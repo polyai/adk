@@ -1,0 +1,41 @@
+entities:
+  - name: customer_name
+    description: Customer name entity for collecting names
+    entity_type: name_config
+    config: {}
+  - name: phone_number
+    description: Phone number entity with country codes
+    entity_type: phone_number
+    config:
+      enabled: true
+      country_codes:
+        - US
+        - UK
+  - name: date
+    description: Date entity for appointment scheduling
+    entity_type: date
+    config:
+      relative_date: true
+  - name: party_size
+    description: Number of people in party
+    entity_type: numeric
+    config:
+      has_decimal: false
+      has_range: true
+      min: 1
+      max: 20
+  - name: confirmation_status
+    description: Confirmation status options
+    entity_type: enum
+    config:
+      options:
+        - confirmed
+        - pending
+        - cancelled
+  - name: email
+    description: Email address validation
+    entity_type: alphanumeric
+    config:
+      enabled: true
+      validation_type: email
+      regular_expression: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"

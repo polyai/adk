@@ -1,0 +1,7 @@
+pronunciations:
+  - regex: "\\bDr\\."
+    replacement: Doctor
+    case_sensitive: true
+  - regex: "\\bMr\\."
+    replacement: Mister
+    case_sensitive: true

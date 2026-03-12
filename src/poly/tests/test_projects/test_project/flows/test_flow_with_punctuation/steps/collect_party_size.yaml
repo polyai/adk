@@ -1,0 +1,16 @@
+step_type: default_step
+name: collect_party_size
+prompt: How many people will be in your party?
+conditions:
+  - name: has_party_size
+    condition_type: step_condition
+    description: User provided party size
+    required_entities:
+      - party_size
+    child_step: collect_email
+  - name: exit_flow
+    condition_type: exit_flow_condition
+    description: Exit flow
+    required_entities: []
+extracted_entities:
+  - party_size

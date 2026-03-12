@@ -1,0 +1,6 @@
+greeting:
+  welcome_message: Hello! Welcome to our web chat. Your account shows {{attr:member-status}}. How can
+    I assist you today?
+  language_code: en-GB
+style_prompt:
+  prompt: You are a helpful and professional web chat assistant.

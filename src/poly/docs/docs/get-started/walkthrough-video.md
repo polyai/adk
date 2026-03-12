@@ -1,0 +1,76 @@
+---
+title: Walkthrough Video
+description: Watch a walkthrough of building a production-ready voice agent with the PolyAI ADK.
+---
+
+This walkthrough from **Eddy Su**, PolyAI’s co-founder and VP of Engineering, shows how quickly a production-ready voice agent can be built using the **PolyAI ADK**.
+
+It gives a practical look at the developer workflow and shows how the ADK fits into modern AI-assisted agent development.
+
+## Watch the video
+
+<div style="padding:64.98% 0 0 0; position:relative;">
+  <iframe
+    src="https://player.vimeo.com/video/1172232796?badge=0&amp;autopause=0&amp;player_id=0&amp;app_id=58479"
+    frameborder="0"
+    allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
+    referrerpolicy="strict-origin-when-cross-origin"
+    style="position:absolute; top:0; left:0; width:100%; height:100%;"
+    title="Building a production-ready voice agent in less than 30 minutes with PolyAI ADK">
+  </iframe>
+</div>
+
+
+## What this walkthrough covers
+
+<div class="grid cards" markdown>
+
+-   **Local development workflow**
+
+    ---
+
+    See how agent work can move from the browser into a local development environment.
+
+-   **AI-assisted development**
+
+    ---
+
+    Watch the ADK used alongside tools such as Claude Code to accelerate implementation.
+
+-   **Fast iteration**
+
+    ---
+
+    Follow the flow from setup to a working agent in a short amount of time.
+
+-   **Production mindset**
+
+    ---
+
+    See how the ADK supports building agents that are intended for real deployment, not just demos.
+
+</div>
+
+!!! tip "Best viewed alongside the docs"
+
+    This walkthrough is a useful companion to the installation and getting started pages. It is often easiest to watch the workflow once, then follow the written steps yourself.
+
+## Next steps
+
+<div class="grid cards" markdown>
+
+-   **Set up the ADK**
+
+    ---
+
+    Install the ADK locally and prepare your development environment.
+    [Open installation](./installation.md)
+
+-   **Build an agent**
+
+    ---
+
+    Follow the step-by-step tutorial for building with the ADK.
+    [Open the tutorial](../tutorials/build-an-agent.md)
+
+</div>

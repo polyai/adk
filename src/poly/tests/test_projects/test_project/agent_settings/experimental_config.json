@@ -1,0 +1,17 @@
+{
+    "asr": {
+      "provider": "riva",
+      "model": "poly-latency",
+      "language": "en-GB"
+    },
+    "vad": {
+      "vad_end": 600
+    },
+    "smart_vad": {
+      "is_enabled": true
+    },
+    "eot": {
+      "provider": "smart_turn",
+      "threshold": 0.5
+    }
+}

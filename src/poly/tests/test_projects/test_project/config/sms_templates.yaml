@@ -1,0 +1,13 @@
+sms_templates:
+- name: test_template_1
+  text: "This is a test template"
+  env_phone_numbers:
+    sandbox: ''
+    pre_release: ''
+    live: '+447700102347'
+- name: test_template_2
+  text: "This is a second test template"
+  env_phone_numbers:
+    sandbox: ''
+    pre_release: ''
+    live: '+447700102347'

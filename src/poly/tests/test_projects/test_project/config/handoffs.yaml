@@ -1,0 +1,26 @@
+handoffs:
+- name: 'default'
+  description: 'default handoff'
+  is_default: true
+  sip_config:
+    method: refer
+    phone_number: '+1234567890'
+  sip_headers:
+  - key: X-PolyAI-Session
+    value: session_id_123
+  - key: X-Custom-Header
+    value: custom_value
+- name: front desk
+  description: Speak to front desk
+  is_default: false
+  sip_config:
+    method: refer
+    phone_number: front desk
+  sip_headers: []
+- name: urgent support
+  description: Transfer for urgent matters
+  is_default: false
+  sip_config:
+    method: refer
+    phone_number: '+1987654321'
+  sip_headers: []

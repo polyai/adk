@@ -1,0 +1,24 @@
+step_type: advanced_step
+name: start_step
+asr_biasing:
+  is_enabled: true
+  alphanumeric: true
+  name_spelling: true
+  numeric: true
+  party_size: false
+  precise_date: false
+  relative_date: false
+  single_number: false
+  time: false
+  yes_no: false
+  address: false
+  custom_keywords: []
+dtmf_config:
+  is_enabled: false
+  inter_digit_timeout: 0
+  max_digits: 0
+  end_key: '#'
+  collect_while_agent_speaking: false
+  is_pii: false
+prompt: Welcome! I'll help you today. Let me use {{fn:test_function}} to get started. If
+  needed, we can handoff using {{ho:handoff-1}} or send SMS via {{twilio_sms:test_template_1}}.

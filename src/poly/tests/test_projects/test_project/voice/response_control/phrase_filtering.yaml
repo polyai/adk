@@ -1,0 +1,13 @@
+phrase_filtering:
+  - name: Block Profanity
+    description: Blocks profane words from being spoken
+    regular_expressions:
+      - "\\bbadword\\b"
+      - "\\boffensive\\b"
+    say_phrase: false
+    function: validate_email
+  - name: Block Competitor Names
+    description: Prevents mentioning competitor names
+    regular_expressions:
+      - "\\bcompetitor\\b"
+    say_phrase: true

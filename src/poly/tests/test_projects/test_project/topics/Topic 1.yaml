@@ -1,0 +1,9 @@
+enabled: true
+actions: Use {{fn:test_function}} to handle this request and {{fn:format_date}}
+  for dates. Access customer info via {{attr:customer-name}} and handoff with {{ho:handoff-1}} if
+  needed. Send notifications using {{twilio_sms:test_template_1}}.
+content: This topic covers general inquiries and uses global functions.
+example_queries:
+- How can I help?
+- What services do you offer?
+- General information request

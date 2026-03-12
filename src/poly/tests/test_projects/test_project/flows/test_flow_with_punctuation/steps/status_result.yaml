@@ -1,0 +1,25 @@
+step_type: advanced_step
+name: status_result
+asr_biasing:
+  is_enabled: false
+  alphanumeric: false
+  name_spelling: false
+  numeric: false
+  party_size: false
+  precise_date: false
+  relative_date: false
+  single_number: false
+  time: false
+  yes_no: false
+  address: false
+  custom_keywords: []
+dtmf_config:
+  is_enabled: true
+  inter_digit_timeout: 5
+  max_digits: 2
+  end_key: '#'
+  collect_while_agent_speaking: false
+  is_pii: false
+prompt: Checking your status using {{fn:test_function}} and {{ft:shared_helper}}. For
+  urgent matters, use {{ho:handoff-3}}. Status updates can be sent via {{twilio_sms:test_template_1}}.
+

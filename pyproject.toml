@@ -1,0 +1,87 @@
+[build-system]
+requires = [
+    "setuptools>=61.0",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = [
+    "src",
+]
+include = [
+    "poly*",
+]
+exclude = [
+    "poly.tests*",
+]
+
+[tool.setuptools.package-data]
+"poly.resources" = [
+    "*.yaml",
+]
+"poly.docs" = [
+    "*.md",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+exclude = [
+    "src/poly/handlers/protobuf/",
+]
+
+[tool.ruff.format]
+exclude = [
+    "src/poly/tests/**.py",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"src/poly/handlers/protobuf/**" = [
+    "ALL",
+]
+"*/__init__.py" = [
+    "F401",
+]
+"src/poly/tests/**.py" = [
+    "D100",
+    "F403",
+    "F405",
+]
+
+[tool.pytest.ini_options]
+norecursedirs = [
+    "test_projects",
+]
+
+[project]
+name = "polyai-adk"
+version = "2.2.15"
+description = "Agent Development Kit (ADK) — a CLI for managing Agent Studio projects locally"
+readme = "README.md"
+requires-python = ">=3.14.0"
+dependencies = [
+    "protobuf>=4.21.0",
+    "rich>=13.0.0",
+    "ruamel.yaml>=0.18.0",
+    "simple-term-menu==1.4.1",
+    "jsonschema>=4.20.0",
+    "requests==2.31.0",
+    "python-dateutil==2.8.2",
+    "ruff>=0.14.0",
+    "ty",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pre-commit>=3.0.0",
+    "pytest>=8.0.0",
+    "tomli-w>=1.0.0",
+]
+
+[project.scripts]
+poly = "poly.cli:main"
+adk = "poly.cli:main"

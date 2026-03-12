@@ -1,0 +1,10 @@
+greeting:
+  welcome_message: Hello! Welcome to our service. Your account shows {{attr:member-status}}. How can
+    I assist you today?
+  language_code: en-GB
+style_prompt:
+  prompt: You are a helpful and professional customer service assistant.
+disclaimer_messages:
+  message: This conversation may be recorded for quality assurance.
+  enabled: true
+  language_code: en-GB

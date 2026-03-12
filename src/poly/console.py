@@ -1,0 +1,272 @@
+"""Rich console output helpers for the ADK CLI.
+
+Provides consistent, colorful terminal output with clean error formatting.
+
+Copyright PolyAI Limited
+"""
+
+import json
+import sys
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.syntax import Syntax
+from rich.table import Table
+from rich.theme import Theme
+
+# Global verbose flag — set by CLI before commands run
+_verbose = False
+
+_theme = Theme(
+    {
+        "info": "cyan",
+        "success": "green",
+        "warning": "yellow",
+        "error": "red bold",
+        "filename.new": "green",
+        "filename.modified": "green",
+        "filename.deleted": "red",
+        "filename.conflict": "red bold",
+        "label": "bold",
+        "muted": "dim",
+    }
+)
+
+console = Console(theme=_theme, stderr=False)
+err_console = Console(theme=_theme, stderr=True)
+
+
+def set_verbose(verbose: bool) -> None:
+    """Enable or disable verbose (traceback) output."""
+    global _verbose
+    _verbose = verbose
+
+
+# ── Helpers ──────────────────────────────────────────────────────────
+
+
+def success(message: str) -> None:
+    console.print(f"[success]{message}[/success]")
+
+
+def error(message: str) -> None:
+    err_console.print(f"[error]Error:[/error] {message}")
+
+
+def warning(message: str) -> None:
+    console.print(f"[warning]Warning:[/warning] {message}")
+
+
+def info(message: str) -> None:
+    console.print(f"[info]{message}[/info]")
+
+
+def plain(message: str) -> None:
+    console.print(message)
+
+
+# ── Structured output ────────────────────────────────────────────────
+
+
+def print_status(
+    region: str,
+    account_id: str,
+    project_id: str,
+    last_updated: str,
+    branch: str,
+) -> None:
+    """Print project status in a styled panel."""
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column("Key", style="label", no_wrap=True)
+    table.add_column("Value")
+    table.add_row("Region", region)
+    table.add_row("Account ID", account_id)
+    table.add_row("Project ID", project_id)
+    table.add_row("Last Pulled", last_updated)
+    table.add_row("Current Branch", branch)
+
+    console.print(Panel(table, title="[bold]Project Status[/bold]", border_style="cyan"))
+
+
+def print_file_list(title: str, files: list[str], style: str) -> None:
+    """Print a labeled list of files in a given style."""
+    if not files:
+        return
+    console.print(f"\n[label]{title}:[/label]")
+    for f in files:
+        console.print(f"  [{style}]{f}[/{style}]")
+
+
+def print_diff(diff: str) -> None:
+    """Print a unified diff with syntax highlighting."""
+    console.print(Syntax(diff, "diff", theme="ansi_dark", line_numbers=False))
+
+
+def print_branches(branches: dict[str, str] | list[str], current_branch: str | None) -> None:
+    """Print branch list with current branch highlighted."""
+    console.print("[label]Branches:[/label]")
+    items = branches.keys() if isinstance(branches, dict) else branches
+    for name in items:
+        if name == current_branch:
+            console.print(f"  [success]* {name}[/success] [muted](current)[/muted]")
+        else:
+            console.print(f"    {name}")
+
+
+def print_validation_errors(errors: list[str]) -> None:
+    """Print validation errors in a styled list."""
+    console.print("[error]Project configuration is invalid.[/error]")
+    for e in errors:
+        console.print(f"  [error]-[/error] {e}")
+
+
+def print_turn_metadata(
+    response: dict,
+    show_functions: bool = False,
+    show_flow: bool = False,
+    show_state: bool = False,
+) -> None:
+    """Print per-turn metadata above the agent response.
+
+    Each section is opt-in via its corresponding flag:
+      - show_functions: tool/function calls made this turn with their arguments
+      - show_flow: the active flow and step name when the agent is inside a flow
+      - show_state: variables added, updated, or removed this turn
+    """
+    if not (show_functions or show_flow or show_state):
+        return
+
+    metadata = response.get("metadata") or {}
+    if not metadata:
+        return
+
+    function_events: list[dict] = metadata.get("function_events") or []
+    in_flow: str | None = metadata.get("in_flow")
+    in_step: str | None = metadata.get("in_step")
+
+    # Aggregate state changes across every function event in this turn
+    # (only needed when the state panel is enabled).
+    all_added: dict = {}
+    all_updated: dict = {}
+    all_removed: list = []
+    if show_state:
+        for event in function_events:
+            sc = event.get("state_changes") or {}
+            all_added.update(sc.get("added") or {})
+            all_updated.update(sc.get("updated") or {})
+            all_removed.extend(sc.get("removed") or [])
+
+    # ── FUNCTIONS ───────────────────────────────────────────────────────
+    if show_functions and function_events:
+        fn_table = Table(show_header=False, box=None, padding=(0, 0), expand=False)
+        fn_table.add_column("call", overflow="fold")
+        for event in function_events:
+            name = event.get("name") or ""
+            args = event.get("arguments") or {}
+            if args:
+                args_str = ", ".join(
+                    f"{k}={json.dumps(v, ensure_ascii=False)}" for k, v in args.items()
+                )
+            else:
+                args_str = ""
+            fn_table.add_row(f"[bold cyan]{name}[/bold cyan]({args_str})")
+        console.print(
+            Panel(
+                fn_table,
+                title="[bold]Functions[/bold]",
+                border_style="cyan",
+                padding=(0, 1),
+            )
+        )
+
+    # ── STATE CHANGES ───────────────────────────────────────────────────
+    state_rows: list[tuple[str, str]] = []
+    if show_state:
+        for k, v in all_added.items():
+            raw = v if isinstance(v, str) else json.dumps(v, ensure_ascii=False)
+            if len(raw) > 120:
+                raw = raw[:117] + "..."
+            state_rows.append((f"[green]+ {k}[/green]", raw))
+        for k, v in all_updated.items():
+            value = v[-1] if isinstance(v, list) and v else v
+            raw = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
+            if len(raw) > 120:
+                raw = raw[:117] + "..."
+            state_rows.append((f"[yellow]~ {k}[/yellow]", raw))
+        for k in all_removed:
+            state_rows.append((f"[red]- {k}[/red]", ""))
+
+    if state_rows:
+        state_table = Table(show_header=False, box=None, padding=(0, 1), expand=False)
+        state_table.add_column("key", no_wrap=True)
+        state_table.add_column("value", overflow="fold")
+        for key_cell, val_cell in state_rows:
+            state_table.add_row(key_cell, val_cell)
+        console.print(
+            Panel(
+                state_table,
+                title="[bold]State Changes[/bold]",
+                border_style="yellow",
+                padding=(0, 1),
+            )
+        )
+
+    # ── FLOW / STEP ─────────────────────────────────────────────────────
+    if show_flow and (in_flow or in_step):
+        parts = []
+        if in_flow:
+            parts.append(f"Flow: [bold]{in_flow}[/bold]")
+        if in_step:
+            parts.append(f"Step: [bold]{in_step}[/bold]")
+        console.print(
+            Panel(
+                "  |  ".join(parts),
+                title="[bold]Flow / Step[/bold]",
+                border_style="bright_magenta",
+                padding=(0, 1),
+            )
+        )
+
+
+# ── Error handling ───────────────────────────────────────────────────
+
+# Maps exception types to user-friendly prefixes
+_ERROR_MESSAGES: dict[type, str] = {
+    FileNotFoundError: "File not found",
+    ValueError: "Invalid value",
+    OSError: "System error",
+    ConnectionError: "Connection failed",
+    TimeoutError: "Request timed out",
+    ImportError: "Missing dependency",
+}
+
+
+def handle_exception(exc: Exception) -> None:
+    """Print a clean error message, or full traceback in verbose mode."""
+    if _verbose:
+        err_console.print_exception(show_locals=False)
+    else:
+        # Try to find a user-friendly prefix
+        prefix = None
+        for exc_type, msg in _ERROR_MESSAGES.items():
+            if isinstance(exc, exc_type):
+                prefix = msg
+                break
+
+        # requests.HTTPError
+        try:
+            import requests
+
+            if isinstance(exc, requests.HTTPError):
+                prefix = "API request failed"
+        except ImportError:
+            pass
+
+        if prefix:
+            error(f"{prefix}: {exc}")
+        else:
+            error(str(exc))
+
+        err_console.print("[muted]Run with --verbose for the full traceback.[/muted]")
+
+    sys.exit(1)

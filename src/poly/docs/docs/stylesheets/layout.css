@@ -1,0 +1,61 @@
+/* =============================================================================
+   LAYOUT
+   ============================================================================= */
+
+/* Remove theme toggle */
+[data-md-component="palette"] {
+  display: none;
+}
+
+/* scrollbar — prevent Material's accent color leaking into scrollbar thumb */
+html,
+.md-sidebar,
+.md-sidebar__scrollwrap,
+.md-sidebar__inner,
+.md-content__inner {
+  --md-accent-fg-color: var(--color-scrollbar-thumb);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar-thumb) var(--color-scrollbar-track);
+}
+
+*::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+*::-webkit-scrollbar-track {
+  background: var(--color-scrollbar-track);
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: var(--color-scrollbar-thumb);
+  border-radius: 999px;
+}
+
+*::-webkit-scrollbar-thumb:hover,
+*::-webkit-scrollbar-thumb:active {
+  background-color: var(--color-scrollbar-thumb);
+}
+
+.md-main__inner {
+  margin-top: 1rem;
+}
+
+.md-content {
+  max-width: 52rem;
+}
+
+.md-typeset {
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-loose);
+}
+
+.md-typeset p,
+.md-typeset li {
+  color: inherit;
+  font-size: var(--font-size-base);
+  line-height: var(--line-height-loose);
+}

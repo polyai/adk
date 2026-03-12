@@ -1,0 +1,49 @@
+name: Feature Request
+description: Suggest a new feature or improvement
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Have an idea to improve the ADK? We'd love to hear it.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or motivation
+      description: What problem does this solve, or what workflow does it improve?
+      placeholder: "I'm always frustrated when..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: How do you think this should work? Include CLI examples if applicable.
+      placeholder: |
+        poly <new-command> --flag
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any other approaches you've thought about or workarounds you're using today.
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Scope
+      description: Which area of the ADK does this relate to?
+      options:
+        - CLI commands
+        - Resource types / schemas
+        - API / sync engine
+        - Validation / formatting
+        - Chat / interactive mode
+        - Documentation
+        - Other
+    validations:
+      required: true

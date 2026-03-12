@@ -1,0 +1,208 @@
+name: Auto Version Bump and Tag
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'pyproject.toml'
+      - 'src/**'
+
+jobs:
+  auto-version-and-tag:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.POLY_CONFIG_BOT_TOKEN }}
+          fetch-depth: 0
+
+      - name: Check commit and version status
+        id: check-status
+        run: |
+          set -e
+
+          # Check if triggered by bot commit
+          COMMIT_AUTHOR=$(git log -1 --format='%an' HEAD)
+          COMMIT_MESSAGE=$(git log -1 --format='%s' HEAD)
+          if [ "$COMMIT_AUTHOR" = "poly-config-bot" ] || echo "$COMMIT_MESSAGE" | grep -q "^chore: Bump version to"; then
+            echo "Bot commit detected, skipping workflow"
+            echo "skip_workflow=true" >> $GITHUB_OUTPUT
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Get parent commit for comparison
+          PARENT_SHA="HEAD^"
+          if ! git rev-parse HEAD^ >/dev/null 2>&1; then
+            git fetch origin main || true
+            PARENT_SHA="origin/main"
+          fi
+
+          # Check if pyproject.toml changed
+          if ! git diff --name-only "$PARENT_SHA" HEAD | grep -q "pyproject.toml"; then
+            echo "pyproject.toml not changed"
+            echo "skip_workflow=false" >> $GITHUB_OUTPUT
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Compare versions
+          CURRENT_VERSION=$(python -c "import tomllib; f=open('pyproject.toml', 'rb'); data=tomllib.load(f); print(data['project']['version'])")
+          PREVIOUS_VERSION=$(git show "$PARENT_SHA:pyproject.toml" 2>/dev/null | python -c "import tomllib, sys; data=tomllib.load(sys.stdin.buffer); print(data['project']['version'])") || echo ""
+
+          if [ -n "$PREVIOUS_VERSION" ] && [ "$CURRENT_VERSION" != "$PREVIOUS_VERSION" ]; then
+            echo "Version manually changed: $PREVIOUS_VERSION -> $CURRENT_VERSION"
+            echo "skip_workflow=false" >> $GITHUB_OUTPUT
+            echo "version_changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "Version unchanged: $CURRENT_VERSION"
+            echo "skip_workflow=false" >> $GITHUB_OUTPUT
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Install uv
+        if: steps.check-status.outputs.skip_workflow != 'true'
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+
+      - name: Set up Python
+        if: steps.check-status.outputs.skip_workflow != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Configure GitHub credentials
+        if: steps.check-status.outputs.skip_workflow != 'true'
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.GENAI_FUNCTIONS_APP_ID }}
+          private-key: ${{ secrets.GENAI_FUNCTIONS_APP_PRIVATE_KEY }}
+          owner: PolyAI-LDN
+
+      - name: Configure git credentials for private repos
+        if: steps.check-status.outputs.skip_workflow != 'true'
+        env:
+          GENAI_FUNCTIONS_APP_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          git config --global url."https://x-access-token:${GENAI_FUNCTIONS_APP_TOKEN}@github.com/".insteadOf "https://github.com/"
+          git config --global credential.helper store
+          echo "https://x-access-token:${GENAI_FUNCTIONS_APP_TOKEN}@github.com" > ~/.git-credentials
+
+      - name: Create virtual environment
+        if: steps.check-status.outputs.skip_workflow != 'true'
+        run: |
+          uv venv
+
+      - name: Install dependencies
+        if: steps.check-status.outputs.skip_workflow != 'true'
+        run: |
+          source .venv/bin/activate
+          uv pip install -e ".[dev]"
+
+      - name: Extract version information
+        if: steps.check-status.outputs.skip_workflow != 'true'
+        id: version-info
+        run: |
+          set -e
+          CURRENT_VERSION=$(python -c "import tomllib; f=open('pyproject.toml', 'rb'); data=tomllib.load(f); print(data['project']['version'])")
+          echo "version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+
+          # Extract major.minor for tag
+          CLEAN_VERSION=$(echo "$CURRENT_VERSION" | sed 's/[^0-9.]//g')
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$CLEAN_VERSION"
+          echo "major_minor_version=$MAJOR.$MINOR" >> $GITHUB_OUTPUT
+          echo "tag_name=v$MAJOR.$MINOR" >> $GITHUB_OUTPUT
+
+          echo "Version: $CURRENT_VERSION -> Tag: v$MAJOR.$MINOR"
+
+      - name: Bump version if needed
+        if: steps.check-status.outputs.skip_workflow != 'true' && steps.check-status.outputs.version_changed != 'true'
+        id: bump-version
+        run: |
+          set -e
+          source .venv/bin/activate
+          CURRENT_VERSION="${{ steps.version-info.outputs.version }}"
+
+          git fetch origin main || true
+          MAIN_VERSION=$(git show origin/main:pyproject.toml 2>/dev/null | python -c "import tomllib, sys; data=tomllib.load(sys.stdin.buffer); print(data['project']['version'])") || echo ""
+
+          if [ "$CURRENT_VERSION" = "$MAIN_VERSION" ]; then
+            # Parse and bump patch version
+            CLEAN_VERSION=$(echo "$CURRENT_VERSION" | sed 's/[^0-9.]//g')
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$CLEAN_VERSION"
+            NEW_PATCH=$((PATCH + 1))
+            NEW_VERSION="$MAJOR.$MINOR.$NEW_PATCH"
+
+            echo "Bumping version: $CURRENT_VERSION -> $NEW_VERSION"
+            echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+            echo "should_bump=true" >> $GITHUB_OUTPUT
+
+            uv run python .github/scripts/update_version.py "$NEW_VERSION"
+          else
+            echo "Version already updated, no bump needed"
+            echo "should_bump=false" >> $GITHUB_OUTPUT
+            echo "new_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit version bump
+        if: steps.check-status.outputs.skip_workflow != 'true' && steps.check-status.outputs.version_changed != 'true' && steps.bump-version.outputs.should_bump == 'true'
+        run: |
+          set -e
+          git config user.name "poly-config-bot"
+          git config user.email "poly-config-bot@poly-ai.com"
+          git add pyproject.toml
+          git commit -m "chore: Bump version to ${{ steps.bump-version.outputs.new_version }}"
+          git push origin main --force-with-lease
+
+      - name: Create and push tags
+        if: steps.check-status.outputs.skip_workflow != 'true'
+        run: |
+          set -e
+          # Use bumped version if available, otherwise current version
+          VERSION="${{ steps.bump-version.outputs.new_version }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="${{ steps.version-info.outputs.version }}"
+          fi
+
+          TAG_NAME="${{ steps.version-info.outputs.tag_name }}"
+          MAJOR_MINOR_VERSION="${{ steps.version-info.outputs.major_minor_version }}"
+          IMMUTABLE_TAG="v$VERSION"
+
+          git fetch origin main
+          git checkout main
+          COMMIT_HASH=$(git rev-parse --short HEAD)
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+          git config user.name "poly-config-bot"
+          git config user.email "poly-config-bot@poly-ai.com"
+
+          # Create immutable patch tag if it doesn't exist
+          if ! git rev-parse "$IMMUTABLE_TAG" >/dev/null 2>&1; then
+            echo "Creating immutable tag: $IMMUTABLE_TAG"
+            git tag -a "$IMMUTABLE_TAG" -m "Release version $VERSION
+
+          Commit: $COMMIT_HASH
+          Date: $TIMESTAMP
+
+          This is an immutable tag pointing to a specific patch version."
+            git push origin "$IMMUTABLE_TAG"
+          else
+            echo "Immutable tag $IMMUTABLE_TAG already exists, skipping"
+          fi
+
+          # Create/update rolling major.minor tag
+          echo "Updating rolling tag: $TAG_NAME -> $VERSION"
+          git tag -f -a "$TAG_NAME" -m "Release version $VERSION (latest in $MAJOR_MINOR_VERSION)
+
+          Commit: $COMMIT_HASH
+          Date: $TIMESTAMP
+
+          This is a rolling tag that always points to the latest patch version in $MAJOR_MINOR_VERSION.
+          For reproducible builds, use the immutable patch tag: $IMMUTABLE_TAG"
+          git push -f origin "$TAG_NAME"

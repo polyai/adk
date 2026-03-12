@@ -1,0 +1,10 @@
+.idea/
+.venv/
+site/
+__pycache__/
+*.pyc
+.idea/
+.venv/
+site/
+__pycache__/
+*.pyc

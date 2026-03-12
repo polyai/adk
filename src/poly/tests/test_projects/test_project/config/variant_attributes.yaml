@@ -1,0 +1,16 @@
+variants:
+  - name: default
+    is_default: true
+attributes:
+  - name: customer-name
+    values:
+      default: "value-1"
+  - name: email-address
+    values:
+      default: "value-2"
+  - name: member-status
+    values:
+      default: "value-3"
+  - name: booking-status
+    values:
+      default: "value-4"

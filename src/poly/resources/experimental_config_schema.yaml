@@ -1,0 +1,1402 @@
+openapi: 3.1.0
+info:
+  title: Additional Features
+  description: Additional LLeMur features configured in the knowledge base
+  version: 1.0.0
+components:
+  schemas:
+    proto_duration:
+      type: string
+      pattern: "^-?\\d+(\\.\\d{1,9})?s$"
+
+    email:
+      type: object
+      description: Parameters for send email experimental feature
+      additionalProperties: false
+      properties:
+        sending_enabled:
+          type: boolean
+          description: Whether the send email experimental feature is enabled
+
+    asr_provider_enum:
+      type: string
+      enum:
+        - default
+        - google
+        - googlev2
+        - riva
+        - openai
+        - fano
+        - nemo
+
+    asr_common_config_properties:
+      type: object
+      properties:
+        provider:
+          $ref: "#/components/schemas/asr_provider_enum"
+          description: |-
+            The ASR service provider to use. Each provider has different capabilities,
+            model offerings, and performance characteristics:
+            - default: Will use PolyProvider. It is the recommended option
+            - google: Google Cloud Speech-to-Text service
+            - riva: Riva in-house speech recognition engine
+            - openai: OpenAI realtime API
+        model:
+          type: string
+          minLength: 1
+          description: |-
+            The specific ASR model to use. Each provider has its own naming convention:
+            - default: "poly-latency", "envera", "voicemail", ...
+            - google: "phone_call", "latest_short", "telephony", ...
+            - googlev2: "chirp_2"
+            - riva: models use detailed naming like "parakeet-0.6b-ctc-latency-6.0" specifying
+              architecture, size, decoder type, and latency characteristics
+            - openai: "gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"
+        language:
+          type: string
+          minLength: 2
+          description: |-
+            Custom language code to pass to the ASR model. Leave this blank to use the current conversation language.
+            This is meant for special values, such as:
+            - "multi": For multilingual models that can automatically detect language
+            - "esen-US": For parakeet English-Spanish model
+            - Other provider-specific codes (consult Runtime Team if you're not sure)
+        initial_timeout:
+          type: number
+          description: Number of seconds to wait for the first user speech before timing out. Also known as "silence timeout" or "ASR timeout".
+        inter_response_timeout:
+          type: number
+          description: >
+            After how many seconds of silence after the last user speech (partial transcription) should the listening time out.
+            Note that this is mainly a safety feature that will only ever trigger if ASR model doesn't return an is_final response
+            before this time, so mainly relevant if we use a model that has bad end of speech detection (Google ASR Polish,
+            Cantonese...) or if the final message somehow gets lost on the way to us.
+        vad_timeout:
+          type: number
+          description: Legacy vad_timeout parameter, in seconds
+        hard_timeout:
+          type: number
+          description: After how many seconds to terminate the turn (with no consideration of other factors)
+        eager_final:
+          type: boolean
+          description: Trigger an agent response upon VAD speech end using the latest partial transcript.
+          default: false
+        disable_itn:
+          description: >
+            Whether to disable inverse text normalisation (ITN) for the ASR model.
+            ITN is a process that converts numbers, dates, and other structured data into a more natural spoken form.
+            If set to true, the ASR will return raw text without any formatting.
+            NOTE: This is a RIVA-specific feature only.
+          type: boolean
+        disable_punctuation:
+          description: >
+            Whether to disable punctuation for the ASR model.
+            If set to true, the ASR will return text without any punctuation.
+            NOTE: This is a RIVA-specific feature only.
+          type: boolean
+      dependentRequired:
+        provider: [model]
+        model: [provider]
+
+    asr_flow_override:
+      allOf:
+        - $ref: "#/components/schemas/asr_common_config_properties"
+        - type: object
+          description: ASR configuration override for a specific flow
+          properties:
+            steps:
+              type: object
+              description: Step-specific ASR configuration overrides. Each key should be a step name.
+              additionalProperties:
+                $ref: "#/components/schemas/asr_step_override"
+
+    asr_step_override:
+      allOf:
+        - $ref: "#/components/schemas/asr_common_config_properties"
+        - type: object
+          description: ASR configuration override for a specific step
+
+    asr_flow_overrides_map:
+      type: object
+      description: Flow-specific ASR configuration overrides. Each key should be a flow name.
+      additionalProperties:
+        $ref: "#/components/schemas/asr_flow_override"
+
+    asr_language_override_config:
+      allOf:
+        - $ref: "#/components/schemas/asr_common_config_properties"
+        - type: object
+          description: Configuration for a specific language
+          properties:
+            custom_language_code:
+              type: string
+              description: >
+                Custom language code to pass to the ASR model, for providers
+                accepting non-standard language codes such as "multi" or "esen-US".
+            flow_overrides:
+              $ref: "#/components/schemas/asr_flow_overrides_map"
+
+    asr_base_properties:
+      type: object
+      description: ASR properties that can only be configured at the base level (not overrideable by flow/step/language)
+      properties:
+        provider_config:
+          type: object
+          description: Provider specific config.
+        use_asr_lib:
+          type: boolean
+          description: Whether to use the asr_lib for experimental ASR providers.
+          default: false
+
+    asr_base_requirements:
+      type: object
+      description: Base-level ASR requirements ensuring provider and model are both present
+      required:
+        - provider
+        - model
+
+    channel_name_enum:
+      type: string
+      enum:
+        - webchat.polyai
+        - sip.polyai
+        - chat.polyai
+      description: |-
+        Recognized channel names in the platform:
+        - webchat.polyai: Web chat channel
+        - sip.polyai: SIP/voice channel
+        - chat.polyai: Chat channel
+
+    llm_inference_parameters:
+      type: object
+      description: |
+        Extra inference parameters to pass to the LLM provider.
+        These are provider-specific, and may not be supported by all providers.
+      additionalProperties: false
+      properties:
+        max_tokens:
+          type: integer
+          description: The maximum number of tokens to generate.
+          minimum: 0
+        temperature:
+          type: number
+          description: Sampling temperature between 0 and 2, which controls the randomness of the output. A lower value makes the output more deterministic.
+          minimum: 0
+          maximum: 2
+        top_p:
+          type: number
+          description: Sampling parameter between 0 and 1, which controls how many possible tokens the model considers. A lower value makes the output more predictable. Not supported in Raven.
+          minimum: 0
+          maximum: 1
+        verbosity:
+          type: string
+          enum:
+            - low
+            - medium
+            - high
+          description: Output verbosity. Only available for OpenAI reasoning models.
+        reasoning_effort:
+          type: string
+          enum:
+            - minimal
+            - low
+            - medium
+            - high
+            - auto
+          description: >
+            LLM 'thinking time'. Supported values vary by model:
+            OpenAI reasoning models (GPT-5): `minimal`, `low`, `medium`, `high`.
+            Raven 3.5: `auto` (model decides whether to reason, short verbosity) and `low` (always reasons, short verbosity).
+            Raven v3: `low` only.
+
+    csat_call_group:
+      type: object
+      description: Configuration for a specific call group (contained/uncontained/call_center)
+      properties:
+        enabled:
+          type: boolean
+          default: false
+          description: Enable CSAT for this call group
+        percentage:
+          type: number
+          minimum: 0
+          maximum: 100
+          default: 2
+          description: Percentage of calls to send CSAT surveys (0-100)
+        delay_minutes:
+          type: number
+          minimum: 6 # scheduled delay must be > 5 minutes as per twilio documentation
+          maximum: 1440
+          default: 6
+          description: Delay in minutes before sending CSAT SMS
+        wait_for_response_hours:
+          type: number
+          minimum: 1
+          maximum: 48
+          default: 24
+          description: How long to wait for a CSAT response in hours before invalidating the CSAT survey
+        weekly_cap:
+          type: integer
+          minimum: 1
+          default: 100
+          description: Maximum number of CSAT surveys to send per week
+      additionalProperties: false
+
+    csat_sms:
+      type: object
+      description: Configuration for CSAT (Customer Satisfaction) SMS surveys
+      properties:
+        enabled:
+          type: boolean
+          default: false
+          description: Master switch to enable/disable CSAT SMS surveys
+        contained_calls:
+          $ref: "#/components/schemas/csat_call_group"
+        uncontained_calls:
+          $ref: "#/components/schemas/csat_call_group"
+        call_center_calls:
+          $ref: "#/components/schemas/csat_call_group"
+        sms_config:
+          type: object
+          description: Configuration for CSAT SMS messages
+          properties:
+            sms_question_template:
+              type: string
+              default: "Rate your call experience 1-5 (1=Poor, 5=Excellent)"
+            sms_response_template:
+              type: string
+              default: "Thanks! Your feedback helps us improve."
+      additionalProperties: false
+
+    asr:
+      allOf:
+        - $ref: "#/components/schemas/asr_common_config_properties"
+        - $ref: "#/components/schemas/asr_base_properties"
+        - $ref: "#/components/schemas/asr_base_requirements"
+        - type: object
+          description: |-
+            ASR configuration details.
+
+            Config override precedence: Step > Flow > Base.
+          properties:
+            flow_overrides:
+              $ref: "#/components/schemas/asr_flow_overrides_map"
+              description: Flow-specific ASR configuration overrides for the default project language.
+            language_overrides:
+              type: object
+              description: |-
+                Language-specific ASR configuration overrides. Each key should be a language code (e.g. "en-US", "fr-FR").
+
+                Language override inheritance behavior:
+                - Base level configs inherit from the default project language's base ASR config.
+                - Flow/step configs do not inherit configs from the default project language's flow/step configs.
+                - Instead, they fall back to their own language override base level config, otherwise the default project language's base ASR config.
+              additionalProperties:
+                $ref: "#/components/schemas/asr_language_override_config"
+      examples:
+        - provider: default
+          model: "poly-latency"
+          language: "en-US"
+        - provider: google
+          model: "phone_call"
+          language: "es-ES"
+        - provider: riva
+          model: "parakeet-0.6b-ctc-latency-6.0"
+          language: "en-US"
+        - provider: riva
+          model: "parakeet-1.1b-ctc-universal-latency-1.0"
+          language: "multi"
+    vad:
+      type: object
+      description: Configure the VAD for Riva ASR (Only English is supported)
+      properties:
+        provider:
+          type: string
+          description: The VAD provider. e.g. "silero". Only available if using ASR lib.
+        vad_start:
+          type: number
+        vad_end:
+          type: number
+        speech_threshold:
+          type: number
+          description: >
+            Threshold (0.0 to 1.0) at which speech is considered active, so a new active VAD
+            window can start. Only available if using ASR lib with Silero VAD.
+          default: 0.35
+          minimum: 0.0
+          maximum: 1.0
+        silence_threshold:
+          type: number
+          description: >
+            Threshold (0.0 to 1.0) at which speech is considered silent, so the active
+            VAD window can close. Only available if using ASR lib with Silero VAD.
+          default: 0.2
+          minimum: 0.0
+          maximum: 1.0
+        flow_overrides:
+          type: object
+          description: Flow-specific VAD configuration overrides. Each key should be a flow name.
+          additionalProperties:
+            type: object
+            description: Configuration for a specific flow
+            additionalProperties: false
+            properties:
+              vad_start:
+                type: number
+              vad_end:
+                type: number
+              speech_threshold:
+                type: number
+                default: 0.35
+                minimum: 0.0
+                maximum: 1.0
+              silence_threshold:
+                type: number
+                default: 0.2
+                minimum: 0.0
+                maximum: 1.0
+              steps:
+                type: object
+                description: Step-specific VAD configuration overrides. Each key should be a step name.
+                additionalProperties:
+                  type: object
+                  description: Configuration for a specific step
+                  additionalProperties: false
+                  properties:
+                    vad_start:
+                      type: number
+                    vad_end:
+                      type: number
+                    speech_threshold:
+                      type: number
+                      default: 0.35
+                      minimum: 0.0
+                      maximum: 1.0
+                    silence_threshold:
+                      type: number
+                      default: 0.2
+                      minimum: 0.0
+                      maximum: 1.0
+
+    eot:
+      type: object
+      description: Configure end of turn detection (Only available with asr_lib)
+      properties:
+        provider:
+          type: string
+          enum: ["smart_turn"]
+          description: The end of turn detection provider. Only available if using ASR lib.
+        threshold:
+          type: number
+          description: Probability threshold for end of turn decisions (0.0-1.0)
+          minimum: 0.0
+          maximum: 1.0
+          default: 0.5
+        timeout_ms:
+          type: integer
+          description: Timeout in milliseconds for end of turn decisions
+          minimum: 100
+          maximum: 10000
+          default: 500
+
+    audio_enhancement:
+      type: object
+      description: Configure real-time audio enhancement (matches proto EnhanceConfig structure with oneof provider)
+      properties:
+        ai-coustics:
+          type: object
+          description: AI-Coustics audio enhancement configuration
+          properties:
+            enabled:
+              type: boolean
+              description: Enable or disable AI-Coustics audio enhancement
+              default: true
+            model:
+              type: string
+              description: |
+                Model/quality tier: "standard", "high", "fast"
+                Note: Currently all map to the same SDK model but infrastructure is ready for different tiers
+              default: "standard"
+            noise_reduction:
+              type: number
+              description: Background noise removal strength (0.0=off, 1.0=max)
+              minimum: 0.0
+              maximum: 1.0
+              default: 0.7
+            voice_gain:
+              type: number
+              description: Output volume adjustment multiplier (1.0=no change, compensates for volume reduction after noise removal)
+              minimum: 0.1
+              maximum: 4.0
+              default: 1.0
+            noise_gate:
+              type: boolean
+              description: Enable silence gating for cleaner output (useful for ASR systems to avoid false triggers)
+              default: false
+            timeout_ms:
+              type: integer
+              description: Max time in milliseconds to wait for enhancement per chunk before falling back to original audio (0=no timeout)
+              minimum: 0
+              maximum: 1000
+              default: 100
+      examples:
+        - ai-coustics:
+            enabled: true
+            noise_reduction: 0.7
+        - ai-coustics:
+            enabled: true
+            noise_reduction: 0.9
+            noise_gate: true
+            voice_gain: 1.2
+        - ai-coustics:
+            enabled: true
+            noise_reduction: 0.3
+            voice_gain: 1.0
+        - ai-coustics:
+            enabled: true
+            noise_reduction: 0.5
+            timeout_ms: 500
+
+    barge_in:
+      type: object
+      properties:
+        is_enabled:
+          type: boolean
+          description: Whether barge-in is enabled globally for the project. Can be used in A/B test configs to toggle barge-in.
+        experimental_config:
+          type: object
+          properties:
+            force_disable:
+              type: boolean
+              description: Force disable barge-in even if the configuration is set to true. This is a workaround to let agent worker enable/disable barge-in conditionally.
+            min_speech_sec:
+              type: number
+              description: Minimum speech duration in seconds required to trigger barge-in.
+            min_stability:
+              type: number
+              description: Minimum transcript stability score required to trigger barge-in. To be deprecated, set to zero.
+            min_partial_transcripts:
+              type: number
+              description: Minimum number of partial transcripts required to trigger barge-in. To be deprecated, set to zero.
+            max_per_call:
+              type: integer
+              description: Maximum number of barge-ins allowed per call.
+            backchannelling:
+              type: object
+              description: Backchannelling configuration specifically for barge-in scenarios.
+              properties:
+                pre_delay_sec:
+                  type: number
+                  description: Seconds before the backchannel utterance is played. Makes the bot sound less aggressive.
+                post_delay_sec:
+                  type: number
+                  description: Seconds before the next utterance after a backchannel utterance is played.
+        flow_overrides:
+          type: object
+          description: Flow-specific barge-in configuration overrides. Each key should be a flow name.
+          additionalProperties:
+            type: object
+            description: Configuration for a specific flow
+            additionalProperties: false
+            properties:
+              is_enabled:
+                type: boolean
+                description: Whether barge-in is enabled for this flow, takes precedence over global setting
+              steps:
+                type: object
+                description: Step-specific barge-in configuration overrides. Each key should be a step name.
+                additionalProperties:
+                  type: object
+                  description: Configuration for a specific step
+                  additionalProperties: false
+                  properties:
+                    is_enabled:
+                      type: boolean
+                      description: Whether barge-in is enabled for this step, takes precedence over flow-level setting
+        interruption_window:
+          $ref: "#/components/schemas/proto_duration"
+          description: The time window during which the barge-in can occur after the bot starts speaking.
+        enable_on_start_turn:
+          type: boolean
+          description: Whether to enable barge-in at the start of a turn. Defaults to false.
+        trigger:
+          type: object
+          description: Alternative VAD thresholds that control when the barge-in SpeechStart event fires.
+          additionalProperties: false
+          properties:
+            speech_threshold:
+              type: number
+              minimum: 0.0
+              maximum: 1.0
+              description: Speech probability threshold (0.0-1.0) for triggering barge-in start.
+            speech_window_ms:
+              type: integer
+              minimum: 100
+              description: Sliding window duration in milliseconds for speech detection.
+
+    tts_postprocessing:
+      type: object
+      properties:
+        vol_gain:
+          type: number
+          minimum: -10
+          maximum: 10
+          description: Linear volume gain in dB
+        ebu_normalization:
+          type: boolean
+        playback_speed:
+          type: number
+          minimum: 0.5
+          maximum: 2
+        trim_silence:
+          type: object
+          properties:
+            is_enabled:
+              type: boolean
+              description: Enable trimming leading silence
+            all_chunks:
+              type: boolean
+              description: Apply to all chunks of a turn, not just the first chunk. False by default
+          required:
+            - is_enabled
+
+    backchannelling:
+      type: object
+      properties:
+        is_enabled:
+          type: boolean
+        utterances:
+          type: array
+          items:
+            type: string
+        min_gap:
+          $ref: "#/components/schemas/proto_duration"
+
+    smart_vad:
+      type: object
+      properties:
+        is_enabled:
+          type: boolean
+        max_extensions:
+          type: integer
+          minimum: 1
+          maximum: 20
+          default: 5
+          description: Maximum number of turn re-executions
+        max_extension_duration:
+          description: >
+            Maximum listening window after triggering.
+            Min: 0.5s, Max: 5s, Default: 1s
+          $ref: "#/components/schemas/proto_duration"
+        gated_functions:
+          type: object
+          description: >
+            Each key should be a flow name, with an empty string key for global functions.
+            When Smart VAD detects user speech during function execution, these gated functions will wait until we've stopped listening before executing (e.g. when max_extension_duration has passed).
+          properties:
+            "":
+              type: array
+              description: Global functions (not associated with any flow) that should be gated
+              items:
+                type: string
+              examples:
+                - ["send_payment", "cancel_order"]
+          additionalProperties:
+            type: array
+            description: List of specific function names in this flow to gate
+            items:
+              type: string
+          examples:
+            - "": ["send_payment"]
+              checkout_flow: ["process_payment", "validate_card"]
+              booking_flow: ["create_booking", "confirm_booking"]
+        flow_overrides:
+          type: object
+          description: Flow-specific Smart VAD configuration overrides. Each key should be a flow name.
+          additionalProperties:
+            type: object
+            description: Configuration for a specific flow
+            additionalProperties: false
+            properties:
+              is_enabled:
+                type: boolean
+                description: Whether Smart VAD is enabled for this flow, takes precedence over global setting
+              steps:
+                type: object
+                description: Step-specific Smart VAD configuration overrides. Each key should be a step name.
+                additionalProperties:
+                  type: object
+                  description: Configuration for a specific step
+                  additionalProperties: false
+                  properties:
+                    is_enabled:
+                      type: boolean
+                      description: Whether Smart VAD is enabled for this step, takes precedence over flow-level setting
+
+    handoff_api:
+      type: object
+      properties:
+        state_keys:
+          type: array
+          items:
+            type: string
+          description: >
+            List of state keys to expose to the client in Handoff API response.
+            Only those listed will be exposed, with null as default value.
+        aliases:
+          type: object
+          additionalProperties:
+            type: string
+          description: >
+            Map of internal state keys to client-facing aliases.
+            These must appear in state_keys to be aliased.
+        shared_id_state_key:
+          type: string
+          description: State key to be used as the shared ID.
+      required:
+        - state_keys
+      additionalProperties: false
+
+    ragdoll:
+      type: object
+      properties:
+        threshold:
+          type: number
+          default: 0.4
+          description: Default threshold for topics to be relevant
+        top_k:
+          type: integer
+          default: 5
+          description: Top K value for topics to be relevant
+        in_flow_threshold:
+          type: number
+          default: 0.35
+          description: Stricter threshold for topics in a JTBD flow
+        qa_metric_threshold:
+          type: number
+          default: 0.33
+          description: QA Metric threshold
+        history_len:
+          type: integer
+          default: 7
+          description: Number of previous RAG results to accumulate in the system prompt
+        previous_user_inputs_len:
+          type: integer
+          default: 2
+          description: Number of previous user inputs to include in the RAG query
+        soft_threshold:
+          type: number
+          description: Soft thresholding for RAG results
+        channel_topic_exclusions:
+          type: object
+          description: Channel-specific topic exclusions. Maps channel names to lists of topic names that should be hidden from the LLM for that channel.
+          propertyNames:
+            $ref: "#/components/schemas/channel_name_enum"
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          example:
+            webchat.polyai: ["topic_name_1", "topic_name_2"]
+            sip.polyai: ["topic_name_3"]
+        qa_metric_exclusions:
+          type: array
+          description: List of topic names that should be excluded from QA metric writing entirely.
+          items:
+            type: string
+          example: ["internal_topic", "test_topic"]
+        feature_flags:
+          type: object
+          description: Feature flags for RAG
+          properties:
+            ragdoll:
+              type: boolean
+              default: true
+              description: Whether RAGDOLL is enabled
+            azure_search:
+              type: boolean
+              default: false
+              description: Whether Azure Search is enabled
+          additionalProperties: false
+      additionalProperties: false
+
+    prompts:
+      type: object
+      description: Configure the default LLeMur prompts. See the default prompts at https://github.com/PolyAI-LDN/poly_core/blob/master/src/poly_platform/llemur/prompts.yaml
+      properties:
+        silence:
+          type: string
+          description: Silence prompt
+        function_not_found:
+          type: string
+          description: Function not found prompt
+        context_information_precursor:
+          type: string
+          description: Context information precursor prompt
+        context_information:
+          type: string
+          description: Context information prompt (must have "{topics_prompt}" in string)
+        non_english_system:
+          type: string
+          description: Non English system prompt (must have "{language_name}" in string)
+        non_english_rag:
+          type: string
+          description: Non English RAG prompt (must have "{language_name}" in string)
+        step_header:
+          type: string
+          description: Step header prompt (default is section before the "{step_prompt}")
+        step_footer:
+          type: string
+          description: Step footer prompt (default is section after the "{step_prompt}")
+        webchat_decorator:
+          type: string
+          description: Optional webchat-specific decorator for webchat.polyai channel
+        voice_decorator:
+          type: string
+          description: Optional voice-specific decorator for chat.polyai or sip.polyai channels
+      additionalProperties: false
+
+    webchat:
+      type: object
+      description: Webchat-specific configuration.
+      properties:
+        llm_wrapped_utterances:
+          type: boolean
+          description: Whether to wrap function utterances in an LLM call for webchat. When enabled, function utterances will be processed by the LLM before being sent to the user in webchat, allowing for more natural and contextual responses instead of showing hard-coded text directly.
+          default: false
+      additionalProperties: false
+
+    memory:
+      type: object
+      description: Configure Agent Memory features.
+      properties:
+        repeat_caller:
+          type: object
+          description: Configure repeat caller features.
+          properties:
+            analytics_enabled:
+              description: True if we should enable analytics of repeat callers.
+              type: boolean
+            identifier_blacklist:
+              description: A list of identifiers which should not be treated as repeat callers.
+              type: array
+              items:
+                type: string
+            state_keys:
+              type: array
+              items:
+                type: string
+              description: >
+                List of state keys which should be mapped to Agent Memory.
+                Only those listed will be exposed / persisted to memory.
+
+    filler_utterances:
+      type: object
+      description: Configure filler utterances to be used during conversation.
+      properties:
+        is_enabled:
+          type: boolean
+          description: Whether filler utterances are enabled
+        interval_sec:
+          type: number
+          description: Interval in seconds between filler utterances
+        initial_interval_sec:
+          type: number
+          description: |
+            Initial interval in seconds before the first filler utterance is triggered.
+            If not set, defaults to the same value as interval_sec.
+        utterances:
+          description: |
+            List of filler utterances to use.
+            Can be a simple array of strings (monolingual),
+            or a dictionary mapping language codes to arrays of strings (multilingual).
+          oneOf:
+            - type: array
+              minItems: 1
+              items:
+                type: string
+            - type: object
+              additionalProperties:
+                type: array
+                minItems: 1
+                items:
+                  type: string
+              example:
+                en-US: ["Hmm...", "Just a second..."]
+                fr-FR: ["D'accord...", "Un instant..."]
+        randomize:
+          type: boolean
+          description: Whether to randomize the order of filler utterances
+      allOf:
+        - if:
+            required:
+              - initial_interval_sec
+          then:
+            required:
+              - interval_sec
+
+    polywhirl_rollout:
+      type: object
+      description: >
+        Polywhirl rollout configuration.
+      properties:
+        rollout_percentage:
+          type: number
+          description: >
+            Rollout percentage. Only applies in live. The rollout applies at call level.
+        default_provider_model_id:
+          type: string
+          description: >
+            Default provider model ID. This is used when the Polywhirl rollout is not applied.
+      required:
+        - rollout_percentage
+        - default_provider_model_id
+      additionalProperties: false
+
+    conversation_control:
+      type: object
+      description: Meta conversation control variables such as max silence count
+      properties:
+        min_chunk_size:
+          type: integer
+          description: Minimum number of words per chunk that should be issued in a TTS request.
+          default: 1
+          minimum: 1
+        max_silence_count:
+          type: number
+          default: 3
+          description: Max consecutive user silence turns before agent hanging up
+        silence_timeout:
+          type: integer
+          description: Number of seconds to wait for user speech before considering it a silence turn (only for realtime)
+          default: 10
+        hangup_utterance:
+          default: "Thank you for calling. Have a great day! Goodbye."
+          oneOf:
+            - type: string
+              description: Default hangup utterance (monolingual)
+            - type: object
+              description: Per-language hangup utterances (language code -> utterance)
+              additionalProperties:
+                type: string
+              example:
+                en-US: "Thank you for calling. Have a great day! Goodbye."
+                es-ES: "Gracias por llamar. ¡Que tenga un buen día! Adiós."
+                fr-FR: "Merci pour votre appel. Passez une bonne journée ! Au revoir."
+          description: Utterance to use when hanging up due to max silence count reached. Can be a string for default behaviour or an object mapping language codes to localised utterances.
+        enhanced_tts_preprocessing_enabled:
+          description: Enables or disables additional modifications to what is sent to the TTS provider. This can resolve things like long number readout and date pronunciation.
+          type: boolean
+          default: false
+        channel_overrides:
+          type: object
+          description: Per-channel overrides for conversation control features
+          propertyNames:
+            $ref: "#/components/schemas/channel_name_enum"
+          additionalProperties:
+            type: object
+            description: Overrides for a specific channel
+            additionalProperties: false
+            properties:
+              disclaimer_message:
+                type: object
+                description: Disclaimer message configuration for this channel
+                additionalProperties: false
+                properties:
+                  is_enabled:
+                    type: boolean
+                    description: |
+                      Controls whether this specific channel shows a disclaimer:
+                      - true or omitted: Show disclaimer (use 'message' if provided, otherwise use base disclaimer)
+                      - false: Do not show any disclaimer for this channel
+                  message:
+                    type: string
+                    description: Custom disclaimer text for this channel. If provided (and is_enabled is not false), this replaces the base disclaimer text
+                allOf:
+                  - if:
+                      properties:
+                        is_enabled:
+                          const: true
+                      required:
+                        - is_enabled
+                    then:
+                      required:
+                        - message
+                      properties:
+                        message:
+                          minLength: 1
+      additionalProperties: false
+
+    background_track:
+      type: object
+      description: Play a recording in the background during the call
+      required:
+        - name
+      properties:
+        name:
+          type: string
+          description: >
+            Name of the audio file to play in the background.
+            Format: s3://poly-audio-tts/voice/recordings/[name].ulaw
+          example: "e901eaf98ada2fa39eafc25a52d69d34"
+        loudness:
+          type: number
+          description: Loudness of the background track in dB.
+          default: -40
+          minimum: -70
+          maximum: -20
+      additionalProperties: false
+
+    realtime:
+      type: object
+      description: Configuration when using a realtime speech model.
+      properties:
+        enabled:
+          type: boolean
+          description: Whether this feature is enabled.
+          default: false
+        speech_to_speech_enabled:
+          type: boolean
+          description: Whether to an end-to-end Speech To Speech model
+            (where we have limited controls over the agent voice), instead of
+            the default Speech To Text model.
+          default: false
+        speech_to_speech_voice_name:
+          type: string
+          description: Name of the Speech To Speech voice to be used.
+            See https://platform.openai.com/docs/api-reference/realtime-sessions/create#realtime-sessions-create-voice
+        speech_to_speech_voice_speed:
+          type: number
+          description: >
+            Speed of the Speech To Speech voice.
+            See https://platform.openai.com/docs/api-reference/realtime_sessions/create#realtime_sessions_create-speed
+          default: 1.0
+          minimum: 0.25
+          maximum: 1.5
+        model_name:
+          type: string
+          description:
+            Name of the model to be used, e.g. "gpt-realtime" (recommended), "gpt-realtime-mini".
+            See https://platform.openai.com/docs/api-reference/realtime.
+        openai_config:
+          type: object
+          description: OpenAI-specific realtime configuration.
+          properties:
+            eagerness:
+              type: string
+              enum:
+                - low
+                - medium
+                - high
+                - auto
+              description: >
+                Eagerness for OpenAI semantic VAD turn detection (low, medium, high, auto).
+                Not yet wired up to the voice agent — setting this field currently has no effect.
+            transcriber_model:
+              type: string
+              description: >
+                The transcription model to use for audio input transcription.
+                If not specified, defaults to "whisper-1".
+                See https://platform.openai.com/docs/guides/realtime-transcription for a list of available models.
+        vad:
+          type: object
+          description: Configure model Voice Activity Detection.
+          properties:
+            provider:
+              type: string
+              description: >
+                The VAD provider. If "silero" then the internal Silero VAD model will be used,
+                else the models own VAD will be used.
+              default: ""
+            speech_threshold:
+              type: number
+              description: >
+                Threshold (0.0 to 1.0) at which speech is considered active, so a new active VAD
+                window can start.
+              default: 0.35
+            silence_threshold:
+              type: number
+              description: >
+                Threshold (0.0 to 1.0) at which speech is considered silent, so the active
+                VAD window can close.
+              default: 0.2
+            start_window_ms:
+              type: number
+              description: >
+                Duration of silence (in milliseconds) after which a VAD window can start.
+            end_window_ms:
+              type: number
+              description: >
+                Duration of silence (in milliseconds) to detect speech stop. With shorter
+                values the model will respond more quickly, but may jump in on short pauses
+                from the user.
+        function_configs:
+          type: object
+          description: A mapping of function names to configs.
+          properties:
+            async:
+              type: boolean
+              description:
+                Whether this function can be executed asynchronously in the background, so that
+                conversation can continue in the foreground.
+
+    llm:
+      type: object
+      description: Configure the LLM for the agent.
+      not:
+        # Only allow at most 1 of the following, but also allow none.
+        anyOf:
+          - required: [variant_overrides, flow_overrides]
+          - required: [variant_overrides, channel_overrides]
+          - required: [flow_overrides, channel_overrides]
+      properties:
+        provider_model_id:
+          type: string
+          description: >
+            The provider model ID to use for the LLM. You can find the list of available models in the LLM Gateway dynamic configs.
+            eg for us-1 prod, the keys are the same as in this yaml
+            https://github.com/PolyAI-LDN/poly_core/blob/master/src/poly_platform/llm_gateway/dynamic_configs/models.us-1.platform-prod.yaml
+        safety:
+          type: object
+          description: >
+            Extra safety configuration. These currently only apply for Raven.
+          properties:
+            # TODO: add agent response config.
+            # Maybe allow completely separate configs for each.
+            content_filters:
+              type: object
+              description: >
+                Configuration for content filters.
+              properties:
+                user_input:
+                  type: object
+                  description: user input content filter config.
+                  properties:
+                    is_enabled:
+                      type: boolean
+                      description: Whether to apply content filtering to user input.
+        inference_parameters:
+          $ref: "#/components/schemas/llm_inference_parameters"
+        include_kb_functions_in_flows:
+          type: boolean
+          description: Whether to include knowledge base functions from retrieved RAG topics when showing functions to the model.
+          default: false
+        mcp_servers:
+          type: array
+          description: List of MCP server URLs to connect to for function calls.
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+                description: The URL of the MCP server.
+              auth:
+                type: object
+                description: how to auth against the MCP server.
+                properties:
+                  header:
+                    type: string
+                    description: The name of the header to include in requests.
+                  query_param:
+                    type: string
+                    description: The name of the query parameter to include in requests.
+                  oauth:
+                    type: object
+                    description: OAuth2 authentication configuration.
+                    properties:
+                      client_id:
+                        type: string
+                        description: The client ID for OAuth2 authentication.
+                      client_secret_name:
+                        type: string
+                        description: The client secret name for OAuth2 authentication.
+                      token_url:
+                        type: string
+                        description: The token URL for OAuth2 authentication.
+                      audience:
+                        type: string
+                        description: The audience for OAuth2 authentication.
+                      scope:
+                        type: string
+                        description: The scope for OAuth2 authentication.
+                    required: [client_id, token_url]
+                  secret_name:
+                    type: string
+                    description: The name of the secret to use for authentication.
+                required: []
+              timeout:
+                type: integer
+                description: The timeout for requests to the MCP server in seconds.
+                default: 10
+            required: [url]
+        variant_overrides:
+          type: object
+          description: Variant-specific LLM configuration overrides. Each key should be a variant name.
+          additionalProperties:
+            type: object
+            description: Configuration for a specific variant.
+            additionalProperties: false
+            properties:
+              provider_model_id:
+                type: string
+              inference_parameters:
+                $ref: "#/components/schemas/llm_inference_parameters"
+        flow_overrides:
+          type: object
+          description: Flow-specific LLM configuration overrides. Each key should be a flow name.
+          additionalProperties:
+            type: object
+            description: Configuration for a specific flow
+            additionalProperties: false
+            properties:
+              provider_model_id:
+                type: string
+              inference_parameters:
+                $ref: "#/components/schemas/llm_inference_parameters"
+              include_kb_functions_in_flows:
+                type: boolean
+                description: Whether to include knowledge base functions from retrieved RAG topics when showing functions to the model in this flow.
+              steps:
+                type: object
+                description: Step-specific LLM configuration overrides. Each key should be a step name.
+                additionalProperties:
+                  type: object
+                  description: Configuration for a specific step
+                  additionalProperties: false
+                  properties:
+                    provider_model_id:
+                      type: string
+                    inference_parameters:
+                      $ref: "#/components/schemas/llm_inference_parameters"
+                    include_kb_functions_in_flows:
+                      type: boolean
+                      description: Whether to include knowledge base functions from retrieved RAG topics when showing functions to the model in this step.
+        channel_overrides:
+          type: object
+          description: Per-channel overrides keyed by channel name
+          propertyNames:
+            $ref: "#/components/schemas/channel_name_enum"
+          additionalProperties:
+            type: object
+            description: Override settings for a specific channel
+            additionalProperties: false
+            properties:
+              provider_model_id:
+                type: string
+                description: Model identifier to use for this channel
+              inference_parameters:
+                $ref: "#/components/schemas/llm_inference_parameters"
+            required:
+              - provider_model_id
+
+    ab:
+      type: object
+      description: Create a Test Group for percentage-based config setting testing
+      properties:
+        is_enabled:
+          type: boolean
+        test_groups:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/test_group"
+
+    test_group:
+      type: object
+      description: A test group object for ab testing
+      properties:
+        group_name:
+          type: string
+        percent:
+          type: number
+        test_config:
+          type: object
+          description: Customizable configuration for test group that override the default group when selected
+          $ref: "#/components/schemas/additional_features"
+
+    agentic_dial:
+      type: object
+      description: Configuration for agentic dial feature
+      additionalProperties: false
+      required:
+        - connector_token_secret_name
+      properties:
+        connector_token_secret_name:
+          type: string
+          description: Secret name containing a dict mapping agent names to connector tokens
+        bridge_ended_function:
+          type: string
+          description: Name of the project function to trigger when a bridge ends
+        agents:
+          type: array
+          description: List of agents available for agentic dial
+          items:
+            type: object
+            description: Agent configuration
+            additionalProperties: false
+            required:
+              - name
+            properties:
+              name:
+                type: string
+                description: Unique name identifier for the agent
+              outbound_endpoint:
+                type: string
+                description: The outbound agent's outbound endpoint
+              outbound_caller_id:
+                type: string
+                description: Caller ID to use for outbound calls from this agent
+              sip_headers:
+                type: object
+                description: SIP headers to include in calls from this agent
+                additionalProperties:
+                  type: string
+        destinations:
+          type: array
+          description: List of destinations available for agentic dial
+          items:
+            type: object
+            description: Destination configuration
+            additionalProperties: false
+            required:
+              - name
+              - phone_number
+            properties:
+              name:
+                type: string
+                description: Unique name identifier for the destination
+              phone_number:
+                type: string
+                description: Phone number to dial for this destination
+              sip_headers:
+                type: object
+                description: SIP headers to include for this destination
+                additionalProperties:
+                  type: string
+              outbound_endpoint:
+                type: string
+                description: Override the agent's outbound endpoint for this destination
+              outbound_caller_id:
+                type: string
+                description: Override the agent's caller ID for this destination
+
+    webhook_config:
+      type: object
+      description: Configuration for a single webhook endpoint
+      additionalProperties: false
+      required:
+        - url
+      properties:
+        url:
+          type: string
+          description: Webhook URL to send POST requests to
+        auth:
+          type: object
+          description: Authentication configuration for the webhook
+          additionalProperties: false
+          properties:
+            header:
+              type: string
+              description: The name of the header to include in requests. Requires secret_name.
+            query_param:
+              type: string
+              description: The name of the query parameter to include in requests. Requires secret_name.
+            secret_name:
+              type: string
+              description: The name of the secret stored in the secrets service to use for authentication. The secret value will be added to the header or query parameter specified.
+          required: []
+
+    webhooks:
+      type: object
+      description: Configuration for deployment webhooks
+      additionalProperties: false
+      properties:
+        on_draft_published:
+          type: array
+          description: Webhooks to trigger when a draft is published to sandbox
+          items:
+            $ref: "#/components/schemas/webhook_config"
+        on_deployment:
+          type: object
+          description: Webhooks to trigger when a deployment is made to a specific environment
+          additionalProperties: false
+          properties:
+            sandbox:
+              type: array
+              description: Webhooks to trigger for sandbox deployments
+              items:
+                $ref: "#/components/schemas/webhook_config"
+            pre-release:
+              type: array
+              description: Webhooks to trigger for pre-release deployments
+              items:
+                $ref: "#/components/schemas/webhook_config"
+            live:
+              type: array
+              description: Webhooks to trigger for live deployments
+              items:
+                $ref: "#/components/schemas/webhook_config"
+
+    additional_features:
+      type: object
+      properties:
+        csat_sms:
+          $ref: "#/components/schemas/csat_sms"
+        handoff_api:
+          $ref: "#/components/schemas/handoff_api"
+        ragdoll:
+          $ref: "#/components/schemas/ragdoll"
+        tts_postprocessing:
+          $ref: "#/components/schemas/tts_postprocessing"
+        smart_vad:
+          $ref: "#/components/schemas/smart_vad"
+        vad:
+          $ref: "#/components/schemas/vad"
+        eot:
+          $ref: "#/components/schemas/eot"
+        barge_in:
+          $ref: "#/components/schemas/barge_in"
+        backchannelling:
+          $ref: "#/components/schemas/backchannelling"
+        prompts:
+          $ref: "#/components/schemas/prompts"
+        webchat:
+          $ref: "#/components/schemas/webchat"
+        memory:
+          $ref: "#/components/schemas/memory"
+        realtime:
+          $ref: "#/components/schemas/realtime"
+        filler_utterances:
+          $ref: "#/components/schemas/filler_utterances"
+        polywhirl_rollout:
+          $ref: "#/components/schemas/polywhirl_rollout"
+        conversation_control:
+          $ref: "#/components/schemas/conversation_control"
+        asr:
+          $ref: "#/components/schemas/asr"
+        audio_enhancement:
+          $ref: "#/components/schemas/audio_enhancement"
+        background_track:
+          $ref: "#/components/schemas/background_track"
+        llm:
+          $ref: "#/components/schemas/llm"
+        ab:
+          $ref: "#/components/schemas/ab"
+        email:
+          $ref: "#/components/schemas/email"
+        agentic_dial:
+          $ref: "#/components/schemas/agentic_dial"
+        webhooks:
+          $ref: "#/components/schemas/webhooks"
+      additionalProperties: false
+
+paths:
+  /__doc_only__additional_features:
+    get:
+      summary: Documentation only
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/additional_features"

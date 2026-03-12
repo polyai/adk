@@ -1,0 +1,4 @@
+name: test_flow_with_punctuation!
+description: Test flow with punctuation in name and default step as start
+start_step: welcome_step
+

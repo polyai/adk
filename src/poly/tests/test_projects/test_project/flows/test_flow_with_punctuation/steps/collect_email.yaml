@@ -1,0 +1,9 @@
+step_type: advanced_step
+name: collect_email
+prompt: Please provide your email. I'll validate it using {{fn:validate_email}} and process with {{ft:calculate_total}}. Your current status is {{attr:booking-status}}. I can send updates via {{twilio_sms:test_template_2}}.
+asr_biasing:
+  is_enabled: true
+  alphanumeric: true
+dtmf_config:
+  is_enabled: false
+

@@ -1,0 +1,8 @@
+enabled: true
+actions: Validate using {{fn:validate_email}} and process with {{fn:shared_helper}}. Check {{attr:email-address}} attribute and use {{ho:handoff-2}} for escalation. Send email verification via {{twilio_sms:test_template_2}}.
+content: This topic handles email validation and processing.
+example_queries:
+  - I need to verify my email
+  - Check my email address
+  - Email validation request
+

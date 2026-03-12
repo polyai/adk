@@ -1,0 +1,7 @@
+keyphrases:
+  - keyphrase: PolyAI
+    level: maximum
+  - keyphrase: reservation
+    level: boosted
+  - keyphrase: check-in
+    level: default

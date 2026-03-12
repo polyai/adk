@@ -1,0 +1,116 @@
+{
+  "attrs@25.4.0": {
+    "licenses": "MIT",
+    "repository": "https://github.com/python-attrs/attrs",
+    "path": ".venv/lib/python3.14/site-packages/attrs-25.4.0.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/attrs-25.4.0.dist-info/licenses/LICENSE"
+  },
+  "certifi@2026.2.25": {
+    "licenses": "MPL-2.0",
+    "repository": "https://github.com/certifi/python-certifi",
+    "path": ".venv/lib/python3.14/site-packages/certifi-2026.2.25.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/certifi-2026.2.25.dist-info/licenses/LICENSE"
+  },
+  "charset-normalizer@3.4.4": {
+    "licenses": "MIT",
+    "repository": "https://github.com/jawah/charset_normalizer",
+    "path": ".venv/lib/python3.14/site-packages/charset_normalizer-3.4.4.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/charset_normalizer-3.4.4.dist-info/licenses/LICENSE"
+  },
+  "idna@3.11": {
+    "licenses": "BSD-3-Clause",
+    "repository": "https://github.com/kjd/idna",
+    "path": ".venv/lib/python3.14/site-packages/idna-3.11.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/idna-3.11.dist-info/licenses/LICENSE.md"
+  },
+  "jsonschema@4.26.0": {
+    "licenses": "MIT",
+    "repository": "https://github.com/python-jsonschema/jsonschema",
+    "path": ".venv/lib/python3.14/site-packages/jsonschema-4.26.0.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/jsonschema-4.26.0.dist-info/licenses/COPYING"
+  },
+  "jsonschema-specifications@2025.9.1": {
+    "licenses": "MIT",
+    "repository": "https://github.com/python-jsonschema/jsonschema-specifications",
+    "path": ".venv/lib/python3.14/site-packages/jsonschema_specifications-2025.9.1.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/jsonschema_specifications-2025.9.1.dist-info/licenses/COPYING"
+  },
+  "markdown-it-py@4.0.0": {
+    "licenses": "MIT",
+    "repository": "https://github.com/executablebooks/markdown-it-py",
+    "path": ".venv/lib/python3.14/site-packages/markdown_it_py-4.0.0.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/markdown_it_py-4.0.0.dist-info/licenses/LICENSE"
+  },
+  "mdurl@0.1.2": {
+    "licenses": "MIT",
+    "repository": "https://github.com/executablebooks/mdurl",
+    "path": ".venv/lib/python3.14/site-packages/mdurl-0.1.2.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/mdurl-0.1.2.dist-info/LICENSE"
+  },
+  "protobuf@6.33.5": {
+    "licenses": "BSD-3-Clause",
+    "repository": "https://developers.google.com/protocol-buffers/",
+    "path": ".venv/lib/python3.14/site-packages/protobuf-6.33.5.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/protobuf-6.33.5.dist-info/LICENSE"
+  },
+  "Pygments@2.19.2": {
+    "licenses": "BSD-2-Clause",
+    "repository": "https://github.com/pygments/pygments",
+    "path": ".venv/lib/python3.14/site-packages/pygments-2.19.2.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/pygments-2.19.2.dist-info/licenses/LICENSE"
+  },
+  "python-dateutil@2.8.2": {
+    "licenses": "BSD-3-Clause",
+    "repository": "https://github.com/dateutil/dateutil",
+    "path": ".venv/lib/python3.14/site-packages/python_dateutil-2.8.2.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/python_dateutil-2.8.2.dist-info/LICENSE"
+  },
+  "referencing@0.37.0": {
+    "licenses": "MIT",
+    "repository": "https://github.com/python-jsonschema/referencing",
+    "path": ".venv/lib/python3.14/site-packages/referencing-0.37.0.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/referencing-0.37.0.dist-info/licenses/COPYING"
+  },
+  "requests@2.31.0": {
+    "licenses": "Apache-2.0",
+    "repository": "https://github.com/psf/requests",
+    "path": ".venv/lib/python3.14/site-packages/requests-2.31.0.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/requests-2.31.0.dist-info/LICENSE"
+  },
+  "rich@14.3.3": {
+    "licenses": "MIT",
+    "repository": "https://github.com/Textualize/rich",
+    "path": ".venv/lib/python3.14/site-packages/rich-14.3.3.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/rich-14.3.3.dist-info/licenses/LICENSE"
+  },
+  "rpds-py@0.30.0": {
+    "licenses": "MIT",
+    "repository": "https://github.com/crate-py/rpds",
+    "path": ".venv/lib/python3.14/site-packages/rpds_py-0.30.0.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/rpds_py-0.30.0.dist-info/licenses/LICENSE"
+  },
+  "ruamel.yaml@0.19.1": {
+    "licenses": "MIT",
+    "repository": "https://sourceforge.net/p/ruamel-yaml/code/ci/default/tree/",
+    "path": ".venv/lib/python3.14/site-packages/ruamel_yaml-0.19.1.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/ruamel_yaml-0.19.1.dist-info/licenses/LICENSE"
+  },
+  "simple-term-menu@1.4.1": {
+    "licenses": "MIT",
+    "repository": "https://github.com/IngoMeyer441/simple-term-menu",
+    "path": ".venv/lib/python3.14/site-packages/simple_term_menu-1.4.1.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/simple_term_menu-1.4.1.dist-info/LICENSE"
+  },
+  "six@1.17.0": {
+    "licenses": "MIT",
+    "repository": "https://github.com/benjaminp/six",
+    "path": ".venv/lib/python3.14/site-packages/six-1.17.0.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/six-1.17.0.dist-info/LICENSE"
+  },
+  "urllib3@2.6.3": {
+    "licenses": "MIT",
+    "repository": "https://github.com/urllib3/urllib3",
+    "path": ".venv/lib/python3.14/site-packages/urllib3-2.6.3.dist-info",
+    "licenseFile": ".venv/lib/python3.14/site-packages/urllib3-2.6.3.dist-info/licenses/LICENSE.txt"
+  }
+}

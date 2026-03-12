@@ -1,0 +1,23 @@
+step_type: default_step
+name: welcome_step
+prompt: Welcome! How can I help you today?
+conditions:
+  - name: book_appointment
+    condition_type: step_condition
+    description: User wants to book appointment
+    required_entities:
+      - date
+    child_step: collect_party_size
+  - name: check_status
+    condition_type: step_condition
+    description: User wants to check status
+    required_entities:
+      - confirmation_status
+    child_step: status_result
+  - name: exit
+    condition_type: exit_flow_condition
+    description: User wants to exit
+    required_entities: []
+extracted_entities:
+  - date
+  - confirmation_status

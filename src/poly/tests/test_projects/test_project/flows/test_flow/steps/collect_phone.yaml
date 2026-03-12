@@ -1,0 +1,17 @@
+step_type: default_step
+name: collect_phone
+prompt: What is your phone number?
+conditions:
+  - name: has_phone
+    condition_type: step_condition
+    description: User provided phone
+    required_entities:
+      - phone_number
+    child_step: final_step
+  - name: no_phone
+    condition_type: step_condition
+    description: User declined to provide phone
+    required_entities: []
+    child_step: final_step
+extracted_entities:
+  - phone_number

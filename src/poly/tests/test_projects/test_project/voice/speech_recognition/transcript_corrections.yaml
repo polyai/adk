@@ -1,0 +1,16 @@
+corrections:
+  - name: Email domain fix
+    description: Correct common email domain misrecognitions
+    regular_expressions:
+      - regular_expression: at gmail dot com
+        replacement: "@gmail.com"
+        replacement_type: full
+      - regular_expression: at hotmail dot com
+        replacement: "@hotmail.com"
+        replacement_type: full
+  - name: Number normalization
+    description: Normalize spoken numbers to digits
+    regular_expressions:
+      - regular_expression: \bdouble (\d)\b
+        replacement: \1\1
+        replacement_type: partial
