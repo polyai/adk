@@ -2,8 +2,14 @@
    SIDEBAR + NAVIGATION
    ============================================================================= */
 
-.md-sidebar--primary {
-  width: 15rem;
+@media screen and (min-width: 76.25em) {
+  .md-sidebar--primary {
+    width: 15rem;
+  }
+
+  .md-nav--primary .md-nav__title {
+    display: none;
+  }
 }
 
 .md-sidebar__scrollwrap {
@@ -15,7 +21,6 @@
 }
 
 .md-nav--primary .md-nav__title {
-  display: none;
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-bolder);
   text-transform: uppercase;
@@ -23,6 +28,13 @@
   color: var(--color-text-secondary);
   padding: 0 0 0.3rem;
   margin-top: 1.2rem;
+}
+
+/* on mobile, pad the drawer title to clear the back-chevron icon */
+@media screen and (max-width: 76.2344em) {
+  .md-nav--primary .md-nav__title {
+    padding-left: 2.4rem;
+  }
 }
 
 .md-nav--primary > .md-nav__list > .md-nav__item:first-child > .md-nav__title {
