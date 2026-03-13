@@ -53,6 +53,28 @@ Remove old docs files and prompt bulid
 
 <!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
 
+- Fix release ([#17](https://github.com/polyai/adk/pull/17),
+  [`bbce7d8`](https://github.com/polyai/adk/commit/bbce7d877b8a70dd6ae9478c854e99728db374d9))
+
+## Summary Re-add semantic release into pyproject.toml
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
 ### Features
 
 - Copy across recent updates/fixes ([#12](https://github.com/polyai/adk/pull/12),
@@ -108,11 +130,6 @@ Relocate docs for website into root of repo Return initial docs included for the
 ## Screenshots / Logs
 
 <!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
-
-### Chores
-
-- **release**: 0.1.1
-  ([`5d4c1a4`](https://github.com/polyai/adk/commit/5d4c1a4db272f70e8dd7eff6a997e3cf6914893a))
 
 ### Continuous Integration
 
@@ -283,14 +300,6 @@ Release workflow details are contributor-facing information and belong alongside
 
 
 ## v0.1.0 (2026-03-13)
-
-### Chores
-
-- **release**: 0.1.0
-  ([`3ff8e64`](https://github.com/polyai/adk/commit/3ff8e64547c3b99fb1d1ac444332948a3d67ba26))
-
-- **release**: 0.1.0
-  ([`3c4e90b`](https://github.com/polyai/adk/commit/3c4e90b46ce07df27b7b639abf49d4461fc40f02))
 
 ### Continuous Integration
 
