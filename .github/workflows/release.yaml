@@ -10,7 +10,7 @@ on:
       - 'pyproject.toml'
 
 permissions:
-  contents: write
+  contents: read
   id-token: write
 
 jobs:
