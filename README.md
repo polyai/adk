@@ -169,7 +169,7 @@ Output ADK documentation
 poly docs
 poly docs -all
 poly docs {documentation (e.g topics)}
-poly docs --output docs/
+poly docs --output doc_file.md
 ```
 
 ## Bugs & Feature Requests
