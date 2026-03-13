@@ -67,7 +67,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 | `poly chat` | Interactive chat session with the agent (`--environment`, `--channel`, `--functions`, `--flows`, `--state`) |
 | `poly docs` | Output resource documentation (`poly docs flows functions topics`, or `--all` for everything) |
 
-Use `poly -h` and `poly {command} -h` for more detailed information
+For more information use `poly -h` and `poly {command} -h`
 
 ## CLI Workflow
 
