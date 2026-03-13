@@ -102,6 +102,9 @@ dependencies = [
     "ty",
 ]
 
+[project.license]
+text = "Apache-2.0"
+
 [project.optional-dependencies]
 dev = [
     "pre-commit>=3.0.0",
