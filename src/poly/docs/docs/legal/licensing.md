@@ -1,9 +1,9 @@
 ---
 title: 'License acknowledgements'
-description: 'Third-party software licenses used in PolyAI Local Agent Studio.'
+description: 'Third-party software licenses used in PolyAI ADK.'
 ---
 
-PolyAI Local Agent Studio uses the following third-party open source software packages. We gratefully acknowledge the contributions of the open source community.
+PolyAI ADK uses the following third-party open source software packages. We gratefully acknowledge the contributions of the open source community.
 
 ## Package licenses
 

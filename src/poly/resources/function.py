@@ -495,7 +495,7 @@ class Function(Resource):
                 or line.startswith("@func_latency_control")
             ):
                 raise ValueError(
-                    "Local Agent Studio decorators found in raw code. This might be because of a parameter mismatch."
+                    "ADK decorators found in raw code. This might be because of a parameter mismatch."
                 )
 
         resource_mappings = kwargs.get("resource_mappings") or []

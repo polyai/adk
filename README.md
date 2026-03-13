@@ -3,7 +3,7 @@
 # Agent Development Kit (ADK)
 
 [![PyPI version](https://img.shields.io/pypi/v/polyai-adk)](https://pypi.org/project/polyai-adk/)
-[![Python version](https://img.shields.io/pypi/pyversions/polyai-adk)](https://pypi.org/project/polyai-adk/)
+[![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Develop with Claude Code](https://img.shields.io/badge/Develop%20with-Claude%20Code-DC9E63?logo=claude)](https://claude.ai/download)
@@ -159,50 +159,13 @@ poly chat --channel webchat
 poly chat --metadata   # show functions, flows, and state each turn
 ```
 
-## Development Setup
-
-### Prerequisites
-
-- Python 3.14 or higher
-- [uv](https://github.com/astral-sh/uv) (`brew install uv`)
-
-### Getting Started
-
-```bash
-git clone https://github.com/PolyAI-LDN/local_agent_studio.git
-cd local_agent_studio
-uv venv
-source .venv/bin/activate
-uv pip install -e ".[dev]"
-pre-commit install
-```
-
-### Running Tests
-
-```bash
-pytest
-```
-
-Test files are located in `src/poly/tests/`.
-
-### Project Structure
-
-- `src/poly/cli.py` - CLI interface
-- `src/poly/project.py` - Core project management
-- `src/poly/resources/` - Resource type implementations
-- `src/poly/handlers/` - API handler implementations
-- `src/poly/tests/` - Test suite
-- `src/poly/types/` - Python type definitions for the Agent Studio runtime
-
 ## Bugs & Feature Requests
 
-Please report bugs or request features via the [GitHub Issues](https://github.com/PolyAI-LDN/local_agent_studio/issues) page.
+Please report bugs or request features via the [GitHub Issues](https://github.com/PolyAI-LDN/adk/issues) page.
 
 ## Contributing
 
-Contributions are welcome! The project uses **ruff** for linting/formatting (enforced via pre-commit hooks) and **pytest** for testing. Please ensure all tests pass before submitting a pull request.
-
-We recommend using [Claude Code](https://claude.ai/download) for development. The repo includes a `.claude/` directory with project-specific instructions and permissions pre-configured.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, and contribution guidelines.
 
 ## Releases
 

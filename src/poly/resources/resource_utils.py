@@ -1,4 +1,4 @@
-"""Util functions for resources in Local Agent Studio
+"""Util functions for resources in ADK
 
 Copyright PolyAI Limited
 """
