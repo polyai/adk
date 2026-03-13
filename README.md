@@ -37,17 +37,86 @@ poly review     # Create a review gist
 ```
 
 ## Usage
-A whitelisted API key is needed to run any of the poly commands.
+![PolyAI](logo.png)
 
-1. Create an API key at https://studio.[us/uk/eu].poly.ai/<account-name>/data-access
-2. Contact an engineer from the developer platform team team to whitelist your API key on Kong
-3. Add the key to your env variable (typically ~/.zshrc or ~/.bashrc), and name it POLY_ADK_KEY
+# Agent Development Kit (ADK)
 
-Once you do that, you'll be able to access agents under the <account-name> for the namespace in which the API key is generated.
+[![PyPI version](https://img.shields.io/pypi/v/polyai-adk)](https://pypi.org/project/polyai-adk/)
+[![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
+[![Develop with Claude Code](https://img.shields.io/badge/Develop%20with-Claude%20Code-DC9E63?logo=claude)](https://claude.ai/download)
 
-*We are in the process of automating the whitelisting of the API key, and limiting the external ADK to just the production namespace.*
+A CLI and Python package for managing [Agent Studio](https://studio.us.poly.ai) projects locally. It provides a Git-like workflow for synchronizing project configurations between your local filesystem and the Agent Studio platform.
+
+**Documentation:** https://polyai.github.io/adk/
+
+## Early Access
+
+⚠️ **The PolyAI ADK is currently in Early Access.**
+
+Changes may be pushed frequently while the platform evolves. If you encounter issues, please ensure you are running the **latest version** of the ADK before reporting them.
+
+[Request access to the PolyAI ADK](https://fehky.share-eu1.hsforms.com/2oSGLpUctRvyqXcb6K44DAQ)
+
+Once approved, the PolyAI team will provide the credentials required to use the ADK.
+
+## Prerequisites
+
+Before using the ADK you must:
+
+- have access to a **PolyAI Agent Studio workspace**
+- obtain an **ADK API key** from the PolyAI team
+
+Access to both is granted through the Early Access Program.
+
+Store your API key as an environment variable named: `POLY_ADK_KEY`
+
+For example:
+
+```bash
+export POLY_ADK_KEY=<your-key>
+```
+
+Any standard method for setting environment variables on your system is acceptable.
 
 ## Usage
+
+Install the ADK from PyPI:
+
+```bash
+pip install polyai-adk
+```
+
+Once installed, the `poly` CLI command becomes available.
+
+```bash
+poly init       # Initialize a project (interactive)
+poly pull       # Pull latest configuration
+poly push       # Push local changes
+poly status     # View project status
+poly diff       # View local changes
+poly branch     # Manage branches
+poly format     # Format resources
+poly validate   # Validate configuration
+poly review     # Create a review gist
+```
+
+Run:
+
+```bash
+poly --help
+```
+
+to see all available commands.
+
+Each command also supports `--help` for detailed syntax:
+
+```bash
+poly push --help
+```
+
+## Commands
 
 Run `poly --help` to see all available commands and options. Each command also supports `--help` for detailed syntax (e.g. `poly push --help`).
 
