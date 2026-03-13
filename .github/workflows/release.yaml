@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'src/**'
+      - '.github/workflows/release.yaml'
+      - 'pyproject.toml'
 
 permissions:
   contents: read
