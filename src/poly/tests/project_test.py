@@ -2212,6 +2212,13 @@ class PullProjectTest(unittest.TestCase):
                 f"Expected rmdir to be called for flow folder containing '{empty_flow_path}'",
             )
 
+class DocsTest(unittest.TestCase):
+    """Tests for the docs module"""
+
+    def test_load_docs(self):
+        """Test loading a docs file"""
+        AgentStudioProject.load_docs("docs")
+
 
 if __name__ == "__main__":
     unittest.main()

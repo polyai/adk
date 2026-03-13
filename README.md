@@ -34,6 +34,7 @@ poly branch     # Manage branches
 poly format     # Format resources
 poly validate   # Validate configuration
 poly review     # Create a review gist
+poly docs       # Output reference documentation
 ```
 
 ## Usage

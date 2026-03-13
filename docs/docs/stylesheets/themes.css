@@ -1,0 +1,76 @@
+/* =============================================================================
+   LIGHT THEME — MkDocs Material variable bindings
+   ============================================================================= */
+[data-md-color-scheme="default"] {
+  --md-default-bg-color:          var(--color-bg);
+  --md-default-fg-color:          var(--color-text-primary);
+  --md-default-fg-color--light:   var(--color-text-secondary);
+  --md-default-fg-color--lighter: var(--color-text-helper);
+
+  --md-primary-fg-color:          var(--color-header-bg);
+  --md-primary-fg-color--light:   #31405f;
+  --md-primary-fg-color--dark:    var(--color-header-bg-dark);
+
+  --md-accent-fg-color:           var(--color-accent);
+  --md-typeset-a-color:           var(--color-link-hover);
+  --md-nav-fg-color:              var(--color-text-primary);
+
+  --md-code-bg-color:             var(--color-code-bg);
+  --md-typeset-table-color:       var(--color-border-subtle);
+}
+
+/* =============================================================================
+   DARK THEME — override semantic tokens, MkDocs vars cascade automatically
+   ============================================================================= */
+[data-md-color-scheme="slate"] {
+  /* override semantic tokens */
+  --color-bg:         var(--palette-zinc-100);
+  --color-bg-page:    var(--palette-zinc-100);
+  --color-bg-surface: var(--palette-zinc-90);
+  --color-bg-hover:   var(--palette-zinc-80);
+
+  --color-text-primary:   var(--palette-zinc-05);
+  --color-text-secondary: var(--palette-zinc-30);
+  --color-text-helper:    var(--palette-zinc-50);
+
+  --color-border-subtle: var(--palette-zinc-70);
+  --color-border-strong: var(--palette-zinc-80);
+
+  --color-accent-text:  var(--palette-brand-50); /* lime on dark bg */
+  --color-code-bg:      var(--palette-zinc-80);
+
+  /* links */
+  --color-link:       var(--color-text-secondary);
+  --color-link-hover: var(--color-text-primary);
+
+  /* search */
+  --color-search-bg:          var(--palette-zinc-80);
+  --color-search-bg-focus:    var(--palette-zinc-70);
+  --color-search-border:      var(--palette-zinc-70);
+  --color-search-text:        var(--palette-zinc-05);
+  --color-search-placeholder: var(--palette-zinc-50);
+  --color-search-icon:        var(--palette-zinc-30);
+  --color-search-highlight:   var(--palette-zinc-05);
+  --color-search-result-text: var(--palette-zinc-30);
+  --md-accent-bg-color:       var(--palette-zinc-70);
+
+  /* scrollbar */
+  --color-scrollbar-thumb: var(--palette-zinc-70);
+  --color-scrollbar-track: transparent;
+
+  /* MkDocs Material bindings */
+  --md-default-bg-color:          var(--color-bg);
+  --md-default-fg-color:          var(--color-text-primary);
+  --md-default-fg-color--light:   var(--color-text-secondary);
+  --md-default-fg-color--lighter: var(--color-text-helper);
+
+  --md-primary-fg-color:          var(--palette-zinc-100);
+  --md-primary-fg-color--light:   var(--palette-zinc-90);
+  --md-primary-fg-color--dark:    var(--palette-zinc-100);
+
+  --md-accent-fg-color:           var(--color-accent);
+  --md-typeset-a-color:           var(--color-accent-text);
+
+  --md-code-bg-color:             var(--color-code-bg);
+  --md-typeset-table-color:       var(--color-border-subtle);
+}

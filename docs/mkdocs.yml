@@ -1,0 +1,131 @@
+site_name: ADK Docs
+site_description: Documentation for the PolyAI Agent Development Kit
+site_url: https://polyai.github.io/adk/
+repo_name: polyai/adk
+repo_url: https://github.com/polyai/adk
+
+theme:
+  name: material
+  custom_dir: overrides
+  favicon: assets/favicon-32.png
+  font:
+    text: Inter
+    code: Roboto Mono
+  logo: assets/poly-ai-logo.svg
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - navigation.instant
+    - navigation.instant.progress
+    - content.code.copy
+    - content.tabs.link
+    - content.tooltips
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  palette:
+    - scheme: default
+      primary: blue grey
+      accent: lime
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - scheme: slate
+      primary: black
+      accent: lime
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+extra:
+  first_repo_url: https://github.com/polyai/adk
+  first_repo_name: adk
+  first_repo_icon: fontawesome/brands/github
+
+  # second_repo_url: https://github.com/polyai/adk-python
+  # second_repo_name: adk-python
+  # second_repo_icon: fontawesome/brands/github
+
+  # third_repo_url: https://github.com/polyai/adk-js
+  # third_repo_name: adk-js
+  # third_repo_icon: fontawesome/brands/github
+
+  # fourth_repo_url: https://github.com/polyai/adk-go
+  # fourth_repo_name: adk-go
+  # fourth_repo_icon: fontawesome/brands/github
+
+extra_css:
+  - stylesheets/tokens.css
+  - stylesheets/themes.css
+  - stylesheets/layout.css
+  - stylesheets/header.css
+  - stylesheets/navigation.css
+  - stylesheets/content.css
+  - stylesheets/components.css
+
+nav:
+  - Home: index.md
+
+  - Get started:
+      - What is the PolyAI ADK?: get-started/what-is-the-adk.md
+      - Walkthrough video: get-started/walkthrough-video.md
+      - Access and waitlist: get-started/access-and-waitlist.md
+      - Pre-requisites: get-started/prerequisites.md
+      - Installation: get-started/installation.md
+      - First commands: get-started/first-commands.md
+
+  - Tutorials:
+      - Build an agent with the ADK: tutorials/build-an-agent.md
+
+  - Core concepts:
+      - Working locally: concepts/working-locally.md
+      - Multi-user workflows and guardrails: concepts/multi-user-and-guardrails.md
+      - Anti-patterns: concepts/anti-patterns.md
+
+  - Reference:
+      - CLI reference: reference/cli.md
+      - Testing: reference/testing.md
+      - Tooling: reference/tooling.md
+
+      - Agent configuration:
+          - Agent settings: reference/agent_settings.md
+          - Voice settings: reference/voice_settings.md
+          - Chat settings: reference/chat_settings.md
+          - Experimental config: reference/experimental_config.md
+
+      - Project resources:
+          - Flows: reference/flows.md
+          - Functions: reference/functions.md
+          - Topics: reference/topics.md
+          - Entities: reference/entities.md
+          - Variables: reference/variables.md
+          - Variants: reference/variants.md
+          - Handoffs: reference/handoffs.md
+          - SMS templates: reference/sms.md
+
+      - Voice controls:
+          - Speech recognition: reference/speech_recognition.md
+          - Response control: reference/response_control.md
+
+  - Development:
+      - Docs workflow: development/docs.md
+
+  - Legal:
+      - Licensing: legal/licensing.md
