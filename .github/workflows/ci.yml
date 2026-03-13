@@ -7,6 +7,31 @@ on:
     - main
 
 jobs:
+  pr-title:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+    - name: Validate PR title follows conventional commits
+      env:
+        PR_TITLE: ${{ github.event.pull_request.title }}
+      run: |
+        # Conventional commit types from CONTRIBUTING.md
+        pattern='^(feat|fix|chore|docs|ci|build|perf|refactor|style|test)(\(.+\))?!?: .+'
+        if [[ ! "$PR_TITLE" =~ $pattern ]]; then
+          echo "::error::PR title does not follow conventional commits format."
+          echo ""
+          echo "Expected: <type>[optional scope][!]: <description>"
+          echo "  Types: feat, fix, chore, docs, ci, build, perf, refactor, style, test"
+          echo "  Examples:"
+          echo "    feat: add poly export command"
+          echo "    fix(cli): handle missing config file"
+          echo "    feat!: redesign resource schema"
+          echo ""
+          echo "See CONTRIBUTING.md for details."
+          exit 1
+        fi
+        echo "PR title is valid: $PR_TITLE"
+
   lint-and-test:
     runs-on: ubuntu-latest
     env:
