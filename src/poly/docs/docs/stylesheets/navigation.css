@@ -100,3 +100,7 @@
 .md-nav__item--section {
   margin-top: 32px;
 }
+
+.md-footer {
+    display: none;
+}
