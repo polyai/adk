@@ -331,8 +331,6 @@ class FlowStep(BaseFlowStep, YamlResource):
             self.asr_biasing = asr_biasing
         elif asr_biasing:
             # resource_id and name are set internally by ASRBiasing.__init__;
-            # strip them for backward compat with old status data
-            asr_biasing = {k: v for k, v in asr_biasing.items() if k not in ("resource_id", "name")}
             asr_biasing["step_id"] = self.step_id
             asr_biasing["flow_id"] = self.flow_id
             self.asr_biasing = ASRBiasing(**asr_biasing)
@@ -342,10 +340,7 @@ class FlowStep(BaseFlowStep, YamlResource):
         if isinstance(dtmf_config, DTMFConfig):
             self.dtmf_config = dtmf_config
         elif dtmf_config:
-            # resource_id and name are set internally by DTMFConfig.__init__;
-            # strip them for backward compat with old status data
-            dtmf_config = {k: v for k, v in dtmf_config.items() if k not in ("resource_id", "name")}
-            dtmf_config["step_id"] = self.step_id
+            # resource_id and name are set internally by DTMFConfig.__init__;            dtmf_config["step_id"] = self.step_id
             dtmf_config["flow_id"] = self.flow_id
             self.dtmf_config = DTMFConfig(**dtmf_config)
         else:
