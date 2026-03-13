@@ -162,6 +162,16 @@ poly chat --channel webchat
 poly chat --metadata   # show functions, flows, and state each turn
 ```
 
+### `poly docs`
+
+Output ADK documentation
+```bash
+poly docs
+poly docs -all
+poly docs {documentation (e.g topics)}
+poly docs --output docs/
+```
+
 ## Bugs & Feature Requests
 
 Please report bugs or request features via the [GitHub Issues](https://github.com/PolyAI-LDN/adk/issues) page.
