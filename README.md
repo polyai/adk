@@ -12,9 +12,32 @@ A CLI and Python package for managing [Agent Studio](https://studio.us.poly.ai) 
 
 **[Documentation](https://polyai.github.io/adk/)**
 
+## Early Access
+
+⚠️ **The PolyAI ADK is currently in Early Access.**
+
+Changes may be pushed frequently while the platform evolves. If you encounter issues, please ensure you are running the **latest version** of the ADK before reporting them.
+
+[Request access to the PolyAI ADK](https://fehky.share-eu1.hsforms.com/2oSGLpUctRvyqXcb6K44DAQ)
+
+Once approved, the PolyAI team will provide the credentials required to use the ADK.
+
 ## Prerequisites
 
-You must have access to a workspace in PolyAI Agent Studio before using this tool. Access and an API key are provided by your PolyAI contact. To request access to the PolyAI platform, reach out to [developers@poly-ai.com](mailto:developers@poly-ai.com).
+Before using the ADK you must:
+
+- have access to a **PolyAI Agent Studio workspace**
+- obtain an **ADK API key** from the PolyAI team
+
+Access to both is granted through the Early Access Program.
+
+Store your API key as an environment variable named: `POLY_ADK_KEY`
+
+For example:
+
+```bash
+export POLY_ADK_KEY=<your-key>
+```
 
 ## Installation
 
@@ -38,17 +61,42 @@ poly docs       # Output reference documentation
 ```
 
 ## Usage
-A whitelisted API key is needed to run any of the poly commands.
 
-1. Create an API key at https://studio.[us/uk/eu].poly.ai/<account-name>/data-access
-2. Contact an engineer from the developer platform team team to whitelist your API key on Kong
-3. Add the key to your env variable (typically ~/.zshrc or ~/.bashrc), and name it POLY_ADK_KEY
+Install the ADK from PyPI:
 
-Once you do that, you'll be able to access agents under the <account-name> for the namespace in which the API key is generated.
+```bash
+pip install polyai-adk
+```
 
-*We are in the process of automating the whitelisting of the API key, and limiting the external ADK to just the production namespace.*
+Once installed, the `poly` CLI command becomes available.
 
-## Usage
+```bash
+poly init       # Initialize a project (interactive)
+poly pull       # Pull latest configuration
+poly push       # Push local changes
+poly status     # View project status
+poly diff       # View local changes
+poly branch     # Manage branches
+poly format     # Format resources
+poly validate   # Validate configuration
+poly review     # Create a review gist
+```
+
+Run:
+
+```bash
+poly --help
+```
+
+to see all available commands.
+
+Each command also supports `--help` for detailed syntax:
+
+```bash
+poly push --help
+```
+
+## Commands
 
 Run `poly --help` to see all available commands and options. Each command also supports `--help` for detailed syntax (e.g. `poly push --help`).
 
