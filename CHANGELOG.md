@@ -3,6 +3,32 @@
 
 ## v0.2.0 (2026-03-13)
 
+### Bug Fixes
+
+- Remove old docs files ([#16](https://github.com/polyai/adk/pull/16),
+  [`1038e5e`](https://github.com/polyai/adk/commit/1038e5ebfad53b9d3b17ae1637c0b65dcf0bba29))
+
+## Summary
+
+Remove old docs files and prompt bulid
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
 ### Continuous Integration
 
 - Build before pushing ([#15](https://github.com/polyai/adk/pull/15),
