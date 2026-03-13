@@ -12,7 +12,7 @@ A CLI and Python package for managing [Agent Studio](https://studio.us.poly.ai) 
 
 ## Prerequisites
 
-You must have access to a workspace in PolyAI Agent Studio before using this tool. Access and an API key are provided by your PolyAI contact. To request access to the PolyAI platform, reach out to [platform-support@poly-ai.com](mailto:platform-support@poly-ai.com).
+You must have access to a workspace in PolyAI Agent Studio before using this tool. Access and an API key are provided by your PolyAI contact. To request access to the PolyAI platform, reach out to [developers@poly-ai.com](mailto:developers@poly-ai.com).
 
 ## Installation
 
@@ -35,13 +35,13 @@ poly review     # Create a review gist
 ```
 
 ## Usage
-A whitelisted API key is needed to run any of the poly commands. 
+A whitelisted API key is needed to run any of the poly commands.
 
 1. Create an API key at https://studio.[us/uk/eu].poly.ai/<account-name>/data-access
 2. Contact an engineer from the developer platform team team to whitelist your API key on Kong
 3. Add the key to your env variable (typically ~/.zshrc or ~/.bashrc), and name it POLY_ADK_KEY
 
-Once you do that, you'll be able to access agents under the <account-name> for the namespace in which the API key is generated. 
+Once you do that, you'll be able to access agents under the <account-name> for the namespace in which the API key is generated.
 
 *We are in the process of automating the whitelisting of the API key, and limiting the external ADK to just the production namespace.*
 
