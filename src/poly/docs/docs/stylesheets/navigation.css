@@ -17,7 +17,7 @@
 }
 
 .md-nav {
-  margin-bottom: 24px;
+  /* margin-bottom: 24px; */
 }
 
 .md-nav--primary .md-nav__title {
@@ -52,6 +52,7 @@
 
 .md-nav__link {
   color: inherit;
+  margin-top: 16px;
 }
 
 .md-nav__link:hover {
@@ -94,4 +95,12 @@
   text-transform: uppercase;
   letter-spacing: var(--letter-spacing-wide);
   color: var(--color-text-secondary);
+}
+
+.md-nav__item--section {
+  margin-top: 32px;
+}
+
+.md-footer {
+    display: none;
 }
