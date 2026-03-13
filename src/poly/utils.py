@@ -116,7 +116,7 @@ def save_imports(base_path: str) -> None:
     decorator_import = ""
     decorators_path = os.path.join(gen_dir, "decorators.py")
     if os.path.isfile(decorators_path):
-        with open(decorators_path) as f:
+        with open(decorators_path, encoding="utf-8") as f:
             dec_names = _read_all_from_stub(f.read()) or []
         all_names.extend(dec_names)
         decorator_import = (
@@ -128,7 +128,7 @@ def save_imports(base_path: str) -> None:
     header = "# flake8: noqa\n# <AUTO GENERATED>\n"
     all_line = "__all__ = [\n    " + ",\n    ".join(f'"{n}"' for n in all_names) + "\n]\n\n"
 
-    with open(os.path.join(gen_dir, "__init__.py"), "w") as f:
+    with open(os.path.join(gen_dir, "__init__.py"), "w", encoding="utf-8") as f:
         f.write(header + all_line + _gen_import_statements() + decorator_import)
 
 
@@ -346,7 +346,7 @@ def export_decorators(decorators: list[str], base_path: str, filepath: str = "_g
     """Export the decorator functions."""
     filepath = os.path.join(base_path, filepath)
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
-    with open(filepath, "w") as f:
+    with open(filepath, "w", encoding="utf-8") as f:
         f.write(
             "# flake8: noqa\n# <AUTO GENERATED>\n" + "from typing import Callable, Optional\n\n"
         )

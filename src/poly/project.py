@@ -56,6 +56,7 @@ logger = logging.getLogger(__name__)
 
 PROJECT_CONFIG_FILE = "project.yaml"
 STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
+_LEGACY_STATUS_FILE = ".agent_studio_config"
 
 
 # New resources to be added here
@@ -205,7 +206,7 @@ class AgentStudioProject:
         if not os.path.exists(config_file_path):
             raise FileNotFoundError(f"Config file not found at {config_file_path}")
 
-        with open(config_file_path, "r") as f:
+        with open(config_file_path, "r", encoding="utf-8") as f:
             config_dict = resource_utils.load_yaml(f) or {}
 
         # Load status file
@@ -383,7 +384,7 @@ class AgentStudioProject:
         if write_project_yaml:
             config_file_path = os.path.join(self.root_path, PROJECT_CONFIG_FILE)
             config_dict = self.build_project_config()
-            with open(config_file_path, "w") as f:
+            with open(config_file_path, "w", encoding="utf-8") as f:
                 yaml_content = resource_utils.dump_yaml(config_dict)
                 f.write(yaml_content)
 
@@ -1021,6 +1022,9 @@ class AgentStudioProject:
         On creating a new flow, group flow steps/functions under
         their flow config.
 
+        If new flow has function step as start step, create referencing a dummy default step.
+        Then update the flow config to use the new step.
+
         When deleting a flow, only send a command to delete the flow config,
         not the steps/functions.
 
@@ -1116,6 +1120,40 @@ class AgentStudioProject:
             flow_config.steps = steps
             flow_config.functions = functions
 
+            function_start_step = next(
+                (
+                    step
+                    for step in new_resources.get(FunctionStep, {}).values()
+                    if step.step_id == flow_config.start_step
+                    and step.flow_id == flow_config.resource_id
+                ),
+                None,
+            )
+            if function_start_step:
+                # Create a dummy default step
+                dummy_step_id = f"{function_start_step.step_id}_start_step_temp"
+                dummy = FlowStep(
+                    resource_id=f"{flow_config.name}_{dummy_step_id}",
+                    step_id=dummy_step_id,
+                    name=f"{flow_config.name}-temp",
+                    flow_id=flow_config.resource_id,
+                    flow_name=flow_config.name,
+                    step_type=StepType.DEFAULT_STEP,
+                    prompt="temp prompt",
+                )
+                flow_config.steps.append(dummy)
+                flow_config.start_step = dummy.step_id
+                reset_flow_config = FlowConfig(
+                    resource_id=flow_config.resource_id,
+                    name=flow_config.name,
+                    description=flow_config.description,
+                    start_step=function_start_step.step_id,
+                )
+                updated_resources.setdefault(FlowConfig, {})[flow_config.resource_id] = (
+                    reset_flow_config
+                )
+                post_push_deleted_resources.setdefault(FlowStep, {})[dummy.resource_id] = dummy
+
         # Deleting flow config deletes all its steps/functions, so we don't need to
         for flow_config_id in deleted_resources.get(FlowConfig, {}):
             for resource_type in [FlowStep, Function, FunctionStep]:
@@ -1129,6 +1167,8 @@ class AgentStudioProject:
         # If we are deleting a start step and updating the flow config to use a different step,
         # we need to delete the start step after the creation of the new one
         for flow_config_id, flow_config in updated_resources.get(FlowConfig, {}).items():
+            if flow_config_id in new_resources.get(FlowConfig, {}):
+                continue
             old_flow_config = self.resources.get(FlowConfig, {}).get(flow_config_id)
             old_step_resource_id = f"{old_flow_config.name}_{old_flow_config.start_step}"
 
@@ -1526,23 +1566,29 @@ class AgentStudioProject:
         return discovered_resources
 
     def read_local_resource(
-        self, resource: ResourceMapping, resource_mappings: list[ResourceMapping]
+        self,
+        resource: ResourceMapping,
+        resource_mappings: list[ResourceMapping],
+        original_resource: Optional[Resource] = None,
     ) -> Resource:
         """Read a local resource from the given resource mapping.
 
         Args:
-            resource_mapping (ResourceMapping): The resource mapping information.
-
+            resource (ResourceMapping): The resource mapping information.
+            resource_mappings (list[ResourceMapping]): All resource mappings for reference resolution.
+            original_resource (Resource): Optional. When provided (e.g. sync re-read), use for
+                known_* kwargs instead of looking up by resource.resource_id. This is used to read
+                ids/positions for subresources.
         Returns:
             Resource: The resource instance.
         """
         resource_class = resource.resource_type
 
         additional_kwargs = {}
-        original_resource = None
+        if original_resource is None:
+            original_resource = self.resources.get(resource_class, {}).get(resource.resource_id)
         # Need to pass parameters for Function resources to extract param ids
         if resource_class == Function:
-            original_resource = self.resources.get(resource_class, {}).get(resource.resource_id)
             additional_kwargs["known_parameters"] = []
             additional_kwargs["known_latency_control"] = {}
 
@@ -1553,7 +1599,6 @@ class AgentStudioProject:
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
         if resource_class == FlowStep:
-            original_resource = self.resources.get(resource_class, {}).get(resource.resource_id)
             additional_kwargs["known_conditions"] = []
             additional_kwargs["known_position"] = None
 
@@ -1564,7 +1609,6 @@ class AgentStudioProject:
                 additional_kwargs["known_position"] = original_resource.position
 
         if resource_class == FunctionStep:
-            original_resource = self.resources.get(resource_class, {}).get(resource.resource_id)
             additional_kwargs["known_function_id"] = None
             additional_kwargs["known_position"] = None
             additional_kwargs["known_latency_control"] = {}
@@ -1863,7 +1907,7 @@ class AgentStudioProject:
         self,
         environment: str,
         channel: str,
-        variant_id: Optional[str],
+        variant: Optional[str],
     ) -> dict:
         """Create a chat session (standard or draft).
 
@@ -1873,7 +1917,7 @@ class AgentStudioProject:
         Args:
             environment (str): The environment to create the chat session in: draft, sandbox, pre-release or live.
             channel (str): The channel to create the chat session in: chat.polyai or webchat.polyai.
-            variant_id (ty.Optional[str]): The variant ID to create the chat session in.
+            variant (ty.Optional[str]): The variant ID to create the chat session in.
 
         Returns:
             dict: API response with conversation_id and initial greeting.
@@ -1897,7 +1941,7 @@ class AgentStudioProject:
                 artifact_version=artifact_version,
                 lambda_deployment_version=lambda_deployment_version,
                 channel=channel,
-                variant_id=variant_id,
+                variant_id=variant,
             )
 
         return AgentStudioInterface.create_chat(
@@ -1905,7 +1949,7 @@ class AgentStudioProject:
             account_id=self.account_id,
             project_id=self.project_id,
             environment=environment,
-            variant_id=variant_id,
+            variant_id=variant,
             channel=channel,
         )
 
@@ -2223,86 +2267,79 @@ class AgentStudioProject:
             raise ValueError("Cannot sync ids due to uncommitted changes.")
 
         sandbox_resources = self.get_remote_resources_by_name("main")
-        # Build lookup by (resource_type, name) -> Resource (not ResourceMapping)
-        sandbox_resource_lookup: dict[tuple[ResourceType, str], Resource] = {}
-        for resource_type, resources_dict in sandbox_resources.items():
+        # Build lookup by file path -> Resource
+        sandbox_resource_lookup: dict[str, Resource] = {}
+        for resources_dict in sandbox_resources.values():
+            for resource in resources_dict.values():
+                sandbox_resource_lookup[resource.file_path] = resource
+
+        # 1. Build sync resource_mappings: use sandbox id when there is a sandbox match by file_path
+        sync_mappings: list[ResourceMapping] = []
+        for resource_type, resources_dict in self.resources.items():
             for resource_id, resource in resources_dict.items():
-                sandbox_resource_lookup[(resource_type, resource.name)] = resource
+                sandbox_version = sandbox_resource_lookup.get(resource.file_path)
+                mapping_resource_id = (
+                    sandbox_version.resource_id if sandbox_version else resource.resource_id
+                )
+                resource_path = resource.get_path(self.root_path)
+                sync_mappings.append(
+                    ResourceMapping(
+                        resource_id=mapping_resource_id,
+                        resource_type=resource_type,
+                        resource_name=resource.name,
+                        file_path=resource_path,
+                        flow_name=(
+                            resource.name
+                            if isinstance(resource, FlowConfig)
+                            else getattr(resource, "flow_name", None)
+                        ),
+                        resource_prefix=resource.get_resource_prefix(file_path=resource.file_path),
+                    )
+                )
 
-        # For all the current resources:
-        # If they exist in sandbox and have a different ID
-        # - Delete resource with old ID
-        # - Create new resource with new ID
-
-        # After done, loop through all current resources and see if any need to be updated to refer to the new ID
-        # - Update resource with new ID
-
-        deleted_resources = {}
-        new_resources = {}
-        updated_resources = {}
+        # 2. Re-read all resources with sync mappings (references resolve from mappings)
+        branch_by_path: dict[str, tuple[type[Resource], str, Resource]] = {}
+        for resource_type, resources_dict in self.resources.items():
+            for resource_id, resource in resources_dict.items():
+                path = resource.file_path
+                branch_by_path[path] = (resource_type, resource_id, resource)
 
         new_state: ResourceMap = {}
+        for mapping in sync_mappings:
+            relative_file_path = os.path.relpath(mapping.file_path, self.root_path)
+            original = branch_by_path.get(relative_file_path)
+            branch_resource = original[2] if original else None
+            sandbox_resource = sandbox_resource_lookup.get(relative_file_path, branch_resource)
+            local_resource = self.read_local_resource(
+                resource=mapping,
+                resource_mappings=sync_mappings,
+                original_resource=sandbox_resource,
+            )
 
-        for resource_type, resources in self.resources.items():
-            for resource_id, resource in resources.items():
-                sandbox_version = sandbox_resource_lookup.get((resource_type, resource.name))
-                if sandbox_version:
-                    synced_resource = resource.sync_resource(sandbox_version)
-                    if synced_resource != resource:
-                        new_resources.setdefault(resource_type, {})[synced_resource.resource_id] = (
-                            synced_resource
-                        )
-                        deleted_resources.setdefault(resource_type, {})[resource_id] = resource
+            new_state.setdefault(mapping.resource_type, {})[mapping.resource_id] = local_resource
 
-                    new_state.setdefault(resource_type, {})[synced_resource.resource_id] = (
-                        synced_resource
-                    )
-                else:
-                    new_state.setdefault(resource_type, {})[resource_id] = resource
+        # 3. Compare new_state vs self.resources by file_path -> new/deleted/updated
+        deleted_resources: ResourceMap = {}
+        new_resources: ResourceMap = {}
+        updated_resources: ResourceMap = {}
 
-        if not new_resources:
+        for resource_type, resources_dict in new_state.items():
+            for new_id, resource in resources_dict.items():
+                path = resource.get_path(self.root_path)
+                relative_file_path = os.path.relpath(path, self.root_path)
+                branch = branch_by_path.get(relative_file_path)
+                if not branch:
+                    continue
+                _, old_id, branch_resource = branch
+                if old_id != new_id:
+                    new_resources.setdefault(resource_type, {})[new_id] = resource
+                    deleted_resources.setdefault(resource_type, {})[old_id] = branch_resource
+                elif resource != branch_resource:
+                    updated_resources.setdefault(resource_type, {})[new_id] = resource
+
+        if not (new_resources or deleted_resources or updated_resources):
             logger.info("No resources required to be synced.")
             return True
-
-        new_resource_mappings = self._make_resource_mappings(new_state)
-
-        # Get updated resources
-        # Re-read resources from disk with new mappings to update any references to changed IDs
-        for resource_type, resources_dict in new_state.items():
-            for resource_id, resource in resources_dict.items():
-                if resource_id in new_resources.get(resource_type, {}):
-                    continue
-
-                # Get the original hash before re-reading
-                original_resource_hash = self.file_structure_info.get(resource.file_path, {}).get(
-                    "hash"
-                )
-                if not original_resource_hash:
-                    # If no original hash, compute from current resource
-                    original_resource_hash = resource.compute_hash()
-
-                # Re-read the resource from disk with updated mappings
-                # This will automatically update any references to resources whose IDs changed
-                local_resource = self.read_local_resource(
-                    resource=ResourceMapping(
-                        resource_type=resource_type,
-                        resource_id=resource_id,
-                        resource_name=resource.name,
-                        file_path=resource.get_path(self.root_path),
-                        flow_name=getattr(resource, "flow_name", None),
-                        resource_prefix=resource_type.get_resource_prefix(
-                            file_path=resource.file_path
-                        ),
-                    ),
-                    resource_mappings=new_resource_mappings,
-                )
-
-                has_changed, _ = local_resource.get_status(original_resource_hash)
-
-                if has_changed:
-                    # Update new_state with the re-read resource (which has updated references)
-                    new_state[resource_type][resource_id] = local_resource
-                    updated_resources.setdefault(resource_type, {})[resource_id] = local_resource
 
         subresource_changes = self._get_updated_subresources(
             new_resources,

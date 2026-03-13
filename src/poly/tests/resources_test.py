@@ -2591,6 +2591,51 @@ conditions:
             invalid_step.validate(resource_mappings=resource_mappings)
         self.assertIn("Requested entity 'customer_name' not found.", str(cm.exception))
 
+    def test_flow_step_name_must_match_pattern(self):
+        """Test flow step name must match allowed pattern (letters, numbers, _ & , / . -)."""
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="flow-123",
+                resource_name="Test Flow",
+                resource_type=FlowConfig,
+                file_path="flows/test_flow/flow_config.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+            )
+        ]
+        for valid_name in ("Test Step", "Step_1", "Step & 2", "Step 1, 2", "a/b", "v1.0", "café"):
+            step = FlowStep(
+                resource_id="flow-123_step-1",
+                step_id="step-1",
+                name=valid_name,
+                flow_id="flow-123",
+                flow_name="Test Flow",
+                step_type=StepType.ADVANCED_STEP,
+                asr_biasing=None,
+                dtmf_config=None,
+                conditions=[],
+                prompt="Prompt",
+                position={"x": 0.0, "y": 0.0},
+            )
+            step.validate(resource_mappings=resource_mappings)
+
+        for invalid_name in ("Step#1", "Step@2", "Step\n", "Step(two)"):
+            step = FlowStep(
+                resource_id="flow-123_step-1",
+                step_id="step-1",
+                name=invalid_name,
+                flow_id="flow-123",
+                flow_name="Test Flow",
+                step_type=StepType.ADVANCED_STEP,
+                asr_biasing=None,
+                dtmf_config=None,
+                conditions=[],
+                prompt="Prompt",
+                position={"x": 0.0, "y": 0.0},
+            )
+            with self.assertRaises(ValueError) as cm:
+                step.validate(resource_mappings=resource_mappings)
+            self.assertIn("Name must contain only", str(cm.exception))
 
     def test_validate_conditions(self):
         """Test validation of flow step conditions."""

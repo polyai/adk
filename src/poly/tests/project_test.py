@@ -1185,6 +1185,65 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         self.assertIn("Test Flow_func_step_old", cleaned_deleted[FunctionStep])
         self.assertIn("Test Flow_func_step", cleaned_new[FunctionStep])
 
+    def test_clean_resources_before_push_new_flow_function_step_as_start_fixes_with_dummy(
+        self,
+    ):
+        """When creating a new flow with a function step as start step, use dummy then fix.
+
+        API requires a non-function step as start when creating a flow. We create a
+        temporary default step as start, then update the flow to use the function step
+        and delete the dummy in post-push.
+        """
+        flow_config_id = "flow-new-func-start"
+        flow_config = FlowConfig(
+            resource_id=flow_config_id,
+            name="New Flow",
+            description="Flow with function step as start",
+            start_step="entry_func",
+        )
+        function_start_step = FunctionStep(
+            resource_id="New Flow_entry_func",
+            step_id="entry_func",
+            name="Entry",
+            flow_id=flow_config_id,
+            flow_name="New Flow",
+            code="def entry_func(conv, flow): pass",
+            position={"x": 0.0, "y": 0.0},
+            function_id="FUNC-entry",
+        )
+
+        new_resources = {
+            FlowConfig: {flow_config_id: flow_config},
+            FunctionStep: {"New Flow_entry_func": function_start_step},
+        }
+        push_changes = self.project._clean_resources_before_push(
+            {},
+            new_resources,
+            {},
+            {},
+        )
+        main_new = push_changes.main.new
+        main_updated = push_changes.main.updated
+        post_deleted = push_changes.post.deleted
+
+        # Flow is created with a dummy default step as start
+        self.assertIn(FlowConfig, main_new)
+        created_flow = main_new[FlowConfig][flow_config_id]
+        self.assertEqual(created_flow.start_step, "entry_func_start_step_temp")
+        step_ids = [s.step_id for s in created_flow.steps]
+        self.assertIn("entry_func_start_step_temp", step_ids)
+        dummy_step = next(s for s in created_flow.steps if s.step_id == "entry_func_start_step_temp")
+        self.assertEqual(dummy_step.step_type, StepType.DEFAULT_STEP)
+
+        # Flow config update is scheduled to reset start to the function step
+        self.assertIn(FlowConfig, main_updated)
+        reset_flow = main_updated[FlowConfig][flow_config_id]
+        self.assertEqual(reset_flow.start_step, "entry_func")
+
+        # Dummy step is scheduled for post-push deletion
+        self.assertIn(FlowStep, post_deleted)
+        self.assertIn("New Flow_entry_func_start_step_temp", post_deleted[FlowStep])
+
     def test_clean_resources_before_push_orphaned_variable_delete_and_recreate(self):
         """When all functions referencing a variable are deleted, variable is delete+recreated."""
         var_id = "VAR-orphan"

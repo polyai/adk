@@ -57,13 +57,32 @@ norecursedirs = [
     "test_projects",
 ]
 
-[tool.semantic_release]
-version_toml = ["pyproject.toml:project.version"]
-version_variables = []
-branch = "main"
-commit_message = "chore(release): {version}"
-build_command = "pip install build && python -m build"
-tag_format = "v{version}"
+[tool.pip-licenses]
+format = "json"
+output-file = "licenses.json"
+with-urls = true
+no-version = true
+ignore-packages = [
+    "polyai-adk",
+]
+
+[tool.licensecheck]
+using = "PEP631"
+only_licenses = [
+    "mit",
+    "apache",
+    "bsd",
+    "mpl",
+]
+ignore_packages = [
+    "idna",
+    "jsonschema",
+    "jsonschema-specifications",
+    "referencing",
+    "rpds-py",
+    "urllib3",
+    "wcwidth",
+]
 
 [project]
 name = "polyai-adk"
@@ -75,7 +94,7 @@ dependencies = [
     "protobuf>=4.21.0",
     "rich>=13.0.0",
     "ruamel.yaml>=0.18.0",
-    "simple-term-menu==1.4.1",
+    "questionary==2.1.1",
     "jsonschema>=4.20.0",
     "requests==2.31.0",
     "python-dateutil==2.8.2",
@@ -83,11 +102,16 @@ dependencies = [
     "ty",
 ]
 
+[project.license]
+text = "Apache-2.0"
+
 [project.optional-dependencies]
 dev = [
     "pre-commit>=3.0.0",
     "pytest>=8.0.0",
     "tomli-w>=1.0.0",
+    "pip-licenses>=5.5.1",
+    "licensecheck>=2024.3",
 ]
 
 [project.scripts]

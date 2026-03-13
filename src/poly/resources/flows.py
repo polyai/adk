@@ -58,6 +58,8 @@ from poly.resources.resource import (
 )
 
 FUNCTION_REGEX = re.compile(r"{{f[nt]:([\w-]+)}}")
+# Flow step names: alphanumeric, extended Latin (C0–024F, 1E00–1EFF), and _ &,/.-
+FLOW_STEP_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF_ &,/.\-]+$")
 FLOW_REFERENCES = [
     "global_functions",
     "sms",
@@ -641,6 +643,14 @@ class FlowStep(BaseFlowStep, YamlResource):
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
         """Validate the flow step resource."""
+        if not self.name:
+            raise ValueError("Name cannot be empty.")
+
+        if not FLOW_STEP_NAME_PATTERN.fullmatch(self.name):
+            raise ValueError(
+                "Name must contain only letters (including accented), numbers, and _ & , / . -"
+            )
+
         if self.prompt is None or not self.prompt.strip():
             raise ValueError("Prompt cannot be empty.")
 
@@ -880,15 +890,6 @@ class FlowStep(BaseFlowStep, YamlResource):
                         deleted.append(condition)
 
         return new, updated, deleted
-
-    def sync_resource(self, other_resource: "FlowStep") -> "FlowStep":
-        """Sync the resource with the other resource."""
-        synced_resource: FlowStep = super().sync_resource(other_resource)
-        other_conditions_by_name = {cond.name: cond for cond in other_resource.conditions}
-        for condition in synced_resource.conditions:
-            if other_condition := other_conditions_by_name.get(condition.name):
-                condition.resource_id = other_condition.resource_id
-        return synced_resource
 
 
 @dataclass
