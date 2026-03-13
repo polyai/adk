@@ -56,7 +56,6 @@ logger = logging.getLogger(__name__)
 
 PROJECT_CONFIG_FILE = "project.yaml"
 STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
-_LEGACY_STATUS_FILE = ".agent_studio_config"
 
 
 # New resources to be added here
@@ -209,26 +208,8 @@ class AgentStudioProject:
         with open(config_file_path, "r") as f:
             config_dict = resource_utils.load_yaml(f) or {}
 
-        # Migrate legacy files
-        if os.path.exists(os.path.join(root_path, "entities")):
-            utils.migrate_entities_to_config(root_path)
-        if os.path.exists(
-            os.path.join(root_path, "agent_settings", "greeting.yaml")
-        ) or os.path.exists(os.path.join(root_path, "agent_settings", "disclaimer_message.yaml")):
-            utils.migrate_voice_settings(root_path)
-        utils.migrate_legacy_generated_files(root_path)
-
-        # Migrate status file from legacy root location if needed
-        status_file_path = os.path.join(root_path, STATUS_FILE)
-        legacy_status_file_path = os.path.join(root_path, _LEGACY_STATUS_FILE)
-        if not os.path.exists(status_file_path) and os.path.exists(legacy_status_file_path):
-            logger.info(
-                f"Migrating status file from {legacy_status_file_path} to {status_file_path}"
-            )
-            os.makedirs(os.path.dirname(status_file_path), exist_ok=True)
-            os.rename(legacy_status_file_path, status_file_path)
-
         # Load status file
+        status_file_path = os.path.join(root_path, STATUS_FILE)
         status_dict = {}
         if not os.path.exists(status_file_path):
             logger.info(
@@ -282,13 +263,6 @@ class AgentStudioProject:
     @classmethod
     def from_dict(cls, data: dict, root_path: str) -> "AgentStudioProject":
         """Load whole project class from a dictionary"""
-        if os.path.exists(os.path.join(root_path, "entities")):
-            utils.migrate_entities_to_config(root_path)
-        if os.path.exists(
-            os.path.join(root_path, "agent_settings", "greeting.yaml")
-        ) or os.path.exists(os.path.join(root_path, "agent_settings", "disclaimer_message.yaml")):
-            utils.migrate_voice_settings(root_path)
-        utils.migrate_legacy_generated_files(root_path)
         resources, not_loaded_resources = cls._load_resources_from_status_dict(data)
 
         file_structure_info = cls.compute_file_structure_info(resources)

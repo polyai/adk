@@ -12,12 +12,9 @@ import os
 import re
 from typing import Callable, Optional
 
-from poly.resources.channel_settings import VoiceDisclaimerMessage, VoiceGreeting
-from poly.resources.entities import Entity
 from poly.resources.flows import FunctionStep
 from poly.resources.function import Function
 from poly.resources.resource import Resource, ResourceMapping
-from poly.resources.resource_utils import load_yaml
 
 logger = logging.getLogger(__name__)
 
@@ -358,93 +355,6 @@ def export_decorators(decorators: list[str], base_path: str, filepath: str = "_g
         for decorator in decorators:
             f.write(inspect.getsource(globals()[decorator]))
             f.write("\n\n")
-
-
-def migrate_entities_to_config(root_path: str) -> None:
-    """Migrate entities from per-file format to config/entities.yaml."""
-    entities_dir = os.path.join(root_path, "entities")
-    if not os.path.exists(entities_dir):
-        return
-
-    for entity in os.listdir(entities_dir):
-        if not entity.endswith(".yaml"):
-            continue
-
-        # Read old entity
-        entity_path = os.path.join(entities_dir, entity)
-        if not os.path.isfile(entity_path):
-            continue
-
-        file_name = entity.split(".")[0]
-
-        with open(entity_path, "r") as f:
-            entity_data = load_yaml(f.read())
-
-        yaml_dict = {
-            "name": file_name,
-            "description": entity_data.get("description"),
-            "entity_type": entity_data.get("entity_type"),
-            "config": entity_data.get("config"),
-        }
-
-        # Save using new format
-        # Use a temp_id as it isn't needed to write to disk
-        Entity.from_yaml_dict(yaml_dict, resource_id="temp_id", name=file_name).save(root_path)
-
-    # Delete the entities directory and all files inside it
-    for file in os.listdir(entities_dir):
-        os.remove(os.path.join(entities_dir, file))
-    os.rmdir(entities_dir)
-
-
-def migrate_voice_settings(root_path: str) -> None:
-    """Migrate voice greeting/style prompt/disclaimer message from settings to voice configuration"""
-    voice_greeting_path = os.path.join(root_path, "agent_settings", "greeting.yaml")
-    if os.path.exists(voice_greeting_path):
-        with open(voice_greeting_path, "r") as f:
-            voice_greeting_data = load_yaml(f.read())
-        VoiceGreeting.from_yaml_dict(
-            voice_greeting_data, resource_id="temp_id", name="voice_greeting"
-        ).save(root_path)
-        os.remove(voice_greeting_path)
-
-    disclaimer_message_path = os.path.join(root_path, "agent_settings", "disclaimer_message.yaml")
-    if os.path.exists(disclaimer_message_path):
-        with open(disclaimer_message_path, "r") as f:
-            disclaimer_message_data = load_yaml(f.read())
-        VoiceDisclaimerMessage.from_yaml_dict(
-            disclaimer_message_data, resource_id="temp_id", name="voice_disclaimer"
-        ).save(root_path)
-        os.remove(disclaimer_message_path)
-
-
-def migrate_legacy_generated_files(root_path: str) -> None:
-    """Remove legacy generated files and migrate the gen/ directory.
-
-    Historical layout changes:
-        imports.py        -> gen/__init__.py -> _gen/__init__.py
-        gen_decorators.py -> gen/decorators.py -> _gen/decorators.py
-        gen/              -> _gen/
-
-    This function cleans up stale root-level files and renames the old
-    ``gen/`` directory to ``_gen/``.
-    """
-    legacy_files = ["imports.py", "gen_decorators.py", "gen.py"]
-    for filename in legacy_files:
-        legacy_path = os.path.join(root_path, filename)
-        if os.path.exists(legacy_path):
-            logger.info(f"Removing legacy generated file: {legacy_path}")
-            os.remove(legacy_path)
-
-    # Migrate gen/ or .gen/ directory to _gen/
-    new_gen_dir = os.path.join(root_path, "_gen")
-    if not os.path.exists(new_gen_dir):
-        for old_name in ("gen", ".gen"):
-            old_gen_dir = os.path.join(root_path, old_name)
-            if os.path.isdir(old_gen_dir):
-                logger.info(f"Migrating generated directory from {old_gen_dir} to {new_gen_dir}")
-                os.rename(old_gen_dir, new_gen_dir)
-                break
 
 
 # Maps function_type value -> VariableReferences proto field name
