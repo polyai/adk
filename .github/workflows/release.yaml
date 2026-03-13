@@ -1,0 +1,48 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    concurrency: release
+
+    # skip bot commits to prevent infinite loops
+    if: github.event.head_commit.author.name != 'poly-config-bot'
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.POLY_CONFIG_BOT_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Semantic release
+        id: release
+        uses: python-semantic-release/python-semantic-release@v9
+        with:
+          github_token: ${{ secrets.POLY_CONFIG_BOT_TOKEN }}
+          git_committer_name: poly-config-bot
+          git_committer_email: poly-config-bot@poly-ai.com
+
+      - name: Build package
+        if: steps.release.outputs.released == 'true'
+        run: |
+          pip install build
+          python -m build
+
+      - name: Publish to GitHub Releases
+        if: steps.release.outputs.released == 'true'
+        uses: python-semantic-release/publish-action@v9
+        with:
+          github_token: ${{ secrets.POLY_CONFIG_BOT_TOKEN }}
+          tag: ${{ steps.release.outputs.tag }}
