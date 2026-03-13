@@ -1,4 +1,4 @@
-"""Variable resource for Local Agent Studio
+"""Variable resource for ADK
 
 Variables are a special resource type that does not exist as files on the
 filesystem. Instead they are stored in-memory and are used for referencing in

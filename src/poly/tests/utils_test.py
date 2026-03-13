@@ -1,4 +1,4 @@
-"""Unit tests for Local Agent Studio Utils
+"""Unit tests for ADK Utils
 
 Copyright PolyAI Limited
 """

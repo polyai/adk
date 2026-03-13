@@ -1,4 +1,4 @@
-"""Unit tests for Local Agent Studio Resources
+"""Unit tests for ADK Resources
 
 Copyright PolyAI Limited
 """
@@ -244,13 +244,13 @@ def test_code(conv: Conversation, flow: Flow, test_param: int):
             str(cm.exception),
         )
 
-        # Test with local agent studio decorators in raw code
+        # Test with ADK decorators in raw code
         test_function.function_type = FunctionType.GLOBAL
         test_function.code = "@func_description('A test function')\n@func_parameter('test_param', 'test parameter')\n@utils.test_decorator\ndef test_code(conv: Conversation, test_param: str):\n    print(random.randint(1, test_param))"
         with self.assertRaises(ValueError) as cm:
             test_function.validate()
         self.assertIn(
-            "Local Agent Studio decorators found in raw code. This might be because of a parameter mismatch.",
+            "ADK decorators found in raw code. This might be because of a parameter mismatch.",
             str(cm.exception),
         )
 

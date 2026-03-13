@@ -35,7 +35,7 @@ class EnvPhoneNumbers:
 
 @dataclass
 class SMSTemplate(MultiResourceYamlResource):
-    """SMS resource for Local Agent Studio."""
+    """SMS resource for ADK."""
 
     text: str
     env_phone_numbers: Optional[EnvPhoneNumbers]

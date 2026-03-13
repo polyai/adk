@@ -64,7 +64,7 @@ class HandoffSipConfig:
 
 @dataclass
 class Handoff(MultiResourceYamlResource):
-    """Handoff resource for Local Agent Studio."""
+    """Handoff resource for ADK."""
 
     description: str
     is_default: bool
