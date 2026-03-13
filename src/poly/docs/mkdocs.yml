@@ -1,14 +1,19 @@
 site_name: ADK Docs
 site_description: Documentation for the PolyAI Agent Development Kit
 site_url: https://polyai.github.io/adk/
+repo_name: polyai/adk
+repo_url: https://github.com/polyai/adk
 
 theme:
   name: material
+  custom_dir: overrides
   favicon: assets/favicon-32.png
   font:
     text: Inter
     code: Roboto Mono
   logo: assets/poly-ai-logo.svg
+  icon:
+    repo: fontawesome/brands/github
   features:
     - navigation.sections
     - navigation.top
@@ -48,6 +53,23 @@ markdown_extensions:
       alternate_style: true
   - toc:
       permalink: true
+
+extra:
+  first_repo_url: https://github.com/polyai/adk
+  first_repo_name: adk
+  first_repo_icon: fontawesome/brands/github
+
+  second_repo_url: https://github.com/polyai/adk-python
+  second_repo_name: adk-python
+  second_repo_icon: fontawesome/brands/github
+
+  third_repo_url: https://github.com/polyai/adk-js
+  third_repo_name: adk-js
+  third_repo_icon: fontawesome/brands/github
+
+  fourth_repo_url: https://github.com/polyai/adk-go
+  fourth_repo_name: adk-go
+  fourth_repo_icon: fontawesome/brands/github
 
 extra_css:
   - stylesheets/tokens.css
