@@ -89,7 +89,7 @@
 .md-header__source {
   display: flex;
   align-items: center;
-  gap: 1rem;
+  gap: 0.5rem;
   max-width: none;
   margin-left: 1rem;
 }
@@ -97,7 +97,7 @@
 .md-source {
   display: inline-flex;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.25rem;
   color: var(--color-text-primary);
   font-size: var(--font-size-base);
   line-height: 1;
