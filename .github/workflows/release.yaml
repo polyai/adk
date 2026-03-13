@@ -39,12 +39,6 @@ jobs:
           git_committer_name: github-actions[bot]
           git_committer_email: "github-actions[bot]@users.noreply.github.com"
 
-      - name: Build package
-        if: steps.release.outputs.released == 'true'
-        run: |
-          pip install build
-          python -m build
-
       - name: Publish to GitHub Releases
         if: steps.release.outputs.released == 'true'
         uses: python-semantic-release/publish-action@v9
