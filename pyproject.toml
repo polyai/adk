@@ -84,6 +84,14 @@ ignore_packages = [
     "wcwidth",
 ]
 
+[tool.semantic_release]
+version_toml = ["pyproject.toml:project.version"]
+version_variables = []
+branch = "main"
+commit_message = "chore(release): {version}"
+build_command = "pip install build && python -m build"
+tag_format = "v{version}"
+
 [project]
 name = "polyai-adk"
 version = "0.1.1"
