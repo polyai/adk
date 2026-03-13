@@ -12,7 +12,7 @@ A CLI and Python package for managing [Agent Studio](https://studio.us.poly.ai) 
 
 ## Prerequisites
 
-You must have access to a workspace in PolyAI Agent Studio before using this tool. Access and an API key are provided by your PolyAI contact. To request access to the PolyAI platform, reach out to [platform-support@poly-ai.com](mailto:platform-support@poly-ai.com).
+You must have access to a workspace in PolyAI Agent Studio before using this tool. Access and an API key are provided by your PolyAI contact. To request access to the PolyAI platform, reach out to [developers@poly-ai.com](mailto:developers@poly-ai.com).
 
 ## Installation
 
@@ -35,13 +35,13 @@ poly review     # Create a review gist
 ```
 
 ## Usage
-A whitelisted API key is needed to run any of the poly commands. 
+A whitelisted API key is needed to run any of the poly commands.
 
 1. Create an API key at https://studio.[us/uk/eu].poly.ai/<account-name>/data-access
 2. Contact an engineer from the developer platform team team to whitelist your API key on Kong
 3. Add the key to your env variable (typically ~/.zshrc or ~/.bashrc), and name it POLY_ADK_KEY
 
-Once you do that, you'll be able to access agents under the <account-name> for the namespace in which the API key is generated. 
+Once you do that, you'll be able to access agents under the <account-name> for the namespace in which the API key is generated.
 
 *We are in the process of automating the whitelisting of the API key, and limiting the external ADK to just the production namespace.*
 
@@ -203,6 +203,23 @@ Please report bugs or request features via the [GitHub Issues](https://github.co
 Contributions are welcome! The project uses **ruff** for linting/formatting (enforced via pre-commit hooks) and **pytest** for testing. Please ensure all tests pass before submitting a pull request.
 
 We recommend using [Claude Code](https://claude.ai/download) for development. The repo includes a `.claude/` directory with project-specific instructions and permissions pre-configured.
+
+## Releases
+
+This project uses [python-semantic-release](https://python-semantic-release.readthedocs.io/) to automate versioning and publishing. Version bumps are determined from [conventional commit](https://www.conventionalcommits.org/) messages:
+
+| Commit prefix | Version bump | Example |
+|---|---|---|
+| `fix:` | Patch (2.0.4 → 2.0.5) | `fix: handle missing config file` |
+| `feat:` | Minor (2.0.4 → 2.1.0) | `feat: add poly export command` |
+| `feat!:` / `BREAKING CHANGE:` | Major (2.0.4 → 3.0.0) | `feat!: redesign resource schema` |
+| `chore:`, `docs:`, `ci:` | No release | `docs: update README` |
+
+When a commit is merged to `main`, the release workflow automatically:
+
+1. Determines the next version from commit history
+2. Updates the version in `pyproject.toml`
+3. Creates a git tag and GitHub Release
 
 ## License
 

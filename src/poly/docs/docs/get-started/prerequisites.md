@@ -18,7 +18,7 @@ Access and API credentials are provided by your PolyAI contact.
 
 If you need access to the PolyAI platform, contact:
 
-- `platform-support@poly-ai.com`
+- `developers@poly-ai.com`
 
 ## Local requirements
 

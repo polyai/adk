@@ -42,7 +42,6 @@ from poly.handlers.interface import (
 )
 from poly.resources import resource_utils
 from poly.project import (
-    _LEGACY_STATUS_FILE,
     PROJECT_CONFIG_FILE,
     STATUS_FILE,
     AgentStudioProject,
@@ -621,12 +620,6 @@ class AgentStudioCLI:
 
         # If not, read all info from status file
         status_path = os.path.join(base_path, STATUS_FILE)
-        # Migrate from legacy status file if it exists
-        legacy_status_file_path = os.path.join(base_path, _LEGACY_STATUS_FILE)
-        if not os.path.exists(status_path) and os.path.exists(legacy_status_file_path):
-            logger.info(f"Migrating status file from {legacy_status_file_path} to {status_path}")
-            os.makedirs(os.path.dirname(status_path), exist_ok=True)
-            os.rename(legacy_status_file_path, status_path)
         if os.path.exists(status_path):
             with open(status_path, "rb") as f:
                 encoded_config_data = f.read()
