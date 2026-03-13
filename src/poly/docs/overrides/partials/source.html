@@ -1,0 +1,23 @@
+<a href="{{ config.extra.first_repo_url }}" class="md-source" target="_blank" rel="noopener">
+    {% set first_icon = config.extra.first_repo_icon or "fontawesome/brands/github" %}
+    {% include ".icons/" ~ first_icon ~ ".svg" %}
+    <span class="md-source__repository">{{ config.extra.first_repo_name }}</span>
+</a>
+
+<a href="{{ config.extra.second_repo_url }}" class="md-source" target="_blank" rel="noopener">
+    {% set second_icon = config.extra.second_repo_icon or "fontawesome/brands/github" %}
+    {% include ".icons/" ~ second_icon ~ ".svg" %}
+    <span class="md-source__repository">{{ config.extra.second_repo_name }}</span>
+</a>
+
+<a href="{{ config.extra.third_repo_url }}" class="md-source" target="_blank" rel="noopener">
+    {% set third_icon = config.extra.third_repo_icon or "fontawesome/brands/github" %}
+    {% include ".icons/" ~ third_icon ~ ".svg" %}
+    <span class="md-source__repository">{{ config.extra.third_repo_name }}</span>
+</a>
+
+<a href="{{ config.extra.fourth_repo_url }}" class="md-source" target="_blank" rel="noopener">
+    {% set fourth_icon = config.extra.fourth_repo_icon or "fontawesome/brands/github" %}
+    {% include ".icons/" ~ fourth_icon ~ ".svg" %}
+    <span class="md-source__repository">{{ config.extra.fourth_repo_name }}</span>
+</a>
