@@ -3,7 +3,11 @@ title: Installation
 description: Install the PolyAI ADK and prepare your local environment.
 ---
 
-# Installation
+!!! warning "Early access"
+
+    The PolyAI ADK is currently in Early Access. Availability is limited, and some functionality may change before general release.
+
+    [Join the waitlist](https://fehky.share-eu1.hsforms.com/2oSGLpUctRvyqXcb6K44DAQ){ target="_blank" rel="noopener" }
 
 The **PolyAI ADK** can be installed as a Python package.
 
