@@ -5,7 +5,6 @@ Copyright PolyAI Limited
 
 import os
 from abc import ABC, abstractmethod
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import ClassVar, Optional
 
@@ -67,16 +66,6 @@ class BaseResource(ABC):
     def build_create_proto(self) -> Message:
         """Create a proto for creating the resource."""
         pass
-
-    def sync_resource(self, other_resource: "BaseResource") -> "BaseResource":
-        """Sync the resource with the other resource.
-
-        Args:
-            other_resource (Resource): The other resource to sync with.
-        """
-        new_resource = deepcopy(self)
-        new_resource.resource_id = other_resource.resource_id
-        return new_resource
 
 
 @dataclass
