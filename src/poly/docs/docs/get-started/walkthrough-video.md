@@ -3,7 +3,7 @@ title: Walkthrough Video
 description: Watch a walkthrough of building a production-ready voice agent with the PolyAI ADK.
 ---
 
-This walkthrough from **Eddy Su**, PolyAI’s co-founder and VP of Engineering, shows how quickly a production-ready voice agent can be built using the **PolyAI ADK**.
+This walkthroug shows how quickly a production-ready voice agent can be built using the **PolyAI ADK**.
 
 It gives a practical look at the developer workflow and shows how the ADK fits into modern AI-assisted agent development.
 
@@ -11,7 +11,7 @@ It gives a practical look at the developer workflow and shows how the ADK fits i
 
 <div style="padding:64.98% 0 0 0; position:relative;">
   <iframe
-    src="https://player.vimeo.com/video/1172232796?badge=0&amp;autopause=0&amp;player_id=0&amp;app_id=58479"
+    src="https://player.vimeo.com/video/1173322390?badge=0&amp;autopause=0&amp;player_id=0&amp;app_id=58479"
     frameborder="0"
     allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
     referrerpolicy="strict-origin-when-cross-origin"
