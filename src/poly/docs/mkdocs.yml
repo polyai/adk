@@ -59,17 +59,17 @@ extra:
   first_repo_name: adk
   first_repo_icon: fontawesome/brands/github
 
-  second_repo_url: https://github.com/polyai/adk-python
-  second_repo_name: adk-python
-  second_repo_icon: fontawesome/brands/github
+  # second_repo_url: https://github.com/polyai/adk-python
+  # second_repo_name: adk-python
+  # second_repo_icon: fontawesome/brands/github
 
-  third_repo_url: https://github.com/polyai/adk-js
-  third_repo_name: adk-js
-  third_repo_icon: fontawesome/brands/github
+  # third_repo_url: https://github.com/polyai/adk-js
+  # third_repo_name: adk-js
+  # third_repo_icon: fontawesome/brands/github
 
-  fourth_repo_url: https://github.com/polyai/adk-go
-  fourth_repo_name: adk-go
-  fourth_repo_icon: fontawesome/brands/github
+  # fourth_repo_url: https://github.com/polyai/adk-go
+  # fourth_repo_name: adk-go
+  # fourth_repo_icon: fontawesome/brands/github
 
 extra_css:
   - stylesheets/tokens.css
