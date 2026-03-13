@@ -3,6 +3,30 @@
 
 ## v0.2.0 (2026-03-13)
 
+### Continuous Integration
+
+- Build before pushing ([#15](https://github.com/polyai/adk/pull/15),
+  [`bff82df`](https://github.com/polyai/adk/commit/bff82df58c2883fd2daab69addc00513d02042e6))
+
+## Summary Build before pushing, delete any existing egg
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
 ### Features
 
 - Copy across recent updates/fixes ([#12](https://github.com/polyai/adk/pull/12),
