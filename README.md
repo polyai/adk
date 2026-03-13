@@ -39,8 +39,6 @@ For example:
 export POLY_ADK_KEY=<your-key>
 ```
 
-Any standard method for setting environment variables on your system is acceptable.
-
 ## Installation
 
 ```bash
