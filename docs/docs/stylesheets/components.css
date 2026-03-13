@@ -1,0 +1,123 @@
+/* =============================================================================
+   UTILITY COMPONENTS
+   ============================================================================= */
+
+/* lead paragraph */
+.lead {
+  font-size: var(--font-size-xl);
+  line-height: var(--line-height-relaxed);
+  color: var(--color-text-secondary);
+  max-width: 40rem;
+  margin-bottom: 1.5rem;
+}
+
+/* section intro */
+.section-intro {
+  margin: 0 0 1.4rem;
+  padding: 0.9rem 1rem;
+  border-left: 3px solid var(--color-accent);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  border-radius: 0;
+}
+
+/* hero */
+.hero {
+  padding: 0.2rem 0 0.8rem;
+}
+
+.hero-eyebrow {
+  display: inline-block;
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: var(--letter-spacing-wide);
+  font-weight: var(--font-weight-bolder);
+  color: var(--color-accent-text);
+  margin-bottom: 0.65rem;
+}
+
+.hero h1 {
+  margin-bottom: 0.65rem;
+}
+
+.hero p {
+  max-width: 42rem;
+  font-size: var(--font-size-xl);
+  line-height: var(--line-height-relaxed);
+  color: var(--color-text-secondary);
+}
+
+/* =============================================================================
+   CARDS
+   ============================================================================= */
+
+.grid.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.85rem;
+  margin-top: 1.2rem;
+}
+
+.grid.cards > ul {
+  display: contents;
+}
+
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid.cards > li {
+  list-style: none;
+  margin: 0;
+  padding: 0.95rem 1rem;
+  background: var(--color-bg-surface);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 8px;
+  /* box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06); */
+  /* transition: border-color 120ms ease, background-color 120ms ease; */
+}
+
+.md-typeset .grid.cards > ul > li:hover,
+.md-typeset .grid.cards > li:hover {
+  border: 1px solid var(--color-border-subtle);
+  box-shadow: none;
+}
+
+.grid.cards strong {
+  font-size: var(--font-size-m);
+  font-weight: var(--font-weight-bold);
+}
+
+.grid.cards a {
+  text-decoration: underline;
+}
+
+/* =============================================================================
+   CODE
+   ============================================================================= */
+
+/* copy button */
+.md-clipboard {
+  color: var(--palette-grey-60);
+  transition: color 120ms ease;
+}
+
+.md-clipboard:hover,
+.md-clipboard:focus {
+  color: var(--palette-grey-100) !important;
+}
+
+.md-typeset code {
+  border-radius: 0.2rem;
+  padding: 0.12em 0.35em;
+}
+
+.md-typeset pre > code {
+  border-radius: 0.3rem;
+}
+
+/* =============================================================================
+   ADMONITIONS
+   ============================================================================= */
+
+.md-typeset .admonition,
+.md-typeset details {
+  border-radius: 0.3rem;
+  box-shadow: none;
+}
