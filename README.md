@@ -10,6 +10,8 @@
 
 A CLI and Python package for managing [Agent Studio](https://studio.us.poly.ai) projects locally. It provides a Git-like workflow for synchronizing project configurations between your local filesystem and the Agent Studio platform.
 
+**[Documentation](https://polyai.github.io/adk/)**
+
 ## Prerequisites
 
 You must have access to a workspace in PolyAI Agent Studio before using this tool. Access and an API key are provided by your PolyAI contact. To request access to the PolyAI platform, reach out to [developers@poly-ai.com](mailto:developers@poly-ai.com).
@@ -166,23 +168,6 @@ Please report bugs or request features via the [GitHub Issues](https://github.co
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, and contribution guidelines.
-
-## Releases
-
-This project uses [python-semantic-release](https://python-semantic-release.readthedocs.io/) to automate versioning and publishing. Version bumps are determined from [conventional commit](https://www.conventionalcommits.org/) messages:
-
-| Commit prefix | Version bump | Example |
-|---|---|---|
-| `fix:` | Patch (2.0.4 → 2.0.5) | `fix: handle missing config file` |
-| `feat:` | Minor (2.0.4 → 2.1.0) | `feat: add poly export command` |
-| `feat!:` / `BREAKING CHANGE:` | Major (2.0.4 → 3.0.0) | `feat!: redesign resource schema` |
-| `chore:`, `docs:`, `ci:` | No release | `docs: update README` |
-
-When a commit is merged to `main`, the release workflow automatically:
-
-1. Determines the next version from commit history
-2. Updates the version in `pyproject.toml`
-3. Creates a git tag and GitHub Release
 
 ## License
 
