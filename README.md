@@ -12,45 +12,6 @@ A CLI and Python package for managing [Agent Studio](https://studio.us.poly.ai) 
 
 **[Documentation](https://polyai.github.io/adk/)**
 
-## Prerequisites
-
-You must have access to a workspace in PolyAI Agent Studio before using this tool. Access and an API key are provided by your PolyAI contact. To request access to the PolyAI platform, reach out to [developers@poly-ai.com](mailto:developers@poly-ai.com).
-
-## Installation
-
-```bash
-pip install polyai-adk
-```
-
-Once installed, use the `poly` command to manage your projects:
-
-```bash
-poly init       # Initialize a project (interactive)
-poly pull       # Pull latest configuration
-poly push       # Push local changes
-poly status     # View project status
-poly diff       # View local changes
-poly branch     # Manage branches
-poly format     # Format resources
-poly validate   # Validate configuration
-poly review     # Create a review gist
-```
-
-## Usage
-![PolyAI](logo.png)
-
-# Agent Development Kit (ADK)
-
-[![PyPI version](https://img.shields.io/pypi/v/polyai-adk)](https://pypi.org/project/polyai-adk/)
-[![Python 3.14](https://img.shields.io/badge/python-3.14-blue)](https://www.python.org/downloads/)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![Develop with Claude Code](https://img.shields.io/badge/Develop%20with-Claude%20Code-DC9E63?logo=claude)](https://claude.ai/download)
-
-A CLI and Python package for managing [Agent Studio](https://studio.us.poly.ai) projects locally. It provides a Git-like workflow for synchronizing project configurations between your local filesystem and the Agent Studio platform.
-
-**Documentation:** https://polyai.github.io/adk/
-
 ## Early Access
 
 ⚠️ **The PolyAI ADK is currently in Early Access.**
@@ -79,6 +40,26 @@ export POLY_ADK_KEY=<your-key>
 ```
 
 Any standard method for setting environment variables on your system is acceptable.
+
+## Installation
+
+```bash
+pip install polyai-adk
+```
+
+Once installed, use the `poly` command to manage your projects:
+
+```bash
+poly init       # Initialize a project (interactive)
+poly pull       # Pull latest configuration
+poly push       # Push local changes
+poly status     # View project status
+poly diff       # View local changes
+poly branch     # Manage branches
+poly format     # Format resources
+poly validate   # Validate configuration
+poly review     # Create a review gist
+```
 
 ## Usage
 
