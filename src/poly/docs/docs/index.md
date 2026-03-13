@@ -63,4 +63,3 @@ If you are new to the ADK, follow this order:
 4. follow **Installation**
 5. use **First commands**
 6. continue to **Build an agent with the ADK**
-7. 
