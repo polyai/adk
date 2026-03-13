@@ -12,6 +12,10 @@
   box-shadow: none;
 }
 
+.md-header__button {
+  color: var(--color-text-primary);
+}
+
 .md-header__topic {
   color: var(--color-text-primary);
 }
