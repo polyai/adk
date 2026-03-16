@@ -1,6 +1,55 @@
 # CHANGELOG
 
 
+## v0.3.0 (2026-03-16)
+
+### Features
+
+- Add shell completion for bash, zsh, and fish ([#22](https://github.com/polyai/adk/pull/22),
+  [`2c563ff`](https://github.com/polyai/adk/commit/2c563ffa77fcc01567dcb18b9c832f296acb2415))
+
+## Summary
+
+Adds a `poly completion <shell>` command that prints a shell completion script, enabling tab
+  completion for all `poly`/`adk` commands, subcommands, and flags.
+
+## Motivation
+
+Shell completion is a standard ergonomic feature for any CLI tool — especially one with 12+
+  subcommands and numerous flags. Without it, users must remember exact command names and flags,
+  slowing down daily use. Every major comparable CLI (Google ADK, AWS AgentCore, `gh`, `kubectl`)
+  ships with completion support.
+
+## Changes
+
+- Add `argcomplete>=3.0.0` dependency (Apache 2.0 — passes license checks) - Call
+  `argcomplete.autocomplete(parser)` in `main()` — this is the hook that makes tab completion work
+  at runtime; it exits immediately when not in a completion context, so there is zero overhead for
+  normal CLI usage - Add `completion` subparser with `bash`, `zsh`, `fish` choices and per-shell
+  installation instructions in the help text - Add `AgentStudioCLI.print_completion()` classmethod -
+  Both `poly` and `adk` entry points are registered in the generated scripts
+
+## Usage
+
+```bash # Bash — add to ~/.bashrc or ~/.bash_profile eval "$(poly completion bash)"
+
+# Zsh — add to ~/.zshrc eval "$(poly completion zsh)"
+
+# Fish — add to ~/.config/fish/completions/poly.fish poly completion fish | source ```
+
+## Test strategy
+
+- [x] Added unit tests for all three shells and invalid shell rejection - [ ] Manual CLI testing
+  (`poly <command>`) - [ ] Tested against a live Agent Studio project - [ ] N/A (docs, config, or
+  trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.2.3 (2026-03-16)
 
 ### Bug Fixes
