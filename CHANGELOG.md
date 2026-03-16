@@ -1,6 +1,37 @@
 # CHANGELOG
 
 
+## v0.2.3 (2026-03-16)
+
+### Bug Fixes
+
+- Read ASR and DTMF if not included ([#20](https://github.com/polyai/adk/pull/20),
+  [`bc5add7`](https://github.com/polyai/adk/commit/bc5add7c31d3decaad5e1bd568c12c4dfdddfe75))
+
+## Summary If ASR and DTMF not included, still read them as defaults
+
+## Motivation Would error if created without these fields
+
+## Changes - Filter on None not empty dicts
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+
 ## v0.2.2 (2026-03-13)
 
 ### Bug Fixes
