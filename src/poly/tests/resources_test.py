@@ -4753,6 +4753,7 @@ class VariableTest(unittest.TestCase):
                 os.path.join(tmpdir, "variables", "actual_var"),
                 os.path.join(tmpdir, "variables", "commented"),
             ])
+
 class PhraseFilterTests(unittest.TestCase):
     def setUp(self):
         MultiResourceYamlResource._file_cache.clear()
