@@ -16,6 +16,7 @@ from argparse import ArgumentParser, RawTextHelpFormatter
 from importlib.metadata import version as get_package_version
 from typing import Optional
 
+import argcomplete
 import requests
 import questionary
 
@@ -477,6 +478,28 @@ class AgentStudioCLI:
             help="Show all metadata (functions, flows, and state). Equivalent to --functions --flows --state.",
         )
 
+        # completion
+        completion_parser = subparsers.add_parser(
+            "completion",
+            formatter_class=RawTextHelpFormatter,
+            help="Generate shell completion scripts",
+            description=(
+                "Output a shell completion script for poly/adk.\n\n"
+                "Add the output to your shell configuration to enable tab completion:\n\n"
+                "  Bash:  eval \"$(poly completion bash)\"\n"
+                "         # or: poly completion bash >> ~/.bash_completion\n\n"
+                "  Zsh:   eval \"$(poly completion zsh)\"\n"
+                "         # or: poly completion zsh > ~/.zsh/completions/_poly\n\n"
+                "  Fish:  poly completion fish | source\n"
+                "         # or: poly completion fish > ~/.config/fish/completions/poly.fish\n"
+            ),
+        )
+        completion_parser.add_argument(
+            "shell",
+            choices=["bash", "zsh", "fish"],
+            help="Shell type to generate completions for.",
+        )
+
         return parser
 
     @classmethod
@@ -572,10 +595,24 @@ class AgentStudioCLI:
                 show_state=show_all or args.state,
             )
 
+        elif args.command == "completion":
+            cls.print_completion(args.shell)
+
+    @classmethod
+    def print_completion(cls, shell: str) -> None:
+        """Print a shell completion script for poly/adk.
+
+        Args:
+            shell: Target shell — one of 'bash', 'zsh', or 'fish'.
+        """
+        script = argcomplete.shellcode(["poly", "adk"], shell=shell)
+        print(script)
+
     @classmethod
     def main(cls, sys_args=None):
         """Main entry point for the CLI tool."""
         parser = cls._create_parser()
+        argcomplete.autocomplete(parser)
 
         try:
             if sys_args:

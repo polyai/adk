@@ -108,6 +108,7 @@ dependencies = [
     "python-dateutil==2.8.2",
     "ruff>=0.14.0",
     "ty",
+    "argcomplete>=3.0.0",
 ]
 
 [project.license]
