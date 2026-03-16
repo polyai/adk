@@ -331,7 +331,7 @@ class FlowStep(BaseFlowStep, YamlResource):
 
         if isinstance(asr_biasing, ASRBiasing):
             self.asr_biasing = asr_biasing
-        elif asr_biasing:
+        elif asr_biasing is not None:
             # resource_id and name are set internally by ASRBiasing.__init__;
             asr_biasing = {k: v for k, v in asr_biasing.items() if k not in ("resource_id", "name")}
             asr_biasing["step_id"] = self.step_id
@@ -342,7 +342,7 @@ class FlowStep(BaseFlowStep, YamlResource):
 
         if isinstance(dtmf_config, DTMFConfig):
             self.dtmf_config = dtmf_config
-        elif dtmf_config:
+        elif dtmf_config is not None:
             # resource_id and name are set internally by DTMFConfig.__init__;
             dtmf_config = {k: v for k, v in dtmf_config.items() if k not in ("resource_id", "name")}
             dtmf_config["step_id"] = self.step_id
