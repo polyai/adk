@@ -2290,6 +2290,11 @@ dtmf_config:
 prompt: Hello, how can I help you?
 """
 
+FLOW_STEP_RAW_NO_ASR_DTMF = """step_type: advanced_step
+name: Test Step
+prompt: Hello, how can I help you?
+"""
+
 TEST_NO_CODE_FLOW_STEP = FlowStep(
     resource_id="flow-123_step-1",
     step_id="step-1",
@@ -2410,6 +2415,20 @@ class FlowStepTests(unittest.TestCase):
         )
         # Should roundtrip back to original raw format
         self.assertEqual(reverted_step, TEST_NO_CODE_FLOW_STEP.raw)
+
+    def test_read_step_with_no_asr_dtmf(self):
+        """Test reading a flow step with no ASR or DTMF config."""
+        yaml_dict = yaml.safe_load(FLOW_STEP_RAW_NO_ASR_DTMF)
+        step = FlowStep.from_yaml_dict(
+            yaml_dict,
+            resource_id="Test Flow_step-1",
+            file_name="test_step",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            resource_mappings=[]
+        )
+        self.assertEqual(step.asr_biasing, ASRBiasing(flow_id="flow-123", step_id="step-1"))
+        self.assertEqual(step.dtmf_config, DTMFConfig(flow_id="flow-123", step_id="step-1"))
 
     def test_function_name_swapping(self):
         """Test the core function name swapping functionality."""
