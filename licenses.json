@@ -20,6 +20,11 @@
     "URL": "http://github.com/ActiveState/appdirs"
   },
   {
+    "License": "Apache Software License",
+    "Name": "argcomplete",
+    "URL": "https://github.com/kislyuk/argcomplete"
+  },
+  {
     "License": "MIT",
     "Name": "attrs",
     "URL": "https://www.attrs.org/en/stable/changelog.html"
