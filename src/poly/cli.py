@@ -486,9 +486,9 @@ class AgentStudioCLI:
             description=(
                 "Output a shell completion script for poly/adk.\n\n"
                 "Add the output to your shell configuration to enable tab completion:\n\n"
-                "  Bash:  eval \"$(poly completion bash)\"\n"
+                '  Bash:  eval "$(poly completion bash)"\n'
                 "         # or: poly completion bash >> ~/.bash_completion\n\n"
-                "  Zsh:   eval \"$(poly completion zsh)\"\n"
+                '  Zsh:   eval "$(poly completion zsh)"\n'
                 "         # or: poly completion zsh > ~/.zsh/completions/_poly\n\n"
                 "  Fish:  poly completion fish | source\n"
                 "         # or: poly completion fish > ~/.config/fish/completions/poly.fish\n"
