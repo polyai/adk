@@ -1,6 +1,31 @@
 # CHANGELOG
 
 
+## v0.3.1 (2026-03-17)
+
+### Bug Fixes
+
+- Reference variables even if commented out ([#21](https://github.com/polyai/adk/pull/21),
+  [`4298d09`](https://github.com/polyai/adk/commit/4298d09f00357046547b3f01473a875228d7a117))
+
+## Summary AS allows references even if commented out. Align here
+
+## Changes - Don't remove comments when searching for variables
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.3.0 (2026-03-16)
 
 ### Features
