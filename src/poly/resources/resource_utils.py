@@ -215,7 +215,7 @@ def extract_variable_names_from_code(code: str) -> set[str]:
     if not code:
         return set()
 
-    names = set(CONV_STATE_DOT_NAME.findall(remove_comments_from_code(code)))
+    names = set(CONV_STATE_DOT_NAME.findall(code))
 
     return names
 
