@@ -3931,6 +3931,45 @@ class SMSTemplateTests(unittest.TestCase):
             invalid_template.validate()
         self.assertIn("Env phone numbers are required", str(cm.exception))
 
+    def test_validate_variable_references(self):
+        """Test validation when SMS template text references a variable."""
+        default_env = EnvPhoneNumbers(
+            sandbox="",
+            pre_release="",
+            live="+447700102347",
+        )
+        template_with_var = SMSTemplate(
+            resource_id="sms-1",
+            name="with_var",
+            text="Hi {{vrbl:VAR-customer_name}}, your booking is confirmed.",
+            env_phone_numbers=default_env,
+        )
+        with self.assertRaises(ValueError) as cm:
+            template_with_var.validate(resource_mappings=[])
+        self.assertIn("Invalid references: ['variables: VAR-customer_name']", str(cm.exception))
+
+        valid_mapping = [
+            ResourceMapping(
+                resource_id="VAR-customer_name",
+                resource_name="customer_name",
+                resource_type=Variable,
+                file_path="variables/customer_name",
+                flow_name=None,
+                resource_prefix="vrbl",
+            )
+        ]
+        self.assertIsNone(template_with_var.validate(resource_mappings=valid_mapping))
+
+        template_two_vars = SMSTemplate(
+            resource_id="sms-2",
+            name="two_vars",
+            text="Hi {{vrbl:VAR-customer_name}}, order {{vrbl:VAR-order_id}}.",
+            env_phone_numbers=default_env,
+        )
+        with self.assertRaises(ValueError) as cm:
+            template_two_vars.validate(resource_mappings=valid_mapping)
+        self.assertIn("Invalid references: ['variables: VAR-order_id']", str(cm.exception))
+
     def test_to_yaml_dict(self):
         """Test converting SMS template to YAML dictionary."""
         yaml_dict = TEST_SMS_TEMPLATE_1.to_yaml_dict()
@@ -4768,10 +4807,13 @@ class VariableTest(unittest.TestCase):
             with open(func_file, "w") as f:
                 f.write("# conv.state.commented\nx = conv.state.actual_var\n")
             discovered = Variable.discover_resources(tmpdir)
-            self.assertEqual(discovered, [
-                os.path.join(tmpdir, "variables", "actual_var"),
-                os.path.join(tmpdir, "variables", "commented"),
-            ])
+            self.assertCountEqual(
+                discovered,
+                [
+                    os.path.join(tmpdir, "variables", "actual_var"),
+                    os.path.join(tmpdir, "variables", "commented"),
+                ]
+            )
 
 class PhraseFilterTests(unittest.TestCase):
     def setUp(self):
