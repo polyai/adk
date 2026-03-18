@@ -1,6 +1,33 @@
 # CHANGELOG
 
 
+## v0.3.2 (2026-03-18)
+
+### Bug Fixes
+
+- Add missing variable referencing sms ([#29](https://github.com/polyai/adk/pull/29),
+  [`c1469f7`](https://github.com/polyai/adk/commit/c1469f786803f58f6b591c9dfe844b52e113cde3))
+
+## Summary SMS text should be able to reference variables, add this with validation
+
+## Changes
+
+- Have variable swap for SMS templates - Add validations
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.3.1 (2026-03-17)
 
 ### Bug Fixes

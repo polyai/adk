@@ -16,7 +16,7 @@ from poly.handlers.protobuf.sms_pb2 import (
     SMSTemplateReferences,
     UpdateSMSEnvPhoneNumbers,
 )
-from poly.resources.resource import MultiResourceYamlResource
+from poly.resources.resource import MultiResourceYamlResource, ResourceMapping
 
 
 @dataclass
@@ -63,6 +63,14 @@ class SMSTemplate(MultiResourceYamlResource):
                 or env_phone_numbers.get("preRelease", ""),
                 live=env_phone_numbers.get("live", ""),
             )
+
+    @classmethod
+    def to_pretty_dict(
+        cls, d: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
+    ) -> dict:
+        """Return the pretty dictionary."""
+        d["text"] = utils.replace_resource_ids_with_names(d["text"], resource_mappings or [])
+        return d
 
     def to_yaml_dict(self) -> dict:
         return {
@@ -147,13 +155,20 @@ class SMSTemplate(MultiResourceYamlResource):
             active=True,
         )
 
-    def validate(self, **kwargs) -> None:
+    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         if not self.name:
             raise ValueError("Name is required")
         if not self.text:
             raise ValueError("Text is required")
         if not self.env_phone_numbers:
             raise ValueError("Env phone numbers are required")
+
+        references = utils.get_references_from_prompt(
+            self.text, ["variables"], raise_on_invalid=True
+        )
+        valid, invalid_references = utils.validate_references(references, resource_mappings)
+        if not valid:
+            raise ValueError(f"Invalid references: {invalid_references}")
 
     @staticmethod
     def discover_resources(base_path: str) -> list[str]:
