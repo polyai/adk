@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'src/poly/docs/**'
+      - 'docs/**'
       - '.github/workflows/publish-docs.yaml'
 
 permissions:
@@ -23,7 +23,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: src/poly/docs
+        working-directory: docs
 
     steps:
       - name: Checkout
@@ -35,10 +35,10 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r docs/requirements.txt
+        run: pip install -r requirements.txt
 
       - name: Build docs
-        run: cd docs && mkdocs build --strict
+        run: mkdocs build --strict
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -46,7 +46,7 @@ jobs:
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: src/poly/docs/site
+          path: docs/site
 
   deploy:
     environment:
