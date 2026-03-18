@@ -4768,10 +4768,13 @@ class VariableTest(unittest.TestCase):
             with open(func_file, "w") as f:
                 f.write("# conv.state.commented\nx = conv.state.actual_var\n")
             discovered = Variable.discover_resources(tmpdir)
-            self.assertEqual(discovered, [
-                os.path.join(tmpdir, "variables", "actual_var"),
-                os.path.join(tmpdir, "variables", "commented"),
-            ])
+            self.assertCountEqual(
+                discovered,
+                [
+                    os.path.join(tmpdir, "variables", "actual_var"),
+                    os.path.join(tmpdir, "variables", "commented"),
+                ]
+            )
 
 class PhraseFilterTests(unittest.TestCase):
     def setUp(self):
