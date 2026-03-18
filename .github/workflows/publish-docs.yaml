@@ -35,10 +35,10 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r docs/requirements.txt
 
       - name: Build docs
-        run: mkdocs build --strict
+        run: cd docs && mkdocs build --strict
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
