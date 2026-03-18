@@ -411,13 +411,15 @@ class MultiResourceYamlResource(YamlResource, ABC):
     @classmethod
     def _get_top_level_data(cls, true_file_path: str) -> dict:
         """Return parsed top-level YAML data for the file, using cache with mtime-based refresh."""
-        if not os.path.exists(true_file_path) or not os.path.isfile(true_file_path):
+        cached = cls._file_cache.get(true_file_path)
+        if not cached and (
+            not os.path.exists(true_file_path) or not os.path.isfile(true_file_path)
+        ):
             raise FileNotFoundError(f"File not found: {true_file_path}")
         try:
             current_mtime = os.path.getmtime(true_file_path)
         except OSError:
             current_mtime = 0.0
-        cached = cls._file_cache.get(true_file_path)
         if cached is not None and cached[0] == current_mtime:
             return cached[1]
         contents = super().read_from_file(true_file_path)
@@ -492,20 +494,25 @@ class MultiResourceYamlResource(YamlResource, ABC):
         true_file_path, _ = _parse_multi_resource_path(file_path)
 
         # Create empty file if it doesn't exist
-        empty_value = "{}" if type(self)._singleton else "[]"
+        empty_value = {} if self._singleton else []
         if not os.path.exists(true_file_path):
-            self.save_to_file(f"{self.top_level_name}: {empty_value}", true_file_path)
+            if not save_to_cache:
+                self.save_to_file(f"{self.top_level_name}: {str(empty_value)}", true_file_path)
+            else:
+                self._file_cache.setdefault(
+                    true_file_path, (0.0, {self.top_level_name: empty_value})
+                )
 
-        top_level_yaml_dict = type(self)._get_top_level_data(true_file_path)
+        top_level_yaml_dict = self._get_top_level_data(true_file_path)
 
-        if type(self)._singleton:
+        if self._singleton:
             top_level_yaml_dict[self.top_level_name] = yaml_content
         else:
             yaml_list = top_level_yaml_dict.get(self.top_level_name, [])
             if not isinstance(yaml_list, list):
                 raise ValueError(f"Top level YAML data is not a list: {top_level_yaml_dict}")
             clean_name = utils.clean_name(self.name, lowercase=False)
-            matching = type(self)._find_matching(yaml_list, clean_name)
+            matching = self._find_matching(yaml_list, clean_name)
             matching_idx = yaml_list.index(matching) if matching is not None else None
             if matching_idx is not None:
                 yaml_list[matching_idx] = yaml_content
@@ -514,7 +521,7 @@ class MultiResourceYamlResource(YamlResource, ABC):
             top_level_yaml_dict[self.top_level_name] = yaml_list
 
         # If queue saves, write to cache instead of file
-        type(self)._update_cache_after_write(true_file_path, top_level_yaml_dict)
+        self._update_cache_after_write(true_file_path, top_level_yaml_dict)
         if not save_to_cache:
             self.save_to_file(utils.dump_yaml(top_level_yaml_dict), true_file_path)
 
