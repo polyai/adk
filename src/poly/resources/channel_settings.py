@@ -152,7 +152,7 @@ class ChannelGreeting(MultiResourceYamlResource):
     @cached_property
     def file_path(self) -> str:
         """Get the file path for the Greeting resource."""
-        return os.path.join(_config_path(type(self).channel_subpath), type(self).top_level_name)
+        return os.path.join(_config_path(self.channel_subpath), self.top_level_name)
 
     def to_yaml_dict(self) -> dict:
         """Convert the greeting settings to a YAML-serializable dict."""
@@ -198,7 +198,7 @@ class ChannelGreeting(MultiResourceYamlResource):
     def build_update_proto(self) -> Channel_UpdateGreeting:
         """Create a proto for updating the resource."""
         return Channel_UpdateGreeting(
-            channel_type=type(self).channel_type,
+            channel_type=self.channel_type,
             greeting=Greeting_UpdateGreeting(
                 welcome_message=self.welcome_message,
                 language_code=self.language_code,
@@ -269,7 +269,7 @@ class ChannelStylePrompt(MultiResourceYamlResource):
     @cached_property
     def file_path(self) -> str:
         """Get the file path for the StylePrompt resource."""
-        return os.path.join(_config_path(type(self).channel_subpath), type(self).top_level_name)
+        return os.path.join(_config_path(self.channel_subpath), self.top_level_name)
 
     def to_yaml_dict(self) -> dict:
         """Convert the style prompt settings to a YAML-serializable dict."""
@@ -292,7 +292,7 @@ class ChannelStylePrompt(MultiResourceYamlResource):
     def build_update_proto(self) -> Channel_UpdateStylePrompt:
         """Create a proto for updating the resource."""
         return Channel_UpdateStylePrompt(
-            channel_type=type(self).channel_type,
+            channel_type=self.channel_type,
             style_prompt=StylePrompt_UpdateStylePrompt(prompt=self.prompt),
         )
 
