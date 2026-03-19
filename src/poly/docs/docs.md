@@ -17,6 +17,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │   ├── rules.txt
 │   └── experimental_config.json        # Optional
 ├── config/                             # Configuration
+│   ├── api_integrations.yaml           # Optional
 │   ├── entities.yaml                   # Optional
 │   ├── handoffs.yaml                   # Optional
 │   ├── sms_templates.yaml              # Optional
@@ -110,6 +111,7 @@ Resource-specific documentation is available via `poly docs {resource} [resource
 - [Flows](flows.md) — multi-step processes with steps, functions, conditions
 - [Functions](functions.md) — global and flow functions, decorators, state, metrics
 - [Topics](topics.md) — knowledge base for RAG
+- [API Integrations](api_integrations.md) — external HTTP API definitions
 - [Entities](entities.md) — structured data collection
 - [Handoffs](handoffs.md) — SIP call transfers
 - [Variants](variants.md) — per-variant configuration
