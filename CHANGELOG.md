@@ -1,6 +1,44 @@
 # CHANGELOG
 
 
+## v0.3.3 (2026-03-19)
+
+### Bug Fixes
+
+- Fix merge for multiresourceyaml resources (#122) ([#28](https://github.com/polyai/adk/pull/28),
+  [`054d552`](https://github.com/polyai/adk/commit/054d55282ef5933f51b1f783ac70440d17c1481b))
+
+## Summary Fix incorrect merge behaviour for `MultiResourceYamlResource` types by performing the
+  3-way merge at the file level rather than per-resource.
+
+## Motivation `MultiResourceYamlResource` types (e.g. entities) store multiple resources in a single
+  YAML file. The previous code performed the 3-way merge per-resource and then wrote each resource
+  individually, which meant the common ancestor used for the merge was wrong and resources from the
+  same file would overwrite each other. It would also crash. <img width="415" height="133"
+  alt="image (1)"
+
+src="https://github.com/user-attachments/assets/388eff5f-2185-4a5b-ab5f-0b32f866452d" />
+
+## Changes - Before the merge loop, serialise the original resources into a file-level cache to use
+  as the common ancestor - Skip the per-resource string merge for `MultiResourceYamlResource` types
+  during the main loop; instead accumulate them into the cache - After the main loop, perform the
+  3-way merge at the file level and write the result - Gate `write_cache_to_file` behind `force`
+  mode, since non-force mode now handles writing via the file-level merge loop
+
+## Test strategy - [x] Added/updated unit tests - [x] Manual CLI testing (`poly pull`) - [x] Tested
+  against a live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist - [ ] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [ ] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages
+  follow [conventional commits](https://www.conventionalcommits.org/) - [ ] ## Screenshots / Logs
+  <img width="1291" height="582" alt="Screenshot 2026-03-13 at 18 57 34"
+  src="https://github.com/user-attachments/assets/44a0cf5d-7024-42c4-8b51-8b2b3fc1b267" />
+
+---------
+
+Co-authored-by: Copilot Autofix powered by AI <175728472+Copilot@users.noreply.github.com>
+
+
 ## v0.3.2 (2026-03-18)
 
 ### Bug Fixes
