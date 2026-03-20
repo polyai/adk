@@ -41,7 +41,7 @@ actions: |-
 ## Example queries
 - Maximum **20 queries**.
 - Cover different ways a user might ask about the same thing.
-- Don't try to cover every minor variation — the model generalizes.
+- Don't try to cover every minor variation - the model generalizes.
 
 ## Content
 - Factual information only. This is what gets retrieved via RAG.
@@ -51,18 +51,18 @@ actions: |-
 ## Actions
 - Behavioral instructions: what to say, when to call functions, how to branch.
 - **This is the only place** where you can use references in a topic:
-  - `{{fn:function_name}}` — call a global function
-  - `{{fn:function_name}}('arg')` — call with an argument
-  - `{{attr:attribute_name}}` — variant attribute
-  - `{{twilio_sms:template_name}}` — SMS template
-  - `{{ho:handoff_name}}` — handoff
-  - `$variable` — state variable
+  - `{{fn:function_name}}` - call a global function
+  - `{{fn:function_name}}('arg')` - call with an argument
+  - `{{attr:attribute_name}}` - variant attribute
+  - `{{twilio_sms:template_name}}` - SMS template
+  - `{{ho:handoff_name}}` - handoff
+  - `$variable` - state variable
 - **Branching**: Use markdown headers (`##`, `###`) for conditional sections.
 - Keep actions clear and scannable; avoid one long paragraph with mixed conditions.
 
 ## Best practices
 - Don't prompt the model to `"Say: '...'"` (hurts multilingual support); use `"Tell the user that ..."`.
 - Prefer structured actions with `## Conditional Branch` sections over a single dense paragraph.
-- Keep content and actions separate — content is facts, actions is behavior.
+- Keep content and actions separate - content is facts, actions is behavior.
 - One topic per subject area. If a topic is getting too large, split it.
 - Disable topics with `enabled: false` rather than deleting them during development.
