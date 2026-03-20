@@ -18,6 +18,7 @@ from poly.handlers.interface import (
     AgentStudioInterface,
 )
 from poly.resources import (
+    ApiIntegration,
     AsrSettings,
     BaseFlowStep,
     ChatGreeting,
@@ -62,6 +63,7 @@ _LEGACY_STATUS_FILE = ".agent_studio_config"
 
 # New resources to be added here
 RESOURCE_NAME_TO_CLASS: dict[str, type[Resource]] = {
+    "api_integration": ApiIntegration,
     "functions": Function,
     "topics": Topic,
     "personality": SettingsPersonality,
