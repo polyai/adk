@@ -7,8 +7,8 @@ Speech recognition resources control how the agent processes user speech input o
 ```
 voice/speech_recognition/
 ├── asr_settings.yaml               # Barge-in, interaction style
-├── keyphrase_boosting.yaml         # Optional — bias ASR toward specific words
-└── transcript_corrections.yaml     # Optional — regex corrections on ASR output
+├── keyphrase_boosting.yaml         # Optional - bias ASR toward specific words
+└── transcript_corrections.yaml     # Optional - regex corrections on ASR output
 ```
 
 ## ASR Settings (`asr_settings.yaml`)
@@ -39,7 +39,7 @@ Bias the speech recognizer toward specific words or phrases (brand names, produc
 ### Structure
 A `keyphrases` list where each entry has:
 - **keyphrase** (required): The word or phrase to boost.
-- **level**: Boost strength — `default`, `boosted`, or `maximum`. Default: `default`.
+- **level**: Boost strength - `default`, `boosted`, or `maximum`. Default: `default`.
 
 ### Example
 ```yaml

@@ -24,7 +24,7 @@ greeting:
 
 ## Style Prompt
 
-Channel-specific instructions that shape how the agent speaks. Separate from personality — use this for voice-specific guidance (e.g. phrasing, verbosity, tone of speech).
+Channel-specific instructions that shape how the agent speaks. Separate from personality - use this for voice-specific guidance (e.g. phrasing, verbosity, tone of speech).
 
 ### Fields
 - **prompt**: Free-text style instructions. No resource references allowed.
@@ -66,5 +66,5 @@ disclaimer_messages:
 ```
 
 ## Related voice resources
-- [Speech Recognition](speech_recognition.md) — ASR settings, keyphrase boosting, transcript corrections
-- [Response Control](response_control.md) — pronunciations, phrase filters
+- [Speech Recognition](speech_recognition.md) - ASR settings, keyphrase boosting, transcript corrections
+- [Response Control](response_control.md) - pronunciations, phrase filters
