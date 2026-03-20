@@ -3,8 +3,6 @@ title: Pre-requisites
 description: Understand the access requirements and local tools needed before using the PolyAI ADK.
 ---
 
-# Pre-requisites
-
 Before using the **PolyAI ADK**, you need both the correct **platform access** and the required **local tools**.
 
 ## Platform access

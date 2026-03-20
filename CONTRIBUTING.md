@@ -56,6 +56,23 @@ We use [conventional commits](https://www.conventionalcommits.org/):
 | `feat!:` / `BREAKING CHANGE:` | Major (2.0.4 → 3.0.0) | `feat!: redesign resource schema` |
 | `chore:`, `docs:`, `ci:` | No release | `docs: update README` |
 
+### Updating dependencies
+
+When you add or change dependencies:
+
+- **License check** — CI allows only MIT, Apache, BSD, MPL. Run locally: `uv run licensecheck --zero`. Packages with missing PyPI license metadata are in `[tool.licensecheck]` `ignore_packages` in `pyproject.toml`; add new ones there after verifying the license.
+- **Attribution** — Regenerate `licenses.json` with `uv run pip-licenses` and commit it. CI checks that it’s up to date.
+
+## Releases
+
+This project uses [python-semantic-release](https://python-semantic-release.readthedocs.io/) to automate versioning and publishing. Version bumps are determined from conventional commit messages (see above).
+
+When a commit is merged to `main`, the release workflow automatically:
+
+1. Determines the next version from commit history
+2. Updates the version in `pyproject.toml`
+3. Creates a git tag and GitHub Release
+
 ## Tooling
 
 We recommend using [Claude Code](https://claude.ai/download) for development. The repo includes a `.claude/` directory with project-specific instructions and permissions pre-configured.

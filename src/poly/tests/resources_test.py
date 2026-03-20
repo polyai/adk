@@ -2290,6 +2290,11 @@ dtmf_config:
 prompt: Hello, how can I help you?
 """
 
+FLOW_STEP_RAW_NO_ASR_DTMF = """step_type: advanced_step
+name: Test Step
+prompt: Hello, how can I help you?
+"""
+
 TEST_NO_CODE_FLOW_STEP = FlowStep(
     resource_id="flow-123_step-1",
     step_id="step-1",
@@ -2410,6 +2415,20 @@ class FlowStepTests(unittest.TestCase):
         )
         # Should roundtrip back to original raw format
         self.assertEqual(reverted_step, TEST_NO_CODE_FLOW_STEP.raw)
+
+    def test_read_step_with_no_asr_dtmf(self):
+        """Test reading a flow step with no ASR or DTMF config."""
+        yaml_dict = yaml.safe_load(FLOW_STEP_RAW_NO_ASR_DTMF)
+        step = FlowStep.from_yaml_dict(
+            yaml_dict,
+            resource_id="Test Flow_step-1",
+            file_name="test_step",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            resource_mappings=[]
+        )
+        self.assertEqual(step.asr_biasing, ASRBiasing(flow_id="flow-123", step_id="step-1"))
+        self.assertEqual(step.dtmf_config, DTMFConfig(flow_id="flow-123", step_id="step-1"))
 
     def test_function_name_swapping(self):
         """Test the core function name swapping functionality."""
@@ -2591,6 +2610,51 @@ conditions:
             invalid_step.validate(resource_mappings=resource_mappings)
         self.assertIn("Requested entity 'customer_name' not found.", str(cm.exception))
 
+    def test_flow_step_name_must_match_pattern(self):
+        """Test flow step name must match allowed pattern (letters, numbers, _ & , / . -)."""
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="flow-123",
+                resource_name="Test Flow",
+                resource_type=FlowConfig,
+                file_path="flows/test_flow/flow_config.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+            )
+        ]
+        for valid_name in ("Test Step", "Step_1", "Step & 2", "Step 1, 2", "a/b", "v1.0", "café"):
+            step = FlowStep(
+                resource_id="flow-123_step-1",
+                step_id="step-1",
+                name=valid_name,
+                flow_id="flow-123",
+                flow_name="Test Flow",
+                step_type=StepType.ADVANCED_STEP,
+                asr_biasing=None,
+                dtmf_config=None,
+                conditions=[],
+                prompt="Prompt",
+                position={"x": 0.0, "y": 0.0},
+            )
+            step.validate(resource_mappings=resource_mappings)
+
+        for invalid_name in ("Step#1", "Step@2", "Step\n", "Step(two)"):
+            step = FlowStep(
+                resource_id="flow-123_step-1",
+                step_id="step-1",
+                name=invalid_name,
+                flow_id="flow-123",
+                flow_name="Test Flow",
+                step_type=StepType.ADVANCED_STEP,
+                asr_biasing=None,
+                dtmf_config=None,
+                conditions=[],
+                prompt="Prompt",
+                position={"x": 0.0, "y": 0.0},
+            )
+            with self.assertRaises(ValueError) as cm:
+                step.validate(resource_mappings=resource_mappings)
+            self.assertIn("Name must contain only", str(cm.exception))
 
     def test_validate_conditions(self):
         """Test validation of flow step conditions."""
@@ -3867,6 +3931,45 @@ class SMSTemplateTests(unittest.TestCase):
             invalid_template.validate()
         self.assertIn("Env phone numbers are required", str(cm.exception))
 
+    def test_validate_variable_references(self):
+        """Test validation when SMS template text references a variable."""
+        default_env = EnvPhoneNumbers(
+            sandbox="",
+            pre_release="",
+            live="+447700102347",
+        )
+        template_with_var = SMSTemplate(
+            resource_id="sms-1",
+            name="with_var",
+            text="Hi {{vrbl:VAR-customer_name}}, your booking is confirmed.",
+            env_phone_numbers=default_env,
+        )
+        with self.assertRaises(ValueError) as cm:
+            template_with_var.validate(resource_mappings=[])
+        self.assertIn("Invalid references: ['variables: VAR-customer_name']", str(cm.exception))
+
+        valid_mapping = [
+            ResourceMapping(
+                resource_id="VAR-customer_name",
+                resource_name="customer_name",
+                resource_type=Variable,
+                file_path="variables/customer_name",
+                flow_name=None,
+                resource_prefix="vrbl",
+            )
+        ]
+        self.assertIsNone(template_with_var.validate(resource_mappings=valid_mapping))
+
+        template_two_vars = SMSTemplate(
+            resource_id="sms-2",
+            name="two_vars",
+            text="Hi {{vrbl:VAR-customer_name}}, order {{vrbl:VAR-order_id}}.",
+            env_phone_numbers=default_env,
+        )
+        with self.assertRaises(ValueError) as cm:
+            template_two_vars.validate(resource_mappings=valid_mapping)
+        self.assertIn("Invalid references: ['variables: VAR-order_id']", str(cm.exception))
+
     def test_to_yaml_dict(self):
         """Test converting SMS template to YAML dictionary."""
         yaml_dict = TEST_SMS_TEMPLATE_1.to_yaml_dict()
@@ -4702,9 +4805,16 @@ class VariableTest(unittest.TestCase):
             os.makedirs(os.path.join(tmpdir, "flows"), exist_ok=True)
             func_file = os.path.join(tmpdir, "functions", "my_func.py")
             with open(func_file, "w") as f:
-                f.write("# conv.state.ignored\nx = conv.state.actual_var\n")
+                f.write("# conv.state.commented\nx = conv.state.actual_var\n")
             discovered = Variable.discover_resources(tmpdir)
-            self.assertEqual(discovered, [os.path.join(tmpdir, "variables", "actual_var")])
+            self.assertCountEqual(
+                discovered,
+                [
+                    os.path.join(tmpdir, "variables", "actual_var"),
+                    os.path.join(tmpdir, "variables", "commented"),
+                ]
+            )
+
 class PhraseFilterTests(unittest.TestCase):
     def setUp(self):
         MultiResourceYamlResource._file_cache.clear()

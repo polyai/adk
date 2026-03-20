@@ -3,7 +3,7 @@ name: Build Docs
 on:
   pull_request:
     paths:
-      - 'src/poly/docs/**'
+      - 'docs/**'
       - '.github/workflows/build-docs.yaml'
 
 jobs:
@@ -12,7 +12,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: src/poly/docs
+        working-directory: docs
 
     steps:
       - uses: actions/checkout@v4

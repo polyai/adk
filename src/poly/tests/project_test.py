@@ -25,6 +25,7 @@ from poly.resources import (
     Function,
     FunctionStep,
     KeyphraseBoosting,
+    Pronunciation,
     Resource,
     ResourceMapping,
     SettingsPersonality,
@@ -46,6 +47,7 @@ from poly.resources.flows import (
     StepType,
 )
 from poly.resources.function import FunctionType
+from poly.resources.resource import MultiResourceYamlResource
 from poly.tests.testing_utils import mock_read_from_file
 
 DIR = os.path.dirname(os.path.abspath(__file__))
@@ -67,6 +69,46 @@ class InitTest(unittest.TestCase):
         self.assertEqual(project.region, "us-1")
         self.assertEqual(project.account_id, "test_account")
         self.assertEqual(project.project_id, "test_project")
+
+
+class SortPathsForReverseDeletionTest(unittest.TestCase):
+    """Tests for _sort_paths_for_reverse_deletion (Pronunciation vs lexicographic order)."""
+
+    def test_sort_paths_for_reverse_deletion(self):
+        base = os.path.join("voice", "response_control", "pronunciations.yaml", "pronunciations")
+        # Pronunciation: must be numeric reverse (11, 10, 9, ...), not lexicographic (9 before 10)
+        pron_paths = {
+            os.path.join(base, "9"),
+            os.path.join(base, "10"),
+            os.path.join(base, "11"),
+        }
+        result = AgentStudioProject._sort_paths_for_reverse_deletion(pron_paths, Pronunciation)
+        self.assertEqual(
+            result,
+            [
+                os.path.join(base, "11"),
+                os.path.join(base, "10"),
+                os.path.join(base, "9"),
+            ],
+            "Pronunciation paths must sort by integer position descending (11, 10, 9), not lexicographic",
+        )
+        # Non-Pronunciation: lexicographic reverse order
+        entity_base = os.path.join("config", "entities.yaml", "entities")
+        entity_paths = {
+            os.path.join(entity_base, "a"),
+            os.path.join(entity_base, "b"),
+            os.path.join(entity_base, "c"),
+        }
+        result_entity = AgentStudioProject._sort_paths_for_reverse_deletion(entity_paths, Entity)
+        self.assertEqual(
+            result_entity,
+            [
+                os.path.join(entity_base, "c"),
+                os.path.join(entity_base, "b"),
+                os.path.join(entity_base, "a"),
+            ],
+            "Other resource types use lexicographic reverse order",
+        )
 
 
 class SerializationRoundTripTest(unittest.TestCase):
@@ -1185,6 +1227,65 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         self.assertIn("Test Flow_func_step_old", cleaned_deleted[FunctionStep])
         self.assertIn("Test Flow_func_step", cleaned_new[FunctionStep])
 
+    def test_clean_resources_before_push_new_flow_function_step_as_start_fixes_with_dummy(
+        self,
+    ):
+        """When creating a new flow with a function step as start step, use dummy then fix.
+
+        API requires a non-function step as start when creating a flow. We create a
+        temporary default step as start, then update the flow to use the function step
+        and delete the dummy in post-push.
+        """
+        flow_config_id = "flow-new-func-start"
+        flow_config = FlowConfig(
+            resource_id=flow_config_id,
+            name="New Flow",
+            description="Flow with function step as start",
+            start_step="entry_func",
+        )
+        function_start_step = FunctionStep(
+            resource_id="New Flow_entry_func",
+            step_id="entry_func",
+            name="Entry",
+            flow_id=flow_config_id,
+            flow_name="New Flow",
+            code="def entry_func(conv, flow): pass",
+            position={"x": 0.0, "y": 0.0},
+            function_id="FUNC-entry",
+        )
+
+        new_resources = {
+            FlowConfig: {flow_config_id: flow_config},
+            FunctionStep: {"New Flow_entry_func": function_start_step},
+        }
+        push_changes = self.project._clean_resources_before_push(
+            {},
+            new_resources,
+            {},
+            {},
+        )
+        main_new = push_changes.main.new
+        main_updated = push_changes.main.updated
+        post_deleted = push_changes.post.deleted
+
+        # Flow is created with a dummy default step as start
+        self.assertIn(FlowConfig, main_new)
+        created_flow = main_new[FlowConfig][flow_config_id]
+        self.assertEqual(created_flow.start_step, "entry_func_start_step_temp")
+        step_ids = [s.step_id for s in created_flow.steps]
+        self.assertIn("entry_func_start_step_temp", step_ids)
+        dummy_step = next(s for s in created_flow.steps if s.step_id == "entry_func_start_step_temp")
+        self.assertEqual(dummy_step.step_type, StepType.DEFAULT_STEP)
+
+        # Flow config update is scheduled to reset start to the function step
+        self.assertIn(FlowConfig, main_updated)
+        reset_flow = main_updated[FlowConfig][flow_config_id]
+        self.assertEqual(reset_flow.start_step, "entry_func")
+
+        # Dummy step is scheduled for post-push deletion
+        self.assertIn(FlowStep, post_deleted)
+        self.assertIn("New Flow_entry_func_start_step_temp", post_deleted[FlowStep])
+
     def test_clean_resources_before_push_orphaned_variable_delete_and_recreate(self):
         """When all functions referencing a variable are deleted, variable is delete+recreated."""
         var_id = "VAR-orphan"
@@ -1886,13 +1987,15 @@ class PullProjectTest(unittest.TestCase):
         self.assertEqual(project.resources, original_resources)
 
     def test_pull_project_not_loaded_resources_force_save(self):
-        """When a resource type was not in the loaded dict, pull saves it directly (force-like)
-        without merging. Prevents spurious deletions when new types like variant_attributes
-        are added remotely but weren't in the local project when loaded.
+        """When a resource type was not in the loaded dict, pull incorporates the incoming
+        resources via the file-level merge without reporting conflicts.  Prevents spurious
+        deletions when new types like variant_attributes are added remotely but weren't in
+        the local project dict when it was loaded.
         """
         # Load project with variant_attributes removed from dict (simulates old project)
         project_data = deepcopy(PROJECT_DATA)
         del project_data["resources"]["variant_attributes"]
+        del project_data["resources"]["variants"]
 
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
@@ -1906,17 +2009,24 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources = full_project.resources
         self.mock_api_handler.pull_resources.return_value = incoming_resources
 
-        files_with_conflicts = project.pull_project(force=False)
+        with mock_read_from_file(
+            {
+                os.path.join(
+                    TEST_DIR, "config", "variant_attributes.yaml"
+                ): "{}\n"
+            }
+        ):
+            files_with_conflicts = project.pull_project(force=False)
 
         self.assertEqual(files_with_conflicts, [])
-        # Variant attributes were saved directly (no merge) and are now in project
+        # Variant attributes are now present in project resources with the correct keys
         self.assertIn(VariantAttribute, project.resources)
         self.assertEqual(
             set(project.resources[VariantAttribute].keys()),
             set(incoming_resources[VariantAttribute].keys()),
         )
-        # Verify save was called for the not-loaded resources (save or save_to_file)
-        self.assertTrue(self.mock_save_to_file.called or self.mock_resource_save.called)
+        # The resource type is removed from _not_loaded_resources once it has been processed
+        self.assertNotIn(VariantAttribute, project._not_loaded_resources)
 
     def test_pull_project_addition(self):
         """Test pulling when a new resource is added remotely"""
@@ -2121,8 +2231,8 @@ class PullProjectTest(unittest.TestCase):
         # Resources are now incoming resources
         self.assertEqual(project.resources, incoming_resources)
 
-    def test_pull_project_deleted_locally(self):
-        """Test pulling when a resource was deleted locally but exists remotely"""
+    def test_pull_project_added_locally_and_remote_same(self):
+        """Test pulling when a resource was added locally and exists remotely"""
         project_data = deepcopy(PROJECT_DATA)
         project_data["resources"]["functions"].pop("FUNCTION-test_function_with_parameters")
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
@@ -2131,7 +2241,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources = deepcopy(full_project_resources)
 
         self.mock_api_handler.pull_resources.return_value = incoming_resources
-        files_with_conflicts = project.pull_project(force=False)
+        files_with_conflicts = project.pull_project(force=False, format=True)
         self.assertEqual(files_with_conflicts, [])
         # Verify resource is updated in project resources
         self.assertIn("FUNCTION-test_function_with_parameters", project.resources.get(Function, {}))
@@ -2144,6 +2254,48 @@ class PullProjectTest(unittest.TestCase):
             if len(call[0]) >= 2 and call[0][1] == test_func_path
         ]
         self.assertEqual(test_func_calls, [])
+
+    def test_pull_project_added_locally_and_remote_different(self):
+        """Test pulling when a resource was added locally and exists remotely"""
+        project_data = deepcopy(PROJECT_DATA)
+        project_data["resources"]["functions"].pop("FUNCTION-test_function_with_parameters")
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        full_project_resources = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR).resources
+        incoming_resources = deepcopy(full_project_resources)
+        incoming_resources[Function]["FUNCTION-test_function_with_parameters"].code = 'def test_function_with_parameters(conv: Conversation):\n    """Test function with parameters."""\n    return "Test function with parameters"\n'
+
+        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        files_with_conflicts = project.pull_project(force=False)
+        self.assertEqual(len(files_with_conflicts), 1)
+
+    def test_pull_project_deleted_locally(self):
+        """Test pulling when a resource was deleted locally and exists remotely"""
+        project_data = deepcopy(PROJECT_DATA)
+        project_data["resources"]["topics"]['TOPIC-new-topic'] = {
+            "resource_id": "TOPIC-new-topic",
+            "name": "new-topic",
+            "actions": "Use {{fn:test_function}}",
+            "content": "New topic content",
+            "example_queries": ["New query"],
+            "enabled": True,
+        }
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+
+        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        files_with_conflicts = project.pull_project(force=False)
+        self.assertEqual(files_with_conflicts, [])
+
+        # Verify it wasn't saved to the file system
+        test_topic_path = os.path.join(TEST_DIR, "topics", "new-topic.yaml")
+        test_topic_calls = [
+            call
+            for call in self.mock_save_to_file.call_args_list
+            if len(call[0]) >= 2 and call[0][1] == test_topic_path
+        ]
+        self.assertEqual(test_topic_calls, [])
+
 
     def test_pull_project_resource_moved(self):
         """Test pulling when a resource's file path has changed (e.g., renamed)"""
@@ -2211,6 +2363,227 @@ class PullProjectTest(unittest.TestCase):
                 any(empty_flow_path in str(call) for call in rmdir_calls),
                 f"Expected rmdir to be called for flow folder containing '{empty_flow_path}'",
             )
+
+    def _make_kp_read_mock(self, original_kp_content, local_kp_content):
+        """Return a side_effect for Resource.read_from_file that serves keyphrase_boosting.yaml
+        with original_kp_content on the first two calls (pre-loop cache build and main-loop
+        cache rebuild) and local_kp_content on the third call (post-loop local-file read).
+        All other file paths fall through to the real file on disk.
+        """
+        kp_path = os.path.join(
+            TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
+        )
+        kp_call_count = [0]
+
+        def side_effect(path, **kwargs):
+            if str(path) == kp_path or kp_path in str(path):
+                kp_call_count[0] += 1
+                if kp_call_count[0] <= 2:
+                    return original_kp_content
+                return local_kp_content
+            with open(str(path)) as f:
+                return f.read()
+
+        return side_effect
+
+    def test_pull_project_multi_resource_yaml_remote_change_no_local_change(self):
+        """Remote modifies a MultiResourceYamlResource entry; local has no changes.
+
+        The file-level 3-way merge should detect no local delta and write the
+        incoming content without reporting any conflict.
+        """
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+        incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
+        self.mock_api_handler.pull_resources.return_value = incoming_resources
+
+        kp_path = os.path.join(
+            TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
+        )
+        # dump_yaml format produced by MultiResourceYamlResource.save(save_to_cache=True)
+        original_kp_content = (
+            "keyphrases:\n"
+            "- keyphrase: PolyAI\n"
+            "  level: maximum\n"
+            "- keyphrase: reservation\n"
+            "  level: boosted\n"
+            "- keyphrase: check-in\n"
+            "  level: default\n"
+        )
+
+        MultiResourceYamlResource._file_cache.clear()
+        with patch(
+            "poly.resources.resource.Resource.read_from_file",
+            side_effect=self._make_kp_read_mock(original_kp_content, original_kp_content),
+        ):
+            files_with_conflicts = project.pull_project(force=False)
+        MultiResourceYamlResource._file_cache.clear()
+
+        self.assertEqual(files_with_conflicts, [])
+        # save_to_file should be called for keyphrase_boosting.yaml with incoming content
+        kp_calls = [
+            call
+            for call in self.mock_save_to_file.call_args_list
+            if len(call[0]) >= 2 and kp_path in str(call[0][1])
+        ]
+        self.assertGreater(
+            len(kp_calls), 0, "save_to_file should be called for keyphrase_boosting.yaml"
+        )
+        saved_content = kp_calls[-1][0][0]
+        self.assertIn("level: boosted", saved_content)
+        self.assertNotIn("<<<<<<<", saved_content)
+
+    def test_pull_project_multi_resource_yaml_merge_no_conflict(self):
+        """Remote modifies one entry in a MultiResourceYamlResource file while local
+        modifies a different entry.  The file-level 3-way merge should apply both
+        changes without conflicts.
+        """
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+        # Remote: PolyAI level maximum → boosted
+        incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
+        self.mock_api_handler.pull_resources.return_value = incoming_resources
+
+        kp_path = os.path.join(
+            TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
+        )
+        original_kp_content = (
+            "keyphrases:\n"
+            "- keyphrase: PolyAI\n"
+            "  level: maximum\n"
+            "- keyphrase: reservation\n"
+            "  level: boosted\n"
+            "- keyphrase: check-in\n"
+            "  level: default\n"
+        )
+        # Local: reservation level boosted → default (independent change)
+        local_kp_content = (
+            "keyphrases:\n"
+            "- keyphrase: PolyAI\n"
+            "  level: maximum\n"
+            "- keyphrase: reservation\n"
+            "  level: default\n"
+            "- keyphrase: check-in\n"
+            "  level: default\n"
+        )
+
+        MultiResourceYamlResource._file_cache.clear()
+        with patch(
+            "poly.resources.resource.Resource.read_from_file",
+            side_effect=self._make_kp_read_mock(original_kp_content, local_kp_content),
+        ):
+            files_with_conflicts = project.pull_project(force=False)
+        MultiResourceYamlResource._file_cache.clear()
+
+        self.assertEqual(files_with_conflicts, [])
+        kp_calls = [
+            call
+            for call in self.mock_save_to_file.call_args_list
+            if len(call[0]) >= 2 and kp_path in str(call[0][1])
+        ]
+        self.assertGreater(
+            len(kp_calls), 0, "save_to_file should be called for keyphrase_boosting.yaml"
+        )
+        saved_content = kp_calls[-1][0][0]
+        # Both the remote change (PolyAI boosted) and the local change (reservation default)
+        # must appear in the merged file
+        self.assertIn("level: boosted", saved_content)
+        self.assertIn("level: default", saved_content)
+        self.assertNotIn("<<<<<<<", saved_content)
+
+    def test_pull_project_multi_resource_yaml_conflict(self):
+        """Remote and local both modify the same entry in a MultiResourceYamlResource file.
+
+        The file-level 3-way merge should detect the conflict and surface it in
+        files_with_conflicts with conflict markers written to the file.
+        """
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+        # Remote: PolyAI level maximum → boosted
+        incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
+        self.mock_api_handler.pull_resources.return_value = incoming_resources
+
+        kp_path = os.path.join(
+            TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
+        )
+        original_kp_content = (
+            "keyphrases:\n"
+            "- keyphrase: PolyAI\n"
+            "  level: maximum\n"
+            "- keyphrase: reservation\n"
+            "  level: boosted\n"
+            "- keyphrase: check-in\n"
+            "  level: default\n"
+        )
+        # Local: PolyAI level maximum → default (conflicts with remote "boosted")
+        local_kp_content = (
+            "keyphrases:\n"
+            "- keyphrase: PolyAI\n"
+            "  level: default\n"
+            "- keyphrase: reservation\n"
+            "  level: boosted\n"
+            "- keyphrase: check-in\n"
+            "  level: default\n"
+        )
+
+        MultiResourceYamlResource._file_cache.clear()
+        with patch(
+            "poly.resources.resource.Resource.read_from_file",
+            side_effect=self._make_kp_read_mock(original_kp_content, local_kp_content),
+        ):
+            files_with_conflicts = project.pull_project(force=False)
+        MultiResourceYamlResource._file_cache.clear()
+
+        self.assertIn(kp_path, files_with_conflicts)
+        kp_calls = [
+            call
+            for call in self.mock_save_to_file.call_args_list
+            if len(call[0]) >= 2 and kp_path in str(call[0][1])
+        ]
+        self.assertGreater(len(kp_calls), 0, "save_to_file should be called for keyphrase_boosting.yaml")
+        saved_content = kp_calls[-1][0][0]
+        self.assertIn("<<<<<<<", saved_content)
+        self.assertIn("=======", saved_content)
+        self.assertIn(">>>>>>>", saved_content)
+
+    def test_pull_project_multi_resource_yaml_force(self):
+        """With force=True, MultiResourceYamlResource files are written directly from
+        the incoming cache without any 3-way merge.
+        """
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+        # Remote: PolyAI level maximum → boosted
+        incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
+        self.mock_api_handler.pull_resources.return_value = incoming_resources
+
+        kp_path = os.path.join(
+            TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
+        )
+
+        MultiResourceYamlResource._file_cache.clear()
+        files_with_conflicts = project.pull_project(force=True)
+        MultiResourceYamlResource._file_cache.clear()
+
+        self.assertEqual(files_with_conflicts, [])
+        # write_cache_to_file() calls save_to_file for the keyphrase file directly
+        kp_calls = [
+            call
+            for call in self.mock_save_to_file.call_args_list
+            if len(call[0]) >= 2 and kp_path in str(call[0][1])
+        ]
+        self.assertGreater(
+            len(kp_calls), 0, "save_to_file should be called for keyphrase_boosting.yaml"
+        )
+        saved_content = kp_calls[-1][0][0]
+        self.assertIn("level: boosted", saved_content)
+        self.assertNotIn("<<<<<<<", saved_content)
+
+class DocsTest(unittest.TestCase):
+    """Tests for the docs module"""
+
+    def test_load_docs(self):
+        """Test loading a docs file"""
+        AgentStudioProject.load_docs("docs")
 
 
 if __name__ == "__main__":

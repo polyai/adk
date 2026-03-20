@@ -16,8 +16,9 @@ from argparse import ArgumentParser, RawTextHelpFormatter
 from importlib.metadata import version as get_package_version
 from typing import Optional
 
+import argcomplete
 import requests
-from simple_term_menu import TerminalMenu
+import questionary
 
 from poly.console import (
     console,
@@ -439,10 +440,10 @@ class AgentStudioCLI:
             help="Environment to chat against. Defaults to current branch.",
         )
         chat_parser.add_argument(
-            "--variant-id",
+            "--variant",
             type=str,
             default=None,
-            help="Variant ID to use for the chat session (e.g. 'Voice').",
+            help="Name of variant to use for the chat session.",
         )
         chat_parser.add_argument(
             "--channel",
@@ -475,6 +476,28 @@ class AgentStudioCLI:
             action="store_true",
             default=False,
             help="Show all metadata (functions, flows, and state). Equivalent to --functions --flows --state.",
+        )
+
+        # completion
+        completion_parser = subparsers.add_parser(
+            "completion",
+            formatter_class=RawTextHelpFormatter,
+            help="Generate shell completion scripts",
+            description=(
+                "Output a shell completion script for poly/adk.\n\n"
+                "Add the output to your shell configuration to enable tab completion:\n\n"
+                '  Bash:  eval "$(poly completion bash)"\n'
+                "         # or: poly completion bash >> ~/.bash_completion\n\n"
+                '  Zsh:   eval "$(poly completion zsh)"\n'
+                "         # or: poly completion zsh > ~/.zsh/completions/_poly\n\n"
+                "  Fish:  poly completion fish | source\n"
+                "         # or: poly completion fish > ~/.config/fish/completions/poly.fish\n"
+            ),
+        )
+        completion_parser.add_argument(
+            "shell",
+            choices=["bash", "zsh", "fish"],
+            help="Shell type to generate completions for.",
         )
 
         return parser
@@ -565,17 +588,31 @@ class AgentStudioCLI:
             cls.chat(
                 args.path,
                 args.environment,
-                args.variant_id,
+                args.variant,
                 args.channel,
                 show_functions=show_all or args.functions,
                 show_flow=show_all or args.flows,
                 show_state=show_all or args.state,
             )
 
+        elif args.command == "completion":
+            cls.print_completion(args.shell)
+
+    @classmethod
+    def print_completion(cls, shell: str) -> None:
+        """Print a shell completion script for poly/adk.
+
+        Args:
+            shell: Target shell — one of 'bash', 'zsh', or 'fish'.
+        """
+        script = argcomplete.shellcode(["poly", "adk"], shell=shell)
+        print(script)
+
     @classmethod
     def main(cls, sys_args=None):
         """Main entry point for the CLI tool."""
         parser = cls._create_parser()
+        argcomplete.autocomplete(parser)
 
         try:
             if sys_args:
@@ -648,43 +685,38 @@ class AgentStudioCLI:
 
         if not region:
             regions = REGIONS
-            region_menu = TerminalMenu(regions, title="Select Region")
-            region_index = region_menu.show()
-            if region_index == -1:
-                warning("No region selected. Exiting.")
-                return
-
-            region = regions[region_index]
+            region_menu = questionary.select("Select Region", choices=regions).ask()
+            region = region_menu
 
         api_handler = AgentStudioInterface()
 
         if not account_id:
             accounts = api_handler.get_accounts(region)
-            account_menu = TerminalMenu(
-                list(accounts.keys()),
-                title="Select Account",
-                search_key=None,
-                show_search_hint=True,
-            )
-            account_index = account_menu.show()
-            if account_index == -1:
+            account_menu = questionary.select(
+                "Select Account",
+                choices=list(accounts.keys()),
+                use_search_filter=True,
+                use_jk_keys=False,
+            ).ask()
+            if not account_menu:
                 warning("No account selected. Exiting.")
-                return None
-            account_id = list(accounts.values())[account_index]
+                return
+            account_id = accounts[account_menu]
 
         if not project_id:
             projects = api_handler.get_projects(region, account_id)
-            project_menu = TerminalMenu(
-                list(projects.keys()),
-                title="Select Project",
-                search_key=None,
-                show_search_hint=True,
-            )
-            project_index = project_menu.show()
-            if project_index == -1:
+            project_menu = questionary.select(
+                "Select Project",
+                choices=list(projects.keys()),
+                use_search_filter=True,
+                use_jk_keys=False,
+            ).ask()
+            if not project_menu:
                 warning("No project selected. Exiting.")
                 return
-            project_id = list(projects.values())[project_index]
+            project_id = projects[project_menu]
+
+        info(f"Initializing project [bold]{account_id}/{project_id}[/bold]...")
 
         project = AgentStudioProject.init_project(
             base_path=base_path,
@@ -956,14 +988,15 @@ class AgentStudioCLI:
                 else:
                     menu_options.append(name)
 
-            branch_menu = TerminalMenu(menu_options, title="Select Branch")
-            branch_index = branch_menu.show()
-            if branch_index == -1:
+            branch_menu = questionary.select(
+                "Select Branch", choices=menu_options, use_search_filter=True, use_jk_keys=False
+            ).ask()
+            if not branch_menu:
                 warning("No branch selected. Exiting.")
                 return
 
             # Get the selected branch name (remove "(current)" suffix if present)
-            selected_option = menu_options[branch_index]
+            selected_option = branch_menu
             branch_name = selected_option.replace(" (current)", "")
 
         switch_ok = project.switch_branch(branch_name, force=force, format=format)
@@ -1066,7 +1099,7 @@ class AgentStudioCLI:
         cls,
         base_path: str,
         environment: str = None,
-        variant_id: str = None,
+        variant: str = None,
         channel: str = None,
         show_functions: bool = False,
         show_flow: bool = False,
@@ -1094,8 +1127,8 @@ class AgentStudioCLI:
             label += f" branch=[bold]{branch_label}[/bold]"
         else:
             label += f" ({environment})"
-        if variant_id:
-            label += f" variant=[bold]{variant_id}[/bold]"
+        if variant:
+            label += f" variant=[bold]{variant}[/bold]"
         info(f"Starting chat for {label}...")
 
         while True:
@@ -1105,7 +1138,7 @@ class AgentStudioCLI:
                 response = project.create_chat_session(
                     environment,
                     channel,
-                    variant_id,
+                    variant,
                 )
             except (requests.HTTPError, ValueError) as e:
                 error(f"Failed to create chat session: {e}")

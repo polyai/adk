@@ -962,24 +962,3 @@ class Function(Resource):
         content = utils.format_code_with_ruff(content, file_name)
         content = utils.restore_function_def_line(content, file_name)
         return content
-
-    def sync_resource(self, other_resource: "Function") -> "Function":
-        """Sync the resource with the other resource."""
-
-        synced_resource: Function = super().sync_resource(other_resource)
-        other_parameters_by_name = {p.name: p for p in other_resource.parameters}
-
-        for parameter in synced_resource.parameters:
-            if parameter.name in other_parameters_by_name:
-                other_parameter = other_parameters_by_name[parameter.name]
-                parameter.id = other_parameter.id
-
-        other_delay_resources_by_name = {
-            d.message: d for d in other_resource.latency_control.delay_responses
-        }
-        for delay_response in synced_resource.latency_control.delay_responses:
-            if delay_response.message in other_delay_resources_by_name:
-                other_delay_resource = other_delay_resources_by_name[delay_response.message]
-                delay_response.id = other_delay_resource.id
-
-        return synced_resource

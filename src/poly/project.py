@@ -50,12 +50,14 @@ from poly.resources import (
     VoiceGreeting,
     VoiceStylePrompt,
 )
+from poly.resources.resource import _parse_multi_resource_path
 from poly.utils import compute_variable_references
 
 logger = logging.getLogger(__name__)
 
 PROJECT_CONFIG_FILE = "project.yaml"
 STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
+_LEGACY_STATUS_FILE = ".agent_studio_config"
 
 
 # New resources to be added here
@@ -205,7 +207,7 @@ class AgentStudioProject:
         if not os.path.exists(config_file_path):
             raise FileNotFoundError(f"Config file not found at {config_file_path}")
 
-        with open(config_file_path, "r") as f:
+        with open(config_file_path, "r", encoding="utf-8") as f:
             config_dict = resource_utils.load_yaml(f) or {}
 
         # Load status file
@@ -383,7 +385,7 @@ class AgentStudioProject:
         if write_project_yaml:
             config_file_path = os.path.join(self.root_path, PROJECT_CONFIG_FILE)
             config_dict = self.build_project_config()
-            with open(config_file_path, "w") as f:
+            with open(config_file_path, "w", encoding="utf-8") as f:
                 yaml_content = resource_utils.dump_yaml(config_dict)
                 f.write(yaml_content)
 
@@ -463,14 +465,14 @@ class AgentStudioProject:
             new_resources, _, _ = self.find_new_kept_deleted(self.discover_local_resources())
             pronunciations = []
             for resource_mapping in new_resources:
+                # Because pronunciation uses position as a "name", deleting these out of order
+                # Effectively "changes" the name, causing some of the resources to not be deleted
                 if resource_mapping.resource_type == Pronunciation:
                     pronunciations.append(resource_mapping.file_path)
                 else:
                     resource_mapping.resource_type.delete_resource(resource_mapping.file_path)
 
-            # Because pronunciation uses position as a "name", deleting these out of order
-            # Effectively "changes" the name, causing some of the resources to not be deleted
-            for file_path in sorted(pronunciations, reverse=True):
+            for file_path in self._sort_paths_for_reverse_deletion(pronunciations, Pronunciation):
                 Pronunciation.delete_resource(file_path)
 
         utils.export_decorators(DECORATORS, self.root_path)
@@ -495,6 +497,23 @@ class AgentStudioProject:
             logger.info(f"Deleting empty folder: {folder_path}")
             os.rmdir(folder_path)
 
+    @staticmethod
+    def _sort_paths_for_reverse_deletion(
+        paths: set[str] | list[str], resource_type: type[Resource]
+    ) -> list[str]:
+        """Return paths in the order they should be deleted (highest index first).
+
+        For Pronunciation, uses the integer position segment so indices 10, 11, ...
+        come before 9. Other multi-resource types use lexicographic path order.
+        """
+        if resource_type is Pronunciation:
+            return sorted(
+                paths,
+                key=lambda p: int(_parse_multi_resource_path(p)[1][-1]),
+                reverse=True,
+            )
+        return sorted(paths, reverse=True)
+
     def _check_no_duplicate_resource_paths(
         self,
         resources: ResourceMap,
@@ -518,6 +537,148 @@ class AgentStudioProject:
                     )
                 seen_paths.add(file_path)
 
+    def _update_multi_resource_yaml_resources(
+        self,
+        original_resources: ResourceMap,
+        incoming_resources: ResourceMap,
+        original_resource_mappings: list[ResourceMapping],
+        incoming_resource_mappings: list[ResourceMapping],
+        force: bool,
+        format: bool = False,
+    ) -> list[str]:
+        """Merge MultiResourceYaml resources when pulling
+
+        As files are merged on a per file basis, we must first compute the whole file:
+        - From the original resources
+        - From the incoming resources
+        - From what's currently on disk (read + applying formatting)
+        Then perform the merge with that and the current file contents.
+        """
+        files_with_conflicts = []
+
+        # Merge MultiResourceYaml:
+        # Compute original file contents
+        original_file_contents = {}
+        local_file_paths: dict[type[Resource], list[str]] = {}
+        if not force:
+            # Get file for original resources
+            # To do this, we simulate a revert but only in cache
+            # 1. Save all original resources
+            # 2. Delete local resources that are not in the original resources
+            # 3. Save the cache and reset
+            MultiResourceYamlResource._file_cache.clear()
+            for resource_type, resources in original_resources.items():
+                if not issubclass(resource_type, MultiResourceYamlResource):
+                    continue
+
+                # Find local resources
+                local_resources_file_paths = resource_type.discover_resources(self.root_path)
+                original_resources_file_paths = set()
+
+                for resource in resources.values():
+                    original_resources_file_paths.add(resource.get_path(self.root_path))
+                    resource.save(
+                        self.root_path,
+                        resource_name=resource.name,
+                        resource_mappings=original_resource_mappings,
+                        format=format,
+                        save_to_cache=True,
+                    )
+
+                # Delete local resources that are not in the original resources
+                deleted_file_paths = set(local_resources_file_paths) - original_resources_file_paths
+                for file_path in self._sort_paths_for_reverse_deletion(
+                    deleted_file_paths, resource_type
+                ):
+                    resource_type.delete_resource(file_path, save_to_cache=True)
+
+                local_file_paths[resource_type] = local_resources_file_paths
+
+            original_file_contents = {
+                file: resource_utils.dump_yaml(top_level_yaml_dict)
+                for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
+            }
+
+        # Compute incoming file contents
+        incoming_file_contents = {}
+        MultiResourceYamlResource._file_cache.clear()
+        for resource_type, resources in incoming_resources.items():
+            if not issubclass(resource_type, MultiResourceYamlResource):
+                continue
+
+            # If the resource was added locally but not in the original resources,
+            # we need to discover the resources on disk
+            if resource_type not in local_file_paths:
+                local_file_paths[resource_type] = resource_type.discover_resources(self.root_path)
+
+            incoming_file_paths = set()
+            for resource in resources.values():
+                file_path = resource.get_path(self.root_path)
+                incoming_file_paths.add(file_path)
+                resource.save(
+                    self.root_path,
+                    resource_name=resource.name,
+                    resource_mappings=incoming_resource_mappings,
+                    format=format,
+                    save_to_cache=True,
+                )
+            if (
+                self._not_loaded_resources is not None
+                and resource_type in self._not_loaded_resources
+            ):
+                self._not_loaded_resources.remove(resource_type)
+
+            local_resource_file_paths = set(local_file_paths.get(resource_type, []))
+            deleted_file_paths = local_resource_file_paths - incoming_file_paths
+            for file_path in self._sort_paths_for_reverse_deletion(
+                deleted_file_paths, resource_type
+            ):
+                resource_type.delete_resource(file_path, save_to_cache=True)
+
+        incoming_file_contents = {
+            file: resource_utils.dump_yaml(top_level_yaml_dict)
+            for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
+        }
+
+        # Compute current file (formatted)
+        local_file_contents = {}
+        MultiResourceYamlResource._file_cache.clear()
+        if not force:
+            for file in incoming_file_contents.keys():
+                try:
+                    contents = Resource.read_from_file(file)
+                    if format:
+                        contents = MultiResourceYamlResource.format_resource(
+                            contents, file_name=file
+                        )
+                    local_file_contents[file] = contents
+                except FileNotFoundError:
+                    local_file_contents[file] = ""
+
+        # Save and compute merges
+        for file, incoming_content in incoming_file_contents.items():
+            if force:
+                MultiResourceYamlResource.save_to_file(incoming_content, file)
+                continue
+            original_content = original_file_contents.get(file, "")
+            local_content = local_file_contents.get(file, "")
+            merged_contents = utils.merge_strings(original_content, local_content, incoming_content)
+
+            if not merged_contents and os.path.exists(file):
+                # Delete the file
+                os.remove(file)
+                continue
+
+            if merged_contents == local_content:
+                continue
+
+            if resource_utils.contains_merge_conflict(merged_contents):
+                files_with_conflicts.append(file)
+            MultiResourceYamlResource.save_to_file(merged_contents, file)
+        MultiResourceYamlResource._file_cache.clear()
+
+        return files_with_conflicts
+
     def _update_pulled_resources(
         self,
         original_resources: ResourceMap,
@@ -537,8 +698,26 @@ class AgentStudioProject:
             self.resources
         )
 
+        # Merging is done on a per file basis.
+        # For most resources, a resource is a single file
+        # For MultiResourceYamlResources, a resource is part of a file,
+        # So we must first compute the whole file, so do merge process separately for each file.
+        files_with_conflicts.extend(
+            self._update_multi_resource_yaml_resources(
+                original_resources=self.resources,
+                incoming_resources=incoming_resources,
+                original_resource_mappings=original_resource_mappings,
+                incoming_resource_mappings=incoming_resource_mappings,
+                force=force,
+                format=format,
+            )
+        )
+
+        # For other resources, we follow the usual process
         for resource_type, incoming in incoming_resources.items():
-            save_to_cache = issubclass(resource_type, MultiResourceYamlResource)
+            if issubclass(resource_type, MultiResourceYamlResource):
+                continue
+
             for resource_id, incoming_resource in incoming.items():
                 # If force is True, overwrite local changes
                 # If the resource is not loaded, save it directly
@@ -551,59 +730,62 @@ class AgentStudioProject:
                         resource_name=incoming_resource.name,
                         resource_mappings=incoming_resource_mappings,
                         format=format,
-                        save_to_cache=save_to_cache,
                     )
                     continue
-                file_path = incoming_resource.get_path(self.root_path)
 
+                file_path = incoming_resource.get_path(self.root_path)
                 original_resource = (
                     original_resources.get(resource_type, {}).get(resource_id)
                     if original_resources.get(resource_type) is not None
                     else None
                 )
-                if original_resource is None:
-                    # If the resource does not exist locally, save it directly
-                    logger.info(
-                        f"Resource {incoming_resource.name} does not exist locally, "
-                        "saving directly."
+
+                if original_resource is not None:
+                    # Merge the original, local, and incoming contents
+                    original_content = original_resource.to_pretty(
+                        resource_name=original_resource.name,
+                        resource_mappings=original_resource_mappings,
                     )
-                    incoming_resource.save(
-                        self.root_path,
-                        resource_name=incoming_resource.name,
-                        resource_mappings=incoming_resource_mappings,
-                        format=format,
-                        save_to_cache=save_to_cache,
-                    )
+                    local_file_path = original_resource.get_path(self.root_path)
+                else:
+                    original_content = ""
+                    local_file_path = incoming_resource.get_path(self.root_path)
+                try:
+                    local_content = resource_type.read_from_file(local_file_path)
+                except FileNotFoundError:
+                    # If local file doesn't exist:
+                    # If no original content, save the incoming content
+                    # If original, assume user deleted it and don't save anything
+                    if not original_content:
+                        logger.info(
+                            f"Resource {incoming_resource.name} does not exist locally, "
+                            "saving directly."
+                        )
+                        incoming_resource.save(
+                            self.root_path,
+                            resource_name=incoming_resource.name,
+                            resource_mappings=incoming_resource_mappings,
+                            format=format,
+                        )
                     continue
 
-                # Merge the original, local, and incoming contents
-                original_content = original_resource.to_pretty(
-                    resource_name=original_resource.name,
-                    resource_mappings=original_resource_mappings,
-                )
                 incoming_content = incoming_resource.to_pretty(
                     resource_name=incoming_resource.name,
                     resource_mappings=incoming_resource_mappings,
                 )
 
-                local_file_path = original_resource.get_path(self.root_path)
-                try:
-                    local_content = original_resource.read_from_file(local_file_path)
-                except FileNotFoundError:
-                    # File deleted locally
-                    continue
-
                 # If formatting is requested, format the original and incoming contents
                 if format:
-                    incoming_content = incoming_resource.format_resource(
+                    incoming_content = resource_type.format_resource(
                         incoming_content,
                         file_name=incoming_resource.name,
                     )
-                    original_content = original_resource.format_resource(
-                        original_content,
-                        file_name=original_resource.name,
-                    )
-                    local_content = incoming_resource.format_resource(
+                    if original_content:
+                        original_content = resource_type.format_resource(
+                            original_content,
+                            file_name=original_resource.name,
+                        )
+                    local_content = resource_type.format_resource(
                         local_content,
                         file_name=incoming_resource.name,
                     )
@@ -618,27 +800,15 @@ class AgentStudioProject:
                 if resource_utils.contains_merge_conflict(merged_contents):
                     files_with_conflicts.append(file_path)
 
-                if isinstance(incoming_resource, MultiResourceYamlResource):
-                    merged_data = resource_utils.load_yaml(merged_contents) or {}
-                    updated_resource = type(incoming_resource).from_yaml_dict(
-                        merged_data,
-                        resource_id=incoming_resource.resource_id,
-                        name=incoming_resource.name,
-                    )
-                    updated_resource.save(
-                        self.root_path,
-                        resource_name=updated_resource.name,
-                        resource_mappings=incoming_resource_mappings,
-                        format=format,
-                        save_to_cache=save_to_cache,
-                    )
-                else:
-                    incoming_resource.save_to_file(
-                        merged_contents,
-                        file_path,
-                    )
+                incoming_resource.save_to_file(
+                    merged_contents,
+                    file_path,
+                )
 
-                if original_resource.get_path(self.root_path) != file_path:
+                if (
+                    original_resource is not None
+                    and original_resource.get_path(self.root_path) != file_path
+                ):
                     # If the file path has changed, remove the old file
                     old_file_path = original_resource.get_path(self.root_path)
                     if os.path.exists(old_file_path):
@@ -651,20 +821,8 @@ class AgentStudioProject:
             }
             incoming_files = {res.get_path(self.root_path) for res in incoming.values()}
             deleted_files = set(original_files) - set(incoming_files)
-            pronunciations = []
             for file_path in deleted_files:
-                if "pronunciations.yaml" in file_path:
-                    pronunciations.append(file_path)
-                else:
-                    resource_type.delete_resource(file_path, save_to_cache=save_to_cache)
-
-            # Because pronunciation uses position as a "name", deleting these out of order
-            # Effectively "changes" the name, causing some of the resources to not be deleted
-            for file_path in sorted(pronunciations, reverse=True):
-                resource_type.delete_resource(file_path, save_to_cache=save_to_cache)
-
-            if save_to_cache and issubclass(resource_type, MultiResourceYamlResource):
-                resource_type.write_cache_to_file()
+                resource_type.delete_resource(file_path)
 
             if (
                 self._not_loaded_resources is not None
@@ -1021,6 +1179,9 @@ class AgentStudioProject:
         On creating a new flow, group flow steps/functions under
         their flow config.
 
+        If new flow has function step as start step, create referencing a dummy default step.
+        Then update the flow config to use the new step.
+
         When deleting a flow, only send a command to delete the flow config,
         not the steps/functions.
 
@@ -1116,6 +1277,40 @@ class AgentStudioProject:
             flow_config.steps = steps
             flow_config.functions = functions
 
+            function_start_step = next(
+                (
+                    step
+                    for step in new_resources.get(FunctionStep, {}).values()
+                    if step.step_id == flow_config.start_step
+                    and step.flow_id == flow_config.resource_id
+                ),
+                None,
+            )
+            if function_start_step:
+                # Create a dummy default step
+                dummy_step_id = f"{function_start_step.step_id}_start_step_temp"
+                dummy = FlowStep(
+                    resource_id=f"{flow_config.name}_{dummy_step_id}",
+                    step_id=dummy_step_id,
+                    name=f"{flow_config.name}-temp",
+                    flow_id=flow_config.resource_id,
+                    flow_name=flow_config.name,
+                    step_type=StepType.DEFAULT_STEP,
+                    prompt="temp prompt",
+                )
+                flow_config.steps.append(dummy)
+                flow_config.start_step = dummy.step_id
+                reset_flow_config = FlowConfig(
+                    resource_id=flow_config.resource_id,
+                    name=flow_config.name,
+                    description=flow_config.description,
+                    start_step=function_start_step.step_id,
+                )
+                updated_resources.setdefault(FlowConfig, {})[flow_config.resource_id] = (
+                    reset_flow_config
+                )
+                post_push_deleted_resources.setdefault(FlowStep, {})[dummy.resource_id] = dummy
+
         # Deleting flow config deletes all its steps/functions, so we don't need to
         for flow_config_id in deleted_resources.get(FlowConfig, {}):
             for resource_type in [FlowStep, Function, FunctionStep]:
@@ -1129,6 +1324,8 @@ class AgentStudioProject:
         # If we are deleting a start step and updating the flow config to use a different step,
         # we need to delete the start step after the creation of the new one
         for flow_config_id, flow_config in updated_resources.get(FlowConfig, {}).items():
+            if flow_config_id in new_resources.get(FlowConfig, {}):
+                continue
             old_flow_config = self.resources.get(FlowConfig, {}).get(flow_config_id)
             old_step_resource_id = f"{old_flow_config.name}_{old_flow_config.start_step}"
 
@@ -1314,11 +1511,10 @@ class AgentStudioProject:
             files (list[str]): List of specific files to revert.
         """
         reverted_files = []
+        resource_mappings = self._make_resource_mappings(self.resources)
         for resource in self.all_resources:
             if not all_files and files and resource.get_path(self.root_path) not in files:
                 continue
-
-            resource_mappings = self._make_resource_mappings(self.resources)
 
             resource.save(self.root_path, resource_mappings=resource_mappings)
             reverted_files.append(resource.get_path(self.root_path))
@@ -1526,23 +1722,29 @@ class AgentStudioProject:
         return discovered_resources
 
     def read_local_resource(
-        self, resource: ResourceMapping, resource_mappings: list[ResourceMapping]
+        self,
+        resource: ResourceMapping,
+        resource_mappings: list[ResourceMapping],
+        original_resource: Optional[Resource] = None,
     ) -> Resource:
         """Read a local resource from the given resource mapping.
 
         Args:
-            resource_mapping (ResourceMapping): The resource mapping information.
-
+            resource (ResourceMapping): The resource mapping information.
+            resource_mappings (list[ResourceMapping]): All resource mappings for reference resolution.
+            original_resource (Resource): Optional. When provided (e.g. sync re-read), use for
+                known_* kwargs instead of looking up by resource.resource_id. This is used to read
+                ids/positions for subresources.
         Returns:
             Resource: The resource instance.
         """
         resource_class = resource.resource_type
 
         additional_kwargs = {}
-        original_resource = None
+        if original_resource is None:
+            original_resource = self.resources.get(resource_class, {}).get(resource.resource_id)
         # Need to pass parameters for Function resources to extract param ids
         if resource_class == Function:
-            original_resource = self.resources.get(resource_class, {}).get(resource.resource_id)
             additional_kwargs["known_parameters"] = []
             additional_kwargs["known_latency_control"] = {}
 
@@ -1553,7 +1755,6 @@ class AgentStudioProject:
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
 
         if resource_class == FlowStep:
-            original_resource = self.resources.get(resource_class, {}).get(resource.resource_id)
             additional_kwargs["known_conditions"] = []
             additional_kwargs["known_position"] = None
 
@@ -1564,7 +1765,6 @@ class AgentStudioProject:
                 additional_kwargs["known_position"] = original_resource.position
 
         if resource_class == FunctionStep:
-            original_resource = self.resources.get(resource_class, {}).get(resource.resource_id)
             additional_kwargs["known_function_id"] = None
             additional_kwargs["known_position"] = None
             additional_kwargs["known_latency_control"] = {}
@@ -1863,7 +2063,7 @@ class AgentStudioProject:
         self,
         environment: str,
         channel: str,
-        variant_id: Optional[str],
+        variant: Optional[str],
     ) -> dict:
         """Create a chat session (standard or draft).
 
@@ -1873,7 +2073,7 @@ class AgentStudioProject:
         Args:
             environment (str): The environment to create the chat session in: draft, sandbox, pre-release or live.
             channel (str): The channel to create the chat session in: chat.polyai or webchat.polyai.
-            variant_id (ty.Optional[str]): The variant ID to create the chat session in.
+            variant (ty.Optional[str]): The variant ID to create the chat session in.
 
         Returns:
             dict: API response with conversation_id and initial greeting.
@@ -1897,7 +2097,7 @@ class AgentStudioProject:
                 artifact_version=artifact_version,
                 lambda_deployment_version=lambda_deployment_version,
                 channel=channel,
-                variant_id=variant_id,
+                variant_id=variant,
             )
 
         return AgentStudioInterface.create_chat(
@@ -1905,7 +2105,7 @@ class AgentStudioProject:
             account_id=self.account_id,
             project_id=self.project_id,
             environment=environment,
-            variant_id=variant_id,
+            variant_id=variant,
             channel=channel,
         )
 
@@ -2223,86 +2423,79 @@ class AgentStudioProject:
             raise ValueError("Cannot sync ids due to uncommitted changes.")
 
         sandbox_resources = self.get_remote_resources_by_name("main")
-        # Build lookup by (resource_type, name) -> Resource (not ResourceMapping)
-        sandbox_resource_lookup: dict[tuple[ResourceType, str], Resource] = {}
-        for resource_type, resources_dict in sandbox_resources.items():
+        # Build lookup by file path -> Resource
+        sandbox_resource_lookup: dict[str, Resource] = {}
+        for resources_dict in sandbox_resources.values():
+            for resource in resources_dict.values():
+                sandbox_resource_lookup[resource.file_path] = resource
+
+        # 1. Build sync resource_mappings: use sandbox id when there is a sandbox match by file_path
+        sync_mappings: list[ResourceMapping] = []
+        for resource_type, resources_dict in self.resources.items():
             for resource_id, resource in resources_dict.items():
-                sandbox_resource_lookup[(resource_type, resource.name)] = resource
+                sandbox_version = sandbox_resource_lookup.get(resource.file_path)
+                mapping_resource_id = (
+                    sandbox_version.resource_id if sandbox_version else resource.resource_id
+                )
+                resource_path = resource.get_path(self.root_path)
+                sync_mappings.append(
+                    ResourceMapping(
+                        resource_id=mapping_resource_id,
+                        resource_type=resource_type,
+                        resource_name=resource.name,
+                        file_path=resource_path,
+                        flow_name=(
+                            resource.name
+                            if isinstance(resource, FlowConfig)
+                            else getattr(resource, "flow_name", None)
+                        ),
+                        resource_prefix=resource.get_resource_prefix(file_path=resource.file_path),
+                    )
+                )
 
-        # For all the current resources:
-        # If they exist in sandbox and have a different ID
-        # - Delete resource with old ID
-        # - Create new resource with new ID
-
-        # After done, loop through all current resources and see if any need to be updated to refer to the new ID
-        # - Update resource with new ID
-
-        deleted_resources = {}
-        new_resources = {}
-        updated_resources = {}
+        # 2. Re-read all resources with sync mappings (references resolve from mappings)
+        branch_by_path: dict[str, tuple[type[Resource], str, Resource]] = {}
+        for resource_type, resources_dict in self.resources.items():
+            for resource_id, resource in resources_dict.items():
+                path = resource.file_path
+                branch_by_path[path] = (resource_type, resource_id, resource)
 
         new_state: ResourceMap = {}
+        for mapping in sync_mappings:
+            relative_file_path = os.path.relpath(mapping.file_path, self.root_path)
+            original = branch_by_path.get(relative_file_path)
+            branch_resource = original[2] if original else None
+            sandbox_resource = sandbox_resource_lookup.get(relative_file_path, branch_resource)
+            local_resource = self.read_local_resource(
+                resource=mapping,
+                resource_mappings=sync_mappings,
+                original_resource=sandbox_resource,
+            )
 
-        for resource_type, resources in self.resources.items():
-            for resource_id, resource in resources.items():
-                sandbox_version = sandbox_resource_lookup.get((resource_type, resource.name))
-                if sandbox_version:
-                    synced_resource = resource.sync_resource(sandbox_version)
-                    if synced_resource != resource:
-                        new_resources.setdefault(resource_type, {})[synced_resource.resource_id] = (
-                            synced_resource
-                        )
-                        deleted_resources.setdefault(resource_type, {})[resource_id] = resource
+            new_state.setdefault(mapping.resource_type, {})[mapping.resource_id] = local_resource
 
-                    new_state.setdefault(resource_type, {})[synced_resource.resource_id] = (
-                        synced_resource
-                    )
-                else:
-                    new_state.setdefault(resource_type, {})[resource_id] = resource
+        # 3. Compare new_state vs self.resources by file_path -> new/deleted/updated
+        deleted_resources: ResourceMap = {}
+        new_resources: ResourceMap = {}
+        updated_resources: ResourceMap = {}
 
-        if not new_resources:
+        for resource_type, resources_dict in new_state.items():
+            for new_id, resource in resources_dict.items():
+                path = resource.get_path(self.root_path)
+                relative_file_path = os.path.relpath(path, self.root_path)
+                branch = branch_by_path.get(relative_file_path)
+                if not branch:
+                    continue
+                _, old_id, branch_resource = branch
+                if old_id != new_id:
+                    new_resources.setdefault(resource_type, {})[new_id] = resource
+                    deleted_resources.setdefault(resource_type, {})[old_id] = branch_resource
+                elif resource != branch_resource:
+                    updated_resources.setdefault(resource_type, {})[new_id] = resource
+
+        if not (new_resources or deleted_resources or updated_resources):
             logger.info("No resources required to be synced.")
             return True
-
-        new_resource_mappings = self._make_resource_mappings(new_state)
-
-        # Get updated resources
-        # Re-read resources from disk with new mappings to update any references to changed IDs
-        for resource_type, resources_dict in new_state.items():
-            for resource_id, resource in resources_dict.items():
-                if resource_id in new_resources.get(resource_type, {}):
-                    continue
-
-                # Get the original hash before re-reading
-                original_resource_hash = self.file_structure_info.get(resource.file_path, {}).get(
-                    "hash"
-                )
-                if not original_resource_hash:
-                    # If no original hash, compute from current resource
-                    original_resource_hash = resource.compute_hash()
-
-                # Re-read the resource from disk with updated mappings
-                # This will automatically update any references to resources whose IDs changed
-                local_resource = self.read_local_resource(
-                    resource=ResourceMapping(
-                        resource_type=resource_type,
-                        resource_id=resource_id,
-                        resource_name=resource.name,
-                        file_path=resource.get_path(self.root_path),
-                        flow_name=getattr(resource, "flow_name", None),
-                        resource_prefix=resource_type.get_resource_prefix(
-                            file_path=resource.file_path
-                        ),
-                    ),
-                    resource_mappings=new_resource_mappings,
-                )
-
-                has_changed, _ = local_resource.get_status(original_resource_hash)
-
-                if has_changed:
-                    # Update new_state with the re-read resource (which has updated references)
-                    new_state[resource_type][resource_id] = local_resource
-                    updated_resources.setdefault(resource_type, {})[resource_id] = local_resource
 
         subresource_changes = self._get_updated_subresources(
             new_resources,

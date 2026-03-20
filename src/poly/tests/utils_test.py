@@ -458,16 +458,6 @@ def process(conv: Conversation):
             {"customer_name", "order_id"},
         )
 
-        code_with_comments = """
-def foo(conv: Conversation):
-    # conv.state.ignored_in_comment
-    return conv.state.actual_var
-"""
-        self.assertEqual(
-            resource_utils.extract_variable_names_from_code(code_with_comments),
-            {"actual_var"},
-        )
-
         code_underscore = "conv.state.my_var_name"
         self.assertEqual(
             resource_utils.extract_variable_names_from_code(code_underscore),

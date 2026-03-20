@@ -64,7 +64,10 @@ class ExperimentalConfig(Resource):
     def validate(self, **kwargs):
         # Validate against schema
         openapi_schema = utils.load_yaml(
-            open(os.path.join(os.path.dirname(__file__), "experimental_config_schema.yaml"))
+            open(
+                os.path.join(os.path.dirname(__file__), "experimental_config_schema.yaml"),
+                encoding="utf-8",
+            )
         )
         additional_features = openapi_schema["components"]["schemas"]["additional_features"]
         resolver = jsonschema.RefResolver.from_schema(openapi_schema)

@@ -217,9 +217,12 @@ class Pronunciation(MultiResourceYamlResource):
         true_file_path, segments = _parse_multi_resource_path(file_path)
         resource_clean_name = segments[-1]
         if not os.path.exists(true_file_path):
-            type(self).save_to_file(f"{self.top_level_name}: []", true_file_path)
+            if not save_to_cache:
+                self.save_to_file(f"{self.top_level_name}: []", true_file_path)
+            else:
+                self._file_cache.setdefault(true_file_path, (0.0, {self.top_level_name: []}))
 
-        top_level_yaml_dict = type(self)._get_top_level_data(true_file_path)
+        top_level_yaml_dict = self._get_top_level_data(true_file_path)
         yaml_list = list(top_level_yaml_dict.get(self.top_level_name, []))
         if not isinstance(yaml_list, list):
             raise ValueError(f"Top level YAML data is not a list: {top_level_yaml_dict}")
@@ -237,9 +240,9 @@ class Pronunciation(MultiResourceYamlResource):
                 yaml_list.append(yaml_content)
 
         top_level_yaml_dict[self.top_level_name] = yaml_list
-        type(self)._update_cache_after_write(true_file_path, top_level_yaml_dict)
+        self._update_cache_after_write(true_file_path, top_level_yaml_dict)
         if not save_to_cache:
-            type(self).save_to_file(utils.dump_yaml(top_level_yaml_dict), true_file_path)
+            self.save_to_file(utils.dump_yaml(top_level_yaml_dict), true_file_path)
 
     @classmethod
     def delete_resource(cls, file_path: str, save_to_cache: bool = False) -> None:

@@ -5,6 +5,7 @@ Copyright PolyAI Limited
 
 import os
 import unittest
+from io import StringIO
 from unittest.mock import MagicMock, patch
 
 from poly.cli import AgentStudioCLI
@@ -151,3 +152,40 @@ class FormatCommandTest(unittest.TestCase):
         AgentStudioCLI.format(TEST_DIR, [], check_only=False)
 
         proj.format_files.assert_called_once_with(files=None, check_only=False)
+
+
+class CompletionCommandTest(unittest.TestCase):
+    """Tests for the completion command."""
+
+    def test_completion_bash_outputs_script(self):
+        """poly completion bash prints a non-empty bash completion script."""
+        with patch("sys.stdout", new_callable=StringIO) as mock_out:
+            AgentStudioCLI.print_completion("bash")
+            output = mock_out.getvalue()
+        self.assertTrue(len(output) > 0)
+
+    def test_completion_zsh_outputs_script(self):
+        """poly completion zsh prints a non-empty zsh completion script."""
+        with patch("sys.stdout", new_callable=StringIO) as mock_out:
+            AgentStudioCLI.print_completion("zsh")
+            output = mock_out.getvalue()
+        self.assertTrue(len(output) > 0)
+
+    def test_completion_fish_outputs_script(self):
+        """poly completion fish prints a non-empty fish completion script."""
+        with patch("sys.stdout", new_callable=StringIO) as mock_out:
+            AgentStudioCLI.print_completion("fish")
+            output = mock_out.getvalue()
+        self.assertTrue(len(output) > 0)
+
+    def test_completion_bash_references_poly(self):
+        """bash completion script references the poly command."""
+        with patch("sys.stdout", new_callable=StringIO) as mock_out:
+            AgentStudioCLI.print_completion("bash")
+            output = mock_out.getvalue()
+        self.assertIn("poly", output)
+
+    def test_completion_invalid_shell_rejected_by_parser(self):
+        """Parser rejects shell choices outside bash/zsh/fish."""
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI.main(sys_args=["completion", "powershell"])
