@@ -274,39 +274,6 @@ class DiffOutputJsonTests(unittest.TestCase):
         self.assertEqual(output["files"], [])
 
 
-class DiffOutputCommandsTests(unittest.TestCase):
-    """Tests for poly diff with --output commands."""
-
-    @patch("poly.cli.AgentStudioCLI._load_project")
-    def test_diff_commands_outputs_commands_key(self, mock_load):
-        """diff(output='commands') should print JSON with a 'commands' key."""
-        project = mock_load.return_value
-        cmd = Command()
-        cmd.type = "update_function"
-        project.generate_push_commands.return_value = [cmd]
-
-        buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.diff("/fake/project", files=[], output="commands")
-
-        output = json.loads(buf.getvalue())
-        self.assertIn("commands", output)
-        self.assertEqual(output["commands"][0]["type"], "update_function")
-
-    @patch("poly.cli.AgentStudioCLI._load_project")
-    def test_diff_commands_does_not_call_diff(self, mock_load):
-        """diff(output='commands') should skip _diff entirely and use generate_push_commands."""
-        project = mock_load.return_value
-        project.generate_push_commands.return_value = []
-
-        buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.diff("/fake/project", files=[], output="commands")
-
-        project.generate_push_commands.assert_called_once_with(skip_validation=True)
-        project.get_diffs.assert_not_called()
-
-
 class ValidateOutputJsonTests(unittest.TestCase):
     """Tests for poly validate with --output json."""
 
@@ -366,52 +333,6 @@ class ValidateOutputJsonTests(unittest.TestCase):
         self.assertEqual(output["errors"][1]["message"], "Some other error without file path")
 
 
-class ValidateOutputCommandsTests(unittest.TestCase):
-    """Tests for poly validate with --output commands."""
-
-    @patch("poly.cli.AgentStudioCLI._load_project")
-    def test_validate_commands_outputs_commands_key(self, mock_load):
-        """validate(output='commands') should print JSON with a 'commands' key."""
-        project = mock_load.return_value
-        cmd = Command()
-        cmd.type = "create_flow"
-        project.generate_push_commands.return_value = [cmd]
-
-        buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.validate_project("/fake/project", output="commands")
-
-        output = json.loads(buf.getvalue())
-        self.assertIn("commands", output)
-        self.assertEqual(output["commands"][0]["type"], "create_flow")
-
-    @patch("poly.cli.AgentStudioCLI._load_project")
-    def test_validate_commands_skips_validation(self, mock_load):
-        """validate(output='commands') should call generate_push_commands with skip_validation=True."""
-        project = mock_load.return_value
-        project.generate_push_commands.return_value = []
-
-        buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.validate_project("/fake/project", output="commands")
-
-        project.generate_push_commands.assert_called_once_with(skip_validation=True)
-        # validate_project() should NOT be called when output is "commands"
-        project.validate_project.assert_not_called()
-
-    @patch("poly.cli.AgentStudioCLI._load_project")
-    def test_validate_commands_does_not_exit_on_empty(self, mock_load):
-        """validate(output='commands') with no commands should not call sys.exit."""
-        project = mock_load.return_value
-        project.generate_push_commands.return_value = []
-
-        buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf), patch("poly.cli.sys.exit") as mock_exit:
-            AgentStudioCLI.validate_project("/fake/project", output="commands")
-
-        mock_exit.assert_not_called()
-
-
 class PushOutputJsonTests(unittest.TestCase):
     """Tests for poly push with --output json."""
 
@@ -442,35 +363,3 @@ class PushOutputJsonTests(unittest.TestCase):
         output = json.loads(buf.getvalue())
         self.assertFalse(output["success"])
         mock_exit.assert_called_once_with(1)
-
-
-class PushOutputCommandsTests(unittest.TestCase):
-    """Tests for poly push with --output commands."""
-
-    @patch("poly.cli.AgentStudioCLI._load_project")
-    def test_push_commands_outputs_commands_key(self, mock_load):
-        """push(output='commands') should print JSON with a 'commands' key."""
-        project = mock_load.return_value
-        cmd = Command()
-        cmd.type = "create_topic"
-        project.generate_push_commands.return_value = [cmd]
-
-        buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.push("/fake/project", output="commands")
-
-        output = json.loads(buf.getvalue())
-        self.assertIn("commands", output)
-        self.assertEqual(output["commands"][0]["type"], "create_topic")
-
-    @patch("poly.cli.AgentStudioCLI._load_project")
-    def test_push_commands_does_not_actually_push(self, mock_load):
-        """push(output='commands') should not call push_project."""
-        project = mock_load.return_value
-        project.generate_push_commands.return_value = []
-
-        buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.push("/fake/project", output="commands")
-
-        project.push_project.assert_not_called()

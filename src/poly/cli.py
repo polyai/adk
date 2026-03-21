@@ -218,9 +218,9 @@ class AgentStudioCLI:
         push_parser.add_argument(
             "--output",
             type=str,
-            choices=["json", "commands"],
+            choices=["json"],
             default=None,
-            help="Output format: 'json' for machine-readable JSON, 'commands' for generated SDK push commands.",
+            help="Output format: 'json' for machine-readable JSON.",
         )
 
         # STATUS
@@ -299,9 +299,9 @@ class AgentStudioCLI:
         diff_parser.add_argument(
             "--output",
             type=str,
-            choices=["json", "commands"],
+            choices=["json"],
             default=None,
-            help="Output format: 'json' for machine-readable JSON, 'commands' for generated SDK push commands.",
+            help="Output format: 'json' for machine-readable JSON.",
         )
 
         # REVIEW
@@ -435,9 +435,9 @@ class AgentStudioCLI:
         validate_parser.add_argument(
             "--output",
             type=str,
-            choices=["json", "commands"],
+            choices=["json"],
             default=None,
-            help="Output format: 'json' for machine-readable JSON, 'commands' for generated SDK push commands.",
+            help="Output format: 'json' for machine-readable JSON.",
         )
 
         # CHAT
@@ -795,11 +795,6 @@ class AgentStudioCLI:
         """Push the project configuration to the Agent Studio."""
         project = cls._load_project(base_path)
 
-        if output == "commands":
-            commands = project.generate_push_commands(skip_validation=skip_validation)
-            json_print({"commands": commands_to_dicts(commands)})
-            return project
-
         if output != "json":
             info(
                 f"Pushing local changes for [bold]{project.account_id}/{project.project_id}[/bold]..."
@@ -906,12 +901,6 @@ class AgentStudioCLI:
     @classmethod
     def diff(cls, base_path: str, files: list[str] = None, output: Optional[str] = None) -> None:
         """Show the changes made to the project."""
-        if output == "commands":
-            project = cls._load_project(base_path)
-            commands = project.generate_push_commands(skip_validation=True)
-            json_print({"commands": commands_to_dicts(commands)})
-            return
-
         diffs = cls._diff(base_path, files) or {}
 
         if output == "json":
@@ -1342,11 +1331,6 @@ class AgentStudioCLI:
     def validate_project(cls, base_path: str, output: Optional[str] = None) -> None:
         """Validate the project configuration locally."""
         project = cls._load_project(base_path)
-
-        if output == "commands":
-            commands = project.generate_push_commands(skip_validation=True)
-            json_print({"commands": commands_to_dicts(commands)})
-            return
 
         errors = project.validate_project()
 
