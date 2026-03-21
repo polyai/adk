@@ -117,6 +117,14 @@ class AgentStudioInterface:
         """
         return self.sync_client.pull_resources()
 
+    def get_queued_commands(self) -> list:
+        """Return a copy of the sync client's current command queue.
+
+        Returns:
+            list: A copy of the queued Command protobuf messages.
+        """
+        return self.sync_client.get_queued_commands()
+
     def push_resources(
         self,
         deleted_resources: dict[type[BaseResource], dict[str, BaseResource]],

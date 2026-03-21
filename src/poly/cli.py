@@ -37,6 +37,7 @@ from poly.console import (
     warning,
 )
 from poly.handlers.github_api_handler import GitHubAPIHandler
+from poly.output import commands_to_dicts, json_print
 from poly.handlers.interface import (
     REGIONS,
     AgentStudioInterface,
@@ -231,6 +232,13 @@ class AgentStudioCLI:
             Base path to check the project status. Defaults to current working directory.
             """,
         )
+        status_parser.add_argument(
+            "--output",
+            type=str,
+            choices=["json", "commands"],
+            default=None,
+            help="Output format: 'json' for machine-readable JSON, 'commands' for generated SDK push commands.",
+        )
 
         # REVERT
         revert_parser = subparsers.add_parser(
@@ -280,6 +288,13 @@ class AgentStudioCLI:
             "files",
             nargs="*",
             help=("List of files to show changes for. If not specified, shows all changes."),
+        )
+        diff_parser.add_argument(
+            "--output",
+            type=str,
+            choices=["json", "commands"],
+            default=None,
+            help="Output format: 'json' for machine-readable JSON, 'commands' for generated SDK push commands.",
         )
 
         # REVIEW
@@ -410,6 +425,13 @@ class AgentStudioCLI:
             default=os.getcwd(),
             help="Base path to validate the project. Defaults to current working directory.",
         )
+        validate_parser.add_argument(
+            "--output",
+            type=str,
+            choices=["json", "commands"],
+            default=None,
+            help="Output format: 'json' for machine-readable JSON, 'commands' for generated SDK push commands.",
+        )
 
         # CHAT
         chat_parser = subparsers.add_parser(
@@ -526,13 +548,13 @@ class AgentStudioCLI:
             cls.push(args.path, args.force, args.skip_validation, args.dry_run, args.format)
 
         elif args.command == "status":
-            cls.status(args.path)
+            cls.status(args.path, output=getattr(args, "output", None))
 
         elif args.command == "revert":
             cls.revert(args.path, args.all, args.files)
 
         elif args.command == "diff":
-            cls.diff(args.path, args.files)
+            cls.diff(args.path, args.files, output=getattr(args, "output", None))
 
         elif args.command == "review":
             if args.delete:
@@ -574,7 +596,7 @@ class AgentStudioCLI:
             )
 
         elif args.command == "validate":
-            cls.validate_project(args.path)
+            cls.validate_project(args.path, output=getattr(args, "output", None))
 
         elif args.command == "docs":
             cls.docs(
@@ -771,13 +793,33 @@ class AgentStudioCLI:
         return project
 
     @classmethod
-    def status(cls, base_path: str) -> None:
+    def status(cls, base_path: str, output: Optional[str] = None) -> None:
         """Check the changed files of the project."""
         project = cls._load_project(base_path)
 
-        files_with_conflicts, modified_files, new_files, deleted_files = project.project_status()
+        if output == "commands":
+            commands = project.generate_push_commands(skip_validation=True)
+            json_print({"commands": commands_to_dicts(commands)})
+            return
 
+        files_with_conflicts, modified_files, new_files, deleted_files = project.project_status()
         branch_info = project.get_current_branch()
+
+        if output == "json":
+
+            def _relativize(paths: list[str]) -> list[str]:
+                return [os.path.relpath(p, project.root_path) for p in paths]
+
+            json_print(
+                {
+                    "branch": branch_info,
+                    "conflicts": _relativize(files_with_conflicts),
+                    "new": _relativize(new_files),
+                    "modified": _relativize(modified_files),
+                    "deleted": _relativize(deleted_files),
+                }
+            )
+            return
 
         print_status(
             region=project.region,
@@ -831,9 +873,31 @@ class AgentStudioCLI:
         return diffs
 
     @classmethod
-    def diff(cls, base_path: str, files: list[str] = None) -> None:
+    def diff(cls, base_path: str, files: list[str] = None, output: Optional[str] = None) -> None:
         """Show the changes made to the project."""
+        if output == "commands":
+            project = cls._load_project(base_path)
+            commands = project.generate_push_commands(skip_validation=True)
+            json_print({"commands": commands_to_dicts(commands)})
+            return
+
         diffs = cls._diff(base_path, files) or {}
+
+        if output == "json":
+            project = cls._load_project(base_path)
+            json_print(
+                {
+                    "files": [
+                        {
+                            "path": os.path.relpath(file_path, project.root_path),
+                            "diff": diff_text,
+                        }
+                        for file_path, diff_text in diffs.items()
+                    ]
+                }
+            )
+            return
+
         for file_path, diff_text in diffs.items():
             console.rule(f"[bold]{file_path}[/bold]")
             print_diff(diff_text)
@@ -1244,11 +1308,31 @@ class AgentStudioCLI:
         return restart
 
     @classmethod
-    def validate_project(cls, base_path: str) -> None:
+    def validate_project(cls, base_path: str, output: Optional[str] = None) -> None:
         """Validate the project configuration locally."""
         project = cls._load_project(base_path)
 
+        if output == "commands":
+            commands = project.generate_push_commands(skip_validation=True)
+            json_print({"commands": commands_to_dicts(commands)})
+            return
+
         errors = project.validate_project()
+
+        if output == "json":
+            parsed_errors = []
+            for err in errors:
+                parts = err.split(": ", 1)
+                if len(parts) == 2 and parts[0].startswith("Validation error in "):
+                    file_path = parts[0].removeprefix("Validation error in ")
+                    parsed_errors.append({"file": file_path, "message": err})
+                else:
+                    parsed_errors.append({"file": None, "message": err})
+            json_print({"valid": len(errors) == 0, "errors": parsed_errors})
+            if errors:
+                sys.exit(1)
+            return
+
         if not errors:
             success("Project configuration is valid.")
         else:

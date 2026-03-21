@@ -113,6 +113,14 @@ class SyncClientHandler:
         """Get the Sourcerer SDK instance."""
         return self._sdk
 
+    def get_queued_commands(self) -> list[Command]:
+        """Return a copy of the current command queue.
+
+        Returns:
+            list[Command]: A copy of the queued Command protobuf messages.
+        """
+        return list(self.sdk._command_queue)
+
     def _load_resources(self, projection: dict) -> dict[type[Resource], dict[str, Resource]]:
         return {
             Topic: self._read_topics_from_projection(projection),
