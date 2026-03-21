@@ -410,3 +410,67 @@ class ValidateOutputCommandsTests(unittest.TestCase):
             AgentStudioCLI.validate_project("/fake/project", output="commands")
 
         mock_exit.assert_not_called()
+
+
+class PushOutputJsonTests(unittest.TestCase):
+    """Tests for poly push with --output json."""
+
+    @patch("poly.cli.AgentStudioCLI._load_project")
+    def test_push_json_success(self, mock_load):
+        """push(output='json') on success should emit JSON with success=true."""
+        project = mock_load.return_value
+        project.push_project.return_value = (True, "Resources pushed successfully.")
+
+        buf = io.StringIO()
+        with patch("poly.output.sys.stdout", buf):
+            AgentStudioCLI.push("/fake/project", output="json")
+
+        output = json.loads(buf.getvalue())
+        self.assertTrue(output["success"])
+        self.assertEqual(output["message"], "Resources pushed successfully.")
+
+    @patch("poly.cli.AgentStudioCLI._load_project")
+    def test_push_json_failure_exits(self, mock_load):
+        """push(output='json') on failure should emit JSON with success=false and exit 1."""
+        project = mock_load.return_value
+        project.push_project.return_value = (False, "Validation errors detected")
+
+        buf = io.StringIO()
+        with patch("poly.output.sys.stdout", buf), patch("poly.cli.sys.exit") as mock_exit:
+            AgentStudioCLI.push("/fake/project", output="json")
+
+        output = json.loads(buf.getvalue())
+        self.assertFalse(output["success"])
+        mock_exit.assert_called_once_with(1)
+
+
+class PushOutputCommandsTests(unittest.TestCase):
+    """Tests for poly push with --output commands."""
+
+    @patch("poly.cli.AgentStudioCLI._load_project")
+    def test_push_commands_outputs_commands_key(self, mock_load):
+        """push(output='commands') should print JSON with a 'commands' key."""
+        project = mock_load.return_value
+        cmd = Command()
+        cmd.type = "create_topic"
+        project.generate_push_commands.return_value = [cmd]
+
+        buf = io.StringIO()
+        with patch("poly.output.sys.stdout", buf):
+            AgentStudioCLI.push("/fake/project", output="commands")
+
+        output = json.loads(buf.getvalue())
+        self.assertIn("commands", output)
+        self.assertEqual(output["commands"][0]["type"], "create_topic")
+
+    @patch("poly.cli.AgentStudioCLI._load_project")
+    def test_push_commands_does_not_actually_push(self, mock_load):
+        """push(output='commands') should not call push_project."""
+        project = mock_load.return_value
+        project.generate_push_commands.return_value = []
+
+        buf = io.StringIO()
+        with patch("poly.output.sys.stdout", buf):
+            AgentStudioCLI.push("/fake/project", output="commands")
+
+        project.push_project.assert_not_called()

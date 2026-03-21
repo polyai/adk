@@ -215,6 +215,13 @@ class AgentStudioCLI:
             default=False,
         )
         push_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
+        push_parser.add_argument(
+            "--output",
+            type=str,
+            choices=["json", "commands"],
+            default=None,
+            help="Output format: 'json' for machine-readable JSON, 'commands' for generated SDK push commands.",
+        )
 
         # STATUS
         status_parser = subparsers.add_parser(
@@ -545,7 +552,14 @@ class AgentStudioCLI:
             cls.pull(args.path, args.force, args.format)
 
         elif args.command == "push":
-            cls.push(args.path, args.force, args.skip_validation, args.dry_run, args.format)
+            cls.push(
+                args.path,
+                args.force,
+                args.skip_validation,
+                args.dry_run,
+                args.format,
+                output=getattr(args, "output", None),
+            )
 
         elif args.command == "status":
             cls.status(args.path, output=getattr(args, "output", None))
@@ -776,19 +790,36 @@ class AgentStudioCLI:
         skip_validation: bool = False,
         dry_run: bool = False,
         format: bool = False,
+        output: Optional[str] = None,
     ) -> AgentStudioProject:
         """Push the project configuration to the Agent Studio."""
         project = cls._load_project(base_path)
-        info(f"Pushing local changes for [bold]{project.account_id}/{project.project_id}[/bold]...")
 
-        push_ok, output = project.push_project(
+        if output == "commands":
+            commands = project.generate_push_commands(skip_validation=skip_validation)
+            json_print({"commands": commands_to_dicts(commands)})
+            return project
+
+        if output != "json":
+            info(
+                f"Pushing local changes for [bold]{project.account_id}/{project.project_id}[/bold]..."
+            )
+
+        push_ok, push_output = project.push_project(
             force=force, skip_validation=skip_validation, dry_run=dry_run, format=format
         )
+
+        if output == "json":
+            json_print({"success": push_ok, "message": push_output})
+            if not push_ok:
+                sys.exit(1)
+            return project
+
         if push_ok:
             success(f"Pushed {project.account_id}/{project.project_id} to Agent Studio.")
         else:
             error(f"Failed to push {project.account_id}/{project.project_id} to Agent Studio.")
-            plain(output)
+            plain(push_output)
 
         return project
 
