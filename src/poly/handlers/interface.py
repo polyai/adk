@@ -108,6 +108,14 @@ class AgentStudioInterface:
         """
         return self.sync_client.pull_deployment_resources(deployment_id)
 
+    def fetch_projection(self) -> dict:
+        """Fetch the raw projection from the SDK.
+
+        Returns:
+            dict: The raw projection data from the API.
+        """
+        return self.sync_client.fetch_projection()
+
     def pull_resources(self) -> dict[type[Resource], dict[str, Resource]]:
         """Fetch all resources for the specific project.
 

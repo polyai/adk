@@ -177,6 +177,12 @@ class AgentStudioCLI:
             default=False,
         )
         pull_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
+        pull_parser.add_argument(
+            "--commands",
+            action="store_true",
+            default=False,
+            help="Output the full SDK projection as JSON instead of pulling.",
+        )
 
         # PUSH
         push_parser = subparsers.add_parser(
@@ -557,7 +563,12 @@ class AgentStudioCLI:
             )
 
         elif args.command == "pull":
-            cls.pull(args.path, args.force, args.format)
+            cls.pull(
+                args.path,
+                args.force,
+                args.format,
+                commands_output=getattr(args, "commands", False),
+            )
 
         elif args.command == "push":
             cls.push(
@@ -783,9 +794,21 @@ class AgentStudioCLI:
         return project
 
     @classmethod
-    def pull(cls, base_path: str, force: bool = False, format: bool = False) -> AgentStudioProject:
+    def pull(
+        cls,
+        base_path: str,
+        force: bool = False,
+        format: bool = False,
+        commands_output: bool = False,
+    ) -> AgentStudioProject:
         """Pull the latest project configuration from the Agent Studio."""
         project = cls._load_project(base_path)
+
+        if commands_output:
+            projection = project.fetch_projection()
+            json_print(projection)
+            return project
+
         info(f"Pulling project [bold]{project.account_id}/{project.project_id}[/bold]...")
 
         files_with_conflicts = project.pull_project(force=force, format=format)

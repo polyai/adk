@@ -177,6 +177,14 @@ class SyncClientHandler:
         )
         return self._load_resources(projection)
 
+    def fetch_projection(self) -> dict:
+        """Fetch the raw projection from the SDK.
+
+        Returns:
+            dict: The raw projection data from the API.
+        """
+        return self.sdk.fetch_projection(force_refresh=True)
+
     def pull_resources(self) -> dict[type[Resource], dict[str, Resource]]:
         """Fetch all resources from a specific project.
 
@@ -187,7 +195,7 @@ class SyncClientHandler:
         logger.info(
             f"Fetching project data for project {self.project_id} on branch {self.sdk.branch_id}"
         )
-        projection = self.sdk.fetch_projection(force_refresh=True)
+        projection = self.fetch_projection()
         logger.info(
             f"Successfully fetched project data for project {self.project_id} on branch {self.sdk.branch_id}"
         )

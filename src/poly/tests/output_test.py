@@ -161,6 +161,49 @@ class CommandsToDictsTests(unittest.TestCase):
         self.assertEqual(result[0], expected)
 
 
+class PullOutputCommandsTests(unittest.TestCase):
+    """Tests for poly pull with --commands."""
+
+    @patch("poly.cli.AgentStudioCLI._load_project")
+    def test_pull_commands_outputs_full_projection(self, mock_load):
+        """pull(commands_output=True) should output the raw SDK projection as JSON."""
+        project = mock_load.return_value
+        projection = {
+            "knowledgeBase": {
+                "topics": {
+                    "entities": {
+                        "topic-abc": {
+                            "name": "greeting",
+                            "content": "Hello, how can I help?",
+                            "isActive": True,
+                        }
+                    }
+                }
+            },
+            "flows": {"some-flow": {"name": "main"}},
+        }
+        project.fetch_projection.return_value = projection
+
+        buf = io.StringIO()
+        with patch("poly.output.sys.stdout", buf):
+            AgentStudioCLI.pull("/fake/project", commands_output=True)
+
+        output = json.loads(buf.getvalue())
+        self.assertEqual(output, projection)
+
+    @patch("poly.cli.AgentStudioCLI._load_project")
+    def test_pull_commands_does_not_pull(self, mock_load):
+        """pull(commands_output=True) should not call pull_project."""
+        project = mock_load.return_value
+        project.fetch_projection.return_value = {}
+
+        buf = io.StringIO()
+        with patch("poly.output.sys.stdout", buf):
+            AgentStudioCLI.pull("/fake/project", commands_output=True)
+
+        project.pull_project.assert_not_called()
+
+
 class StatusOutputJsonTests(unittest.TestCase):
     """Tests for poly status with --json."""
 

@@ -408,6 +408,14 @@ class AgentStudioProject:
             self._not_loaded_resources = []
         self.save_config()
 
+    def fetch_projection(self) -> dict:
+        """Fetch the raw projection from the SDK without modifying local state.
+
+        Returns:
+            dict: The raw projection data from the API.
+        """
+        return self.api_handler.fetch_projection()
+
     def pull_project(self, force: bool = False, format: bool = False) -> list[str]:
         """Pull the project configuration from the Agent Studio Interactor.
 
