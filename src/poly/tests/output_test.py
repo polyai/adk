@@ -161,13 +161,14 @@ class CommandsToDictsTests(unittest.TestCase):
         self.assertEqual(result[0], expected)
 
 
-class PullOutputCommandsTests(unittest.TestCase):
-    """Tests for poly pull with --commands."""
+class PullOutputProjectionTests(unittest.TestCase):
+    """Tests for poly pull with --projection."""
 
     @patch("poly.cli.AgentStudioCLI._load_project")
-    def test_pull_commands_outputs_full_projection(self, mock_load):
-        """pull(commands_output=True) should output the raw SDK projection as JSON."""
+    def test_pull_projection_outputs_full_projection(self, mock_load):
+        """pull(projection_output=True) should output the raw SDK projection as JSON."""
         project = mock_load.return_value
+        project.pull_project.return_value = []
         projection = {
             "knowledgeBase": {
                 "topics": {
@@ -186,22 +187,23 @@ class PullOutputCommandsTests(unittest.TestCase):
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.pull("/fake/project", commands_output=True)
+            AgentStudioCLI.pull("/fake/project", projection_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertEqual(output, projection)
 
     @patch("poly.cli.AgentStudioCLI._load_project")
-    def test_pull_commands_does_not_pull(self, mock_load):
-        """pull(commands_output=True) should not call pull_project."""
+    def test_pull_projection_still_pulls(self, mock_load):
+        """pull(projection_output=True) should still call pull_project."""
         project = mock_load.return_value
+        project.pull_project.return_value = []
         project.fetch_projection.return_value = {}
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.pull("/fake/project", commands_output=True)
+            AgentStudioCLI.pull("/fake/project", projection_output=True)
 
-        project.pull_project.assert_not_called()
+        project.pull_project.assert_called_once()
 
 
 class StatusOutputJsonTests(unittest.TestCase):

@@ -178,10 +178,10 @@ class AgentStudioCLI:
         )
         pull_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
         pull_parser.add_argument(
-            "--commands",
+            "--projection",
             action="store_true",
             default=False,
-            help="Output the full SDK projection as JSON instead of pulling.",
+            help="Output the full SDK projection as JSON after pulling.",
         )
 
         # PUSH
@@ -567,7 +567,7 @@ class AgentStudioCLI:
                 args.path,
                 args.force,
                 args.format,
-                commands_output=getattr(args, "commands", False),
+                projection_output=getattr(args, "projection", False),
             )
 
         elif args.command == "push":
@@ -799,19 +799,21 @@ class AgentStudioCLI:
         base_path: str,
         force: bool = False,
         format: bool = False,
-        commands_output: bool = False,
+        projection_output: bool = False,
     ) -> AgentStudioProject:
         """Pull the latest project configuration from the Agent Studio."""
         project = cls._load_project(base_path)
 
-        if commands_output:
+        if not projection_output:
+            info(f"Pulling project [bold]{project.account_id}/{project.project_id}[/bold]...")
+
+        files_with_conflicts = project.pull_project(force=force, format=format)
+
+        if projection_output:
             projection = project.fetch_projection()
             json_print(projection)
             return project
 
-        info(f"Pulling project [bold]{project.account_id}/{project.project_id}[/bold]...")
-
-        files_with_conflicts = project.pull_project(force=force, format=format)
         if files_with_conflicts:
             print_file_list("Merge conflicts detected", files_with_conflicts, "filename.conflict")
 
