@@ -37,14 +37,9 @@ jobs:
         run: pip install anthropic
 
       - name: Run docs update agent
-        id: agent
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          python docs/scripts/update_docs.py | tee /tmp/agent.log
-          # Extract the summary file path printed by the script.
-          SUMMARY=$(grep "^PR_SUMMARY_FILE=" /tmp/agent.log | cut -d= -f2)
-          echo "summary_file=${SUMMARY}" >> $GITHUB_OUTPUT
+        run: python docs/scripts/update_docs.py
 
       - name: Check for doc changes
         id: check
@@ -68,17 +63,8 @@ jobs:
           git commit -m "docs: auto-update from ${SHORT_SHA}"
           git push origin "${BRANCH}"
 
-          SUMMARY_FILE="${{ steps.agent.outputs.summary_file }}"
-          if [[ -f "${SUMMARY_FILE}" ]]; then
-            gh pr create \
-              --title "docs: auto-update from ${SHORT_SHA}" \
-              --body-file "${SUMMARY_FILE}" \
-              --base  main \
-              --head  "${BRANCH}"
-          else
-            gh pr create \
-              --title "docs: auto-update from ${SHORT_SHA}" \
-              --body  "Auto-generated docs update from merge ${SHORT_SHA}." \
-              --base  main \
-              --head  "${BRANCH}"
-          fi
+          gh pr create \
+            --title "docs: auto-update from ${SHORT_SHA}" \
+            --body-file /tmp/pr_summary.md \
+            --base main \
+            --head "${BRANCH}"

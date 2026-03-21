@@ -33,7 +33,7 @@ DOCS_CHAR_LIMIT = 600_000
 
 def run(cmd: list[str], cwd: Path = REPO_ROOT) -> str:
     """Run a shell command and return stdout, logging stderr on failure."""
-    result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, check=False)
     if result.returncode != 0:
         print(f"Warning: {' '.join(cmd)} exited {result.returncode}: {result.stderr.strip()}")
     return result.stdout
@@ -266,9 +266,7 @@ the documentation if needed.
     )
     summary_file = Path(tempfile.gettempdir()) / "pr_summary.md"
     summary_file.write_text(summary)
-    # Print the path so the workflow step can read it via $GITHUB_OUTPUT.
-    print(f"PR_SUMMARY_FILE={summary_file}")
-    print(f"\nUpdated {len(updated)} file(s).")
+    print(f"\nUpdated {len(updated)} file(s). PR summary written to {summary_file}.")
 
 
 if __name__ == "__main__":
