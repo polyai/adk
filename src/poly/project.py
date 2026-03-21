@@ -10,7 +10,7 @@ import os
 import uuid
 from dataclasses import dataclass, fields
 from datetime import datetime
-from typing import Any, Optional, TypeAlias
+from typing import Any, Optional, TypeAlias, Union
 
 import poly.resources.resource_utils as resource_utils
 import poly.utils as utils
@@ -407,6 +407,14 @@ class AgentStudioProject:
         if not preserve_not_loaded_resources:
             self._not_loaded_resources = []
         self.save_config()
+
+    def fetch_projection(self) -> dict:
+        """Fetch the raw projection from the SDK without modifying local state.
+
+        Returns:
+            dict: The raw projection data from the API.
+        """
+        return self.api_handler.fetch_projection()
 
     def pull_project(self, force: bool = False, format: bool = False) -> list[str]:
         """Pull the project configuration from the Agent Studio Interactor.
@@ -839,7 +847,8 @@ class AgentStudioProject:
         dry_run=False,
         format=False,
         email=None,
-    ) -> tuple[bool, str]:
+        capture_commands=False,
+    ) -> tuple[bool, str, list]:
         """Push the project configuration to the Agent Studio Interactor.
 
         Args:
@@ -849,10 +858,12 @@ class AgentStudioProject:
             format (bool): If True, format the resource before saving.
             email (str): Email to use for metadata creation.
                 If None, use the email of the current user.
+            capture_commands (bool): If True, return the Command protobufs that were sent.
 
         Returns:
-            Tuple[bool, str]: A tuple containing a boolean indicating success,
-                and a string message.
+            Tuple[bool, str, list]: A tuple containing a boolean indicating success,
+                a string message, and a list of Command protobufs (empty unless
+                capture_commands is True).
         """
 
         if not dry_run:
@@ -869,9 +880,113 @@ class AgentStudioProject:
                     return (
                         False,
                         f"Merge conflicts detected in the following files:\n- {conflicts}\nPlease resolve the conflicts and try again.",
+                        [],
                     )
 
-        # Push Algorithm
+        changeset = self._compute_push_changeset(skip_validation=skip_validation, format=format)
+        if changeset is None:
+            return False, "No changes detected", []
+        if isinstance(changeset, str):
+            return False, changeset, []
+
+        push_changes, new_state = changeset
+
+        new_resources = push_changes.main.new
+        updated_resources = push_changes.main.updated
+        deleted_resources = push_changes.main.deleted
+        pre_changes = push_changes.pre
+        post_changes = push_changes.post
+
+        pre_and_post_push = any(
+            [
+                pre_changes.new,
+                pre_changes.updated,
+                pre_changes.deleted,
+                post_changes.new,
+                post_changes.updated,
+                post_changes.deleted,
+            ]
+        )
+
+        # 6. Queue all push phases
+        if self.branch_id:
+            logger.info(f"Pushing changes to branch {self.branch_id}")
+
+        if pre_and_post_push:
+            self.api_handler.push_resources(
+                new_resources=pre_changes.new,
+                deleted_resources=pre_changes.deleted,
+                updated_resources=pre_changes.updated,
+                dry_run=dry_run,
+                email=email,
+                queue_pushes=True,
+            )
+
+        self.api_handler.push_resources(
+            new_resources=new_resources,
+            deleted_resources=deleted_resources,
+            updated_resources=updated_resources,
+            dry_run=dry_run,
+            email=email,
+            queue_pushes=True,
+        )
+
+        if pre_and_post_push:
+            self.api_handler.push_resources(
+                new_resources=post_changes.new,
+                deleted_resources=post_changes.deleted,
+                updated_resources=post_changes.updated,
+                dry_run=dry_run,
+                email=email,
+                queue_pushes=True,
+            )
+
+        # Snapshot commands before sending
+        captured_commands = self.api_handler.get_queued_commands() if capture_commands else []
+
+        # Send or handle dry run
+        if dry_run:
+            self.api_handler.clear_command_queue()
+            push_success = True
+        else:
+            push_success = self.api_handler.send_queued_commands()
+
+        self.branch_id = self.api_handler.branch_id
+
+        if not push_success:
+            failed_resources = []
+            for resource_dict in [
+                new_resources,
+                updated_resources,
+                deleted_resources,
+            ]:
+                for resources in resource_dict.values():
+                    failed_resources.extend([res.name for res in resources.values()])
+            errors_names = "\n-".join(failed_resources)
+            return False, f"Failed to push resources: \n-{errors_names}", captured_commands
+
+        if dry_run:
+            return True, "Dry run completed. No changes were pushed.", captured_commands
+        else:
+            # Update local state
+            self.resources = new_state
+            self.file_structure_info = self.compute_file_structure_info(self.resources)
+            self.save_config()
+
+        return True, "Resources pushed successfully.", captured_commands
+
+    def _compute_push_changeset(
+        self,
+        skip_validation: bool = False,
+        format: bool = False,
+    ) -> Union[tuple[PushPhaseChangeSet, ResourceMap], str, None]:
+        """Compute the changeset that would be pushed, without sending anything.
+
+        Returns:
+            None if there are no changes.
+            A string error message if validation fails.
+            A tuple of (PushPhaseChangeSet, new_state ResourceMap) on success.
+        """
         # 1. Get new/kept/deleted resources
         new_resource_mappings, kept_resource_mappings, deleted_resource_mappings = (
             self.find_new_kept_deleted(self.discover_local_resources())
@@ -879,7 +994,6 @@ class AgentStudioProject:
         local_resource_mappings = new_resource_mappings + kept_resource_mappings
 
         if format:
-            # format all local resources before pushing
             self._format_resources(local_resource_mappings)
 
         new_resource_ids: dict[type[Resource], set[str]] = {
@@ -939,7 +1053,7 @@ class AgentStudioProject:
         deleted_resources.update(subresource_changes.deleted)
 
         if not (updated_resources or new_resources or deleted_resources):
-            return False, "No changes detected"
+            return None
 
         # 4. Validate all resources with new state
         if not skip_validation:
@@ -948,11 +1062,9 @@ class AgentStudioProject:
             )
             if validation_errors:
                 error_messages = "\n".join(validation_errors)
-                return False, f"Validation errors detected:\n{error_messages}"
+                return f"Validation errors detected:\n{error_messages}"
 
         # 5. Group flow resources together
-        # Creating flow config, group all new steps/functions under it and remove from
-        # new resources
         push_changes = self._clean_resources_before_push(
             new_state,
             new_resources,
@@ -962,25 +1074,12 @@ class AgentStudioProject:
         new_resources = push_changes.main.new
         updated_resources = push_changes.main.updated
         deleted_resources = push_changes.main.deleted
-        pre_changes = push_changes.pre
-        post_changes = push_changes.post
 
         # Assign positions to new flows
         new_resources, updated_resources = self._assign_flow_positions(
             new_resources,
             updated_resources,
             new_state,
-        )
-
-        pre_and_post_push = any(
-            [
-                pre_changes.new,
-                pre_changes.updated,
-                pre_changes.deleted,
-                post_changes.new,
-                post_changes.updated,
-                post_changes.deleted,
-            ]
         )
 
         # Assign positions to new flows
@@ -1018,63 +1117,89 @@ class AgentStudioProject:
 
             resource_utils.assign_flow_positions(flow_steps, flow_config.start_step)
 
-        # 6. Push new/updated/deleted resources
-        if self.branch_id:
-            logger.info(f"Pushing changes to branch {self.branch_id}")
+        push_changes = PushPhaseChangeSet(
+            main=ResourceChangeSet(
+                new=new_resources,
+                updated=updated_resources,
+                deleted=deleted_resources,
+            ),
+            pre=push_changes.pre,
+            post=push_changes.post,
+        )
 
+        return push_changes, new_state
+
+    def generate_push_commands(self, skip_validation: bool = False) -> list:
+        """Generate the SDK Command protobufs that would be sent in a push.
+
+        Computes the changeset and queues commands without sending them.
+
+        Args:
+            skip_validation: If True, skip local validation.
+
+        Returns:
+            list: A list of Command protobuf messages.
+
+        Raises:
+            ValueError: If there are no changes or validation fails.
+        """
+        changeset = self._compute_push_changeset(skip_validation=skip_validation)
+        if changeset is None:
+            return []
+        if isinstance(changeset, str):
+            raise ValueError(changeset)
+
+        push_changes, _ = changeset
+
+        new_resources = push_changes.main.new
+        updated_resources = push_changes.main.updated
+        deleted_resources = push_changes.main.deleted
+        pre_changes = push_changes.pre
+        post_changes = push_changes.post
+
+        pre_and_post_push = any(
+            [
+                pre_changes.new,
+                pre_changes.updated,
+                pre_changes.deleted,
+                post_changes.new,
+                post_changes.updated,
+                post_changes.deleted,
+            ]
+        )
+
+        # Queue all commands without sending
         if pre_and_post_push:
             self.api_handler.push_resources(
                 new_resources=pre_changes.new,
                 deleted_resources=pre_changes.deleted,
                 updated_resources=pre_changes.updated,
-                dry_run=dry_run,
-                email=email,
+                dry_run=False,
                 queue_pushes=True,
             )
 
-        # Push changed resources (queue only when pre_push ran, so we send pre+main together)
-        success = self.api_handler.push_resources(
+        self.api_handler.push_resources(
             new_resources=new_resources,
             deleted_resources=deleted_resources,
             updated_resources=updated_resources,
-            dry_run=dry_run,
-            email=email,
-            queue_pushes=pre_and_post_push,
+            dry_run=False,
+            queue_pushes=True,
         )
 
         if pre_and_post_push:
-            success = self.api_handler.push_resources(
+            self.api_handler.push_resources(
                 new_resources=post_changes.new,
                 deleted_resources=post_changes.deleted,
                 updated_resources=post_changes.updated,
-                dry_run=dry_run,
-                email=email,
-                queue_pushes=False,
+                dry_run=False,
+                queue_pushes=True,
             )
 
-        self.branch_id = self.api_handler.branch_id
+        # Snapshot and clear the queue
+        commands = self.api_handler.get_queued_commands()
+        self.api_handler.clear_command_queue()
 
-        if not success:
-            failed_resources = []
-            for resource_dict in [
-                new_resources,
-                updated_resources,
-                deleted_resources,
-            ]:
-                for resources in resource_dict.values():
-                    failed_resources.extend([res.name for res in resources.values()])
-            errors_names = "\n-".join(failed_resources)
-            return False, f"Failed to push resources: \n-{errors_names}"
-
-        if dry_run:
-            return True, "Dry run completed. No changes were pushed."
-        else:
-            # Update local state
-            self.resources = new_state
-            self.file_structure_info = self.compute_file_structure_info(self.resources)
-            self.save_config()
-
-        return True, "Resources pushed successfully."
+        return commands
 
     @staticmethod
     def _assign_flow_positions(

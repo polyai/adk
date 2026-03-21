@@ -113,6 +113,31 @@ class SyncClientHandler:
         """Get the Sourcerer SDK instance."""
         return self._sdk
 
+    def get_queued_commands(self) -> list[Command]:
+        """Return a copy of the current command queue.
+
+        Returns:
+            list[Command]: A copy of the queued Command protobuf messages.
+        """
+        return list(self.sdk._command_queue)
+
+    def send_queued_commands(self) -> bool:
+        """Send all queued commands as a batch and clear the queue.
+
+        Returns:
+            bool: True if successful, False if the batch send failed.
+        """
+        try:
+            self.sdk.send_command_batch()
+            return True
+        except SourcererAPIError as e:
+            logger.error(f"Failed to send command batch: {e}")
+            return False
+
+    def clear_command_queue(self) -> None:
+        """Clear all queued commands without sending."""
+        self.sdk.clear_queue()
+
     def _load_resources(self, projection: dict) -> dict[type[Resource], dict[str, Resource]]:
         return {
             Topic: self._read_topics_from_projection(projection),
@@ -152,6 +177,14 @@ class SyncClientHandler:
         )
         return self._load_resources(projection)
 
+    def fetch_projection(self) -> dict:
+        """Fetch the raw projection from the SDK.
+
+        Returns:
+            dict: The raw projection data from the API.
+        """
+        return self.sdk.fetch_projection(force_refresh=True)
+
     def pull_resources(self) -> dict[type[Resource], dict[str, Resource]]:
         """Fetch all resources from a specific project.
 
@@ -162,7 +195,7 @@ class SyncClientHandler:
         logger.info(
             f"Fetching project data for project {self.project_id} on branch {self.sdk.branch_id}"
         )
-        projection = self.sdk.fetch_projection(force_refresh=True)
+        projection = self.fetch_projection()
         logger.info(
             f"Successfully fetched project data for project {self.project_id} on branch {self.sdk.branch_id}"
         )
