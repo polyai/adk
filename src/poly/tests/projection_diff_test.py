@@ -104,18 +104,19 @@ class ApplyCommandTests(unittest.TestCase):
     """Tests for apply_command applying a single command to a projection."""
 
     def test_create_topic_adds_entry(self):
-        """A create_topic command should add an entry under knowledgeBase.topics.entities."""
+        """A create_topic command should add an entry with camelCase keys."""
         projection = {"knowledgeBase": {"topics": {"entities": {}}}}
         command_dict = {
             "type": "create_topic",
-            "create_topic": {"id": "t1", "name": "greet", "content": "hi"},
+            "create_topic": {"id": "t1", "name": "greet", "content": "hi", "is_active": True},
         }
 
         apply_command(projection, command_dict)
 
-        entry = projection["knowledgeBase"]["topics"]["entities"]["t1"]
-        self.assertEqual(entry["name"], "greet")
-        self.assertEqual(entry["content"], "hi")
+        self.assertEqual(
+            projection["knowledgeBase"]["topics"]["entities"]["t1"],
+            {"id": "t1", "name": "greet", "content": "hi", "isActive": True},
+        )
 
     def test_update_topic_merges_into_existing(self):
         """An update_topic command should merge into the existing topic, preserving unchanged fields."""
@@ -135,10 +136,10 @@ class ApplyCommandTests(unittest.TestCase):
 
         apply_command(projection, command_dict)
 
-        entry = projection["knowledgeBase"]["topics"]["entities"]["t1"]
-        self.assertEqual(entry["content"], "hello there")
-        self.assertEqual(entry["name"], "greet")
-        self.assertTrue(entry["isActive"])
+        self.assertEqual(
+            projection["knowledgeBase"]["topics"]["entities"]["t1"],
+            {"id": "t1", "name": "greet", "content": "hello there", "isActive": True},
+        )
 
     def test_delete_topic_removes_entry(self):
         """A delete_topic command should remove the entry from the projection."""
@@ -157,17 +158,19 @@ class ApplyCommandTests(unittest.TestCase):
         self.assertNotIn("t1", projection["knowledgeBase"]["topics"]["entities"])
 
     def test_create_entity_adds_at_correct_path(self):
-        """An entity_create command should add at entities.entities.entities."""
+        """An entity_create command should add at entities.entities.entities with camelCase keys."""
         projection = {"entities": {"entities": {"entities": {}}}}
         command_dict = {
             "type": "entity_create",
-            "entity_create": {"id": "e1", "name": "color", "values": ["red", "blue"]},
+            "entity_create": {"id": "e1", "name": "color", "entity_type": "list"},
         }
 
         apply_command(projection, command_dict)
 
-        entry = projection["entities"]["entities"]["entities"]["e1"]
-        self.assertEqual(entry["name"], "color")
+        self.assertEqual(
+            projection["entities"]["entities"]["entities"]["e1"],
+            {"id": "e1", "name": "color", "entityType": "list"},
+        )
 
     def test_update_singleton_personality_merges(self):
         """An update_personality command should merge into agentSettings.personality."""
@@ -179,9 +182,10 @@ class ApplyCommandTests(unittest.TestCase):
 
         apply_command(projection, command_dict)
 
-        personality = projection["agentSettings"]["personality"]
-        self.assertEqual(personality["tone"], "formal")
-        self.assertEqual(personality["verbosity"], "low")
+        self.assertEqual(
+            projection["agentSettings"]["personality"],
+            {"tone": "formal", "verbosity": "low"},
+        )
 
     def test_channel_routed_voice_greeting(self):
         """A channel_update_greeting with voice channel_type should update channels.voice.config.greeting."""
@@ -193,8 +197,10 @@ class ApplyCommandTests(unittest.TestCase):
 
         apply_command(projection, command_dict)
 
-        greeting = projection["channels"]["voice"]["config"]["greeting"]
-        self.assertEqual(greeting["text"], "Welcome!")
+        self.assertEqual(
+            projection["channels"]["voice"]["config"]["greeting"],
+            {"text": "Welcome!", "channelType": 1},
+        )
 
     def test_channel_routed_chat_greeting(self):
         """A channel_update_greeting with channel_type=2 should route to channels.webChat.config.greeting."""
@@ -206,8 +212,10 @@ class ApplyCommandTests(unittest.TestCase):
 
         apply_command(projection, command_dict)
 
-        greeting = projection["channels"]["webChat"]["config"]["greeting"]
-        self.assertEqual(greeting["text"], "Hi there")
+        self.assertEqual(
+            projection["channels"]["webChat"]["config"]["greeting"],
+            {"text": "Hi there", "channelType": 2},
+        )
 
     def test_unknown_command_type_is_skipped(self):
         """An unrecognized command type should be skipped without raising an error."""
@@ -218,22 +226,9 @@ class ApplyCommandTests(unittest.TestCase):
 
         self.assertEqual(projection, {"some": "data"})
 
-    def test_create_in_empty_projection_creates_intermediate_dicts(self):
-        """Creating a topic in an empty projection should create all intermediate dicts."""
+    def test_create_in_empty_projection_full_structure(self):
+        """Creating a topic in an empty projection should produce the full nested structure."""
         projection = {}
-        command_dict = {
-            "type": "create_topic",
-            "create_topic": {"id": "t1", "name": "greet"},
-        }
-
-        apply_command(projection, command_dict)
-
-        entry = projection["knowledgeBase"]["topics"]["entities"]["t1"]
-        self.assertEqual(entry["name"], "greet")
-
-    def test_create_topic_converts_payload_keys_to_camel_case(self):
-        """Payload fields like is_active should be stored as isActive in the projection."""
-        projection = {"knowledgeBase": {"topics": {"entities": {}}}}
         command_dict = {
             "type": "create_topic",
             "create_topic": {"id": "t1", "name": "greet", "is_active": True},
@@ -241,9 +236,18 @@ class ApplyCommandTests(unittest.TestCase):
 
         apply_command(projection, command_dict)
 
-        entry = projection["knowledgeBase"]["topics"]["entities"]["t1"]
-        self.assertIn("isActive", entry)
-        self.assertNotIn("is_active", entry)
+        self.assertEqual(
+            projection,
+            {
+                "knowledgeBase": {
+                    "topics": {
+                        "entities": {
+                            "t1": {"id": "t1", "name": "greet", "isActive": True},
+                        }
+                    }
+                }
+            },
+        )
 
     def test_delete_nonexistent_entry_does_not_raise(self):
         """Deleting an entry that does not exist should not raise."""
@@ -285,9 +289,18 @@ class ApplyCommandsTests(unittest.TestCase):
 
         result = apply_commands(projection, commands)
 
-        entry = result["knowledgeBase"]["topics"]["entities"]["t1"]
-        self.assertEqual(entry["content"], "updated hello")
-        self.assertEqual(entry["name"], "greet")
+        self.assertEqual(
+            result,
+            {
+                "knowledgeBase": {
+                    "topics": {
+                        "entities": {
+                            "t1": {"id": "t1", "name": "greet", "content": "updated hello"},
+                        }
+                    }
+                }
+            },
+        )
 
     def test_original_projection_not_mutated(self):
         """The original projection dict should not be modified."""
@@ -414,8 +427,8 @@ class DiffProjectionsTests(unittest.TestCase):
 class GenerateProjectionDiffTests(unittest.TestCase):
     """Tests for the generate_projection_diff orchestrator."""
 
-    def test_returns_commands_and_diff_keys(self):
-        """The result should contain both 'commands' and 'diff' keys with the expected change."""
+    def test_update_topic_full_output(self):
+        """Updating a topic should produce commands and a diff with the exact changed fields."""
         projection = {
             "knowledgeBase": {
                 "topics": {"entities": {"t1": {"id": "t1", "name": "greeting", "content": "Hello"}}}
@@ -426,6 +439,7 @@ class GenerateProjectionDiffTests(unittest.TestCase):
         cmd.type = "update_topic"
         cmd.command_id = "cmd-001"
         cmd.update_topic.id = "t1"
+        cmd.update_topic.name = "greeting"
         cmd.update_topic.content = "Hello updated"
 
         project = MagicMock()
@@ -434,17 +448,30 @@ class GenerateProjectionDiffTests(unittest.TestCase):
 
         result = generate_projection_diff(project)
 
-        self.assertIn("commands", result)
-        self.assertIn("diff", result)
+        # Verify full structure — commands list + diff with only changed fields
         self.assertEqual(len(result["commands"]), 1)
         self.assertEqual(result["commands"][0]["type"], "update_topic")
+        self.assertEqual(result["commands"][0]["command_id"], "cmd-001")
+        self.assertEqual(
+            result["diff"],
+            {
+                "knowledgeBase": {
+                    "topics": {
+                        "entities": {
+                            "t1": {
+                                "content": {
+                                    "before": "Hello",
+                                    "after": "Hello updated",
+                                },
+                            }
+                        }
+                    }
+                }
+            },
+        )
 
-        # The diff should show the content change
-        topic_diff = result["diff"]["knowledgeBase"]["topics"]["entities"]["t1"]
-        self.assertIn("content", topic_diff)
-
-    def test_no_changes_returns_empty_commands_and_diff(self):
-        """When there are no commands, both commands and diff should be empty."""
+    def test_no_changes_full_output(self):
+        """When there are no commands, output should be empty commands and empty diff."""
         projection = {"knowledgeBase": {"topics": {"entities": {}}}}
 
         project = MagicMock()
@@ -453,8 +480,7 @@ class GenerateProjectionDiffTests(unittest.TestCase):
 
         result = generate_projection_diff(project)
 
-        self.assertEqual(result["commands"], [])
-        self.assertEqual(result["diff"], {})
+        self.assertEqual(result, {"commands": [], "diff": {}})
 
     def test_calls_fetch_projection_and_generate_push_commands(self):
         """The orchestrator should call fetch_projection and generate_push_commands on the project."""
