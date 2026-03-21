@@ -40,14 +40,6 @@ theme:
         icon: material/weather-sunny
         name: Switch to light mode
 
-plugins:
-  - search
-  - gen-files:
-      scripts:
-        - gen_cli_reference.py
-  - macros:
-      module_name: main
-
 markdown_extensions:
   - admonition
   - attr_list
@@ -109,7 +101,6 @@ nav:
 
   - Reference:
       - CLI reference: reference/cli.md
-      - CLI options: reference/cli-options.md
       - Testing: reference/testing.md
       - Tooling: reference/tooling.md
 
@@ -135,8 +126,6 @@ nav:
 
   - Development:
       - Docs workflow: development/docs.md
-
-  - Changelog: changelog.md
 
   - Legal:
       - Licensing: legal/licensing.md

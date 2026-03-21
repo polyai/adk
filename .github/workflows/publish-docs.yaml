@@ -6,9 +6,6 @@ on:
       - main
     paths:
       - 'docs/**'
-      - 'src/**'
-      - 'CHANGELOG.md'
-      - 'pyproject.toml'
       - '.github/workflows/publish-docs.yaml'
 
 permissions:
@@ -35,17 +32,10 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
-          allow-prereleases: true
+          python-version: '3.11'
 
-      - name: Install ADK
-        run: pip install -e ..
-
-      - name: Install docs dependencies
+      - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Copy changelog
-        run: cp ../CHANGELOG.md docs/changelog.md 2>/dev/null || echo "No CHANGELOG.md found, skipping"
 
       - name: Build docs
         run: mkdocs build --strict
