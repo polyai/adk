@@ -262,13 +262,6 @@ class AgentStudioCLI:
             default=False,
             help="Output machine-readable JSON instead of Rich formatting.",
         )
-        status_parser.add_argument(
-            "--proto",
-            action="store_true",
-            default=False,
-            help="Output the SDK push commands that would be sent, serialized as JSON.",
-        )
-
         # REVERT
         revert_parser = subparsers.add_parser(
             "revert",
@@ -595,11 +588,7 @@ class AgentStudioCLI:
             )
 
         elif args.command == "status":
-            cls.status(
-                args.path,
-                json_output=getattr(args, "json", False),
-                proto_output=getattr(args, "proto", False),
-            )
+            cls.status(args.path, json_output=getattr(args, "json", False))
 
         elif args.command == "revert":
             cls.revert(args.path, args.all, args.files)
@@ -860,6 +849,11 @@ class AgentStudioCLI:
         project = cls._load_project(base_path)
         capture = json_output or proto_output
 
+        # Snapshot projection before push for --proto diff computation
+        projection_before = None
+        if proto_output:
+            projection_before = project.fetch_projection()
+
         if not capture:
             info(
                 f"Pushing local changes for [bold]{project.account_id}/{project.project_id}[/bold]..."
@@ -873,11 +867,18 @@ class AgentStudioCLI:
             capture_commands=capture,
         )
 
-        if capture:
-            result = {"success": push_ok, "message": push_output}
-            if proto_output:
-                result["commands"] = commands_to_dicts(push_commands)
-            json_print(result)
+        if proto_output:
+            from poly.projection_diff import enrich_commands_with_diffs
+
+            command_dicts = commands_to_dicts(push_commands)
+            result_commands = enrich_commands_with_diffs(projection_before, command_dicts)
+            json_print({"commands": result_commands})
+            if not push_ok:
+                sys.exit(1)
+            return project
+
+        if json_output:
+            json_print({"success": push_ok, "message": push_output})
             if not push_ok:
                 sys.exit(1)
             return project
@@ -895,15 +896,9 @@ class AgentStudioCLI:
         cls,
         base_path: str,
         json_output: bool = False,
-        proto_output: bool = False,
     ) -> None:
         """Check the changed files of the project."""
         project = cls._load_project(base_path)
-
-        if proto_output:
-            commands = project.generate_push_commands(skip_validation=True)
-            json_print({"commands": commands_to_dicts(commands)})
-            return
 
         files_with_conflicts, modified_files, new_files, deleted_files = project.project_status()
         branch_info = project.get_current_branch()

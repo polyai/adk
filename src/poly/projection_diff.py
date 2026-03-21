@@ -367,6 +367,40 @@ def diff_projections(before: Any, after: Any) -> Any:
     return {"before": before, "after": after}
 
 
+def enrich_commands_with_diffs(projection_before: dict, command_dicts: list[dict]) -> list[dict]:
+    """Augment each command dict with a ``diff`` showing what changed.
+
+    Applies the commands to a copy of the projection, then for each command
+    looks up the before/after values at its projection path and computes
+    a per-field diff.
+
+    Args:
+        projection_before: The projection state before the commands are applied.
+        command_dicts: Serialized command dicts from ``commands_to_dicts``.
+
+    Returns:
+        A new list of command dicts, each with an added ``diff`` key.
+    """
+    projection_after = apply_commands(projection_before, command_dicts)
+
+    result = []
+    for cmd_dict in command_dicts:
+        enriched = dict(cmd_dict)
+        resolved = resolve_command_path(cmd_dict)
+
+        if resolved is not None:
+            _, path = resolved
+            before_val = _get_at_path(projection_before, path)
+            after_val = _get_at_path(projection_after, path)
+            enriched["diff"] = diff_projections(before_val, after_val)
+        else:
+            enriched["diff"] = {}
+
+        result.append(enriched)
+
+    return result
+
+
 def generate_projection_diff(project: Any) -> dict:
     """Generate a projection-level diff showing what a push would change.
 
@@ -387,21 +421,4 @@ def generate_projection_diff(project: Any) -> dict:
     commands = project.generate_push_commands(skip_validation=True)
     command_dicts = commands_to_dicts(commands)
 
-    after = apply_commands(before, command_dicts)
-
-    result_commands = []
-    for cmd_dict in command_dicts:
-        resolved = resolve_command_path(cmd_dict)
-        enriched = dict(cmd_dict)
-
-        if resolved is not None:
-            _, path = resolved
-            before_val = _get_at_path(before, path)
-            after_val = _get_at_path(after, path)
-            enriched["diff"] = diff_projections(before_val, after_val)
-        else:
-            enriched["diff"] = {}
-
-        result_commands.append(enriched)
-
-    return {"commands": result_commands}
+    return {"commands": enrich_commands_with_diffs(before, command_dicts)}

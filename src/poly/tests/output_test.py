@@ -339,42 +339,6 @@ class StatusOutputJsonTests(unittest.TestCase):
         )
 
 
-class StatusOutputProtoTests(unittest.TestCase):
-    """Tests for poly status with --proto."""
-
-    @patch("poly.cli.AgentStudioCLI._load_project")
-    def test_status_commands_full_structure(self, mock_load):
-        """status(proto_output=True) should serialize commands with full protobuf detail."""
-        project = mock_load.return_value
-        project.generate_push_commands.return_value = [
-            _make_create_topic_command(),
-            _make_delete_topic_command(),
-        ]
-
-        buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.status("/fake/project", proto_output=True)
-
-        output = json.loads(buf.getvalue())
-        self.assertEqual(
-            output,
-            {"commands": [CREATE_TOPIC_EXPECTED, DELETE_TOPIC_EXPECTED]},
-        )
-
-    @patch("poly.cli.AgentStudioCLI._load_project")
-    def test_status_commands_empty_when_no_changes(self, mock_load):
-        """status(proto_output=True) with no changes should return empty commands list."""
-        project = mock_load.return_value
-        project.generate_push_commands.return_value = []
-
-        buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.status("/fake/project", proto_output=True)
-
-        output = json.loads(buf.getvalue())
-        self.assertEqual(output, {"commands": []})
-
-
 class DiffOutputJsonTests(unittest.TestCase):
     """Tests for poly diff with --json."""
 
@@ -510,47 +474,61 @@ class PushOutputJsonTests(unittest.TestCase):
 class PushOutputProtoTests(unittest.TestCase):
     """Tests for poly push with --proto."""
 
+    @patch("poly.projection_diff.enrich_commands_with_diffs")
     @patch("poly.cli.AgentStudioCLI._load_project")
-    def test_push_commands_full_structure(self, mock_load):
-        """push(proto_output=True) should include fully serialized commands."""
+    def test_push_proto_outputs_commands_with_diffs(self, mock_load, mock_enrich):
+        """push(proto_output=True) should output commands with nested diffs, same as diff --proto."""
         project = mock_load.return_value
+        project.fetch_projection.return_value = {"knowledgeBase": {"topics": {"entities": {}}}}
         project.push_project.return_value = (
             True,
             "Resources pushed successfully.",
-            [_make_create_topic_command(), _make_delete_topic_command()],
+            [_make_create_topic_command()],
         )
+        mock_enrich.return_value = [
+            {
+                **CREATE_TOPIC_EXPECTED,
+                "diff": {
+                    "before": None,
+                    "after": {
+                        "id": "topic-abc",
+                        "name": "greeting",
+                        "content": "Hello, how can I help?",
+                        "isActive": True,
+                    },
+                },
+            }
+        ]
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
             AgentStudioCLI.push("/fake/project", proto_output=True)
 
         output = json.loads(buf.getvalue())
-        self.assertEqual(
-            output,
-            {
-                "success": True,
-                "message": "Resources pushed successfully.",
-                "commands": [CREATE_TOPIC_EXPECTED, DELETE_TOPIC_EXPECTED],
-            },
-        )
+        self.assertEqual(output, {"commands": mock_enrich.return_value})
 
     @patch("poly.cli.AgentStudioCLI._load_project")
-    def test_push_commands_passes_capture_commands(self, mock_load):
-        """push(proto_output=True) should call push_project with capture_commands=True."""
+    def test_push_proto_fetches_projection_before_push(self, mock_load):
+        """push(proto_output=True) should fetch projection before pushing for diff computation."""
         project = mock_load.return_value
+        project.fetch_projection.return_value = {}
         project.push_project.return_value = (True, "Resources pushed successfully.", [])
+
+        call_order = []
+        project.fetch_projection.side_effect = lambda: (call_order.append("fetch") or {})
+        project.push_project.side_effect = lambda **kw: (
+            call_order.append("push") or (True, "ok", [])
+        )
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
             AgentStudioCLI.push("/fake/project", proto_output=True)
 
-        project.push_project.assert_called_once()
-        call_kwargs = project.push_project.call_args[1]
-        self.assertTrue(call_kwargs["capture_commands"])
+        self.assertEqual(call_order, ["fetch", "push"])
 
     @patch("poly.cli.AgentStudioCLI._load_project")
-    def test_push_json_without_commands_omits_commands_key(self, mock_load):
-        """push(json_output=True) without commands should not include commands key."""
+    def test_push_json_does_not_include_commands(self, mock_load):
+        """push(json_output=True) without --proto should not include commands or diffs."""
         project = mock_load.return_value
         project.push_project.return_value = (True, "Resources pushed successfully.", [])
 
