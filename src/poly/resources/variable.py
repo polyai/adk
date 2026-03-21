@@ -10,6 +10,7 @@ Copyright PolyAI Limited
 import logging
 import os
 from dataclasses import dataclass
+from typing import ClassVar
 
 import poly.resources.resource_utils as utils
 from poly.handlers.protobuf.variables_pb2 import (
@@ -31,6 +32,8 @@ class Variable(Resource):
 
     They are tracked via resource mapping and are denoted through the vrbl suffix.
     """
+
+    projection_path: ClassVar[list[str]] = ["variables", "variables", "entities", "{id}"]
 
     resource_id: str
     name: str

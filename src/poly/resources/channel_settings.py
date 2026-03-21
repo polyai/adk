@@ -35,6 +35,8 @@ def _config_path(channel: str) -> str:
 class VoiceDisclaimerMessage(MultiResourceYamlResource):
     """Resource class for managing disclaimer message settings (voice-only)"""
 
+    projection_path: ClassVar[list[str]] = ["channels", "voice", "disclaimer"]
+
     message: str = field(default="")
     enabled: bool = field(default=False)
     language_code: str = field(default="en-GB")
@@ -242,6 +244,8 @@ class ChannelGreeting(MultiResourceYamlResource):
 class VoiceGreeting(ChannelGreeting):
     """Voice channel greeting settings."""
 
+    projection_path: ClassVar[list[str]] = ["channels", "voice", "config", "greeting"]
+
     channel_type: ClassVar[ChannelType] = ChannelType.VOICE
     channel_subpath: ClassVar[str] = "voice"
 
@@ -249,6 +253,8 @@ class VoiceGreeting(ChannelGreeting):
 @dataclass
 class ChatGreeting(ChannelGreeting):
     """Chat (web chat) channel greeting settings."""
+
+    projection_path: ClassVar[list[str]] = ["channels", "webChat", "config", "greeting"]
 
     channel_type: ClassVar[ChannelType] = ChannelType.WEB_CHAT
     channel_subpath: ClassVar[str] = "chat"
@@ -333,6 +339,8 @@ class ChannelStylePrompt(MultiResourceYamlResource):
 class VoiceStylePrompt(ChannelStylePrompt):
     """Voice channel style prompt settings."""
 
+    projection_path: ClassVar[list[str]] = ["channels", "voice", "config", "stylePrompt"]
+
     channel_type: ClassVar[ChannelType] = ChannelType.VOICE
     channel_subpath: ClassVar[str] = "voice"
 
@@ -340,6 +348,8 @@ class VoiceStylePrompt(ChannelStylePrompt):
 @dataclass
 class ChatStylePrompt(ChannelStylePrompt):
     """Chat (web chat) channel style prompt settings."""
+
+    projection_path: ClassVar[list[str]] = ["channels", "webChat", "config", "stylePrompt"]
 
     channel_type: ClassVar[ChannelType] = ChannelType.WEB_CHAT
     channel_subpath: ClassVar[str] = "chat"

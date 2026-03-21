@@ -66,6 +66,8 @@ class HandoffSipConfig:
 class Handoff(MultiResourceYamlResource):
     """Handoff resource for ADK."""
 
+    projection_path: ClassVar[list[str]] = ["handoff", "handoffs", "entities", "{id}"]
+
     description: str
     is_default: bool
     sip_config: HandoffSipConfig

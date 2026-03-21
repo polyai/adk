@@ -24,6 +24,8 @@ from poly.resources.resource import (
 class Pronunciation(MultiResourceYamlResource):
     """Dataclass representing a TTS Rule"""
 
+    projection_path: ClassVar[list[str]] = ["pronunciations", "pronunciations", "entities", "{id}"]
+
     regex: str
     replacement: str
     case_sensitive: bool

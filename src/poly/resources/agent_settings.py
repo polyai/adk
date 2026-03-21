@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import os
 from dataclasses import dataclass, field
 from functools import cached_property
+from typing import ClassVar
 
 from google.protobuf.message import Message
 
@@ -36,6 +37,8 @@ ALLOWED_ADJECTIVES = {
 @dataclass
 class SettingsPersonality(YamlResource):
     """Resource class for managing personality settings"""
+
+    projection_path: ClassVar[list[str]] = ["agentSettings", "personality"]
 
     custom: str
     adjectives: dict[str, bool] = field(default_factory=dict)
@@ -135,6 +138,8 @@ class SettingsPersonality(YamlResource):
 class SettingsRole(YamlResource):
     """Resource class for managing role settings"""
 
+    projection_path: ClassVar[list[str]] = ["agentSettings", "role"]
+
     value: str
     additional_info: str
     custom: str
@@ -230,6 +235,8 @@ class SettingsRole(YamlResource):
 @dataclass
 class SettingsRules(Resource):
     """Resource class for managing rules settings"""
+
+    projection_path: ClassVar[list[str]] = ["agentSettings", "rules"]
 
     behaviour: str
 

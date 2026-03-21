@@ -25,6 +25,8 @@ from poly.resources.resource import MultiResourceYamlResource, ResourceMapping
 class Variant(MultiResourceYamlResource):
     """Dataclass representing a variant"""
 
+    projection_path: ClassVar[list[str]] = ["variantManagement", "variants", "entities", "{id}"]
+
     is_default: bool = False
     top_level_name: ClassVar[str] = "variants"
     attribute_ids: list[str] = field(default_factory=list, repr=False, init=False)
@@ -152,6 +154,8 @@ class Variant(MultiResourceYamlResource):
 @dataclass
 class VariantAttribute(MultiResourceYamlResource):
     """Dataclass representing a variant attribute"""
+
+    projection_path: ClassVar[list[str]] = ["variantManagement", "attributes", "entities", "{id}"]
 
     mappings: dict[str, str]
     top_level_name: ClassVar[str] = "attributes"

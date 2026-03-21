@@ -72,224 +72,114 @@ class CommandSpec:
     """Field name within the payload that holds the flow ID (for nested flow resources)."""
 
 
-def _register_entity_resource(
-    registry: dict[str, CommandSpec],
-    create_cmd: str,
-    update_cmd: str,
-    delete_cmd: str,
-    path: list[str],
-    id_field: str = "id",
-    flow_id_field: Optional[str] = None,
-) -> None:
-    """Register create/update/delete specs for an entity-based resource."""
-    for cmd, op in [(create_cmd, "create"), (update_cmd, "update"), (delete_cmd, "delete")]:
-        registry[cmd] = CommandSpec(
-            path=path,
-            operation=op,
-            payload_key=cmd,
-            id_field=id_field,
-            flow_id_field=flow_id_field,
-        )
-
-
-def _register_singleton(
-    registry: dict[str, CommandSpec],
-    cmd: str,
-    path: list[str],
-) -> None:
-    """Register an update-only singleton resource."""
-    registry[cmd] = CommandSpec(
-        path=path,
-        operation="update",
-        payload_key=cmd,
-    )
-
-
 def _build_registry() -> dict[str, CommandSpec]:
-    """Build the complete command type → projection path registry."""
+    """Build the command type → projection path registry from resource classes.
+
+    Iterates all resource classes in ``RESOURCE_NAME_TO_CLASS`` and derives
+    CommandSpecs from their ``projection_path``, ``command_type``, and related
+    ClassVars. This means adding a new resource type with a ``projection_path``
+    automatically registers it — no manual updates needed.
+    """
+    from poly.project import RESOURCE_NAME_TO_CLASS
+
     r: dict[str, CommandSpec] = {}
 
-    # Topics
-    _register_entity_resource(
-        r,
-        "create_topic",
-        "update_topic",
-        "delete_topic",
-        ["knowledgeBase", "topics", "entities", "{id}"],
-    )
+    # Channel-routed command types: multiple resource classes share the same
+    # update_command_type but target different projection paths based on channel_type
+    # in the payload. We detect these and register them with an empty path so
+    # apply_command resolves the path dynamically.
+    channel_routed: set[str] = set()
+    cmd_to_path: dict[str, list[str]] = {}
+    for resource_cls in RESOURCE_NAME_TO_CLASS.values():
+        path = resource_cls.projection_path
+        if not path:
+            continue
+        try:
+            dummy = object.__new__(resource_cls)
+            dummy.resource_id = ""
+            update_cmd = dummy.update_command_type
+        except Exception:
+            continue
+        if update_cmd in cmd_to_path and cmd_to_path[update_cmd] != path:
+            channel_routed.add(update_cmd)
+        cmd_to_path[update_cmd] = path
 
-    # Entities
-    _register_entity_resource(
-        r,
-        "entity_create",
-        "entity_update",
-        "entity_delete",
-        ["entities", "entities", "entities", "{id}"],
-    )
+    for resource_cls in RESOURCE_NAME_TO_CLASS.values():
+        path = resource_cls.projection_path
+        if not path:
+            continue  # Sub-resources without a projection path (e.g. ASRBiasing, DTMFConfig)
 
-    # Variables
-    _register_entity_resource(
-        r,
-        "variable_create",
-        "variable_update",
-        "variable_delete",
-        ["variables", "variables", "entities", "{id}"],
-    )
+        # Read command_type properties via a minimal instance (they're @property, not ClassVar)
+        try:
+            dummy = object.__new__(resource_cls)
+            dummy.resource_id = ""
+            create_cmd = dummy.create_command_type
+            update_cmd = dummy.update_command_type
+            delete_cmd = dummy.delete_command_type
+        except (NotImplementedError, AttributeError, TypeError):
+            try:
+                dummy = object.__new__(resource_cls)
+                dummy.resource_id = ""
+                update_cmd = dummy.update_command_type
+            except Exception:
+                continue
+            create_cmd = None
+            delete_cmd = None
 
-    # Functions (global)
-    _register_entity_resource(
-        r,
-        "create_function",
-        "update_function",
-        "delete_function",
-        ["functions", "functions", "entities", "{id}"],
-    )
+        # Skip duplicate registrations for channel-routed commands (voice/chat share
+        # the same command type). They get a single entry with an empty path.
+        if update_cmd in channel_routed:
+            if update_cmd not in r:
+                r[update_cmd] = CommandSpec(
+                    path=[],  # resolved dynamically in _resolve_channel_path
+                    operation="update",
+                    payload_key=update_cmd,
+                )
+            continue
 
-    # Flows
-    _register_entity_resource(
-        r,
-        "create_flow",
-        "update_flow",
-        "delete_flow",
-        ["flows", "flows", "entities", "{id}"],
-        id_field="id",
-    )
-    # update_flow and delete_flow use flow_id instead of id
-    r["update_flow"] = CommandSpec(
-        path=["flows", "flows", "entities", "{id}"],
-        operation="update",
-        payload_key="update_flow",
-        id_field="flow_id",
-    )
-    r["delete_flow"] = CommandSpec(
-        path=["flows", "flows", "entities", "{id}"],
-        operation="delete",
-        payload_key="delete_flow",
-        id_field="flow_id",
-    )
+        id_field = resource_cls.projection_id_field
+        update_id_field = resource_cls.projection_update_id_field or id_field
+        flow_id_field = resource_cls.projection_parent_id_field
 
-    # Flow steps (nested under flow)
-    _flow_step_path = ["flows", "flows", "entities", "{flow_id}", "steps", "entities", "{id}"]
-    _register_entity_resource(
-        r,
-        "create_flow_step",
-        "update_flow_step",
-        "delete_flow_step",
-        _flow_step_path,
-        flow_id_field="flow_id",
-    )
+        is_singleton = "{id}" not in path
 
-    # Function steps (create_step / update_step / delete_step)
-    _register_entity_resource(
-        r,
-        "create_step",
-        "update_step",
-        "delete_step",
-        _flow_step_path,
-        id_field="step_id",
-        flow_id_field="flow_id",
-    )
+        if is_singleton:
+            r[update_cmd] = CommandSpec(
+                path=path,
+                operation="update",
+                payload_key=update_cmd,
+            )
+        else:
+            if create_cmd and create_cmd not in r:
+                r[create_cmd] = CommandSpec(
+                    path=path,
+                    operation="create",
+                    payload_key=create_cmd,
+                    id_field=id_field,
+                    flow_id_field=flow_id_field,
+                )
+            if update_cmd not in r:
+                r[update_cmd] = CommandSpec(
+                    path=path,
+                    operation="update",
+                    payload_key=update_cmd,
+                    id_field=update_id_field,
+                    flow_id_field=flow_id_field,
+                )
+            if delete_cmd and delete_cmd not in r:
+                r[delete_cmd] = CommandSpec(
+                    path=path,
+                    operation="delete",
+                    payload_key=delete_cmd,
+                    id_field=update_id_field,
+                    flow_id_field=flow_id_field,
+                )
 
-    # SMS Templates
-    _register_entity_resource(
-        r,
-        "sms_create_template",
-        "sms_update_template",
-        "sms_delete_template",
-        ["sms", "templates", "entities", "{id}"],
-    )
-
-    # Handoffs
-    _register_entity_resource(
-        r,
-        "handoff_create",
-        "handoff_update",
-        "handoff_delete",
-        ["handoff", "handoffs", "entities", "{id}"],
-    )
-
-    # Handoff set default (separate command)
+    # Extra commands not tied to a single resource class
     r["handoff_set_default"] = CommandSpec(
         path=["handoff", "handoffs", "entities", "{id}"],
         operation="update",
         payload_key="handoff_set_default",
-    )
-
-    # Phrase filters (stop keywords)
-    _register_entity_resource(
-        r,
-        "stop_keywords_create",
-        "stop_keywords_update",
-        "stop_keywords_delete",
-        ["stopKeywords", "filters", "entities", "{id}"],
-    )
-
-    # Pronunciations
-    _register_entity_resource(
-        r,
-        "pronunciations_create_pronunciation",
-        "pronunciations_update_pronunciation",
-        "pronunciations_delete_pronunciation",
-        ["pronunciations", "pronunciations", "entities", "{id}"],
-    )
-
-    # Keyphrase boosting
-    _register_entity_resource(
-        r,
-        "create_keyphrase_boosting",
-        "update_keyphrase_boosting",
-        "delete_keyphrase_boosting",
-        ["keyphraseBoosting", "keyphraseBoosting", "entities", "{id}"],
-    )
-
-    # Transcript corrections
-    _register_entity_resource(
-        r,
-        "create_transcript_corrections",
-        "update_transcript_corrections",
-        "delete_transcript_corrections",
-        ["transcriptCorrections", "transcriptCorrections", "entities", "{id}"],
-    )
-
-    # Variants
-    _register_entity_resource(
-        r,
-        "variant_create_variant",
-        "variant_set_default_variant",
-        "variant_delete_variant",
-        ["variantManagement", "variants", "entities", "{id}"],
-    )
-
-    # Variant attributes
-    _register_entity_resource(
-        r,
-        "variant_create_attribute",
-        "variant_update_attribute",
-        "variant_delete_attribute",
-        ["variantManagement", "attributes", "entities", "{id}"],
-    )
-
-    # --- Singletons (update only) ---
-
-    _register_singleton(r, "update_personality", ["agentSettings", "personality"])
-    _register_singleton(r, "update_role", ["agentSettings", "role"])
-    _register_singleton(r, "update_rules", ["agentSettings", "rules"])
-    _register_singleton(r, "voice_channel_update_disclaimer", ["channels", "voice", "disclaimer"])
-    _register_singleton(r, "experimental_config_update_config", ["experimentalConfig"])
-    _register_singleton(
-        r, "voice_channel_update_asr_settings", ["channels", "voice", "asrSettings"]
-    )
-
-    # Channel-routed commands are handled specially in apply_command
-    r["channel_update_greeting"] = CommandSpec(
-        path=[],  # resolved dynamically
-        operation="update",
-        payload_key="channel_update_greeting",
-    )
-    r["channel_update_style_prompt"] = CommandSpec(
-        path=[],  # resolved dynamically
-        operation="update",
-        payload_key="channel_update_style_prompt",
     )
 
     return r
@@ -363,13 +253,13 @@ def apply_command(projection: dict, command_dict: dict) -> None:
     payload = command_dict.get(spec.payload_key, {})
 
     # Determine the projection path
-    if cmd_type in ("channel_update_greeting", "channel_update_style_prompt"):
+    if not spec.path:
+        # Channel-routed: resolve dynamically based on channel_type in payload
         path = _resolve_channel_path(command_dict, spec)
+        if not path:
+            return
     else:
         path = _resolve_path(spec, payload)
-
-    if not path:
-        return
 
     payload_camel = snake_to_camel_keys(payload)
 

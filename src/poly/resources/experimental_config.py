@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import json
 import os
 from dataclasses import dataclass, field
+from typing import ClassVar
 
 import jsonschema
 
@@ -17,6 +18,8 @@ from poly.resources.resource import Resource
 @dataclass
 class ExperimentalConfig(Resource):
     """ExperimentalConfig resource"""
+
+    projection_path: ClassVar[list[str]] = ["experimentalConfig"]
 
     config: dict = field(default_factory=dict)
 

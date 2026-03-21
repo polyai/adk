@@ -12,7 +12,7 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
-from typing import Literal, Optional, Union
+from typing import ClassVar, Literal, Optional, Union
 
 from google.protobuf.message import Message
 
@@ -178,6 +178,8 @@ class LatencyControl(SubResource):
 @dataclass
 class Function(Resource):
     """Dataclass representing an Agent Studio function"""
+
+    projection_path: ClassVar[list[str]] = ["functions", "functions", "entities", "{id}"]
 
     description: str
     code: str

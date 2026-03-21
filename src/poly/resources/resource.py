@@ -31,6 +31,17 @@ class BaseResource(ABC):
 
     resource_id: str
 
+    # --- Projection mapping (for --proto diff) ---
+    # Override in subclasses. Use {id} for entity ID, {flow_id} for parent flow ID.
+    projection_path: ClassVar[list[str]] = []
+    projection_id_field: ClassVar[str] = "id"
+    projection_update_id_field: ClassVar[Optional[str]] = (
+        None  # if update/delete use a different ID field
+    )
+    projection_parent_id_field: ClassVar[Optional[str]] = (
+        None  # for nested resources (e.g. flow_id)
+    )
+
     @property
     @abstractmethod
     def command_type(self) -> str:
