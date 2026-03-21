@@ -147,6 +147,13 @@ poly docs flows functions topics
 
 Resource-specific documentation is available for agent settings, voice settings, chat settings, flows, functions, topics, entities, handoffs, variants, SMS templates, variables, speech recognition, response control, and experimental config.
 
+To write the output to a file for use with an AI coding tool, run:
+~~~bash
+poly docs --all --output rules.md
+~~~bash
+
+Reference `rules.md` in your coding agent context to give it accurate knowledge of ADK resource types and conventions.
+
 ### Step 5 — Customise the agent
 
 This is the core build phase. Create a branch, edit resources locally, track changes, and push them back.
@@ -343,15 +350,16 @@ Now provide the coding agent with the information you gathered earlier.
 This is the core input step. Include:
 
 - project-specific requirements
-- the URL to the business’s public API documentation
+- the URL to the business's public API documentation
 - relevant internal context
 - useful patterns or best practices from previous projects
 
-The coding agent can also use the docs command to inspect the SDK and understand the available resources.
+Before starting, generate a local documentation file and reference it in your coding agent session. This gives the agent accurate knowledge of ADK resource types, schemas, and conventions.
+```bash
+poly docs --all --output rules.md
+```
 
-~~~bash
-poly docs --all
-~~~
+Point your coding agent at `rules.md` as part of its initial context. The agent can then use it to generate and edit project files correctly without needing to run `poly docs` interactively.
 
 Reusing proven patterns from earlier projects can improve both speed and output quality.
 
