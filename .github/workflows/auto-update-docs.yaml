@@ -1,6 +1,6 @@
 name: Auto-update docs
 
-# Runs whenever a PR that touches source code or pyproject.toml is merged to main.
+# Runs whenever a PR that touches source code is merged to main.
 # The agent reads the diff, figures out which docs pages are stale, rewrites them,
 # and opens a PR for human review.
 #
@@ -13,7 +13,6 @@ on:
       - main
     paths:
       - 'src/**'
-      - 'pyproject.toml'
 
 permissions:
   contents: write
@@ -32,16 +31,20 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.14'
-          allow-prereleases: true
+          python-version: '3.11'
 
       - name: Install dependencies
         run: pip install anthropic
 
       - name: Run docs update agent
+        id: agent
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: python docs/scripts/update_docs.py
+        run: |
+          python docs/scripts/update_docs.py | tee /tmp/agent.log
+          # Extract the summary file path printed by the script.
+          SUMMARY=$(grep "^PR_SUMMARY_FILE=" /tmp/agent.log | cut -d= -f2)
+          echo "summary_file=${SUMMARY}" >> $GITHUB_OUTPUT
 
       - name: Check for doc changes
         id: check
@@ -65,11 +68,17 @@ jobs:
           git commit -m "docs: auto-update from ${SHORT_SHA}"
           git push origin "${BRANCH}"
 
-          PR_BODY=$(cat docs/scripts/.pr_summary 2>/dev/null \
-                    || echo "Auto-generated docs update from merge ${SHORT_SHA}.")
-
-          gh pr create \
-            --title "docs: auto-update from ${SHORT_SHA}" \
-            --body  "${PR_BODY}" \
-            --base  main \
-            --head  "${BRANCH}"
+          SUMMARY_FILE="${{ steps.agent.outputs.summary_file }}"
+          if [[ -f "${SUMMARY_FILE}" ]]; then
+            gh pr create \
+              --title "docs: auto-update from ${SHORT_SHA}" \
+              --body-file "${SUMMARY_FILE}" \
+              --base  main \
+              --head  "${BRANCH}"
+          else
+            gh pr create \
+              --title "docs: auto-update from ${SHORT_SHA}" \
+              --body  "Auto-generated docs update from merge ${SHORT_SHA}." \
+              --base  main \
+              --head  "${BRANCH}"
+          fi

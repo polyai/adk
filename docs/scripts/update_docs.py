@@ -12,13 +12,14 @@ Requires:
 
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import anthropic
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 DOCS_DIR = REPO_ROOT / "docs" / "docs"
-SUMMARY_FILE = Path(__file__).resolve().parent / ".pr_summary"
+DOCS_DIR_RESOLVED = DOCS_DIR.resolve()
 
 # Swap to claude-opus-4-6 for higher-stakes repos with complex docs.
 MODEL = "claude-sonnet-4-6"
@@ -31,16 +32,25 @@ DOCS_CHAR_LIMIT = 600_000
 
 
 def run(cmd: list[str], cwd: Path = REPO_ROOT) -> str:
-    """Run a shell command and return stdout."""
+    """Run a shell command and return stdout, logging stderr on failure."""
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd)
+    if result.returncode != 0:
+        print(f"Warning: {' '.join(cmd)} exited {result.returncode}: {result.stderr.strip()}")
     return result.stdout
 
 
 def get_diff() -> str:
-    """Return the unified diff of src/ and pyproject.toml from the last merge."""
-    diff = run(["git", "diff", "HEAD~1", "HEAD", "--", "src/", "pyproject.toml"])
+    """Return the unified diff of src/ from the last merge.
+
+    Only diffs src/ — pyproject.toml version bumps alone are not worth a
+    Claude call, and the version-bump commit fires on every push to main.
+    """
+    diff = run(["git", "diff", "HEAD~1", "HEAD", "--", "src/"])
     if len(diff) > DIFF_CHAR_LIMIT:
-        return diff[:DIFF_CHAR_LIMIT] + "\n\n[diff truncated — showing first 30 000 chars]"
+        return (
+            diff[:DIFF_CHAR_LIMIT]
+            + f"\n\n[diff truncated — showing first {DIFF_CHAR_LIMIT:,} chars]"
+        )
     return diff
 
 
@@ -88,15 +98,38 @@ def build_docs_block(docs: dict[str, str]) -> str:
     return "\n".join(lines)
 
 
+def safe_write(rel_path: str, content: str, allowed_paths: set[str]) -> bool:
+    """Write content to a docs file, enforcing strict path safety checks.
+
+    Returns True if the file was written, False if it was skipped.
+    """
+    # Resolve symlinks before comparing to prevent traversal via ../ or symlinks.
+    abs_path = (REPO_ROOT / rel_path).resolve()
+
+    if not abs_path.is_relative_to(DOCS_DIR_RESOLVED):
+        print(f"Skipping {rel_path} — resolves outside docs directory.")
+        return False
+
+    # Only allow updating files that already exist in the docs — no new files.
+    if rel_path not in allowed_paths:
+        print(f"Skipping {rel_path} — not an existing docs file.")
+        return False
+
+    abs_path.write_text(content)
+    return True
+
+
 def main() -> None:
+    """Run the agentic docs update: diff → Claude → write files → write PR summary."""
     diff = get_diff()
     if not diff.strip():
-        print("No relevant code changes in src/ or pyproject.toml — skipping.")
+        print("No relevant code changes in src/ — skipping.")
         sys.exit(0)
 
     commit_info = get_commit_info()
     docs = read_docs()
     docs_block = build_docs_block(docs)
+    allowed_paths = set(docs.keys())
 
     client = anthropic.Anthropic()
 
@@ -155,7 +188,7 @@ the documentation if needed.
 ## Merged commit
 {commit_info}
 
-## Code diff (src/ and pyproject.toml)
+## Code diff (src/ only)
 ```diff
 {diff}
 ```
@@ -169,7 +202,6 @@ the documentation if needed.
    - New or removed CLI commands or flags
    - Changed command behaviour or output
    - New or changed resource types, YAML fields, or schemas
-   - Version bumps in pyproject.toml
    - New concepts or workflows
 
 2. For each docs page that is now inaccurate or incomplete, call `update_doc_file`
@@ -190,39 +222,41 @@ the documentation if needed.
 
     print(f"Sending diff ({len(diff)} chars) and {len(docs)} doc files to Claude...")
 
-    response = client.messages.create(
-        model=MODEL,
-        max_tokens=8096,
-        tools=tools,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    try:
+        response = client.messages.create(
+            model=MODEL,
+            max_tokens=16_384,
+            tools=tools,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except anthropic.APIError as exc:
+        print(f"Anthropic API error — skipping docs update: {exc}")
+        sys.exit(0)
 
     updated: list[str] = []
     reasons: list[str] = []
+    done = False
 
     for block in response.content:
         if block.type != "tool_use":
             continue
         if block.name == "no_updates_needed":
             print(f"No updates needed: {block.input['reason']}")
-            sys.exit(0)
+            done = True
+            break
         if block.name == "update_doc_file":
             rel_path = block.input["file_path"]
-            abs_path = REPO_ROOT / rel_path
-            if not abs_path.is_relative_to(DOCS_DIR):
-                print(f"Skipping {rel_path} — outside docs directory.")
-                continue
-            abs_path.parent.mkdir(parents=True, exist_ok=True)
-            abs_path.write_text(block.input["new_content"])
-            updated.append(rel_path)
-            reasons.append(f"- **{rel_path}**: {block.input['reason']}")
-            print(f"Updated: {rel_path}")
+            if safe_write(rel_path, block.input["new_content"], allowed_paths):
+                updated.append(rel_path)
+                reasons.append(f"- **{rel_path}**: {block.input['reason']}")
+                print(f"Updated: {rel_path}")
 
-    if not updated:
-        print("Claude returned no file updates.")
+    if done or not updated:
+        print("No files written.")
         sys.exit(0)
 
-    # Write PR summary for the workflow to use as the PR body.
+    # Write PR summary to a temp file that the workflow reads via --body-file.
+    # Using /tmp avoids the file being staged by `git add docs/`.
     merge_hash = run(["git", "rev-parse", "--short", "HEAD"]).strip()
     summary = (
         f"Auto-generated docs update triggered by merge {merge_hash}.\n\n"
@@ -230,8 +264,11 @@ the documentation if needed.
         + "\n".join(reasons)
         + "\n\n---\n_Updated by the auto-update-docs workflow using Claude._"
     )
-    SUMMARY_FILE.write_text(summary)
-    print(f"\nUpdated {len(updated)} file(s). PR summary written to {SUMMARY_FILE}.")
+    summary_file = Path(tempfile.gettempdir()) / "pr_summary.md"
+    summary_file.write_text(summary)
+    # Print the path so the workflow step can read it via $GITHUB_OUTPUT.
+    print(f"PR_SUMMARY_FILE={summary_file}")
+    print(f"\nUpdated {len(updated)} file(s).")
 
 
 if __name__ == "__main__":
