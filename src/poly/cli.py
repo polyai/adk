@@ -178,6 +178,12 @@ class AgentStudioCLI:
         )
         pull_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
         pull_parser.add_argument(
+            "--json",
+            action="store_true",
+            default=False,
+            help="Output machine-readable JSON instead of Rich formatting.",
+        )
+        pull_parser.add_argument(
             "--projection",
             action="store_true",
             default=False,
@@ -567,6 +573,7 @@ class AgentStudioCLI:
                 args.path,
                 args.force,
                 args.format,
+                json_output=getattr(args, "json", False),
                 projection_output=getattr(args, "projection", False),
             )
 
@@ -799,19 +806,26 @@ class AgentStudioCLI:
         base_path: str,
         force: bool = False,
         format: bool = False,
+        json_output: bool = False,
         projection_output: bool = False,
     ) -> AgentStudioProject:
         """Pull the latest project configuration from the Agent Studio."""
         project = cls._load_project(base_path)
+        capture = json_output or projection_output
 
-        if not projection_output:
+        if not capture:
             info(f"Pulling project [bold]{project.account_id}/{project.project_id}[/bold]...")
 
         files_with_conflicts = project.pull_project(force=force, format=format)
 
-        if projection_output:
-            projection = project.fetch_projection()
-            json_print(projection)
+        if capture:
+            result = {
+                "success": True,
+                "conflicts": files_with_conflicts,
+            }
+            if projection_output:
+                result["projection"] = project.fetch_projection()
+            json_print(result)
             return project
 
         if files_with_conflicts:

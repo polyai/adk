@@ -161,12 +161,61 @@ class CommandsToDictsTests(unittest.TestCase):
         self.assertEqual(result[0], expected)
 
 
+class PullOutputJsonTests(unittest.TestCase):
+    """Tests for poly pull with --json."""
+
+    @patch("poly.cli.AgentStudioCLI._load_project")
+    def test_pull_json_success_no_conflicts(self, mock_load):
+        """pull(json_output=True) should output success and empty conflicts."""
+        project = mock_load.return_value
+        project.pull_project.return_value = []
+
+        buf = io.StringIO()
+        with patch("poly.output.sys.stdout", buf):
+            AgentStudioCLI.pull("/fake/project", json_output=True)
+
+        output = json.loads(buf.getvalue())
+        self.assertEqual(output, {"success": True, "conflicts": []})
+
+    @patch("poly.cli.AgentStudioCLI._load_project")
+    def test_pull_json_with_conflicts(self, mock_load):
+        """pull(json_output=True) should include conflict file paths."""
+        project = mock_load.return_value
+        project.pull_project.return_value = ["flows/main/config.yaml", "topics/greeting.yaml"]
+
+        buf = io.StringIO()
+        with patch("poly.output.sys.stdout", buf):
+            AgentStudioCLI.pull("/fake/project", json_output=True)
+
+        output = json.loads(buf.getvalue())
+        self.assertEqual(
+            output,
+            {
+                "success": True,
+                "conflicts": ["flows/main/config.yaml", "topics/greeting.yaml"],
+            },
+        )
+
+    @patch("poly.cli.AgentStudioCLI._load_project")
+    def test_pull_json_does_not_include_projection(self, mock_load):
+        """pull(json_output=True) without --projection should not include projection key."""
+        project = mock_load.return_value
+        project.pull_project.return_value = []
+
+        buf = io.StringIO()
+        with patch("poly.output.sys.stdout", buf):
+            AgentStudioCLI.pull("/fake/project", json_output=True)
+
+        output = json.loads(buf.getvalue())
+        self.assertNotIn("projection", output)
+
+
 class PullOutputProjectionTests(unittest.TestCase):
     """Tests for poly pull with --projection."""
 
     @patch("poly.cli.AgentStudioCLI._load_project")
-    def test_pull_projection_outputs_full_projection(self, mock_load):
-        """pull(projection_output=True) should output the raw SDK projection as JSON."""
+    def test_pull_projection_includes_projection_in_output(self, mock_load):
+        """pull(projection_output=True) should include the projection in JSON output."""
         project = mock_load.return_value
         project.pull_project.return_value = []
         projection = {
@@ -190,7 +239,10 @@ class PullOutputProjectionTests(unittest.TestCase):
             AgentStudioCLI.pull("/fake/project", projection_output=True)
 
         output = json.loads(buf.getvalue())
-        self.assertEqual(output, projection)
+        self.assertEqual(
+            output,
+            {"success": True, "conflicts": [], "projection": projection},
+        )
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_pull_projection_still_pulls(self, mock_load):
