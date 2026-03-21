@@ -421,4 +421,4 @@ def generate_projection_diff(project: Any) -> dict:
     commands = project.generate_push_commands(skip_validation=True)
     command_dicts = commands_to_dicts(commands)
 
-    return {"commands": enrich_commands_with_diffs(before, command_dicts)}
+    return {"success": True, "commands": enrich_commands_with_diffs(before, command_dicts)}

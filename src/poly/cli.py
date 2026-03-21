@@ -872,7 +872,7 @@ class AgentStudioCLI:
 
             command_dicts = commands_to_dicts(push_commands)
             result_commands = enrich_commands_with_diffs(projection_before, command_dicts)
-            json_print({"commands": result_commands})
+            json_print({"success": push_ok, "commands": result_commands})
             if not push_ok:
                 sys.exit(1)
             return project

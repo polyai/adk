@@ -505,7 +505,7 @@ class PushOutputProtoTests(unittest.TestCase):
             AgentStudioCLI.push("/fake/project", proto_output=True)
 
         output = json.loads(buf.getvalue())
-        self.assertEqual(output, {"commands": mock_enrich.return_value})
+        self.assertEqual(output, {"success": True, "commands": mock_enrich.return_value})
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_push_proto_fetches_projection_before_push(self, mock_load):
@@ -551,6 +551,7 @@ class DiffOutputProtoTests(unittest.TestCase):
     def test_diff_proto_full_output(self, mock_load, mock_gen_diff):
         """diff(proto_output=True) should output commands with nested diffs."""
         expected_result = {
+            "success": True,
             "commands": [
                 {
                     **CREATE_TOPIC_EXPECTED,
@@ -580,7 +581,7 @@ class DiffOutputProtoTests(unittest.TestCase):
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_diff_proto_does_not_call_file_diff(self, mock_load, mock_gen_diff, mock_diff):
         """diff(proto_output=True) should not invoke _diff for file-level diffs."""
-        mock_gen_diff.return_value = {"commands": []}
+        mock_gen_diff.return_value = {"success": True, "commands": []}
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):

@@ -472,7 +472,7 @@ class GenerateProjectionDiffTests(unittest.TestCase):
 
         result = generate_projection_diff(project)
 
-        self.assertEqual(result, {"commands": []})
+        self.assertEqual(result, {"success": True, "commands": []})
 
     def test_calls_fetch_projection_and_generate_push_commands(self):
         """The orchestrator should call fetch_projection and generate_push_commands on the project."""
