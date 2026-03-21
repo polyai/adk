@@ -184,7 +184,7 @@ class AgentStudioCLI:
             help="Output machine-readable JSON instead of Rich formatting.",
         )
         pull_parser.add_argument(
-            "--projection",
+            "--proto",
             action="store_true",
             default=False,
             help="Output the full SDK projection as JSON after pulling.",
@@ -234,7 +234,7 @@ class AgentStudioCLI:
             help="Output machine-readable JSON instead of Rich formatting.",
         )
         push_parser.add_argument(
-            "--commands",
+            "--proto",
             action="store_true",
             default=False,
             help="Output the SDK push commands that were sent, serialized as JSON.",
@@ -263,7 +263,7 @@ class AgentStudioCLI:
             help="Output machine-readable JSON instead of Rich formatting.",
         )
         status_parser.add_argument(
-            "--commands",
+            "--proto",
             action="store_true",
             default=False,
             help="Output the SDK push commands that would be sent, serialized as JSON.",
@@ -574,7 +574,7 @@ class AgentStudioCLI:
                 args.force,
                 args.format,
                 json_output=getattr(args, "json", False),
-                projection_output=getattr(args, "projection", False),
+                proto_output=getattr(args, "proto", False),
             )
 
         elif args.command == "push":
@@ -585,14 +585,14 @@ class AgentStudioCLI:
                 args.dry_run,
                 args.format,
                 json_output=getattr(args, "json", False),
-                commands_output=getattr(args, "commands", False),
+                proto_output=getattr(args, "proto", False),
             )
 
         elif args.command == "status":
             cls.status(
                 args.path,
                 json_output=getattr(args, "json", False),
-                commands_output=getattr(args, "commands", False),
+                proto_output=getattr(args, "proto", False),
             )
 
         elif args.command == "revert":
@@ -807,11 +807,11 @@ class AgentStudioCLI:
         force: bool = False,
         format: bool = False,
         json_output: bool = False,
-        projection_output: bool = False,
+        proto_output: bool = False,
     ) -> AgentStudioProject:
         """Pull the latest project configuration from the Agent Studio."""
         project = cls._load_project(base_path)
-        capture = json_output or projection_output
+        capture = json_output or proto_output
 
         if not capture:
             info(f"Pulling project [bold]{project.account_id}/{project.project_id}[/bold]...")
@@ -823,7 +823,7 @@ class AgentStudioCLI:
                 "success": True,
                 "conflicts": files_with_conflicts,
             }
-            if projection_output:
+            if proto_output:
                 result["projection"] = project.fetch_projection()
             json_print(result)
             return project
@@ -843,11 +843,11 @@ class AgentStudioCLI:
         dry_run: bool = False,
         format: bool = False,
         json_output: bool = False,
-        commands_output: bool = False,
+        proto_output: bool = False,
     ) -> AgentStudioProject:
         """Push the project configuration to the Agent Studio."""
         project = cls._load_project(base_path)
-        capture = json_output or commands_output
+        capture = json_output or proto_output
 
         if not capture:
             info(
@@ -864,7 +864,7 @@ class AgentStudioCLI:
 
         if capture:
             result = {"success": push_ok, "message": push_output}
-            if commands_output:
+            if proto_output:
                 result["commands"] = commands_to_dicts(push_commands)
             json_print(result)
             if not push_ok:
@@ -884,12 +884,12 @@ class AgentStudioCLI:
         cls,
         base_path: str,
         json_output: bool = False,
-        commands_output: bool = False,
+        proto_output: bool = False,
     ) -> None:
         """Check the changed files of the project."""
         project = cls._load_project(base_path)
 
-        if commands_output:
+        if proto_output:
             commands = project.generate_push_commands(skip_validation=True)
             json_print({"commands": commands_to_dicts(commands)})
             return

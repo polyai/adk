@@ -198,7 +198,7 @@ class PullOutputJsonTests(unittest.TestCase):
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_pull_json_does_not_include_projection(self, mock_load):
-        """pull(json_output=True) without --projection should not include projection key."""
+        """pull(json_output=True) without --proto should not include projection key."""
         project = mock_load.return_value
         project.pull_project.return_value = []
 
@@ -210,12 +210,12 @@ class PullOutputJsonTests(unittest.TestCase):
         self.assertNotIn("projection", output)
 
 
-class PullOutputProjectionTests(unittest.TestCase):
-    """Tests for poly pull with --projection."""
+class PullOutputProtoTests(unittest.TestCase):
+    """Tests for poly pull with --proto."""
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_pull_projection_includes_projection_in_output(self, mock_load):
-        """pull(projection_output=True) should include the projection in JSON output."""
+        """pull(proto_output=True) should include the projection in JSON output."""
         project = mock_load.return_value
         project.pull_project.return_value = []
         projection = {
@@ -236,7 +236,7 @@ class PullOutputProjectionTests(unittest.TestCase):
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.pull("/fake/project", projection_output=True)
+            AgentStudioCLI.pull("/fake/project", proto_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertEqual(
@@ -246,14 +246,14 @@ class PullOutputProjectionTests(unittest.TestCase):
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_pull_projection_still_pulls(self, mock_load):
-        """pull(projection_output=True) should still call pull_project."""
+        """pull(proto_output=True) should still call pull_project."""
         project = mock_load.return_value
         project.pull_project.return_value = []
         project.fetch_projection.return_value = {}
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.pull("/fake/project", projection_output=True)
+            AgentStudioCLI.pull("/fake/project", proto_output=True)
 
         project.pull_project.assert_called_once()
 
@@ -319,12 +319,12 @@ class StatusOutputJsonTests(unittest.TestCase):
         self.assertIsNone(output["branch"])
 
 
-class StatusOutputCommandsTests(unittest.TestCase):
-    """Tests for poly status with --commands."""
+class StatusOutputProtoTests(unittest.TestCase):
+    """Tests for poly status with --proto."""
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_status_commands_full_structure(self, mock_load):
-        """status(commands_output=True) should serialize commands with full protobuf detail."""
+        """status(proto_output=True) should serialize commands with full protobuf detail."""
         project = mock_load.return_value
         project.generate_push_commands.return_value = [
             _make_create_topic_command(),
@@ -333,7 +333,7 @@ class StatusOutputCommandsTests(unittest.TestCase):
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.status("/fake/project", commands_output=True)
+            AgentStudioCLI.status("/fake/project", proto_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertEqual(
@@ -343,13 +343,13 @@ class StatusOutputCommandsTests(unittest.TestCase):
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_status_commands_empty_when_no_changes(self, mock_load):
-        """status(commands_output=True) with no changes should return empty commands list."""
+        """status(proto_output=True) with no changes should return empty commands list."""
         project = mock_load.return_value
         project.generate_push_commands.return_value = []
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.status("/fake/project", commands_output=True)
+            AgentStudioCLI.status("/fake/project", proto_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertEqual(output, {"commands": []})
@@ -493,12 +493,12 @@ class PushOutputJsonTests(unittest.TestCase):
         mock_exit.assert_called_once_with(1)
 
 
-class PushOutputCommandsTests(unittest.TestCase):
-    """Tests for poly push with --commands."""
+class PushOutputProtoTests(unittest.TestCase):
+    """Tests for poly push with --proto."""
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_push_commands_full_structure(self, mock_load):
-        """push(commands_output=True) should include fully serialized commands."""
+        """push(proto_output=True) should include fully serialized commands."""
         project = mock_load.return_value
         project.push_project.return_value = (
             True,
@@ -508,7 +508,7 @@ class PushOutputCommandsTests(unittest.TestCase):
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.push("/fake/project", commands_output=True)
+            AgentStudioCLI.push("/fake/project", proto_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertEqual(
@@ -522,13 +522,13 @@ class PushOutputCommandsTests(unittest.TestCase):
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_push_commands_passes_capture_commands(self, mock_load):
-        """push(commands_output=True) should call push_project with capture_commands=True."""
+        """push(proto_output=True) should call push_project with capture_commands=True."""
         project = mock_load.return_value
         project.push_project.return_value = (True, "Resources pushed successfully.", [])
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.push("/fake/project", commands_output=True)
+            AgentStudioCLI.push("/fake/project", proto_output=True)
 
         project.push_project.assert_called_once()
         call_kwargs = project.push_project.call_args[1]
