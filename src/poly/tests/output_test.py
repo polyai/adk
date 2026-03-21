@@ -549,3 +549,53 @@ class PushOutputProtoTests(unittest.TestCase):
             output,
             {"success": True, "message": "Resources pushed successfully."},
         )
+
+
+class DiffOutputProtoTests(unittest.TestCase):
+    """Tests for poly diff with --proto."""
+
+    @patch("poly.projection_diff.generate_projection_diff")
+    @patch("poly.cli.AgentStudioCLI._load_project")
+    def test_diff_proto_outputs_json(self, mock_load, mock_gen_diff):
+        """diff(proto_output=True) should output the projection diff as JSON."""
+        mock_gen_diff.return_value = {
+            "commands": [CREATE_TOPIC_EXPECTED],
+            "diff": {
+                "knowledgeBase": {
+                    "topics": {
+                        "entities": {
+                            "topic-abc": {
+                                "content": {
+                                    "before": None,
+                                    "after": "Hello, how can I help?",
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+        }
+
+        buf = io.StringIO()
+        with patch("poly.output.sys.stdout", buf):
+            AgentStudioCLI.diff("/fake/project", files=[], proto_output=True)
+
+        output = json.loads(buf.getvalue())
+        self.assertIn("commands", output)
+        self.assertIn("diff", output)
+        self.assertEqual(len(output["commands"]), 1)
+        self.assertEqual(output["commands"][0]["type"], "create_topic")
+        self.assertIn("knowledgeBase", output["diff"])
+
+    @patch("poly.cli.AgentStudioCLI._diff")
+    @patch("poly.projection_diff.generate_projection_diff")
+    @patch("poly.cli.AgentStudioCLI._load_project")
+    def test_diff_proto_does_not_call_file_diff(self, mock_load, mock_gen_diff, mock_diff):
+        """diff(proto_output=True) should not invoke _diff for file-level diffs."""
+        mock_gen_diff.return_value = {"commands": [], "diff": {}}
+
+        buf = io.StringIO()
+        with patch("poly.output.sys.stdout", buf):
+            AgentStudioCLI.diff("/fake/project", files=[], proto_output=True)
+
+        mock_diff.assert_not_called()

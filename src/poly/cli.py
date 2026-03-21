@@ -324,6 +324,12 @@ class AgentStudioCLI:
             default=False,
             help="Output machine-readable JSON instead of Rich formatting.",
         )
+        diff_parser.add_argument(
+            "--proto",
+            action="store_true",
+            default=False,
+            help="Output the projection diff (before/after push) as JSON.",
+        )
 
         # REVIEW
         review_parser = subparsers.add_parser(
@@ -599,7 +605,12 @@ class AgentStudioCLI:
             cls.revert(args.path, args.all, args.files)
 
         elif args.command == "diff":
-            cls.diff(args.path, args.files, json_output=getattr(args, "json", False))
+            cls.diff(
+                args.path,
+                args.files,
+                json_output=getattr(args, "json", False),
+                proto_output=getattr(args, "proto", False),
+            )
 
         elif args.command == "review":
             if args.delete:
@@ -965,8 +976,22 @@ class AgentStudioCLI:
         return diffs
 
     @classmethod
-    def diff(cls, base_path: str, files: list[str] = None, json_output: bool = False) -> None:
+    def diff(
+        cls,
+        base_path: str,
+        files: list[str] = None,
+        json_output: bool = False,
+        proto_output: bool = False,
+    ) -> None:
         """Show the changes made to the project."""
+        if proto_output:
+            from poly.projection_diff import generate_projection_diff
+
+            project = cls._load_project(base_path)
+            result = generate_projection_diff(project)
+            json_print(result)
+            return
+
         diffs = cls._diff(base_path, files) or {}
 
         if json_output:
