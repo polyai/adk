@@ -125,6 +125,18 @@ class AgentStudioInterface:
         """
         return self.sync_client.get_queued_commands()
 
+    def send_queued_commands(self) -> bool:
+        """Send all queued commands as a batch and clear the queue.
+
+        Returns:
+            bool: True if successful, False if the batch send failed.
+        """
+        return self.sync_client.send_queued_commands()
+
+    def clear_command_queue(self) -> None:
+        """Clear all queued commands without sending."""
+        self.sync_client.clear_command_queue()
+
     def push_resources(
         self,
         deleted_resources: dict[type[BaseResource], dict[str, BaseResource]],

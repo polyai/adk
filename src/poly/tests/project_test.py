@@ -184,7 +184,9 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
                 os.path.join(TEST_DIR, "config", "entities.yaml", "entities", "phone_number"),
                 os.path.join(TEST_DIR, "config", "entities.yaml", "entities", "date"),
                 os.path.join(TEST_DIR, "config", "entities.yaml", "entities", "party_size"),
-                os.path.join(TEST_DIR, "config", "entities.yaml", "entities", "confirmation_status"),
+                os.path.join(
+                    TEST_DIR, "config", "entities.yaml", "entities", "confirmation_status"
+                ),
                 os.path.join(TEST_DIR, "config", "entities.yaml", "entities", "email"),
             ],
         )
@@ -245,8 +247,12 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
         self.assertCountEqual(
             local_resources[SMSTemplate],
             [
-                os.path.join(TEST_DIR, "config", "sms_templates.yaml", "sms_templates", "test_template_1"),
-                os.path.join(TEST_DIR, "config", "sms_templates.yaml", "sms_templates", "test_template_2"),
+                os.path.join(
+                    TEST_DIR, "config", "sms_templates.yaml", "sms_templates", "test_template_1"
+                ),
+                os.path.join(
+                    TEST_DIR, "config", "sms_templates.yaml", "sms_templates", "test_template_2"
+                ),
             ],
         )
 
@@ -257,7 +263,7 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
             [
                 os.path.join(TEST_DIR, "variables", "customer_name"),
                 os.path.join(TEST_DIR, "variables", "payment_success"),
-                os.path.join(TEST_DIR, "variables", "data_processed")
+                os.path.join(TEST_DIR, "variables", "data_processed"),
             ],
         )
 
@@ -267,9 +273,27 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
         self.assertCountEqual(
             local_resources[KeyphraseBoosting],
             [
-                os.path.join(TEST_DIR, speech_recognition_path, "keyphrase_boosting.yaml", "keyphrases", "PolyAI"),
-                os.path.join(TEST_DIR, speech_recognition_path, "keyphrase_boosting.yaml", "keyphrases", "reservation"),
-                os.path.join(TEST_DIR, speech_recognition_path, "keyphrase_boosting.yaml", "keyphrases", "check_in"),
+                os.path.join(
+                    TEST_DIR,
+                    speech_recognition_path,
+                    "keyphrase_boosting.yaml",
+                    "keyphrases",
+                    "PolyAI",
+                ),
+                os.path.join(
+                    TEST_DIR,
+                    speech_recognition_path,
+                    "keyphrase_boosting.yaml",
+                    "keyphrases",
+                    "reservation",
+                ),
+                os.path.join(
+                    TEST_DIR,
+                    speech_recognition_path,
+                    "keyphrase_boosting.yaml",
+                    "keyphrases",
+                    "check_in",
+                ),
             ],
         )
 
@@ -278,8 +302,20 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
         self.assertCountEqual(
             local_resources[TranscriptCorrection],
             [
-                os.path.join(TEST_DIR, speech_recognition_path, "transcript_corrections.yaml", "corrections", "Email_domain_fix"),
-                os.path.join(TEST_DIR, speech_recognition_path, "transcript_corrections.yaml", "corrections", "Number_normalization"),
+                os.path.join(
+                    TEST_DIR,
+                    speech_recognition_path,
+                    "transcript_corrections.yaml",
+                    "corrections",
+                    "Email_domain_fix",
+                ),
+                os.path.join(
+                    TEST_DIR,
+                    speech_recognition_path,
+                    "transcript_corrections.yaml",
+                    "corrections",
+                    "Number_normalization",
+                ),
             ],
         )
 
@@ -829,7 +865,9 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         # The original step should be in deleted_resources
         self.assertIn(FlowStep, cleaned_deleted)
         self.assertIn("flow-123_step-1", cleaned_deleted[FlowStep])
-        self.assertEqual(cleaned_deleted[FlowStep]["flow-123_step-1"].step_type, StepType.ADVANCED_STEP)
+        self.assertEqual(
+            cleaned_deleted[FlowStep]["flow-123_step-1"].step_type, StepType.ADVANCED_STEP
+        )
 
         # The updated step should be in new_resources
         self.assertIn(FlowStep, cleaned_new)
@@ -900,9 +938,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         self.assertEqual(dummy.extracted_entities, [])
 
         self.assertIn(FlowConfig, pre_push_updated)
-        self.assertEqual(
-            pre_push_updated[FlowConfig]["flow-123"].start_step, "step-1_temp"
-        )
+        self.assertEqual(pre_push_updated[FlowConfig]["flow-123"].start_step, "step-1_temp")
 
         # Post-push: delete dummy
         self.assertIn(FlowStep, post_push_deleted)
@@ -922,9 +958,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             StepType.DEFAULT_STEP,
         )
         self.assertIn(FlowConfig, cleaned_updated)
-        self.assertEqual(
-            cleaned_updated[FlowConfig]["flow-123"].start_step, "step-1"
-        )
+        self.assertEqual(cleaned_updated[FlowConfig]["flow-123"].start_step, "step-1")
 
     def test_clean_resources_before_push_deletes_start_step_after_switching_to_different_step(
         self,
@@ -1043,9 +1077,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="step-1",
         )
 
-        self.project.resources.setdefault(FlowStep, {})[
-            "Test Flow_step-abc123"
-        ] = old_start_step
+        self.project.resources.setdefault(FlowStep, {})["Test Flow_step-abc123"] = old_start_step
         self.project.resources.setdefault(FlowConfig, {})["flow-123"] = flow_config
 
         new_resources = {FlowStep: {"Test Flow_step-1": new_start_step}}
@@ -1073,9 +1105,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         self.assertEqual(dummy.step_id, "step-abc123_temp")
 
         self.assertIn(FlowConfig, pre_push_updated)
-        self.assertEqual(
-            pre_push_updated[FlowConfig]["flow-123"].start_step, "step-abc123_temp"
-        )
+        self.assertEqual(pre_push_updated[FlowConfig]["flow-123"].start_step, "step-abc123_temp")
 
         # Post-push: delete dummy (not old step - old stays in main push deleted)
         self.assertIn(FlowStep, post_push_deleted)
@@ -1126,9 +1156,9 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="step-2",
         )
 
-        self.project.resources.setdefault(FunctionStep, {})[
-            "Test Flow_func_step"
-        ] = old_function_step
+        self.project.resources.setdefault(FunctionStep, {})["Test Flow_func_step"] = (
+            old_function_step
+        )
         self.project.resources.setdefault(FlowConfig, {})["flow-123"] = flow_config
 
         new_resources = {FlowStep: {"Test Flow_step-2": new_flow_step}}
@@ -1191,16 +1221,14 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="func_step",
         )
 
-        self.project.resources.setdefault(FunctionStep, {})[
-            "Test Flow_func_step_old"
-        ] = old_function_step
+        self.project.resources.setdefault(FunctionStep, {})["Test Flow_func_step_old"] = (
+            old_function_step
+        )
         self.project.resources.setdefault(FlowConfig, {})["flow-123"] = flow_config
 
         new_resources = {FunctionStep: {"Test Flow_func_step": new_function_step}}
         updated_resources = {FlowConfig: {"flow-123": updated_flow_config}}
-        deleted_resources = {
-            FunctionStep: {"Test Flow_func_step_old": old_function_step}
-        }
+        deleted_resources = {FunctionStep: {"Test Flow_func_step_old": old_function_step}}
 
         push_changes = self.project._clean_resources_before_push(
             {},
@@ -1274,7 +1302,9 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         self.assertEqual(created_flow.start_step, "entry_func_start_step_temp")
         step_ids = [s.step_id for s in created_flow.steps]
         self.assertIn("entry_func_start_step_temp", step_ids)
-        dummy_step = next(s for s in created_flow.steps if s.step_id == "entry_func_start_step_temp")
+        dummy_step = next(
+            s for s in created_flow.steps if s.step_id == "entry_func_start_step_temp"
+        )
         self.assertEqual(dummy_step.step_type, StepType.DEFAULT_STEP)
 
         # Flow config update is scheduled to reset start to the function step
@@ -1507,7 +1537,7 @@ class PushProjectTest(unittest.TestCase):
     def test_push_project_no_changes(self):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, _ = project.push_project(force=True)
 
         self.assertFalse(success)
         self.assertEqual(message, "No changes detected")
@@ -1517,7 +1547,7 @@ class PushProjectTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         self.mock_pull.return_value = ["functions/test_function.py"]
 
-        success, message = project.push_project(force=False)
+        success, message, _ = project.push_project(force=False)
 
         self.assertFalse(success)
         self.assertIn("Merge conflicts detected", message)
@@ -1528,7 +1558,7 @@ class PushProjectTest(unittest.TestCase):
         project_data["resources"]["topics"].pop("TOPIC-Topic 1")
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, _ = project.push_project(force=True)
 
         self.assertTrue(success)
         self.mock_api_handler.push_resources.assert_called_once()
@@ -1550,7 +1580,7 @@ class PushProjectTest(unittest.TestCase):
                 number_steps += 1
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True, skip_validation=True)
+        success, message, _ = project.push_project(force=True, skip_validation=True)
 
         self.assertTrue(success, f"Push failed: {message}")
         self.mock_api_handler.push_resources.assert_called_once()
@@ -1579,7 +1609,7 @@ class PushProjectTest(unittest.TestCase):
         }
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, _ = project.push_project(force=True)
 
         self.assertTrue(success)
         self.mock_api_handler.push_resources.assert_called_once()
@@ -1625,7 +1655,7 @@ class PushProjectTest(unittest.TestCase):
             return result
 
         with patch.object(AgentStudioProject, "discover_local_resources", mock_discover):
-            success, message = project.push_project(force=True, skip_validation=True)
+            success, message, _ = project.push_project(force=True, skip_validation=True)
 
         self.assertTrue(success, f"Push failed: {message}")
         self.mock_api_handler.push_resources.assert_called_once()
@@ -1642,7 +1672,7 @@ class PushProjectTest(unittest.TestCase):
         )
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, _ = project.push_project(force=True)
 
         self.assertTrue(success)
         self.mock_api_handler.push_resources.assert_called_once()
@@ -1658,7 +1688,7 @@ class PushProjectTest(unittest.TestCase):
         ] = True
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, _ = project.push_project(force=True)
 
         self.assertTrue(success)
         self.mock_api_handler.push_resources.assert_called_once()
@@ -1673,7 +1703,7 @@ class PushProjectTest(unittest.TestCase):
 
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, _ = project.push_project(force=True)
 
         self.assertTrue(success)
         self.mock_api_handler.push_resources.assert_called_once()
@@ -1704,14 +1734,13 @@ class PushProjectTest(unittest.TestCase):
 
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, _ = project.push_project(force=True)
 
         self.assertTrue(success)
         self.mock_api_handler.push_resources.assert_called_once()
         call_args = self.mock_api_handler.push_resources.call_args
         deleted_resources = call_args.kwargs["deleted_resources"]
         self.assertIn(Condition, deleted_resources)
-
 
     def test_push_project_updated_sub_resource_asr_biasing(self):
         """Test pushing an updated ASRBiasing sub-resource"""
@@ -1723,7 +1752,7 @@ class PushProjectTest(unittest.TestCase):
 
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, _ = project.push_project(force=True)
 
         self.assertTrue(success)
         self.mock_api_handler.push_resources.assert_called_once()
@@ -1753,7 +1782,7 @@ class PushProjectTest(unittest.TestCase):
         ] = False
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, _ = project.push_project(force=True)
 
         self.assertTrue(success)
         self.mock_api_handler.push_resources.assert_called_once()
@@ -1771,7 +1800,7 @@ class PushProjectTest(unittest.TestCase):
         project_data["resources"]["keyphrase_boosting"].pop("KEYPHRASE_BOOSTING-polyai")
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, _ = project.push_project(force=True)
 
         self.assertTrue(success)
         self.mock_api_handler.push_resources.assert_called_once()
@@ -1791,7 +1820,7 @@ class PushProjectTest(unittest.TestCase):
         }
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, _ = project.push_project(force=True)
 
         self.assertTrue(success)
         self.mock_api_handler.push_resources.assert_called_once()
@@ -1802,10 +1831,12 @@ class PushProjectTest(unittest.TestCase):
 
     def test_push_project_modified_keyphrase_boosting(self):
         project_data = deepcopy(PROJECT_DATA)
-        project_data["resources"]["keyphrase_boosting"]["KEYPHRASE_BOOSTING-polyai"]["level"] = "default"
+        project_data["resources"]["keyphrase_boosting"]["KEYPHRASE_BOOSTING-polyai"]["level"] = (
+            "default"
+        )
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, _ = project.push_project(force=True)
 
         self.assertTrue(success)
         self.mock_api_handler.push_resources.assert_called_once()
@@ -1816,10 +1847,12 @@ class PushProjectTest(unittest.TestCase):
 
     def test_push_project_new_transcript_correction(self):
         project_data = deepcopy(PROJECT_DATA)
-        project_data["resources"]["transcript_corrections"].pop("TRANSCRIPT_CORRECTIONS-email_domain")
+        project_data["resources"]["transcript_corrections"].pop(
+            "TRANSCRIPT_CORRECTIONS-email_domain"
+        )
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, _ = project.push_project(force=True)
 
         self.assertTrue(success)
         self.mock_api_handler.push_resources.assert_called_once()
@@ -1841,7 +1874,7 @@ class PushProjectTest(unittest.TestCase):
         }
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, _ = project.push_project(force=True)
 
         self.assertTrue(success)
         self.mock_api_handler.push_resources.assert_called_once()
@@ -1855,7 +1888,7 @@ class PushProjectTest(unittest.TestCase):
         project_data["resources"]["asr_settings"]["asr_settings"]["barge_in"] = True
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, _ = project.push_project(force=True)
 
         self.assertTrue(success)
         self.mock_api_handler.push_resources.assert_called_once()
@@ -1867,14 +1900,16 @@ class PushProjectTest(unittest.TestCase):
     def test_push_project_validation_error(self):
         project_data = deepcopy(PROJECT_DATA)
         # Create invalid resource (empty description)
-        project_data["resources"]["flow_config"]["FLOW_CONFIG-test_flow"]["description"] = "description"
+        project_data["resources"]["flow_config"]["FLOW_CONFIG-test_flow"]["description"] = (
+            "description"
+        )
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         # Modify the local file to match
         flow_config_path = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
         invalid_content = "name: test_flow\ndescription:\nstart_step: start_step\n"
 
         with mock_read_from_file({flow_config_path: invalid_content}):
-            success, message = project.push_project(force=True, skip_validation=False)
+            success, message, _ = project.push_project(force=True, skip_validation=False)
 
         self.assertFalse(success)
         self.assertIn("Validation errors", message)
@@ -1882,14 +1917,16 @@ class PushProjectTest(unittest.TestCase):
     def test_push_project_validation_error_skip(self):
         project_data = deepcopy(PROJECT_DATA)
         # Create invalid resource (empty description)
-        project_data["resources"]["flow_config"]["FLOW_CONFIG-test_flow"]["description"] = "description"
+        project_data["resources"]["flow_config"]["FLOW_CONFIG-test_flow"]["description"] = (
+            "description"
+        )
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         # Modify the local file to match
         flow_config_path = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
         invalid_content = "name: test_flow\ndescription:\nstart_step: start_step\n"
 
         with mock_read_from_file({flow_config_path: invalid_content}):
-            success, message = project.push_project(force=True, skip_validation=True)
+            success, message, _ = project.push_project(force=True, skip_validation=True)
 
         self.assertTrue(success)
 
@@ -1898,7 +1935,7 @@ class PushProjectTest(unittest.TestCase):
         project_data["resources"]["topics"].pop("TOPIC-Topic 1")
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True, dry_run=True)
+        success, message, _ = project.push_project(force=True, dry_run=True)
 
         self.assertTrue(success)
         self.assertIn("Dry run completed", message)
@@ -1947,7 +1984,9 @@ class ValidateProjectTest(unittest.TestCase):
         ):
             errors = project.validate_project()
         self.assertEqual(len(errors), 2)
-        self.assertIn("Invalid references: ['global_functions: FUNCTION-missing_function']", errors[0])
+        self.assertIn(
+            "Invalid references: ['global_functions: FUNCTION-missing_function']", errors[0]
+        )
         self.assertIn("Start step 'missing_step' not found.", errors[1])
 
 
@@ -2010,11 +2049,7 @@ class PullProjectTest(unittest.TestCase):
         self.mock_api_handler.pull_resources.return_value = incoming_resources
 
         with mock_read_from_file(
-            {
-                os.path.join(
-                    TEST_DIR, "config", "variant_attributes.yaml"
-                ): "{}\n"
-            }
+            {os.path.join(TEST_DIR, "config", "variant_attributes.yaml"): "{}\n"}
         ):
             files_with_conflicts = project.pull_project(force=False)
 
@@ -2137,9 +2172,7 @@ class PullProjectTest(unittest.TestCase):
         self.mock_api_handler.pull_resources.return_value = incoming_resources
 
         # Mock local file with different changes
-        flow_config_path = os.path.join(
-            TEST_DIR, "flows", "test_flow", "flow_config.yaml"
-        )
+        flow_config_path = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
         with mock_read_from_file(
             {
                 flow_config_path: "name: test_flow\ndescription: Modified locally - different description\nstart_step: start_step\n"
@@ -2158,7 +2191,9 @@ class PullProjectTest(unittest.TestCase):
             if len(call[0]) >= 2 and call[0][1] == flow_config_path
         ]
         # Check that the saved content contains merge conflict
-        self.assertGreater(len(flow_config_calls), 0, "save_to_file should be called for flow_config.yaml")
+        self.assertGreater(
+            len(flow_config_calls), 0, "save_to_file should be called for flow_config.yaml"
+        )
         saved_content = flow_config_calls[0][0][0] if flow_config_calls else ""
         # Verify merge conflict markers are present
         self.assertIn("<<<<<<<", saved_content)
@@ -2263,7 +2298,9 @@ class PullProjectTest(unittest.TestCase):
 
         full_project_resources = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR).resources
         incoming_resources = deepcopy(full_project_resources)
-        incoming_resources[Function]["FUNCTION-test_function_with_parameters"].code = 'def test_function_with_parameters(conv: Conversation):\n    """Test function with parameters."""\n    return "Test function with parameters"\n'
+        incoming_resources[Function][
+            "FUNCTION-test_function_with_parameters"
+        ].code = 'def test_function_with_parameters(conv: Conversation):\n    """Test function with parameters."""\n    return "Test function with parameters"\n'
 
         self.mock_api_handler.pull_resources.return_value = incoming_resources
         files_with_conflicts = project.pull_project(force=False)
@@ -2272,7 +2309,7 @@ class PullProjectTest(unittest.TestCase):
     def test_pull_project_deleted_locally(self):
         """Test pulling when a resource was deleted locally and exists remotely"""
         project_data = deepcopy(PROJECT_DATA)
-        project_data["resources"]["topics"]['TOPIC-new-topic'] = {
+        project_data["resources"]["topics"]["TOPIC-new-topic"] = {
             "resource_id": "TOPIC-new-topic",
             "name": "new-topic",
             "actions": "Use {{fn:test_function}}",
@@ -2296,7 +2333,6 @@ class PullProjectTest(unittest.TestCase):
         ]
         self.assertEqual(test_topic_calls, [])
 
-
     def test_pull_project_resource_moved(self):
         """Test pulling when a resource's file path has changed (e.g., renamed)"""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
@@ -2306,8 +2342,8 @@ class PullProjectTest(unittest.TestCase):
         # Store original path before renaming
         original_path = renamed_topic.get_path(TEST_DIR)
         # Clear cached property so it recalculates with new name
-        if hasattr(renamed_topic, '__dict__'):
-            renamed_topic.__dict__.pop('file_path', None)
+        if hasattr(renamed_topic, "__dict__"):
+            renamed_topic.__dict__.pop("file_path", None)
 
         # Rename the topic (this changes the file path)
         renamed_topic.name = "renamed_topic"
@@ -2370,9 +2406,7 @@ class PullProjectTest(unittest.TestCase):
         cache rebuild) and local_kp_content on the third call (post-loop local-file read).
         All other file paths fall through to the real file on disk.
         """
-        kp_path = os.path.join(
-            TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
-        )
+        kp_path = os.path.join(TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml")
         kp_call_count = [0]
 
         def side_effect(path, **kwargs):
@@ -2397,9 +2431,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
         self.mock_api_handler.pull_resources.return_value = incoming_resources
 
-        kp_path = os.path.join(
-            TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
-        )
+        kp_path = os.path.join(TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml")
         # dump_yaml format produced by MultiResourceYamlResource.save(save_to_cache=True)
         original_kp_content = (
             "keyphrases:\n"
@@ -2444,9 +2476,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
         self.mock_api_handler.pull_resources.return_value = incoming_resources
 
-        kp_path = os.path.join(
-            TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
-        )
+        kp_path = os.path.join(TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml")
         original_kp_content = (
             "keyphrases:\n"
             "- keyphrase: PolyAI\n"
@@ -2503,9 +2533,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
         self.mock_api_handler.pull_resources.return_value = incoming_resources
 
-        kp_path = os.path.join(
-            TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
-        )
+        kp_path = os.path.join(TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml")
         original_kp_content = (
             "keyphrases:\n"
             "- keyphrase: PolyAI\n"
@@ -2540,7 +2568,9 @@ class PullProjectTest(unittest.TestCase):
             for call in self.mock_save_to_file.call_args_list
             if len(call[0]) >= 2 and kp_path in str(call[0][1])
         ]
-        self.assertGreater(len(kp_calls), 0, "save_to_file should be called for keyphrase_boosting.yaml")
+        self.assertGreater(
+            len(kp_calls), 0, "save_to_file should be called for keyphrase_boosting.yaml"
+        )
         saved_content = kp_calls[-1][0][0]
         self.assertIn("<<<<<<<", saved_content)
         self.assertIn("=======", saved_content)
@@ -2556,9 +2586,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
         self.mock_api_handler.pull_resources.return_value = incoming_resources
 
-        kp_path = os.path.join(
-            TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
-        )
+        kp_path = os.path.join(TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml")
 
         MultiResourceYamlResource._file_cache.clear()
         files_with_conflicts = project.pull_project(force=True)
@@ -2577,6 +2605,7 @@ class PullProjectTest(unittest.TestCase):
         saved_content = kp_calls[-1][0][0]
         self.assertIn("level: boosted", saved_content)
         self.assertNotIn("<<<<<<<", saved_content)
+
 
 class DocsTest(unittest.TestCase):
     """Tests for the docs module"""

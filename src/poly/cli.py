@@ -221,6 +221,12 @@ class AgentStudioCLI:
             default=False,
             help="Output machine-readable JSON instead of Rich formatting.",
         )
+        push_parser.add_argument(
+            "--commands",
+            action="store_true",
+            default=False,
+            help="Output the SDK push commands that were sent, serialized as JSON.",
+        )
 
         # STATUS
         status_parser = subparsers.add_parser(
@@ -561,6 +567,7 @@ class AgentStudioCLI:
                 args.dry_run,
                 args.format,
                 json_output=getattr(args, "json", False),
+                commands_output=getattr(args, "commands", False),
             )
 
         elif args.command == "status":
@@ -797,21 +804,30 @@ class AgentStudioCLI:
         dry_run: bool = False,
         format: bool = False,
         json_output: bool = False,
+        commands_output: bool = False,
     ) -> AgentStudioProject:
         """Push the project configuration to the Agent Studio."""
         project = cls._load_project(base_path)
+        capture = json_output or commands_output
 
-        if not json_output:
+        if not capture:
             info(
                 f"Pushing local changes for [bold]{project.account_id}/{project.project_id}[/bold]..."
             )
 
-        push_ok, push_output = project.push_project(
-            force=force, skip_validation=skip_validation, dry_run=dry_run, format=format
+        push_ok, push_output, push_commands = project.push_project(
+            force=force,
+            skip_validation=skip_validation,
+            dry_run=dry_run,
+            format=format,
+            capture_commands=capture,
         )
 
-        if json_output:
-            json_print({"success": push_ok, "message": push_output})
+        if capture:
+            result = {"success": push_ok, "message": push_output}
+            if commands_output:
+                result["commands"] = commands_to_dicts(push_commands)
+            json_print(result)
             if not push_ok:
                 sys.exit(1)
             return project

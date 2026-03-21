@@ -340,7 +340,7 @@ class PushOutputJsonTests(unittest.TestCase):
     def test_push_json_success(self, mock_load):
         """push(json_output=True) on success should emit JSON with success=true."""
         project = mock_load.return_value
-        project.push_project.return_value = (True, "Resources pushed successfully.")
+        project.push_project.return_value = (True, "Resources pushed successfully.", [])
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
@@ -354,7 +354,7 @@ class PushOutputJsonTests(unittest.TestCase):
     def test_push_json_failure_exits(self, mock_load):
         """push(json_output=True) on failure should emit JSON with success=false and exit 1."""
         project = mock_load.return_value
-        project.push_project.return_value = (False, "Validation errors detected")
+        project.push_project.return_value = (False, "Validation errors detected", [])
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf), patch("poly.cli.sys.exit") as mock_exit:
@@ -363,3 +363,51 @@ class PushOutputJsonTests(unittest.TestCase):
         output = json.loads(buf.getvalue())
         self.assertFalse(output["success"])
         mock_exit.assert_called_once_with(1)
+
+
+class PushOutputCommandsTests(unittest.TestCase):
+    """Tests for poly push with --commands."""
+
+    @patch("poly.cli.AgentStudioCLI._load_project")
+    def test_push_commands_includes_commands_in_output(self, mock_load):
+        """push(commands_output=True) should include commands in JSON output."""
+        project = mock_load.return_value
+        cmd = Command()
+        cmd.type = "create_topic"
+        project.push_project.return_value = (True, "Resources pushed successfully.", [cmd])
+
+        buf = io.StringIO()
+        with patch("poly.output.sys.stdout", buf):
+            AgentStudioCLI.push("/fake/project", commands_output=True)
+
+        output = json.loads(buf.getvalue())
+        self.assertTrue(output["success"])
+        self.assertIn("commands", output)
+        self.assertEqual(output["commands"][0]["type"], "create_topic")
+
+    @patch("poly.cli.AgentStudioCLI._load_project")
+    def test_push_commands_passes_capture_commands(self, mock_load):
+        """push(commands_output=True) should call push_project with capture_commands=True."""
+        project = mock_load.return_value
+        project.push_project.return_value = (True, "Resources pushed successfully.", [])
+
+        buf = io.StringIO()
+        with patch("poly.output.sys.stdout", buf):
+            AgentStudioCLI.push("/fake/project", commands_output=True)
+
+        project.push_project.assert_called_once()
+        call_kwargs = project.push_project.call_args[1]
+        self.assertTrue(call_kwargs["capture_commands"])
+
+    @patch("poly.cli.AgentStudioCLI._load_project")
+    def test_push_json_without_commands_omits_commands_key(self, mock_load):
+        """push(json_output=True) without commands should not include commands key."""
+        project = mock_load.return_value
+        project.push_project.return_value = (True, "Resources pushed successfully.", [])
+
+        buf = io.StringIO()
+        with patch("poly.output.sys.stdout", buf):
+            AgentStudioCLI.push("/fake/project", json_output=True)
+
+        output = json.loads(buf.getvalue())
+        self.assertNotIn("commands", output)

@@ -121,6 +121,23 @@ class SyncClientHandler:
         """
         return list(self.sdk._command_queue)
 
+    def send_queued_commands(self) -> bool:
+        """Send all queued commands as a batch and clear the queue.
+
+        Returns:
+            bool: True if successful, False if the batch send failed.
+        """
+        try:
+            self.sdk.send_command_batch()
+            return True
+        except SourcererAPIError as e:
+            logger.error(f"Failed to send command batch: {e}")
+            return False
+
+    def clear_command_queue(self) -> None:
+        """Clear all queued commands without sending."""
+        self.sdk.clear_queue()
+
     def _load_resources(self, projection: dict) -> dict[type[Resource], dict[str, Resource]]:
         return {
             Topic: self._read_topics_from_projection(projection),

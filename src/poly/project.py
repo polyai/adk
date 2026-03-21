@@ -839,7 +839,8 @@ class AgentStudioProject:
         dry_run=False,
         format=False,
         email=None,
-    ) -> tuple[bool, str]:
+        capture_commands=False,
+    ) -> tuple[bool, str, list]:
         """Push the project configuration to the Agent Studio Interactor.
 
         Args:
@@ -849,10 +850,12 @@ class AgentStudioProject:
             format (bool): If True, format the resource before saving.
             email (str): Email to use for metadata creation.
                 If None, use the email of the current user.
+            capture_commands (bool): If True, return the Command protobufs that were sent.
 
         Returns:
-            Tuple[bool, str]: A tuple containing a boolean indicating success,
-                and a string message.
+            Tuple[bool, str, list]: A tuple containing a boolean indicating success,
+                a string message, and a list of Command protobufs (empty unless
+                capture_commands is True).
         """
 
         if not dry_run:
@@ -869,13 +872,14 @@ class AgentStudioProject:
                     return (
                         False,
                         f"Merge conflicts detected in the following files:\n- {conflicts}\nPlease resolve the conflicts and try again.",
+                        [],
                     )
 
         changeset = self._compute_push_changeset(skip_validation=skip_validation, format=format)
         if changeset is None:
-            return False, "No changes detected"
+            return False, "No changes detected", []
         if isinstance(changeset, str):
-            return False, changeset
+            return False, changeset, []
 
         push_changes, new_state = changeset
 
@@ -896,7 +900,7 @@ class AgentStudioProject:
             ]
         )
 
-        # 6. Push new/updated/deleted resources
+        # 6. Queue all push phases
         if self.branch_id:
             logger.info(f"Pushing changes to branch {self.branch_id}")
 
@@ -910,29 +914,38 @@ class AgentStudioProject:
                 queue_pushes=True,
             )
 
-        # Push changed resources (queue only when pre_push ran, so we send pre+main together)
-        success = self.api_handler.push_resources(
+        self.api_handler.push_resources(
             new_resources=new_resources,
             deleted_resources=deleted_resources,
             updated_resources=updated_resources,
             dry_run=dry_run,
             email=email,
-            queue_pushes=pre_and_post_push,
+            queue_pushes=True,
         )
 
         if pre_and_post_push:
-            success = self.api_handler.push_resources(
+            self.api_handler.push_resources(
                 new_resources=post_changes.new,
                 deleted_resources=post_changes.deleted,
                 updated_resources=post_changes.updated,
                 dry_run=dry_run,
                 email=email,
-                queue_pushes=False,
+                queue_pushes=True,
             )
+
+        # Snapshot commands before sending
+        captured_commands = self.api_handler.get_queued_commands() if capture_commands else []
+
+        # Send or handle dry run
+        if dry_run:
+            self.api_handler.clear_command_queue()
+            push_success = True
+        else:
+            push_success = self.api_handler.send_queued_commands()
 
         self.branch_id = self.api_handler.branch_id
 
-        if not success:
+        if not push_success:
             failed_resources = []
             for resource_dict in [
                 new_resources,
@@ -942,17 +955,17 @@ class AgentStudioProject:
                 for resources in resource_dict.values():
                     failed_resources.extend([res.name for res in resources.values()])
             errors_names = "\n-".join(failed_resources)
-            return False, f"Failed to push resources: \n-{errors_names}"
+            return False, f"Failed to push resources: \n-{errors_names}", captured_commands
 
         if dry_run:
-            return True, "Dry run completed. No changes were pushed."
+            return True, "Dry run completed. No changes were pushed.", captured_commands
         else:
             # Update local state
             self.resources = new_state
             self.file_structure_info = self.compute_file_structure_info(self.resources)
             self.save_config()
 
-        return True, "Resources pushed successfully."
+        return True, "Resources pushed successfully.", captured_commands
 
     def _compute_push_changeset(
         self,
@@ -1176,7 +1189,7 @@ class AgentStudioProject:
 
         # Snapshot and clear the queue
         commands = self.api_handler.get_queued_commands()
-        self.api_handler.sync_client.sdk.clear_queue()
+        self.api_handler.clear_command_queue()
 
         return commands
 
