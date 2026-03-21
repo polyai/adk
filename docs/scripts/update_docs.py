@@ -10,7 +10,6 @@ Requires:
     anthropic Python package (pip install anthropic)
 """
 
-import os
 import subprocess
 import sys
 from pathlib import Path
