@@ -237,6 +237,43 @@ def _resolve_path(spec: CommandSpec, payload: dict) -> list[str]:
     return resolved
 
 
+def resolve_command_path(command_dict: dict) -> Optional[tuple[CommandSpec, list[str]]]:
+    """Resolve the projection path for a serialized command.
+
+    Args:
+        command_dict: A serialized command dict from ``commands_to_dicts``.
+
+    Returns:
+        A tuple of (CommandSpec, resolved path), or None if the command type is unknown.
+    """
+    cmd_type = command_dict.get("type", "")
+    spec = COMMAND_TYPE_REGISTRY.get(cmd_type)
+    if spec is None:
+        logger.warning(f"Unknown command type '{cmd_type}', skipping in projection diff")
+        return None
+
+    payload = command_dict.get(spec.payload_key, {})
+
+    if not spec.path:
+        path = _resolve_channel_path(command_dict, spec)
+        if not path:
+            return None
+    else:
+        path = _resolve_path(spec, payload)
+
+    return spec, path
+
+
+def _get_at_path(d: dict, path: list[str]) -> Any:
+    """Get a value from a nested dict by path, returning None if any segment is missing."""
+    current = d
+    for key in path:
+        if not isinstance(current, dict) or key not in current:
+            return None
+        current = current[key]
+    return current
+
+
 def apply_command(projection: dict, command_dict: dict) -> None:
     """Apply a single serialized command to the projection in-place.
 
@@ -244,23 +281,12 @@ def apply_command(projection: dict, command_dict: dict) -> None:
         projection: The projection dict to mutate.
         command_dict: A serialized command dict from ``commands_to_dicts``.
     """
-    cmd_type = command_dict.get("type", "")
-    spec = COMMAND_TYPE_REGISTRY.get(cmd_type)
-    if spec is None:
-        logger.warning(f"Unknown command type '{cmd_type}', skipping in projection diff")
+    resolved = resolve_command_path(command_dict)
+    if resolved is None:
         return
 
+    spec, path = resolved
     payload = command_dict.get(spec.payload_key, {})
-
-    # Determine the projection path
-    if not spec.path:
-        # Channel-routed: resolve dynamically based on channel_type in payload
-        path = _resolve_channel_path(command_dict, spec)
-        if not path:
-            return
-    else:
-        path = _resolve_path(spec, payload)
-
     payload_camel = snake_to_camel_keys(payload)
 
     # Navigate to the parent, creating intermediate dicts as needed
@@ -345,14 +371,16 @@ def generate_projection_diff(project: Any) -> dict:
     """Generate a projection-level diff showing what a push would change.
 
     Fetches the remote projection, generates push commands, applies them
-    to a copy of the projection, and diffs the two states.
+    to a copy of the projection, and computes a per-command diff. Each
+    command in the output includes a ``diff`` key showing what changed
+    at that command's projection path.
 
     Args:
         project: An ``AgentStudioProject`` instance.
 
     Returns:
-        A dict with ``commands`` (serialized command list) and ``diff``
-        (structured before/after projection diff).
+        A dict with ``commands`` — each command dict augmented with a
+        ``diff`` key showing ``{before, after}`` for changed fields.
     """
     before = project.fetch_projection()
 
@@ -361,9 +389,19 @@ def generate_projection_diff(project: Any) -> dict:
 
     after = apply_commands(before, command_dicts)
 
-    projection_diff = diff_projections(before, after)
+    result_commands = []
+    for cmd_dict in command_dicts:
+        resolved = resolve_command_path(cmd_dict)
+        enriched = dict(cmd_dict)
 
-    return {
-        "commands": command_dicts,
-        "diff": projection_diff,
-    }
+        if resolved is not None:
+            _, path = resolved
+            before_val = _get_at_path(before, path)
+            after_val = _get_at_path(after, path)
+            enriched["diff"] = diff_projections(before_val, after_val)
+        else:
+            enriched["diff"] = {}
+
+        result_commands.append(enriched)
+
+    return {"commands": result_commands}

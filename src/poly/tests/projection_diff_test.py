@@ -427,8 +427,8 @@ class DiffProjectionsTests(unittest.TestCase):
 class GenerateProjectionDiffTests(unittest.TestCase):
     """Tests for the generate_projection_diff orchestrator."""
 
-    def test_update_topic_full_output(self):
-        """Updating a topic should produce commands and a diff with the exact changed fields."""
+    def test_update_topic_diff_nested_in_command(self):
+        """Each command should include a diff key showing only the changed fields."""
         projection = {
             "knowledgeBase": {
                 "topics": {"entities": {"t1": {"id": "t1", "name": "greeting", "content": "Hello"}}}
@@ -448,30 +448,22 @@ class GenerateProjectionDiffTests(unittest.TestCase):
 
         result = generate_projection_diff(project)
 
-        # Verify full structure — commands list + diff with only changed fields
         self.assertEqual(len(result["commands"]), 1)
-        self.assertEqual(result["commands"][0]["type"], "update_topic")
-        self.assertEqual(result["commands"][0]["command_id"], "cmd-001")
+        command = result["commands"][0]
+        self.assertEqual(command["type"], "update_topic")
+        self.assertEqual(command["command_id"], "cmd-001")
         self.assertEqual(
-            result["diff"],
+            command["diff"],
             {
-                "knowledgeBase": {
-                    "topics": {
-                        "entities": {
-                            "t1": {
-                                "content": {
-                                    "before": "Hello",
-                                    "after": "Hello updated",
-                                },
-                            }
-                        }
-                    }
-                }
+                "content": {
+                    "before": "Hello",
+                    "after": "Hello updated",
+                },
             },
         )
 
-    def test_no_changes_full_output(self):
-        """When there are no commands, output should be empty commands and empty diff."""
+    def test_no_changes_returns_empty_commands(self):
+        """When there are no commands, output should have an empty commands list."""
         projection = {"knowledgeBase": {"topics": {"entities": {}}}}
 
         project = MagicMock()
@@ -480,7 +472,7 @@ class GenerateProjectionDiffTests(unittest.TestCase):
 
         result = generate_projection_diff(project)
 
-        self.assertEqual(result, {"commands": [], "diff": {}})
+        self.assertEqual(result, {"commands": []})
 
     def test_calls_fetch_projection_and_generate_push_commands(self):
         """The orchestrator should call fetch_projection and generate_push_commands on the project."""

@@ -571,23 +571,22 @@ class DiffOutputProtoTests(unittest.TestCase):
     @patch("poly.projection_diff.generate_projection_diff")
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_diff_proto_full_output(self, mock_load, mock_gen_diff):
-        """diff(proto_output=True) should output the complete projection diff structure."""
+        """diff(proto_output=True) should output commands with nested diffs."""
         expected_result = {
-            "commands": [CREATE_TOPIC_EXPECTED],
-            "diff": {
-                "knowledgeBase": {
-                    "topics": {
-                        "entities": {
-                            "topic-abc": {
-                                "content": {
-                                    "before": None,
-                                    "after": "Hello, how can I help?",
-                                }
-                            }
-                        }
-                    }
+            "commands": [
+                {
+                    **CREATE_TOPIC_EXPECTED,
+                    "diff": {
+                        "before": None,
+                        "after": {
+                            "id": "topic-abc",
+                            "name": "greeting",
+                            "content": "Hello, how can I help?",
+                            "isActive": True,
+                        },
+                    },
                 }
-            },
+            ],
         }
         mock_gen_diff.return_value = expected_result
 
@@ -603,7 +602,7 @@ class DiffOutputProtoTests(unittest.TestCase):
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_diff_proto_does_not_call_file_diff(self, mock_load, mock_gen_diff, mock_diff):
         """diff(proto_output=True) should not invoke _diff for file-level diffs."""
-        mock_gen_diff.return_value = {"commands": [], "diff": {}}
+        mock_gen_diff.return_value = {"commands": []}
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
