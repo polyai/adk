@@ -133,11 +133,11 @@ class CommandsToDictsTests(unittest.TestCase):
 
 
 class StatusOutputJsonTests(unittest.TestCase):
-    """Tests for poly status with --output json."""
+    """Tests for poly status with --json."""
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_status_json_returns_valid_json_with_expected_keys(self, mock_load):
-        """status(output='json') should print JSON with branch, conflicts, new, modified, deleted."""
+        """status(json_output=True) should print JSON with branch, conflicts, new, modified, deleted."""
         project = mock_load.return_value
         project.root_path = "/fake/project"
         project.project_status.return_value = (
@@ -150,7 +150,7 @@ class StatusOutputJsonTests(unittest.TestCase):
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.status("/fake/project", output="json")
+            AgentStudioCLI.status("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertEqual(output["branch"], "feature-branch")
@@ -161,7 +161,7 @@ class StatusOutputJsonTests(unittest.TestCase):
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_status_json_empty_changes_returns_empty_lists(self, mock_load):
-        """status(output='json') with no changes should return empty lists."""
+        """status(json_output=True) with no changes should return empty lists."""
         project = mock_load.return_value
         project.root_path = "/fake/project"
         project.project_status.return_value = ([], [], [], [])
@@ -169,7 +169,7 @@ class StatusOutputJsonTests(unittest.TestCase):
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.status("/fake/project", output="json")
+            AgentStudioCLI.status("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertEqual(output["conflicts"], [])
@@ -179,7 +179,7 @@ class StatusOutputJsonTests(unittest.TestCase):
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_status_json_branch_is_none_when_not_on_branch(self, mock_load):
-        """status(output='json') should include null branch when not on a branch."""
+        """status(json_output=True) should include null branch when not on a branch."""
         project = mock_load.return_value
         project.root_path = "/fake/project"
         project.project_status.return_value = ([], [], [], [])
@@ -187,18 +187,18 @@ class StatusOutputJsonTests(unittest.TestCase):
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.status("/fake/project", output="json")
+            AgentStudioCLI.status("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertIsNone(output["branch"])
 
 
 class StatusOutputCommandsTests(unittest.TestCase):
-    """Tests for poly status with --output commands."""
+    """Tests for poly status with --commands."""
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_status_commands_outputs_commands_key(self, mock_load):
-        """status(output='commands') should print JSON with a 'commands' key."""
+        """status(commands_output=True) should print JSON with a 'commands' key."""
         project = mock_load.return_value
         cmd = Command()
         cmd.type = "create_topic"
@@ -206,7 +206,7 @@ class StatusOutputCommandsTests(unittest.TestCase):
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.status("/fake/project", output="commands")
+            AgentStudioCLI.status("/fake/project", commands_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertIn("commands", output)
@@ -215,25 +215,25 @@ class StatusOutputCommandsTests(unittest.TestCase):
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_status_commands_empty_when_no_changes(self, mock_load):
-        """status(output='commands') with no changes should return empty commands list."""
+        """status(commands_output=True) with no changes should return empty commands list."""
         project = mock_load.return_value
         project.generate_push_commands.return_value = []
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.status("/fake/project", output="commands")
+            AgentStudioCLI.status("/fake/project", commands_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertEqual(output["commands"], [])
 
 
 class DiffOutputJsonTests(unittest.TestCase):
-    """Tests for poly diff with --output json."""
+    """Tests for poly diff with --json."""
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     @patch("poly.cli.AgentStudioCLI._diff")
     def test_diff_json_returns_files_array(self, mock_diff, mock_load):
-        """diff(output='json') should print JSON with a 'files' array containing path and diff."""
+        """diff(json_output=True) should print JSON with a 'files' array containing path and diff."""
         project = mock_load.return_value
         project.root_path = "/fake/project"
         mock_diff.return_value = {
@@ -243,7 +243,7 @@ class DiffOutputJsonTests(unittest.TestCase):
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.diff("/fake/project", files=[], output="json")
+            AgentStudioCLI.diff("/fake/project", files=[], json_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertIn("files", output)
@@ -261,31 +261,31 @@ class DiffOutputJsonTests(unittest.TestCase):
     @patch("poly.cli.AgentStudioCLI._load_project")
     @patch("poly.cli.AgentStudioCLI._diff")
     def test_diff_json_empty_diffs_returns_empty_files(self, mock_diff, mock_load):
-        """diff(output='json') with no changes should return empty files array."""
+        """diff(json_output=True) with no changes should return empty files array."""
         project = mock_load.return_value
         project.root_path = "/fake/project"
         mock_diff.return_value = None  # _diff returns None when no changes
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.diff("/fake/project", files=[], output="json")
+            AgentStudioCLI.diff("/fake/project", files=[], json_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertEqual(output["files"], [])
 
 
 class ValidateOutputJsonTests(unittest.TestCase):
-    """Tests for poly validate with --output json."""
+    """Tests for poly validate with --json."""
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_validate_json_valid_project(self, mock_load):
-        """validate(output='json') on valid project should return valid=true, errors=[]."""
+        """validate(json_output=True) on valid project should return valid=true, errors=[]."""
         project = mock_load.return_value
         project.validate_project.return_value = []
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.validate_project("/fake/project", output="json")
+            AgentStudioCLI.validate_project("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertTrue(output["valid"])
@@ -294,7 +294,7 @@ class ValidateOutputJsonTests(unittest.TestCase):
     @patch("poly.cli.sys.exit")
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_validate_json_invalid_project_exits_1(self, mock_load, mock_exit):
-        """validate(output='json') on invalid project should exit with code 1."""
+        """validate(json_output=True) on invalid project should exit with code 1."""
         project = mock_load.return_value
         project.validate_project.return_value = [
             "Validation error in flows/main/config.yaml: Missing required field 'name'"
@@ -302,14 +302,14 @@ class ValidateOutputJsonTests(unittest.TestCase):
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.validate_project("/fake/project", output="json")
+            AgentStudioCLI.validate_project("/fake/project", json_output=True)
 
         mock_exit.assert_called_once_with(1)
 
     @patch("poly.cli.sys.exit")
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_validate_json_invalid_project_returns_errors(self, mock_load, mock_exit):
-        """validate(output='json') on invalid project should include parsed error details."""
+        """validate(json_output=True) on invalid project should include parsed error details."""
         project = mock_load.return_value
         project.validate_project.return_value = [
             "Validation error in flows/main/config.yaml: Missing required field 'name'",
@@ -318,7 +318,7 @@ class ValidateOutputJsonTests(unittest.TestCase):
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.validate_project("/fake/project", output="json")
+            AgentStudioCLI.validate_project("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertFalse(output["valid"])
@@ -334,17 +334,17 @@ class ValidateOutputJsonTests(unittest.TestCase):
 
 
 class PushOutputJsonTests(unittest.TestCase):
-    """Tests for poly push with --output json."""
+    """Tests for poly push with --json."""
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_push_json_success(self, mock_load):
-        """push(output='json') on success should emit JSON with success=true."""
+        """push(json_output=True) on success should emit JSON with success=true."""
         project = mock_load.return_value
         project.push_project.return_value = (True, "Resources pushed successfully.")
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf):
-            AgentStudioCLI.push("/fake/project", output="json")
+            AgentStudioCLI.push("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertTrue(output["success"])
@@ -352,13 +352,13 @@ class PushOutputJsonTests(unittest.TestCase):
 
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_push_json_failure_exits(self, mock_load):
-        """push(output='json') on failure should emit JSON with success=false and exit 1."""
+        """push(json_output=True) on failure should emit JSON with success=false and exit 1."""
         project = mock_load.return_value
         project.push_project.return_value = (False, "Validation errors detected")
 
         buf = io.StringIO()
         with patch("poly.output.sys.stdout", buf), patch("poly.cli.sys.exit") as mock_exit:
-            AgentStudioCLI.push("/fake/project", output="json")
+            AgentStudioCLI.push("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertFalse(output["success"])

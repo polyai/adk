@@ -216,11 +216,10 @@ class AgentStudioCLI:
         )
         push_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
         push_parser.add_argument(
-            "--output",
-            type=str,
-            choices=["json"],
-            default=None,
-            help="Output format: 'json' for machine-readable JSON.",
+            "--json",
+            action="store_true",
+            default=False,
+            help="Output machine-readable JSON instead of Rich formatting.",
         )
 
         # STATUS
@@ -240,11 +239,16 @@ class AgentStudioCLI:
             """,
         )
         status_parser.add_argument(
-            "--output",
-            type=str,
-            choices=["json", "commands"],
-            default=None,
-            help="Output format: 'json' for machine-readable JSON, 'commands' for generated SDK push commands.",
+            "--json",
+            action="store_true",
+            default=False,
+            help="Output machine-readable JSON instead of Rich formatting.",
+        )
+        status_parser.add_argument(
+            "--commands",
+            action="store_true",
+            default=False,
+            help="Output the SDK push commands that would be sent, serialized as JSON.",
         )
 
         # REVERT
@@ -297,11 +301,10 @@ class AgentStudioCLI:
             help=("List of files to show changes for. If not specified, shows all changes."),
         )
         diff_parser.add_argument(
-            "--output",
-            type=str,
-            choices=["json"],
-            default=None,
-            help="Output format: 'json' for machine-readable JSON.",
+            "--json",
+            action="store_true",
+            default=False,
+            help="Output machine-readable JSON instead of Rich formatting.",
         )
 
         # REVIEW
@@ -433,11 +436,10 @@ class AgentStudioCLI:
             help="Base path to validate the project. Defaults to current working directory.",
         )
         validate_parser.add_argument(
-            "--output",
-            type=str,
-            choices=["json"],
-            default=None,
-            help="Output format: 'json' for machine-readable JSON.",
+            "--json",
+            action="store_true",
+            default=False,
+            help="Output machine-readable JSON instead of Rich formatting.",
         )
 
         # CHAT
@@ -558,17 +560,21 @@ class AgentStudioCLI:
                 args.skip_validation,
                 args.dry_run,
                 args.format,
-                output=getattr(args, "output", None),
+                json_output=getattr(args, "json", False),
             )
 
         elif args.command == "status":
-            cls.status(args.path, output=getattr(args, "output", None))
+            cls.status(
+                args.path,
+                json_output=getattr(args, "json", False),
+                commands_output=getattr(args, "commands", False),
+            )
 
         elif args.command == "revert":
             cls.revert(args.path, args.all, args.files)
 
         elif args.command == "diff":
-            cls.diff(args.path, args.files, output=getattr(args, "output", None))
+            cls.diff(args.path, args.files, json_output=getattr(args, "json", False))
 
         elif args.command == "review":
             if args.delete:
@@ -610,7 +616,7 @@ class AgentStudioCLI:
             )
 
         elif args.command == "validate":
-            cls.validate_project(args.path, output=getattr(args, "output", None))
+            cls.validate_project(args.path, json_output=getattr(args, "json", False))
 
         elif args.command == "docs":
             cls.docs(
@@ -790,12 +796,12 @@ class AgentStudioCLI:
         skip_validation: bool = False,
         dry_run: bool = False,
         format: bool = False,
-        output: Optional[str] = None,
+        json_output: bool = False,
     ) -> AgentStudioProject:
         """Push the project configuration to the Agent Studio."""
         project = cls._load_project(base_path)
 
-        if output != "json":
+        if not json_output:
             info(
                 f"Pushing local changes for [bold]{project.account_id}/{project.project_id}[/bold]..."
             )
@@ -804,7 +810,7 @@ class AgentStudioCLI:
             force=force, skip_validation=skip_validation, dry_run=dry_run, format=format
         )
 
-        if output == "json":
+        if json_output:
             json_print({"success": push_ok, "message": push_output})
             if not push_ok:
                 sys.exit(1)
@@ -819,11 +825,16 @@ class AgentStudioCLI:
         return project
 
     @classmethod
-    def status(cls, base_path: str, output: Optional[str] = None) -> None:
+    def status(
+        cls,
+        base_path: str,
+        json_output: bool = False,
+        commands_output: bool = False,
+    ) -> None:
         """Check the changed files of the project."""
         project = cls._load_project(base_path)
 
-        if output == "commands":
+        if commands_output:
             commands = project.generate_push_commands(skip_validation=True)
             json_print({"commands": commands_to_dicts(commands)})
             return
@@ -831,7 +842,7 @@ class AgentStudioCLI:
         files_with_conflicts, modified_files, new_files, deleted_files = project.project_status()
         branch_info = project.get_current_branch()
 
-        if output == "json":
+        if json_output:
 
             def _relativize(paths: list[str]) -> list[str]:
                 return [os.path.relpath(p, project.root_path) for p in paths]
@@ -899,11 +910,11 @@ class AgentStudioCLI:
         return diffs
 
     @classmethod
-    def diff(cls, base_path: str, files: list[str] = None, output: Optional[str] = None) -> None:
+    def diff(cls, base_path: str, files: list[str] = None, json_output: bool = False) -> None:
         """Show the changes made to the project."""
         diffs = cls._diff(base_path, files) or {}
 
-        if output == "json":
+        if json_output:
             project = cls._load_project(base_path)
             json_print(
                 {
@@ -1328,13 +1339,13 @@ class AgentStudioCLI:
         return restart
 
     @classmethod
-    def validate_project(cls, base_path: str, output: Optional[str] = None) -> None:
+    def validate_project(cls, base_path: str, json_output: bool = False) -> None:
         """Validate the project configuration locally."""
         project = cls._load_project(base_path)
 
         errors = project.validate_project()
 
-        if output == "json":
+        if json_output:
             parsed_errors = []
             for err in errors:
                 parts = err.split(": ", 1)
