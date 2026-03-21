@@ -23,10 +23,11 @@ SUMMARY_FILE = Path(__file__).resolve().parent / ".pr_summary"
 # Swap to claude-opus-4-6 for higher-stakes repos with complex docs.
 MODEL = "claude-sonnet-4-6"
 
-# Soft limits to stay well within context. Diffs larger than this are truncated
-# with a notice so Claude knows it's seeing a partial picture.
-DIFF_CHAR_LIMIT = 30_000
-DOCS_CHAR_LIMIT = 60_000
+# Sonnet has a 200k token context window (~800k chars). Docs are ~150k chars and
+# diffs are typically under 50k — both fit comfortably. The limits below are a
+# safety net only for exceptionally large inputs.
+DIFF_CHAR_LIMIT = 80_000
+DOCS_CHAR_LIMIT = 600_000
 
 
 def run(cmd: list[str], cwd: Path = REPO_ROOT) -> str:
@@ -49,9 +50,25 @@ def get_commit_info() -> str:
 
 
 def read_docs() -> dict[str, str]:
-    """Read all markdown files from the docs directory."""
+    """Read all markdown files from the docs directory.
+
+    Reference pages are listed first since they are the most likely to need
+    updating when source code changes.
+    """
+    all_paths = sorted(DOCS_DIR.rglob("*.md"))
+
+    def priority(p: Path) -> int:
+        parts = p.parts
+        if "reference" in parts:
+            return 0
+        if "tutorials" in parts:
+            return 1
+        if "concepts" in parts:
+            return 2
+        return 3
+
     docs: dict[str, str] = {}
-    for path in sorted(DOCS_DIR.rglob("*.md")):
+    for path in sorted(all_paths, key=priority):
         rel = str(path.relative_to(REPO_ROOT))
         docs[rel] = path.read_text()
     return docs
