@@ -11,7 +11,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from poly.output import commands_to_dicts
+from poly.output.json_output import commands_to_dicts
 from poly.resources.resource_utils import to_camel_case
 
 logger = logging.getLogger(__name__)

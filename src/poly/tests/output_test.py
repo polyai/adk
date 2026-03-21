@@ -12,7 +12,7 @@ from google.protobuf.json_format import MessageToDict
 
 from poly.cli import AgentStudioCLI
 from poly.handlers.protobuf.commands_pb2 import Command
-from poly.output import commands_to_dicts, json_print
+from poly.output.json_output import commands_to_dicts, json_print
 
 
 class JsonPrintTests(unittest.TestCase):
@@ -23,7 +23,7 @@ class JsonPrintTests(unittest.TestCase):
         data = {"key": "value", "count": 42}
         buf = io.StringIO()
 
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             json_print(data)
 
         output = buf.getvalue()
@@ -35,7 +35,7 @@ class JsonPrintTests(unittest.TestCase):
         data = {"a": 1}
         buf = io.StringIO()
 
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             json_print(data)
 
         # The second line should start with exactly 2 spaces for the key
@@ -46,7 +46,7 @@ class JsonPrintTests(unittest.TestCase):
         """Output should end with a trailing newline character."""
         buf = io.StringIO()
 
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             json_print({"x": 1})
 
         self.assertTrue(buf.getvalue().endswith("\n"))
@@ -56,7 +56,7 @@ class JsonPrintTests(unittest.TestCase):
         data = {"files": [{"path": "a.yaml", "diff": "+line"}]}
         buf = io.StringIO()
 
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             json_print(data)
 
         parsed = json.loads(buf.getvalue())
@@ -69,7 +69,7 @@ class JsonPrintTests(unittest.TestCase):
         data = {"ts": datetime(2026, 1, 1, 12, 0, 0)}
         buf = io.StringIO()
 
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             json_print(data)
 
         parsed = json.loads(buf.getvalue())
@@ -171,7 +171,7 @@ class PullOutputJsonTests(unittest.TestCase):
         project.pull_project.return_value = []
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.pull("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
@@ -184,7 +184,7 @@ class PullOutputJsonTests(unittest.TestCase):
         project.pull_project.return_value = ["flows/main/config.yaml", "topics/greeting.yaml"]
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.pull("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
@@ -203,7 +203,7 @@ class PullOutputJsonTests(unittest.TestCase):
         project.pull_project.return_value = []
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.pull("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
@@ -235,7 +235,7 @@ class PullOutputProtoTests(unittest.TestCase):
         project.fetch_projection.return_value = projection
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.pull("/fake/project", proto_output=True)
 
         output = json.loads(buf.getvalue())
@@ -252,7 +252,7 @@ class PullOutputProtoTests(unittest.TestCase):
         project.fetch_projection.return_value = {}
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.pull("/fake/project", proto_output=True)
 
         project.pull_project.assert_called_once()
@@ -275,7 +275,7 @@ class StatusOutputJsonTests(unittest.TestCase):
         project.get_current_branch.return_value = "feature-branch"
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.status("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
@@ -299,7 +299,7 @@ class StatusOutputJsonTests(unittest.TestCase):
         project.get_current_branch.return_value = "main"
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.status("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
@@ -323,7 +323,7 @@ class StatusOutputJsonTests(unittest.TestCase):
         project.get_current_branch.return_value = None
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.status("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
@@ -354,7 +354,7 @@ class DiffOutputJsonTests(unittest.TestCase):
         }
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.diff("/fake/project", files=[], json_output=True)
 
         output = json.loads(buf.getvalue())
@@ -377,7 +377,7 @@ class DiffOutputJsonTests(unittest.TestCase):
         mock_diff.return_value = None
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.diff("/fake/project", files=[], json_output=True)
 
         output = json.loads(buf.getvalue())
@@ -394,7 +394,7 @@ class ValidateOutputJsonTests(unittest.TestCase):
         project.validate_project.return_value = []
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.validate_project("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
@@ -411,7 +411,7 @@ class ValidateOutputJsonTests(unittest.TestCase):
         ]
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.validate_project("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
@@ -444,7 +444,7 @@ class PushOutputJsonTests(unittest.TestCase):
         project.push_project.return_value = (True, "Resources pushed successfully.", [])
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.push("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
@@ -460,7 +460,10 @@ class PushOutputJsonTests(unittest.TestCase):
         project.push_project.return_value = (False, "Validation errors detected", [])
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf), patch("poly.cli.sys.exit") as mock_exit:
+        with (
+            patch("poly.output.json_output.sys.stdout", buf),
+            patch("poly.cli.sys.exit") as mock_exit,
+        ):
             AgentStudioCLI.push("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
@@ -474,7 +477,7 @@ class PushOutputJsonTests(unittest.TestCase):
 class PushOutputProtoTests(unittest.TestCase):
     """Tests for poly push with --proto."""
 
-    @patch("poly.projection_diff.enrich_commands_with_diffs")
+    @patch("poly.output.projection_diff.enrich_commands_with_diffs")
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_push_proto_outputs_commands_with_diffs(self, mock_load, mock_enrich):
         """push(proto_output=True) should output commands with nested diffs, same as diff --proto."""
@@ -501,7 +504,7 @@ class PushOutputProtoTests(unittest.TestCase):
         ]
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.push("/fake/project", proto_output=True)
 
         output = json.loads(buf.getvalue())
@@ -521,7 +524,7 @@ class PushOutputProtoTests(unittest.TestCase):
         )
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.push("/fake/project", proto_output=True)
 
         self.assertEqual(call_order, ["fetch", "push"])
@@ -533,7 +536,7 @@ class PushOutputProtoTests(unittest.TestCase):
         project.push_project.return_value = (True, "Resources pushed successfully.", [])
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.push("/fake/project", json_output=True)
 
         output = json.loads(buf.getvalue())
@@ -546,7 +549,7 @@ class PushOutputProtoTests(unittest.TestCase):
 class DiffOutputProtoTests(unittest.TestCase):
     """Tests for poly diff with --proto."""
 
-    @patch("poly.projection_diff.generate_projection_diff")
+    @patch("poly.output.projection_diff.generate_projection_diff")
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_diff_proto_full_output(self, mock_load, mock_gen_diff):
         """diff(proto_output=True) should output commands with nested diffs."""
@@ -570,21 +573,21 @@ class DiffOutputProtoTests(unittest.TestCase):
         mock_gen_diff.return_value = expected_result
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.diff("/fake/project", files=[], proto_output=True)
 
         output = json.loads(buf.getvalue())
         self.assertEqual(output, expected_result)
 
     @patch("poly.cli.AgentStudioCLI._diff")
-    @patch("poly.projection_diff.generate_projection_diff")
+    @patch("poly.output.projection_diff.generate_projection_diff")
     @patch("poly.cli.AgentStudioCLI._load_project")
     def test_diff_proto_does_not_call_file_diff(self, mock_load, mock_gen_diff, mock_diff):
         """diff(proto_output=True) should not invoke _diff for file-level diffs."""
         mock_gen_diff.return_value = {"success": True, "commands": []}
 
         buf = io.StringIO()
-        with patch("poly.output.sys.stdout", buf):
+        with patch("poly.output.json_output.sys.stdout", buf):
             AgentStudioCLI.diff("/fake/project", files=[], proto_output=True)
 
         mock_diff.assert_not_called()

@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import MagicMock
 
 from poly.handlers.protobuf.commands_pb2 import Command
-from poly.projection_diff import (
+from poly.output.projection_diff import (
     apply_command,
     apply_commands,
     deep_merge,

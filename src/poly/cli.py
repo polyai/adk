@@ -20,7 +20,7 @@ import argcomplete
 import requests
 import questionary
 
-from poly.console import (
+from poly.output.console import (
     console,
     error,
     handle_exception,
@@ -37,7 +37,7 @@ from poly.console import (
     warning,
 )
 from poly.handlers.github_api_handler import GitHubAPIHandler
-from poly.output import commands_to_dicts, json_print
+from poly.output.json_output import commands_to_dicts, json_print
 from poly.handlers.interface import (
     REGIONS,
     AgentStudioInterface,
@@ -868,7 +868,7 @@ class AgentStudioCLI:
         )
 
         if proto_output:
-            from poly.projection_diff import enrich_commands_with_diffs
+            from poly.output.projection_diff import enrich_commands_with_diffs
 
             command_dicts = commands_to_dicts(push_commands)
             result_commands = enrich_commands_with_diffs(projection_before, command_dicts)
@@ -980,7 +980,7 @@ class AgentStudioCLI:
     ) -> None:
         """Show the changes made to the project."""
         if proto_output:
-            from poly.projection_diff import generate_projection_diff
+            from poly.output.projection_diff import generate_projection_diff
 
             project = cls._load_project(base_path)
             result = generate_projection_diff(project)
