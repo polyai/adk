@@ -3,8 +3,6 @@ title: CLI reference
 description: Reference for the core commands provided by the PolyAI ADK CLI.
 ---
 
-# CLI reference
-
 <p class="lead">
 The PolyAI ADK is accessed through the <code>poly</code> command.
 Use the CLI help output as the first source of truth.
@@ -166,7 +164,11 @@ Examples:
 ~~~bash
 poly docs flows functions topics
 poly docs --all
+poly docs --all --output rules.md
 ~~~
+
+Use `--output` to write the documentation to a local file. This is useful when working with AI coding tools — pass the output file as context to give the agent accurate knowledge of ADK resource types and conventions.
+
 
 ## Working pattern
 
