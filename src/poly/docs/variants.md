@@ -12,11 +12,11 @@ Variant attributes provide per-variant configuration (per location, environment,
 
 The file has two top-level keys:
 
-### `variants` — List of variants
+### `variants` - List of variants
 - **name** (required): Unique identifier (e.g. a location name, environment, or tenant). Used as the key in attribute `values`.
 - **is_default** (optional): Exactly one variant must have `is_default: true`. Used when no variant is resolved at runtime.
 
-### `attributes` — List of attributes
+### `attributes` - List of attributes
 - **name**: Attribute identifier (snake_case recommended), e.g. `greeting_name`, `support_phone_number`.
 - **values**: Map from **variant name** to string value. Must have one entry per variant. Values can be `""`, a single line, or multi-line (`|-`).
 
