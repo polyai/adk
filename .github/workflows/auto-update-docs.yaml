@@ -4,7 +4,7 @@ name: Auto-update docs
 # The agent reads the diff, figures out which docs pages are stale, rewrites them,
 # and opens a PR for human review.
 #
-# Required secret: ANTHROPIC_API_KEY
+# Required secret: CLAUDE_API_KEY
 # The GITHUB_TOKEN secret is automatically available — no setup needed.
 
 on:
@@ -38,7 +38,7 @@ jobs:
 
       - name: Run docs update agent
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
         run: python docs/scripts/update_docs.py
 
       - name: Check for doc changes
