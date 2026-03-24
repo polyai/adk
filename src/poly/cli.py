@@ -1354,7 +1354,7 @@ class AgentStudioCLI:
     ) -> None:
         """Print the change history of the project."""
         project = cls._load_project(base_path)
-        versions = project.get_deployments(client_env=environment)
+        versions, active_deployment_hashes = project.get_deployments(client_env=environment)
 
         if not versions:
             error("No versions found.")
@@ -1376,7 +1376,7 @@ class AgentStudioCLI:
         if json:
             print(json.dumps(versions))
         else:
-            print_log_history(versions, one_line=one_line)
+            print_log_history(versions, active_deployment_hashes, one_line=one_line)
 
 
 def main():

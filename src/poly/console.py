@@ -232,7 +232,9 @@ def print_turn_metadata(
 # ── LOG HISTORY ───────────────────────────────────────────────────────
 
 
-def print_log_history(versions: list[dict[str, Any]], one_line: bool = False) -> None:
+def print_log_history(
+    versions: list[dict[str, Any]], active_deployment_hashes: dict[str, str], one_line: bool = False
+) -> None:
     """Print the change history of the project."""
     for version in versions:
         deployment_message = version.get("deployment_metadata").get("deployment_message") or "-"
@@ -244,13 +246,23 @@ def print_log_history(versions: list[dict[str, Any]], one_line: bool = False) ->
         client_env = version.get("client_env")
         artifact_version = version.get("artifact_version")
         lambda_deployment_version = version.get("function_deployment_version")
+
+        badges = []
+        if active_deployment_hashes.get("sandbox") == version_hash:
+            badges.append("[cyan]Sandbox[/cyan]")
+        if active_deployment_hashes.get("pre-release") == version_hash:
+            badges.append("[yellow]Pre-release[/yellow]")
+        if active_deployment_hashes.get("live") == version_hash:
+            badges.append("[green]Live[/green]")
+
+        badge_str = f" [bold]{' '.join(badges)}[/bold] " if badges else " "
         if one_line:
             console.print(
-                f"[bold][yellow]{version_hash[:9]}[/yellow][/bold] ([cyan]{deployment_type}[/cyan]) {deployment_message} [muted]{created_by}[/muted]"
+                f"[bold][yellow]{version_hash[:9]}[/yellow][/bold] ([cyan]{deployment_type}[/cyan]) {deployment_message}{badge_str}[muted]{created_by}[/muted]"
             )
         else:
             console.print(
-                f"[bold][yellow]{version_hash}[/yellow][/bold] ([cyan]{deployment_type}[/cyan])"
+                f"[bold][yellow]{version_hash}[/yellow][/bold] ([cyan]{deployment_type}[/cyan]){badge_str}"
             )
             console.print(f"Date: [muted]{created_at}[/muted]")
             console.print(f"By: [muted]{created_by}[/muted]")

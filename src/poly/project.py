@@ -1589,23 +1589,39 @@ class AgentStudioProject:
 
         return diffs
 
-    def get_deployments(self, client_env: str = "sandbox") -> list[dict[str, Any]]:
+    def get_deployments(
+        self, client_env: str = "sandbox"
+    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
         """Get the deployments for the project.
         Args:
             client_env (str): The client environment (sandbox, pre-release, live)
                 defaults to sandbox
         Returns:
-            list[dict[str, Any]]: A list of deployment information
+            tuple[list[dict[str, Any]], dict[str, str]]: A tuple containing:
+                - list[dict[str, Any]]: A list of deployment information
+                - dict[str, str]: A dictionary mapping environment names to deployment hashes
         """
         env_names = {"sandbox", "pre-release", "live"}
         if client_env not in env_names:
             raise ValueError(f"Invalid client environment: {client_env}")
-        return self.api_handler.get_deployments(
+
+        active_deployments = self.api_handler.get_active_deployments(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+        )
+        active_deployment_hashes = {
+            env: deployment.get("version") for env, deployment in active_deployments.items()
+        }
+
+        deployments = self.api_handler.get_deployments(
             region=self.region,
             account_id=self.account_id,
             project_id=self.project_id,
             client_env=client_env,
         )
+
+        return deployments, active_deployment_hashes
 
     def get_remote_resources_by_name(self, name: str) -> ResourceMap:
         """Resolve and fetch a remote project state by name.
@@ -1643,7 +1659,7 @@ class AgentStudioProject:
         # 3) Deployment version hash prefix -> deployment resources
         version_hash = (name or "")[:9].lower()
         if version_hash:
-            deployments = self.get_deployments(client_env="sandbox")
+            deployments, _ = self.get_deployments(client_env="sandbox")
             deployment = next(
                 (d for d in deployments if d.get("version_hash")[:9] == version_hash), {}
             )
