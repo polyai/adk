@@ -1503,17 +1503,17 @@ class AgentStudioProject:
 
         return files_with_conflicts, modified_files, new_files, deleted_files
 
-    def revert_changes(self, all_files: bool = False, files: list[str] = None) -> list[str]:
+    def revert_changes(self, files: list[str] = None) -> list[str]:
         """Revert changes in the project.
 
         Args:
-            all_files (bool): If True, revert all changes.
             files (list[str]): List of specific files to revert.
         """
         reverted_files = []
         resource_mappings = self._make_resource_mappings(self.resources)
+        all_files = not files
         for resource in self.all_resources:
-            if not all_files and files and resource.get_path(self.root_path) not in files:
+            if not all_files and resource.get_path(self.root_path) not in files:
                 continue
 
             resource.save(self.root_path, resource_mappings=resource_mappings)
@@ -1669,6 +1669,22 @@ class AgentStudioProject:
                     f"Pulling resources from deployment '{deployment_id}' (version {version_hash})..."
                 )
                 return self.api_handler.pull_deployment_resources(deployment_id)
+
+        # 4) Local resources -> local resources
+        if name == "local":
+            new_resources_mappings, kept_resources_mappings, _ = self.find_new_kept_deleted(
+                self.discover_local_resources()
+            )
+            local_resources_mappings = new_resources_mappings + kept_resources_mappings
+            resources: ResourceMap = {}
+            for resource_mapping in local_resources_mappings:
+                resource = self.read_local_resource(
+                    resource=resource_mapping, resource_mappings=local_resources_mappings
+                )
+                resources.setdefault(resource_mapping.resource_type, {})[
+                    resource_mapping.resource_id
+                ] = resource
+            return resources
 
         logger.warning(f"Name '{name}' not found in environments, branches, or deployments.")
         return {}
