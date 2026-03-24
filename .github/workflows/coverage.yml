@@ -3,7 +3,7 @@ name: Coverage Report
 on:
   pull_request:
     paths:
-      - "src/poly/tests**"
+      - "src/**"
 
 jobs:
   coverage:
