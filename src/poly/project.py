@@ -1589,6 +1589,24 @@ class AgentStudioProject:
 
         return diffs
 
+    def get_deployments(self, client_env: str = "sandbox") -> list[dict[str, Any]]:
+        """Get the deployments for the project.
+        Args:
+            client_env (str): The client environment (sandbox, pre-release, live)
+                defaults to sandbox
+        Returns:
+            list[dict[str, Any]]: A list of deployment information
+        """
+        env_names = {"sandbox", "pre-release", "live"}
+        if client_env not in env_names:
+            raise ValueError(f"Invalid client environment: {client_env}")
+        return self.api_handler.get_deployments(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            client_env=client_env,
+        )
+
     def get_remote_resources_by_name(self, name: str) -> ResourceMap:
         """Resolve and fetch a remote project state by name.
         Supports:
@@ -1625,12 +1643,11 @@ class AgentStudioProject:
         # 3) Deployment version hash prefix -> deployment resources
         version_hash = (name or "")[:9].lower()
         if version_hash:
-            deployments = self.api_handler.get_deployments(
-                region=self.region,
-                account_id=self.account_id,
-                project_id=self.project_id,
+            deployments = self.get_deployments(client_env="sandbox")
+            deployment = next(
+                (d for d in deployments if d.get("version_hash")[:9] == version_hash), {}
             )
-            deployment_id = deployments.get(version_hash)
+            deployment_id = deployment.get("id")
             if deployment_id:
                 logger.info(
                     f"Pulling resources from deployment '{deployment_id}' (version {version_hash})..."

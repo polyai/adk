@@ -7,6 +7,7 @@ Copyright PolyAI Limited
 
 import json
 import sys
+from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -226,6 +227,39 @@ def print_turn_metadata(
                 padding=(0, 1),
             )
         )
+
+
+# ── LOG HISTORY ───────────────────────────────────────────────────────
+
+
+def print_log_history(versions: list[dict[str, Any]], one_line: bool = False) -> None:
+    """Print the change history of the project."""
+    for version in versions:
+        deployment_message = version.get("deployment_metadata").get("deployment_message") or "-"
+        deployment_type = version.get("deployment_metadata").get("deployment_type")
+        created_at = version.get("created_at")
+        created_by = version.get("created_by")
+        version_hash = version.get("version_hash")
+        deployment_id = version.get("id")
+        client_env = version.get("client_env")
+        artifact_version = version.get("artifact_version")
+        lambda_deployment_version = version.get("function_deployment_version")
+        if one_line:
+            console.print(
+                f"[bold][yellow]{version_hash[:9]}[/yellow][/bold] ([cyan]{deployment_type}[/cyan]) {deployment_message} [muted]{created_by}[/muted]"
+            )
+        else:
+            console.print(
+                f"[bold][yellow]{version_hash}[/yellow][/bold] ([cyan]{deployment_type}[/cyan])"
+            )
+            console.print(f"Date: [muted]{created_at}[/muted]")
+            console.print(f"By: [muted]{created_by}[/muted]")
+            console.print(f"Deployment ID: [muted]{deployment_id}[/muted]")
+            console.print(f"Artifact Version: [muted]{artifact_version}[/muted]")
+            console.print(f"Lambda Deployment Version: [muted]{lambda_deployment_version}[/muted]")
+            console.print(f"Client Environment: [cyan]{client_env}[/cyan]")
+            console.print(f"Message: {deployment_message}")
+            console.print()
 
 
 # ── Error handling ───────────────────────────────────────────────────

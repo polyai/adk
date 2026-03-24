@@ -35,6 +35,7 @@ from poly.console import (
     set_verbose,
     success,
     warning,
+    print_log_history,
 )
 from poly.handlers.github_api_handler import GitHubAPIHandler
 from poly.handlers.interface import (
@@ -478,7 +479,7 @@ class AgentStudioCLI:
             help="Show all metadata (functions, flows, and state). Equivalent to --functions --flows --state.",
         )
 
-        # completion
+        # COMPLETION
         completion_parser = subparsers.add_parser(
             "completion",
             formatter_class=RawTextHelpFormatter,
@@ -498,6 +499,56 @@ class AgentStudioCLI:
             "shell",
             choices=["bash", "zsh", "fish"],
             help="Shell type to generate completions for.",
+        )
+
+        # LOG HISTORY
+        log_history_parser = subparsers.add_parser(
+            "log",
+            parents=[verbose_parent],
+            help="Show the log history of the project.",
+            description="Show the log history of the project.",
+            formatter_class=RawTextHelpFormatter,
+        )
+        log_history_parser.add_argument(
+            "--path",
+            type=str,
+            default=os.getcwd(),
+            help="Base path to the project. Defaults to current working directory.",
+        )
+        log_history_parser.add_argument(
+            "--env",
+            "-e",
+            type=str,
+            default="sandbox",
+            choices=["sandbox", "pre-release", "live"],
+            help="Environment to show the change history for. Defaults to sandbox.",
+        )
+        log_history_parser.add_argument(
+            "--limit",
+            type=int,
+            default=10,
+            help="Number of versions to show. Defaults to 10.",
+        )
+        log_history_parser.add_argument(
+            "--offset",
+            type=int,
+            default=0,
+            help="Number of versions to skip. Defaults to 0.",
+        )
+        log_history_parser.add_argument(
+            "--hash",
+            type=str,
+            help="Hash of the version to start from.",
+        )
+        log_history_parser.add_argument(
+            "--oneline",
+            action="store_true",
+            help="Output the change history in one line.",
+        )
+        log_history_parser.add_argument(
+            "--json",
+            action="store_true",
+            help="Output the change history in JSON format.",
         )
 
         return parser
@@ -597,6 +648,11 @@ class AgentStudioCLI:
 
         elif args.command == "completion":
             cls.print_completion(args.shell)
+
+        elif args.command == "log":
+            cls.print_log_history(
+                args.path, args.env, args.limit, args.offset, args.hash, args.json, args.oneline
+            )
 
     @classmethod
     def print_completion(cls, shell: str) -> None:
@@ -1284,6 +1340,43 @@ class AgentStudioCLI:
             success(f"Documentation written to {output_path}")
         else:
             plain(content)
+
+    @classmethod
+    def print_log_history(
+        cls,
+        base_path: str,
+        environment: str = "sandbox",
+        limit: int = 10,
+        offset: int = 0,
+        hash: str = None,
+        json: bool = False,
+        one_line: bool = False,
+    ) -> None:
+        """Print the change history of the project."""
+        project = cls._load_project(base_path)
+        versions = project.get_deployments(client_env=environment)
+
+        if not versions:
+            error("No versions found.")
+            return
+
+        if hash:
+            hash = hash[:9]
+
+        if hash:
+            version_idx = next(
+                (i for i, v in enumerate(versions) if v.get("version_hash")[:9] == hash), None
+            )
+            if version_idx is None:
+                error(f"Version hash '{hash}' not found.")
+                return
+            offset = version_idx
+
+        versions = versions[offset : offset + limit]
+        if json:
+            print(json.dumps(versions))
+        else:
+            print_log_history(versions, one_line=one_line)
 
 
 def main():
