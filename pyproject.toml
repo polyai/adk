@@ -52,6 +52,18 @@ exclude = [
     "F405",
 ]
 
+[tool.coverage.run]
+omit = [
+    "src/poly/handlers/protobuf/*",
+    "src/poly/types/*",
+]
+
+[tool.coverage.report]
+omit = [
+    "src/poly/handlers/protobuf/*",
+    "src/poly/types/*",
+]
+
 [tool.pytest.ini_options]
 norecursedirs = [
     "test_projects",
