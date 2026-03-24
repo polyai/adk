@@ -156,12 +156,8 @@ def merge_strings(original: str, updated: str, incoming: str) -> str:
             _, _, _, a_start, a_end, b_start, b_end = region
             result.append("<<<<<<<\n")
             result.extend(a[a_start:a_end])
-            if result[-1] != "\n":
-                result.append("\n")
             result.append("=======\n")
             result.extend(b[b_start:b_end])
-            if result[-1] != "\n":
-                result.append("\n")
             result.append(">>>>>>>\n")
     return "".join(result)
 
