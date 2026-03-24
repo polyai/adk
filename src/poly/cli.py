@@ -1423,7 +1423,11 @@ class AgentStudioCLI:
 
         versions = versions[offset : offset + limit]
         if output_json:
-            print(json.dumps(versions))
+            json_output = {
+                "versions": versions,
+                "active_deployment_hashes": active_deployment_hashes,
+            }
+            print(json.dumps(json_output))
         else:
             print_history(versions, active_deployment_hashes, one_line=one_line)
 
