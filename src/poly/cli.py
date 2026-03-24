@@ -341,11 +341,11 @@ class AgentStudioCLI:
             nargs="*",
             help=("List of files to show changes for. If not specified, shows all changes."),
         )
-        # review_parser.add_argument(
-        #     "--delete",
-        #     action="store_true",
-        #     help="Delete all the fully diff gists in your GitHub account.",
-        # )
+        review_parser.add_argument(
+            "--delete",
+            action="store_true",
+            help="Delete all the fully diff gists in your GitHub account.",
+        )
 
         # Branch
         # GET BRANCHES 'branch list'
