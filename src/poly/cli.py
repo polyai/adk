@@ -524,21 +524,21 @@ class AgentStudioCLI:
             help="Shell type to generate completions for.",
         )
 
-        # LOG HISTORY
-        log_history_parser = subparsers.add_parser(
-            "log",
+        # HISTORY
+        history_parser = subparsers.add_parser(
+            "history",
             parents=[verbose_parent],
-            help="Show the log history of the project.",
-            description="Show the log history of the project.",
+            help="Show the history of the project.",
+            description="Show the history of the project.",
             formatter_class=RawTextHelpFormatter,
         )
-        log_history_parser.add_argument(
+        history_parser.add_argument(
             "--path",
             type=str,
             default=os.getcwd(),
             help="Base path to the project. Defaults to current working directory.",
         )
-        log_history_parser.add_argument(
+        history_parser.add_argument(
             "--env",
             "-e",
             type=str,
@@ -546,29 +546,29 @@ class AgentStudioCLI:
             choices=["sandbox", "pre-release", "live"],
             help="Environment to show the change history for. Defaults to sandbox.",
         )
-        log_history_parser.add_argument(
+        history_parser.add_argument(
             "--limit",
             type=int,
             default=10,
             help="Number of versions to show. Defaults to 10.",
         )
-        log_history_parser.add_argument(
+        history_parser.add_argument(
             "--offset",
             type=int,
             default=0,
             help="Number of versions to skip. Defaults to 0.",
         )
-        log_history_parser.add_argument(
+        history_parser.add_argument(
             "--hash",
             type=str,
             help="Hash of the version to start from.",
         )
-        log_history_parser.add_argument(
+        history_parser.add_argument(
             "--oneline",
             action="store_true",
             help="Output the change history in one line.",
         )
-        log_history_parser.add_argument(
+        history_parser.add_argument(
             "--json",
             action="store_true",
             help="Output the change history in JSON format.",
@@ -603,7 +603,7 @@ class AgentStudioCLI:
             cls.status(args.path)
 
         elif args.command == "revert":
-            cls.revert(args.path, args.all, args.files)
+            cls.revert(args.path, args.files)
 
         elif args.command == "diff":
             cls.diff(args.path, args.files, args.hash, args.before, args.after)
@@ -672,8 +672,8 @@ class AgentStudioCLI:
         elif args.command == "completion":
             cls.print_completion(args.shell)
 
-        elif args.command == "log":
-            cls.print_log_history(
+        elif args.command == "history":
+            cls.print_history(
                 args.path, args.env, args.limit, args.offset, args.hash, args.json, args.oneline
             )
 
@@ -1391,7 +1391,7 @@ class AgentStudioCLI:
             plain(content)
 
     @classmethod
-    def print_log_history(
+    def print_history(
         cls,
         base_path: str,
         environment: str = "sandbox",
@@ -1425,7 +1425,7 @@ class AgentStudioCLI:
         if output_json:
             print(json.dumps(versions))
         else:
-            print_log_history(versions, active_deployment_hashes, one_line=one_line)
+            print_history(versions, active_deployment_hashes, one_line=one_line)
 
 
 def main():

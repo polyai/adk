@@ -229,10 +229,10 @@ def print_turn_metadata(
         )
 
 
-# ── LOG HISTORY ───────────────────────────────────────────────────────
+# ── HISTORY ───────────────────────────────────────────────────────────
 
 
-def print_log_history(
+def print_history(
     versions: list[dict[str, Any]], active_deployment_hashes: dict[str, str], one_line: bool = False
 ) -> None:
     """Print the change history of the project."""

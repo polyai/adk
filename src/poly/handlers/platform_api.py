@@ -171,7 +171,7 @@ class PlatformAPIHandler:
     @staticmethod
     def get_deployments(
         region: str, account_id: str, project_id: str, client_env: str = "sandbox"
-    ) -> dict[str, str]:
+    ) -> list[dict[str, ty.Any]]:
         """Get the deployments for a given project and client environment.
         Args:
             region (str): The region name
@@ -180,7 +180,7 @@ class PlatformAPIHandler:
             client_env (str): The client environment (sandbox, pre-release, live)
                 defaults to sandbox
         Returns:
-            list[dict[str, str]]: A list of deployment information
+            list[dict[str, Any]]: A list of deployment records from the API
         """
         endpoint = DEPLOYMENTS_URL.format(account_id=account_id, project_id=project_id)
 
