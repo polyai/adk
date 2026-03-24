@@ -6,13 +6,13 @@ asks Claude which pages need updating and what the updates should be, then
 writes changes to disk. The workflow then opens a PR if any files changed.
 
 Requires:
-    ANTHROPIC_API_KEY environment variable
+    ANTHROPIC_API_KEY environment variable (set from the CLAUDE_API_KEY secret in CI)
     anthropic Python package (pip install anthropic)
 """
 
+import os
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import anthropic
@@ -256,7 +256,8 @@ the documentation if needed.
         sys.exit(0)
 
     # Write PR summary to a temp file that the workflow reads via --body-file.
-    # Using /tmp avoids the file being staged by `git add docs/`.
+    # RUNNER_TEMP is set by GitHub Actions; falling back to /tmp for local runs.
+    # Using a temp dir avoids the file being staged by `git add docs/`.
     merge_hash = run(["git", "rev-parse", "--short", "HEAD"]).strip()
     summary = (
         f"Auto-generated docs update triggered by merge {merge_hash}.\n\n"
@@ -264,7 +265,8 @@ the documentation if needed.
         + "\n".join(reasons)
         + "\n\n---\n_Updated by the auto-update-docs workflow using Claude._"
     )
-    summary_file = Path(tempfile.gettempdir()) / "pr_summary.md"
+    temp_dir = Path(os.environ.get("RUNNER_TEMP", "/tmp"))
+    summary_file = temp_dir / "pr_summary.md"
     summary_file.write_text(summary)
     print(f"\nUpdated {len(updated)} file(s). PR summary written to {summary_file}.")
 
