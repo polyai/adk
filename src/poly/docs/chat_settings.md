@@ -24,7 +24,7 @@ greeting:
 
 ## Style Prompt
 
-Channel-specific instructions that shape how the agent writes. Separate from personality — use this for chat-specific guidance (e.g. "keep responses concise", "use bullet points for lists").
+Channel-specific instructions that shape how the agent writes. Separate from personality - use this for chat-specific guidance (e.g. "keep responses concise", "use bullet points for lists").
 
 ### Fields
 - **prompt**: Free-text style instructions. No resource references allowed.

@@ -51,11 +51,11 @@ custom: ""
 Plain-text behavioral instructions the agent follows on every turn. This is a key file for shaping agent behavior.
 
 ### Supported references
-- `{{fn:function_name}}` — global functions
-- `{{twilio_sms:template_name}}` — SMS templates
-- `{{ho:handoff_name}}` — handoffs
-- `{{attr:attribute_name}}` — variant attributes
-- `{{vrbl:variable_name}}` — variables
+- `{{fn:function_name}}` - global functions
+- `{{twilio_sms:template_name}}` - SMS templates
+- `{{ho:handoff_name}}` - handoffs
+- `{{attr:attribute_name}}` - variant attributes
+- `{{vrbl:variable_name}}` - variables
 
 ### Example
 ```text
