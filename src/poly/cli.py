@@ -35,7 +35,7 @@ from poly.console import (
     set_verbose,
     success,
     warning,
-    print_log_history,
+    print_history,
 )
 from poly.handlers.github_api_handler import GitHubAPIHandler
 from poly.handlers.interface import (
