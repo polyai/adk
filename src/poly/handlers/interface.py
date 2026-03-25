@@ -110,14 +110,21 @@ class AgentStudioInterface:
         """
         return self.sync_client.pull_deployment_resources(deployment_id)
 
-    def pull_resources(self) -> dict[type[Resource], dict[str, Resource]]:
+    def pull_resources(
+        self, projection_json: dict[str, Any] = None
+    ) -> tuple[dict[type[Resource], dict[str, Resource]], dict[str, Any]]:
         """Fetch all resources for the specific project.
+
+        Args:
+            projection_json (dict[str, Any]): A dictionary containing the projection.
+                If provided, the projection will be used instead of fetching it from the API.
 
         Returns:
             dict[type[Resource], dict[str, Resource]]: A dictionary mapping resource types to
                 their resources
+            dict[str, Any]: The projection data
         """
-        return self.sync_client.pull_resources()
+        return self.sync_client.pull_resources(projection_json=projection_json)
 
     def push_resources(
         self,
