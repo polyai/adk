@@ -45,9 +45,15 @@ jobs:
         run: |
           source .venv/bin/activate
           PR_SHA=$(git rev-parse HEAD)
+          if git rev-parse --verify -q HEAD:uv.lock >/dev/null; then
+            git checkout -- uv.lock
+          fi
           git checkout "origin/$BASE_REF"
           uv pip install -e ".[dev]"
           uv run pytest src/poly/tests/ --cov=poly --cov-report=json:coverage-base.json -q || true
+          if git rev-parse --verify -q HEAD:uv.lock >/dev/null; then
+            git checkout -- uv.lock
+          fi
           git checkout "$PR_SHA"
 
       - name: Generate coverage comment
