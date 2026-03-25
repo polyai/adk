@@ -10,13 +10,14 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 
 ```
 <account>/<project>/
-├── _gen/                               # Generated stubs — do not edit
+├── _gen/                               # Generated stubs - do not edit
 ├── agent_settings/                     # Agent identity and behavior
 │   ├── personality.yaml
 │   ├── role.yaml
 │   ├── rules.txt
 │   └── experimental_config.json        # Optional
 ├── config/                             # Configuration
+│   ├── api_integrations.yaml           # Optional
 │   ├── entities.yaml                   # Optional
 │   ├── handoffs.yaml                   # Optional
 │   ├── sms_templates.yaml              # Optional
@@ -28,11 +29,11 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │   │   ├── keyphrase_boosting.yaml     # Optional
 │   │   └── transcript_corrections.yaml # Optional
 │   └── response_control/
-│       ├── pronunciations.yaml         # Optional — TTS rules
-│       └── phrase_filtering.yaml       # Optional — stop keywords
+│       ├── pronunciations.yaml         # Optional - TTS rules
+│       └── phrase_filtering.yaml       # Optional - stop keywords
 ├── chat/                               # Chat channel settings
 │   └── configuration.yaml              # Greeting, style prompt
-├── flows/                              # Optional — flow definitions
+├── flows/                              # Optional - flow definitions
 │   └── {flow_name}/
 │       ├── flow_config.yaml
 │       ├── steps/
@@ -42,8 +43,8 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │       └── functions/
 │           └── {function_name}.py
 ├── functions/                          # Global functions (shared across flows)
-│   ├── start_function.py              # Optional — runs at call start
-│   ├── end_function.py                # Optional — runs at call end
+│   ├── start_function.py              # Optional - runs at call start
+│   ├── end_function.py                # Optional - runs at call end
 │   └── {function_name}.py
 ├── topics/                             # Knowledge base topics
 │   └── {topic_name}.yaml
@@ -104,17 +105,18 @@ These placeholders can be used in prompts, rules, topics, and other text fields 
 
 Resource-specific documentation is available via `poly docs {resource} [resource ...]` or `poly docs --all`. Docs can also be read directly from `src/poly/docs/`:
 
-- [Agent Settings](agent_settings.md) — personality, role, rules
-- [Voice Settings](voice_settings.md) — voice greeting, disclaimer, style prompt
-- [Chat Settings](chat_settings.md) — chat greeting, style prompt
-- [Flows](flows.md) — multi-step processes with steps, functions, conditions
-- [Functions](functions.md) — global and flow functions, decorators, state, metrics
-- [Topics](topics.md) — knowledge base for RAG
-- [Entities](entities.md) — structured data collection
-- [Handoffs](handoffs.md) — SIP call transfers
-- [Variants](variants.md) — per-variant configuration
-- [SMS Templates](sms.md) — text message templates
-- [Variables](variables.md) — state variables referenced in code
-- [Speech Recognition](speech_recognition.md) — ASR settings, keyphrase boosting, transcript corrections
-- [Response Control](response_control.md) — pronunciations, phrase filters
-- [Experimental Config](experimental_config.md) — feature flags
+- [Agent Settings](agent_settings.md) - personality, role, rules
+- [Voice Settings](voice_settings.md) - voice greeting, disclaimer, style prompt
+- [Chat Settings](chat_settings.md) - chat greeting, style prompt
+- [Flows](flows.md) - multistep processes with steps, functions, conditions
+- [Functions](functions.md) - global and flow functions, decorators, state, metrics
+- [Topics](topics.md) - knowledge base for RAG
+- [API Integrations](api_integrations.md) — external HTTP API definitions
+- [Entities](entities.md) - structured data collection
+- [Handoffs](handoffs.md) - SIP call transfers
+- [Variants](variants.md) - per-variant configuration
+- [SMS Templates](sms.md) - text message templates
+- [Variables](variables.md) - state variables referenced in code
+- [Speech Recognition](speech_recognition.md) - ASR settings, keyphrase boosting, transcript corrections
+- [Response Control](response_control.md) - pronunciations, phrase filters
+- [Experimental Config](experimental_config.md) - feature flags

@@ -1,0 +1,17 @@
+api_integrations:
+- name: customer_api
+  description: test
+  environments:
+    sandbox:
+      base_url: https://dev-customer.com
+      auth_type: basic
+    pre-release:
+      base_url: https://dev-customer.com
+      auth_type: basic
+    live:
+      base_url: https://customer.com
+      auth_type: apiKey
+  operations:
+  - name: get_confirmation_status
+    method: GET
+    resource: /bookings/{booking_id}/confirmation-status

@@ -26,6 +26,16 @@ Claude Code is particularly useful for:
 - applying patterns reused across previous projects
 - speeding up repetitive implementation work
 
+#### Loading ADK rules into your coding agent
+
+Before using Claude Code or another AI coding tool, generate a local documentation file and reference it in your session:
+
+~~~bash
+poly docs --all --output rules.md
+~~~
+
+Then reference rules.md in your prompt or agent context. This gives your coding agent accurate knowledge of ADK resource types, constraints, and conventions.
+
 ### VS Code extension
 
 A **PolyAI ADK VS Code extension** is available in the VS Code Marketplace:

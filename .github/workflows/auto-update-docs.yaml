@@ -1,0 +1,70 @@
+name: Auto-update docs
+
+# Runs whenever a PR that touches source code is merged to main.
+# The agent reads the diff, figures out which docs pages are stale, rewrites them,
+# and opens a PR for human review.
+#
+# Required secret: CLAUDE_API_KEY
+# The GITHUB_TOKEN secret is automatically available — no setup needed.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'src/**'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update-docs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2  # Need HEAD and HEAD~1 for the diff
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install anthropic
+
+      - name: Run docs update agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+        run: python docs/scripts/update_docs.py
+
+      - name: Check for doc changes
+        id: check
+        run: |
+          git diff --quiet docs/ && echo "changed=false" >> $GITHUB_OUTPUT \
+                                 || echo "changed=true"  >> $GITHUB_OUTPUT
+
+      - name: Open docs PR
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          BRANCH="docs/auto-update-${SHORT_SHA}"
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git checkout -b "${BRANCH}"
+          git add docs/
+          git commit -m "docs: auto-update from ${SHORT_SHA}"
+          git push origin "${BRANCH}"
+
+          gh pr create \
+            --title "docs: auto-update from ${SHORT_SHA}" \
+            --body-file /tmp/pr_summary.md \
+            --base main \
+            --head "${BRANCH}"
