@@ -14,6 +14,9 @@ from poly.handlers.sdk import SourcererAPIError, SourcererSDK
 from poly.resources import (
     ASRBiasing,
     AsrSettings,
+    ApiIntegration,
+    ApiIntegrationOperation,
+    ApiIntegrationEnvironments,
     BaseResource,
     ChatGreeting,
     ChatStylePrompt,
@@ -132,7 +135,8 @@ class SyncClientHandler:
             KeyphraseBoosting: self._read_keyphrase_boosting_from_projection(projection),
             TranscriptCorrection: self._read_transcript_corrections_from_projection(projection),
             **self._read_asr_settings_from_projection(projection),
-        }
+            ApiIntegration: self._read_api_integrations_from_projection(projection),
+        }  # ty:ignore[invalid-return-type]
 
     def pull_deployment_resources(
         self, deployment_id: str
@@ -818,6 +822,33 @@ class SyncClientHandler:
             }
         }
 
+    @staticmethod
+    def _read_api_integrations_from_projection(
+        projection: dict,
+    ) -> dict[type[Resource], dict[str, Resource]]:
+        api_integrations = {}
+        for integration_id, integration_data in (
+            projection.get("apiIntegrations", {})
+            .get("apiIntegrations", {})
+            .get("entities", {})
+            .items()
+        ):
+            environments = ApiIntegrationEnvironments.from_dict(
+                integration_data.get("environments")
+            )
+            operations_raw = integration_data.get("operations") or {}
+            operations = [ApiIntegrationOperation.from_dict(v) for v in operations_raw.values()]
+
+            api_integrations[integration_id] = ApiIntegration(
+                resource_id=integration_id,
+                name=integration_data.get("name", ""),
+                description=integration_data.get("description", ""),
+                environments=environments,
+                operations=operations,
+            )
+
+        return api_integrations
+
     # Types that should be created first
     # as they are referenced by other resources
     PRIORITY_CREATE_TYPES = [
@@ -834,6 +865,8 @@ class SyncClientHandler:
         FunctionStep,
         FlowStep,
         Condition,
+        # Integrations should be created before operations and environments
+        ApiIntegration,
     ]
 
     PRIORITY_DELETE_TYPES = [

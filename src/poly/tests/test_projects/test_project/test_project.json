@@ -1055,6 +1055,26 @@
         ]
       }
     },
+    "api_integration": {
+      "int-customer_api": {
+        "resource_id": "int-customer_api",
+        "name": "customer_api",
+        "description": "test",
+        "environments": {
+          "sandbox": {"base_url": "https://dev-customer.com", "auth_type": "basic"},
+          "pre_release": {"base_url": "https://dev-customer.com", "auth_type": "basic"},
+          "live": {"base_url": "https://customer.com", "auth_type": "apiKey"}
+        },
+        "operations": [
+          {
+            "resource_id": "",
+            "name": "get_confirmation_status",
+            "method": "GET",
+            "resource": "/bookings/{booking_id}/confirmation-status"
+          }
+        ]
+      }
+    },
     "asr_settings": {
       "asr_settings": {
         "resource_id": "asr_settings",

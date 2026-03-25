@@ -50,6 +50,11 @@
     "URL": "https://github.com/jawah/charset_normalizer/blob/master/CHANGELOG.md"
   },
   {
+    "License": "Apache-2.0",
+    "Name": "coverage",
+    "URL": "https://github.com/coveragepy/coveragepy"
+  },
+  {
     "License": "Python Software Foundation License",
     "Name": "distlib",
     "URL": "https://github.com/pypa/distlib"
@@ -148,6 +153,11 @@
     "License": "MIT",
     "Name": "pytest",
     "URL": "https://docs.pytest.org/en/latest/"
+  },
+  {
+    "License": "MIT",
+    "Name": "pytest-cov",
+    "URL": "https://pytest-cov.readthedocs.io/en/latest/changelog.html"
   },
   {
     "License": "Apache Software License; BSD License",
