@@ -5,6 +5,7 @@ Copyright PolyAI Limited
 
 import logging
 import uuid
+from copy import deepcopy
 from typing import Any, Optional
 
 from poly.handlers.protobuf.commands_pb2 import Command
@@ -836,16 +837,14 @@ class SyncClientHandler:
         Variable,
     ]
 
-    def push_resources(
+    def queue_resources(
         self,
         deleted_resources: dict[type[BaseResource], dict[str, BaseResource]],
         new_resources: dict[type[BaseResource], dict[str, BaseResource]],
         updated_resources: dict[type[BaseResource], dict[str, BaseResource]],
-        dry_run: bool = False,
-        queue_pushes: bool = False,
         email: Optional[str] = None,
-    ) -> bool:
-        """Upload multiple resources for the specific project.
+    ) -> list[Command]:
+        """Queue multiple resources for the specific project.
 
         Sends in order:
         - delete
@@ -860,7 +859,7 @@ class SyncClientHandler:
                 uploading
 
         Returns:
-            bool: True if the resources were pushed successfully, False otherwise
+            list[Command]: A list of queued Command protobuf messages.
         """
         metadata = self.sdk.create_metadata()
         if email:
@@ -944,21 +943,40 @@ class SyncClientHandler:
                         )
                     )
 
-        if not (dry_run or queue_pushes):
-            logger.info(f"Sending commands command_queue={self.sdk._command_queue!r}")
-            try:
-                self.sdk.send_command_batch()
-            except SourcererAPIError as e:
-                logger.error(f"Failed to push resources: {e}")
-                # If the batch fails, we assume all commands failed
-                return False
-        elif queue_pushes:
-            return True
-        elif dry_run:
-            logger.info(f"Created commands command_queue={self.sdk._command_queue!r}")
-            self.sdk.clear_queue()
+        logger.info(
+            f"Queued {len(self.sdk._command_queue)} commands command_queue={self.sdk._command_queue!r}"
+        )
+        return self.get_queued_commands()
 
-        return True
+    def send_queued_commands(self) -> bool:
+        """Send all queued commands as a batch and clear the queue.
+
+        Returns:
+            bool: True if the commands were sent successfully, False otherwise
+        """
+        if not self.sdk._command_queue:
+            logger.info("No commands to send")
+            return True
+
+        try:
+            logger.info(f"Sending {len(self.sdk._command_queue)} commands to {self.sdk.branch_id}")
+            return self.sdk.send_command_batch()
+        except SourcererAPIError as e:
+            logger.error(f"Failed to send commands: {e}")
+            return False
+
+    def clear_command_queue(self) -> None:
+        """Clear all queued commands without sending."""
+        logger.info(f"Clearing {len(self.sdk._command_queue)} commands")
+        self.sdk.clear_queue()
+
+    def get_queued_commands(self) -> list[Command]:
+        """Get all queued commands.
+
+        Returns:
+            list[Command]: A list of queued Command protobuf messages.
+        """
+        return deepcopy(self.sdk._command_queue)
 
     def switch_branch(self, branch_id: str) -> bool:
         """Switch to a different branch within the same project.

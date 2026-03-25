@@ -36,7 +36,7 @@ from poly.output.console import (
     success,
     warning,
 )
-from poly.output.json_output import json_print
+from poly.output.json_output import json_print, commands_to_dicts
 from poly.handlers.github_api_handler import GitHubAPIHandler
 from poly.handlers.interface import (
     REGIONS,
@@ -222,6 +222,18 @@ class AgentStudioCLI:
             default=False,
         )
         push_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
+        push_parser.add_argument(
+            "--output-json-commands",
+            action="store_true",
+            help="Output the commands that will be sent to the Agent Studio in json format",
+            default=False,
+        )
+        push_parser.add_argument(
+            "--email",
+            type=str,
+            help="Email to use for metadata creation for push",
+            default=None,
+        )
 
         # STATUS
         status_parser = subparsers.add_parser(
@@ -538,7 +550,9 @@ class AgentStudioCLI:
                 args.skip_validation,
                 args.dry_run,
                 args.format,
+                args.email,
                 output_json=args.json,
+                output_commands=args.output_json_commands,
             )
 
         elif args.command == "status":
@@ -841,26 +855,33 @@ class AgentStudioCLI:
         skip_validation: bool = False,
         dry_run: bool = False,
         format: bool = False,
+        email: Optional[str] = None,
         output_json: bool = False,
+        output_commands: bool = False,
     ) -> None:
         """Push the project configuration to the Agent Studio."""
         project = cls._load_project(base_path, output_json=output_json)
-        if not output_json:
+        if not output_json and not output_commands:
             info(
                 f"Pushing local changes for [bold]{project.account_id}/{project.project_id}[/bold]..."
             )
 
-        push_ok, output = project.push_project(
-            force=force, skip_validation=skip_validation, dry_run=dry_run, format=format
+        push_ok, output, commands = project.push_project(
+            force=force,
+            skip_validation=skip_validation,
+            dry_run=dry_run,
+            format=format,
+            email=email,
         )
-        if output_json:
-            json_print(
-                {
-                    "success": push_ok,
-                    "message": output,
-                    "dry_run": dry_run,
-                }
-            )
+        if output_json or output_commands:
+            json_output = {
+                "success": push_ok,
+                "message": output,
+                "dry_run": dry_run,
+            }
+            if output_commands:
+                json_output["commands"] = commands_to_dicts(commands)
+            json_print(json_output)
             if not push_ok:
                 sys.exit(1)
             return

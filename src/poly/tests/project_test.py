@@ -9,7 +9,6 @@ import json
 import os
 import unittest
 from copy import deepcopy
-from unittest import mock
 from unittest.mock import MagicMock, patch
 
 import poly.resources.resource_utils as resource_utils
@@ -1497,7 +1496,9 @@ class PushProjectTest(unittest.TestCase):
         ).start()
         self.mock_save_config = patch.object(AgentStudioProject, "save_config").start()
         self.mock_pull.return_value = []
-        self.mock_api_handler.push_resources = MagicMock(return_value=True)
+        self.mock_api_handler.queue_resources = MagicMock(return_value=[])
+        self.mock_api_handler.send_queued_commands = MagicMock(return_value=True)
+        self.mock_api_handler.clear_command_queue = MagicMock()
         self.mock_load_project = patch.object(AgentStudioProject, "load_project").start()
 
     def tearDown(self):
@@ -1507,17 +1508,17 @@ class PushProjectTest(unittest.TestCase):
     def test_push_project_no_changes(self):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertFalse(success)
         self.assertEqual(message, "No changes detected")
-        self.mock_api_handler.push_resources.assert_not_called()
+        self.mock_api_handler.queue_resources.assert_not_called()
 
     def test_push_project_merge_conflict(self):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         self.mock_pull.return_value = ["functions/test_function.py"]
 
-        success, message = project.push_project(force=False)
+        success, message, commands = project.push_project(force=False)
 
         self.assertFalse(success)
         self.assertIn("Merge conflicts detected", message)
@@ -1528,11 +1529,11 @@ class PushProjectTest(unittest.TestCase):
         project_data["resources"]["topics"].pop("TOPIC-Topic 1")
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         new_resources = call_args.kwargs["new_resources"]
         self.assertIn(Topic, new_resources)
         # New resources get random IDs, so check by name
@@ -1550,11 +1551,11 @@ class PushProjectTest(unittest.TestCase):
                 number_steps += 1
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True, skip_validation=True)
+        success, message, commands = project.push_project(force=True, skip_validation=True)
 
         self.assertTrue(success, f"Push failed: {message}")
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         new_resources = call_args.kwargs["new_resources"]
         self.assertIn(FlowConfig, new_resources)
         # New resources get random IDs, so check by name
@@ -1579,11 +1580,11 @@ class PushProjectTest(unittest.TestCase):
         }
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         deleted_resources = call_args.kwargs["deleted_resources"]
         self.assertIn(Function, deleted_resources)
         self.assertIn("FUNCTION-extra_function", deleted_resources[Function])
@@ -1625,11 +1626,11 @@ class PushProjectTest(unittest.TestCase):
             return result
 
         with patch.object(AgentStudioProject, "discover_local_resources", mock_discover):
-            success, message = project.push_project(force=True, skip_validation=True)
+            success, message, commands = project.push_project(force=True, skip_validation=True)
 
         self.assertTrue(success, f"Push failed: {message}")
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         deleted_resources = call_args.kwargs["deleted_resources"]
         # Must NOT include VariantAttribute - we never had them locally
         self.assertNotIn(VariantAttribute, deleted_resources)
@@ -1642,11 +1643,11 @@ class PushProjectTest(unittest.TestCase):
         )
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
         self.assertIn(Function, updated_resources)
         self.assertIn("FUNCTION-test_function", updated_resources[Function])
@@ -1658,11 +1659,11 @@ class PushProjectTest(unittest.TestCase):
         ] = True
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
         self.assertIn(DTMFConfig, updated_resources)
 
@@ -1673,11 +1674,11 @@ class PushProjectTest(unittest.TestCase):
 
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         new_resources = call_args.kwargs["new_resources"]
         self.assertIn(Condition, new_resources)
         # Deleted 2 conditions, so check that 2 new conditions are pushed
@@ -1704,11 +1705,11 @@ class PushProjectTest(unittest.TestCase):
 
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         deleted_resources = call_args.kwargs["deleted_resources"]
         self.assertIn(Condition, deleted_resources)
 
@@ -1723,11 +1724,11 @@ class PushProjectTest(unittest.TestCase):
 
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
         self.assertIn(ASRBiasing, updated_resources)
 
@@ -1753,11 +1754,11 @@ class PushProjectTest(unittest.TestCase):
         ] = False
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         new_resources = call_args.kwargs["new_resources"]
         updated_resources = call_args.kwargs["updated_resources"]
         deleted_resources = call_args.kwargs["deleted_resources"]
@@ -1771,11 +1772,11 @@ class PushProjectTest(unittest.TestCase):
         project_data["resources"]["keyphrase_boosting"].pop("KEYPHRASE_BOOSTING-polyai")
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         new_resources = call_args.kwargs["new_resources"]
         self.assertIn(KeyphraseBoosting, new_resources)
         kp_names = [r.keyphrase for r in new_resources[KeyphraseBoosting].values()]
@@ -1791,11 +1792,11 @@ class PushProjectTest(unittest.TestCase):
         }
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         deleted_resources = call_args.kwargs["deleted_resources"]
         self.assertIn(KeyphraseBoosting, deleted_resources)
         self.assertIn("KEYPHRASE_BOOSTING-extra", deleted_resources[KeyphraseBoosting])
@@ -1805,11 +1806,11 @@ class PushProjectTest(unittest.TestCase):
         project_data["resources"]["keyphrase_boosting"]["KEYPHRASE_BOOSTING-polyai"]["level"] = "default"
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
         self.assertIn(KeyphraseBoosting, updated_resources)
         self.assertIn("KEYPHRASE_BOOSTING-polyai", updated_resources[KeyphraseBoosting])
@@ -1819,11 +1820,11 @@ class PushProjectTest(unittest.TestCase):
         project_data["resources"]["transcript_corrections"].pop("TRANSCRIPT_CORRECTIONS-email_domain")
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         new_resources = call_args.kwargs["new_resources"]
         self.assertIn(TranscriptCorrection, new_resources)
         tc_names = [r.name for r in new_resources[TranscriptCorrection].values()]
@@ -1841,11 +1842,11 @@ class PushProjectTest(unittest.TestCase):
         }
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         deleted_resources = call_args.kwargs["deleted_resources"]
         self.assertIn(TranscriptCorrection, deleted_resources)
         self.assertIn("TRANSCRIPT_CORRECTIONS-extra", deleted_resources[TranscriptCorrection])
@@ -1855,11 +1856,11 @@ class PushProjectTest(unittest.TestCase):
         project_data["resources"]["asr_settings"]["asr_settings"]["barge_in"] = True
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
         self.assertIn(AsrSettings, updated_resources)
         self.assertIn("asr_settings", updated_resources[AsrSettings])
@@ -1874,7 +1875,7 @@ class PushProjectTest(unittest.TestCase):
         invalid_content = "name: test_flow\ndescription:\nstart_step: start_step\n"
 
         with mock_read_from_file({flow_config_path: invalid_content}):
-            success, message = project.push_project(force=True, skip_validation=False)
+            success, message, commands = project.push_project(force=True, skip_validation=False)
 
         self.assertFalse(success)
         self.assertIn("Validation errors", message)
@@ -1889,7 +1890,7 @@ class PushProjectTest(unittest.TestCase):
         invalid_content = "name: test_flow\ndescription:\nstart_step: start_step\n"
 
         with mock_read_from_file({flow_config_path: invalid_content}):
-            success, message = project.push_project(force=True, skip_validation=True)
+            success, message, commands = project.push_project(force=True, skip_validation=True)
 
         self.assertTrue(success)
 
@@ -1898,18 +1899,13 @@ class PushProjectTest(unittest.TestCase):
         project_data["resources"]["topics"].pop("TOPIC-Topic 1")
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True, dry_run=True)
+        success, message, commands = project.push_project(force=True, dry_run=True)
 
         self.assertTrue(success)
         self.assertIn("Dry run completed", message)
-        self.mock_api_handler.push_resources.assert_called_once_with(
-            new_resources=mock.ANY,
-            deleted_resources=mock.ANY,
-            updated_resources=mock.ANY,
-            dry_run=True,
-            email=None,
-            queue_pushes=mock.ANY,
-        )
+        self.mock_api_handler.queue_resources.assert_called_once()
+        self.mock_api_handler.send_queued_commands.assert_not_called()
+        self.mock_api_handler.clear_command_queue.assert_called_once()
 
 
 class ValidateProjectTest(unittest.TestCase):

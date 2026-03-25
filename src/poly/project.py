@@ -12,6 +12,8 @@ from dataclasses import dataclass, fields
 from datetime import datetime
 from typing import Any, Optional, TypeAlias
 
+from google.protobuf.message import Message
+
 import poly.resources.resource_utils as resource_utils
 import poly.utils as utils
 from poly.handlers.interface import (
@@ -832,6 +834,72 @@ class AgentStudioProject:
 
         return files_with_conflicts
 
+    def _stage_commands(
+        self,
+        new_state: ResourceMap,
+        new_resources: ResourceMap,
+        updated_resources: ResourceMap,
+        deleted_resources: ResourceMap,
+        email: Optional[str] = None,
+    ) -> list[Message]:
+        """Stage commands for the project."""
+
+        # Group flow resources together
+        # Creating flow config, group all new steps/functions under it and remove from
+        # new resources
+        push_changes = self._clean_resources_before_push(
+            new_state,
+            new_resources,
+            updated_resources,
+            deleted_resources,
+        )
+        new_resources = push_changes.main.new
+        updated_resources = push_changes.main.updated
+        deleted_resources = push_changes.main.deleted
+        pre_changes = push_changes.pre
+        post_changes = push_changes.post
+
+        # Assign positions to new flows
+        new_resources, updated_resources = self._assign_flow_positions(
+            new_resources,
+            updated_resources,
+            new_state,
+        )
+
+        # Queue new/updated/deleted resources
+        commands = []
+        if pre_changes.new or pre_changes.deleted or pre_changes.updated:
+            commands.extend(
+                self.api_handler.queue_resources(
+                    new_resources=pre_changes.new,
+                    deleted_resources=pre_changes.deleted,
+                    updated_resources=pre_changes.updated,
+                    email=email,
+                )
+            )
+
+        if new_resources or deleted_resources or updated_resources:
+            commands.extend(
+                self.api_handler.queue_resources(
+                    new_resources=new_resources,
+                    deleted_resources=deleted_resources,
+                    updated_resources=updated_resources,
+                    email=email,
+                )
+            )
+
+        if post_changes.new or post_changes.deleted or post_changes.updated:
+            commands.extend(
+                self.api_handler.queue_resources(
+                    new_resources=post_changes.new,
+                    deleted_resources=post_changes.deleted,
+                    updated_resources=post_changes.updated,
+                    email=email,
+                )
+            )
+
+        return commands
+
     def push_project(
         self,
         force=False,
@@ -839,7 +907,7 @@ class AgentStudioProject:
         dry_run=False,
         format=False,
         email=None,
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str, list[Message]]:
         """Push the project configuration to the Agent Studio Interactor.
 
         Args:
@@ -851,8 +919,10 @@ class AgentStudioProject:
                 If None, use the email of the current user.
 
         Returns:
-            Tuple[bool, str]: A tuple containing a boolean indicating success,
-                and a string message.
+            Tuple[bool, str, list[Message]]:
+                - Boolean indicating success.
+                - String message.
+                - List of commands serialized to protobuf.
         """
 
         if not dry_run:
@@ -869,9 +939,10 @@ class AgentStudioProject:
                     return (
                         False,
                         f"Merge conflicts detected in the following files:\n- {conflicts}\nPlease resolve the conflicts and try again.",
+                        [],
                     )
 
-        # Push Algorithm
+                # Push Algorithm
         # 1. Get new/kept/deleted resources
         new_resource_mappings, kept_resource_mappings, deleted_resource_mappings = (
             self.find_new_kept_deleted(self.discover_local_resources())
@@ -939,7 +1010,7 @@ class AgentStudioProject:
         deleted_resources.update(subresource_changes.deleted)
 
         if not (updated_resources or new_resources or deleted_resources):
-            return False, "No changes detected"
+            return False, "No changes detected", []
 
         # 4. Validate all resources with new state
         if not skip_validation:
@@ -948,42 +1019,48 @@ class AgentStudioProject:
             )
             if validation_errors:
                 error_messages = "\n".join(validation_errors)
-                return False, f"Validation errors detected:\n{error_messages}"
+                return False, f"Validation errors detected:\n{error_messages}", []
 
-        # 5. Group flow resources together
-        # Creating flow config, group all new steps/functions under it and remove from
-        # new resources
-        push_changes = self._clean_resources_before_push(
-            new_state,
-            new_resources,
-            updated_resources,
-            deleted_resources,
+        commands = self._stage_commands(
+            new_state, new_resources, updated_resources, deleted_resources, email=email
         )
-        new_resources = push_changes.main.new
-        updated_resources = push_changes.main.updated
-        deleted_resources = push_changes.main.deleted
-        pre_changes = push_changes.pre
-        post_changes = push_changes.post
+        if not dry_run:
+            success = self.api_handler.send_queued_commands()
+        else:
+            self.api_handler.clear_command_queue()
+            success = True
 
-        # Assign positions to new flows
-        new_resources, updated_resources = self._assign_flow_positions(
-            new_resources,
-            updated_resources,
-            new_state,
-        )
+        self.branch_id = self.api_handler.branch_id
 
-        pre_and_post_push = any(
-            [
-                pre_changes.new,
-                pre_changes.updated,
-                pre_changes.deleted,
-                post_changes.new,
-                post_changes.updated,
-                post_changes.deleted,
-            ]
-        )
+        if not success:
+            failed_resources = []
+            for resource_dict in [
+                new_resources,
+                updated_resources,
+                deleted_resources,
+            ]:
+                for resources in resource_dict.values():
+                    failed_resources.extend([res.name for res in resources.values()])
+            errors_names = "\n-".join(failed_resources)
+            return False, f"Failed to push resources: \n-{errors_names}", commands
 
-        # Assign positions to new flows
+        if dry_run:
+            return True, "Dry run completed. No changes were pushed.", commands
+        else:
+            # Update local state
+            self.resources = new_state
+            self.file_structure_info = self.compute_file_structure_info(self.resources)
+            self.save_config()
+
+        return True, "Resources pushed successfully.", commands
+
+    @staticmethod
+    def _assign_flow_positions(
+        new_resources: ResourceMap,
+        updated_resources: ResourceMap,
+        new_state: ResourceMap,
+    ) -> ResourceUpdatePair:
+        """Assign positions to flows with new/updated steps."""
         for flow_config in new_resources.get(FlowConfig, {}).values():
             if not isinstance(flow_config, FlowConfig):
                 raise TypeError(f"Flow config is not a FlowConfig: {flow_config}")
@@ -1014,99 +1091,6 @@ class AgentStudioProject:
                     + list(new_state.get(FunctionStep, {}).values())
                 )
                 if isinstance(step, BaseFlowStep) and step.flow_id == updated_flow_id
-            ]
-
-            resource_utils.assign_flow_positions(flow_steps, flow_config.start_step)
-
-        # 6. Push new/updated/deleted resources
-        if self.branch_id:
-            logger.info(f"Pushing changes to branch {self.branch_id}")
-
-        if pre_and_post_push:
-            self.api_handler.push_resources(
-                new_resources=pre_changes.new,
-                deleted_resources=pre_changes.deleted,
-                updated_resources=pre_changes.updated,
-                dry_run=dry_run,
-                email=email,
-                queue_pushes=True,
-            )
-
-        # Push changed resources (queue only when pre_push ran, so we send pre+main together)
-        success = self.api_handler.push_resources(
-            new_resources=new_resources,
-            deleted_resources=deleted_resources,
-            updated_resources=updated_resources,
-            dry_run=dry_run,
-            email=email,
-            queue_pushes=pre_and_post_push,
-        )
-
-        if pre_and_post_push:
-            success = self.api_handler.push_resources(
-                new_resources=post_changes.new,
-                deleted_resources=post_changes.deleted,
-                updated_resources=post_changes.updated,
-                dry_run=dry_run,
-                email=email,
-                queue_pushes=False,
-            )
-
-        self.branch_id = self.api_handler.branch_id
-
-        if not success:
-            failed_resources = []
-            for resource_dict in [
-                new_resources,
-                updated_resources,
-                deleted_resources,
-            ]:
-                for resources in resource_dict.values():
-                    failed_resources.extend([res.name for res in resources.values()])
-            errors_names = "\n-".join(failed_resources)
-            return False, f"Failed to push resources: \n-{errors_names}"
-
-        if dry_run:
-            return True, "Dry run completed. No changes were pushed."
-        else:
-            # Update local state
-            self.resources = new_state
-            self.file_structure_info = self.compute_file_structure_info(self.resources)
-            self.save_config()
-
-        return True, "Resources pushed successfully."
-
-    @staticmethod
-    def _assign_flow_positions(
-        new_resources: ResourceMap,
-        updated_resources: ResourceMap,
-        new_state: ResourceMap,
-    ) -> ResourceUpdatePair:
-        """Assign positions to flows with new/updated steps."""
-        for flow_config in new_resources.get(FlowConfig, {}).values():
-            if not isinstance(flow_config, FlowConfig):
-                raise TypeError(f"Flow config is not a FlowConfig: {flow_config}")
-            resource_utils.assign_flow_positions(flow_config.steps, flow_config.start_step)
-
-        # Assign positions to flows with new/updated steps
-        updated_flow_ids = set()
-        for flow_step in list(new_resources.get(FlowStep, {}).values()) + list(
-            updated_resources.get(FlowStep, {}).values()
-        ):
-            if not isinstance(flow_step, FlowStep):
-                raise TypeError(f"Flow step is not a FlowStep: {flow_step}")
-            updated_flow_ids.add(flow_step.flow_id)
-
-        for updated_flow_id in updated_flow_ids:
-            flow_config = new_state.get(FlowConfig, {}).get(updated_flow_id)
-            if not flow_config:
-                raise ValueError(f"Flow config not found for flow id: {updated_flow_id}")
-            if not isinstance(flow_config, FlowConfig):
-                raise TypeError(f"Flow config is not a FlowConfig: {flow_config}")
-            flow_steps = [
-                step
-                for step in new_state.get(FlowStep, {}).values()
-                if isinstance(step, FlowStep) and step.flow_id == updated_flow_id
             ]
 
             resource_utils.assign_flow_positions(flow_steps, flow_config.start_step)
@@ -2510,62 +2494,10 @@ class AgentStudioProject:
         if not (updated_resources or new_resources or deleted_resources):
             return True
 
-        push_changes = self._clean_resources_before_push(
-            new_state,
-            new_resources,
-            updated_resources,
-            deleted_resources,
+        self._stage_commands(
+            new_state, new_resources, updated_resources, deleted_resources, email=email
         )
-        new_resources = push_changes.main.new
-        updated_resources = push_changes.main.updated
-        deleted_resources = push_changes.main.deleted
-        pre_changes = push_changes.pre
-        post_changes = push_changes.post
-
-        new_resources, updated_resources = self._assign_flow_positions(
-            new_resources,
-            updated_resources,
-            new_state,
-        )
-
-        # 6. Push new/updated/deleted resources
-        if self.branch_id:
-            logger.info(f"Pushing changes to branch {self.branch_id}")
-
-        pre_and_post_push = (
-            pre_changes.new
-            or pre_changes.updated
-            or pre_changes.deleted
-            or post_changes.new
-            or post_changes.updated
-            or post_changes.deleted
-        )
-
-        if pre_and_post_push:
-            success = self.api_handler.push_resources(
-                new_resources=pre_changes.new,
-                deleted_resources=pre_changes.deleted,
-                updated_resources=pre_changes.updated,
-                queue_pushes=True,
-                email=email,
-            )
-
-        # Push changed resources
-        success = self.api_handler.push_resources(
-            new_resources=new_resources,
-            deleted_resources=deleted_resources,
-            updated_resources=updated_resources,
-            queue_pushes=pre_and_post_push,
-            email=email,
-        )
-
-        if pre_and_post_push:
-            success = self.api_handler.push_resources(
-                new_resources=post_changes.new,
-                deleted_resources=post_changes.deleted,
-                updated_resources=post_changes.updated,
-                email=email,
-            )
+        success = self.api_handler.send_queued_commands()
 
         self.branch_id = self.api_handler.branch_id
 
