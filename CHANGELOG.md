@@ -1,6 +1,261 @@
 # CHANGELOG
 
 
+## v0.4.0 (2026-03-25)
+
+### Bug Fixes
+
+- Update API key reference in auto-update-docs workflow
+  ([#38](https://github.com/polyai/adk/pull/38),
+  [`d9de6fe`](https://github.com/polyai/adk/commit/d9de6fe84cbf70b42262e78f92058325c6b9167c))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+---------
+
+Co-authored-by: Benjamin Levin <bplevin36@gmail.com>
+
+### Documentation
+
+- Agentic docs-update workflow ([#35](https://github.com/polyai/adk/pull/35),
+  [`b330cc6`](https://github.com/polyai/adk/commit/b330cc6e4e75c0d138b3c2b2bc06e5be3827d40d))
+
+## Summary
+
+Adds a GitHub Actions workflow that automatically keeps the docs in sync with the codebase. Every
+  time a PR is merged to main that touches \`src/\`, the workflow diffs what changed, sends the diff
+  and all current docs to Claude, and opens a new PR with any suggested updates for human review
+  before they are merged.
+
+## Motivation
+
+The docs are fully hand-maintained today. Any new CLI flag, changed command behaviour, new resource
+  type, or schema change requires a manual docs PR — and that update often doesn't happen. This
+  automates the detection and drafting of those updates.
+
+## Changes
+
+- **\`.github/workflows/auto-update-docs.yaml\`** — triggers on push to main when \`src/\` changes,
+  runs the agent script, opens a docs PR if anything was updated -
+  **\`docs/scripts/update_docs.py\`** — gets the git diff, reads all current markdown files
+  (reference pages first), calls Claude with both, and writes back any files Claude says need
+  updating. PR body written to \`/tmp/pr_summary.md\` for the workflow to use
+
+## Test strategy
+
+- [x] N/A (docs, config, or trivial change)
+
+> The \`build-docs.yaml\` workflow runs \`mkdocs build --strict\` on every PR — that is the
+  validation gate for the docs side. The agent workflow is triggered by source code merges, not this
+  PR, so it will not self-test. To test manually: merge a code PR touching \`src/\` and check the
+  Actions tab for the \`Auto-update docs\` run.
+
+## Checklist
+
+- [x] No breaking changes to the \`poly\` CLI interface - [x] Commit messages follow [conventional
+  commits](https://www.conventionalcommits.org/)
+
+## Setup required
+
+One secret must be added before the workflow will do anything:
+
+**Settings → Secrets and variables → Actions → New repository secret**
+
+| Name | Value | |---|---| | \`ANTHROPIC_API_KEY\` | Anthropic API key (personal or shared team key)
+  |
+
+\`GITHUB_TOKEN\` (used to open the docs PR) is provided automatically by GitHub — no setup needed.
+
+## How it works
+
+1. Engineer merges a PR that changes \`src/\` 2. \`auto-update-docs\` workflow fires and diffs
+  \`HEAD~1..HEAD\` 3. Claude reads the diff and all 32 docs pages (reference pages first),
+  identifies anything stale 4. Script writes updated files to disk; PR body written to
+  \`/tmp/pr_summary.md\` 5. Workflow opens a PR: \`docs: auto-update from <sha>\` 6. Engineer
+  reviews, edits if needed, and merges
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+- Removing the em-dashes from the docs ([#33](https://github.com/polyai/adk/pull/33),
+  [`e643138`](https://github.com/polyai/adk/commit/e643138294465a84ab9be9128b360b324bb0205b))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+- Update licensing ([#30](https://github.com/polyai/adk/pull/30),
+  [`0a2bd75`](https://github.com/polyai/adk/commit/0a2bd75ab3e383ad07703dbf4f107663a3ddbf0c))
+
+## Summary
+
+Update licensing page to point to `licenses.json`. Also include missing MLP license text Fixes
+  deployment for docs
+
+## Motivation
+
+Use `licenses.json` as the one source of truth, to avoid having to maintain two lists
+
+## Changes
+
+- Update main license info, remove table and point to licenses.json - Remove GNU license text - Add
+  MLP license text - Update docs build and deploy steps to point to the correct place
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Aaron Forinton <89849359+AaronForinton@users.noreply.github.com>
+
+- Update tooling info ([#32](https://github.com/polyai/adk/pull/32),
+  [`1e322e6`](https://github.com/polyai/adk/commit/1e322e61ecd61520defe86144a3b4cf9592269f6))
+
+## Summary
+
+Documents the poly docs --output flag and the rules file workflow for AI coding tools across the CLI
+  reference and Build an agent tutorial.
+
+## Motivation
+
+Discussions in Slack
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+### Features
+
+- Add API Integrations ([#31](https://github.com/polyai/adk/pull/31),
+  [`f856884`](https://github.com/polyai/adk/commit/f856884da1f11ede25aba539fab16d25e8dcfb9f))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. --> - Adds support for creating API
+  Integrations using `yaml` files. - API Secrets are still managed by the UI - Updates docs
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Aligns with Agent Studio features
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+- API Integrations yaml file can be created in the `/config` dir.
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+
 ## v0.3.3 (2026-03-19)
 
 ### Bug Fixes
