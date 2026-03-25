@@ -172,7 +172,7 @@ Common uses include:
 
 !!! warning "Missing values will fail validation"
 
-    If a variant is missing from an attribute’s `values` map, validation will fail.
+    If a variant is missing from an attribute's `values` map, validation will fail.
 
 ## Best practices
 
