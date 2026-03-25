@@ -12,11 +12,11 @@ from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.protobuf.handoff_pb2 import Handoff_SetDefault
 from poly.handlers.sdk import SourcererAPIError, SourcererSDK
 from poly.resources import (
+    ApiIntegration,
+    ApiIntegrationEnvironments,
+    ApiIntegrationOperation,
     ASRBiasing,
     AsrSettings,
-    ApiIntegration,
-    ApiIntegrationOperation,
-    ApiIntegrationEnvironments,
     BaseResource,
     ChatGreeting,
     ChatStylePrompt,

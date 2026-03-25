@@ -39,7 +39,6 @@ from poly.resources import (
     VoiceGreeting,
     VoiceStylePrompt,
 )
-from poly.resources.resource import MultiResourceYamlResource
 from poly.resources.flows import (
     ASRBiasing,
     Condition,
@@ -47,6 +46,7 @@ from poly.resources.flows import (
     StepType,
 )
 from poly.resources.function import FunctionType
+from poly.resources.resource import MultiResourceYamlResource
 from poly.tests.testing_utils import mock_read_from_file
 
 DIR = os.path.dirname(os.path.abspath(__file__))
