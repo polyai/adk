@@ -14,7 +14,7 @@ import subprocess
 import sys
 from argparse import ArgumentParser, RawTextHelpFormatter
 from importlib.metadata import version as get_package_version
-from typing import Optional
+from typing import Any, Optional
 
 import argcomplete
 import requests
@@ -155,6 +155,19 @@ class AgentStudioCLI:
         init_parser.add_argument(
             "--format", action="store_true", help="Format resources after init."
         )
+        init_parser.add_argument(
+            "--from-projection",
+            type=str,
+            metavar="JSON|-",
+            help="Projection JSON text, or '-' to read from stdin (e.g. poly init ... --from-projection - < proj.json).",
+            default=None,
+        )
+        init_parser.add_argument(
+            "--output-json-projection",
+            action="store_true",
+            help="Output the projection in json format",
+            default=False,
+        )
         init_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
 
         # PULL
@@ -181,6 +194,19 @@ class AgentStudioCLI:
             "--format",
             action="store_true",
             help="Format resources after pulling.",
+            default=False,
+        )
+        pull_parser.add_argument(
+            "--from-projection",
+            type=str,
+            metavar="JSON|-",
+            help="Projection JSON text, or '-' to read from stdin (e.g. poly pull --from-projection - < proj.json).",
+            default=None,
+        )
+        pull_parser.add_argument(
+            "--output-json-projection",
+            action="store_true",
+            help="Output the projection in json format",
             default=False,
         )
         pull_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
@@ -222,6 +248,13 @@ class AgentStudioCLI:
             default=False,
         )
         push_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
+        push_parser.add_argument(
+            "--from-projection",
+            type=str,
+            metavar="JSON|-",
+            help="Use this projection for the pre-push refresh instead of the API; '-' reads from stdin.",
+            default=None,
+        )
         push_parser.add_argument(
             "--output-json-commands",
             action="store_true",
@@ -376,6 +409,19 @@ class AgentStudioCLI:
             "-f",
             action="store_true",
             help="Force switch to a different branch and discard changes.",
+        )
+        branches_parser.add_argument(
+            "--from-projection",
+            type=str,
+            metavar="JSON|-",
+            help="Projection JSON for the post-switch pull, or '-' to read from stdin.",
+            default=None,
+        )
+        branches_parser.add_argument(
+            "--output-json-projection",
+            action="store_true",
+            help="Output the projection in json format",
+            default=False,
         )
 
         # FORMAT
@@ -537,11 +583,20 @@ class AgentStudioCLI:
                 args.account_id,
                 args.project_id,
                 args.format,
+                args.from_projection,
                 output_json=args.json,
+                output_json_projection=args.output_json_projection,
             )
 
         elif args.command == "pull":
-            cls.pull(args.path, args.force, args.format, output_json=args.json)
+            cls.pull(
+                args.path,
+                args.force,
+                args.format,
+                args.from_projection,
+                output_json=args.json,
+                output_json_projection=args.output_json_projection,
+            )
 
         elif args.command == "push":
             cls.push(
@@ -551,6 +606,7 @@ class AgentStudioCLI:
                 args.dry_run,
                 args.format,
                 args.email,
+                args.from_projection,
                 output_json=args.json,
                 output_commands=args.output_json_commands,
             )
@@ -591,6 +647,8 @@ class AgentStudioCLI:
                     getattr(args, "force", False),
                     getattr(args, "format", False),
                     args.json,
+                    output_json_projection=args.output_json_projection,
+                    from_projection=args.from_projection,
                 )
 
             elif args.action == "current":
@@ -662,6 +720,39 @@ class AgentStudioCLI:
         except Exception as e:
             handle_exception(e)
 
+    @staticmethod
+    def _parse_from_projection_json(
+        from_projection: Optional[str],
+        *,
+        json_errors: bool,
+    ) -> Optional[dict[str, Any]]:
+        """Parse ``--from-projection`` CLI value into a projection dict, or exit on failure.
+
+        If the value is ``-`` (after stripping), JSON is read from stdin until EOF.
+        """
+        if not from_projection:
+            return None
+        raw = from_projection.strip()
+        if raw == "-":
+            raw = sys.stdin.read()
+        try:
+            parsed: Any = json.loads(raw)
+        except json.JSONDecodeError as e:
+            msg = f"Invalid JSON in --from-projection: {e}"
+            if json_errors:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+        if not isinstance(parsed, dict):
+            msg = "--from-projection must be a JSON object (dictionary)."
+            if json_errors:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+        return parsed.get("projection", parsed)
+
     @classmethod
     def _load_project(cls, base_path: str, output_json: bool = False) -> AgentStudioProject:
         """Read project config or exit with a helpful error if not found.
@@ -720,7 +811,9 @@ class AgentStudioCLI:
         account_id: str = None,
         project_id: str = None,
         format: bool = False,
+        from_projection: str = None,
         output_json: bool = False,
+        output_json_projection: bool = False,
     ) -> None:
         """Initialize a new Agent Studio project."""
         if output_json and not (region and account_id and project_id):
@@ -787,12 +880,18 @@ class AgentStudioCLI:
         if not output_json:
             info(f"Initializing project [bold]{account_id}/{project_id}[/bold]...")
 
-        project = AgentStudioProject.init_project(
+        projection_json = cls._parse_from_projection_json(
+            from_projection,
+            json_errors=output_json or output_json_projection,
+        )
+
+        project, projection = AgentStudioProject.init_project(
             base_path=base_path,
             region=region,
             account_id=account_id,
             project_id=project_id,
             format=format,
+            projection_json=projection_json,
         )
 
         if not project:
@@ -807,13 +906,14 @@ class AgentStudioCLI:
                 error("Failed to initialize the project.")
             sys.exit(1)
 
-        if output_json:
-            json_print(
-                {
-                    "success": True,
-                    "root_path": project.root_path,
-                }
-            )
+        if output_json or output_json_projection:
+            json_output = {
+                "success": True,
+                "root_path": project.root_path,
+            }
+            if output_json_projection:
+                json_output["projection"] = projection
+            json_print(json_output)
         else:
             success(f"Project initialized at {project.root_path}")
 
@@ -823,21 +923,31 @@ class AgentStudioCLI:
         base_path: str,
         force: bool = False,
         format: bool = False,
+        from_projection: str = None,
         output_json: bool = False,
+        output_json_projection: bool = False,
     ) -> None:
         """Pull the latest project configuration from the Agent Studio."""
         project = cls._load_project(base_path, output_json=output_json)
         if not output_json:
             info(f"Pulling project [bold]{project.account_id}/{project.project_id}[/bold]...")
 
-        files_with_conflicts = project.pull_project(force=force, format=format)
-        if output_json:
-            json_print(
-                {
-                    "success": not bool(files_with_conflicts),
-                    "files_with_conflicts": files_with_conflicts,
-                }
-            )
+        projection_json = cls._parse_from_projection_json(
+            from_projection,
+            json_errors=output_json or output_json_projection,
+        )
+
+        files_with_conflicts, projection = project.pull_project(
+            force=force, format=format, projection_json=projection_json
+        )
+        if output_json or output_json_projection:
+            json_output = {
+                "success": not bool(files_with_conflicts),
+                "files_with_conflicts": files_with_conflicts,
+            }
+            if output_json_projection:
+                json_output["projection"] = projection
+            json_print(json_output)
             if files_with_conflicts:
                 sys.exit(1)
             return
@@ -856,6 +966,7 @@ class AgentStudioCLI:
         dry_run: bool = False,
         format: bool = False,
         email: Optional[str] = None,
+        from_projection: str = None,
         output_json: bool = False,
         output_commands: bool = False,
     ) -> None:
@@ -866,12 +977,18 @@ class AgentStudioCLI:
                 f"Pushing local changes for [bold]{project.account_id}/{project.project_id}[/bold]..."
             )
 
+        projection_json = cls._parse_from_projection_json(
+            from_projection,
+            json_errors=output_json or output_commands,
+        )
+
         push_ok, output, commands = project.push_project(
             force=force,
             skip_validation=skip_validation,
             dry_run=dry_run,
             format=format,
             email=email,
+            projection_json=projection_json,
         )
         if output_json or output_commands:
             json_output = {
@@ -1181,6 +1298,8 @@ class AgentStudioCLI:
         force: bool = False,
         format: bool = False,
         output_json: bool = False,
+        output_json_projection: bool = False,
+        from_projection: str = None,
     ) -> None:
         """Switch to a different branch in the Agent Studio project."""
         project = cls._load_project(base_path, output_json=output_json)
@@ -1219,14 +1338,22 @@ class AgentStudioCLI:
             selected_option = branch_menu
             branch_name = selected_option.replace(" (current)", "")
 
-        switch_ok = project.switch_branch(branch_name, force=force, format=format)
-        if output_json:
-            json_print(
-                {
-                    "success": switch_ok,
-                    "branch_name": branch_name,
-                }
-            )
+        projection_json = cls._parse_from_projection_json(
+            from_projection,
+            json_errors=output_json or output_json_projection,
+        )
+
+        switch_ok, projection = project.switch_branch(
+            branch_name, force=force, format=format, projection_json=projection_json
+        )
+        if output_json or output_json_projection:
+            json_output = {
+                "success": switch_ok,
+                "branch_name": branch_name,
+            }
+            if output_json_projection:
+                json_output["projection"] = projection
+            json_print(json_output)
             if not switch_ok:
                 sys.exit(1)
             return

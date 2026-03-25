@@ -153,21 +153,33 @@ class SyncClientHandler:
         )
         return self._load_resources(projection)
 
-    def pull_resources(self) -> dict[type[Resource], dict[str, Resource]]:
+    def pull_resources(
+        self, projection_json: dict[str, Any] = None
+    ) -> tuple[dict[type[Resource], dict[str, Resource]], dict[str, Any]]:
         """Fetch all resources from a specific project.
+
+        Args:
+            projection_json (dict[str, Any]): A dictionary containing the projection.
+                If provided, the projection will be used instead of fetching it from the API.
 
         Returns:
             dict[type[Resource], dict[str, Resource]]: A dictionary mapping resource types to
                 their resources
+            dict[str, Any]: The projection data
         """
-        logger.info(
-            f"Fetching project data for project {self.project_id} on branch {self.sdk.branch_id}"
-        )
-        projection = self.sdk.fetch_projection(force_refresh=True)
+        if projection_json:
+            logger.info("Using provided projection")
+            projection = projection_json
+        else:
+            logger.info(
+                f"Fetching project data for project {self.project_id} on branch {self.sdk.branch_id}"
+            )
+            projection = self.sdk.fetch_projection(force_refresh=True)
+        logger.debug(f"Projection: {projection}")
         logger.info(
             f"Successfully fetched project data for project {self.project_id} on branch {self.sdk.branch_id}"
         )
-        return self._load_resources(projection)
+        return self._load_resources(projection), projection
 
     @staticmethod
     def _read_topics_from_projection(projection: dict) -> dict[str, Topic]:

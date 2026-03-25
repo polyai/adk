@@ -318,7 +318,8 @@ class AgentStudioProject:
         account_id: str,
         project_id: str,
         format: bool = False,
-    ) -> "AgentStudioProject":
+        projection_json: dict[str, Any] = None,
+    ) -> tuple["AgentStudioProject", dict[str, Any]]:
         """Get project from the Agent Studio Interactor
 
         Args:
@@ -327,9 +328,12 @@ class AgentStudioProject:
             account_id (str): The account ID of the project
             project_id (str): The project ID
             format (bool): If True, format resources after pulling
+            projection_json (dict[str, Any]): A dictionary containing the projection
+                If provided, the projection will be used instead of fetching it from the API.
 
         Returns:
             AgentStudioProject: An instance of AgentStudioProject with functions loaded
+            dict[str, Any]: The projection data
         """
 
         base_path = os.path.join(base_path, account_id, project_id)
@@ -343,7 +347,9 @@ class AgentStudioProject:
             last_updated=datetime.now(),
             branch_id="main",
         )
-        project.resources = project.api_handler.pull_resources()
+        project.resources, projection = project.api_handler.pull_resources(
+            projection_json=projection_json
+        )
         project._check_no_duplicate_resource_paths(project.resources)
 
         resource_mappings: list[ResourceMapping] = project._make_resource_mappings(
@@ -364,7 +370,7 @@ class AgentStudioProject:
         utils.export_decorators(DECORATORS, base_path)
         utils.save_imports(base_path)
 
-        return project
+        return project, projection
 
     def save_config(self, write_project_yaml: bool = False) -> None:
         """Save the project configuration to a file
@@ -391,7 +397,9 @@ class AgentStudioProject:
                 yaml_content = resource_utils.dump_yaml(config_dict)
                 f.write(yaml_content)
 
-    def load_project(self, preserve_not_loaded_resources: bool = False) -> None:
+    def load_project(
+        self, preserve_not_loaded_resources: bool = False, projection_json: dict[str, Any] = None
+    ) -> None:
         """Load the current state of project on Agent Studio into memory
 
         This is used when no current resources are loaded.
@@ -400,8 +408,10 @@ class AgentStudioProject:
             preserve_not_loaded_resources: If True, retain the current
                 _not_loaded_resources value across the load (used when reloading
                 for comparison without affecting local state).
+            projection_json: If set, build resources from this projection dict
+                instead of fetching from the API (same shape as a sourcerer projection).
         """
-        resources = self.api_handler.pull_resources()
+        resources, _ = self.api_handler.pull_resources(projection_json=projection_json)
         self._check_no_duplicate_resource_paths(resources)
 
         self.resources = resources
@@ -410,7 +420,9 @@ class AgentStudioProject:
             self._not_loaded_resources = []
         self.save_config()
 
-    def pull_project(self, force: bool = False, format: bool = False) -> list[str]:
+    def pull_project(
+        self, force: bool = False, format: bool = False, projection_json: dict[str, Any] = None
+    ) -> tuple[list[str], dict[str, Any]]:
         """Pull the project configuration from the Agent Studio Interactor.
 
         If there are local changes, it will merge them with the incoming changes.
@@ -427,13 +439,16 @@ class AgentStudioProject:
 
         Returns:
             list[str]: A list of file names with merge conflicts.
+            dict[str, Any]: The projection data
         """
 
         # -------
         # Pull resources
         # -------
 
-        incoming_resources = self.api_handler.pull_resources()
+        incoming_resources, projection = self.api_handler.pull_resources(
+            projection_json=projection_json
+        )
         self.branch_id = self.api_handler.branch_id
 
         self._check_no_duplicate_resource_paths(incoming_resources)
@@ -481,7 +496,7 @@ class AgentStudioProject:
         utils.save_imports(self.root_path)
         self.save_config()
 
-        return files_with_conflicts
+        return files_with_conflicts, projection
 
     @staticmethod
     def _delete_empty_folders(folder_path: str) -> None:
@@ -907,6 +922,7 @@ class AgentStudioProject:
         dry_run=False,
         format=False,
         email=None,
+        projection_json: dict[str, Any] = None,
     ) -> tuple[bool, str, list[Message]]:
         """Push the project configuration to the Agent Studio Interactor.
 
@@ -915,6 +931,8 @@ class AgentStudioProject:
             skip_validation (bool): If True, skip local validation.
             dry_run (bool): If True, do not actually push changes.
             format (bool): If True, format the resource before saving.
+            projection_json (dict[str, Any]): A dictionary containing the projection
+                If provided, the projection will be used instead of fetching it from the API.
             email (str): Email to use for metadata creation.
                 If None, use the email of the current user.
 
@@ -929,10 +947,14 @@ class AgentStudioProject:
             # If force, load latest version of the project
             # to compare against
             if force:
-                self.load_project(preserve_not_loaded_resources=True)
+                self.load_project(
+                    preserve_not_loaded_resources=True, projection_json=projection_json
+                )
             # If not force, pull and merge latest version of the project
             else:
-                files_with_conflicts = self.pull_project(format=format)
+                files_with_conflicts, _ = self.pull_project(
+                    format=format, projection_json=projection_json
+                )
 
                 if files_with_conflicts:
                     conflicts = "\n- ".join(files_with_conflicts)
@@ -1604,7 +1626,8 @@ class AgentStudioProject:
                 self.region, self.account_id, self.project_id, branch_id
             )
             logger.info(f"Pulling resources from branch '{name}'...")
-            return branch_api_handler.pull_resources()
+            resources, _ = branch_api_handler.pull_resources()
+            return resources
 
         # 3) Deployment version hash prefix -> deployment resources
         version_hash = (name or "")[:9].lower()
@@ -1981,16 +2004,25 @@ class AgentStudioProject:
         self.save_config()
         return branch_id
 
-    def switch_branch(self, branch_name: str, force: bool = False, format: bool = False) -> bool:
+    def switch_branch(
+        self,
+        branch_name: str,
+        force: bool = False,
+        format: bool = False,
+        projection_json: dict[str, Any] = None,
+    ) -> tuple[bool, dict[str, Any]]:
         """Switch to a different branch in the project.
 
         Args:
             branch_name (str): The name of the branch
             force (bool): If True, discard uncommitted changes when switching branches.
             format (bool): If True, format resources after switching branches.
+            projection_json (dict[str, Any]): A dictionary containing the projection
+                If provided, the projection will be used instead of fetching it from the API.
 
         Returns:
             bool: True if the switch was successful, False otherwise
+            dict[str, Any]: The projection data
         """
         if self.get_diffs(all_files=True) and not force:
             raise ValueError(
@@ -2001,10 +2033,13 @@ class AgentStudioProject:
         if branch_name not in branches:
             raise ValueError(f"Branch {branch_name} does not exist.")
         success = self.api_handler.switch_branch(branches[branch_name])
+        projection = {}
         if success:
             self.branch_id = branches[branch_name]
-            self.pull_project(force=force, format=format)
-        return success
+            _, projection = self.pull_project(
+                force=force, format=format, projection_json=projection_json
+            )
+        return success, projection
 
     def get_current_branch(self) -> Optional[str]:
         """Get the current branch name.

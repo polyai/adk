@@ -1495,7 +1495,7 @@ class PushProjectTest(unittest.TestCase):
             AgentStudioProject, "api_handler", new_callable=MagicMock
         ).start()
         self.mock_save_config = patch.object(AgentStudioProject, "save_config").start()
-        self.mock_pull.return_value = []
+        self.mock_pull.return_value = ([], {})
         self.mock_api_handler.queue_resources = MagicMock(return_value=[])
         self.mock_api_handler.send_queued_commands = MagicMock(return_value=True)
         self.mock_api_handler.clear_command_queue = MagicMock()
@@ -1516,7 +1516,7 @@ class PushProjectTest(unittest.TestCase):
 
     def test_push_project_merge_conflict(self):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
-        self.mock_pull.return_value = ["functions/test_function.py"]
+        self.mock_pull.return_value = (["functions/test_function.py"], {})
 
         success, message, commands = project.push_project(force=False)
 
@@ -1976,9 +1976,9 @@ class PullProjectTest(unittest.TestCase):
         # Incoming resources are the same as project.resources
         # Use the actual resources from the project to ensure they match
         original_resources = deepcopy(project.resources)
-        self.mock_api_handler.pull_resources.return_value = original_resources
+        self.mock_api_handler.pull_resources.return_value = (original_resources, {})
 
-        files_with_conflicts = project.pull_project(force=False)
+        files_with_conflicts, _ = project.pull_project(force=False)
         self.assertEqual(files_with_conflicts, [])
         self.assertEqual(project.resources, original_resources)
 
@@ -2003,7 +2003,7 @@ class PullProjectTest(unittest.TestCase):
         # Simulate pull: incoming has variant_attributes from remote
         full_project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         incoming_resources = full_project.resources
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         with mock_read_from_file(
             {
@@ -2012,7 +2012,7 @@ class PullProjectTest(unittest.TestCase):
                 ): "{}\n"
             }
         ):
-            files_with_conflicts = project.pull_project(force=False)
+            files_with_conflicts, _ = project.pull_project(force=False)
 
         self.assertEqual(files_with_conflicts, [])
         # Variant attributes are now present in project resources with the correct keys
@@ -2037,9 +2037,9 @@ class PullProjectTest(unittest.TestCase):
             example_queries=["New query"],
         )
         incoming_resources.setdefault(Topic, {})["TOPIC-new_topic"] = new_topic
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
-        files_with_conflicts = project.pull_project(force=False)
+        files_with_conflicts, _ = project.pull_project(force=False)
         self.assertEqual(files_with_conflicts, [])
         # Verify the new resource was saved via save_to_file or save
         self.assertTrue(self.mock_save_to_file.called or self.mock_resource_save.called)
@@ -2053,9 +2053,9 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources = deepcopy(project.resources)
         if Topic in incoming_resources and "TOPIC-Topic 1" in incoming_resources[Topic]:
             del incoming_resources[Topic]["TOPIC-Topic 1"]
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
-        files_with_conflicts = project.pull_project(force=False)
+        files_with_conflicts, _ = project.pull_project(force=False)
 
         self.assertEqual(files_with_conflicts, [])
         # Verify the resource file was removed via os.remove
@@ -2072,9 +2072,9 @@ class PullProjectTest(unittest.TestCase):
         modified_func = deepcopy(incoming_resources[Function][func_id])
         modified_func.code = 'def test_function(conv: Conversation):\n    """Modified remotely."""\n    return "Modified"\n'
         incoming_resources[Function][func_id] = modified_func
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
-        files_with_conflicts = project.pull_project(force=False)
+        files_with_conflicts, _ = project.pull_project(force=False)
         self.assertEqual(files_with_conflicts, [])
         # Verify resource is updated in project resources
         self.assertIn(func_id, project.resources.get(Function, {}))
@@ -2090,7 +2090,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources[Function][
             "FUNCTION-test_function"
         ].code = 'def test_function(conv: Conversation):\n    """Modified remotely."""\n    return "Remote change"\n'
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         with mock_read_from_file(
             {
@@ -2099,7 +2099,7 @@ class PullProjectTest(unittest.TestCase):
                 ): 'from _gen import *  # <AUTO GENERATED>\n\n@func_description(\'A test function for global use.\')\ndef test_function(conv: Conversation):\n    """Modified locally."""\n    return "Local change"\n'
             }
         ):
-            files_with_conflicts = project.pull_project(force=False)
+            files_with_conflicts, _ = project.pull_project(force=False)
         # Should detect merge conflict
         self.assertEqual(
             files_with_conflicts, [os.path.join(TEST_DIR, "functions", "test_function.py")]
@@ -2130,7 +2130,7 @@ class PullProjectTest(unittest.TestCase):
         modified_flow_config = deepcopy(incoming_resources[FlowConfig][flow_config_id])
         modified_flow_config.description = "Modified remotely - new description"
         incoming_resources[FlowConfig][flow_config_id] = modified_flow_config
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         # Mock local file with different changes
         flow_config_path = os.path.join(
@@ -2141,7 +2141,7 @@ class PullProjectTest(unittest.TestCase):
                 flow_config_path: "name: test_flow\ndescription: Modified locally - different description\nstart_step: start_step\n"
             }
         ):
-            files_with_conflicts = project.pull_project(force=False)
+            files_with_conflicts, _ = project.pull_project(force=False)
         # Should detect merge conflict
         self.assertEqual(files_with_conflicts, [flow_config_path])
         # Resources are now incoming resources
@@ -2174,7 +2174,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources[Function][
             "FUNCTION-test_function"
         ].code = 'def test_function(conv: Conversation):\n    """Modified remotely."""\n    return "Remote change"\n'
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         with mock_read_from_file(
             {
@@ -2183,7 +2183,7 @@ class PullProjectTest(unittest.TestCase):
                 ): 'from _gen import *  # <AUTO GENERATED>\n\ndef added_extra_function():\n    pass\n\n@func_description(\'A test function for global use.\')\ndef test_function(conv: Conversation):\n    """A test function for global use."""\n    return "Hello from global function"\n'
             }
         ):
-            files_with_conflicts = project.pull_project(force=False)
+            files_with_conflicts, _ = project.pull_project(force=False)
         # Should detect no merge conflict
         self.assertEqual(files_with_conflicts, [])
         # Resources are now incoming resources
@@ -2211,7 +2211,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources[Function][
             "FUNCTION-test_function"
         ].code = 'def test_function(conv: Conversation):\n    """Modified remotely."""\n    return "Remote change"\n'
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         with mock_read_from_file(
             {
@@ -2220,7 +2220,7 @@ class PullProjectTest(unittest.TestCase):
                 ): 'from _gen import *  # <AUTO GENERATED>\n\n@func_description(\'A test function for global use.\')\ndef test_function(conv: Conversation):\n    """Modified locally."""\n    return "Local change"\n'
             }
         ):
-            files_with_conflicts = project.pull_project(force=True)
+            files_with_conflicts, _ = project.pull_project(force=True)
 
         # Should detect no merge conflict
         self.assertEqual(files_with_conflicts, [])
@@ -2236,8 +2236,8 @@ class PullProjectTest(unittest.TestCase):
         full_project_resources = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR).resources
         incoming_resources = deepcopy(full_project_resources)
 
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
-        files_with_conflicts = project.pull_project(force=False, format=True)
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        files_with_conflicts, _ = project.pull_project(force=False, format=True)
         self.assertEqual(files_with_conflicts, [])
         # Verify resource is updated in project resources
         self.assertIn("FUNCTION-test_function_with_parameters", project.resources.get(Function, {}))
@@ -2261,8 +2261,8 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources = deepcopy(full_project_resources)
         incoming_resources[Function]["FUNCTION-test_function_with_parameters"].code = 'def test_function_with_parameters(conv: Conversation):\n    """Test function with parameters."""\n    return "Test function with parameters"\n'
 
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
-        files_with_conflicts = project.pull_project(force=False)
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        files_with_conflicts, _ = project.pull_project(force=False)
         self.assertEqual(len(files_with_conflicts), 1)
 
     def test_pull_project_deleted_locally(self):
@@ -2279,8 +2279,8 @@ class PullProjectTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         incoming_resources = deepcopy(project.resources)
 
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
-        files_with_conflicts = project.pull_project(force=False)
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        files_with_conflicts, _ = project.pull_project(force=False)
         self.assertEqual(files_with_conflicts, [])
 
         # Verify it wasn't saved to the file system
@@ -2308,9 +2308,9 @@ class PullProjectTest(unittest.TestCase):
         # Rename the topic (this changes the file path)
         renamed_topic.name = "renamed_topic"
 
-        self.mock_api_handler.pull_resources.return_value = original_resources
+        self.mock_api_handler.pull_resources.return_value = (original_resources, {})
 
-        files_with_conflicts = project.pull_project(force=False)
+        files_with_conflicts, _ = project.pull_project(force=False)
 
         self.assertEqual(files_with_conflicts, [])
         # Verify old file would be removed
@@ -2324,6 +2324,8 @@ class PullProjectTest(unittest.TestCase):
     def test_pull_project_empty_flow_folder_deletion(self):
         """Test that empty flow folders are deleted after pull"""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        original_resources = deepcopy(project.resources)
+        self.mock_api_handler.pull_resources.return_value = (original_resources, {})
 
         # Mock os.listdir and os.rmdir to verify empty folder deletion
         empty_flow_path = os.path.join(TEST_DIR, "flows", "test_flow")
@@ -2346,7 +2348,7 @@ class PullProjectTest(unittest.TestCase):
             patch("os.path.isdir", side_effect=mock_isdir),
             patch("os.rmdir") as mock_rmdir,
         ):
-            files_with_conflicts = project.pull_project(force=False)
+            files_with_conflicts, _ = project.pull_project(force=False)
 
             # Empty flow folder should be deleted
             # _delete_empty_folders is called after pull_project
@@ -2391,7 +2393,7 @@ class PullProjectTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         incoming_resources = deepcopy(project.resources)
         incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         kp_path = os.path.join(
             TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
@@ -2412,7 +2414,7 @@ class PullProjectTest(unittest.TestCase):
             "poly.resources.resource.Resource.read_from_file",
             side_effect=self._make_kp_read_mock(original_kp_content, original_kp_content),
         ):
-            files_with_conflicts = project.pull_project(force=False)
+            files_with_conflicts, _ = project.pull_project(force=False)
         MultiResourceYamlResource._file_cache.clear()
 
         self.assertEqual(files_with_conflicts, [])
@@ -2438,7 +2440,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources = deepcopy(project.resources)
         # Remote: PolyAI level maximum → boosted
         incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         kp_path = os.path.join(
             TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
@@ -2468,7 +2470,7 @@ class PullProjectTest(unittest.TestCase):
             "poly.resources.resource.Resource.read_from_file",
             side_effect=self._make_kp_read_mock(original_kp_content, local_kp_content),
         ):
-            files_with_conflicts = project.pull_project(force=False)
+            files_with_conflicts, _ = project.pull_project(force=False)
         MultiResourceYamlResource._file_cache.clear()
 
         self.assertEqual(files_with_conflicts, [])
@@ -2497,7 +2499,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources = deepcopy(project.resources)
         # Remote: PolyAI level maximum → boosted
         incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         kp_path = os.path.join(
             TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
@@ -2527,7 +2529,7 @@ class PullProjectTest(unittest.TestCase):
             "poly.resources.resource.Resource.read_from_file",
             side_effect=self._make_kp_read_mock(original_kp_content, local_kp_content),
         ):
-            files_with_conflicts = project.pull_project(force=False)
+            files_with_conflicts, _ = project.pull_project(force=False)
         MultiResourceYamlResource._file_cache.clear()
 
         self.assertIn(kp_path, files_with_conflicts)
@@ -2550,14 +2552,14 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources = deepcopy(project.resources)
         # Remote: PolyAI level maximum → boosted
         incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         kp_path = os.path.join(
             TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
         )
 
         MultiResourceYamlResource._file_cache.clear()
-        files_with_conflicts = project.pull_project(force=True)
+        files_with_conflicts, _ = project.pull_project(force=True)
         MultiResourceYamlResource._file_cache.clear()
 
         self.assertEqual(files_with_conflicts, [])
