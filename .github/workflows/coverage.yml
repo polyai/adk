@@ -45,6 +45,7 @@ jobs:
         run: |
           source .venv/bin/activate
           PR_SHA=$(git rev-parse HEAD)
+          git checkout -- uv.lock
           git checkout "origin/$BASE_REF"
           uv pip install -e ".[dev]"
           uv run pytest src/poly/tests/ --cov=poly --cov-report=json:coverage-base.json -q || true
