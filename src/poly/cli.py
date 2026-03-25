@@ -12,7 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
-from argparse import ArgumentParser, RawTextHelpFormatter
+from argparse import SUPPRESS, ArgumentParser, RawTextHelpFormatter
 from importlib.metadata import version as get_package_version
 from typing import Any, Optional
 
@@ -159,13 +159,13 @@ class AgentStudioCLI:
             "--from-projection",
             type=str,
             metavar="JSON|-",
-            help="Projection JSON text, or '-' to read from stdin (e.g. poly init ... --from-projection - < proj.json).",
+            help=SUPPRESS,
             default=None,
         )
         init_parser.add_argument(
             "--output-json-projection",
             action="store_true",
-            help="Output the projection in json format",
+            help=SUPPRESS,
             default=False,
         )
         init_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
@@ -200,13 +200,13 @@ class AgentStudioCLI:
             "--from-projection",
             type=str,
             metavar="JSON|-",
-            help="Projection JSON text, or '-' to read from stdin (e.g. poly pull --from-projection - < proj.json).",
+            help=SUPPRESS,
             default=None,
         )
         pull_parser.add_argument(
             "--output-json-projection",
             action="store_true",
-            help="Output the projection in json format",
+            help=SUPPRESS,
             default=False,
         )
         pull_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
@@ -252,13 +252,13 @@ class AgentStudioCLI:
             "--from-projection",
             type=str,
             metavar="JSON|-",
-            help="Use this projection for the pre-push refresh instead of the API; '-' reads from stdin.",
+            help=SUPPRESS,
             default=None,
         )
         push_parser.add_argument(
             "--output-json-commands",
             action="store_true",
-            help="Output the commands that will be sent to the Agent Studio in json format",
+            help=SUPPRESS,
             default=False,
         )
         push_parser.add_argument(
@@ -414,7 +414,7 @@ class AgentStudioCLI:
             "--from-projection",
             type=str,
             metavar="JSON|-",
-            help="Projection JSON for the post-switch pull, or '-' to read from stdin.",
+            help=SUPPRESS,
             default=None,
         )
         branches_parser.add_argument(
