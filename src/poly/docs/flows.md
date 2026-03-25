@@ -60,7 +60,7 @@ These define how the agent can transition out of one default node. They can tran
 Example:
 - **condition_type**: `step_condition` (go to another step) or `exit_flow_condition` (exit flow)
 - **description**: When this condition applies
-- **child_step**: Next step — **only for step_condition**; omit for exit_flow_condition
+- **child_step**: Next step - **only for step_condition**; omit for exit_flow_condition
 - **required_entities**: Entities that must be collected before this condition can trigger
 
 **child_step rules:**

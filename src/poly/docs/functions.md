@@ -7,8 +7,8 @@ Functions are Python files that add deterministic logic to your agent. They can 
 ## Location
 ```
 functions/                          # Global functions
-├── start_function.py               # Optional — runs once at call start
-├── end_function.py                 # Optional — runs once at call end
+├── start_function.py               # Optional - runs once at call start
+├── end_function.py                 # Optional - runs once at call end
 └── {function_name}.py              # Called by LLM via {{fn:function_name}}
 flows/{flow_name}/
 ├── functions/
@@ -96,7 +96,7 @@ Prefer naming after the **event that should trigger the call** (e.g. `first_name
 
 ### Start function (`start_function.py`)
 - Runs **once at call start**, before the first user input.
-- Signature: `def start_function(conv: Conversation):` — no `flow`, no `@func_parameter`.
+- Signature: `def start_function(conv: Conversation):` - no `flow`, no `@func_parameter`.
 - Typical use: initialize state, read SIP headers, set language, write initial metrics, then `conv.goto_flow("...")`.
 
 ### End function (`end_function.py`)
@@ -111,7 +111,7 @@ If a function file isn't intended to be called by the LLM, it still needs a main
 `conv.state` is preserved between turns. Use it to set variables for future logic or to be used in prompts
 - **Set**: `conv.state.variable_name = value`
 - **Read**: `conv.state.variable_name` (returns `None` if not set)
-- **In prompts**: `$variable` or `{{vrbl:variable}}` (not `conv.state.variable`). No `$var.attribute` — stringify in Python first.
+- **In prompts**: `$variable` or `{{vrbl:variable}}` (not `conv.state.variable`). No `$var.attribute` - stringify in Python first.
 
 ### Counters
 Use `conv.state.counter` (initialize and increment) to avoid infinite retries. After a limit (e.g. 3), hand off or exit.

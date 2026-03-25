@@ -35,7 +35,7 @@ Each entity has:
 
 - **In flow prompts**: `{{entity:entity_name}}` to reference the collected value.
 - **In function steps**: `conv.entities.entity_name.value` to read; check with `if conv.entities.entity_name: ...`.
-- **In default step conditions**: `required_entities` gates a condition — it only triggers once all listed entities are collected.
+- **In default step conditions**: `required_entities` gates a condition - it only triggers once all listed entities are collected.
 - **In default steps**: `extracted_entities` tells the agent which entities to collect in that step. ASR biasing is automatically configured based on entity types.
 
 ## Example

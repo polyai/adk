@@ -96,11 +96,11 @@ When an Agent Studio project is linked locally, it follows this general structur
 
 This structure mirrors the parts of the agent that Agent Studio understands: settings, flows, functions, topics, channel configuration, and supporting resources.
 
-## Workflow 1 — CLI workflow
+## Workflow 1 - CLI workflow
 
 The CLI workflow is the manual developer path. You use the ADK directly, edit the project locally, and push changes back to Agent Studio.
 
-### Step 1 — Initialise your project
+### Step 1 - Initialise your project
 
 Link a local folder to an existing Agent Studio project. The agent must already exist in Agent Studio.
 
@@ -111,7 +111,7 @@ poly init --region <region> --account_id <account_id> --project_id <project_id>
 
 This creates the local project structure and writes the metadata needed to connect the folder to Agent Studio.
 
-### Step 2 — Pull remote config and set up the environment
+### Step 2 - Pull remote config and set up the environment
 
 Pull the current configuration into your local project.
 
@@ -126,7 +126,7 @@ At this point, configure any API keys or environment variables needed for the pr
 
     All CLI commands should be run from within the local project folder, unless you explicitly use the relevant path flag.
 
-### Step 3 — Run the agent locally
+### Step 3 - Run the agent locally
 
 Start an interactive chat session to confirm the connection works and inspect runtime behaviour.
 
@@ -136,7 +136,7 @@ poly chat --environment sandbox --channel voice
 poly chat --functions --flows --state
 ~~~
 
-### Step 4 — Review the docs and understand the SDK
+### Step 4 - Review the docs and understand the SDK
 
 Use the CLI docs command to inspect the available resources and learn how they fit together.
 
@@ -147,7 +147,7 @@ poly docs flows functions topics
 
 Resource-specific documentation is available for agent settings, voice settings, chat settings, flows, functions, topics, entities, handoffs, variants, SMS templates, variables, speech recognition, response control, and experimental config.
 
-### Step 5 — Customise the agent
+### Step 5 - Customise the agent
 
 This is the core build phase. Create a branch, edit resources locally, track changes, and push them back.
 
@@ -199,7 +199,7 @@ Tune speech recognition and control TTS behaviour.
 
 Enable or tune experimental features where needed.
 
-### Step 6 — Track and validate changes
+### Step 6 - Track and validate changes
 
 Inspect the local changes before pushing.
 
@@ -213,7 +213,7 @@ poly revert --all
 poly revert <file>
 ~~~
 
-### Step 7 — Push changes
+### Step 7 - Push changes
 
 Push the local changes back to Agent Studio.
 
@@ -224,7 +224,7 @@ poly push -f
 poly push --skip-validation
 ~~~
 
-### Step 8 — Test against sandbox
+### Step 8 - Test against sandbox
 
 Validate the behaviour in the sandbox environment.
 
@@ -233,7 +233,7 @@ poly chat --environment sandbox
 poly chat --environment sandbox --functions --flows
 ~~~
 
-### Step 9 — Iterate on quality
+### Step 9 - Iterate on quality
 
 Review, refine, and test again. You can also use the review command to share diffs with teammates.
 
@@ -244,15 +244,15 @@ poly review --before main --after my-feature
 
 Make test calls, inspect transcripts, refine prompts, flows, and functions, and then re-push.
 
-### Step 10 — Deploy to production
+### Step 10 - Deploy to production
 
 Once the changes are pushed and validated, merge the branch in Agent Studio and deploy the project.
 
-### Step 11 — Monitor performance
+### Step 11 - Monitor performance
 
 Use Agent Studio analytics to monitor containment, CSAT, handle time, and flagged transcripts. Pull changes back locally as needed and continue iterating.
 
-## Workflow 2 — AI-agent workflow
+## Workflow 2 - AI-agent workflow
 
 The AI-agent workflow uses a coding agent such as **Claude Code** to execute the same development loop on your behalf.
 
@@ -282,7 +282,7 @@ The AI-agent workflow uses a coding agent such as **Claude Code** to execute the
 
     In this workflow, the coding agent does the heavy lifting of building the agent, while Agent Studio remains the place where the work is reviewed, tested, and deployed.
 
-### Step 1 — Gather requirements
+### Step 1 - Gather requirements
 
 Collect the project context before you begin.
 
@@ -301,7 +301,7 @@ The more complete and structured the input is, the better the generated output i
 
     This workflow works best when you gather the important information up front rather than feeding it in piecemeal later.
 
-### Step 2 — Create a new project in Agent Studio
+### Step 2 - Create a new project in Agent Studio
 
 Open **Agent Studio** and create a brand-new project.
 
@@ -317,7 +317,7 @@ That blank starting point is intentional. The coding agent will populate the pro
 
     Agent Studio is where the project lives, but the coding agent does most of the actual building work.
 
-### Step 3 — Launch the coding agent via the CLI
+### Step 3 - Launch the coding agent via the CLI
 
 Open your command line interface and launch your coding agent.
 
@@ -336,7 +336,7 @@ poly pull
 
 The ADK acts as the bridge between your local development environment and Agent Studio in the cloud. It allows the coding agent to read from and write back to the project.
 
-### Step 4 — Feed context to the coding agent
+### Step 4 - Feed context to the coding agent
 
 Now provide the coding agent with the information you gathered earlier.
 
@@ -355,7 +355,7 @@ poly docs --all
 
 Reusing proven patterns from earlier projects can improve both speed and output quality.
 
-### Step 5 — Let the agent build
+### Step 5 - Let the agent build
 
 Once the context has been provided, let the coding agent generate the project files.
 
@@ -391,7 +391,7 @@ The coding agent can produce the assets needed for the agent, including:
 
 The generated assets are structured for Agent Studio and prepared to be pushed back to the platform.
 
-### Step 6 — Push back to Agent Studio
+### Step 6 - Push back to Agent Studio
 
 Once the coding agent has generated the project files, it uses the ADK to push them back into Agent Studio.
 
@@ -408,7 +408,7 @@ When you switch to that branch in Agent Studio, you should see the generated cha
 
     The branch-based workflow makes it possible to inspect what was generated before merging it into the main project.
 
-### Step 7 — Review, merge, and deploy
+### Step 7 - Review, merge, and deploy
 
 Review the generated work inside Agent Studio.
 
