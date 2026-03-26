@@ -1076,7 +1076,9 @@ class SyncClientHandler:
 
         if branch_name is None:
             metadata = self.sdk.create_metadata()
-            suffix = f"{metadata.created_at.seconds % 10000:05d}"  # to avoid duplicate names
+            time_suffix = f"{metadata.created_at.seconds % 100000:05d}"
+            random_suffix = uuid.uuid4().hex[:4]
+            suffix = f"{time_suffix}-{random_suffix}"  # to avoid duplicate names
             branch_name = f"ADK-{suffix}"
 
         logger.info(f"Creating new branch '{branch_name}' from 'main' branch")
