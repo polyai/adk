@@ -1,6 +1,72 @@
 # CHANGELOG
 
 
+## v0.5.0 (2026-03-26)
+
+### Features
+
+- **cli**: Machine-readable --json, projection-based pull/push, and serialized push commands
+  ([#41](https://github.com/polyai/adk/pull/41),
+  [`cb91e2a`](https://github.com/polyai/adk/commit/cb91e2abffe97dfdbc6e3db8770f16a369f6da29))
+
+## Summary
+
+Adds a global-style `--json` mode across `poly` subcommands so stdout is a single JSON object for
+  scripting and CI. Introduces `--from-projection` / optional projection output for `init` and
+  `pull`, and `--output-json-commands` on `push` to include the queued Agent Studio commands (as
+  dicts). Moves console helpers under `poly.output` and adds `json_output` helpers (including
+  protobuf → JSON via `MessageToDict`).
+
+## Motivation
+
+Operators and automation need stable, parseable CLI output and the ability to drive pull/push from a
+  captured projection (without hitting the projection API). Exposing staged push commands supports
+  dry-run review and integration testing.
+
+Closes #23
+
+## Changes
+
+- Wire `json_parent` (`--json`) into relevant subparsers; many code paths now emit structured JSON
+  and exit with non-zero on failure where appropriate. - Add `--from-projection` (JSON string or `-`
+  for stdin) to `pull` and `push`; `SyncClientHandler.pull_resources` uses an inline projection when
+  provided instead of fetching. - Add `--output-json-projection` on `init` / `pull` (and related
+  flows) to include the projection in JSON output when requested. - Add `--output-json-commands` on
+  `push` to append serialized commands to the JSON payload; `push_project` returns `(success,
+  message, commands)`. - `pull_project` returns `(files_with_conflicts, projection)`;
+  `pull_resources` returns `(resources, projection)`. - New `poly/output/json_output.py`
+  (`json_print`, `commands_to_dicts`); relocate `console.py` to `poly/output/console.py` and update
+  imports. - Update `project_test` mocks/expectations for new return shapes; `uv.lock` updated for
+  dependencies.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+**Note for reviewers:** The **CLI** remains backward compatible (new flags only).
+  **`AgentStudioProject.pull_project` / `push_project`** (and `pull_resources` on the handler)
+  **change return types** vs `main`; any direct Python callers must be updated to unpack the new
+  tuples and optional `projection_json` argument.
+
+## Screenshots / Logs
+
+<!-- Optional: example `poly status --json`, `poly push --dry-run --output-json-commands`, `poly
+  pull --from-projection - < proj.json` -->
+
+---------
+
+Co-authored-by: Oliver Eisenberg <Oliver.Eisenberg@Poly-AI.com>
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+
 ## v0.4.1 (2026-03-26)
 
 ### Bug Fixes
