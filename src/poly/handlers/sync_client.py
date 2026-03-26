@@ -987,7 +987,8 @@ class SyncClientHandler:
         for command in commands:
             self.sdk.add_command_to_queue(command)
 
-        logger.info(f"Queued {len(commands)} commands commands={commands!r}")
+        logger.info(f"Queued {len(commands)} commands")
+        logger.debug(f"Commands: {commands!r}")
         return commands
 
     def send_queued_commands(self) -> bool:
@@ -996,7 +997,7 @@ class SyncClientHandler:
         Returns:
             bool: True if the commands were sent successfully, False otherwise
         """
-        if not self.sdk._command_queue:
+        if self.sdk.get_queue_size() == 0:
             logger.info("No commands to send")
             return True
 
