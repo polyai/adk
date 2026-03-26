@@ -1,6 +1,112 @@
 # CHANGELOG
 
 
+## v0.4.1 (2026-03-26)
+
+### Bug Fixes
+
+- Error on merges ([#44](https://github.com/polyai/adk/pull/44),
+  [`b3d8d62`](https://github.com/polyai/adk/commit/b3d8d62b8b36e476f7027691d0d18da33edf9a74))
+
+## Summary Fix issue where merges were marked as successful when there is an internal API error
+
+## Motivation
+
+This error breaks pipelines that rely on this output
+
+Closes #<!-- issue number -->
+
+## Changes
+
+- Make success response more explicit instead of relying on errors/conflicts lists
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+- Guard uv.lock checkout in coverage workflow ([#42](https://github.com/polyai/adk/pull/42),
+  [`2383405`](https://github.com/polyai/adk/commit/238340568a8bdbe8ece9612f94d7bd7664154fad))
+
+## Summary
+
+- Prevent coverage CI from failing when `uv.lock` is absent on a branch - Wrap both `git checkout --
+  uv.lock` calls with a conditional `git rev-parse --verify` check before and after the base branch
+  checkout step
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+### Chores
+
+- Add pytest-cov and coverage to dev dependencies ([#36](https://github.com/polyai/adk/pull/36),
+  [`649ccb7`](https://github.com/polyai/adk/commit/649ccb7d10f3ce59ba9e0f0094bf93b3c90736a7))
+
+## Summary - Adds `pytest-cov>=6.0.0` and `coverage>=7.0.0` to the `[dev]` optional dependencies in
+  `pyproject.toml`
+
+## Test plan - [x] Run `uv pip install -e ".[dev]"` and verify `pytest-cov` and `coverage` install
+  successfully <img width="557" height="135" alt="image"
+  src="https://github.com/user-attachments/assets/9e669897-c974-4e37-a2a3-8a3c6ed37c3a" />
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+### Documentation
+
+- Fix formatting issues ([#40](https://github.com/polyai/adk/pull/40),
+  [`eafff58`](https://github.com/polyai/adk/commit/eafff58ab877a65d3fd204a850bcb7489083a1fa))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+
 ## v0.4.0 (2026-03-25)
 
 ### Bug Fixes

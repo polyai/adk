@@ -1091,7 +1091,7 @@ class SyncClientHandler:
 
     def merge_branch(
         self, message: str, conflict_resolutions: Optional[list[dict[str, Any]]] = None
-    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
         """Merge the current branch into main.
 
         Args:
@@ -1102,12 +1102,13 @@ class SyncClientHandler:
                 - value: Optional custom value (only used with custom strategy)
 
         Returns:
+            success (bool): True if the merge was successful, False otherwise
             list[dict[str, str]]: A list of conflict information if the merge failed, empty list if successful
             list[dict[str, str]]: A list of error information if the merge failed, empty list if successful
         """
         if self.sdk.branch_id == "main":
             logger.error("Cannot merge 'main' branch into itself.")
-            return [], []
+            return False, [], []
 
         logger.info(f"Merging branch '{self.sdk.branch_id}' into 'main'")
 
@@ -1119,9 +1120,7 @@ class SyncClientHandler:
             )
         except SourcererAPIError as e:
             logger.error(f"Failed to merge branch '{self.sdk.branch_id}' into 'main': {e}")
-            return [], []
-
-        conflicts, errors = [], []
+            return False, [], []
 
         if result.get("hasConflicts", False) or result.get("errors", []):
             logger.error(
@@ -1129,9 +1128,10 @@ class SyncClientHandler:
             )
             conflicts = result.get("conflicts", [])
             errors = result.get("errors", [])
+            return False, conflicts, errors
 
         logger.info(f"Successfully merged branch '{self.sdk.branch_id}' into 'main'")
-        return conflicts, errors
+        return True, [], []
 
     def get_branch_chat_info(self, branch_id: str) -> dict[str, Any]:
         """Get deployment info needed to start a draft chat on a branch."""
