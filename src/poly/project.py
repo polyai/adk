@@ -320,7 +320,7 @@ class AgentStudioProject:
         account_id: str,
         project_id: str,
         format: bool = False,
-        projection_json: dict[str, Any] = None,
+        projection_json: Optional[dict[str, Any]] = None,
     ) -> tuple["AgentStudioProject", dict[str, Any]]:
         """Get project from the Agent Studio Interactor
 
@@ -400,7 +400,9 @@ class AgentStudioProject:
                 f.write(yaml_content)
 
     def load_project(
-        self, preserve_not_loaded_resources: bool = False, projection_json: dict[str, Any] = None
+        self,
+        preserve_not_loaded_resources: bool = False,
+        projection_json: Optional[dict[str, Any]] = None,
     ) -> None:
         """Load the current state of project on Agent Studio into memory
 
@@ -423,7 +425,10 @@ class AgentStudioProject:
         self.save_config()
 
     def pull_project(
-        self, force: bool = False, format: bool = False, projection_json: dict[str, Any] = None
+        self,
+        force: bool = False,
+        format: bool = False,
+        projection_json: Optional[dict[str, Any]] = None,
     ) -> tuple[list[str], dict[str, Any]]:
         """Pull the project configuration from the Agent Studio Interactor.
 
@@ -926,7 +931,7 @@ class AgentStudioProject:
         dry_run=False,
         format=False,
         email=None,
-        projection_json: dict[str, Any] = None,
+        projection_json: Optional[dict[str, Any]] = None,
     ) -> tuple[bool, str, list[Message]]:
         """Push the project configuration to the Agent Studio Interactor.
 
@@ -2012,7 +2017,7 @@ class AgentStudioProject:
         branch_name: str,
         force: bool = False,
         format: bool = False,
-        projection_json: dict[str, Any] = None,
+        projection_json: Optional[dict[str, Any]] = None,
     ) -> tuple[bool, dict[str, Any]]:
         """Switch to a different branch in the project.
 

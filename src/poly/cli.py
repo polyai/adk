@@ -737,6 +737,8 @@ class AgentStudioCLI:
             raw = sys.stdin.read()
         try:
             parsed: Any = json.loads(raw)
+            if isinstance(parsed, dict) and "projection" in parsed:
+                parsed = parsed["projection"]
         except json.JSONDecodeError as e:
             msg = f"Invalid JSON in --from-projection: {e}"
             if json_errors:
@@ -751,7 +753,7 @@ class AgentStudioCLI:
             else:
                 error(msg)
             sys.exit(1)
-        return parsed.get("projection", parsed)
+        return parsed
 
     @classmethod
     def _load_project(cls, base_path: str, output_json: bool = False) -> AgentStudioProject:
