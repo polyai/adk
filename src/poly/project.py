@@ -2370,10 +2370,10 @@ class AgentStudioProject:
                 f"Cannot merge branch with uncommitted changes, diffs: {list(diffs.keys())}"
             )
 
-        conflicts, errors = self.api_handler.merge_branch(
+        success, conflicts, errors = self.api_handler.merge_branch(
             message=message, conflict_resolutions=conflict_resolutions
         )
-        if not (conflicts or errors):
+        if success:
             self.switch_branch("main", force=True)
             return True, [], []
 
