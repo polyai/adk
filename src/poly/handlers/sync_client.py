@@ -1085,7 +1085,9 @@ class SyncClientHandler:
             expected_main_last_known_sequence=self.sdk._last_known_sequence,
             branch_name=branch_name,
         )
-        logger.info(f"Created and switched to new branch '{self.sdk.branch_id}'")
+        logger.info(
+            f"Created and switched to new branch. Name:'{branch_name}' ID:'{self.sdk.branch_id}'"
+        )
         return self.sdk.branch_id
 
     def get_branches(self) -> dict[str, str]:
