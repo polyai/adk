@@ -254,7 +254,7 @@ Use Agent Studio analytics to monitor containment, CSAT, handle time, and flagge
 
 ## Workflow 2 - AI-agent workflow
 
-The AI-agent workflow uses a coding agent such as **Claude Code** to execute the same development loop on your behalf.
+The AI-agent workflow uses a coding tool such as **Claude Code** to run the same development loop on your behalf.
 
 <div class="grid cards" markdown>
 
@@ -264,11 +264,11 @@ The AI-agent workflow uses a coding agent such as **Claude Code** to execute the
 
     Requirements, business rules, integrations, and API documentation.
 
--   **The coding agent generates the project**
+-   **The coding tool generates the project**
 
     ---
 
-    It uses the ADK to inspect the SDK, generate files, and push the result.
+    It uses the ADK to read documentation, generate files, and push the result.
 
 -   **You review and deploy**
 
@@ -286,7 +286,7 @@ The AI-agent workflow uses a coding agent such as **Claude Code** to execute the
 
 Collect the project context before you begin.
 
-This should include anything the coding agent will need in order to produce a working agent, such as:
+Include anything the coding tool will need to produce a working agent:
 
 - API endpoint URLs
 - business rules
@@ -311,30 +311,28 @@ The project starts empty:
 - no flows
 - no configuration
 
-That blank starting point is intentional. The coding agent will populate the project in later steps.
+That blank starting point is intentional. The coding tool populates the project in later steps.
 
 !!! note "Think of Agent Studio as the deployment target"
 
-    Agent Studio is where the project lives, but the coding agent does most of the actual building work.
+    Agent Studio is where the project lives, but the coding tool generates the actual content.
 
-### Step 3 - Launch the coding agent via the CLI
+### Step 3 - Start the coding tool via the CLI
 
-Open your command line interface and launch your coding agent.
+Open your terminal and start the coding tool.
 
 At this stage:
 
 - the ADK must already be installed
 - the Agent Studio project must already exist
-- the coding agent should be linked to the project using the ADK
-
-A typical starting point is:
+- the coding tool should initialize and link the project using the ADK
 
 ~~~bash
 poly init --region <region> --account_id <account_id> --project_id <project_id>
 poly pull
 ~~~
 
-The ADK acts as the bridge between your local development environment and Agent Studio in the cloud. It allows the coding agent to read from and write back to the project.
+The ADK acts as the bridge between your local environment and Agent Studio. It lets the coding tool read from and write back to the project.
 
 ### Step 4 - Give the coding tool its context
 

@@ -147,7 +147,7 @@ Prefer naming functions after the **event that should trigger them**, rather tha
 - `store_first_name`
 - `send_confirmation`
 
-This helps the model understand when the function should be called.
+This tells the model when to call the function.
 
 ## Returns and control flow
 

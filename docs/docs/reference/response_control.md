@@ -6,7 +6,7 @@ description: Control how voice-agent output is filtered and pronounced before it
 # Response control
 
 <p class="lead">
-Response control resources manage what the agent says before it reaches the user.
+Response control resources process the agent's output before it is spoken.
 </p>
 
 They are used to adjust spoken output by:

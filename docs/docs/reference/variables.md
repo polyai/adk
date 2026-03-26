@@ -6,10 +6,8 @@ description: Understand how state variables are discovered, stored, and referenc
 # Variables
 
 <p class="lead">
-Variables are virtual resources that represent state values used in the agent's code.
+Variables are not files on disk. They represent values stored in <code>conv.state</code> and are discovered automatically by scanning function code.
 </p>
-
-Unlike most resources, variables do not have files on disk. They are discovered automatically by scanning function code for `conv.state.<name>` usage.
 
 ## How variables work
 

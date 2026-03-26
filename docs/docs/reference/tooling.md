@@ -26,15 +26,15 @@ Claude Code is particularly useful for:
 - applying patterns reused across previous projects
 - speeding up repetitive implementation work
 
-#### Loading ADK rules into your coding agent
+#### Loading ADK rules into Claude Code
 
-Before using Claude Code or another AI coding tool, generate a local documentation file and reference it in your session:
+Before starting a session with Claude Code or another coding tool, generate a documentation file and pass it as context:
 
 ~~~bash
 poly docs --all --output rules.md
 ~~~
 
-Then reference rules.md in your prompt or agent context. This gives your coding agent accurate knowledge of ADK resource types, constraints, and conventions.
+Reference `rules.md` in your session prompt. This gives the coding tool accurate knowledge of ADK resource types, constraints, and conventions.
 
 ### VS Code extension
 
