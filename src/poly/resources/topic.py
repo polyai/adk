@@ -7,6 +7,7 @@ import os
 import re
 from dataclasses import dataclass
 from functools import cached_property
+from typing import ClassVar
 
 import poly.resources.resource_utils as utils
 from poly.handlers.protobuf.knowledge_base_pb2 import (
@@ -27,6 +28,8 @@ TOPIC_REFERENCES = ["global_functions", "sms", "handoff", "attributes", "variabl
 @dataclass
 class Topic(YamlResource):
     """Dataclass representing an Agent Studio KB Topic"""
+
+    projection_path: ClassVar[list[str]] = ["knowledgeBase", "topics", "entities", "{id}"]
 
     actions: str
     content: str

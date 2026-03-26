@@ -22,6 +22,8 @@ from poly.resources.resource import MultiResourceYamlResource, ResourceMapping
 class PhraseFilter(MultiResourceYamlResource):
     """Dataclass representing an Agent Studio Phrase Filter (Stop Keyword)"""
 
+    projection_path: ClassVar[list[str]] = ["stopKeywords", "filters", "entities", "{id}"]
+
     description: str
     regular_expressions: list[str]
     say_phrase: bool

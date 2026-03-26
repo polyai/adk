@@ -10,7 +10,7 @@ from abc import ABC
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property
-from typing import Optional
+from typing import ClassVar, Optional
 
 import poly.resources.resource_utils as utils
 from poly.handlers.protobuf.flows_pb2 import (
@@ -79,6 +79,9 @@ NO_CODE_STEP_REFERENCES = [
 @dataclass
 class FlowConfig(YamlResource):
     """Flow configuration resource."""
+
+    projection_path: ClassVar[list[str]] = ["flows", "flows", "entities", "{id}"]
+    projection_update_id_field: ClassVar[Optional[str]] = "flow_id"
 
     description: str = field(default="")
     start_step: str = field(default="")
@@ -298,6 +301,17 @@ class BaseFlowStep(ABC):
 @dataclass
 class FlowStep(BaseFlowStep, YamlResource):
     """Flow step resource."""
+
+    projection_path: ClassVar[list[str]] = [
+        "flows",
+        "flows",
+        "entities",
+        "{flow_id}",
+        "steps",
+        "entities",
+        "{id}",
+    ]
+    projection_parent_id_field: ClassVar[Optional[str]] = "flow_id"
 
     asr_biasing: Optional["ASRBiasing"]
     dtmf_config: Optional["DTMFConfig"]
@@ -896,6 +910,8 @@ class FlowStep(BaseFlowStep, YamlResource):
 class ASRBiasing(SubResource):
     """ASR Biasing configuration."""
 
+    projection_path: ClassVar[list[str]] = []
+
     alphanumeric: bool
     name_spelling: bool
     numeric: bool
@@ -1016,6 +1032,8 @@ class ASRBiasing(SubResource):
 class DTMFConfig(SubResource):
     """DTMF Configuration."""
 
+    projection_path: ClassVar[list[str]] = []
+
     is_enabled: bool
     inter_digit_timeout: int
     max_digits: int
@@ -1106,6 +1124,17 @@ class ConditionType(str, Enum):
 @dataclass
 class Condition(SubResource):
     """Conditions for no code steps"""
+
+    projection_path: ClassVar[list[str]] = [
+        "flows",
+        "flows",
+        "entities",
+        "{flow_id}",
+        "steps",
+        "entities",
+        "{id}",
+    ]
+    projection_parent_id_field: ClassVar[Optional[str]] = "flow_id"
 
     description: str
     required_entities: list[str]
@@ -1337,6 +1366,18 @@ class Condition(SubResource):
 @dataclass(init=False)
 class FunctionStep(Function, BaseFlowStep):
     """Dataclass representing a function step"""
+
+    projection_path: ClassVar[list[str]] = [
+        "flows",
+        "flows",
+        "entities",
+        "{flow_id}",
+        "steps",
+        "entities",
+        "{id}",
+    ]
+    projection_id_field: ClassVar[str] = "step_id"
+    projection_parent_id_field: ClassVar[Optional[str]] = "flow_id"
 
     function_id: str
     step_type: StepType = field(default=StepType.FUNCTION_STEP, init=False)

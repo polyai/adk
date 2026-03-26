@@ -20,7 +20,7 @@ import argcomplete
 import requests
 import questionary
 
-from poly.console import (
+from poly.output.console import (
     console,
     error,
     handle_exception,
@@ -37,6 +37,7 @@ from poly.console import (
     warning,
 )
 from poly.handlers.github_api_handler import GitHubAPIHandler
+from poly.output.json_output import commands_to_dicts, json_print
 from poly.handlers.interface import (
     REGIONS,
     AgentStudioInterface,
@@ -176,6 +177,18 @@ class AgentStudioCLI:
             default=False,
         )
         pull_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
+        pull_parser.add_argument(
+            "--json",
+            action="store_true",
+            default=False,
+            help="Output machine-readable JSON instead of Rich formatting.",
+        )
+        pull_parser.add_argument(
+            "--proto",
+            action="store_true",
+            default=False,
+            help="Output the full SDK projection as JSON after pulling.",
+        )
 
         # PUSH
         push_parser = subparsers.add_parser(
@@ -214,6 +227,18 @@ class AgentStudioCLI:
             default=False,
         )
         push_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
+        push_parser.add_argument(
+            "--json",
+            action="store_true",
+            default=False,
+            help="Output machine-readable JSON instead of Rich formatting.",
+        )
+        push_parser.add_argument(
+            "--proto",
+            action="store_true",
+            default=False,
+            help="Output the SDK push commands that were sent, serialized as JSON.",
+        )
 
         # STATUS
         status_parser = subparsers.add_parser(
@@ -231,7 +256,12 @@ class AgentStudioCLI:
             Base path to check the project status. Defaults to current working directory.
             """,
         )
-
+        status_parser.add_argument(
+            "--json",
+            action="store_true",
+            default=False,
+            help="Output machine-readable JSON instead of Rich formatting.",
+        )
         # REVERT
         revert_parser = subparsers.add_parser(
             "revert",
@@ -280,6 +310,18 @@ class AgentStudioCLI:
             "files",
             nargs="*",
             help=("List of files to show changes for. If not specified, shows all changes."),
+        )
+        diff_parser.add_argument(
+            "--json",
+            action="store_true",
+            default=False,
+            help="Output machine-readable JSON instead of Rich formatting.",
+        )
+        diff_parser.add_argument(
+            "--proto",
+            action="store_true",
+            default=False,
+            help="Output the projection diff (before/after push) as JSON.",
         )
 
         # REVIEW
@@ -410,6 +452,12 @@ class AgentStudioCLI:
             default=os.getcwd(),
             help="Base path to validate the project. Defaults to current working directory.",
         )
+        validate_parser.add_argument(
+            "--json",
+            action="store_true",
+            default=False,
+            help="Output machine-readable JSON instead of Rich formatting.",
+        )
 
         # CHAT
         chat_parser = subparsers.add_parser(
@@ -520,19 +568,38 @@ class AgentStudioCLI:
             )
 
         elif args.command == "pull":
-            cls.pull(args.path, args.force, args.format)
+            cls.pull(
+                args.path,
+                args.force,
+                args.format,
+                json_output=getattr(args, "json", False),
+                proto_output=getattr(args, "proto", False),
+            )
 
         elif args.command == "push":
-            cls.push(args.path, args.force, args.skip_validation, args.dry_run, args.format)
+            cls.push(
+                args.path,
+                args.force,
+                args.skip_validation,
+                args.dry_run,
+                args.format,
+                json_output=getattr(args, "json", False),
+                proto_output=getattr(args, "proto", False),
+            )
 
         elif args.command == "status":
-            cls.status(args.path)
+            cls.status(args.path, json_output=getattr(args, "json", False))
 
         elif args.command == "revert":
             cls.revert(args.path, args.all, args.files)
 
         elif args.command == "diff":
-            cls.diff(args.path, args.files)
+            cls.diff(
+                args.path,
+                args.files,
+                json_output=getattr(args, "json", False),
+                proto_output=getattr(args, "proto", False),
+            )
 
         elif args.command == "review":
             if args.delete:
@@ -574,7 +641,7 @@ class AgentStudioCLI:
             )
 
         elif args.command == "validate":
-            cls.validate_project(args.path)
+            cls.validate_project(args.path, json_output=getattr(args, "json", False))
 
         elif args.command == "docs":
             cls.docs(
@@ -734,12 +801,33 @@ class AgentStudioCLI:
         return project
 
     @classmethod
-    def pull(cls, base_path: str, force: bool = False, format: bool = False) -> AgentStudioProject:
+    def pull(
+        cls,
+        base_path: str,
+        force: bool = False,
+        format: bool = False,
+        json_output: bool = False,
+        proto_output: bool = False,
+    ) -> AgentStudioProject:
         """Pull the latest project configuration from the Agent Studio."""
         project = cls._load_project(base_path)
-        info(f"Pulling project [bold]{project.account_id}/{project.project_id}[/bold]...")
+        capture = json_output or proto_output
+
+        if not capture:
+            info(f"Pulling project [bold]{project.account_id}/{project.project_id}[/bold]...")
 
         files_with_conflicts = project.pull_project(force=force, format=format)
+
+        if capture:
+            result = {
+                "success": True,
+                "conflicts": files_with_conflicts,
+            }
+            if proto_output:
+                result["projection"] = project.fetch_projection()
+            json_print(result)
+            return project
+
         if files_with_conflicts:
             print_file_list("Merge conflicts detected", files_with_conflicts, "filename.conflict")
 
@@ -754,30 +842,82 @@ class AgentStudioCLI:
         skip_validation: bool = False,
         dry_run: bool = False,
         format: bool = False,
+        json_output: bool = False,
+        proto_output: bool = False,
     ) -> AgentStudioProject:
         """Push the project configuration to the Agent Studio."""
         project = cls._load_project(base_path)
-        info(f"Pushing local changes for [bold]{project.account_id}/{project.project_id}[/bold]...")
+        capture = json_output or proto_output
 
-        push_ok, output = project.push_project(
-            force=force, skip_validation=skip_validation, dry_run=dry_run, format=format
+        # Snapshot projection before push for --proto diff computation
+        projection_before = None
+        if proto_output:
+            projection_before = project.fetch_projection()
+
+        if not capture:
+            info(
+                f"Pushing local changes for [bold]{project.account_id}/{project.project_id}[/bold]..."
+            )
+
+        push_ok, push_output, push_commands = project.push_project(
+            force=force,
+            skip_validation=skip_validation,
+            dry_run=dry_run,
+            format=format,
+            capture_commands=capture,
         )
+
+        if proto_output:
+            from poly.output.projection_diff import enrich_commands_with_diffs
+
+            command_dicts = commands_to_dicts(push_commands)
+            result_commands = enrich_commands_with_diffs(projection_before, command_dicts)
+            json_print({"success": push_ok, "commands": result_commands})
+            if not push_ok:
+                sys.exit(1)
+            return project
+
+        if json_output:
+            json_print({"success": push_ok, "message": push_output})
+            if not push_ok:
+                sys.exit(1)
+            return project
+
         if push_ok:
             success(f"Pushed {project.account_id}/{project.project_id} to Agent Studio.")
         else:
             error(f"Failed to push {project.account_id}/{project.project_id} to Agent Studio.")
-            plain(output)
+            plain(push_output)
 
         return project
 
     @classmethod
-    def status(cls, base_path: str) -> None:
+    def status(
+        cls,
+        base_path: str,
+        json_output: bool = False,
+    ) -> None:
         """Check the changed files of the project."""
         project = cls._load_project(base_path)
 
         files_with_conflicts, modified_files, new_files, deleted_files = project.project_status()
-
         branch_info = project.get_current_branch()
+
+        if json_output:
+
+            def _relativize(paths: list[str]) -> list[str]:
+                return [os.path.relpath(p, project.root_path) for p in paths]
+
+            json_print(
+                {
+                    "branch": branch_info,
+                    "conflicts": _relativize(files_with_conflicts),
+                    "new": _relativize(new_files),
+                    "modified": _relativize(modified_files),
+                    "deleted": _relativize(deleted_files),
+                }
+            )
+            return
 
         print_status(
             region=project.region,
@@ -831,9 +971,39 @@ class AgentStudioCLI:
         return diffs
 
     @classmethod
-    def diff(cls, base_path: str, files: list[str] = None) -> None:
+    def diff(
+        cls,
+        base_path: str,
+        files: list[str] = None,
+        json_output: bool = False,
+        proto_output: bool = False,
+    ) -> None:
         """Show the changes made to the project."""
+        if proto_output:
+            from poly.output.projection_diff import generate_projection_diff
+
+            project = cls._load_project(base_path)
+            result = generate_projection_diff(project)
+            json_print(result)
+            return
+
         diffs = cls._diff(base_path, files) or {}
+
+        if json_output:
+            project = cls._load_project(base_path)
+            json_print(
+                {
+                    "files": [
+                        {
+                            "path": os.path.relpath(file_path, project.root_path),
+                            "diff": diff_text,
+                        }
+                        for file_path, diff_text in diffs.items()
+                    ]
+                }
+            )
+            return
+
         for file_path, diff_text in diffs.items():
             console.rule(f"[bold]{file_path}[/bold]")
             print_diff(diff_text)
@@ -1244,11 +1414,26 @@ class AgentStudioCLI:
         return restart
 
     @classmethod
-    def validate_project(cls, base_path: str) -> None:
+    def validate_project(cls, base_path: str, json_output: bool = False) -> None:
         """Validate the project configuration locally."""
         project = cls._load_project(base_path)
 
         errors = project.validate_project()
+
+        if json_output:
+            parsed_errors = []
+            for err in errors:
+                parts = err.split(": ", 1)
+                if len(parts) == 2 and parts[0].startswith("Validation error in "):
+                    file_path = parts[0].removeprefix("Validation error in ")
+                    parsed_errors.append({"file": file_path, "message": err})
+                else:
+                    parsed_errors.append({"file": None, "message": err})
+            json_print({"valid": len(errors) == 0, "errors": parsed_errors})
+            if errors:
+                sys.exit(1)
+            return
+
         if not errors:
             success("Project configuration is valid.")
         else:

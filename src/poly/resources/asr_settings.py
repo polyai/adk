@@ -7,6 +7,7 @@ import logging
 import os
 from dataclasses import dataclass
 from functools import cached_property
+from typing import ClassVar
 
 from google.protobuf.message import Message
 
@@ -25,6 +26,8 @@ VALID_INTERACTION_STYLES = {"balanced", "precise", "swift", "sonic", "turbo"}
 @dataclass
 class AsrSettings(YamlResource):
     """Resource class for managing ASR (speech recognition) settings"""
+
+    projection_path: ClassVar[list[str]] = ["channels", "voice", "asrSettings"]
 
     barge_in: bool
     interaction_style: str

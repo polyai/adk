@@ -79,6 +79,8 @@ EXPECTED_ENTITY_CONFIG_FIELDS: dict[EntityType, dict[str, type | tuple]] = {
 class Entity(MultiResourceYamlResource):
     """Dataclass representing an Agent Studio Entity"""
 
+    projection_path: ClassVar[list[str]] = ["entities", "entities", "entities", "{id}"]
+
     description: str
     entity_type: EntityType
     config: dict = field(default_factory=dict)

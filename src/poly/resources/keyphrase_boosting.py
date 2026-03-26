@@ -22,6 +22,13 @@ VALID_LEVELS = ("default", "boosted", "maximum")
 class KeyphraseBoosting(MultiResourceYamlResource):
     """Dataclass representing an ASR Keyphrase Boosting entry"""
 
+    projection_path: ClassVar[list[str]] = [
+        "keyphraseBoosting",
+        "keyphraseBoosting",
+        "entities",
+        "{id}",
+    ]
+
     keyphrase: str
     level: str
     top_level_name: ClassVar[str] = "keyphrases"

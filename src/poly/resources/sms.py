@@ -37,6 +37,8 @@ class EnvPhoneNumbers:
 class SMSTemplate(MultiResourceYamlResource):
     """SMS resource for ADK."""
 
+    projection_path: ClassVar[list[str]] = ["sms", "templates", "entities", "{id}"]
+
     text: str
     env_phone_numbers: Optional[EnvPhoneNumbers]
     top_level_name: ClassVar[str] = "sms_templates"

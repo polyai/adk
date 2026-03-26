@@ -66,6 +66,13 @@ class RegularExpressionRule:
 class TranscriptCorrection(MultiResourceYamlResource):
     """Dataclass representing an ASR Transcript Correction"""
 
+    projection_path: ClassVar[list[str]] = [
+        "transcriptCorrections",
+        "transcriptCorrections",
+        "entities",
+        "{id}",
+    ]
+
     description: str
     regular_expressions: list[RegularExpressionRule] = field(default_factory=list)
     top_level_name: ClassVar[str] = "corrections"

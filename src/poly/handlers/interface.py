@@ -108,6 +108,14 @@ class AgentStudioInterface:
         """
         return self.sync_client.pull_deployment_resources(deployment_id)
 
+    def fetch_projection(self) -> dict:
+        """Fetch the raw projection from the SDK.
+
+        Returns:
+            dict: The raw projection data from the API.
+        """
+        return self.sync_client.fetch_projection()
+
     def pull_resources(self) -> dict[type[Resource], dict[str, Resource]]:
         """Fetch all resources for the specific project.
 
@@ -116,6 +124,26 @@ class AgentStudioInterface:
                 their resources
         """
         return self.sync_client.pull_resources()
+
+    def get_queued_commands(self) -> list:
+        """Return a copy of the sync client's current command queue.
+
+        Returns:
+            list: A copy of the queued Command protobuf messages.
+        """
+        return self.sync_client.get_queued_commands()
+
+    def send_queued_commands(self) -> bool:
+        """Send all queued commands as a batch and clear the queue.
+
+        Returns:
+            bool: True if successful, False if the batch send failed.
+        """
+        return self.sync_client.send_queued_commands()
+
+    def clear_command_queue(self) -> None:
+        """Clear all queued commands without sending."""
+        self.sync_client.clear_command_queue()
 
     def push_resources(
         self,
