@@ -184,7 +184,7 @@ class AgentStudioInterface:
 
     def merge_branch(
         self, message: str, conflict_resolutions: Optional[list[dict[str, Any]]] = None
-    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
         """Merge the current branch into main.
 
         Args:
@@ -194,8 +194,10 @@ class AgentStudioInterface:
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
                 - value: Optional custom value (only used with custom strategy)
 
-        Returns:
+         Returns:
+            success (bool): True if the merge was successful, False otherwise
             list[dict[str, str]]: A list of conflict information if the merge failed, empty list if successful
+            list[dict[str, str]]: A list of error information if the merge failed, empty list if successful
         """
         return self.sync_client.merge_branch(message, conflict_resolutions)
 
