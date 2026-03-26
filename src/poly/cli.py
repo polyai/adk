@@ -961,7 +961,9 @@ class AgentStudioCLI:
             return
 
         if new_branch_name:
-            warning(f"Switched to branch '{new_branch_name}'.")
+            warning(
+                f"Current branch no longer exists in Agent Studio. Switched to branch '{new_branch_name}'."
+            )
         if files_with_conflicts:
             print_file_list("Merge conflicts detected", files_with_conflicts, "filename.conflict")
 
@@ -1020,7 +1022,9 @@ class AgentStudioCLI:
             return
 
         if new_branch_name:
-            warning(f"Created new branch '{new_branch_name}'.")
+            warning(
+                f"Current branch no longer exists in Agent Studio. Created and switched to new branch '{new_branch_name}'."
+            )
         if push_ok:
             success(f"Pushed {project.account_id}/{project.project_id} to Agent Studio.")
         else:
