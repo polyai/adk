@@ -347,15 +347,13 @@ Include:
 - relevant internal context
 - useful patterns or best practices from previous projects
 
-Use the docs command to generate a reference file the coding tool can read:
+The coding agent can also use the docs command to inspect the SDK and understand the available resources.
 
 ~~~bash
 poly docs --all
 ~~~
 
-Including patterns from earlier projects reduces correction time and improves consistency.
-
-### Step 5 - Generate the project files
+### Step 5 - Let the agent build
 
 Once the context is in place, the coding tool generates the project files.
 
