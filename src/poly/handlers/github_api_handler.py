@@ -91,7 +91,12 @@ class GitHubAPIHandler:
         """Return review gists (comprised only of .diff files) as a list of {id, description}."""
         gists = cls.list_gists()
         return [
-            {"id": g["id"], "description": g.get("description") or g["id"]}
+            {
+                "id": g["id"],
+                "description": g.get("description") or g["id"],
+                "created_at": g.get("created_at", ""),
+                "html_url": g.get("html_url", ""),
+            }
             for g in gists
             if g.get("files") and all(f.endswith(".diff") for f in g["files"])
         ]

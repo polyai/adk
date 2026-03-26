@@ -12,6 +12,7 @@ import os
 import shutil
 import subprocess
 import sys
+import webbrowser
 from argparse import SUPPRESS, ArgumentParser, RawTextHelpFormatter
 from importlib.metadata import version as get_package_version
 from typing import Any, Optional
@@ -52,6 +53,14 @@ from poly.project import (
 logger = logging.getLogger(__name__)
 
 DOCUMENT_CHOICES = AgentStudioProject.discover_docs()
+
+
+def _format_gist_choice(g: dict) -> str:
+    """Format a gist dict as a human-readable choice label."""
+    id_hint = g["id"][:7]
+    date = g.get("created_at", "")[:10]  # YYYY-MM-DD
+    parts = [p for p in [date, id_hint, g["description"]] if p]
+    return "  ".join(parts)
 
 
 class AgentStudioCLI:
@@ -363,17 +372,22 @@ class AgentStudioCLI:
         review_parser.add_argument(
             "--before",
             type=str,
-            help="Name of the original branch or version to compare against",
+            help="Name of the original branch or version to compare against.",
         )
         review_parser.add_argument(
             "--after",
             type=str,
-            help="Name of the branch or version to compare with",
+            help="Name of the branch or version to compare with.",
+        )
+        review_parser.add_argument(
+            "--list",
+            action="store_true",
+            help="List gists to open one in the browser.",
         )
         review_parser.add_argument(
             "--delete",
             action="store_true",
-            help="Interactively select and delete review gists from your GitHub account.",
+            help="Select and delete gists.",
         )
 
         # Branch
@@ -623,6 +637,8 @@ class AgentStudioCLI:
         elif args.command == "review":
             if args.delete:
                 cls.delete_gists()
+            elif args.list:
+                cls.list_gists()
             else:
                 if args.before and args.after:
                     cls.review(
@@ -1169,16 +1185,17 @@ class AgentStudioCLI:
             before_name: Optional name of base branch (for comparing two remote branches)
             after_name: Optional name of compare branch (for comparing two remote branches)
         """
+        project_name = "/".join(os.path.abspath(base_path).split(os.sep)[-2:])
         if before_name and after_name:
             body = cls._review(
                 base_path=base_path,
                 before_name=before_name,
                 after_name=after_name,
             )
-            description = f"Diff between '{before_name}' and '{after_name}'"
+            description = f"{project_name}: {before_name} → {after_name}"
         else:
             body = cls._review(base_path)
-            description = f"Diff for {'/'.join(base_path.split(os.sep)[-2:])}"
+            description = f"{project_name}: local → remote"
 
         if not body:
             return
@@ -1197,6 +1214,29 @@ class AgentStudioCLI:
         return
 
     @classmethod
+    def list_gists(cls) -> None:
+        """Interactively select a review gist and open it in the browser."""
+        try:
+            gists = GitHubAPIHandler.list_diff_gists()
+        except requests.HTTPError as e:
+            error(f"GitHub API error: {e}")
+            return
+        except OSError as e:
+            error(str(e))
+            return
+
+        if not gists:
+            plain("[muted]No review gists found.[/muted]")
+            return
+
+        url_by_choice = {_format_gist_choice(g): g["html_url"] for g in gists}
+        selected = questionary.select("Select a gist to open", choices=list(url_by_choice)).ask()
+        if not selected:
+            return
+
+        webbrowser.open(url_by_choice[selected])
+
+    @classmethod
     def delete_gists(cls) -> None:
         """Interactively select and delete review gists from the user's GitHub account."""
         try:
@@ -1212,8 +1252,8 @@ class AgentStudioCLI:
             plain("[muted]No review gists found.[/muted]")
             return
 
-        choices = [g["description"] for g in gists]
-        description_to_id = {g["description"]: g["id"] for g in gists}
+        choices = [_format_gist_choice(g) for g in gists]
+        description_to_id = {_format_gist_choice(g): g["id"] for g in gists}
 
         selected = questionary.checkbox("Select gists to delete", choices=choices).ask()
         if not selected:
