@@ -943,6 +943,7 @@ class AgentStudioCLI:
         files_with_conflicts, projection = project.pull_project(
             force=force, format=format, projection_json=projection_json
         )
+        new_branch_name = None
         if original_branch_id != project.branch_id:
             new_branch_name = project.get_current_branch()
         if output_json or output_json_projection:
@@ -1003,6 +1004,7 @@ class AgentStudioCLI:
             email=email,
             projection_json=projection_json,
         )
+        new_branch_name = None
         if original_branch_id != project.branch_id:
             new_branch_name = project.get_current_branch()
         if output_json or output_commands:
