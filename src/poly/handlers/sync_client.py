@@ -115,7 +115,7 @@ class SyncClientHandler:
             branch = next((b for b in found_branches if b.get("branchId") == self.branch_id), None)
             if not branch:
                 logger.info(
-                    f"Branch id {self.branch_id} does not exist. Switching to 'main' branch."
+                    f"Branch ID:'{self.branch_id}' does not exist. Switching to 'main' branch."
                 )
                 self._sdk.branch_id = "main"
         return self.branch_id
