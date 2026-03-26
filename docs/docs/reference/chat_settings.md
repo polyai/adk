@@ -63,7 +63,7 @@ Use this for chat-specific guidance such as:
 - using bullet points for lists
 - adjusting formatting for readability
 
-This is separate from the agent’s broader personality. Use it to control how the agent communicates specifically in web chat.
+This is separate from the agent's broader personality. Use it to control how the agent communicates specifically in web chat.
 
 ### Fields
 
@@ -100,7 +100,7 @@ style_prompt:
 
     ---
 
-    Define the agent’s overall identity, role, and rules.
+    Define the agent's overall identity, role, and rules.
     [Open agent settings](./agent_settings.md)
 
 -   **Voice settings**

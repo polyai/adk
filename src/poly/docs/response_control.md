@@ -6,8 +6,8 @@ Response control resources manage what the agent says before it reaches the user
 
 ```
 voice/response_control/
-├── pronunciations.yaml             # Optional — TTS pronunciation rules
-└── phrase_filtering.yaml           # Optional — block/intercept phrases before TTS
+├── pronunciations.yaml             # Optional - TTS pronunciation rules
+└── phrase_filtering.yaml           # Optional - block/intercept phrases before TTS
 ```
 
 ## Pronunciations (`pronunciations.yaml`)

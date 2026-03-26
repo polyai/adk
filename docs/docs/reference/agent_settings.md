@@ -1,12 +1,12 @@
 ---
 title: Agent settings
-description: Define the agent’s identity, role, and behavioral rules in the PolyAI ADK.
+description: Define the agent's identity, role, and behavioral rules in the PolyAI ADK.
 ---
 
 # Agent settings
 
 <p class="lead">
-Agent settings define the agent’s identity and behavioral rules.
+Agent settings define the agent's identity and behavioral rules.
 They live in <code>agent_settings/</code> and are made up of personality, role, and rules resources.
 </p>
 
@@ -32,7 +32,7 @@ agent_settings/
 
     ---
 
-    Controls the agent’s tone and conversational style.
+    Controls the agent's tone and conversational style.
 
 -   **Role**
 
@@ -56,7 +56,7 @@ agent_settings/
 
 ## Personality
 
-The `personality.yaml` file controls the agent’s conversational tone.
+The `personality.yaml` file controls the agent's conversational tone.
 
 ### Fields
 
@@ -102,7 +102,7 @@ custom: ""
 
 The `role.yaml` file defines what the agent is.
 
-This is usually the agent’s role, title, or function in the business context.
+This is usually the agent's role, title, or function in the business context.
 
 ### Fields
 

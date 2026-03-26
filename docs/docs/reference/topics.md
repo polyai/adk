@@ -6,7 +6,7 @@ description: Define knowledge-base topics that the agent can retrieve and act on
 # Topics
 
 <p class="lead">
-Topics are the agent’s knowledge base. They are queried through retrieval-augmented generation (RAG), and when a user’s input matches a topic, the agent retrieves its content and follows its actions.
+Topics are the agent's knowledge base. They are queried through retrieval-augmented generation (RAG), and when a user's input matches a topic, the agent retrieves its content and follows its actions.
 </p>
 
 Topics are how you teach the agent facts and guidance about specific subject areas without putting everything into flows or rules.
@@ -164,7 +164,7 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
 - prefer structured `##` branches in actions
 - disable topics with `enabled: false` during development instead of deleting them
 
-!!! tip "Tell, don’t script"
+!!! tip "Tell, don't script"
 
     Prefer instructions like “Tell the user that ...” over hard-coded dialogue such as `Say: '...'`. This gives the agent more room to behave naturally, especially across languages.
 

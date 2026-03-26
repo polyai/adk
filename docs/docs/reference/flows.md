@@ -6,7 +6,7 @@ description: Define multi-step processes that guide the agent through structured
 # Flows
 
 <p class="lead">
-Flows choreograph multi-step processes. At any given moment, the model only sees the current step’s prompt and tools.
+Flows choreograph multi-step processes. At any given moment, the model only sees the current step's prompt and tools.
 </p>
 
 A good flow keeps each step focused on a single task. Use Python for branching, validation, and routing logic, and use prompts for conversational behavior.
@@ -108,7 +108,7 @@ start_step: Collect Details
 
 ## Step types
 
-A step represents the agent’s current position in the flow.
+A step represents the agent's current position in the flow.
 
 There are three step types:
 
@@ -166,7 +166,7 @@ A condition can:
 
 Use the correct step identifier depending on target type:
 
-- **Default step** or **advanced step**: use the step’s `name`
+- **Default step** or **advanced step**: use the step's `name`
 - **Function step**: use the Python filename without `.py`
 
 ## Advanced steps

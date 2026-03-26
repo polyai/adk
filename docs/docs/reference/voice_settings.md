@@ -72,7 +72,7 @@ Use this for voice-specific guidance such as:
 - spoken tone
 - conversational pacing
 
-This is separate from the agent’s broader personality. Use it to shape how the agent should sound specifically on phone calls.
+This is separate from the agent's broader personality. Use it to shape how the agent should sound specifically on phone calls.
 
 ### Fields
 
