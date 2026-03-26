@@ -87,13 +87,25 @@ class GitHubAPIHandler:
         return resp.json()
 
     @classmethod
+    def list_diff_gists(cls) -> list[dict[str, str]]:
+        """Return review gists (comprised only of .diff files) as a list of {id, description}."""
+        gists = cls.list_gists()
+        return [
+            {"id": g["id"], "description": g.get("description") or g["id"]}
+            for g in gists
+            if g.get("files") and all(f.endswith(".diff") for f in g["files"])
+        ]
+
+    @classmethod
+    def delete_gist(cls, gist_id: str) -> None:
+        """Delete a single gist by ID."""
+        cls._request("DELETE", f"{GIST_URL}/{gist_id}")
+
+    @classmethod
     def delete_diff_gists(cls) -> list[str]:
         """Delete all review gists (comprised only of .diff files) and return IDs."""
         deleted_ids: list[str] = []
-        gists = cls.list_gists()
-        for gist in gists:
-            # Delete gists comprised only of *.diff files
-            if all(file.endswith(".diff") for file in gist["files"]):
-                cls._request("DELETE", f"{GIST_URL}/{gist['id']}")
-                deleted_ids.append(gist["id"])
+        for gist in cls.list_diff_gists():
+            cls.delete_gist(gist["id"])
+            deleted_ids.append(gist["id"])
         return deleted_ids

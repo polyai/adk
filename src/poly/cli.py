@@ -373,7 +373,7 @@ class AgentStudioCLI:
         review_parser.add_argument(
             "--delete",
             action="store_true",
-            help="Delete all the fully diff gists in your GitHub account.",
+            help="Interactively select and delete review gists from your GitHub account.",
         )
 
         # Branch
@@ -1198,17 +1198,38 @@ class AgentStudioCLI:
 
     @classmethod
     def delete_gists(cls) -> None:
-        """Delete the gists made for the reviews of the project."""
+        """Interactively select and delete review gists from the user's GitHub account."""
         try:
-            deleted = GitHubAPIHandler.delete_diff_gists()
-            for gist_id in deleted:
-                plain(f"  [muted]Deleted gist:[/muted] {gist_id}")
-            success("All diff gists deleted.")
+            gists = GitHubAPIHandler.list_diff_gists()
+        except requests.HTTPError as e:
+            error(f"GitHub API error: {e}")
+            return
+        except OSError as e:
+            error(str(e))
+            return
+
+        if not gists:
+            plain("[muted]No review gists found.[/muted]")
+            return
+
+        choices = [g["description"] for g in gists]
+        description_to_id = {g["description"]: g["id"] for g in gists}
+
+        selected = questionary.checkbox("Select gists to delete", choices=choices).ask()
+        if not selected:
+            warning("No gists selected. Exiting.")
+            return
+
+        try:
+            for description in selected:
+                gist_id = description_to_id[description]
+                GitHubAPIHandler.delete_gist(gist_id)
+                plain(f"  [muted]Deleted gist:[/muted] {description}")
+            success(f"Deleted {len(selected)} gist(s).")
         except requests.HTTPError as e:
             error(f"GitHub API error: {e}")
         except OSError as e:
             error(str(e))
-        return
 
     @classmethod
     def branch_list(cls, base_path: str, output_json: bool = False) -> None:
