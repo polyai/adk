@@ -114,7 +114,7 @@ class SyncClientHandler:
             found_branches = self._sdk.fetch_branches().get("branches", [])
             branch = next((b for b in found_branches if b.get("branchId") == self.branch_id), None)
             if not branch:
-                logger.warning(
+                logger.info(
                     f"Branch id {self.branch_id} does not exist. Switching to 'main' branch."
                 )
                 self._sdk.branch_id = "main"
@@ -1040,13 +1040,13 @@ class SyncClientHandler:
         self.assert_branch_exists()
 
         if self.sdk.branch_id == branch_id:
-            logger.info(f"Already on branch {branch_id}")
+            logger.info(f"Already on branch ID:'{branch_id}'")
             return True
 
         if branch_id == "main":
             self.sdk.branch_id = "main"
             self.sdk.get_project_data()
-            logger.info(f"Switched to branch {branch_id}")
+            logger.info(f"Switched to branch ID:'{branch_id}'")
             return True
 
         if found_branches := self.sdk.fetch_branches().get("branches"):
@@ -1056,10 +1056,10 @@ class SyncClientHandler:
                 # Re-fetch project data to ensure the SDK is up-to-date
                 self.sdk.clear_cache()
                 self.sdk.get_project_data()
-                logger.info(f"Switched to branch {branch_id}")
+                logger.info(f"Switched to branch ID:'{branch_id}'")
                 return True
             else:
-                logger.error(f"Branch {branch_id} does not exist.")
+                logger.error(f"Branch ID:'{branch_id}' does not exist.")
                 return False
 
     def create_branch(self, branch_name: Optional[str] = None) -> str:
@@ -1076,9 +1076,8 @@ class SyncClientHandler:
 
         if branch_name is None:
             metadata = self.sdk.create_metadata()
-            email = metadata.created_by.split("@")[0]
-            suffix = f"{metadata.created_at.seconds % 10000:04d}"  # to avoid duplicate names
-            branch_name = f"ADK-{email}-{suffix}"
+            suffix = f"{metadata.created_at.seconds % 10000:05d}"  # to avoid duplicate names
+            branch_name = f"ADK-{suffix}"
 
         logger.info(f"Creating new branch '{branch_name}' from 'main' branch")
 
@@ -1086,7 +1085,7 @@ class SyncClientHandler:
             expected_main_last_known_sequence=self.sdk._last_known_sequence,
             branch_name=branch_name,
         )
-        logger.warning(f"Created and switched to new branch '{self.sdk.branch_id}'")
+        logger.info(f"Created and switched to new branch '{self.sdk.branch_id}'")
         return self.sdk.branch_id
 
     def get_branches(self) -> dict[str, str]:
@@ -1115,15 +1114,15 @@ class SyncClientHandler:
             logger.error("Cannot delete 'main' branch.")
             return False
 
-        logger.info(f"Deleting branch '{branch_id}'")
+        logger.info(f"Deleting branch ID:'{branch_id}'")
 
         try:
             self.sdk.delete_branch(branch_id=branch_id)
         except SourcererAPIError as e:
-            logger.error(f"Failed to delete branch '{branch_id}': {e}")
+            logger.error(f"Failed to delete branch ID:'{branch_id}': {e}")
             return False
 
-        logger.info(f"Successfully deleted branch '{branch_id}'")
+        logger.info(f"Successfully deleted branch ID:'{branch_id}'")
         return True
 
     def merge_branch(
