@@ -124,7 +124,11 @@ class AgentStudioInterface:
                 their resources
             dict[str, Any]: The projection data
         """
-        return self.sync_client.pull_resources(projection_json=projection_json)
+        if projection_json is not None:
+            return SyncClientHandler.load_resources_from_projection(
+                projection_json
+            ), projection_json
+        return self.sync_client.pull_resources()
 
     def push_resources(
         self,

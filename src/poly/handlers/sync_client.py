@@ -78,7 +78,7 @@ class SyncClientHandler:
     @property
     def branch_id(self) -> str:
         """Get the current branch ID."""
-        return self.sdk.branch_id
+        return self._sdk.branch_id
 
     def __init__(
         self,
@@ -102,40 +102,46 @@ class SyncClientHandler:
             project_id=project_id,
             branch_id=branch_id,
         )
-        # Switch to the specified branch if exists and provided.
-        if branch_id and branch_id != "main":
-            found_branches = self._sdk.fetch_branches().get("branches", [])
-            branch = next((b for b in found_branches if b.get("branchId") == branch_id), None)
-            if branch:
-                self._sdk.branch_id = branch_id
-            else:
-                logger.warning(f"Branch {branch_id} does not exist. Switching to 'main' branch.")
-                self._sdk.branch_id = "main"
 
     @property
     def sdk(self) -> SourcererSDK:
         """Get the Sourcerer SDK instance."""
         return self._sdk
 
-    def _load_resources(self, projection: dict) -> dict[type[Resource], dict[str, Resource]]:
+    def assert_branch_exists(self) -> str:
+        """Assert that the branch exists and switch to 'main' if it doesn't."""
+        if self.branch_id != "main":
+            found_branches = self._sdk.fetch_branches().get("branches", [])
+            branch = next((b for b in found_branches if b.get("branchId") == self.branch_id), None)
+            if not branch:
+                logger.warning(
+                    f"Branch id {self.branch_id} does not exist. Switching to 'main' branch."
+                )
+                self._sdk.branch_id = "main"
+        return self.branch_id
+
+    @classmethod
+    def load_resources_from_projection(
+        cls, projection: dict
+    ) -> dict[type[Resource], dict[str, Resource]]:
         return {
-            Topic: self._read_topics_from_projection(projection),
-            Function: self._read_functions_from_projection(projection),
-            Entity: self._read_entities_from_projection(projection),
-            Variable: self._read_variables_from_projection(projection),
-            **self._read_agent_settings_from_projection(projection),
-            **self._read_channel_settings_from_projection(projection),
-            **self._read_flows_from_projection(projection),
-            ExperimentalConfig: self._read_experimental_config_from_projection(projection),
-            SMSTemplate: self._read_sms_templates_from_projection(projection),
-            Handoff: self._read_handoffs_from_projection(projection),
-            **self._read_variants_from_projection(projection),
-            PhraseFilter: self._read_phrase_filters_from_projection(projection),
-            Pronunciation: self._read_pronunciations_from_projection(projection),
-            KeyphraseBoosting: self._read_keyphrase_boosting_from_projection(projection),
-            TranscriptCorrection: self._read_transcript_corrections_from_projection(projection),
-            **self._read_asr_settings_from_projection(projection),
-            ApiIntegration: self._read_api_integrations_from_projection(projection),
+            Topic: cls._read_topics_from_projection(projection),
+            Function: cls._read_functions_from_projection(projection),
+            Entity: cls._read_entities_from_projection(projection),
+            Variable: cls._read_variables_from_projection(projection),
+            **cls._read_agent_settings_from_projection(projection),
+            **cls._read_channel_settings_from_projection(projection),
+            **cls._read_flows_from_projection(projection),
+            ExperimentalConfig: cls._read_experimental_config_from_projection(projection),
+            SMSTemplate: cls._read_sms_templates_from_projection(projection),
+            Handoff: cls._read_handoffs_from_projection(projection),
+            **cls._read_variants_from_projection(projection),
+            PhraseFilter: cls._read_phrase_filters_from_projection(projection),
+            Pronunciation: cls._read_pronunciations_from_projection(projection),
+            KeyphraseBoosting: cls._read_keyphrase_boosting_from_projection(projection),
+            TranscriptCorrection: cls._read_transcript_corrections_from_projection(projection),
+            **cls._read_asr_settings_from_projection(projection),
+            ApiIntegration: cls._read_api_integrations_from_projection(projection),
         }  # ty:ignore[invalid-return-type]
 
     def pull_deployment_resources(
@@ -151,39 +157,31 @@ class SyncClientHandler:
         logger.info(
             f"Fetching project data for project {self.project_id} for deployment {deployment_id}"
         )
+        self.assert_branch_exists()
         projection = self.sdk.fetch_deployment_projection(deployment_id=deployment_id)
         logger.info(
             f"Successfully fetched project data for project {self.project_id} for deployment {deployment_id}"
         )
-        return self._load_resources(projection)
+        return self.load_resources_from_projection(projection)
 
-    def pull_resources(
-        self, projection_json: dict[str, Any] = None
-    ) -> tuple[dict[type[Resource], dict[str, Resource]], dict[str, Any]]:
+    def pull_resources(self) -> tuple[dict[type[Resource], dict[str, Resource]], dict[str, Any]]:
         """Fetch all resources from a specific project.
-
-        Args:
-            projection_json (dict[str, Any]): A dictionary containing the projection.
-                If provided, the projection will be used instead of fetching it from the API.
 
         Returns:
             dict[type[Resource], dict[str, Resource]]: A dictionary mapping resource types to
                 their resources
             dict[str, Any]: The projection data
         """
-        if projection_json is not None:
-            logger.info("Using provided projection")
-            projection = projection_json
-        else:
-            logger.info(
-                f"Fetching project data for project {self.project_id} on branch {self.sdk.branch_id}"
-            )
-            projection = self.sdk.fetch_projection(force_refresh=True)
+        logger.info(
+            f"Fetching project data for project {self.project_id} on branch {self.sdk.branch_id}"
+        )
+        self.assert_branch_exists()
+        projection = self.sdk.fetch_projection(force_refresh=True)
         logger.debug(f"Projection: {projection}")
         logger.info(
             f"Successfully fetched project data for project {self.project_id} on branch {self.sdk.branch_id}"
         )
-        return self._load_resources(projection), projection
+        return self.load_resources_from_projection(projection), projection
 
     @staticmethod
     def _read_topics_from_projection(projection: dict) -> dict[str, Topic]:
@@ -909,9 +907,6 @@ class SyncClientHandler:
         if email:
             metadata.created_by = email
 
-        if self.sdk.branch_id == "main":
-            self.create_branch()  # creates branch and switches to it
-
         commands = []
 
         delete_resources_priority: list[type[BaseResource]] = []
@@ -1005,6 +1000,12 @@ class SyncClientHandler:
             logger.info("No commands to send")
             return True
 
+        self.assert_branch_exists()
+
+        # Creates branch and switches to it
+        if self.sdk.branch_id == "main":
+            self.create_branch()
+
         try:
             logger.info(f"Sending {len(self.sdk._command_queue)} commands to {self.sdk.branch_id}")
             self.sdk.send_command_batch()
@@ -1035,6 +1036,8 @@ class SyncClientHandler:
         Returns:
             bool: True if the switch was successful, False otherwise
         """
+        self.assert_branch_exists()
+
         if self.sdk.branch_id == branch_id:
             logger.info(f"Already on branch {branch_id}")
             return True
@@ -1138,6 +1141,8 @@ class SyncClientHandler:
             list[dict[str, str]]: A list of conflict information if the merge failed, empty list if successful
             list[dict[str, str]]: A list of error information if the merge failed, empty list if successful
         """
+        self.assert_branch_exists()
+
         if self.sdk.branch_id == "main":
             logger.error("Cannot merge 'main' branch into itself.")
             return [], []
@@ -1168,4 +1173,5 @@ class SyncClientHandler:
 
     def get_branch_chat_info(self, branch_id: str) -> dict[str, Any]:
         """Get deployment info needed to start a draft chat on a branch."""
+        self.assert_branch_exists()
         return self.sdk.get_branch_chat_info(branch_id)

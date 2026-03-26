@@ -451,7 +451,9 @@ class AgentStudioProject:
         incoming_resources, projection = self.api_handler.pull_resources(
             projection_json=projection_json
         )
-        self.branch_id = self.api_handler.branch_id
+        # Only update branch id if we used the API to pull the resources
+        if projection_json is None:
+            self.branch_id = self.api_handler.branch_id
 
         self._check_no_duplicate_resource_paths(incoming_resources)
         # -------
@@ -1050,11 +1052,10 @@ class AgentStudioProject:
         )
         if not dry_run:
             success = self.api_handler.send_queued_commands()
+            self.branch_id = self.api_handler.branch_id
         else:
             self.api_handler.clear_command_queue()
             success = True
-
-        self.branch_id = self.api_handler.branch_id
 
         if not success:
             failed_resources = []
