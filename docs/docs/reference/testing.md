@@ -16,6 +16,12 @@ In the ADK workflow, testing usually sits alongside validation and manual review
 Run tests with:
 
 ~~~bash
+uv run pytest src/poly/tests/ -v
+~~~
+
+Or, if pytest is on your path directly:
+
+~~~bash
 pytest
 ~~~
 

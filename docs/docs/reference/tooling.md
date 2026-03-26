@@ -38,11 +38,7 @@ Then reference rules.md in your prompt or agent context. This gives your coding 
 
 ### VS Code extension
 
-A **PolyAI ADK VS Code extension** is available in the VS Code Marketplace:
-
-- `https://marketplace.visualstudio.com/items?itemName=PolyAI.adk-extension`
-
-This can be useful when working directly with ADK resources in a local editor.
+A **PolyAI ADK VS Code extension** is available in the VS Code Marketplace. Search for `PolyAI.adk-extension` or install it directly from the [marketplace listing](https://marketplace.visualstudio.com/items?itemName=PolyAI.adk-extension){ target="_blank" rel="noopener" }.
 
 ## Other local tools
 

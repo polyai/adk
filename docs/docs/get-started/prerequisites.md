@@ -1,9 +1,9 @@
 ---
-title: Pre-requisites
+title: Prerequisites
 description: Understand the access requirements and local tools needed before using the PolyAI ADK.
 ---
 
-Before using the **PolyAI ADK**, you need both the correct **platform access** and the required **local tools**.
+Before using the **PolyAI ADK**, you need the correct **platform access** and the required **local tools**.
 
 ## Platform access
 
@@ -20,47 +20,45 @@ If you need access to the PolyAI platform, contact:
 
 ## Local requirements
 
-You will also need the following installed on your machine:
+Install the following tools before continuing:
 
-<div class="grid cards" markdown>
+| Tool | Version | Notes |
+|---|---|---|
+| **Python** | 3.14+ | Required to run the ADK |
+| **uv** | latest | Recommended for development setup from source |
+| **Git** | any | Required to clone the repository or contribute |
 
--   **Python 3.14 or higher**
+### Install Python 3.14+
 
-    ---
+Python 3.14 is a recent release. Use one of these methods:
 
-    The ADK requires a modern Python runtime.
+- **Homebrew** (macOS): `brew install python@3.14`
+- **pyenv**: `pyenv install 3.14` then `pyenv global 3.14`
+- **Official installer**: [python.org/downloads](https://www.python.org/downloads/){ target="_blank" rel="noopener" }
 
--   **uv**
+### Install uv
 
-    ---
+The recommended way to install `uv`:
 
-    Recommended for local development setup from source.
+~~~bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+~~~
 
--   **Git**
-
-    ---
-
-    Required if you plan to clone the repository or contribute from source.
-
-</div>
-
-## Install uv
-
-If you use Homebrew on macOS, you can install `uv` with:
+Alternatively, with Homebrew on macOS:
 
 ~~~bash
 brew install uv
 ~~~
 
-## Before you continue
+## Checklist
 
-Before moving on, make sure you have:
+Before continuing, confirm:
 
-- confirmed access to **Agent Studio**
-- obtained an **API key**
-- installed **Python 3.14+**
-- installed `uv` if you are using the development setup
-- confirmed that **Git** is available locally
+- [ ] You have access to an **Agent Studio workspace**
+- [ ] You have obtained an **API key** from your PolyAI contact
+- [ ] Python 3.14+ is installed and on your `PATH`
+- [ ] `uv` is installed if you plan to use the development setup
+- [ ] `git` is available locally
 
 ## Next step
 

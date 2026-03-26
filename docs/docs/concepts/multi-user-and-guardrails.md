@@ -69,9 +69,7 @@ You can also use:
 
 ## Validation as a guardrail
 
-Before pushing, the ADK can validate the project locally.
-
-This is one of the main guardrails in the workflow. It helps catch issues early, before they are pushed into Agent Studio.
+Run `poly validate` before pushing to catch issues locally, before they reach Agent Studio.
 
 Examples of what validation protects against include:
 
@@ -82,7 +80,7 @@ Examples of what validation protects against include:
 
 !!! info "Validate before pushing"
 
-    In collaborative workflows, `poly validate` should be treated as a normal part of the editing cycle, not as an optional afterthought.
+    In collaborative workflows, treat `poly validate` as a standard step in the editing cycle, not an optional one.
 
 ## Pulling and merge behavior
 
@@ -94,25 +92,23 @@ poly pull
 
 If the pulled changes conflict with your own local edits, the ADK will merge them and surface merge markers where conflicts occur.
 
-That means the local workflow is not isolated from Agent Studio UI work — both sides can affect branch state, and developers should be aware of that.
+The local workflow is not isolated from Agent Studio UI work — both sides affect branch state. Keep that in mind when collaborating.
 
 ## Review workflow
 
-When changes are ready for review, the ADK can help generate a review artifact using:
+When changes are ready for review, generate a review artifact:
 
 ~~~bash
 poly review
 ~~~
 
-This can be used to compare:
+Use this to compare:
 
 - local changes against the remote project
 - one branch against another
 - a feature branch against `main` or `sandbox`
 
-A GitHub environment token is required for this step.
-
-The review flow is useful when you want to share changes without asking a reviewer to inspect the raw local filesystem.
+A GitHub environment token is required. The output lets reviewers inspect changes without access to your local filesystem.
 
 ## Guardrails inherited from Agent Studio
 
