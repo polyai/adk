@@ -157,15 +157,14 @@ class AgentStudioInterface:
             email=email,
         )
 
-        if not (dry_run or queue_pushes):
-            return self.send_queued_commands()
-        elif queue_pushes:
+        if queue_pushes:
             return True
-        elif dry_run:
+
+        if dry_run:
             self.clear_command_queue()
             return True
 
-        return False
+        return self.send_queued_commands()
 
     def queue_resources(
         self,

@@ -171,7 +171,7 @@ class SyncClientHandler:
                 their resources
             dict[str, Any]: The projection data
         """
-        if projection_json:
+        if projection_json is not None:
             logger.info("Using provided projection")
             projection = projection_json
         else:
@@ -900,8 +900,7 @@ class SyncClientHandler:
             deleted_resources (dict[type[BaseResource], dict[str, BaseResource]]): Resources to delete
             new_resources (dict[type[BaseResource], dict[str, BaseResource]]): New resources to upload
             updated_resources (dict[type[BaseResource], dict[str, BaseResource]]): Updated resources to upload
-            dry_run (bool): If True, only log the upload actions without actually
-                uploading
+            email (str): Email to use for metadata creation.
 
         Returns:
             list[Command]: A list of queued Command protobuf messages.
@@ -912,6 +911,8 @@ class SyncClientHandler:
 
         if self.sdk.branch_id == "main":
             self.create_branch()  # creates branch and switches to it
+
+        commands = []
 
         delete_resources_priority: list[type[BaseResource]] = []
         for resource_type in self.PRIORITY_DELETE_TYPES:
@@ -924,7 +925,7 @@ class SyncClientHandler:
         for resource_type in delete_resources_priority:
             for resource_id, resource in deleted_resources.get(resource_type, {}).items():
                 delete_type = resource.delete_command_type
-                self.sdk.add_command_to_queue(
+                commands.append(
                     Command(
                         type=delete_type,
                         command_id=str(uuid.uuid4()),
@@ -945,7 +946,7 @@ class SyncClientHandler:
             resources = new_resources.get(resource_type, {})
             for resource_id, resource in resources.items():
                 create_type = resource.create_command_type
-                self.sdk.add_command_to_queue(
+                commands.append(
                     Command(
                         type=create_type,
                         command_id=str(uuid.uuid4()),
@@ -966,7 +967,7 @@ class SyncClientHandler:
             resources = updated_resources.get(resource_type, {})
             for resource_id, resource in resources.items():
                 update_type = resource.update_command_type
-                self.sdk.add_command_to_queue(
+                commands.append(
                     Command(
                         type=update_type,
                         command_id=str(uuid.uuid4()),
@@ -979,7 +980,7 @@ class SyncClientHandler:
         for resource_dict in [new_resources, updated_resources]:
             for resource_id, resource in resource_dict.get(Handoff, {}).items():
                 if isinstance(resource, Handoff) and resource.is_default:
-                    self.sdk.add_command_to_queue(
+                    commands.append(
                         Command(
                             type="handoff_set_default",
                             command_id=str(uuid.uuid4()),
@@ -988,10 +989,11 @@ class SyncClientHandler:
                         )
                     )
 
-        logger.info(
-            f"Queued {len(self.sdk._command_queue)} commands command_queue={self.sdk._command_queue!r}"
-        )
-        return self.get_queued_commands()
+        for command in commands:
+            self.sdk.add_command_to_queue(command)
+
+        logger.info(f"Queued {len(commands)} commands commands={commands!r}")
+        return commands
 
     def send_queued_commands(self) -> bool:
         """Send all queued commands as a batch and clear the queue.
@@ -1005,7 +1007,8 @@ class SyncClientHandler:
 
         try:
             logger.info(f"Sending {len(self.sdk._command_queue)} commands to {self.sdk.branch_id}")
-            return self.sdk.send_command_batch()
+            self.sdk.send_command_batch()
+            return True
         except SourcererAPIError as e:
             logger.error(f"Failed to send commands: {e}")
             return False
