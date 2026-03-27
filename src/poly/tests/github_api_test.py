@@ -252,19 +252,49 @@ class DeleteGistsTest(unittest.TestCase):
         self.assertEqual(mock_delete.call_count, 2)
         self.assertIn("2 gist(s)", mock_success.call_args[0][0])
 
+    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
     @patch("poly.cli.GitHubAPIHandler.delete_gist")
     @patch("poly.cli.success")
-    def test_direct_gist_id_skips_interactive_prompt(self, mock_success, mock_delete):
-        """Passing gist_id directly deletes it without showing a checkbox prompt."""
+    def test_direct_gist_id_skips_interactive_prompt(self, mock_success, mock_delete, mock_list):
+        """Passing a full gist_id deletes it directly without showing a checkbox prompt."""
+        mock_list.return_value = self.SAMPLE_GISTS
+
         AgentStudioCLI.delete_gists(gist_id="aaa1111111")
 
         mock_delete.assert_called_once_with("aaa1111111")
         mock_success.assert_called_once()
 
+    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli.GitHubAPIHandler.delete_gist")
+    @patch("poly.cli.success")
+    def test_short_gist_id_prefix_matches(self, mock_success, mock_delete, mock_list):
+        """Passing the first 7 characters of a gist ID resolves and deletes the full gist."""
+        mock_list.return_value = self.SAMPLE_GISTS
+
+        AgentStudioCLI.delete_gists(gist_id="aaa1111")
+
+        mock_delete.assert_called_once_with("aaa1111111")
+        mock_success.assert_called_once()
+
+    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli.GitHubAPIHandler.delete_gist")
+    @patch("poly.cli.error")
+    def test_unmatched_gist_id_shows_error(self, mock_error, mock_delete, mock_list):
+        """An ID that doesn't match any review gist shows an error and does not delete."""
+        mock_list.return_value = self.SAMPLE_GISTS
+
+        AgentStudioCLI.delete_gists(gist_id="zzz9999")
+
+        mock_delete.assert_not_called()
+        mock_error.assert_called_once()
+
+    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
     @patch("poly.cli.GitHubAPIHandler.delete_gist")
     @patch("poly.cli.json_print")
-    def test_direct_gist_id_with_json_output(self, mock_json_print, mock_delete):
+    def test_direct_gist_id_with_json_output(self, mock_json_print, mock_delete, mock_list):
         """With output_json=True and a gist_id, result is printed as JSON."""
+        mock_list.return_value = self.SAMPLE_GISTS
+
         AgentStudioCLI.delete_gists(gist_id="aaa1111111", output_json=True)
 
         mock_delete.assert_called_once_with("aaa1111111")

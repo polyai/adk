@@ -363,7 +363,7 @@ class AgentStudioCLI:
                 "  poly review list\n"
                 "  poly review list --json\n"
                 "  poly review delete\n"
-                "  poly review delete --gist GIST_ID\n"
+                "  poly review delete --id GIST_ID\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -373,6 +373,13 @@ class AgentStudioCLI:
             choices=["list", "delete"],
             default=None,
             help="Subcommand: 'list' to open a gist in the browser, 'delete' to remove gists.",
+        )
+        review_parser.add_argument(
+            "--id",
+            type=str,
+            default=None,
+            metavar="GIST_ID",
+            help="Gist ID (or first 7 characters) to delete directly, skipping the interactive prompt (used with 'delete').",
         )
         review_parser.add_argument(
             "--path",
@@ -389,13 +396,6 @@ class AgentStudioCLI:
             "--after",
             type=str,
             help="Name of the branch or version to compare with.",
-        )
-        review_parser.add_argument(
-            "--gist",
-            type=str,
-            default=None,
-            metavar="GIST_ID",
-            help="Gist ID to delete directly, skipping the interactive prompt (used with 'delete').",
         )
 
         # Branch
@@ -644,7 +644,7 @@ class AgentStudioCLI:
 
         elif args.command == "review":
             if args.action == "delete":
-                cls.delete_gists(gist_id=args.gist, output_json=args.json)
+                cls.delete_gists(gist_id=args.id, output_json=args.json)
             elif args.action == "list":
                 cls.list_gists(output_json=args.json)
             else:
@@ -1252,23 +1252,42 @@ class AgentStudioCLI:
     def delete_gists(cls, gist_id: Optional[str] = None, output_json: bool = False) -> None:
         """Interactively select and delete review gists from the user's GitHub account.
 
-        If gist_id is provided, delete that specific gist without an interactive prompt.
+        If gist_id is provided (full ID or first 7 characters), delete that specific gist
+        without an interactive prompt.
         """
         try:
-            if gist_id:
-                GitHubAPIHandler.delete_gist(gist_id)
-                if output_json:
-                    json_print({"deleted": [gist_id], "count": 1})
-                else:
-                    success(f"Deleted gist: {gist_id}")
-                return
-
             gists = GitHubAPIHandler.list_diff_gists()
         except requests.HTTPError as e:
             error(f"GitHub API error: {e}")
             return
         except OSError as e:
             error(str(e))
+            return
+
+        if gist_id:
+            matched = next(
+                (
+                    g
+                    for g in gists
+                    if g["id"].startswith(gist_id) or gist_id.startswith(g["id"][:7])
+                ),
+                None,
+            )
+            if not matched:
+                error(f"No review gist found matching '{gist_id}'.")
+                return
+            try:
+                GitHubAPIHandler.delete_gist(matched["id"])
+            except requests.HTTPError as e:
+                error(f"GitHub API error: {e}")
+                return
+            except OSError as e:
+                error(str(e))
+                return
+            if output_json:
+                json_print({"deleted": [matched["id"]], "count": 1})
+            else:
+                success(f"Deleted gist: {matched['id']}")
             return
 
         if not gists:
