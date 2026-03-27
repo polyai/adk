@@ -418,7 +418,7 @@ class AgentStudioCLI:
 
         branches_parser = subparsers.add_parser(
             "branch",
-            parents=[verbose_parent],
+            parents=[verbose_parent, json_parent],
             help="Manage branches in the Agent Studio project.",
             description=(
                 "Manage branches in the Agent Studio project.\n\n"
@@ -434,14 +434,14 @@ class AgentStudioCLI:
 
         branch_list_parser = branch_subparsers.add_parser(
             "list",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent],
             help="List all branches in the project.",
         )
         branch_list_parser.set_defaults(branch_subcommand="list")
 
         branch_create_parser = branch_subparsers.add_parser(
             "create",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent],
             help="Create a new branch.",
         )
         branch_create_parser.add_argument(
@@ -451,7 +451,7 @@ class AgentStudioCLI:
 
         branch_switch_parser = branch_subparsers.add_parser(
             "switch",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent],
             help="Switch to a different branch.",
         )
         branch_switch_parser.add_argument(
@@ -488,7 +488,7 @@ class AgentStudioCLI:
 
         branch_current_parser = branch_subparsers.add_parser(
             "current",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent],
             help="Show the current branch.",
         )
         branch_current_parser.set_defaults(branch_subcommand="current")
