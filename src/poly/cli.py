@@ -348,7 +348,7 @@ class AgentStudioCLI:
         review_parser = subparsers.add_parser(
             "review",
             parents=[verbose_parent, json_parent],
-            help="Create an experience similar to a Pull Request, so that people can review changes locally or between versions/branches.",
+            help="Create a Pull Request-style review of Agent Studio project changes.",
             description=(
                 "Make a review page against project configuration in Agent Studio.\n\n"
                 "If you do not specify --before/--after, it compares your local project "
@@ -368,20 +368,6 @@ class AgentStudioCLI:
             formatter_class=RawTextHelpFormatter,
         )
         review_parser.add_argument(
-            "action",
-            nargs="?",
-            choices=["list", "delete"],
-            default=None,
-            help="Subcommand: 'list' to open a gist in the browser, 'delete' to remove gists.",
-        )
-        review_parser.add_argument(
-            "--id",
-            type=str,
-            default=None,
-            metavar="GIST_ID",
-            help="Gist ID (or first 7 characters) to delete.",
-        )
-        review_parser.add_argument(
             "--path",
             type=str,
             default=os.getcwd(),
@@ -397,54 +383,115 @@ class AgentStudioCLI:
             type=str,
             help="Name of the branch or version to compare with.",
         )
+        review_parser.set_defaults(review_subcommand=None)
+        review_subparsers = review_parser.add_subparsers(dest="review_subcommand")
+
+        review_list_parser = review_subparsers.add_parser(
+            "list",
+            parents=[json_parent],
+            help="Interactively select a review gist to open in the browser.",
+        )
+        review_list_parser.set_defaults(review_subcommand="list")
+
+        review_delete_parser = review_subparsers.add_parser(
+            "delete",
+            parents=[json_parent],
+            help="Interactively select and delete review gists.",
+        )
+        review_delete_parser.add_argument(
+            "--id",
+            type=str,
+            default=None,
+            metavar="GIST_ID",
+            help="Gist ID (or first 7 characters) to delete directly, skipping the interactive prompt.",
+        )
+        review_delete_parser.set_defaults(review_subcommand="delete")
 
         # Branch
-        # GET BRANCHES 'branch list'
-        branches_parser = subparsers.add_parser(
-            "branch",
-            parents=[verbose_parent, json_parent],
-            help="Manage branches in the Agent Studio project.",
-            description="Manage branches in the Agent Studio project.\n\nExamples:\n  poly branch list\n  poly branch create new-branch\n  poly branch switch existing-branch",
-            formatter_class=RawTextHelpFormatter,
-        )
-        branches_parser.add_argument(
+        branch_path_parent = ArgumentParser(add_help=False)
+        branch_path_parent.add_argument(
             "--path",
             type=str,
             default=os.getcwd(),
-            help="Base path to push the project. Defaults to current working directory.",
+            help="Base path to the project. Defaults to current working directory.",
         )
-        branches_parser.add_argument(
-            "action",
-            choices=["list", "create", "switch", "current"],
+
+        branches_parser = subparsers.add_parser(
+            "branch",
+            parents=[verbose_parent],
+            help="Manage branches in the Agent Studio project.",
+            description=(
+                "Manage branches in the Agent Studio project.\n\n"
+                "Examples:\n"
+                "  poly branch list\n"
+                "  poly branch create new-branch\n"
+                "  poly branch switch existing-branch\n"
+                "  poly branch current\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
         )
-        branches_parser.add_argument(
-            "branch_name", nargs="?", help="Name of the branch to create or switch to."
+        branch_subparsers = branches_parser.add_subparsers(dest="branch_subcommand", required=True)
+
+        branch_list_parser = branch_subparsers.add_parser(
+            "list",
+            parents=[branch_path_parent, json_parent],
+            help="List all branches in the project.",
         )
-        branches_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
-        branches_parser.add_argument(
+        branch_list_parser.set_defaults(branch_subcommand="list")
+
+        branch_create_parser = branch_subparsers.add_parser(
+            "create",
+            parents=[branch_path_parent, json_parent],
+            help="Create a new branch.",
+        )
+        branch_create_parser.add_argument(
+            "branch_name", nargs="?", help="Name of the branch to create."
+        )
+        branch_create_parser.set_defaults(branch_subcommand="create")
+
+        branch_switch_parser = branch_subparsers.add_parser(
+            "switch",
+            parents=[branch_path_parent, json_parent],
+            help="Switch to a different branch.",
+        )
+        branch_switch_parser.add_argument(
+            "branch_name", nargs="?", help="Name of the branch to switch to."
+        )
+        branch_switch_parser.add_argument(
+            "--debug", action="store_true", help="Display debug logs."
+        )
+        branch_switch_parser.add_argument(
             "--format",
             action="store_true",
             help="Format the project after switching branches.",
         )
-        branches_parser.add_argument(
+        branch_switch_parser.add_argument(
             "--force",
             "-f",
             action="store_true",
             help="Force switch to a different branch and discard changes.",
         )
-        branches_parser.add_argument(
+        branch_switch_parser.add_argument(
             "--from-projection",
             type=str,
             metavar="JSON|-",
             help=SUPPRESS,
             default=None,
         )
-        branches_parser.add_argument(
+        branch_switch_parser.add_argument(
             "--output-json-projection",
             action="store_true",
             help="Output the projection in json format",
             default=False,
         )
+        branch_switch_parser.set_defaults(branch_subcommand="switch")
+
+        branch_current_parser = branch_subparsers.add_parser(
+            "current",
+            parents=[branch_path_parent, json_parent],
+            help="Show the current branch.",
+        )
+        branch_current_parser.set_defaults(branch_subcommand="current")
 
         # FORMAT
         format_parser = subparsers.add_parser(
@@ -643,9 +690,9 @@ class AgentStudioCLI:
             cls.diff(args.path, args.files, args.json)
 
         elif args.command == "review":
-            if args.action == "delete":
+            if args.review_subcommand == "delete":
                 cls.delete_gists(gist_id=args.id, output_json=args.json)
-            elif args.action == "list":
+            elif args.review_subcommand == "list":
                 cls.list_gists(output_json=args.json)
             else:
                 if args.before and args.after:
@@ -659,13 +706,13 @@ class AgentStudioCLI:
                     cls.review(args.path, output_json=args.json)
 
         elif args.command == "branch":
-            if args.action == "list":
+            if args.branch_subcommand == "list":
                 cls.branch_list(args.path, args.json)
 
-            elif args.action == "create":
+            elif args.branch_subcommand == "create":
                 cls.branch_create(args.path, args.branch_name, args.json)
 
-            elif args.action == "switch":
+            elif args.branch_subcommand == "switch":
                 cls.branch_switch(
                     args.path,
                     args.branch_name,
@@ -676,7 +723,7 @@ class AgentStudioCLI:
                     from_projection=args.from_projection,
                 )
 
-            elif args.action == "current":
+            elif args.branch_subcommand == "current":
                 cls.get_current_branch(args.path, args.json)
 
         elif args.command == "format":
