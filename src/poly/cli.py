@@ -630,9 +630,9 @@ class AgentStudioCLI:
             help="Hash of the version to start from.",
         )
         deployments_parser.add_argument(
-            "--oneline",
+            "--details",
             action="store_true",
-            help="Output each deployment on one line.",
+            help="Output each deployment with detailed information.",
         )
         deployments_parser.add_argument(
             "--json",
@@ -764,7 +764,7 @@ class AgentStudioCLI:
 
         elif args.command == "deployments":
             cls.print_deployments(
-                args.path, args.env, args.limit, args.offset, args.hash, args.json, args.oneline
+                args.path, args.env, args.limit, args.offset, args.hash, args.json, args.details
             )
 
     @classmethod
@@ -1841,7 +1841,7 @@ class AgentStudioCLI:
         offset: int = 0,
         hash: str = None,
         output_json: bool = False,
-        one_line: bool = False,
+        details: bool = False,
     ) -> None:
         """Print deployments for the project."""
         project = cls._load_project(base_path)
@@ -1871,7 +1871,7 @@ class AgentStudioCLI:
             }
             print(json.dumps(json_output))
         else:
-            print_deployments(versions, active_deployment_hashes, one_line=one_line)
+            print_deployments(versions, active_deployment_hashes, details=details)
 
 
 def main():

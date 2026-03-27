@@ -7,6 +7,7 @@ Copyright PolyAI Limited
 
 import json
 import sys
+from datetime import datetime
 from typing import Any
 
 from rich.console import Console
@@ -232,46 +233,82 @@ def print_turn_metadata(
 # ── DEPLOYMENTS ───────────────────────────────────────────────────────
 
 
+def _format_deployment_timestamp_compact(created_at: str) -> str:
+    """Parse API timestamps (RFC 2822, ISO) and return a short UTC label."""
+    if not created_at:
+        return "-"
+    try:
+        dt = datetime.strptime(created_at, "%a, %d %b %Y %H:%M:%S %Z")
+        return dt.strftime("%d/%m/%y %H:%M")
+    except (TypeError, ValueError):
+        return "-"
+
+
 def print_deployments(
-    versions: list[dict[str, Any]], active_deployment_hashes: dict[str, str], one_line: bool = False
+    versions: list[dict[str, Any]], active_deployment_hashes: dict[str, str], details: bool = False
 ) -> None:
     """Print deployments for the project."""
+    table = None
+    if not details:
+        table = Table(
+            box=None,
+            show_header=False,
+            header_style="bold",
+            padding=(0, 1),
+        )
+        table.add_column("Type", style="cyan", no_wrap=True)
+        table.add_column("Hash", style="bold yellow", no_wrap=True, max_width=11)
+        table.add_column("When", no_wrap=True)
+        table.add_column("By", overflow="ellipsis", no_wrap=True)
+        table.add_column("Message", overflow="fold")
+        table.add_column("Active", overflow="fold")
     for version in versions:
-        deployment_message = version.get("deployment_metadata").get("deployment_message") or "-"
-        deployment_type = version.get("deployment_metadata").get("deployment_type")
-        created_at = version.get("created_at")
-        created_by = version.get("created_by")
+        meta = version.get("deployment_metadata", {})
+        deployment_message = meta.get("deployment_message") or "-"
+        deployment_type = meta.get("deployment_type")
+        created_at = version.get("created_at", "")
+        created_by = version.get("created_by", "")
         version_hash = version.get("version_hash")
-        deployment_id = version.get("id")
-        client_env = version.get("client_env")
-        artifact_version = version.get("artifact_version")
-        lambda_deployment_version = version.get("function_deployment_version")
 
         badges = []
         if active_deployment_hashes.get("sandbox") == version_hash:
-            badges.append("[cyan]Sandbox[/cyan]")
+            badges.append("[bold bright blue]sandbox[/bold bright blue]")
         if active_deployment_hashes.get("pre-release") == version_hash:
-            badges.append("[yellow]Pre-release[/yellow]")
+            badges.append("[bold yellow]pre-release[/bold yellow]")
         if active_deployment_hashes.get("live") == version_hash:
-            badges.append("[green]Live[/green]")
+            badges.append("[bold green]live[/bold green]")
 
-        badge_str = f" [bold]{' '.join(badges)}[/bold] " if badges else " "
-        if one_line:
-            console.print(
-                f"[bold][yellow]{version_hash[:9]}[/yellow][/bold] ([cyan]{deployment_type}[/cyan]) {deployment_message}{badge_str}[muted]{created_by}[/muted]"
+        badges_str = " ".join(badges) if badges else ""
+        if not details:
+            date_compact = _format_deployment_timestamp_compact(created_at)
+            table.add_row(
+                str(deployment_type or "—"),
+                (version_hash or "")[:9],
+                date_compact,
+                str(created_by or "—"),
+                deployment_message,
+                badges_str,
             )
         else:
+            deployment_id = version.get("id")
+            client_env = version.get("client_env")
+            artifact_version = version.get("artifact_version")
+            lambda_deployment_version = version.get("function_deployment_version")
             console.print(
-                f"[bold][yellow]{version_hash}[/yellow][/bold] ([cyan]{deployment_type}[/cyan]){badge_str}"
+                f"([cyan]{deployment_type}[/cyan]) [bold][yellow]{version_hash}[/yellow][/bold] {badges_str}"
             )
-            console.print(f"Date: [muted]{created_at}[/muted]")
-            console.print(f"By: [muted]{created_by}[/muted]")
-            console.print(f"Deployment ID: [muted]{deployment_id}[/muted]")
-            console.print(f"Artifact Version: [muted]{artifact_version}[/muted]")
-            console.print(f"Lambda Deployment Version: [muted]{lambda_deployment_version}[/muted]")
-            console.print(f"Client Environment: [cyan]{client_env}[/cyan]")
+            console.print(f"Date: {created_at}")
+            console.print(f"By: {created_by}")
+            console.print(f"Deployment ID: {deployment_id}")
+            console.print(f"Artifact Version: {artifact_version}")
+            console.print(f"Lambda Deployment Version: {lambda_deployment_version}")
+            console.print(f"Client Environment: {client_env}")
             console.print(f"Message: {deployment_message}")
             console.print()
+
+    if table:
+        console.print(table)
+        return
 
 
 # ── Error handling ───────────────────────────────────────────────────
