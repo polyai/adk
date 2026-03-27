@@ -1,6 +1,60 @@
 # CHANGELOG
 
 
+## v0.6.0 (2026-03-27)
+
+### Features
+
+- Add resource caching and progress spinner for init/pull/branch
+  ([#50](https://github.com/polyai/adk/pull/50),
+  [`2d4fc0a`](https://github.com/polyai/adk/commit/2d4fc0ae78c348d0cc9269d7f0749c83a06adedd))
+
+## Summary
+
+Batch `MultiResourceYamlResource` writes during `poly init` so each YAML file is written once
+  instead of once per resource, and add a progress spinner to `init`, `pull`, and `branch switch` so
+  the CLI doesn't appear stuck on large projects.
+
+Also edited CONTRIBUTING.md to edit the clone url - changed org to PolyAI.
+
+## Motivation
+
+`poly init` is very slow on projects with many pronunciations (or other multi-resource YAML types)
+  because `save()` rewrites the full YAML file for every single item. On large projects like pacden,
+  the process appears stuck with no output. The `save_to_cache` + `write_cache_to_file` pattern
+  already exists for `poly pull` — this reuses it for `init` and adds a progress spinner across all
+  three commands.
+
+## Changes
+
+- Use `save_to_cache=True` for all `MultiResourceYamlResource` saves during `init_project()`, then
+  flush to disk once via `write_cache_to_file()` - Add an optional `on_save(current, total)`
+  callback to `init_project()`, `pull_project()`, `_update_multi_resource_yaml_resources()`,
+  `_update_pulled_resources()`, and `switch_branch()` for progress reporting - Wire up
+  `console.status()` spinners in `cli.py` for `init`, `pull`, and `branch switch`, using
+  `nullcontext` to skip the spinner in `--json` mode - Progress counter includes both multi-resource
+  (per batch total) and non-multi-resource types for an accurate total
+
+- CONTRIBUTING.md to edit the clone url - changed org from PolyAI-LDN to PolyAI.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (361 tests, 0 failures)
+  - [x] No breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit
+  messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs Before: <img width="1683" height="1066" alt="Screenshot 2026-03-25 at 10 04
+  14 PM" src="https://github.com/user-attachments/assets/0dd22d4d-7c3a-4342-9dd4-3d6d1ec4c2ff" />
+
+After: <img width="1693" height="322" alt="Screenshot 2026-03-25 at 10 04 01 PM"
+  src="https://github.com/user-attachments/assets/b1f8441f-498c-40a3-bc3c-e7093c56c0a5" />
+
+
 ## v0.5.1 (2026-03-27)
 
 ### Bug Fixes
