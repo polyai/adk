@@ -348,7 +348,7 @@ class AgentStudioCLI:
         review_parser = subparsers.add_parser(
             "review",
             parents=[verbose_parent, json_parent],
-            help="Create a Pull Request-style review of Agent Studio project changes.",
+            help="Create a GitHub Gist of Agent Studio project changes to share changes.",
             description=(
                 "Make a review page against project configuration in Agent Studio.\n\n"
                 "If you do not specify --before/--after, it compares your local project "
