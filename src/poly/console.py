@@ -229,13 +229,13 @@ def print_turn_metadata(
         )
 
 
-# ── HISTORY ───────────────────────────────────────────────────────────
+# ── DEPLOYMENTS ───────────────────────────────────────────────────────
 
 
-def print_history(
+def print_deployments(
     versions: list[dict[str, Any]], active_deployment_hashes: dict[str, str], one_line: bool = False
 ) -> None:
-    """Print the change history of the project."""
+    """Print deployments for the project."""
     for version in versions:
         deployment_message = version.get("deployment_metadata").get("deployment_message") or "-"
         deployment_type = version.get("deployment_metadata").get("deployment_type")

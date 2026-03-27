@@ -35,7 +35,7 @@ from poly.console import (
     set_verbose,
     success,
     warning,
-    print_history,
+    print_deployments,
 )
 from poly.handlers.github_api_handler import GitHubAPIHandler
 from poly.handlers.interface import (
@@ -524,54 +524,54 @@ class AgentStudioCLI:
             help="Shell type to generate completions for.",
         )
 
-        # HISTORY
-        history_parser = subparsers.add_parser(
-            "history",
+        # DEPLOYMENTS
+        deployments_parser = subparsers.add_parser(
+            "deployments",
             parents=[verbose_parent],
-            help="Show the history of the project.",
-            description="Show the history of the project.",
+            help="List deployments for the project.",
+            description="List deployments for the project.",
             formatter_class=RawTextHelpFormatter,
         )
-        history_parser.add_argument(
+        deployments_parser.add_argument(
             "--path",
             type=str,
             default=os.getcwd(),
             help="Base path to the project. Defaults to current working directory.",
         )
-        history_parser.add_argument(
+        deployments_parser.add_argument(
             "--env",
             "-e",
             type=str,
             default="sandbox",
             choices=["sandbox", "pre-release", "live"],
-            help="Environment to show the change history for. Defaults to sandbox.",
+            help="Environment to list deployments for. Defaults to sandbox.",
         )
-        history_parser.add_argument(
+        deployments_parser.add_argument(
             "--limit",
             type=int,
             default=10,
             help="Number of versions to show. Defaults to 10.",
         )
-        history_parser.add_argument(
+        deployments_parser.add_argument(
             "--offset",
             type=int,
             default=0,
             help="Number of versions to skip. Defaults to 0.",
         )
-        history_parser.add_argument(
+        deployments_parser.add_argument(
             "--hash",
             type=str,
             help="Hash of the version to start from.",
         )
-        history_parser.add_argument(
+        deployments_parser.add_argument(
             "--oneline",
             action="store_true",
-            help="Output the change history in one line.",
+            help="Output each deployment on one line.",
         )
-        history_parser.add_argument(
+        deployments_parser.add_argument(
             "--json",
             action="store_true",
-            help="Output the change history in JSON format.",
+            help="Output deployments in JSON format.",
         )
 
         return parser
@@ -672,8 +672,8 @@ class AgentStudioCLI:
         elif args.command == "completion":
             cls.print_completion(args.shell)
 
-        elif args.command == "history":
-            cls.print_history(
+        elif args.command == "deployments":
+            cls.print_deployments(
                 args.path, args.env, args.limit, args.offset, args.hash, args.json, args.oneline
             )
 
@@ -1391,7 +1391,7 @@ class AgentStudioCLI:
             plain(content)
 
     @classmethod
-    def print_history(
+    def print_deployments(
         cls,
         base_path: str,
         environment: str = "sandbox",
@@ -1401,7 +1401,7 @@ class AgentStudioCLI:
         output_json: bool = False,
         one_line: bool = False,
     ) -> None:
-        """Print the change history of the project."""
+        """Print deployments for the project."""
         project = cls._load_project(base_path)
         versions, active_deployment_hashes = project.get_deployments(client_env=environment)
 
@@ -1429,7 +1429,7 @@ class AgentStudioCLI:
             }
             print(json.dumps(json_output))
         else:
-            print_history(versions, active_deployment_hashes, one_line=one_line)
+            print_deployments(versions, active_deployment_hashes, one_line=one_line)
 
 
 def main():
