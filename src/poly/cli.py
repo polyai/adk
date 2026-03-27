@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 from argparse import SUPPRESS, ArgumentParser, RawTextHelpFormatter
+from contextlib import nullcontext
 from importlib.metadata import version as get_package_version
 from typing import Any, Optional
 
@@ -887,14 +888,26 @@ class AgentStudioCLI:
             json_errors=output_json or output_json_projection,
         )
 
-        project, projection = AgentStudioProject.init_project(
-            base_path=base_path,
-            region=region,
-            account_id=account_id,
-            project_id=project_id,
-            format=format,
-            projection_json=projection_json,
+        ctx = (
+            console.status("[info]Saving resources...[/info]") if not output_json else nullcontext()
         )
+        on_save = None
+
+        with ctx as status:
+            if status:
+
+                def on_save(current: int, total: int) -> None:
+                    status.update(f"[info]Saving resources ({current}/{total})...[/info]")
+
+            project, projection = AgentStudioProject.init_project(
+                base_path=base_path,
+                region=region,
+                account_id=account_id,
+                project_id=project_id,
+                format=format,
+                projection_json=projection_json,
+                on_save=on_save,
+            )
 
         if not project:
             if output_json:
@@ -940,9 +953,22 @@ class AgentStudioCLI:
         )
 
         original_branch_id = project.branch_id
-        files_with_conflicts, projection = project.pull_project(
-            force=force, format=format, projection_json=projection_json
+
+        ctx = (
+            console.status("[info]Saving resources...[/info]") if not output_json else nullcontext()
         )
+        on_save = None
+
+        with ctx as status:
+            if status:
+
+                def on_save(current: int, total: int) -> None:
+                    status.update(f"[info]Saving resources ({current}/{total})...[/info]")
+
+            files_with_conflicts, projection = project.pull_project(
+                force=force, format=format, projection_json=projection_json, on_save=on_save
+            )
+
         new_branch_name = None
         if original_branch_id != project.branch_id:
             new_branch_name = project.get_current_branch()
@@ -1365,9 +1391,25 @@ class AgentStudioCLI:
             json_errors=output_json or output_json_projection,
         )
 
-        switch_ok, projection = project.switch_branch(
-            branch_name, force=force, format=format, projection_json=projection_json
+        ctx = (
+            console.status("[info]Saving resources...[/info]") if not output_json else nullcontext()
         )
+        on_save = None
+
+        with ctx as status:
+            if status:
+
+                def on_save(current: int, total: int) -> None:
+                    status.update(f"[info]Saving resources ({current}/{total})...[/info]")
+
+            switch_ok, projection = project.switch_branch(
+                branch_name,
+                force=force,
+                format=format,
+                projection_json=projection_json,
+                on_save=on_save,
+            )
+
         if output_json or output_json_projection:
             json_output = {
                 "success": switch_ok,
