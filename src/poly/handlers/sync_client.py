@@ -1061,6 +1061,7 @@ class SyncClientHandler:
             else:
                 logger.error(f"Branch ID:'{branch_id}' does not exist.")
                 return False
+        return False
 
     def create_branch(self, branch_name: Optional[str] = None) -> str:
         """Create a new branch for the project
