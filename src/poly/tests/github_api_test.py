@@ -298,21 +298,21 @@ class DeleteGistsTest(unittest.TestCase):
         AgentStudioCLI.delete_gists(gist_id="aaa1111111", output_json=True)
 
         mock_delete.assert_called_once_with("aaa1111111")
-        mock_json_print.assert_called_once_with({"deleted": ["aaa1111111"], "count": 1})
+        mock_json_print.assert_called_once_with({"success": True})
 
     @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
     @patch("poly.cli.GitHubAPIHandler.delete_gist")
     @patch("poly.cli.questionary")
     @patch("poly.cli.json_print")
-    def test_json_output_prints_deleted_ids(self, mock_json_print, mock_q, mock_delete, mock_list):
-        """With output_json=True, deleted gist IDs are printed as JSON rather than rich text."""
+    def test_json_output_prints_success(self, mock_json_print, mock_q, mock_delete, mock_list):
+        """With output_json=True, a success JSON object is printed after deletion."""
         mock_list.return_value = self.SAMPLE_GISTS
         first_choice = _format_gist_choice(self.SAMPLE_GISTS[0])
         mock_q.checkbox.return_value.ask.return_value = [first_choice]
 
         AgentStudioCLI.delete_gists(output_json=True)
 
-        mock_json_print.assert_called_once_with({"deleted": ["aaa1111111"], "count": 1})
+        mock_json_print.assert_called_once_with({"success": True})
 
 
 class ListGistsTest(unittest.TestCase):
@@ -421,6 +421,29 @@ class ReviewDescriptionTest(unittest.TestCase):
         AgentStudioCLI.review(base_path="/some/my-project")
 
         self.assertFalse(mock_create.call_args[1]["public"])
+
+    @patch("poly.cli.GitHubAPIHandler.create_gist", return_value="https://gist.github.com/xyz")
+    @patch("poly.cli.AgentStudioCLI._review", return_value={"file.diff": {"content": "+line"}})
+    @patch("poly.cli.json_print")
+    def test_json_output_prints_success_and_link(self, mock_json_print, mock_review, mock_create):
+        """With output_json=True, a successful review prints {success: true, link: url}."""
+        AgentStudioCLI.review(base_path="/some/my-project", output_json=True)
+
+        mock_json_print.assert_called_once_with(
+            {"success": True, "link": "https://gist.github.com/xyz"}
+        )
+
+    @patch("poly.cli.GitHubAPIHandler.create_gist")
+    @patch("poly.cli.AgentStudioCLI._review", return_value={})
+    @patch("poly.cli.json_print")
+    def test_json_output_empty_diff_prints_failure(self, mock_json_print, mock_review, mock_create):
+        """With output_json=True, an empty diff prints {success: false, message: ...}."""
+        AgentStudioCLI.review(base_path="/some/my-project", output_json=True)
+
+        mock_json_print.assert_called_once()
+        result = mock_json_print.call_args[0][0]
+        self.assertFalse(result["success"])
+        self.assertIn("message", result)
 
 
 if __name__ == "__main__":

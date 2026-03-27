@@ -379,7 +379,7 @@ class AgentStudioCLI:
             type=str,
             default=None,
             metavar="GIST_ID",
-            help="Gist ID (or first 7 characters) to delete directly, skipping the interactive prompt (used with 'delete').",
+            help="Gist ID (or first 7 characters) to delete.",
         )
         review_parser.add_argument(
             "--path",
@@ -653,9 +653,10 @@ class AgentStudioCLI:
                         base_path=args.path,
                         before_name=args.before,
                         after_name=args.after,
+                        output_json=args.json,
                     )
                 else:
-                    cls.review(args.path)
+                    cls.review(args.path, output_json=args.json)
 
         elif args.command == "branch":
             if args.action == "list":
@@ -1186,12 +1187,14 @@ class AgentStudioCLI:
         base_path: str,
         before_name: str = None,
         after_name: str = None,
+        output_json: bool = False,
     ) -> None:
         """Show the changes made to the project in a Pull Request format.
         Args:
             base_path: Base path for the project (used to read project config)
             before_name: Optional name of base branch (for comparing two remote branches)
             after_name: Optional name of compare branch (for comparing two remote branches)
+            output_json: If True, print result as a JSON object instead of rich text
         """
         project_name = "/".join(os.path.abspath(base_path).split(os.sep)[-2:])
         if before_name and after_name:
@@ -1206,6 +1209,8 @@ class AgentStudioCLI:
             description = f"{project_name}: local → remote"
 
         if not body:
+            if output_json:
+                json_print({"success": False, "message": "No changes to review."})
             return
 
         try:
@@ -1214,12 +1219,20 @@ class AgentStudioCLI:
                 description=description,
                 public=False,
             )
-            success(f"Gist created: {url}")
+            if output_json:
+                json_print({"success": True, "link": url})
+            else:
+                success(f"Gist created: {url}")
         except requests.HTTPError as e:
-            error(f"GitHub API error: {e}")
+            if output_json:
+                json_print({"success": False, "message": f"GitHub API error: {e}"})
+            else:
+                error(f"GitHub API error: {e}")
         except OSError as e:
-            error(str(e))
-        return
+            if output_json:
+                json_print({"success": False, "message": str(e)})
+            else:
+                error(str(e))
 
     @classmethod
     def list_gists(cls, output_json: bool = False) -> None:
@@ -1258,10 +1271,16 @@ class AgentStudioCLI:
         try:
             gists = GitHubAPIHandler.list_diff_gists()
         except requests.HTTPError as e:
-            error(f"GitHub API error: {e}")
+            if output_json:
+                json_print({"success": False, "message": f"GitHub API error: {e}"})
+            else:
+                error(f"GitHub API error: {e}")
             return
         except OSError as e:
-            error(str(e))
+            if output_json:
+                json_print({"success": False, "message": str(e)})
+            else:
+                error(str(e))
             return
 
         if gist_id:
@@ -1274,18 +1293,29 @@ class AgentStudioCLI:
                 None,
             )
             if not matched:
-                error(f"No review gist found matching '{gist_id}'.")
+                if output_json:
+                    json_print(
+                        {"success": False, "message": f"No review gist found matching '{gist_id}'."}
+                    )
+                else:
+                    error(f"No review gist found matching '{gist_id}'.")
                 return
             try:
                 GitHubAPIHandler.delete_gist(matched["id"])
             except requests.HTTPError as e:
-                error(f"GitHub API error: {e}")
+                if output_json:
+                    json_print({"success": False, "message": f"GitHub API error: {e}"})
+                else:
+                    error(f"GitHub API error: {e}")
                 return
             except OSError as e:
-                error(str(e))
+                if output_json:
+                    json_print({"success": False, "message": str(e)})
+                else:
+                    error(str(e))
                 return
             if output_json:
-                json_print({"deleted": [matched["id"]], "count": 1})
+                json_print({"success": True})
             else:
                 success(f"Deleted gist: {matched['id']}")
             return
@@ -1303,21 +1333,25 @@ class AgentStudioCLI:
             return
 
         try:
-            deleted_ids = []
             for description in selected:
                 gist_id = description_to_id[description]
                 GitHubAPIHandler.delete_gist(gist_id)
-                deleted_ids.append(gist_id)
                 if not output_json:
                     plain(f"  [muted]Deleted gist:[/muted] {description}")
             if output_json:
-                json_print({"deleted": deleted_ids, "count": len(deleted_ids)})
+                json_print({"success": True})
             else:
                 success(f"Deleted {len(selected)} gist(s).")
         except requests.HTTPError as e:
-            error(f"GitHub API error: {e}")
+            if output_json:
+                json_print({"success": False, "message": f"GitHub API error: {e}"})
+            else:
+                error(f"GitHub API error: {e}")
         except OSError as e:
-            error(str(e))
+            if output_json:
+                json_print({"success": False, "message": str(e)})
+            else:
+                error(str(e))
 
     @classmethod
     def branch_list(cls, base_path: str, output_json: bool = False) -> None:
