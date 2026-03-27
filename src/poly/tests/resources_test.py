@@ -14,6 +14,15 @@ from poly.resources.agent_settings import (
     SettingsRole,
     SettingsRules,
 )
+from poly.resources.api_integration import (
+    AVAILABLE_AUTH_TYPES,
+    AVAILABLE_OPERATIONS,
+    URL_PATTERN,
+    ApiIntegration,
+    ApiIntegrationConfig,
+    ApiIntegrationEnvironments,
+    ApiIntegrationOperation,
+)
 from poly.resources.asr_settings import AsrSettings
 from poly.resources.channel_settings import (
     ChatGreeting,
@@ -4747,6 +4756,228 @@ class HandoffTests(unittest.TestCase):
         self.assertIn("H1", discovered[0])
 
 
+class ApiIntegrationTest(unittest.TestCase):
+    """Tests for ApiIntegration, ApiIntegrationConfig, Environments, ApiIntegrationOperation."""
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+
+    def test_api_integration_config_from_dict_and_to_proto(self):
+        """ApiIntegrationConfig from_dict handles None, empty, and camelCase; to_proto returns proto."""
+        c = ApiIntegrationConfig.from_dict(None)
+        self.assertEqual(c.base_url, "")
+        self.assertEqual(c.auth_type, "none")
+        c = ApiIntegrationConfig.from_dict({"baseUrl": "https://api.example.com", "authType": "oauth2"})
+        self.assertEqual(c.base_url, "https://api.example.com")
+        self.assertEqual(c.auth_type, "oauth2")
+        proto = c.to_proto()
+        self.assertEqual(proto.base_url, "https://api.example.com")
+        self.assertEqual(proto.auth_type, "oauth2")
+
+    def test_api_integration_config_build_config_update_proto(self):
+        """build_config_update_proto returns ApiIntegrationConfig_Update with integration_id and environment."""
+        c = ApiIntegrationConfig(base_url="https://sandbox.example.com", auth_type="api_key")
+        update = c.build_config_update_proto("int-123", "sandbox")
+        self.assertEqual(update.id, "int-123")
+        self.assertEqual(update.environment, "sandbox")
+        self.assertEqual(update.base_url, "https://sandbox.example.com")
+        self.assertEqual(update.auth_type, "api_key")
+
+    def test_environments_from_dict_and_to_proto(self):
+        """Environments from_dict and to_proto roundtrip."""
+        env = ApiIntegrationEnvironments.from_dict(None)
+        self.assertEqual(env.sandbox.base_url, "")
+        data = {
+            "sandbox": {"base_url": "https://sb.com", "auth_type": "oauth2"},
+            "live": {"base_url": "https://live.com", "auth_type": "none"},
+        }
+        env = ApiIntegrationEnvironments.from_dict(data)
+        self.assertEqual(env.sandbox.base_url, "https://sb.com")
+        self.assertEqual(env.live.auth_type, "none")
+        proto = env.to_proto()
+        self.assertEqual(proto.sandbox.base_url, "https://sb.com")
+        self.assertEqual(proto.live.auth_type, "none")
+
+    def test_api_integration_operation_from_dict_and_protos(self):
+        """ApiIntegrationOperation from_dict sets resource_id from id; build_*_proto set integration_id."""
+        op = ApiIntegrationOperation.from_dict(None)
+        self.assertEqual(op.resource_id, "")
+        self.assertEqual(op.name, "")
+        op = ApiIntegrationOperation.from_dict({
+            "id": "op-abc",
+            "name": "get_ticket",
+            "method": "GET",
+            "resource": "/tickets/{id}",
+        })
+        self.assertEqual(op.resource_id, "op-abc")
+        self.assertEqual(op.name, "get_ticket")
+        self.assertEqual(op.method, "GET")
+        self.assertEqual(op.resource, "/tickets/{id}")
+        self.assertEqual(op.command_type, "api_integration_operation")
+        op.integration_id = "int-1"
+        create = op.build_create_proto()
+        self.assertEqual(create.id, "op-abc")
+        self.assertEqual(create.integration_id, "int-1")
+        self.assertEqual(create.name, "get_ticket")
+        update = op.build_update_proto()
+        self.assertEqual(update.id, "op-abc")
+        self.assertEqual(update.integration_id, "int-1")
+        delete = op.build_delete_proto()
+        self.assertEqual(delete.id, "op-abc")
+        self.assertEqual(delete.integration_id, "int-1")
+
+    def test_api_integration_file_path_and_command_type(self):
+        """ApiIntegration file_path includes name segment; command_type and update_command_type."""
+        i = ApiIntegration(resource_id="int-1", name="My API", description="Desc")
+        self.assertIn("config", i.file_path)
+        self.assertIn("api_integrations.yaml", i.file_path)
+        self.assertIn("api_integrations", i.file_path)
+        self.assertIn("My_API", i.file_path)
+        self.assertEqual(i.command_type, "api_integration")
+        self.assertEqual(i.update_command_type, "update_api_integration")
+
+    def test_api_integration_to_yaml_dict_and_from_yaml_dict(self):
+        """ApiIntegration to_yaml_dict and from_yaml_dict roundtrip with environments and operations."""
+        env = ApiIntegrationEnvironments.from_dict({
+            "sandbox": {"base_url": "https://sb.com", "auth_type": "none"},
+        })
+        ops = [
+            ApiIntegrationOperation(resource_id="op-1", name="get", method="GET", resource="/x"),
+        ]
+        i = ApiIntegration(
+            resource_id="int-1",
+            name="TestAPI",
+            description="Description",
+            environments=env,
+            operations=ops,
+        )
+        d = i.to_yaml_dict()
+        self.assertEqual(d["name"], "TestAPI")
+        self.assertEqual(d["description"], "Description")
+        self.assertIn("environments", d)
+        self.assertEqual(d["environments"]["sandbox"]["base_url"], "https://sb.com")
+        self.assertEqual(len(d["operations"]), 1)
+        self.assertEqual(d["operations"][0]["name"], "get")
+        i2 = ApiIntegration.from_yaml_dict(d, resource_id="int-1", name="TestAPI")
+        self.assertEqual(i2.resource_id, "int-1")
+        self.assertEqual(i2.name, "TestAPI")
+        self.assertEqual(i2.environments.sandbox.base_url, "https://sb.com")
+        self.assertEqual(len(i2.operations), 1)
+        self.assertEqual(i2.operations[0].name, "get")
+        self.assertEqual(i2.operations[0].resource_id, "")
+
+    def test_api_integration_build_protos(self):
+        """ApiIntegration build_create_proto, build_update_proto, build_delete_proto set id and environments."""
+        env = ApiIntegrationEnvironments.from_dict({"sandbox": {"base_url": "https://x.com", "auth_type": "none"}})
+        i = ApiIntegration(resource_id="int-1", name="API", description="D", environments=env)
+        create = i.build_create_proto()
+        self.assertEqual(create.id, "int-1")
+        self.assertEqual(create.name, "API")
+        self.assertEqual(create.description, "D")
+        self.assertEqual(create.environments.sandbox.base_url, "https://x.com")
+        update = i.build_update_proto()
+        self.assertEqual(update.id, "int-1")
+        self.assertEqual(update.name, "API")
+        delete = i.build_delete_proto()
+        self.assertEqual(delete.id, "int-1")
+
+    def test_api_integration_get_new_updated_deleted_subresources(self):
+        """get_new_updated_deleted_subresources returns new/updated/deleted operations with integration_id set."""
+        op1 = ApiIntegrationOperation(resource_id="op-1", name="get", method="GET", resource="/a")
+        op2 = ApiIntegrationOperation(resource_id="op-2", name="post", method="POST", resource="/b")
+        new_integration = ApiIntegration(
+            resource_id="int-1",
+            name="API",
+            operations=[op1, op2],
+        )
+        new_ops, updated_ops, deleted_ops = new_integration.get_new_updated_deleted_subresources(None)
+        self.assertEqual(len(new_ops), 2)
+        self.assertEqual(len(updated_ops), 0)
+        self.assertEqual(len(deleted_ops), 0)
+        self.assertEqual(new_ops[0].integration_id, "int-1")
+        self.assertEqual(new_ops[1].integration_id, "int-1")
+
+        old_integration = ApiIntegration(
+            resource_id="int-1",
+            name="API",
+            operations=[
+                ApiIntegrationOperation(resource_id="op-1", name="get", method="GET", resource="/a"),
+                ApiIntegrationOperation(resource_id="op-3", name="delete", method="DELETE", resource="/c"),
+            ],
+        )
+        current = ApiIntegration(
+            resource_id="int-1",
+            name="API",
+            operations=[
+                ApiIntegrationOperation(resource_id="op-1", name="get_renamed", method="GET", resource="/a"),
+                op2,
+            ],
+        )
+        new_ops, updated_ops, deleted_ops = current.get_new_updated_deleted_subresources(old_integration)
+        self.assertEqual(len(new_ops), 1)
+        self.assertEqual(new_ops[0].name, "post")
+        self.assertEqual(len(updated_ops), 1)
+        self.assertEqual(updated_ops[0].name, "get_renamed")
+        self.assertEqual(len(deleted_ops), 1)
+        self.assertEqual(deleted_ops[0].name, "delete")
+        self.assertEqual(deleted_ops[0].integration_id, "int-1")
+
+    def test_api_integration_discover_resources(self):
+        """discover_resources returns [] when no file; returns paths for each integration in the list."""
+        import tempfile
+        self.assertEqual(ApiIntegration.discover_resources("/nonexistent"), [])
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, "config")
+            os.makedirs(config_dir, exist_ok=True)
+            yaml_path = os.path.join(config_dir, "api_integrations.yaml")
+            with open(yaml_path, "w") as f:
+                yaml.dump({
+                    "api_integrations": [
+                        {"name": "API One", "description": "First"},
+                        {"name": "API Two", "description": "Second"},
+                    ],
+                }, f)
+            discovered = ApiIntegration.discover_resources(tmpdir)
+            self.assertEqual(len(discovered), 2)
+            self.assertIn("api_integrations.yaml", discovered[0])
+            self.assertIn("API_One", discovered[0])
+            self.assertIn("API_Two", discovered[1])
+
+    def test_api_integration_read_local_resource(self):
+        """read_local_resource loads integration from multi-resource path and returns ApiIntegration."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            config_dir = os.path.join(tmpdir, "config")
+            os.makedirs(config_dir, exist_ok=True)
+            yaml_path = os.path.join(config_dir, "api_integrations.yaml")
+            with open(yaml_path, "w") as f:
+                yaml.dump({
+                    "api_integrations": [
+                        {
+                            "name": "TestAPI",
+                            "description": "A test",
+                            "environments": {
+                                "sandbox": {"base_url": "https://sb.com", "auth_type": "none"},
+                            },
+                            "operations": [{"name": "get", "method": "GET", "resource": "/x"}],
+                        },
+                    ],
+                }, f)
+            resource_path = os.path.join(yaml_path, "api_integrations", "TestAPI")
+            integration = ApiIntegration.read_local_resource(
+                file_path=resource_path,
+                resource_id="int-1",
+                resource_name="TestAPI",
+            )
+            self.assertEqual(integration.resource_id, "int-1")
+            self.assertEqual(integration.name, "TestAPI")
+            self.assertEqual(integration.description, "A test")
+            self.assertEqual(integration.environments.sandbox.base_url, "https://sb.com")
+            self.assertEqual(len(integration.operations), 1)
+            self.assertEqual(integration.operations[0].name, "get")
+            self.assertEqual(integration.operations[0].method, "GET")
+
+
 class VariableTest(unittest.TestCase):
     """Basic tests for the Variable resource."""
 
@@ -5480,6 +5711,264 @@ class TranscriptCorrectionTests(unittest.TestCase):
             result.regular_expressions[0].regular_expression,
             "at gmail dot com",
         )
+
+
+class TestApiIntegrationValidate(unittest.TestCase):
+    """Tests for ApiIntegration.validate()."""
+
+    def _make_integration(self, **kwargs):
+        """Helper to build an ApiIntegration with sensible defaults."""
+        defaults = {
+            "resource_id": "int-1",
+            "name": "my_api",
+            "description": "A valid description",
+            "operations": [
+                ApiIntegrationOperation(
+                    resource_id="op-1", name="list_users", method="GET", resource="/users"
+                ),
+            ],
+        }
+        defaults.update(kwargs)
+        return ApiIntegration(**defaults)
+
+    def test_valid_integration_does_not_raise(self):
+        """A fully valid integration passes validation without error."""
+        integration = self._make_integration()
+        integration.validate()
+
+    def test_empty_environments_defaults_to_none_auth_type(self):
+        """An integration with no environments set defaults without raising."""
+        integration = self._make_integration(environments=None)
+        integration.validate()  # should not raise; defaults fill in auth_type="none"
+
+    def test_environment_with_missing_auth_type_defaults_to_none(self):
+        """auth_type missing from YAML is coerced to 'none' by from_dict."""
+        env = ApiIntegrationEnvironments.from_dict(
+            {"sandbox": {"base_url": "https://sb.example.com"}}
+        )
+        self.assertEqual(env.sandbox.auth_type, "none")
+
+    def test_environment_with_empty_auth_type_defaults_to_none(self):
+        """auth_type set to empty string in YAML is coerced to 'none' by from_dict."""
+        env = ApiIntegrationEnvironments.from_dict(
+            {"sandbox": {"base_url": "https://sb.example.com", "auth_type": ""}}
+        )
+        self.assertEqual(env.sandbox.auth_type, "none")
+
+    def test_environment_with_invalid_auth_type_raises_value_error(self):
+        """Validation rejects an environment whose auth_type is not in AVAILABLE_AUTH_TYPES."""
+        integration = self._make_integration(
+            environments=ApiIntegrationEnvironments.from_dict(
+                {"sandbox": {"base_url": "https://sb.example.com", "auth_type": "bearer"}}
+            )
+        )
+        with self.assertRaises(ValueError) as ctx:
+            integration.validate()
+        self.assertIn("bearer", str(ctx.exception))
+        self.assertIn("must be one of", str(ctx.exception))
+        for auth_type in AVAILABLE_AUTH_TYPES:
+            self.assertIn(auth_type, str(ctx.exception))
+
+    def test_environment_with_invalid_base_url_raises_value_error(self):
+        """Validation rejects an environment whose base_url is not a valid URL."""
+        integration = self._make_integration(
+            environments=ApiIntegrationEnvironments.from_dict(
+                {"sandbox": {"base_url": "not-a-url", "auth_type": "none"}}
+            )
+        )
+        with self.assertRaises(ValueError) as ctx:
+            integration.validate()
+        self.assertIn("not a valid URL path", str(ctx.exception))
+        self.assertIn("sandbox", str(ctx.exception))
+
+    def test_environment_with_empty_base_url_is_valid(self):
+        """An empty base_url is allowed when auth_type is 'none'."""
+        integration = self._make_integration(
+            environments=ApiIntegrationEnvironments.from_dict(
+                {"sandbox": {"base_url": "", "auth_type": "none"}}
+            )
+        )
+        integration.validate()  # should not raise
+
+    def test_environment_with_empty_base_url_and_non_none_auth_type_raises(self):
+        """An empty base_url is invalid when auth_type is set to something other than 'none'."""
+        integration = self._make_integration(
+            environments=ApiIntegrationEnvironments.from_dict(
+                {"sandbox": {"base_url": "", "auth_type": "oauth2"}}
+            )
+        )
+        with self.assertRaises(ValueError) as ctx:
+            integration.validate()
+        self.assertIn("base_url cannot be empty", str(ctx.exception))
+        self.assertIn("sandbox", str(ctx.exception))
+
+    def test_url_pattern_accepts_http_and_https(self):
+        """URL_PATTERN matches valid http and https base URLs."""
+        self.assertTrue(URL_PATTERN.fullmatch("https://api.example.com"))
+        self.assertTrue(URL_PATTERN.fullmatch("http://api.example.com/v1"))
+        self.assertTrue(URL_PATTERN.fullmatch(""))
+        self.assertFalse(URL_PATTERN.fullmatch("not-a-url"))
+        self.assertFalse(URL_PATTERN.fullmatch("ftp://api.example.com"))
+
+    def test_empty_name_raises_value_error(self):
+        """Validation rejects an integration whose name is empty."""
+        integration = self._make_integration(name="")
+        with self.assertRaises(ValueError, msg="Name cannot be empty."):
+            integration.validate()
+
+    def test_operation_with_empty_name_raises_value_error(self):
+        """Validation rejects an operation whose name is empty."""
+        integration = self._make_integration(
+            operations=[
+                ApiIntegrationOperation(resource_id="op-1", name="", method="GET", resource="/x"),
+            ]
+        )
+        with self.assertRaises(ValueError, msg="Operation name cannot be empty."):
+            integration.validate()
+
+    def test_operation_method_is_normalised_to_uppercase(self):
+        """Lowercase method in YAML is normalised to uppercase and accepted."""
+        integration = self._make_integration(
+            operations=[{"name": "list_users", "method": "get", "resource": "/users"}]
+        )
+        integration.validate()  # should not raise
+        op = ApiIntegrationOperation.from_dict({"name": "list_users", "method": "post", "resource": "/users"})
+        self.assertEqual(op.method, "POST")
+
+    def test_operation_with_empty_method_raises_value_error(self):
+        """Validation rejects an operation whose method is empty."""
+        integration = self._make_integration(
+            operations=[
+                ApiIntegrationOperation(
+                    resource_id="op-1", name="get_users", method="", resource="/users"
+                ),
+            ]
+        )
+        with self.assertRaises(ValueError) as ctx:
+            integration.validate()
+        self.assertIn("method cannot be empty", str(ctx.exception))
+        self.assertIn("get_users", str(ctx.exception))
+
+    def test_operation_with_invalid_method_raises_value_error(self):
+        """Validation rejects an operation whose method is not in AVAILABLE_OPERATIONS."""
+        integration = self._make_integration(
+            operations=[
+                ApiIntegrationOperation(
+                    resource_id="op-1", name="get_users", method="INVALID", resource="/users"
+                ),
+            ]
+        )
+        with self.assertRaises(ValueError) as ctx:
+            integration.validate()
+        self.assertIn("INVALID", str(ctx.exception))
+        self.assertIn("must be one of", str(ctx.exception))
+        for method in AVAILABLE_OPERATIONS:
+            self.assertIn(method, str(ctx.exception))
+
+    def test_operation_with_empty_resource_raises_value_error(self):
+        """Validation rejects an operation whose resource is empty."""
+        integration = self._make_integration(
+            operations=[
+                ApiIntegrationOperation(
+                    resource_id="op-1", name="get_users", method="GET", resource=""
+                ),
+            ]
+        )
+        with self.assertRaises(ValueError) as ctx:
+            integration.validate()
+        self.assertIn("resource cannot be empty", str(ctx.exception))
+        self.assertIn("get_users", str(ctx.exception))
+
+    def test_operation_with_invalid_resource_raises_value_error(self):
+        """Validation rejects an operation whose resource is not a valid URL path."""
+        integration = self._make_integration(
+            operations=[
+                ApiIntegrationOperation(
+                    resource_id="op-1", name="get_users", method="GET", resource="users"
+                ),
+            ]
+        )
+        with self.assertRaises(ValueError) as ctx:
+            integration.validate()
+        self.assertIn("not a valid URL path", str(ctx.exception))
+        self.assertIn("get_users", str(ctx.exception))
+
+    def test_operation_resource_with_path_params_is_valid(self):
+        """Validation accepts resources with {param} placeholders."""
+        integration = self._make_integration(
+            operations=[
+                ApiIntegrationOperation(
+                    resource_id="op-1", name="get_user", method="GET", resource="/users/{user_id}"
+                ),
+            ]
+        )
+        integration.validate()  # should not raise
+
+    def test_duplicate_operation_name_and_method_raises_value_error(self):
+        """Validation rejects two operations that share the same name and method."""
+        integration = self._make_integration(
+            operations=[
+                ApiIntegrationOperation(
+                    resource_id="op-1", name="get_users", method="GET", resource="/users"
+                ),
+                ApiIntegrationOperation(
+                    resource_id="op-2", name="get_users", method="GET", resource="/users/list"
+                ),
+            ]
+        )
+        with self.assertRaises(ValueError) as ctx:
+            integration.validate()
+        self.assertIn("Duplicate operation", str(ctx.exception))
+        self.assertIn("get_users", str(ctx.exception))
+        self.assertIn("GET", str(ctx.exception))
+
+    def test_same_name_different_method_is_allowed(self):
+        """Two operations with the same name but different methods are valid."""
+        integration = self._make_integration(
+            operations=[
+                ApiIntegrationOperation(
+                    resource_id="op-1", name="get_users", method="GET", resource="/users"
+                ),
+                ApiIntegrationOperation(
+                    resource_id="op-2", name="get_users", method="POST", resource="/users"
+                ),
+            ]
+        )
+        integration.validate()  # should not raise
+
+    def test_multiple_valid_operations_pass(self):
+        """An integration with multiple distinct, complete operations is valid."""
+        integration = self._make_integration(
+            operations=[
+                ApiIntegrationOperation(
+                    resource_id="op-1", name="list_users", method="GET", resource="/users"
+                ),
+                ApiIntegrationOperation(
+                    resource_id="op-2", name="create_user", method="POST", resource="/users"
+                ),
+            ]
+        )
+        integration.validate()
+
+    def test_no_operations_is_valid(self):
+        """An integration with zero operations passes validation."""
+        integration = self._make_integration(operations=[])
+        integration.validate()
+
+    def test_operation_as_dict_is_normalized(self):
+        """Validation handles operations stored as raw dicts (via _normalize_op)."""
+        integration = self._make_integration(
+            operations=[{"name": "get_users", "method": "GET", "resource": "/users"}]
+        )
+        integration.validate()
+
+    def test_operation_dict_with_empty_name_raises(self):
+        """Validation catches empty name even when the operation is a raw dict."""
+        integration = self._make_integration(
+            operations=[{"name": "", "method": "GET", "resource": "/users"}]
+        )
+        with self.assertRaises(ValueError, msg="Operation name cannot be empty."):
+            integration.validate()
 
 
 if __name__ == "__main__":

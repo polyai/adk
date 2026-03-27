@@ -12,15 +12,15 @@ import os
 import shutil
 import subprocess
 import sys
-from argparse import ArgumentParser, RawTextHelpFormatter
+from argparse import SUPPRESS, ArgumentParser, RawTextHelpFormatter
 from importlib.metadata import version as get_package_version
-from typing import Optional
+from typing import Any, Optional
 
 import argcomplete
 import requests
 import questionary
 
-from poly.console import (
+from poly.output.console import (
     console,
     error,
     handle_exception,
@@ -37,6 +37,7 @@ from poly.console import (
     warning,
     print_deployments,
 )
+from poly.output.json_output import json_print, commands_to_dicts
 from poly.handlers.github_api_handler import GitHubAPIHandler
 from poly.handlers.interface import (
     REGIONS,
@@ -82,6 +83,13 @@ class AgentStudioCLI:
             help="Show full error tracebacks for debugging.",
         )
 
+        json_parent = ArgumentParser(add_help=False)
+        json_parent.add_argument(
+            "--json",
+            action="store_true",
+            help="Print a single JSON object on stdout (machine-readable).",
+        )
+
         subparsers = parser.add_subparsers(dest="command", required=True)
 
         # DOCS
@@ -116,7 +124,7 @@ class AgentStudioCLI:
         # INIT
         init_parser = subparsers.add_parser(
             "init",
-            parents=[verbose_parent],
+            parents=[verbose_parent, json_parent],
             help="Initialize a new Agent Studio project.",
             description="Initialize a new Agent Studio project.\n\nExamples:\n  poly init --region eu-west-1 --account_id 123 --project_id my_project\n  poly init  # (interactive selection)",
             formatter_class=RawTextHelpFormatter,
@@ -148,12 +156,25 @@ class AgentStudioCLI:
         init_parser.add_argument(
             "--format", action="store_true", help="Format resources after init."
         )
+        init_parser.add_argument(
+            "--from-projection",
+            type=str,
+            metavar="JSON|-",
+            help=SUPPRESS,
+            default=None,
+        )
+        init_parser.add_argument(
+            "--output-json-projection",
+            action="store_true",
+            help=SUPPRESS,
+            default=False,
+        )
         init_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
 
         # PULL
         pull_parser = subparsers.add_parser(
             "pull",
-            parents=[verbose_parent],
+            parents=[verbose_parent, json_parent],
             help="Pull the latest project configuration from Agent Studio.",
             description="Pull the latest project configuration from Agent Studio.\n\nExamples:\n  poly pull --path /path/to/project\n  poly pull -f  # force overwrite local changes",
             formatter_class=RawTextHelpFormatter,
@@ -176,12 +197,25 @@ class AgentStudioCLI:
             help="Format resources after pulling.",
             default=False,
         )
+        pull_parser.add_argument(
+            "--from-projection",
+            type=str,
+            metavar="JSON|-",
+            help=SUPPRESS,
+            default=None,
+        )
+        pull_parser.add_argument(
+            "--output-json-projection",
+            action="store_true",
+            help=SUPPRESS,
+            default=False,
+        )
         pull_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
 
         # PUSH
         push_parser = subparsers.add_parser(
             "push",
-            parents=[verbose_parent],
+            parents=[verbose_parent, json_parent],
             help="Push the project configuration to Agent Studio.",
             description="Push the project configuration to Agent Studio.\n\nExamples:\n  poly push --path /path/to/project\n  poly push --skip-validation --dry-run",
             formatter_class=RawTextHelpFormatter,
@@ -215,11 +249,30 @@ class AgentStudioCLI:
             default=False,
         )
         push_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
+        push_parser.add_argument(
+            "--from-projection",
+            type=str,
+            metavar="JSON|-",
+            help=SUPPRESS,
+            default=None,
+        )
+        push_parser.add_argument(
+            "--output-json-commands",
+            action="store_true",
+            help=SUPPRESS,
+            default=False,
+        )
+        push_parser.add_argument(
+            "--email",
+            type=str,
+            help="Email to use for metadata creation for push",
+            default=None,
+        )
 
         # STATUS
         status_parser = subparsers.add_parser(
             "status",
-            parents=[verbose_parent],
+            parents=[verbose_parent, json_parent],
             help="Check the changed files of the project.",
             description="Check the changed files of the project.\n\nExamples:\n  poly status\n  poly status --path /path/to/project",
             formatter_class=RawTextHelpFormatter,
@@ -236,7 +289,7 @@ class AgentStudioCLI:
         # REVERT
         revert_parser = subparsers.add_parser(
             "revert",
-            parents=[verbose_parent],
+            parents=[verbose_parent, json_parent],
             help="Revert changes in the project.",
             description="Revert changes in the project.\n\nExamples:\n  poly revert\n  poly revert --files file1.yaml file2.yaml",
             formatter_class=RawTextHelpFormatter,
@@ -258,7 +311,7 @@ class AgentStudioCLI:
         # DIFF
         diff_parser = subparsers.add_parser(
             "diff",
-            parents=[verbose_parent],
+            parents=[verbose_parent, json_parent],
             help="Show the changes made to the project.",
             description="Show the changes made to the project.\n\nExamples:\n  poly diff\n  poly diff file1.yaml",
             formatter_class=RawTextHelpFormatter,
@@ -351,7 +404,7 @@ class AgentStudioCLI:
         # GET BRANCHES 'branch list'
         branches_parser = subparsers.add_parser(
             "branch",
-            parents=[verbose_parent],
+            parents=[verbose_parent, json_parent],
             help="Manage branches in the Agent Studio project.",
             description="Manage branches in the Agent Studio project.\n\nExamples:\n  poly branch list\n  poly branch create new-branch\n  poly branch switch existing-branch",
             formatter_class=RawTextHelpFormatter,
@@ -381,11 +434,24 @@ class AgentStudioCLI:
             action="store_true",
             help="Force switch to a different branch and discard changes.",
         )
+        branches_parser.add_argument(
+            "--from-projection",
+            type=str,
+            metavar="JSON|-",
+            help=SUPPRESS,
+            default=None,
+        )
+        branches_parser.add_argument(
+            "--output-json-projection",
+            action="store_true",
+            help="Output the projection in json format",
+            default=False,
+        )
 
         # FORMAT
         format_parser = subparsers.add_parser(
             "format",
-            parents=[verbose_parent],
+            parents=[verbose_parent, json_parent],
             help="Run ruff and YAML/JSON formatting on the project (optional ty with --ty).",
             description=(
                 "Run ruff (lint + format) on Python and formatting on YAML/JSON resources.\n\n"
@@ -423,7 +489,7 @@ class AgentStudioCLI:
         # Validate
         validate_parser = subparsers.add_parser(
             "validate",
-            parents=[verbose_parent],
+            parents=[verbose_parent, json_parent],
             help="Validate the project configuration locally.",
             description="Validate the project configuration locally.\n\nExamples:\n  poly validate --path /path/to/project\n",
             formatter_class=RawTextHelpFormatter,
@@ -591,22 +657,42 @@ class AgentStudioCLI:
                 args.account_id,
                 args.project_id,
                 args.format,
+                args.from_projection,
+                output_json=args.json,
+                output_json_projection=args.output_json_projection,
             )
 
         elif args.command == "pull":
-            cls.pull(args.path, args.force, args.format)
+            cls.pull(
+                args.path,
+                args.force,
+                args.format,
+                args.from_projection,
+                output_json=args.json,
+                output_json_projection=args.output_json_projection,
+            )
 
         elif args.command == "push":
-            cls.push(args.path, args.force, args.skip_validation, args.dry_run, args.format)
+            cls.push(
+                args.path,
+                args.force,
+                args.skip_validation,
+                args.dry_run,
+                args.format,
+                args.email,
+                args.from_projection,
+                output_json=args.json,
+                output_commands=args.output_json_commands,
+            )
 
         elif args.command == "status":
-            cls.status(args.path)
+            cls.status(args.path, args.json)
 
         elif args.command == "revert":
-            cls.revert(args.path, args.files)
+            cls.revert(args.path, args.files, output_json=args.json)
 
         elif args.command == "diff":
-            cls.diff(args.path, args.files, args.hash, args.before, args.after)
+            cls.diff(args.path, args.files, args.hash, args.before, args.after, args.json)
 
         elif args.command == "review":
             if args.delete:
@@ -623,10 +709,10 @@ class AgentStudioCLI:
 
         elif args.command == "branch":
             if args.action == "list":
-                cls.branch_list(args.path)
+                cls.branch_list(args.path, args.json)
 
             elif args.action == "create":
-                cls.branch_create(args.path, args.branch_name)
+                cls.branch_create(args.path, args.branch_name, args.json)
 
             elif args.action == "switch":
                 cls.branch_switch(
@@ -634,10 +720,13 @@ class AgentStudioCLI:
                     args.branch_name,
                     getattr(args, "force", False),
                     getattr(args, "format", False),
+                    args.json,
+                    output_json_projection=args.output_json_projection,
+                    from_projection=args.from_projection,
                 )
 
             elif args.action == "current":
-                cls.get_current_branch(args.path)
+                cls.get_current_branch(args.path, args.json)
 
         elif args.command == "format":
             cls.format(
@@ -645,10 +734,11 @@ class AgentStudioCLI:
                 args.files,
                 getattr(args, "check", False),
                 getattr(args, "ty", False),
+                output_json=args.json,
             )
 
         elif args.command == "validate":
-            cls.validate_project(args.path)
+            cls.validate_project(args.path, args.json)
 
         elif args.command == "docs":
             cls.docs(
@@ -709,15 +799,59 @@ class AgentStudioCLI:
         except Exception as e:
             handle_exception(e)
 
+    @staticmethod
+    def _parse_from_projection_json(
+        from_projection: Optional[str],
+        *,
+        json_errors: bool,
+    ) -> Optional[dict[str, Any]]:
+        """Parse ``--from-projection`` CLI value into a projection dict, or exit on failure.
+
+        If the value is ``-`` (after stripping), JSON is read from stdin until EOF.
+        """
+        if not from_projection:
+            return None
+        raw = from_projection.strip()
+        if raw == "-":
+            raw = sys.stdin.read()
+        try:
+            parsed: Any = json.loads(raw)
+            if isinstance(parsed, dict) and "projection" in parsed:
+                parsed = parsed["projection"]
+        except json.JSONDecodeError as e:
+            msg = f"Invalid JSON in --from-projection: {e}"
+            if json_errors:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+        if not isinstance(parsed, dict):
+            msg = "--from-projection must be a JSON object (dictionary)."
+            if json_errors:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+        return parsed
+
     @classmethod
-    def _load_project(cls, base_path: str) -> AgentStudioProject:
+    def _load_project(cls, base_path: str, output_json: bool = False) -> AgentStudioProject:
         """Read project config or exit with a helpful error if not found.
 
         Args:
             base_path: Path to the project directory.
+            output_json: If True, print JSON and exit when config is missing.
         """
         project = cls.read_project_config(base_path)
         if not project:
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "error": "No project configuration found. Run poly init to initialize a project.",
+                    }
+                )
+                sys.exit(1)
             error(
                 "No project configuration found. Run [bold]poly init[/bold] to initialize a project."
             )
@@ -758,9 +892,22 @@ class AgentStudioCLI:
         account_id: str = None,
         project_id: str = None,
         format: bool = False,
-    ) -> AgentStudioProject:
+        from_projection: str = None,
+        output_json: bool = False,
+        output_json_projection: bool = False,
+    ) -> None:
         """Initialize a new Agent Studio project."""
-        info("Initialising project...")
+        if output_json and not (region and account_id and project_id):
+            json_print(
+                {
+                    "success": False,
+                    "error": "init with --json requires --region, --account_id, and --project_id.",
+                }
+            )
+            sys.exit(1)
+
+        if not output_json:
+            info("Initialising project...")
 
         if not region:
             regions = REGIONS
@@ -778,6 +925,14 @@ class AgentStudioCLI:
                 use_jk_keys=False,
             ).ask()
             if not account_menu:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No account selected.",
+                        }
+                    )
+                    sys.exit(1)
                 warning("No account selected. Exiting.")
                 return
             account_id = accounts[account_menu]
@@ -791,39 +946,108 @@ class AgentStudioCLI:
                 use_jk_keys=False,
             ).ask()
             if not project_menu:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No project selected.",
+                        }
+                    )
+                    sys.exit(1)
                 warning("No project selected. Exiting.")
                 return
             project_id = projects[project_menu]
 
-        info(f"Initializing project [bold]{account_id}/{project_id}[/bold]...")
+        if not output_json:
+            info(f"Initializing project [bold]{account_id}/{project_id}[/bold]...")
 
-        project = AgentStudioProject.init_project(
+        projection_json = cls._parse_from_projection_json(
+            from_projection,
+            json_errors=output_json or output_json_projection,
+        )
+
+        project, projection = AgentStudioProject.init_project(
             base_path=base_path,
             region=region,
             account_id=account_id,
             project_id=project_id,
             format=format,
+            projection_json=projection_json,
         )
 
         if not project:
-            error("Failed to initialize the project.")
-            return None
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "error": "Failed to initialize the project.",
+                    }
+                )
+            else:
+                error("Failed to initialize the project.")
+            sys.exit(1)
 
-        success(f"Project initialized at {project.root_path}")
-        return project
+        if output_json or output_json_projection:
+            json_output = {
+                "success": True,
+                "root_path": project.root_path,
+            }
+            if output_json_projection:
+                json_output["projection"] = projection
+            json_print(json_output)
+        else:
+            success(f"Project initialized at {project.root_path}")
 
     @classmethod
-    def pull(cls, base_path: str, force: bool = False, format: bool = False) -> AgentStudioProject:
+    def pull(
+        cls,
+        base_path: str,
+        force: bool = False,
+        format: bool = False,
+        from_projection: str = None,
+        output_json: bool = False,
+        output_json_projection: bool = False,
+    ) -> None:
         """Pull the latest project configuration from the Agent Studio."""
-        project = cls._load_project(base_path)
-        info(f"Pulling project [bold]{project.account_id}/{project.project_id}[/bold]...")
+        project = cls._load_project(base_path, output_json=output_json)
+        if not output_json:
+            info(f"Pulling project [bold]{project.account_id}/{project.project_id}[/bold]...")
 
-        files_with_conflicts = project.pull_project(force=force, format=format)
+        projection_json = cls._parse_from_projection_json(
+            from_projection,
+            json_errors=output_json or output_json_projection,
+        )
+
+        original_branch_id = project.branch_id
+        files_with_conflicts, projection = project.pull_project(
+            force=force, format=format, projection_json=projection_json
+        )
+        new_branch_name = None
+        if original_branch_id != project.branch_id:
+            new_branch_name = project.get_current_branch()
+        if output_json or output_json_projection:
+            json_output = {
+                "success": not bool(files_with_conflicts),
+                "files_with_conflicts": files_with_conflicts,
+            }
+            if new_branch_name:
+                json_output["new_branch_name"] = new_branch_name
+                json_output["new_branch_id"] = project.branch_id
+            if output_json_projection:
+                json_output["projection"] = projection
+            json_print(json_output)
+            if files_with_conflicts:
+                sys.exit(1)
+            return
+
+        if new_branch_name:
+            warning(
+                f"Current branch no longer exists in Agent Studio. Switched to branch '{new_branch_name}'."
+            )
         if files_with_conflicts:
             print_file_list("Merge conflicts detected", files_with_conflicts, "filename.conflict")
 
         success(f"Pulled {project.account_id}/{project.project_id}")
-        return project
 
     @classmethod
     def push(
@@ -833,28 +1057,75 @@ class AgentStudioCLI:
         skip_validation: bool = False,
         dry_run: bool = False,
         format: bool = False,
-    ) -> AgentStudioProject:
+        email: Optional[str] = None,
+        from_projection: str = None,
+        output_json: bool = False,
+        output_commands: bool = False,
+    ) -> None:
         """Push the project configuration to the Agent Studio."""
-        project = cls._load_project(base_path)
-        info(f"Pushing local changes for [bold]{project.account_id}/{project.project_id}[/bold]...")
+        project = cls._load_project(base_path, output_json=output_json)
+        if not output_json and not output_commands:
+            info(
+                f"Pushing local changes for [bold]{project.account_id}/{project.project_id}[/bold]..."
+            )
 
-        push_ok, output = project.push_project(
-            force=force, skip_validation=skip_validation, dry_run=dry_run, format=format
+        projection_json = cls._parse_from_projection_json(
+            from_projection,
+            json_errors=output_json or output_commands,
         )
+
+        original_branch_id = project.branch_id
+        push_ok, output, commands = project.push_project(
+            force=force,
+            skip_validation=skip_validation,
+            dry_run=dry_run,
+            format=format,
+            email=email,
+            projection_json=projection_json,
+        )
+        new_branch_name = None
+        if original_branch_id != project.branch_id:
+            new_branch_name = project.get_current_branch()
+        if output_json or output_commands:
+            json_output = {
+                "success": push_ok,
+                "message": output,
+                "dry_run": dry_run,
+            }
+            if new_branch_name:
+                json_output["new_branch_name"] = new_branch_name
+                json_output["new_branch_id"] = project.branch_id
+            if output_commands:
+                json_output["commands"] = commands_to_dicts(commands)
+            json_print(json_output)
+            if not push_ok:
+                sys.exit(1)
+            return
+
+        if new_branch_name:
+            warning(f"Created and switched to new branch '{new_branch_name}'.")
         if push_ok:
             success(f"Pushed {project.account_id}/{project.project_id} to Agent Studio.")
         else:
             error(f"Failed to push {project.account_id}/{project.project_id} to Agent Studio.")
             plain(output)
 
-        return project
-
     @classmethod
-    def status(cls, base_path: str) -> None:
+    def status(cls, base_path: str, output_json: bool = False) -> None:
         """Check the changed files of the project."""
-        project = cls._load_project(base_path)
+        project = cls._load_project(base_path, output_json=output_json)
 
         files_with_conflicts, modified_files, new_files, deleted_files = project.project_status()
+
+        if output_json:
+            json_output = {
+                "files_with_conflicts": files_with_conflicts,
+                "modified_files": modified_files,
+                "new_files": new_files,
+                "deleted_files": deleted_files,
+            }
+            json_print(json_output)
+            return
 
         branch_info = project.get_current_branch()
 
@@ -875,13 +1146,26 @@ class AgentStudioCLI:
             plain("\n[muted]No changes detected.[/muted]")
 
     @classmethod
-    def revert(cls, base_path: str, files: list[str] = None) -> None:
+    def revert(
+        cls,
+        base_path: str,
+        files: list[str] = None,
+        output_json: bool = False,
+    ) -> None:
         """Revert changes in the project."""
         if not files:
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "error": "No files specified to revert. Use --all or list files.",
+                    }
+                )
+                sys.exit(1)
             error("No files specified to revert. Use [bold]--all[/bold] to revert all changes.")
             return
 
-        project = cls._load_project(base_path)
+        project = cls._load_project(base_path, output_json=output_json)
 
         # If relative paths are provided, convert them to absolute paths
         files = [os.path.abspath(os.path.join(os.getcwd(), file)) for file in files or []]
@@ -940,6 +1224,7 @@ class AgentStudioCLI:
         hash: str = None,
         before: str = None,
         after: str = None,
+        output_json: bool = False,
     ) -> None:
         """Show the changes made to the project."""
         if hash and (before or after):
@@ -951,9 +1236,16 @@ class AgentStudioCLI:
 
         diffs = cls._compute_diff(base_path, files, before, after) or {}
 
-        if not diffs:
-            plain("[muted]No changes detected.[/muted]")
+        if output_json:
+            json_print(
+                {
+                    "diffs": diffs,
+                }
+            )
             return
+
+        if not diffs and not output_json:
+            plain("[muted]No changes detected.[/muted]")
 
         for file_path, diff_text in diffs.items():
             console.rule(f"[bold]{file_path}[/bold]")
@@ -1030,11 +1322,20 @@ class AgentStudioCLI:
         return
 
     @classmethod
-    def branch_list(cls, base_path: str) -> None:
+    def branch_list(cls, base_path: str, output_json: bool = False) -> None:
         """List branches in the Agent Studio project."""
-        project = cls._load_project(base_path)
+        project = cls._load_project(base_path, output_json=output_json)
 
         current_branch, branches = project.get_branches()
+
+        if output_json:
+            json_output = {
+                "current_branch": current_branch,
+                "branches": branches,
+            }
+            json_print(json_output)
+            return
+
         if not branches:
             plain("[muted]No branches found.[/muted]")
             return
@@ -1043,42 +1344,88 @@ class AgentStudioCLI:
 
         if current_branch is None:
             warning(
-                f"Current local branch '{project.branch_id}' does not exist in Agent Studio. "
+                f"Current local branch does not exist in Agent Studio. "
                 "It may have been deleted or merged."
             )
 
     @classmethod
-    def branch_create(cls, base_path: str, branch_name: str = None) -> None:
+    def branch_create(
+        cls, base_path: str, branch_name: str = None, output_json: bool = False
+    ) -> None:
         """Create a new branch in the Agent Studio project."""
-        project = cls._load_project(base_path)
+        project = cls._load_project(base_path, output_json=output_json)
 
         if project.branch_id != "main":
-            error(
-                "Branches can only be created from the [bold]main[/bold] branch (sandbox). "
-                "Please switch and try again."
-            )
-            return
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "error": "Branches can only be created from the main branch (sandbox).",
+                    }
+                )
+            else:
+                error(
+                    "Branches can only be created from the [bold]main[/bold] branch (sandbox). "
+                    "Please switch and try again."
+                )
+            sys.exit(1)
 
         if not branch_name:
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "error": "branch create with --json requires a branch name argument.",
+                    }
+                )
+                sys.exit(1)
             branch_name = input("Enter the name of the new branch: ").strip()
             if not branch_name:
                 warning("No branch name provided. Exiting.")
                 return
 
         new_branch_id = project.create_branch(branch_name)
+        if output_json:
+            json_print(
+                {
+                    "success": bool(new_branch_id),
+                    "new_branch_id": new_branch_id,
+                    "branch_name": branch_name,
+                }
+            )
+            if not new_branch_id:
+                sys.exit(1)
+            return
+
         if new_branch_id:
             success(f"Branch '{branch_name}' created (ID: {new_branch_id})")
         else:
             error("Failed to create the branch.")
+            sys.exit(1)
 
     @classmethod
     def branch_switch(
-        cls, base_path: str, branch_name: str = None, force: bool = False, format: bool = False
+        cls,
+        base_path: str,
+        branch_name: str = None,
+        force: bool = False,
+        format: bool = False,
+        output_json: bool = False,
+        output_json_projection: bool = False,
+        from_projection: str = None,
     ) -> None:
         """Switch to a different branch in the Agent Studio project."""
-        project = cls._load_project(base_path)
+        project = cls._load_project(base_path, output_json=output_json)
 
         if not branch_name:
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "error": "branch switch with --json requires a branch name argument.",
+                    }
+                )
+                sys.exit(1)
             # Drop down menu to select branch
             current_branch, branches = project.get_branches()
             if not branches:
@@ -1104,21 +1451,48 @@ class AgentStudioCLI:
             selected_option = branch_menu
             branch_name = selected_option.replace(" (current)", "")
 
-        switch_ok = project.switch_branch(branch_name, force=force, format=format)
+        projection_json = cls._parse_from_projection_json(
+            from_projection,
+            json_errors=output_json or output_json_projection,
+        )
+
+        switch_ok, projection = project.switch_branch(
+            branch_name, force=force, format=format, projection_json=projection_json
+        )
+        if output_json or output_json_projection:
+            json_output = {
+                "success": switch_ok,
+                "branch_name": branch_name,
+            }
+            if output_json_projection:
+                json_output["projection"] = projection
+            json_print(json_output)
+            if not switch_ok:
+                sys.exit(1)
+            return
+
         if switch_ok:
             success(f"Switched to branch '{branch_name}'.")
         else:
             error(f"Failed to switch to branch '{branch_name}'.")
+            sys.exit(1)
 
     @classmethod
-    def get_current_branch(cls, base_path: str) -> None:
+    def get_current_branch(cls, base_path: str, output_json: bool = False) -> None:
         """Get the current branch of the Agent Studio project."""
-        project = cls._load_project(base_path)
+        project = cls._load_project(base_path, output_json=output_json)
 
         current_branch = project.get_current_branch()
+        if output_json:
+            json_output = {
+                "current_branch": current_branch,
+            }
+            json_print(json_output)
+            return
+
         if current_branch is None:
             warning(
-                f"Current local branch '{project.branch_id}' does not exist in Agent Studio. "
+                f"Current local branch does not exist in Agent Studio. "
                 "It may have been deleted or merged."
             )
             return
@@ -1131,73 +1505,133 @@ class AgentStudioCLI:
         files: list[str] = None,
         check_only: bool = False,
         run_ty: bool = False,
+        output_json: bool = False,
     ) -> None:
         """Format project resources (Python via ruff, YAML/JSON via in-process formatting); optionally run ty."""
-        project = cls._load_project(base_path)
-        # Resolve to absolute paths so they match resource_mapping.file_path
+        project = cls._load_project(base_path, output_json=output_json)
         files_resolved: list[str] | None = None
         if files:
             files_resolved = [os.path.abspath(os.path.join(base_path, f)) for f in files]
 
-        if check_only:
-            info("[bold]Check-only[/bold]: verifying formatting (no files will be modified).")
-        else:
-            info("[bold]Fix mode[/bold]: formatting project resources.")
+        if not output_json:
+            if check_only:
+                info("[bold]Check-only[/bold]: verifying formatting (no files will be modified).")
+            else:
+                info("[bold]Fix mode[/bold]: formatting project resources.")
+            plain("")
+            info(
+                "Checking project resources (Python + YAML/JSON)"
+                if check_only
+                else "Formatting project resources (Python + YAML/JSON)"
+            )
 
-        plain("")
-
-        step = (
-            "Checking project resources (Python + YAML/JSON)"
-            if check_only
-            else "Formatting project resources (Python + YAML/JSON)"
-        )
-        info(step)
         affected, format_errors = project.format_files(files=files_resolved, check_only=check_only)
-        for msg in format_errors:
-            plain(f"[red]{msg}[/red]")
+        rel_affected = [os.path.relpath(p, base_path) or p for p in affected]
+
         if format_errors:
-            error("Format failed for some files.")
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "check_only": check_only,
+                        "format_errors": format_errors,
+                        "affected": rel_affected,
+                        "ty_ran": False,
+                        "ty_returncode": None,
+                        "ty_timed_out": False,
+                    }
+                )
+            else:
+                for msg in format_errors:
+                    plain(f"[red]{msg}[/red]")
+                error("Format failed for some files.")
             sys.exit(1)
-            return
+
         if check_only and affected:
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "check_only": check_only,
+                        "format_errors": [],
+                        "affected": rel_affected,
+                        "ty_ran": False,
+                        "ty_returncode": None,
+                        "ty_timed_out": False,
+                    }
+                )
+            else:
+                for path in affected:
+                    rel = os.path.relpath(path, base_path) or path
+                    plain(f"[red]{rel}[/red]")
+                info("Try [bold]poly format[/bold] to fix.")
+            sys.exit(1)
+
+        if not output_json:
             for path in affected:
                 rel = os.path.relpath(path, base_path) or path
-                plain(f"[red]{rel}[/red]")
-            info("Try [bold]poly format[/bold] to fix.")
-            sys.exit(1)
-            return
-        for path in affected:
-            rel = os.path.relpath(path, base_path) or path
-            plain(rel)
-        success("Passed.")
-        if check_only:
-            success("All checks passed (no changes written).")
-        else:
-            success("All issues fixed." if affected else "No issues found.")
+                plain(rel)
+            success("Passed.")
+            if check_only:
+                success("All checks passed (no changes written).")
+            else:
+                success("All issues fixed." if affected else "No issues found.")
 
-        # Ty (type check only; no fix) — off by default; use --ty to enable.
+        ty_returncode: int | None = None
+        ty_timed_out = False
         if run_ty:
             ty_cmd = [sys.executable, "-m", "ty"]
             if shutil.which("ty"):
                 ty_cmd = ["ty"]
-            info("Type checking (ty)")
+            if not output_json:
+                info("Type checking (ty)")
             try:
                 r = subprocess.run(
                     ty_cmd + ["check"],
                     cwd=base_path,
-                    capture_output=False,
+                    capture_output=output_json,
                     text=True,
                     timeout=15,
                     stdin=subprocess.DEVNULL,
                 )
+                ty_returncode = r.returncode
             except subprocess.TimeoutExpired:
-                plain("[red]Timed out after 15s.[/red]")
+                ty_timed_out = True
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "check_only": check_only,
+                            "format_errors": [],
+                            "affected": rel_affected,
+                            "ty_ran": True,
+                            "ty_returncode": None,
+                            "ty_timed_out": True,
+                        }
+                    )
+                else:
+                    plain("[red]Timed out after 15s.[/red]")
                 sys.exit(1)
-                return
-            if r.returncode != 0:
+
+            if not output_json and ty_returncode != 0:
                 sys.exit(1)
-                return
-            success("Passed.")
+            if not output_json:
+                success("Passed.")
+
+        if output_json:
+            json_print(
+                {
+                    "success": not (run_ty and ty_returncode not in (None, 0)),
+                    "check_only": check_only,
+                    "format_errors": [],
+                    "affected": rel_affected,
+                    "ty_ran": run_ty,
+                    "ty_returncode": ty_returncode,
+                    "ty_timed_out": ty_timed_out,
+                }
+            )
+            if run_ty and ty_returncode != 0:
+                sys.exit(1)
 
     @classmethod
     def chat(
@@ -1349,11 +1783,19 @@ class AgentStudioCLI:
         return restart
 
     @classmethod
-    def validate_project(cls, base_path: str) -> None:
+    def validate_project(cls, base_path: str, output_json: bool = False) -> None:
         """Validate the project configuration locally."""
-        project = cls._load_project(base_path)
-
+        project = cls._load_project(base_path, output_json=output_json)
         errors = project.validate_project()
+
+        if output_json:
+            json_output = {
+                "valid": bool(not errors),
+                "errors": errors,
+            }
+            json_print(json_output)
+            return
+
         if not errors:
             success("Project configuration is valid.")
         else:

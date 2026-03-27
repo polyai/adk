@@ -9,7 +9,6 @@ import json
 import os
 import unittest
 from copy import deepcopy
-from unittest import mock
 from unittest.mock import MagicMock, patch
 
 import poly.resources.resource_utils as resource_utils
@@ -1496,8 +1495,10 @@ class PushProjectTest(unittest.TestCase):
             AgentStudioProject, "api_handler", new_callable=MagicMock
         ).start()
         self.mock_save_config = patch.object(AgentStudioProject, "save_config").start()
-        self.mock_pull.return_value = []
-        self.mock_api_handler.push_resources = MagicMock(return_value=True)
+        self.mock_pull.return_value = ([], {})
+        self.mock_api_handler.queue_resources = MagicMock(return_value=[])
+        self.mock_api_handler.send_queued_commands = MagicMock(return_value=True)
+        self.mock_api_handler.clear_command_queue = MagicMock()
         self.mock_load_project = patch.object(AgentStudioProject, "load_project").start()
 
     def tearDown(self):
@@ -1507,17 +1508,17 @@ class PushProjectTest(unittest.TestCase):
     def test_push_project_no_changes(self):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertFalse(success)
         self.assertEqual(message, "No changes detected")
-        self.mock_api_handler.push_resources.assert_not_called()
+        self.mock_api_handler.queue_resources.assert_not_called()
 
     def test_push_project_merge_conflict(self):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
-        self.mock_pull.return_value = ["functions/test_function.py"]
+        self.mock_pull.return_value = (["functions/test_function.py"], {})
 
-        success, message = project.push_project(force=False)
+        success, message, commands = project.push_project(force=False)
 
         self.assertFalse(success)
         self.assertIn("Merge conflicts detected", message)
@@ -1528,11 +1529,11 @@ class PushProjectTest(unittest.TestCase):
         project_data["resources"]["topics"].pop("TOPIC-Topic 1")
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         new_resources = call_args.kwargs["new_resources"]
         self.assertIn(Topic, new_resources)
         # New resources get random IDs, so check by name
@@ -1550,11 +1551,11 @@ class PushProjectTest(unittest.TestCase):
                 number_steps += 1
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True, skip_validation=True)
+        success, message, commands = project.push_project(force=True, skip_validation=True)
 
         self.assertTrue(success, f"Push failed: {message}")
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         new_resources = call_args.kwargs["new_resources"]
         self.assertIn(FlowConfig, new_resources)
         # New resources get random IDs, so check by name
@@ -1579,11 +1580,11 @@ class PushProjectTest(unittest.TestCase):
         }
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         deleted_resources = call_args.kwargs["deleted_resources"]
         self.assertIn(Function, deleted_resources)
         self.assertIn("FUNCTION-extra_function", deleted_resources[Function])
@@ -1625,11 +1626,11 @@ class PushProjectTest(unittest.TestCase):
             return result
 
         with patch.object(AgentStudioProject, "discover_local_resources", mock_discover):
-            success, message = project.push_project(force=True, skip_validation=True)
+            success, message, commands = project.push_project(force=True, skip_validation=True)
 
         self.assertTrue(success, f"Push failed: {message}")
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         deleted_resources = call_args.kwargs["deleted_resources"]
         # Must NOT include VariantAttribute - we never had them locally
         self.assertNotIn(VariantAttribute, deleted_resources)
@@ -1642,11 +1643,11 @@ class PushProjectTest(unittest.TestCase):
         )
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
         self.assertIn(Function, updated_resources)
         self.assertIn("FUNCTION-test_function", updated_resources[Function])
@@ -1658,11 +1659,11 @@ class PushProjectTest(unittest.TestCase):
         ] = True
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
         self.assertIn(DTMFConfig, updated_resources)
 
@@ -1673,11 +1674,11 @@ class PushProjectTest(unittest.TestCase):
 
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         new_resources = call_args.kwargs["new_resources"]
         self.assertIn(Condition, new_resources)
         # Deleted 2 conditions, so check that 2 new conditions are pushed
@@ -1704,11 +1705,11 @@ class PushProjectTest(unittest.TestCase):
 
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         deleted_resources = call_args.kwargs["deleted_resources"]
         self.assertIn(Condition, deleted_resources)
 
@@ -1723,11 +1724,11 @@ class PushProjectTest(unittest.TestCase):
 
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
         self.assertIn(ASRBiasing, updated_resources)
 
@@ -1753,11 +1754,11 @@ class PushProjectTest(unittest.TestCase):
         ] = False
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         new_resources = call_args.kwargs["new_resources"]
         updated_resources = call_args.kwargs["updated_resources"]
         deleted_resources = call_args.kwargs["deleted_resources"]
@@ -1771,11 +1772,11 @@ class PushProjectTest(unittest.TestCase):
         project_data["resources"]["keyphrase_boosting"].pop("KEYPHRASE_BOOSTING-polyai")
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         new_resources = call_args.kwargs["new_resources"]
         self.assertIn(KeyphraseBoosting, new_resources)
         kp_names = [r.keyphrase for r in new_resources[KeyphraseBoosting].values()]
@@ -1791,11 +1792,11 @@ class PushProjectTest(unittest.TestCase):
         }
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         deleted_resources = call_args.kwargs["deleted_resources"]
         self.assertIn(KeyphraseBoosting, deleted_resources)
         self.assertIn("KEYPHRASE_BOOSTING-extra", deleted_resources[KeyphraseBoosting])
@@ -1805,11 +1806,11 @@ class PushProjectTest(unittest.TestCase):
         project_data["resources"]["keyphrase_boosting"]["KEYPHRASE_BOOSTING-polyai"]["level"] = "default"
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
         self.assertIn(KeyphraseBoosting, updated_resources)
         self.assertIn("KEYPHRASE_BOOSTING-polyai", updated_resources[KeyphraseBoosting])
@@ -1819,11 +1820,11 @@ class PushProjectTest(unittest.TestCase):
         project_data["resources"]["transcript_corrections"].pop("TRANSCRIPT_CORRECTIONS-email_domain")
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         new_resources = call_args.kwargs["new_resources"]
         self.assertIn(TranscriptCorrection, new_resources)
         tc_names = [r.name for r in new_resources[TranscriptCorrection].values()]
@@ -1841,11 +1842,11 @@ class PushProjectTest(unittest.TestCase):
         }
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         deleted_resources = call_args.kwargs["deleted_resources"]
         self.assertIn(TranscriptCorrection, deleted_resources)
         self.assertIn("TRANSCRIPT_CORRECTIONS-extra", deleted_resources[TranscriptCorrection])
@@ -1855,11 +1856,11 @@ class PushProjectTest(unittest.TestCase):
         project_data["resources"]["asr_settings"]["asr_settings"]["barge_in"] = True
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True)
+        success, message, commands = project.push_project(force=True)
 
         self.assertTrue(success)
-        self.mock_api_handler.push_resources.assert_called_once()
-        call_args = self.mock_api_handler.push_resources.call_args
+        self.mock_api_handler.queue_resources.assert_called_once()
+        call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
         self.assertIn(AsrSettings, updated_resources)
         self.assertIn("asr_settings", updated_resources[AsrSettings])
@@ -1874,7 +1875,7 @@ class PushProjectTest(unittest.TestCase):
         invalid_content = "name: test_flow\ndescription:\nstart_step: start_step\n"
 
         with mock_read_from_file({flow_config_path: invalid_content}):
-            success, message = project.push_project(force=True, skip_validation=False)
+            success, message, commands = project.push_project(force=True, skip_validation=False)
 
         self.assertFalse(success)
         self.assertIn("Validation errors", message)
@@ -1889,7 +1890,7 @@ class PushProjectTest(unittest.TestCase):
         invalid_content = "name: test_flow\ndescription:\nstart_step: start_step\n"
 
         with mock_read_from_file({flow_config_path: invalid_content}):
-            success, message = project.push_project(force=True, skip_validation=True)
+            success, message, commands = project.push_project(force=True, skip_validation=True)
 
         self.assertTrue(success)
 
@@ -1898,18 +1899,13 @@ class PushProjectTest(unittest.TestCase):
         project_data["resources"]["topics"].pop("TOPIC-Topic 1")
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
-        success, message = project.push_project(force=True, dry_run=True)
+        success, message, commands = project.push_project(force=True, dry_run=True)
 
         self.assertTrue(success)
         self.assertIn("Dry run completed", message)
-        self.mock_api_handler.push_resources.assert_called_once_with(
-            new_resources=mock.ANY,
-            deleted_resources=mock.ANY,
-            updated_resources=mock.ANY,
-            dry_run=True,
-            email=None,
-            queue_pushes=mock.ANY,
-        )
+        self.mock_api_handler.queue_resources.assert_called_once()
+        self.mock_api_handler.send_queued_commands.assert_not_called()
+        self.mock_api_handler.clear_command_queue.assert_called_once()
 
 
 class ValidateProjectTest(unittest.TestCase):
@@ -1980,9 +1976,9 @@ class PullProjectTest(unittest.TestCase):
         # Incoming resources are the same as project.resources
         # Use the actual resources from the project to ensure they match
         original_resources = deepcopy(project.resources)
-        self.mock_api_handler.pull_resources.return_value = original_resources
+        self.mock_api_handler.pull_resources.return_value = (original_resources, {})
 
-        files_with_conflicts = project.pull_project(force=False)
+        files_with_conflicts, _ = project.pull_project(force=False)
         self.assertEqual(files_with_conflicts, [])
         self.assertEqual(project.resources, original_resources)
 
@@ -2007,7 +2003,7 @@ class PullProjectTest(unittest.TestCase):
         # Simulate pull: incoming has variant_attributes from remote
         full_project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         incoming_resources = full_project.resources
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         with mock_read_from_file(
             {
@@ -2016,7 +2012,7 @@ class PullProjectTest(unittest.TestCase):
                 ): "{}\n"
             }
         ):
-            files_with_conflicts = project.pull_project(force=False)
+            files_with_conflicts, _ = project.pull_project(force=False)
 
         self.assertEqual(files_with_conflicts, [])
         # Variant attributes are now present in project resources with the correct keys
@@ -2041,9 +2037,9 @@ class PullProjectTest(unittest.TestCase):
             example_queries=["New query"],
         )
         incoming_resources.setdefault(Topic, {})["TOPIC-new_topic"] = new_topic
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
-        files_with_conflicts = project.pull_project(force=False)
+        files_with_conflicts, _ = project.pull_project(force=False)
         self.assertEqual(files_with_conflicts, [])
         # Verify the new resource was saved via save_to_file or save
         self.assertTrue(self.mock_save_to_file.called or self.mock_resource_save.called)
@@ -2057,9 +2053,9 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources = deepcopy(project.resources)
         if Topic in incoming_resources and "TOPIC-Topic 1" in incoming_resources[Topic]:
             del incoming_resources[Topic]["TOPIC-Topic 1"]
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
-        files_with_conflicts = project.pull_project(force=False)
+        files_with_conflicts, _ = project.pull_project(force=False)
 
         self.assertEqual(files_with_conflicts, [])
         # Verify the resource file was removed via os.remove
@@ -2076,9 +2072,9 @@ class PullProjectTest(unittest.TestCase):
         modified_func = deepcopy(incoming_resources[Function][func_id])
         modified_func.code = 'def test_function(conv: Conversation):\n    """Modified remotely."""\n    return "Modified"\n'
         incoming_resources[Function][func_id] = modified_func
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
-        files_with_conflicts = project.pull_project(force=False)
+        files_with_conflicts, _ = project.pull_project(force=False)
         self.assertEqual(files_with_conflicts, [])
         # Verify resource is updated in project resources
         self.assertIn(func_id, project.resources.get(Function, {}))
@@ -2094,7 +2090,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources[Function][
             "FUNCTION-test_function"
         ].code = 'def test_function(conv: Conversation):\n    """Modified remotely."""\n    return "Remote change"\n'
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         with mock_read_from_file(
             {
@@ -2103,7 +2099,7 @@ class PullProjectTest(unittest.TestCase):
                 ): 'from _gen import *  # <AUTO GENERATED>\n\n@func_description(\'A test function for global use.\')\ndef test_function(conv: Conversation):\n    """Modified locally."""\n    return "Local change"\n'
             }
         ):
-            files_with_conflicts = project.pull_project(force=False)
+            files_with_conflicts, _ = project.pull_project(force=False)
         # Should detect merge conflict
         self.assertEqual(
             files_with_conflicts, [os.path.join(TEST_DIR, "functions", "test_function.py")]
@@ -2134,7 +2130,7 @@ class PullProjectTest(unittest.TestCase):
         modified_flow_config = deepcopy(incoming_resources[FlowConfig][flow_config_id])
         modified_flow_config.description = "Modified remotely - new description"
         incoming_resources[FlowConfig][flow_config_id] = modified_flow_config
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         # Mock local file with different changes
         flow_config_path = os.path.join(
@@ -2145,7 +2141,7 @@ class PullProjectTest(unittest.TestCase):
                 flow_config_path: "name: test_flow\ndescription: Modified locally - different description\nstart_step: start_step\n"
             }
         ):
-            files_with_conflicts = project.pull_project(force=False)
+            files_with_conflicts, _ = project.pull_project(force=False)
         # Should detect merge conflict
         self.assertEqual(files_with_conflicts, [flow_config_path])
         # Resources are now incoming resources
@@ -2178,7 +2174,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources[Function][
             "FUNCTION-test_function"
         ].code = 'def test_function(conv: Conversation):\n    """Modified remotely."""\n    return "Remote change"\n'
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         with mock_read_from_file(
             {
@@ -2187,7 +2183,7 @@ class PullProjectTest(unittest.TestCase):
                 ): 'from _gen import *  # <AUTO GENERATED>\n\ndef added_extra_function():\n    pass\n\n@func_description(\'A test function for global use.\')\ndef test_function(conv: Conversation):\n    """A test function for global use."""\n    return "Hello from global function"\n'
             }
         ):
-            files_with_conflicts = project.pull_project(force=False)
+            files_with_conflicts, _ = project.pull_project(force=False)
         # Should detect no merge conflict
         self.assertEqual(files_with_conflicts, [])
         # Resources are now incoming resources
@@ -2215,7 +2211,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources[Function][
             "FUNCTION-test_function"
         ].code = 'def test_function(conv: Conversation):\n    """Modified remotely."""\n    return "Remote change"\n'
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         with mock_read_from_file(
             {
@@ -2224,7 +2220,7 @@ class PullProjectTest(unittest.TestCase):
                 ): 'from _gen import *  # <AUTO GENERATED>\n\n@func_description(\'A test function for global use.\')\ndef test_function(conv: Conversation):\n    """Modified locally."""\n    return "Local change"\n'
             }
         ):
-            files_with_conflicts = project.pull_project(force=True)
+            files_with_conflicts, _ = project.pull_project(force=True)
 
         # Should detect no merge conflict
         self.assertEqual(files_with_conflicts, [])
@@ -2240,8 +2236,8 @@ class PullProjectTest(unittest.TestCase):
         full_project_resources = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR).resources
         incoming_resources = deepcopy(full_project_resources)
 
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
-        files_with_conflicts = project.pull_project(force=False, format=True)
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        files_with_conflicts, _ = project.pull_project(force=False, format=True)
         self.assertEqual(files_with_conflicts, [])
         # Verify resource is updated in project resources
         self.assertIn("FUNCTION-test_function_with_parameters", project.resources.get(Function, {}))
@@ -2265,8 +2261,8 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources = deepcopy(full_project_resources)
         incoming_resources[Function]["FUNCTION-test_function_with_parameters"].code = 'def test_function_with_parameters(conv: Conversation):\n    """Test function with parameters."""\n    return "Test function with parameters"\n'
 
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
-        files_with_conflicts = project.pull_project(force=False)
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        files_with_conflicts, _ = project.pull_project(force=False)
         self.assertEqual(len(files_with_conflicts), 1)
 
     def test_pull_project_deleted_locally(self):
@@ -2283,8 +2279,8 @@ class PullProjectTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         incoming_resources = deepcopy(project.resources)
 
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
-        files_with_conflicts = project.pull_project(force=False)
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        files_with_conflicts, _ = project.pull_project(force=False)
         self.assertEqual(files_with_conflicts, [])
 
         # Verify it wasn't saved to the file system
@@ -2312,9 +2308,9 @@ class PullProjectTest(unittest.TestCase):
         # Rename the topic (this changes the file path)
         renamed_topic.name = "renamed_topic"
 
-        self.mock_api_handler.pull_resources.return_value = original_resources
+        self.mock_api_handler.pull_resources.return_value = (original_resources, {})
 
-        files_with_conflicts = project.pull_project(force=False)
+        files_with_conflicts, _ = project.pull_project(force=False)
 
         self.assertEqual(files_with_conflicts, [])
         # Verify old file would be removed
@@ -2328,6 +2324,8 @@ class PullProjectTest(unittest.TestCase):
     def test_pull_project_empty_flow_folder_deletion(self):
         """Test that empty flow folders are deleted after pull"""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        original_resources = deepcopy(project.resources)
+        self.mock_api_handler.pull_resources.return_value = (original_resources, {})
 
         # Mock os.listdir and os.rmdir to verify empty folder deletion
         empty_flow_path = os.path.join(TEST_DIR, "flows", "test_flow")
@@ -2350,7 +2348,7 @@ class PullProjectTest(unittest.TestCase):
             patch("os.path.isdir", side_effect=mock_isdir),
             patch("os.rmdir") as mock_rmdir,
         ):
-            files_with_conflicts = project.pull_project(force=False)
+            files_with_conflicts, _ = project.pull_project(force=False)
 
             # Empty flow folder should be deleted
             # _delete_empty_folders is called after pull_project
@@ -2395,7 +2393,7 @@ class PullProjectTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         incoming_resources = deepcopy(project.resources)
         incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         kp_path = os.path.join(
             TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
@@ -2416,7 +2414,7 @@ class PullProjectTest(unittest.TestCase):
             "poly.resources.resource.Resource.read_from_file",
             side_effect=self._make_kp_read_mock(original_kp_content, original_kp_content),
         ):
-            files_with_conflicts = project.pull_project(force=False)
+            files_with_conflicts, _ = project.pull_project(force=False)
         MultiResourceYamlResource._file_cache.clear()
 
         self.assertEqual(files_with_conflicts, [])
@@ -2442,7 +2440,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources = deepcopy(project.resources)
         # Remote: PolyAI level maximum → boosted
         incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         kp_path = os.path.join(
             TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
@@ -2472,7 +2470,7 @@ class PullProjectTest(unittest.TestCase):
             "poly.resources.resource.Resource.read_from_file",
             side_effect=self._make_kp_read_mock(original_kp_content, local_kp_content),
         ):
-            files_with_conflicts = project.pull_project(force=False)
+            files_with_conflicts, _ = project.pull_project(force=False)
         MultiResourceYamlResource._file_cache.clear()
 
         self.assertEqual(files_with_conflicts, [])
@@ -2501,7 +2499,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources = deepcopy(project.resources)
         # Remote: PolyAI level maximum → boosted
         incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         kp_path = os.path.join(
             TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
@@ -2531,7 +2529,7 @@ class PullProjectTest(unittest.TestCase):
             "poly.resources.resource.Resource.read_from_file",
             side_effect=self._make_kp_read_mock(original_kp_content, local_kp_content),
         ):
-            files_with_conflicts = project.pull_project(force=False)
+            files_with_conflicts, _ = project.pull_project(force=False)
         MultiResourceYamlResource._file_cache.clear()
 
         self.assertIn(kp_path, files_with_conflicts)
@@ -2554,14 +2552,14 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources = deepcopy(project.resources)
         # Remote: PolyAI level maximum → boosted
         incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
-        self.mock_api_handler.pull_resources.return_value = incoming_resources
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
 
         kp_path = os.path.join(
             TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
         )
 
         MultiResourceYamlResource._file_cache.clear()
-        files_with_conflicts = project.pull_project(force=True)
+        files_with_conflicts, _ = project.pull_project(force=True)
         MultiResourceYamlResource._file_cache.clear()
 
         self.assertEqual(files_with_conflicts, [])

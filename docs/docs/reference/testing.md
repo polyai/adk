@@ -40,7 +40,7 @@ Testing is useful when you want to:
 
     ---
 
-    Use `pytest` to run the project’s test suite locally.
+    Use `pytest` to run the project's test suite locally.
 
 -   **Validation**
 
