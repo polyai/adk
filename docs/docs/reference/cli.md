@@ -5,7 +5,7 @@ description: Reference for the core commands provided by the PolyAI ADK CLI.
 
 <p class="lead">
 The PolyAI ADK is accessed through the <code>poly</code> command.
-Use the CLI help output as the first source of truth.
+When in doubt about a flag or option, run the command with <code>--help</code> — that output reflects your installed version exactly.
 </p>
 
 ## Start with help
@@ -22,9 +22,9 @@ Each command also supports its own help output. For example:
 poly push --help
 ~~~
 
-!!! tip "Use help output as the source of truth"
+!!! tip "Help output reflects your installed version"
 
-    The installed CLI is the fastest way to confirm the commands and flags available in your local environment.
+    This reference page covers the standard commands. Run `poly <command> --help` to confirm the exact flags available in your environment.
 
 ## Core commands
 

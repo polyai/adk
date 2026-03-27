@@ -13,7 +13,7 @@ description: Documentation for the PolyAI Agent Development Kit.
 
 Build, edit, and deploy Agent Studio projects locally with the **PolyAI ADK**.
 
-The ADK gives developers a local, Git-like workflow for working with Agent Studio projects using standard tooling, validation, and AI-assisted development.
+The ADK gives you a local, Git-like workflow for Agent Studio projects: pull, edit with standard tooling, validate, and push.
 
 ## Start here
 
@@ -23,14 +23,14 @@ The ADK gives developers a local, Git-like workflow for working with Agent Studi
 
     ---
 
-    Learn what the ADK is, why it exists, and how it fits into Agent Studio workflows.
+    Understand what the ADK does and where it fits in the Agent Studio workflow.
     [Read the overview](get-started/what-is-the-adk.md)
 
 -   **Installation**
 
     ---
 
-    Set up the ADK locally and prepare your development environment.
+    Install the ADK and prepare your local environment.
     [Open installation](get-started/installation.md)
 
 -   **Build an agent**
@@ -44,20 +44,19 @@ The ADK gives developers a local, Git-like workflow for working with Agent Studi
 
     ---
 
-    Review the core commands available in the `poly` CLI.
+    See every `poly` command and its flags.
     [Open CLI reference](reference/cli.md)
 
 </div>
 
 ## What this site covers
 
-This documentation is organised around the developer journey:
+This documentation follows the developer journey:
 
-- understanding what the ADK is
-- getting access and installing it
-- learning the core CLI workflow
-- building and reviewing agents
-- looking up commands, testing, and tooling details
+- understanding what the ADK is and how to get access
+- installing it and running the first commands
+- building, reviewing, and deploying agents
+- reference for all CLI commands, resource types, and tooling
 
 ## Recommended path
 
@@ -65,7 +64,7 @@ If you are new to the ADK, follow this order:
 
 1. read **What is the PolyAI ADK?**
 2. check **Access and waitlist**
-3. complete **Pre-requisites**
+3. complete **Prerequisites**
 4. follow **Installation**
 5. use **First commands**
 6. continue to **Build an agent with the ADK**

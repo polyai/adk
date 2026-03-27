@@ -9,14 +9,14 @@ description: Follow the end-to-end workflow for going from a blank Agent Studio 
 
     [Join the waitlist](https://fehky.share-eu1.hsforms.com/2oSGLpUctRvyqXcb6K44DAQ){ target="_blank" rel="noopener" }
 
-This guide walks through how to go from a blank slate to a production-ready voice agent with a real backend using **Agent Studio**, the **PolyAI ADK**, and optionally a coding agent such as **Claude Code**.
+This guide walks through how to go from a blank slate to a production-ready voice agent using **Agent Studio**, the **PolyAI ADK**, and optionally a coding tool such as **Claude Code**.
 
 There are two common ways to build with the ADK:
 
 | Workflow | Description |
 |---|---|
 | **CLI workflow** | The hands-on developer path. You run the commands yourself, edit files locally, and push changes back to Agent Studio. |
-| **AI-agent workflow** | A coding agent uses the ADK on your behalf, generating and pushing the project files from a brief. |
+| **AI-agent workflow** | You provide a brief; a coding tool uses the ADK to generate and push the project files on your behalf. |
 
 <div class="grid cards" markdown>
 
@@ -254,7 +254,7 @@ Use Agent Studio analytics to monitor containment, CSAT, handle time, and flagge
 
 ## Workflow 2 - AI-agent workflow
 
-The AI-agent workflow uses a coding agent such as **Claude Code** to execute the same development loop on your behalf.
+The AI-agent workflow uses a coding tool such as **Claude Code** to run the same development loop on your behalf.
 
 <div class="grid cards" markdown>
 
@@ -264,11 +264,11 @@ The AI-agent workflow uses a coding agent such as **Claude Code** to execute the
 
     Requirements, business rules, integrations, and API documentation.
 
--   **The coding agent generates the project**
+-   **The coding tool generates the project**
 
     ---
 
-    It uses the ADK to inspect the SDK, generate files, and push the result.
+    It uses the ADK to read documentation, generate files, and push the result.
 
 -   **You review and deploy**
 
@@ -280,13 +280,13 @@ The AI-agent workflow uses a coding agent such as **Claude Code** to execute the
 
 !!! info "No manual flow-building required"
 
-    In this workflow, the coding agent does the heavy lifting of building the agent, while Agent Studio remains the place where the work is reviewed, tested, and deployed.
+    In this workflow, the coding tool generates the project files. Agent Studio is where the output is reviewed, tested, and deployed.
 
 ### Step 1 - Gather requirements
 
 Collect the project context before you begin.
 
-This should include anything the coding agent will need in order to produce a working agent, such as:
+Include anything the coding tool will need to produce a working agent:
 
 - API endpoint URLs
 - business rules
@@ -295,11 +295,11 @@ This should include anything the coding agent will need in order to produce a wo
 - reference material
 - links to API documentation
 
-The more complete and structured the input is, the better the generated output is likely to be.
+The more complete and structured your input is, the less correction the output requires.
 
 !!! tip "Front-load the context"
 
-    This workflow works best when you gather the important information up front rather than feeding it in piecemeal later.
+    Gather everything up front. Providing context piecemeal produces piecemeal output.
 
 ### Step 2 - Create a new project in Agent Studio
 
@@ -311,55 +311,51 @@ The project starts empty:
 - no flows
 - no configuration
 
-That blank starting point is intentional. The coding agent will populate the project in later steps.
+That blank starting point is intentional. The coding tool populates the project in later steps.
 
 !!! note "Think of Agent Studio as the deployment target"
 
-    Agent Studio is where the project lives, but the coding agent does most of the actual building work.
+    Agent Studio is where the project lives, but the coding tool generates the actual content.
 
-### Step 3 - Launch the coding agent via the CLI
+### Step 3 - Start the coding tool via the CLI
 
-Open your command line interface and launch your coding agent.
+Open your terminal and start the coding tool.
 
 At this stage:
 
 - the ADK must already be installed
 - the Agent Studio project must already exist
-- the coding agent should be linked to the project using the ADK
-
-A typical starting point is:
+- the coding tool should initialize and link the project using the ADK
 
 ~~~bash
 poly init --region <region> --account_id <account_id> --project_id <project_id>
 poly pull
 ~~~
 
-The ADK acts as the bridge between your local development environment and Agent Studio in the cloud. It allows the coding agent to read from and write back to the project.
+The ADK acts as the bridge between your local environment and Agent Studio. It lets the coding tool read from and write back to the project.
 
-### Step 4 - Feed context to the coding agent
+### Step 4 - Give the coding tool its context
 
-Now provide the coding agent with the information you gathered earlier.
+Provide the coding tool with the information you gathered earlier.
 
-This is the core input step. Include:
+Include:
 
 - project-specific requirements
 - the URL to the business’s public API documentation
 - relevant internal context
 - useful patterns or best practices from previous projects
 
-The coding agent can also use the docs command to inspect the SDK and understand the available resources.
+Use the docs command to generate a reference file the coding tool can read:
 
 ~~~bash
 poly docs --all
 ~~~
 
-Reusing proven patterns from earlier projects can improve both speed and output quality.
+### Step 5 - Generate the project files
 
-### Step 5 - Let the agent build
+Once the context is in place, the coding tool generates the project files.
 
-Once the context has been provided, let the coding agent generate the project files.
-
-The coding agent can produce the assets needed for the agent, including:
+This produces the assets the agent needs, including:
 
 <div class="grid cards" markdown>
 
@@ -389,11 +385,11 @@ The coding agent can produce the assets needed for the agent, including:
 
 </div>
 
-The generated assets are structured for Agent Studio and prepared to be pushed back to the platform.
+The generated files follow ADK structure and are ready to push to Agent Studio.
 
-### Step 6 - Push back to Agent Studio
+### Step 6 - Push to Agent Studio
 
-Once the coding agent has generated the project files, it uses the ADK to push them back into Agent Studio.
+Once the files are generated, use the ADK to push them to Agent Studio.
 
 A new branch is created in the project so the generated work can be reviewed safely before anything goes live.
 
@@ -443,15 +439,7 @@ At that point, the agent is live.
 | **poly chat** | Start an interactive session with the agent |
 | **poly docs** | Output resource documentation |
 
-## Summary
-
-| Metric | Value |
-|---|---|
-| **Manual workflow** | Supported |
-| **AI-agent workflow** | Supported |
-| **Production-ready path** | Yes |
-
-The overall loop is straightforward:
+## The overall loop
 
 1. create or connect a project
 2. build locally using the ADK

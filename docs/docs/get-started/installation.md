@@ -23,17 +23,17 @@ Once installed, you can use the `poly` command to interact with Agent Studio pro
 
 ## Verify the installation
 
-To confirm that the CLI is available, run:
+Confirm the CLI is available:
 
 ~~~bash
 poly --help
 ~~~
 
-If installation has completed successfully, this will display the top-level command help.
+You should see the top-level command help if installation succeeded.
 
 ## Development setup from source
 
-If you are contributing to the ADK itself or working directly from the repository, you can set it up locally from source instead.
+To contribute to the ADK or work directly from the repository:
 
 ~~~bash
 git clone https://github.com/polyai/adk.git
@@ -44,17 +44,7 @@ uv pip install -e ".[dev]"
 pre-commit install
 ~~~
 
-This installs the project in editable mode and enables the repository’s development hooks.
-
-## Running tests
-
-To run the test suite:
-
-~~~bash
-pytest
-~~~
-
-Test files are located in `src/poly/tests/`.
+This installs the project in editable mode and registers the development hooks.
 
 ## Next step
 

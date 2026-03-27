@@ -3,15 +3,9 @@ title: Working locally
 description: Understand how the PolyAI ADK maps Agent Studio projects onto a local development workflow.
 ---
 
-The **PolyAI ADK** is a CLI tool and Python package for managing **PolyAI Agent Studio** projects locally.
+With the ADK, you work on Agent Studio projects from your local machine instead of exclusively through the browser.
 
-It provides a Git-like workflow for synchronizing project configuration between your local filesystem and the Agent Studio platform, so agent development can fit into normal engineering build, review, and collaboration cycles.
-
-## What “working locally” means
-
-With the ADK, you are not building an agent only inside the browser.
-
-Instead, you work with a project on your machine, where you can:
+Your local filesystem becomes your primary editing surface. You can:
 
 - edit agent resources directly
 - review changes with Git-style workflows
@@ -135,21 +129,11 @@ These placeholders are used in prompts, rules, topic actions, and related text f
 | `{{ho:handoff_name}}` | Handoff destination | Rules |
 | `{{vrbl:variable_name}}` | State variable | Prompts, topic actions, SMS templates |
 
-These references make the local project composable: settings, prompts, and behaviors can refer to resources by name rather than hard-coding values.
-
-## Why local development matters
-
-Working locally makes the ADK especially useful for teams that want to:
-
-- review changes before deployment
-- reuse patterns across projects
-- work with large or complex resource trees
-- generate or modify resources using coding agents
-- fit agent development into existing engineering processes
+These references let settings, prompts, and behaviors point to resources by name rather than repeating hard-coded values.
 
 !!! tip "A Git-like workflow for Agent Studio"
 
-    The ADK is easiest to understand if you think of it as a synchronization layer between your local project files and the Agent Studio platform.
+    Think of the ADK as a synchronization layer between your local files and the Agent Studio platform.
 
 ## Related pages
 

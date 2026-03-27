@@ -9,7 +9,7 @@ description: Enable experimental features and advanced runtime settings for an a
 The experimental config file is an optional JSON file used to enable experimental features and advanced runtime settings for an agent.
 </p>
 
-It can be used for things such as:
+Use it for:
 
 - feature flags
 - ASR tuning
@@ -66,11 +66,11 @@ The ADK validates `experimental_config.json` against this schema when you run:
 poly validate
 ~~~
 
-If the configuration is invalid, it will fail validation locally. Invalid experimental config in deployed agents is not read by the runtime.
+Invalid configuration fails `poly validate` locally. Experimental config that fails validation is not read by the runtime in deployed agents.
 
 !!! info "Validate before pushing"
 
-    Because experimental config can affect runtime behavior in subtle ways, it should always be validated locally before changes are pushed.
+    Experimental config can affect runtime behavior in subtle ways. Always run `poly validate` locally before pushing changes.
 
 ## When to use it
 

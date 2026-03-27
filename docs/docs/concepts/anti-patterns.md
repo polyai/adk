@@ -3,7 +3,7 @@ title: Common anti-patterns
 description: Avoid common mistakes when building flows, writing prompts, and handling control flow in the PolyAI ADK.
 ---
 
-This page collects common implementation mistakes that make agents harder to reason about, harder to maintain, or more likely to behave incorrectly at runtime.
+This page collects common implementation mistakes that make agents harder to predict, harder to maintain, or more likely to behave incorrectly at runtime.
 
 The general rule is simple: keep prompts focused on conversation, keep Python focused on deterministic logic, and make control flow explicit.
 
@@ -71,9 +71,9 @@ Implement the check in Python and transition to the correct step or flow explici
 
 When branching logic is buried in prompts:
 
-- behavior becomes harder to test
+- behavior becomes harder to test and verify
 - routing becomes harder to debug
-- the agent becomes more dependent on model interpretation for deterministic behavior
+- deterministic behavior becomes dependent on how the model interprets the instruction
 
 <div class="grid cards" markdown>
 
