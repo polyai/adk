@@ -1307,10 +1307,16 @@ class AgentStudioCLI:
         try:
             gists = GitHubAPIHandler.list_diff_gists()
         except requests.HTTPError as e:
-            error(f"GitHub API error: {e}")
+            if output_json:
+                json_print({"success": False, "message": f"GitHub API error: {e}"})
+            else:
+                error(f"GitHub API error: {e}")
             return
         except OSError as e:
-            error(str(e))
+            if output_json:
+                json_print({"success": False, "message": str(e)})
+            else:
+                error(str(e))
             return
 
         if output_json:

@@ -387,6 +387,17 @@ class ListGistsTest(unittest.TestCase):
 
         mock_json_print.assert_called_once_with(self.SAMPLE_GISTS)
 
+    @patch("poly.cli.GitHubAPIHandler.list_diff_gists", side_effect=OSError("disk error"))
+    @patch("poly.cli.json_print")
+    def test_json_output_on_error_prints_failure(self, mock_json_print, _mock_list):
+        """With output_json=True, an API/OS error prints {success: false, message: ...}."""
+        AgentStudioCLI.list_gists(output_json=True)
+
+        mock_json_print.assert_called_once()
+        result = mock_json_print.call_args[0][0]
+        self.assertFalse(result["success"])
+        self.assertIn("disk error", result["message"])
+
 
 class ReviewDescriptionTest(unittest.TestCase):
     """Tests for AgentStudioCLI.review gist description formatting."""
