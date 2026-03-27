@@ -964,14 +964,21 @@ class AgentStudioCLI:
             json_errors=output_json or output_json_projection,
         )
 
+        original_branch_id = project.branch_id
         files_with_conflicts, projection = project.pull_project(
             force=force, format=format, projection_json=projection_json
         )
+        new_branch_name = None
+        if original_branch_id != project.branch_id:
+            new_branch_name = project.get_current_branch()
         if output_json or output_json_projection:
             json_output = {
                 "success": not bool(files_with_conflicts),
                 "files_with_conflicts": files_with_conflicts,
             }
+            if new_branch_name:
+                json_output["new_branch_name"] = new_branch_name
+                json_output["new_branch_id"] = project.branch_id
             if output_json_projection:
                 json_output["projection"] = projection
             json_print(json_output)
@@ -979,6 +986,10 @@ class AgentStudioCLI:
                 sys.exit(1)
             return
 
+        if new_branch_name:
+            warning(
+                f"Current branch no longer exists in Agent Studio. Switched to branch '{new_branch_name}'."
+            )
         if files_with_conflicts:
             print_file_list("Merge conflicts detected", files_with_conflicts, "filename.conflict")
 
@@ -1009,6 +1020,7 @@ class AgentStudioCLI:
             json_errors=output_json or output_commands,
         )
 
+        original_branch_id = project.branch_id
         push_ok, output, commands = project.push_project(
             force=force,
             skip_validation=skip_validation,
@@ -1017,12 +1029,18 @@ class AgentStudioCLI:
             email=email,
             projection_json=projection_json,
         )
+        new_branch_name = None
+        if original_branch_id != project.branch_id:
+            new_branch_name = project.get_current_branch()
         if output_json or output_commands:
             json_output = {
                 "success": push_ok,
                 "message": output,
                 "dry_run": dry_run,
             }
+            if new_branch_name:
+                json_output["new_branch_name"] = new_branch_name
+                json_output["new_branch_id"] = project.branch_id
             if output_commands:
                 json_output["commands"] = commands_to_dicts(commands)
             json_print(json_output)
@@ -1030,6 +1048,8 @@ class AgentStudioCLI:
                 sys.exit(1)
             return
 
+        if new_branch_name:
+            warning(f"Created and switched to new branch '{new_branch_name}'.")
         if push_ok:
             success(f"Pushed {project.account_id}/{project.project_id} to Agent Studio.")
         else:
@@ -1376,7 +1396,7 @@ class AgentStudioCLI:
 
         if current_branch is None:
             warning(
-                f"Current local branch '{project.branch_id}' does not exist in Agent Studio. "
+                f"Current local branch does not exist in Agent Studio. "
                 "It may have been deleted or merged."
             )
 
@@ -1524,7 +1544,7 @@ class AgentStudioCLI:
 
         if current_branch is None:
             warning(
-                f"Current local branch '{project.branch_id}' does not exist in Agent Studio. "
+                f"Current local branch does not exist in Agent Studio. "
                 "It may have been deleted or merged."
             )
             return

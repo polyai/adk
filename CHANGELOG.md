@@ -1,6 +1,44 @@
 # CHANGELOG
 
 
+## v0.5.1 (2026-03-27)
+
+### Bug Fixes
+
+- Display branch name instead of branch id ([#45](https://github.com/polyai/adk/pull/45),
+  [`5a54240`](https://github.com/polyai/adk/commit/5a54240418d1848d195af23e87b3cb7005462d4b))
+
+## Summary Display new branch name in CLI when the tool switches branch
+
+## Motivation On push when creating a new branch, users would be shown branch ID not new branch name
+
+## Changes
+
+- Change logger level for some logs to hide on usual CLI usage - Make it more clear when a branch id
+  is used in logs - When branch_id changes, output this in CLI with new branch name - Update auto
+  branch name to exclude `sdk-user`
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs <img width="428" height="126" alt="Screenshot 2026-03-26 at 15 54 24"
+  src="https://github.com/user-attachments/assets/39a17de0-7395-4f0c-9cd2-898043cc322c" />
+
+---------
+
+Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+
+
 ## v0.5.0 (2026-03-26)
 
 ### Features
