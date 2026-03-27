@@ -692,7 +692,9 @@ class Function(Resource):
             }
             for name in variable_names:
                 if name not in known_variables:
-                    logger.warning(f"Variable {name} not found in resource mappings")
+                    logger.warning(
+                        f"Variable {name} not found in resource mappings, will be added in the next push"
+                    )
                     continue
                 variable_references[known_variables[name]] = True
         return variable_references

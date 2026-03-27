@@ -1621,7 +1621,7 @@ class AgentStudioProject:
             )
             deployment_id = (deployments.get(name) or {}).get("deployment_id")
             if not deployment_id:
-                logger.warning(f"No active deployment found for environment '{name}'.")
+                logger.error(f"No active deployment found for environment '{name}'.")
                 return {}
             logger.info(f"Pulling resources from deployment '{deployment_id}' ({name})...")
             return self.api_handler.pull_deployment_resources(deployment_id)
@@ -1652,7 +1652,7 @@ class AgentStudioProject:
                 )
                 return self.api_handler.pull_deployment_resources(deployment_id)
 
-        logger.warning(f"Name '{name}' not found in environments, branches, or deployments.")
+        logger.error(f"Name '{name}' not found in environments, branches, or deployments.")
         return {}
 
     def diff_remote_named_versions(
@@ -1663,7 +1663,7 @@ class AgentStudioProject:
         after_resources = self.get_remote_resources_by_name(after_name)
 
         if not before_resources or not after_resources:
-            logger.warning(
+            logger.error(
                 "Could not retrieve resources for one or both specified names: "
                 f"before={before_name}, after={after_name}"
             )
