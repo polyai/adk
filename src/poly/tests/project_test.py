@@ -70,6 +70,61 @@ class InitTest(unittest.TestCase):
         self.assertEqual(project.project_id, "test_project")
 
 
+class InitProjectOnSaveTest(unittest.TestCase):
+    """Tests for the on_save callback in init_project"""
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.mock_save_config = patch.object(AgentStudioProject, "save_config").start()
+        self.mock_save_imports = patch("poly.utils.save_imports").start()
+        self.mock_export_decorators = patch("poly.utils.export_decorators").start()
+        self.mock_resource_save = patch.object(Resource, "save").start()
+        self.mock_write_cache = patch.object(
+            MultiResourceYamlResource, "write_cache_to_file"
+        ).start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_on_save_called_with_correct_progress(self):
+        """on_save should be called once per resource with (current, total)"""
+        self.mock_api_handler.pull_resources.return_value = (
+            AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR).resources,
+            {},
+        )
+        on_save = MagicMock()
+
+        project, _ = AgentStudioProject.init_project(
+            base_path=os.path.join(TEST_DIR, "tmp"),
+            region="us-1",
+            account_id="test_account",
+            project_id="test_project",
+            on_save=on_save,
+        )
+
+        total = len(project.all_resources)
+        self.assertEqual(on_save.call_count, total)
+        on_save.assert_any_call(1, total)
+        on_save.assert_any_call(total, total)
+
+    def test_no_on_save_does_not_error(self):
+        """init_project without on_save should work without errors"""
+        self.mock_api_handler.pull_resources.return_value = (
+            AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR).resources,
+            {},
+        )
+
+        project, _ = AgentStudioProject.init_project(
+            base_path=os.path.join(TEST_DIR, "tmp"),
+            region="us-1",
+            account_id="test_account",
+            project_id="test_project",
+        )
+        self.assertIsNotNone(project)
+
+
 class SortPathsForReverseDeletionTest(unittest.TestCase):
     """Tests for _sort_paths_for_reverse_deletion (Pronunciation vs lexicographic order)."""
 
@@ -2575,6 +2630,31 @@ class PullProjectTest(unittest.TestCase):
         saved_content = kp_calls[-1][0][0]
         self.assertIn("level: boosted", saved_content)
         self.assertNotIn("<<<<<<<", saved_content)
+
+    def test_pull_project_on_save_callback(self):
+        """on_save should be called during pull with correct final progress"""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+
+        on_save = MagicMock()
+        files_with_conflicts, _ = project.pull_project(on_save=on_save)
+
+        self.assertEqual(files_with_conflicts, [])
+        self.assertGreater(on_save.call_count, 0)
+        last_call = on_save.call_args_list[-1]
+        current, total = last_call[0]
+        self.assertEqual(current, total)
+
+    def test_pull_project_no_on_save_does_not_error(self):
+        """pull_project without on_save should work without errors"""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+
+        files_with_conflicts, _ = project.pull_project()
+        self.assertEqual(files_with_conflicts, [])
+
 
 class DocsTest(unittest.TestCase):
     """Tests for the docs module"""
