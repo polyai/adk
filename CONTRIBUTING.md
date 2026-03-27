@@ -12,7 +12,7 @@ Contributions are welcome! Please ensure all tests pass before submitting a pull
 ### Getting Started
 
 ```bash
-git clone https://github.com/PolyAI-LDN/adk.git
+git clone https://github.com/PolyAI/adk.git
 cd adk
 uv venv
 source .venv/bin/activate
