@@ -290,6 +290,22 @@ class DeleteGistsTest(unittest.TestCase):
 
     @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
     @patch("poly.cli.GitHubAPIHandler.delete_gist")
+    @patch("poly.cli.error")
+    def test_full_id_sharing_prefix_does_not_match_wrong_gist(
+        self, mock_error, mock_delete, mock_list
+    ):
+        """A full ID that shares a 7-char prefix with a gist but doesn't match it exactly
+        should not delete the wrong gist."""
+        mock_list.return_value = self.SAMPLE_GISTS  # contains "aaa1111111"
+
+        # "aaa1111xyz" shares the "aaa1111" prefix but is not a valid ID
+        AgentStudioCLI.delete_gists(gist_id="aaa1111xyz")
+
+        mock_delete.assert_not_called()
+        mock_error.assert_called_once()
+
+    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli.GitHubAPIHandler.delete_gist")
     @patch("poly.cli.json_print")
     def test_direct_gist_id_with_json_output(self, mock_json_print, mock_delete, mock_list):
         """With output_json=True and a gist_id, result is printed as JSON."""

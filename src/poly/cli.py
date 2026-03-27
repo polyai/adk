@@ -1352,11 +1352,7 @@ class AgentStudioCLI:
 
         if gist_id:
             matched = next(
-                (
-                    g
-                    for g in gists
-                    if g["id"].startswith(gist_id) or gist_id.startswith(g["id"][:7])
-                ),
+                (g for g in gists if g["id"].startswith(gist_id)),
                 None,
             )
             if not matched:
