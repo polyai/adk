@@ -1,4 +1,4 @@
-"""Tests for the review, list_gists, delete_gists, and gist formatting functionality.
+"""Tests for GitHub API gist interactions: review, list_gists, delete_gists, and gist formatting.
 
 Copyright PolyAI Limited
 """
@@ -252,6 +252,38 @@ class DeleteGistsTest(unittest.TestCase):
         self.assertEqual(mock_delete.call_count, 2)
         self.assertIn("2 gist(s)", mock_success.call_args[0][0])
 
+    @patch("poly.cli.GitHubAPIHandler.delete_gist")
+    @patch("poly.cli.success")
+    def test_direct_gist_id_skips_interactive_prompt(self, mock_success, mock_delete):
+        """Passing gist_id directly deletes it without showing a checkbox prompt."""
+        AgentStudioCLI.delete_gists(gist_id="aaa1111111")
+
+        mock_delete.assert_called_once_with("aaa1111111")
+        mock_success.assert_called_once()
+
+    @patch("poly.cli.GitHubAPIHandler.delete_gist")
+    @patch("poly.cli.json_print")
+    def test_direct_gist_id_with_json_output(self, mock_json_print, mock_delete):
+        """With output_json=True and a gist_id, result is printed as JSON."""
+        AgentStudioCLI.delete_gists(gist_id="aaa1111111", output_json=True)
+
+        mock_delete.assert_called_once_with("aaa1111111")
+        mock_json_print.assert_called_once_with({"deleted": ["aaa1111111"], "count": 1})
+
+    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli.GitHubAPIHandler.delete_gist")
+    @patch("poly.cli.questionary")
+    @patch("poly.cli.json_print")
+    def test_json_output_prints_deleted_ids(self, mock_json_print, mock_q, mock_delete, mock_list):
+        """With output_json=True, deleted gist IDs are printed as JSON rather than rich text."""
+        mock_list.return_value = self.SAMPLE_GISTS
+        first_choice = _format_gist_choice(self.SAMPLE_GISTS[0])
+        mock_q.checkbox.return_value.ask.return_value = [first_choice]
+
+        AgentStudioCLI.delete_gists(output_json=True)
+
+        mock_json_print.assert_called_once_with({"deleted": ["aaa1111111"], "count": 1})
+
 
 class ListGistsTest(unittest.TestCase):
     """Tests for AgentStudioCLI.list_gists interactive selection flow."""
@@ -298,6 +330,16 @@ class ListGistsTest(unittest.TestCase):
         AgentStudioCLI.list_gists()
 
         mock_browser.open.assert_not_called()
+
+    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli.json_print")
+    def test_json_output_prints_gist_list(self, mock_json_print, mock_list):
+        """With output_json=True, gists are printed as JSON without an interactive prompt."""
+        mock_list.return_value = self.SAMPLE_GISTS
+
+        AgentStudioCLI.list_gists(output_json=True)
+
+        mock_json_print.assert_called_once_with(self.SAMPLE_GISTS)
 
 
 class ReviewDescriptionTest(unittest.TestCase):

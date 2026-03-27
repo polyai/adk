@@ -347,7 +347,7 @@ class AgentStudioCLI:
         # REVIEW
         review_parser = subparsers.add_parser(
             "review",
-            parents=[verbose_parent],
+            parents=[verbose_parent, json_parent],
             help="Create an experience similar to a Pull Request, so that people can review changes locally or between versions/branches.",
             description=(
                 "Make a review page against project configuration in Agent Studio.\n\n"
@@ -360,8 +360,19 @@ class AgentStudioCLI:
                 "  poly review --path /path/to/project --before main --after feature-branch\n"
                 "  poly review --path /path/to/project --before sandbox --after live\n"
                 "  poly review --path /path/to/project --before version-hash-1 --after version-hash-2\n"
+                "  poly review list\n"
+                "  poly review list --json\n"
+                "  poly review delete\n"
+                "  poly review delete --gist GIST_ID\n"
             ),
             formatter_class=RawTextHelpFormatter,
+        )
+        review_parser.add_argument(
+            "action",
+            nargs="?",
+            choices=["list", "delete"],
+            default=None,
+            help="Subcommand: 'list' to open a gist in the browser, 'delete' to remove gists.",
         )
         review_parser.add_argument(
             "--path",
@@ -380,14 +391,11 @@ class AgentStudioCLI:
             help="Name of the branch or version to compare with.",
         )
         review_parser.add_argument(
-            "--list",
-            action="store_true",
-            help="List gists to open one in the browser.",
-        )
-        review_parser.add_argument(
-            "--delete",
-            action="store_true",
-            help="Select and delete gists.",
+            "--gist",
+            type=str,
+            default=None,
+            metavar="GIST_ID",
+            help="Gist ID to delete directly, skipping the interactive prompt (used with 'delete').",
         )
 
         # Branch
@@ -635,10 +643,10 @@ class AgentStudioCLI:
             cls.diff(args.path, args.files, args.json)
 
         elif args.command == "review":
-            if args.delete:
-                cls.delete_gists()
-            elif args.list:
-                cls.list_gists()
+            if args.action == "delete":
+                cls.delete_gists(gist_id=args.gist, output_json=args.json)
+            elif args.action == "list":
+                cls.list_gists(output_json=args.json)
             else:
                 if args.before and args.after:
                     cls.review(
@@ -1214,7 +1222,7 @@ class AgentStudioCLI:
         return
 
     @classmethod
-    def list_gists(cls) -> None:
+    def list_gists(cls, output_json: bool = False) -> None:
         """Interactively select a review gist and open it in the browser."""
         try:
             gists = GitHubAPIHandler.list_diff_gists()
@@ -1223,6 +1231,10 @@ class AgentStudioCLI:
             return
         except OSError as e:
             error(str(e))
+            return
+
+        if output_json:
+            json_print(gists)
             return
 
         if not gists:
@@ -1237,9 +1249,20 @@ class AgentStudioCLI:
         webbrowser.open(url_by_choice[selected])
 
     @classmethod
-    def delete_gists(cls) -> None:
-        """Interactively select and delete review gists from the user's GitHub account."""
+    def delete_gists(cls, gist_id: Optional[str] = None, output_json: bool = False) -> None:
+        """Interactively select and delete review gists from the user's GitHub account.
+
+        If gist_id is provided, delete that specific gist without an interactive prompt.
+        """
         try:
+            if gist_id:
+                GitHubAPIHandler.delete_gist(gist_id)
+                if output_json:
+                    json_print({"deleted": [gist_id], "count": 1})
+                else:
+                    success(f"Deleted gist: {gist_id}")
+                return
+
             gists = GitHubAPIHandler.list_diff_gists()
         except requests.HTTPError as e:
             error(f"GitHub API error: {e}")
@@ -1261,11 +1284,17 @@ class AgentStudioCLI:
             return
 
         try:
+            deleted_ids = []
             for description in selected:
                 gist_id = description_to_id[description]
                 GitHubAPIHandler.delete_gist(gist_id)
-                plain(f"  [muted]Deleted gist:[/muted] {description}")
-            success(f"Deleted {len(selected)} gist(s).")
+                deleted_ids.append(gist_id)
+                if not output_json:
+                    plain(f"  [muted]Deleted gist:[/muted] {description}")
+            if output_json:
+                json_print({"deleted": deleted_ids, "count": len(deleted_ids)})
+            else:
+                success(f"Deleted {len(selected)} gist(s).")
         except requests.HTTPError as e:
             error(f"GitHub API error: {e}")
         except OSError as e:
