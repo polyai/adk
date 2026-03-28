@@ -92,7 +92,7 @@ poly pull
 
 If the pulled changes conflict with your own local edits, the ADK will merge them and surface merge markers where conflicts occur.
 
-The local workflow is not isolated from Agent Studio UI work — both sides affect branch state. Keep that in mind when collaborating.
+The local workflow is not isolated from Agent Studio UI work - both sides affect branch state. Keep that in mind when collaborating.
 
 ## Review workflow
 

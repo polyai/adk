@@ -43,7 +43,7 @@ The intended workflow is simple:
 | **Claude Code + ADK** | Generate project files and push changes |
 | **Agent Studio** | Host, preview, review, and deploy the agent |
 
-## Step 1 — Gather requirements
+## Step 1 - Gather requirements
 
 Collect the project context from your team's communication channels before you begin.
 
@@ -62,7 +62,7 @@ The more complete and structured your input, the less correction the output requ
 
     Gather everything up front. Providing context piecemeal produces piecemeal output.
 
-## Step 2 — Create a new project in Agent Studio
+## Step 2 - Create a new project in Agent Studio
 
 Open **Agent Studio** and create a brand-new project.
 
@@ -78,7 +78,7 @@ That blank starting point is intentional. The coding tool populates the project 
 
     Agent Studio is where the project lives, but the coding tool generates the actual content.
 
-## Step 3 — Start the coding tool via the CLI
+## Step 3 - Start the coding tool via the CLI
 
 Open your terminal and start your coding tool.
 
@@ -95,7 +95,7 @@ poly pull
 
 The ADK acts as the bridge between your local environment and Agent Studio. It lets the coding tool read from and write back to the project.
 
-## Step 4 — Give the coding tool its context
+## Step 4 - Give the coding tool its context
 
 Provide the coding tool with the information you gathered earlier.
 
@@ -114,7 +114,7 @@ poly docs --all
 
 Including patterns from earlier projects reduces correction time and improves consistency.
 
-## Step 5 — Generate the project files
+## Step 5 - Generate the project files
 
 Once the context is in place, the coding tool generates the project files.
 
@@ -150,7 +150,7 @@ This produces the assets the agent needs, including:
 
 The generated files follow ADK structure and are ready to push to Agent Studio.
 
-## Step 6 — Push to Agent Studio
+## Step 6 - Push to Agent Studio
 
 Once the files are generated, use the ADK to push them to Agent Studio.
 
@@ -167,7 +167,7 @@ When you switch to that branch in Agent Studio, you should see the generated cha
 
     The branch-based workflow makes it possible to inspect what was generated before merging it into the main project.
 
-## Step 7 — Review, merge, and deploy
+## Step 7 - Review, merge, and deploy
 
 Review the generated work inside Agent Studio.
 

@@ -51,7 +51,7 @@ A typical project structure looks like this:
 
 ~~~text
 <account>/<project>/
-├── _gen/                               # Generated stubs — do not edit
+├── _gen/                               # Generated stubs - do not edit
 ├── agent_settings/                     # Agent identity and behavior
 │   ├── personality.yaml
 │   ├── role.yaml
@@ -68,7 +68,7 @@ A typical project structure looks like this:
 │   └── response_control/
 ├── chat/                               # Chat channel settings
 │   └── configuration.yaml
-├── flows/                              # Optional — flow definitions
+├── flows/                              # Optional - flow definitions
 ├── functions/                          # Global functions
 ├── topics/                             # Knowledge base topics
 └── project.yaml                        # Project metadata
@@ -134,6 +134,21 @@ These references let settings, prompts, and behaviors point to resources by name
 !!! tip "A Git-like workflow for Agent Studio"
 
     Think of the ADK as a synchronization layer between your local files and the Agent Studio platform.
+
+## Development setup from source
+
+To contribute to the ADK or work directly from the repository:
+
+~~~bash
+git clone https://github.com/polyai/adk.git
+cd adk
+uv venv
+source .venv/bin/activate
+uv pip install -e ".[dev]"
+pre-commit install
+~~~
+
+This installs the project in editable mode and registers the development hooks.
 
 ## Related pages
 
