@@ -5,18 +5,17 @@ Copyright PolyAI Limited
 
 import logging
 import uuid
-from copy import deepcopy
 from typing import Any, Optional
 
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.protobuf.handoff_pb2 import Handoff_SetDefault
 from poly.handlers.sdk import SourcererAPIError, SourcererSDK
 from poly.resources import (
-    ApiIntegration,
-    ApiIntegrationEnvironments,
-    ApiIntegrationOperation,
     ASRBiasing,
     AsrSettings,
+    ApiIntegration,
+    ApiIntegrationOperation,
+    ApiIntegrationEnvironments,
     BaseResource,
     ChatGreeting,
     ChatStylePrompt,
@@ -78,7 +77,7 @@ class SyncClientHandler:
     @property
     def branch_id(self) -> str:
         """Get the current branch ID."""
-        return self._sdk.branch_id
+        return self.sdk.branch_id
 
     def __init__(
         self,
@@ -102,46 +101,40 @@ class SyncClientHandler:
             project_id=project_id,
             branch_id=branch_id,
         )
+        # Switch to the specified branch if exists and provided.
+        if branch_id and branch_id != "main":
+            found_branches = self._sdk.fetch_branches().get("branches", [])
+            branch = next((b for b in found_branches if b.get("branchId") == branch_id), None)
+            if branch:
+                self._sdk.branch_id = branch_id
+            else:
+                logger.warning(f"Branch {branch_id} does not exist. Switching to 'main' branch.")
+                self._sdk.branch_id = "main"
 
     @property
     def sdk(self) -> SourcererSDK:
         """Get the Sourcerer SDK instance."""
         return self._sdk
 
-    def assert_branch_exists(self) -> str:
-        """Assert that the branch exists and switch to 'main' if it doesn't."""
-        if self.branch_id != "main":
-            found_branches = self._sdk.fetch_branches().get("branches", [])
-            branch = next((b for b in found_branches if b.get("branchId") == self.branch_id), None)
-            if not branch:
-                logger.info(
-                    f"Branch ID:'{self.branch_id}' does not exist. Switching to 'main' branch."
-                )
-                self._sdk.branch_id = "main"
-        return self.branch_id
-
-    @classmethod
-    def load_resources_from_projection(
-        cls, projection: dict
-    ) -> dict[type[Resource], dict[str, Resource]]:
+    def _load_resources(self, projection: dict) -> dict[type[Resource], dict[str, Resource]]:
         return {
-            Topic: cls._read_topics_from_projection(projection),
-            Function: cls._read_functions_from_projection(projection),
-            Entity: cls._read_entities_from_projection(projection),
-            Variable: cls._read_variables_from_projection(projection),
-            **cls._read_agent_settings_from_projection(projection),
-            **cls._read_channel_settings_from_projection(projection),
-            **cls._read_flows_from_projection(projection),
-            ExperimentalConfig: cls._read_experimental_config_from_projection(projection),
-            SMSTemplate: cls._read_sms_templates_from_projection(projection),
-            Handoff: cls._read_handoffs_from_projection(projection),
-            **cls._read_variants_from_projection(projection),
-            PhraseFilter: cls._read_phrase_filters_from_projection(projection),
-            Pronunciation: cls._read_pronunciations_from_projection(projection),
-            KeyphraseBoosting: cls._read_keyphrase_boosting_from_projection(projection),
-            TranscriptCorrection: cls._read_transcript_corrections_from_projection(projection),
-            **cls._read_asr_settings_from_projection(projection),
-            ApiIntegration: cls._read_api_integrations_from_projection(projection),
+            Topic: self._read_topics_from_projection(projection),
+            Function: self._read_functions_from_projection(projection),
+            Entity: self._read_entities_from_projection(projection),
+            Variable: self._read_variables_from_projection(projection),
+            **self._read_agent_settings_from_projection(projection),
+            **self._read_channel_settings_from_projection(projection),
+            **self._read_flows_from_projection(projection),
+            ExperimentalConfig: self._read_experimental_config_from_projection(projection),
+            SMSTemplate: self._read_sms_templates_from_projection(projection),
+            Handoff: self._read_handoffs_from_projection(projection),
+            **self._read_variants_from_projection(projection),
+            PhraseFilter: self._read_phrase_filters_from_projection(projection),
+            Pronunciation: self._read_pronunciations_from_projection(projection),
+            KeyphraseBoosting: self._read_keyphrase_boosting_from_projection(projection),
+            TranscriptCorrection: self._read_transcript_corrections_from_projection(projection),
+            **self._read_asr_settings_from_projection(projection),
+            ApiIntegration: self._read_api_integrations_from_projection(projection),
         }  # ty:ignore[invalid-return-type]
 
     def pull_deployment_resources(
@@ -157,31 +150,27 @@ class SyncClientHandler:
         logger.info(
             f"Fetching project data for project {self.project_id} for deployment {deployment_id}"
         )
-        self.assert_branch_exists()
         projection = self.sdk.fetch_deployment_projection(deployment_id=deployment_id)
         logger.info(
             f"Successfully fetched project data for project {self.project_id} for deployment {deployment_id}"
         )
-        return self.load_resources_from_projection(projection)
+        return self._load_resources(projection)
 
-    def pull_resources(self) -> tuple[dict[type[Resource], dict[str, Resource]], dict[str, Any]]:
+    def pull_resources(self) -> dict[type[Resource], dict[str, Resource]]:
         """Fetch all resources from a specific project.
 
         Returns:
             dict[type[Resource], dict[str, Resource]]: A dictionary mapping resource types to
                 their resources
-            dict[str, Any]: The projection data
         """
         logger.info(
             f"Fetching project data for project {self.project_id} on branch {self.sdk.branch_id}"
         )
-        self.assert_branch_exists()
         projection = self.sdk.fetch_projection(force_refresh=True)
-        logger.debug(f"Projection: {projection}")
         logger.info(
             f"Successfully fetched project data for project {self.project_id} on branch {self.sdk.branch_id}"
         )
-        return self.load_resources_from_projection(projection), projection
+        return self._load_resources(projection)
 
     @staticmethod
     def _read_topics_from_projection(projection: dict) -> dict[str, Topic]:
@@ -880,14 +869,16 @@ class SyncClientHandler:
         Variable,
     ]
 
-    def queue_resources(
+    def push_resources(
         self,
         deleted_resources: dict[type[BaseResource], dict[str, BaseResource]],
         new_resources: dict[type[BaseResource], dict[str, BaseResource]],
         updated_resources: dict[type[BaseResource], dict[str, BaseResource]],
+        dry_run: bool = False,
+        queue_pushes: bool = False,
         email: Optional[str] = None,
-    ) -> list[Command]:
-        """Queue multiple resources for the specific project.
+    ) -> bool:
+        """Upload multiple resources for the specific project.
 
         Sends in order:
         - delete
@@ -898,16 +889,18 @@ class SyncClientHandler:
             deleted_resources (dict[type[BaseResource], dict[str, BaseResource]]): Resources to delete
             new_resources (dict[type[BaseResource], dict[str, BaseResource]]): New resources to upload
             updated_resources (dict[type[BaseResource], dict[str, BaseResource]]): Updated resources to upload
-            email (str): Email to use for metadata creation.
+            dry_run (bool): If True, only log the upload actions without actually
+                uploading
 
         Returns:
-            list[Command]: A list of queued Command protobuf messages.
+            bool: True if the resources were pushed successfully, False otherwise
         """
         metadata = self.sdk.create_metadata()
         if email:
             metadata.created_by = email
 
-        commands = []
+        if self.sdk.branch_id == "main":
+            self.create_branch()  # creates branch and switches to it
 
         delete_resources_priority: list[type[BaseResource]] = []
         for resource_type in self.PRIORITY_DELETE_TYPES:
@@ -920,7 +913,7 @@ class SyncClientHandler:
         for resource_type in delete_resources_priority:
             for resource_id, resource in deleted_resources.get(resource_type, {}).items():
                 delete_type = resource.delete_command_type
-                commands.append(
+                self.sdk.add_command_to_queue(
                     Command(
                         type=delete_type,
                         command_id=str(uuid.uuid4()),
@@ -941,7 +934,7 @@ class SyncClientHandler:
             resources = new_resources.get(resource_type, {})
             for resource_id, resource in resources.items():
                 create_type = resource.create_command_type
-                commands.append(
+                self.sdk.add_command_to_queue(
                     Command(
                         type=create_type,
                         command_id=str(uuid.uuid4()),
@@ -962,7 +955,7 @@ class SyncClientHandler:
             resources = updated_resources.get(resource_type, {})
             for resource_id, resource in resources.items():
                 update_type = resource.update_command_type
-                commands.append(
+                self.sdk.add_command_to_queue(
                     Command(
                         type=update_type,
                         command_id=str(uuid.uuid4()),
@@ -975,7 +968,7 @@ class SyncClientHandler:
         for resource_dict in [new_resources, updated_resources]:
             for resource_id, resource in resource_dict.get(Handoff, {}).items():
                 if isinstance(resource, Handoff) and resource.is_default:
-                    commands.append(
+                    self.sdk.add_command_to_queue(
                         Command(
                             type="handoff_set_default",
                             command_id=str(uuid.uuid4()),
@@ -984,49 +977,21 @@ class SyncClientHandler:
                         )
                     )
 
-        for command in commands:
-            self.sdk.add_command_to_queue(command)
-
-        logger.info(f"Queued {len(commands)} commands")
-        logger.debug(f"Commands: {commands!r}")
-        return commands
-
-    def send_queued_commands(self) -> bool:
-        """Send all queued commands as a batch and clear the queue.
-
-        Returns:
-            bool: True if the commands were sent successfully, False otherwise
-        """
-        if self.sdk.get_queue_size() == 0:
-            logger.info("No commands to send")
+        if not (dry_run or queue_pushes):
+            logger.info(f"Sending commands command_queue={self.sdk._command_queue!r}")
+            try:
+                self.sdk.send_command_batch()
+            except SourcererAPIError as e:
+                logger.error(f"Failed to push resources: {e}")
+                # If the batch fails, we assume all commands failed
+                return False
+        elif queue_pushes:
             return True
+        elif dry_run:
+            logger.info(f"Created commands command_queue={self.sdk._command_queue!r}")
+            self.sdk.clear_queue()
 
-        self.assert_branch_exists()
-
-        # Creates branch and switches to it
-        if self.sdk.branch_id == "main":
-            self.create_branch()
-
-        try:
-            logger.info(f"Sending {len(self.sdk._command_queue)} commands to {self.sdk.branch_id}")
-            self.sdk.send_command_batch()
-            return True
-        except SourcererAPIError as e:
-            logger.error(f"Failed to send commands: {e}")
-            return False
-
-    def clear_command_queue(self) -> None:
-        """Clear all queued commands without sending."""
-        logger.info(f"Clearing {len(self.sdk._command_queue)} commands")
-        self.sdk.clear_queue()
-
-    def get_queued_commands(self) -> list[Command]:
-        """Get all queued commands.
-
-        Returns:
-            list[Command]: A list of queued Command protobuf messages.
-        """
-        return deepcopy(self.sdk._command_queue)
+        return True
 
     def switch_branch(self, branch_id: str) -> bool:
         """Switch to a different branch within the same project.
@@ -1037,16 +1002,14 @@ class SyncClientHandler:
         Returns:
             bool: True if the switch was successful, False otherwise
         """
-        self.assert_branch_exists()
-
         if self.sdk.branch_id == branch_id:
-            logger.info(f"Already on branch ID:'{branch_id}'")
+            logger.info(f"Already on branch {branch_id}")
             return True
 
         if branch_id == "main":
             self.sdk.branch_id = "main"
             self.sdk.get_project_data()
-            logger.info(f"Switched to branch ID:'{branch_id}'")
+            logger.info(f"Switched to branch {branch_id}")
             return True
 
         if found_branches := self.sdk.fetch_branches().get("branches"):
@@ -1056,12 +1019,11 @@ class SyncClientHandler:
                 # Re-fetch project data to ensure the SDK is up-to-date
                 self.sdk.clear_cache()
                 self.sdk.get_project_data()
-                logger.info(f"Switched to branch ID:'{branch_id}'")
+                logger.info(f"Switched to branch {branch_id}")
                 return True
             else:
-                logger.error(f"Branch ID:'{branch_id}' does not exist.")
+                logger.error(f"Branch {branch_id} does not exist.")
                 return False
-        return False
 
     def create_branch(self, branch_name: Optional[str] = None) -> str:
         """Create a new branch for the project
@@ -1077,10 +1039,9 @@ class SyncClientHandler:
 
         if branch_name is None:
             metadata = self.sdk.create_metadata()
-            time_suffix = f"{metadata.created_at.seconds % 100000:05d}"
-            random_suffix = uuid.uuid4().hex[:4]
-            suffix = f"{time_suffix}-{random_suffix}"  # to avoid duplicate names
-            branch_name = f"ADK-{suffix}"
+            email = metadata.created_by.split("@")[0]
+            suffix = f"{metadata.created_at.seconds % 10000:04d}"  # to avoid duplicate names
+            branch_name = f"ADK-{email}-{suffix}"
 
         logger.info(f"Creating new branch '{branch_name}' from 'main' branch")
 
@@ -1088,9 +1049,7 @@ class SyncClientHandler:
             expected_main_last_known_sequence=self.sdk._last_known_sequence,
             branch_name=branch_name,
         )
-        logger.info(
-            f"Created and switched to new branch. Name:'{branch_name}' ID:'{self.sdk.branch_id}'"
-        )
+        logger.warning(f"Created and switched to new branch '{self.sdk.branch_id}'")
         return self.sdk.branch_id
 
     def get_branches(self) -> dict[str, str]:
@@ -1119,20 +1078,20 @@ class SyncClientHandler:
             logger.error("Cannot delete 'main' branch.")
             return False
 
-        logger.info(f"Deleting branch ID:'{branch_id}'")
+        logger.info(f"Deleting branch '{branch_id}'")
 
         try:
             self.sdk.delete_branch(branch_id=branch_id)
         except SourcererAPIError as e:
-            logger.error(f"Failed to delete branch ID:'{branch_id}': {e}")
+            logger.error(f"Failed to delete branch '{branch_id}': {e}")
             return False
 
-        logger.info(f"Successfully deleted branch ID:'{branch_id}'")
+        logger.info(f"Successfully deleted branch '{branch_id}'")
         return True
 
     def merge_branch(
         self, message: str, conflict_resolutions: Optional[list[dict[str, Any]]] = None
-    ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
+    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
         """Merge the current branch into main.
 
         Args:
@@ -1143,15 +1102,12 @@ class SyncClientHandler:
                 - value: Optional custom value (only used with custom strategy)
 
         Returns:
-            success (bool): True if the merge was successful, False otherwise
             list[dict[str, str]]: A list of conflict information if the merge failed, empty list if successful
             list[dict[str, str]]: A list of error information if the merge failed, empty list if successful
         """
-        self.assert_branch_exists()
-
         if self.sdk.branch_id == "main":
             logger.error("Cannot merge 'main' branch into itself.")
-            return False, [], []
+            return [], []
 
         logger.info(f"Merging branch '{self.sdk.branch_id}' into 'main'")
 
@@ -1163,7 +1119,9 @@ class SyncClientHandler:
             )
         except SourcererAPIError as e:
             logger.error(f"Failed to merge branch '{self.sdk.branch_id}' into 'main': {e}")
-            return False, [], []
+            return [], []
+
+        conflicts, errors = [], []
 
         if result.get("hasConflicts", False) or result.get("errors", []):
             logger.error(
@@ -1171,12 +1129,10 @@ class SyncClientHandler:
             )
             conflicts = result.get("conflicts", [])
             errors = result.get("errors", [])
-            return False, conflicts, errors
 
         logger.info(f"Successfully merged branch '{self.sdk.branch_id}' into 'main'")
-        return True, [], []
+        return conflicts, errors
 
     def get_branch_chat_info(self, branch_id: str) -> dict[str, Any]:
         """Get deployment info needed to start a draft chat on a branch."""
-        self.assert_branch_exists()
         return self.sdk.get_branch_chat_info(branch_id)

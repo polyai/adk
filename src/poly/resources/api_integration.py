@@ -11,21 +11,22 @@ from dataclasses import dataclass, field
 from typing import ClassVar, Optional
 
 import poly.resources.resource_utils as utils
-from poly.handlers.protobuf import api_integrations_pb2
-from poly.handlers.protobuf.api_integrations_pb2 import (
-    ApiIntegration_Create,
-    ApiIntegration_Delete,
-    ApiIntegration_Update,
-    ApiIntegrationConfig_Update,
-    ApiIntegrationOperation_Create,
-    ApiIntegrationOperation_Delete,
-    ApiIntegrationOperation_Update,
-    Environments,
-)
 from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
     SubResource,
+)
+
+from poly.handlers.protobuf import api_integrations_pb2
+from poly.handlers.protobuf.api_integrations_pb2 import (
+    ApiIntegration_Create,
+    ApiIntegration_Update,
+    ApiIntegrationConfig_Update,
+    ApiIntegration_Delete,
+    Environments,
+    ApiIntegrationOperation_Create,
+    ApiIntegrationOperation_Update,
+    ApiIntegrationOperation_Delete,
 )
 
 logger = logging.getLogger(__name__)

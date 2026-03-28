@@ -4,12 +4,12 @@ from poly.resources.agent_settings import (
     SettingsRole,
     SettingsRules,
 )
+from poly.resources.asr_settings import AsrSettings
 from poly.resources.api_integration import (
     ApiIntegration,
-    ApiIntegrationEnvironments,
     ApiIntegrationOperation,
+    ApiIntegrationEnvironments,
 )
-from poly.resources.asr_settings import AsrSettings
 from poly.resources.channel_settings import (
     ChatGreeting,
     ChatStylePrompt,

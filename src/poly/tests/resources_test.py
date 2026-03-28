@@ -14,15 +14,6 @@ from poly.resources.agent_settings import (
     SettingsRole,
     SettingsRules,
 )
-from poly.resources.api_integration import (
-    AVAILABLE_AUTH_TYPES,
-    AVAILABLE_OPERATIONS,
-    URL_PATTERN,
-    ApiIntegration,
-    ApiIntegrationConfig,
-    ApiIntegrationEnvironments,
-    ApiIntegrationOperation,
-)
 from poly.resources.asr_settings import AsrSettings
 from poly.resources.channel_settings import (
     ChatGreeting,
@@ -49,6 +40,15 @@ from poly.resources.function import (
     FunctionLatencyControl,
     FunctionParameters,
     FunctionType,
+)
+from poly.resources.api_integration import (
+    AVAILABLE_AUTH_TYPES,
+    AVAILABLE_OPERATIONS,
+    URL_PATTERN,
+    ApiIntegration,
+    ApiIntegrationConfig,
+    ApiIntegrationOperation,
+    ApiIntegrationEnvironments,
 )
 from poly.resources.handoff import Handoff
 from poly.resources.keyphrase_boosting import KeyphraseBoosting

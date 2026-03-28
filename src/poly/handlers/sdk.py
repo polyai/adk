@@ -316,6 +316,9 @@ class SourcererSDK:
                     response_data = response.json()
                     # Check if this is a conflict response
                     if "conflicts" in response_data or "hasConflicts" in response_data:
+                        logger.warning(
+                            f"Merge has conflicts: {len(response_data.get('conflicts', []))} conflicts detected"
+                        )
                         return response_data
                     # Otherwise, it's a different error
                     error_msg = f"API Error 400: {response_data}"
