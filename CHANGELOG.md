@@ -1,6 +1,270 @@
 # CHANGELOG
 
 
+## v0.6.0 (2026-03-27)
+
+### Features
+
+- Add resource caching and progress spinner for init/pull/branch
+  ([#50](https://github.com/polyai/adk/pull/50),
+  [`2d4fc0a`](https://github.com/polyai/adk/commit/2d4fc0ae78c348d0cc9269d7f0749c83a06adedd))
+
+## Summary
+
+Batch `MultiResourceYamlResource` writes during `poly init` so each YAML file is written once
+  instead of once per resource, and add a progress spinner to `init`, `pull`, and `branch switch` so
+  the CLI doesn't appear stuck on large projects.
+
+Also edited CONTRIBUTING.md to edit the clone url - changed org to PolyAI.
+
+## Motivation
+
+`poly init` is very slow on projects with many pronunciations (or other multi-resource YAML types)
+  because `save()` rewrites the full YAML file for every single item. On large projects like pacden,
+  the process appears stuck with no output. The `save_to_cache` + `write_cache_to_file` pattern
+  already exists for `poly pull` — this reuses it for `init` and adds a progress spinner across all
+  three commands.
+
+## Changes
+
+- Use `save_to_cache=True` for all `MultiResourceYamlResource` saves during `init_project()`, then
+  flush to disk once via `write_cache_to_file()` - Add an optional `on_save(current, total)`
+  callback to `init_project()`, `pull_project()`, `_update_multi_resource_yaml_resources()`,
+  `_update_pulled_resources()`, and `switch_branch()` for progress reporting - Wire up
+  `console.status()` spinners in `cli.py` for `init`, `pull`, and `branch switch`, using
+  `nullcontext` to skip the spinner in `--json` mode - Progress counter includes both multi-resource
+  (per batch total) and non-multi-resource types for an accurate total
+
+- CONTRIBUTING.md to edit the clone url - changed org from PolyAI-LDN to PolyAI.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (361 tests, 0 failures)
+  - [x] No breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit
+  messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs Before: <img width="1683" height="1066" alt="Screenshot 2026-03-25 at 10 04
+  14 PM" src="https://github.com/user-attachments/assets/0dd22d4d-7c3a-4342-9dd4-3d6d1ec4c2ff" />
+
+After: <img width="1693" height="322" alt="Screenshot 2026-03-25 at 10 04 01 PM"
+  src="https://github.com/user-attachments/assets/b1f8441f-498c-40a3-bc3c-e7093c56c0a5" />
+
+
+## v0.5.1 (2026-03-27)
+
+### Bug Fixes
+
+- Display branch name instead of branch id ([#45](https://github.com/polyai/adk/pull/45),
+  [`5a54240`](https://github.com/polyai/adk/commit/5a54240418d1848d195af23e87b3cb7005462d4b))
+
+## Summary Display new branch name in CLI when the tool switches branch
+
+## Motivation On push when creating a new branch, users would be shown branch ID not new branch name
+
+## Changes
+
+- Change logger level for some logs to hide on usual CLI usage - Make it more clear when a branch id
+  is used in logs - When branch_id changes, output this in CLI with new branch name - Update auto
+  branch name to exclude `sdk-user`
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs <img width="428" height="126" alt="Screenshot 2026-03-26 at 15 54 24"
+  src="https://github.com/user-attachments/assets/39a17de0-7395-4f0c-9cd2-898043cc322c" />
+
+---------
+
+Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+
+
+## v0.5.0 (2026-03-26)
+
+### Features
+
+- **cli**: Machine-readable --json, projection-based pull/push, and serialized push commands
+  ([#41](https://github.com/polyai/adk/pull/41),
+  [`cb91e2a`](https://github.com/polyai/adk/commit/cb91e2abffe97dfdbc6e3db8770f16a369f6da29))
+
+## Summary
+
+Adds a global-style `--json` mode across `poly` subcommands so stdout is a single JSON object for
+  scripting and CI. Introduces `--from-projection` / optional projection output for `init` and
+  `pull`, and `--output-json-commands` on `push` to include the queued Agent Studio commands (as
+  dicts). Moves console helpers under `poly.output` and adds `json_output` helpers (including
+  protobuf → JSON via `MessageToDict`).
+
+## Motivation
+
+Operators and automation need stable, parseable CLI output and the ability to drive pull/push from a
+  captured projection (without hitting the projection API). Exposing staged push commands supports
+  dry-run review and integration testing.
+
+Closes #23
+
+## Changes
+
+- Wire `json_parent` (`--json`) into relevant subparsers; many code paths now emit structured JSON
+  and exit with non-zero on failure where appropriate. - Add `--from-projection` (JSON string or `-`
+  for stdin) to `pull` and `push`; `SyncClientHandler.pull_resources` uses an inline projection when
+  provided instead of fetching. - Add `--output-json-projection` on `init` / `pull` (and related
+  flows) to include the projection in JSON output when requested. - Add `--output-json-commands` on
+  `push` to append serialized commands to the JSON payload; `push_project` returns `(success,
+  message, commands)`. - `pull_project` returns `(files_with_conflicts, projection)`;
+  `pull_resources` returns `(resources, projection)`. - New `poly/output/json_output.py`
+  (`json_print`, `commands_to_dicts`); relocate `console.py` to `poly/output/console.py` and update
+  imports. - Update `project_test` mocks/expectations for new return shapes; `uv.lock` updated for
+  dependencies.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+**Note for reviewers:** The **CLI** remains backward compatible (new flags only).
+  **`AgentStudioProject.pull_project` / `push_project`** (and `pull_resources` on the handler)
+  **change return types** vs `main`; any direct Python callers must be updated to unpack the new
+  tuples and optional `projection_json` argument.
+
+## Screenshots / Logs
+
+<!-- Optional: example `poly status --json`, `poly push --dry-run --output-json-commands`, `poly
+  pull --from-projection - < proj.json` -->
+
+---------
+
+Co-authored-by: Oliver Eisenberg <Oliver.Eisenberg@Poly-AI.com>
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+
+## v0.4.1 (2026-03-26)
+
+### Bug Fixes
+
+- Error on merges ([#44](https://github.com/polyai/adk/pull/44),
+  [`b3d8d62`](https://github.com/polyai/adk/commit/b3d8d62b8b36e476f7027691d0d18da33edf9a74))
+
+## Summary Fix issue where merges were marked as successful when there is an internal API error
+
+## Motivation
+
+This error breaks pipelines that rely on this output
+
+Closes #<!-- issue number -->
+
+## Changes
+
+- Make success response more explicit instead of relying on errors/conflicts lists
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+- Guard uv.lock checkout in coverage workflow ([#42](https://github.com/polyai/adk/pull/42),
+  [`2383405`](https://github.com/polyai/adk/commit/238340568a8bdbe8ece9612f94d7bd7664154fad))
+
+## Summary
+
+- Prevent coverage CI from failing when `uv.lock` is absent on a branch - Wrap both `git checkout --
+  uv.lock` calls with a conditional `git rev-parse --verify` check before and after the base branch
+  checkout step
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+### Chores
+
+- Add pytest-cov and coverage to dev dependencies ([#36](https://github.com/polyai/adk/pull/36),
+  [`649ccb7`](https://github.com/polyai/adk/commit/649ccb7d10f3ce59ba9e0f0094bf93b3c90736a7))
+
+## Summary - Adds `pytest-cov>=6.0.0` and `coverage>=7.0.0` to the `[dev]` optional dependencies in
+  `pyproject.toml`
+
+## Test plan - [x] Run `uv pip install -e ".[dev]"` and verify `pytest-cov` and `coverage` install
+  successfully <img width="557" height="135" alt="image"
+  src="https://github.com/user-attachments/assets/9e669897-c974-4e37-a2a3-8a3c6ed37c3a" />
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+### Documentation
+
+- Fix formatting issues ([#40](https://github.com/polyai/adk/pull/40),
+  [`eafff58`](https://github.com/polyai/adk/commit/eafff58ab877a65d3fd204a850bcb7489083a1fa))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+
 ## v0.4.0 (2026-03-25)
 
 ### Bug Fixes
