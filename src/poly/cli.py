@@ -36,6 +36,7 @@ from poly.output.console import (
     set_verbose,
     success,
     warning,
+    print_deployments,
 )
 from poly.output.json_output import json_print, commands_to_dicts
 from poly.handlers.github_api_handler import GitHubAPIHandler
@@ -291,7 +292,7 @@ class AgentStudioCLI:
             "revert",
             parents=[verbose_parent, json_parent],
             help="Revert changes in the project.",
-            description="Revert changes in the project.\n\nExamples:\n  poly revert --all\n  poly revert file1.yaml file2.yaml",
+            description="Revert changes in the project.\n\nExamples:\n  poly revert\n  poly revert --files file1.yaml file2.yaml",
             formatter_class=RawTextHelpFormatter,
         )
         revert_parser.add_argument(
@@ -303,15 +304,9 @@ class AgentStudioCLI:
             """,
         )
         revert_parser.add_argument(
-            "--all",
-            "-a",
-            action="store_true",
-            help="Revert all changes in the project.",
-        )
-        revert_parser.add_argument(
             "files",
             nargs="*",
-            help="List of files to revert.",
+            help="List of files to revert. If not specified, it will revert all changes.",
         )
 
         # DIFF
@@ -331,9 +326,26 @@ class AgentStudioCLI:
             """,
         )
         diff_parser.add_argument(
-            "files",
+            "hash",
+            nargs="?",
+            default=None,
+            type=str,
+            help="Hash of the version to compare against. If not specified, it will be inferred from the --before and --after arguments.",
+        )
+        diff_parser.add_argument(
+            "--files",
             nargs="*",
             help=("List of files to show changes for. If not specified, shows all changes."),
+        )
+        diff_parser.add_argument(
+            "--before",
+            type=str,
+            help="Name of the original branch or version to compare with",
+        )
+        diff_parser.add_argument(
+            "--after",
+            type=str,
+            help="Name of the branch or version to compare against",
         )
 
         # REVIEW
@@ -362,14 +374,26 @@ class AgentStudioCLI:
             help="Base path to the project. Defaults to current working directory.",
         )
         review_parser.add_argument(
+            "hash",
+            nargs="?",
+            default=None,
+            type=str,
+            help="Hash of the version to compare against. If not specified, it will be inferred from the --before and --after arguments.",
+        )
+        review_parser.add_argument(
             "--before",
             type=str,
-            help="Name of the original branch or version to compare against",
+            help="Name of the original branch or version to compare with",
         )
         review_parser.add_argument(
             "--after",
             type=str,
-            help="Name of the branch or version to compare with",
+            help="Name of the branch or version to compare against",
+        )
+        review_parser.add_argument(
+            "--files",
+            nargs="*",
+            help=("List of files to show changes for. If not specified, shows all changes."),
         )
         review_parser.add_argument(
             "--delete",
@@ -448,7 +472,7 @@ class AgentStudioCLI:
             help="Base path to run format/lint. Defaults to current working directory.",
         )
         format_parser.add_argument(
-            "files",
+            "--files",
             nargs="*",
             help="Specific files/dirs to format. If not specified, runs on the whole --path tree.",
         )
@@ -545,7 +569,7 @@ class AgentStudioCLI:
             help="Show all metadata (functions, flows, and state). Equivalent to --functions --flows --state.",
         )
 
-        # completion
+        # COMPLETION
         completion_parser = subparsers.add_parser(
             "completion",
             formatter_class=RawTextHelpFormatter,
@@ -565,6 +589,56 @@ class AgentStudioCLI:
             "shell",
             choices=["bash", "zsh", "fish"],
             help="Shell type to generate completions for.",
+        )
+
+        # DEPLOYMENTS
+        deployments_parser = subparsers.add_parser(
+            "deployments",
+            parents=[verbose_parent],
+            help="List deployments for the project.",
+            description="List deployments for the project.",
+            formatter_class=RawTextHelpFormatter,
+        )
+        deployments_parser.add_argument(
+            "--path",
+            type=str,
+            default=os.getcwd(),
+            help="Base path to the project. Defaults to current working directory.",
+        )
+        deployments_parser.add_argument(
+            "--env",
+            "-e",
+            type=str,
+            default="sandbox",
+            choices=["sandbox", "pre-release", "live"],
+            help="Environment to list deployments for. Defaults to sandbox.",
+        )
+        deployments_parser.add_argument(
+            "--limit",
+            type=int,
+            default=10,
+            help="Number of versions to show. Defaults to 10.",
+        )
+        deployments_parser.add_argument(
+            "--offset",
+            type=int,
+            default=0,
+            help="Number of versions to skip. Defaults to 0.",
+        )
+        deployments_parser.add_argument(
+            "--hash",
+            type=str,
+            help="Hash of the version to start from.",
+        )
+        deployments_parser.add_argument(
+            "--details",
+            action="store_true",
+            help="Output each deployment with detailed information.",
+        )
+        deployments_parser.add_argument(
+            "--json",
+            action="store_true",
+            help="Output deployments in JSON format.",
         )
 
         return parser
@@ -616,10 +690,10 @@ class AgentStudioCLI:
             cls.status(args.path, args.json)
 
         elif args.command == "revert":
-            cls.revert(args.path, args.all, args.files, output_json=args.json)
+            cls.revert(args.path, args.files, output_json=args.json)
 
         elif args.command == "diff":
-            cls.diff(args.path, args.files, args.json)
+            cls.diff(args.path, args.files, args.hash, args.before, args.after, args.json)
 
         elif args.command == "review":
             if args.delete:
@@ -688,6 +762,11 @@ class AgentStudioCLI:
 
         elif args.command == "completion":
             cls.print_completion(args.shell)
+
+        elif args.command == "deployments":
+            cls.print_deployments(
+                args.path, args.env, args.limit, args.offset, args.hash, args.json, args.details
+            )
 
     @classmethod
     def print_completion(cls, shell: str) -> None:
@@ -1096,12 +1175,11 @@ class AgentStudioCLI:
     def revert(
         cls,
         base_path: str,
-        all_files: bool = False,
         files: list[str] = None,
         output_json: bool = False,
     ) -> None:
         """Revert changes in the project."""
-        if not all_files and not files:
+        if not files:
             if output_json:
                 json_print(
                     {
@@ -1118,16 +1196,7 @@ class AgentStudioCLI:
         # If relative paths are provided, convert them to absolute paths
         files = [os.path.abspath(os.path.join(os.getcwd(), file)) for file in files or []]
 
-        files_reverted = project.revert_changes(all_files=all_files, files=files)
-        if output_json:
-            json_print(
-                {
-                    "success": bool(files_reverted),
-                    "files_reverted": files_reverted,
-                }
-            )
-            return
-
+        files_reverted = project.revert_changes(files=files)
         if not files_reverted:
             plain("[muted]No changes to revert.[/muted]")
             return
@@ -1135,26 +1204,64 @@ class AgentStudioCLI:
         success("Changes reverted successfully.")
 
     @classmethod
-    def _diff(
-        cls, base_path: str, files: list[str] = None, output_json: bool = False
-    ) -> dict[str, str]:
-        """Compute local diffs; may print a human hint when there are no changes."""
+    def _compute_diff(
+        cls, base_path: str, files: list[str] = None, before: str = None, after: str = None
+    ) -> Optional[dict[str, str]]:
+        """Compute the diffs between the project and the given versions or branches.
 
-        project = cls._load_project(base_path, output_json=output_json)
-
+        If before and after are not specified, it will compute the diffs between the project and the remote version.
+        If before and after are specified, it will compute the diffs between the two remote versions.
+        If only after is specified, it will compare between after and the previous version.
+        """
+        project = cls._load_project(base_path)
         files = [os.path.abspath(os.path.join(os.getcwd(), file)) for file in files or []]
+        if not (before or after):
+            return project.get_diffs(all_files=not files, files=files)
 
-        diffs = project.get_diffs(all_files=not files, files=files) or {}
+        if not before:
+            versions, deployment_hashes = project.get_deployments()
+            if before in deployment_hashes:
+                before = deployment_hashes[before]
+            if not versions:
+                error("No versions found.")
+                return
+            version_idx = next(
+                (i for i, v in enumerate(versions) if v.get("version_hash")[:9] == after[:9]), None
+            )
+            if version_idx is None:
+                error(f"Version hash '{after}' not found.")
+                return
+            if version_idx == len(versions) - 1:
+                error("No previous version found.")
+                return
+            previous_version_idx = version_idx + 1
+            before = versions[previous_version_idx].get("version_hash")[:9]
 
-        if not diffs and not output_json:
-            plain("[muted]No changes detected.[/muted]")
+        if not after:
+            after = "local"
 
-        return diffs
+        return project.diff_remote_named_versions(before_name=before, after_name=after)
 
     @classmethod
-    def diff(cls, base_path: str, files: list[str] = None, output_json: bool = False) -> None:
+    def diff(
+        cls,
+        base_path: str,
+        files: list[str] = None,
+        hash: str = None,
+        before: str = None,
+        after: str = None,
+        output_json: bool = False,
+    ) -> None:
         """Show the changes made to the project."""
-        diffs = cls._diff(base_path, files, output_json=output_json)
+        if hash and (before or after):
+            error("Cannot specify both hash and before/after versions.")
+            return
+
+        if hash:
+            after = hash
+
+        diffs = cls._compute_diff(base_path, files, before, after) or {}
+
         if output_json:
             json_print(
                 {
@@ -1163,71 +1270,55 @@ class AgentStudioCLI:
             )
             return
 
-        if not diffs:
-            return
+        if not diffs and not output_json:
+            plain("[muted]No changes detected.[/muted]")
 
         for file_path, diff_text in diffs.items():
             console.rule(f"[bold]{file_path}[/bold]")
             print_diff(diff_text)
 
     @classmethod
-    def _review(
+    def review(
         cls,
         base_path: str,
-        before_name: str = None,
-        after_name: str = None,
-    ) -> dict:
-        """Review the changes made to the project.
+        files: list[str] = None,
+        hash: str = None,
+        before: str = None,
+        after: str = None,
+    ) -> None:
+        """Show the changes made to the project in a Pull Request format.
         Args:
             base_path: Base path for the project (used to read project config)
-            before_name: Optional name of base branch (for comparing two remote branches)
-            after_name: Optional name of compare branch (for comparing two remote branches)
+            files: Optional list of files to show changes for. If not specified, shows all changes.
+            hash: Optional hash of the version to compare against. If not specified, it will be inferred from the --before and --after arguments.
+            before: Optional name of base branch (for comparing two remote branches)
+            after: Optional name of compare branch (for comparing two remote branches)
         """
-        if before_name and after_name:
-            # Compare two remote versions/branches/environments
-            project = cls._load_project(base_path)
-            diffs = project.diff_remote_named_versions(before_name, after_name) or {}
-        else:
-            # Compare local vs remote (existing behavior)
-            diffs = cls._diff(base_path)
+        if hash and (before or after):
+            error("Cannot specify both hash and before/after versions.")
+            return
+
+        if hash:
+            after = hash
+            description = f"Diff for hash '{hash}'"
+
+        if not (before or after):
+            description = f"Diff for {'/'.join(base_path.split(os.sep)[-2:])}"
+
+        if before and after:
+            description = f"Diff between '{before}' and '{after}'"
+
+        diffs = cls._compute_diff(base_path, files=files, before=before, after=after) or {}
 
         if not diffs:
-            return {}
+            plain("[muted]No changes detected.[/muted]")
+            return
 
         body = {}
         for file_path, diff in diffs.items():
             # Use the file_path as-is (it's already relative or a file path)
             safe_name = file_path.replace(os.sep, "_")
             body[f"{safe_name}.diff"] = {"content": diff}
-
-        return body
-
-    @classmethod
-    def review(
-        cls,
-        base_path: str,
-        before_name: str = None,
-        after_name: str = None,
-    ) -> None:
-        """Show the changes made to the project in a Pull Request format.
-        Args:
-            base_path: Base path for the project (used to read project config)
-            before_name: Optional name of base branch (for comparing two remote branches)
-            after_name: Optional name of compare branch (for comparing two remote branches)
-        """
-        if before_name and after_name:
-            body = cls._review(
-                base_path=base_path,
-                before_name=before_name,
-                after_name=after_name,
-            )
-            description = f"Diff between '{before_name}' and '{after_name}'"
-        else:
-            body = cls._review(base_path)
-            description = f"Diff for {'/'.join(base_path.split(os.sep)[-2:])}"
-
-        if not body:
-            return
 
         try:
             url = GitHubAPIHandler.create_gist(
@@ -1782,6 +1873,47 @@ class AgentStudioCLI:
             success(f"Documentation written to {output_path}")
         else:
             plain(content)
+
+    @classmethod
+    def print_deployments(
+        cls,
+        base_path: str,
+        environment: str = "sandbox",
+        limit: int = 10,
+        offset: int = 0,
+        hash: str = None,
+        output_json: bool = False,
+        details: bool = False,
+    ) -> None:
+        """Print deployments for the project."""
+        project = cls._load_project(base_path)
+        versions, active_deployment_hashes = project.get_deployments(client_env=environment)
+
+        if not versions:
+            error("No versions found.")
+            return
+
+        if hash:
+            hash = hash[:9]
+
+        if hash:
+            version_idx = next(
+                (i for i, v in enumerate(versions) if v.get("version_hash")[:9] == hash), None
+            )
+            if version_idx is None:
+                error(f"Version hash '{hash}' not found.")
+                return
+            offset = version_idx
+
+        versions = versions[offset : offset + limit]
+        if output_json:
+            json_output = {
+                "versions": versions,
+                "active_deployment_hashes": active_deployment_hashes,
+            }
+            print(json.dumps(json_output))
+        else:
+            print_deployments(versions, active_deployment_hashes, details=details)
 
 
 def main():
