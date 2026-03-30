@@ -53,6 +53,10 @@ poly pull --force
 poly pull --format
 ~~~
 
+If the branch you are currently on no longer exists in Agent Studio, `poly pull` automatically switches to the `main` branch and displays a warning message with the new branch name.
+
+When using JSON output (`--json`), the response includes `new_branch_name` and `new_branch_id` fields if a branch switch occurred.
+
 ### `poly push`
 
 Push local changes to Agent Studio.
@@ -66,6 +70,10 @@ poly push --skip-validation
 poly push --force
 poly push --format
 ~~~
+
+When pushing creates a new branch (for example, when pushing to Agent Studio for the first time on a branch), the CLI displays a message with the new branch name.
+
+When using JSON output (`--json`), the response includes `new_branch_name` and `new_branch_id` fields if a new branch was created.
 
 ### `poly status`
 
