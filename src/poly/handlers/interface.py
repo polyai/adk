@@ -4,6 +4,8 @@ Copyright PolyAI Limited"""
 
 from typing import Any, Optional
 
+from google.protobuf.message import Message
+
 from poly.handlers.platform_api import PlatformAPIHandler
 from poly.handlers.sync_client import SyncClientHandler
 from poly.resources import BaseResource, Resource
@@ -108,13 +110,24 @@ class AgentStudioInterface:
         """
         return self.sync_client.pull_deployment_resources(deployment_id)
 
-    def pull_resources(self) -> dict[type[Resource], dict[str, Resource]]:
+    def pull_resources(
+        self, projection_json: Optional[dict[str, Any]] = None
+    ) -> tuple[dict[type[Resource], dict[str, Resource]], dict[str, Any]]:
         """Fetch all resources for the specific project.
+
+        Args:
+            projection_json (Optional[dict[str, Any]]): A dictionary containing the projection.
+                If provided, the projection will be used instead of fetching it from the API.
 
         Returns:
             dict[type[Resource], dict[str, Resource]]: A dictionary mapping resource types to
                 their resources
+            dict[str, Any]: The projection data
         """
+        if projection_json is not None:
+            return SyncClientHandler.load_resources_from_projection(
+                projection_json
+            ), projection_json
         return self.sync_client.pull_resources()
 
     def push_resources(
@@ -129,25 +142,79 @@ class AgentStudioInterface:
         """Upload multiple resources for the specific project.
 
         Args:
-            new_resources (dict[type[Resource], dict[str, Resource]]): New resources to upload
-            deleted_resources (dict[type[Resource], dict[str, Resource]]): Resources to delete
-            updated_resources (dict[type[Resource], dict[str, Resource]]): Updated resources to upload
+            new_resources (dict[type[BaseResource], dict[str, BaseResource]]): New resources to upload
+            deleted_resources (dict[type[BaseResource], dict[str, BaseResource]]): Resources to delete
+            updated_resources (dict[type[BaseResource], dict[str, BaseResource]]): Updated resources to upload
             dry_run (bool): If True, only log the upload actions without actually
                 uploading
+            queue_pushes (bool): If True, queue the resources for pushing.
             email (str): Email to use for metadata creation.
                 If None, use the email of the current user.
 
         Returns:
             bool: True if the resources were pushed successfully, False otherwise
         """
-        return self.sync_client.push_resources(
+        self.queue_resources(
             deleted_resources=deleted_resources,
             new_resources=new_resources,
             updated_resources=updated_resources,
-            dry_run=dry_run,
-            queue_pushes=queue_pushes,
             email=email,
         )
+
+        if queue_pushes:
+            return True
+
+        if dry_run:
+            self.clear_command_queue()
+            return True
+
+        return self.send_queued_commands()
+
+    def queue_resources(
+        self,
+        deleted_resources: dict[type[BaseResource], dict[str, BaseResource]],
+        new_resources: dict[type[BaseResource], dict[str, BaseResource]],
+        updated_resources: dict[type[BaseResource], dict[str, BaseResource]],
+        email: Optional[str] = None,
+    ) -> list[Message]:
+        """Queue multiple resources for the specific project.
+
+        Args:
+            deleted_resources (dict[type[BaseResource], dict[str, BaseResource]]): Resources to delete
+            new_resources (dict[type[BaseResource], dict[str, BaseResource]]): New resources to upload
+            updated_resources (dict[type[BaseResource], dict[str, BaseResource]]): Updated resources to upload
+            email (str): Email to use for metadata creation.
+                If None, use the email of the current user.
+
+        Returns:
+            list[Message]: A list of queued Command protobuf messages.
+        """
+        return self.sync_client.queue_resources(
+            deleted_resources=deleted_resources,
+            new_resources=new_resources,
+            updated_resources=updated_resources,
+            email=email,
+        )
+
+    def send_queued_commands(self) -> bool:
+        """Send all queued commands as a batch and clear the queue.
+
+        Returns:
+            bool: True if the commands were sent successfully, False otherwise
+        """
+        return self.sync_client.send_queued_commands()
+
+    def clear_command_queue(self) -> None:
+        """Clear all queued commands without sending."""
+        self.sync_client.clear_command_queue()
+
+    def get_queued_commands(self) -> list[Message]:
+        """Get all queued commands.
+
+        Returns:
+            list[Message]: A list of queued Command protobuf messages.
+        """
+        return self.sync_client.get_queued_commands()
 
     def get_branches(self) -> dict[str, str]:
         """Get a list of branches.
@@ -184,7 +251,7 @@ class AgentStudioInterface:
 
     def merge_branch(
         self, message: str, conflict_resolutions: Optional[list[dict[str, Any]]] = None
-    ) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
         """Merge the current branch into main.
 
         Args:
@@ -195,7 +262,9 @@ class AgentStudioInterface:
                 - value: Optional custom value (only used with custom strategy)
 
         Returns:
+            success (bool): True if the merge was successful, False otherwise
             list[dict[str, str]]: A list of conflict information if the merge failed, empty list if successful
+            list[dict[str, str]]: A list of error information if the merge failed, empty list if successful
         """
         return self.sync_client.merge_branch(message, conflict_resolutions)
 
