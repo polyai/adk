@@ -172,9 +172,8 @@ If the user is expected to answer, put the full question in the utterance and le
 
 ## Design principle
 
-When in doubt:
-
 - make control flow explicit
 - keep prompts conversational
 - keep code deterministic
 - prefer simple, testable paths over clever prompt tricks
+  
