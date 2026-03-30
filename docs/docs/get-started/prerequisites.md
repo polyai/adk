@@ -24,21 +24,12 @@ Install the following tools before continuing:
 
 | Tool | Version | Notes |
 |---|---|---|
-| **Python** | 3.14+ | Required to run the ADK |
-| **uv** | latest | Recommended for development setup from source |
+| **uv** | latest | Manages Python and virtual environments |
 | **Git** | any | Required to clone the repository or contribute |
-
-### Install Python 3.14+
-
-Python 3.14 is a recent release. Use one of these methods:
-
-- **Homebrew** (macOS): `brew install python@3.14`
-- **pyenv**: `pyenv install 3.14` then `pyenv global 3.14`
-- **Official installer**: [python.org/downloads](https://www.python.org/downloads/){ target="_blank" rel="noopener" }
 
 ### Install uv
 
-The recommended way to install `uv`:
+`uv` manages Python versions for you, including the version required by the ADK. Install it with:
 
 ~~~bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -50,14 +41,15 @@ Alternatively, with Homebrew on macOS:
 brew install uv
 ~~~
 
+See the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/){ target="_blank" rel="noopener" } for more options.
+
 ## Checklist
 
 Before continuing, confirm:
 
 - [ ] You have access to an **Agent Studio workspace**
 - [ ] You have obtained an **API key** from your PolyAI contact
-- [ ] Python 3.14+ is installed and on your `PATH`
-- [ ] `uv` is installed if you plan to use the development setup
+- [ ] `uv` is installed
 - [ ] `git` is available locally
 
 ## Next step

@@ -135,21 +135,6 @@ These references let settings, prompts, and behaviors point to resources by name
 
     Think of the ADK as a synchronization layer between your local files and the Agent Studio platform.
 
-## Development setup from source
-
-To contribute to the ADK or work directly from the repository:
-
-~~~bash
-git clone https://github.com/polyai/adk.git
-cd adk
-uv venv
-source .venv/bin/activate
-uv pip install -e ".[dev]"
-pre-commit install
-~~~
-
-This installs the project in editable mode and registers the development hooks.
-
 ## Related pages
 
 <div class="grid cards" markdown>
