@@ -1270,7 +1270,7 @@ class AgentStudioCLI:
                 before_name=before_name,
                 after_name=after_name,
             )
-            description = f"{project_name}: {before_name} → {after_name}"
+            description = f"Poly ADK: {project_name}: {before_name} → {after_name}"
         else:
             body = cls._review(base_path)
             description = f"{project_name}: local → remote"
