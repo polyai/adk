@@ -9,7 +9,7 @@ PolyAI ADK uses several third-party open source software packages. We gratefully
 
 ### MIT License
 
-~~~
+~~~text
 MIT License
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -30,10 +30,9 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ~~~
-
 ### Apache License 2.0
 
-~~~
+~~~text
 Apache License
 Version 2.0, January 2004
 http://www.apache.org/licenses/
@@ -131,10 +130,9 @@ warranty, support, indemnity, or other liability obligations.
 
 END OF TERMS AND CONDITIONS
 ~~~
-
 ### BSD 3-Clause License
 
-~~~
+~~~text
 BSD 3-Clause License
 
 Redistribution and use in source and binary forms, with or without
@@ -162,10 +160,9 @@ CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
 OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ~~~
-
 ### Mozilla Public License 2.0 (MPL 2.0)
 
-~~~
+~~~text
 Mozilla Public License Version 2.0
 ==================================
 
