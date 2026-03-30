@@ -1,6 +1,54 @@
 # CHANGELOG
 
 
+## v0.6.1 (2026-03-30)
+
+### Bug Fixes
+
+- Update poly review --delete to interactive select-and-delete flow
+  ([#47](https://github.com/polyai/adk/pull/47),
+  [`9ea826a`](https://github.com/polyai/adk/commit/9ea826aba9837073172dd28bffc3c2e22a9684c9))
+
+## Summary - Updates gist description format from `Diff for account/project` to `project: local →
+  remote` / `project: before → after` - Replaces `poly review --delete` bulk-delete with a
+  `questionary.checkbox` prompt so users can select individual gists to delete - Adds `poly review
+  --list` to interactively select and open a gist in the browser - Adds `list_diff_gists()` and
+  `delete_gist()` helpers to `GitHubAPIHandler`; refactors `delete_diff_gists()` to use them - Exits
+  gracefully with a warning if no gists exist or none are selected - Adds `--json` flag for
+  outputting results using JSON - Adds unit tests for gist commands in `tests/review_test.py` -
+  Converts `poly review list` and `poly review delete` from a positional `action` argument to proper
+  argparse subparsers, so each subcommand owns only its relevant flags (`--id` now only appears
+  under `poly review delete --help`) - Applies the same refactor to `poly branch` (`list`, `create`,
+  `switch`, `current`), so `--force`, `--format`, `--from-projection` etc. only appear under `poly
+  branch switch --help` for standardisation
+
+## Test plan - [x] Run `poly review` to create one or more review gists - [x] Run `poly review
+  --delete` and verify the checkbox menu appears listing gists by description - [x] Select a subset
+  and confirm only those are deleted - [x] Run again with no gists present and confirm "No review
+  gists found." message - [x] Press Ctrl-C / select nothing and confirm "No gists selected.
+  Exiting." warning - [x] Run `poly review --list` and confirm a select menu appears; selecting a
+  gist opens it in the browser
+
+<img width="942" height="413" alt="image"
+  src="https://github.com/user-attachments/assets/abace417-edc0-4d5f-ac87-fa20832e0bb6" /> <img
+  width="711" height="62" alt="image"
+  src="https://github.com/user-attachments/assets/44a03254-03cc-4265-8ed0-9d590313df5b" /> <img
+  width="637" height="72" alt="image"
+  src="https://github.com/user-attachments/assets/91ef9899-9666-479f-94ec-9084e488253e" /> <img
+  width="664" height="215" alt="image"
+  src="https://github.com/user-attachments/assets/b57168a2-999e-4450-a166-42e92a429ee0" /> <img
+  width="341" height="75" alt="image"
+  src="https://github.com/user-attachments/assets/19b83928-5a20-4e05-a51a-73c549383db2" />
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+Co-authored-by: Ruari Phipps <ruari@poly-ai.com>
+
+
 ## v0.6.0 (2026-03-27)
 
 ### Features
