@@ -1,6 +1,146 @@
 # CHANGELOG
 
 
+## v0.6.1 (2026-03-30)
+
+### Bug Fixes
+
+- Update poly review --delete to interactive select-and-delete flow
+  ([#47](https://github.com/polyai/adk/pull/47),
+  [`9ea826a`](https://github.com/polyai/adk/commit/9ea826aba9837073172dd28bffc3c2e22a9684c9))
+
+## Summary - Updates gist description format from `Diff for account/project` to `project: local →
+  remote` / `project: before → after` - Replaces `poly review --delete` bulk-delete with a
+  `questionary.checkbox` prompt so users can select individual gists to delete - Adds `poly review
+  --list` to interactively select and open a gist in the browser - Adds `list_diff_gists()` and
+  `delete_gist()` helpers to `GitHubAPIHandler`; refactors `delete_diff_gists()` to use them - Exits
+  gracefully with a warning if no gists exist or none are selected - Adds `--json` flag for
+  outputting results using JSON - Adds unit tests for gist commands in `tests/review_test.py` -
+  Converts `poly review list` and `poly review delete` from a positional `action` argument to proper
+  argparse subparsers, so each subcommand owns only its relevant flags (`--id` now only appears
+  under `poly review delete --help`) - Applies the same refactor to `poly branch` (`list`, `create`,
+  `switch`, `current`), so `--force`, `--format`, `--from-projection` etc. only appear under `poly
+  branch switch --help` for standardisation
+
+## Test plan - [x] Run `poly review` to create one or more review gists - [x] Run `poly review
+  --delete` and verify the checkbox menu appears listing gists by description - [x] Select a subset
+  and confirm only those are deleted - [x] Run again with no gists present and confirm "No review
+  gists found." message - [x] Press Ctrl-C / select nothing and confirm "No gists selected.
+  Exiting." warning - [x] Run `poly review --list` and confirm a select menu appears; selecting a
+  gist opens it in the browser
+
+<img width="942" height="413" alt="image"
+  src="https://github.com/user-attachments/assets/abace417-edc0-4d5f-ac87-fa20832e0bb6" /> <img
+  width="711" height="62" alt="image"
+  src="https://github.com/user-attachments/assets/44a03254-03cc-4265-8ed0-9d590313df5b" /> <img
+  width="637" height="72" alt="image"
+  src="https://github.com/user-attachments/assets/91ef9899-9666-479f-94ec-9084e488253e" /> <img
+  width="664" height="215" alt="image"
+  src="https://github.com/user-attachments/assets/b57168a2-999e-4450-a166-42e92a429ee0" /> <img
+  width="341" height="75" alt="image"
+  src="https://github.com/user-attachments/assets/19b83928-5a20-4e05-a51a-73c549383db2" />
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+Co-authored-by: Ruari Phipps <ruari@poly-ai.com>
+
+
+## v0.6.0 (2026-03-27)
+
+### Features
+
+- Add resource caching and progress spinner for init/pull/branch
+  ([#50](https://github.com/polyai/adk/pull/50),
+  [`2d4fc0a`](https://github.com/polyai/adk/commit/2d4fc0ae78c348d0cc9269d7f0749c83a06adedd))
+
+## Summary
+
+Batch `MultiResourceYamlResource` writes during `poly init` so each YAML file is written once
+  instead of once per resource, and add a progress spinner to `init`, `pull`, and `branch switch` so
+  the CLI doesn't appear stuck on large projects.
+
+Also edited CONTRIBUTING.md to edit the clone url - changed org to PolyAI.
+
+## Motivation
+
+`poly init` is very slow on projects with many pronunciations (or other multi-resource YAML types)
+  because `save()` rewrites the full YAML file for every single item. On large projects like pacden,
+  the process appears stuck with no output. The `save_to_cache` + `write_cache_to_file` pattern
+  already exists for `poly pull` — this reuses it for `init` and adds a progress spinner across all
+  three commands.
+
+## Changes
+
+- Use `save_to_cache=True` for all `MultiResourceYamlResource` saves during `init_project()`, then
+  flush to disk once via `write_cache_to_file()` - Add an optional `on_save(current, total)`
+  callback to `init_project()`, `pull_project()`, `_update_multi_resource_yaml_resources()`,
+  `_update_pulled_resources()`, and `switch_branch()` for progress reporting - Wire up
+  `console.status()` spinners in `cli.py` for `init`, `pull`, and `branch switch`, using
+  `nullcontext` to skip the spinner in `--json` mode - Progress counter includes both multi-resource
+  (per batch total) and non-multi-resource types for an accurate total
+
+- CONTRIBUTING.md to edit the clone url - changed org from PolyAI-LDN to PolyAI.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (361 tests, 0 failures)
+  - [x] No breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit
+  messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs Before: <img width="1683" height="1066" alt="Screenshot 2026-03-25 at 10 04
+  14 PM" src="https://github.com/user-attachments/assets/0dd22d4d-7c3a-4342-9dd4-3d6d1ec4c2ff" />
+
+After: <img width="1693" height="322" alt="Screenshot 2026-03-25 at 10 04 01 PM"
+  src="https://github.com/user-attachments/assets/b1f8441f-498c-40a3-bc3c-e7093c56c0a5" />
+
+
+## v0.5.1 (2026-03-27)
+
+### Bug Fixes
+
+- Display branch name instead of branch id ([#45](https://github.com/polyai/adk/pull/45),
+  [`5a54240`](https://github.com/polyai/adk/commit/5a54240418d1848d195af23e87b3cb7005462d4b))
+
+## Summary Display new branch name in CLI when the tool switches branch
+
+## Motivation On push when creating a new branch, users would be shown branch ID not new branch name
+
+## Changes
+
+- Change logger level for some logs to hide on usual CLI usage - Make it more clear when a branch id
+  is used in logs - When branch_id changes, output this in CLI with new branch name - Update auto
+  branch name to exclude `sdk-user`
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs <img width="428" height="126" alt="Screenshot 2026-03-26 at 15 54 24"
+  src="https://github.com/user-attachments/assets/39a17de0-7395-4f0c-9cd2-898043cc322c" />
+
+---------
+
+Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+
+
 ## v0.5.0 (2026-03-26)
 
 ### Features

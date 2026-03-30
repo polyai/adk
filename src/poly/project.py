@@ -10,6 +10,7 @@ import os
 import uuid
 from dataclasses import dataclass, fields
 from datetime import datetime
+from collections.abc import Callable
 from typing import Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
@@ -321,6 +322,7 @@ class AgentStudioProject:
         project_id: str,
         format: bool = False,
         projection_json: Optional[dict[str, Any]] = None,
+        on_save: Callable[[int, int], None] | None = None,
     ) -> tuple["AgentStudioProject", dict[str, Any]]:
         """Get project from the Agent Studio Interactor
 
@@ -332,6 +334,8 @@ class AgentStudioProject:
             format (bool): If True, format resources after pulling
             projection_json (dict[str, Any]): A dictionary containing the projection
                 If provided, the projection will be used instead of fetching it from the API.
+            on_save: Optional callback invoked with (current, total)
+                during the resource save loop.
 
         Returns:
             AgentStudioProject: An instance of AgentStudioProject with functions loaded
@@ -358,14 +362,25 @@ class AgentStudioProject:
             project.resources
         )
 
-        # Save functions and topics
-        for resource in project.all_resources:
+        all_resources = project.all_resources
+        total = len(all_resources)
+
+        MultiResourceYamlResource._file_cache.clear()
+
+        for i, resource in enumerate(all_resources, 1):
+            if on_save:
+                on_save(i, total)
+            is_multi = isinstance(resource, MultiResourceYamlResource)
             resource.save(
                 base_path,
                 resource_mappings=resource_mappings,
                 resource_name=resource.name,
                 format=format,
+                save_to_cache=is_multi,
             )
+
+        MultiResourceYamlResource.write_cache_to_file()
+        MultiResourceYamlResource._file_cache.clear()
 
         project.save_config(write_project_yaml=True)
 
@@ -429,6 +444,7 @@ class AgentStudioProject:
         force: bool = False,
         format: bool = False,
         projection_json: Optional[dict[str, Any]] = None,
+        on_save: Callable[[int, int], None] | None = None,
     ) -> tuple[list[str], dict[str, Any]]:
         """Pull the project configuration from the Agent Studio Interactor.
 
@@ -470,6 +486,7 @@ class AgentStudioProject:
             incoming_resources=incoming_resources,
             force=force,
             format=format,
+            on_save=on_save,
         )
 
         # -------
@@ -571,7 +588,10 @@ class AgentStudioProject:
         incoming_resource_mappings: list[ResourceMapping],
         force: bool,
         format: bool = False,
-    ) -> list[str]:
+        on_save: Callable[[int, int], None] | None = None,
+        progress_offset: int = 0,
+        progress_total: int = 0,
+    ) -> tuple[list[str], int]:
         """Merge MultiResourceYaml resources when pulling
 
         As files are merged on a per file basis, we must first compute the whole file:
@@ -661,6 +681,10 @@ class AgentStudioProject:
             ):
                 resource_type.delete_resource(file_path, save_to_cache=True)
 
+            progress_offset += len(resources)
+            if on_save:
+                on_save(progress_offset, progress_total)
+
         incoming_file_contents = {
             file: resource_utils.dump_yaml(top_level_yaml_dict)
             for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
@@ -703,7 +727,7 @@ class AgentStudioProject:
             MultiResourceYamlResource.save_to_file(merged_contents, file)
         MultiResourceYamlResource._file_cache.clear()
 
-        return files_with_conflicts
+        return files_with_conflicts, progress_offset
 
     def _update_pulled_resources(
         self,
@@ -711,6 +735,7 @@ class AgentStudioProject:
         incoming_resources: ResourceMap,
         force: bool,
         format: bool = False,
+        on_save: Callable[[int, int], None] | None = None,
     ) -> list[str]:
         files_with_conflicts = []
 
@@ -725,19 +750,24 @@ class AgentStudioProject:
         )
 
         # Merging is done on a per file basis.
-        # For most resources, a resource is a single file
-        # For MultiResourceYamlResources, a resource is part of a file,
-        # So we must first compute the whole file, so do merge process separately for each file.
-        files_with_conflicts.extend(
-            self._update_multi_resource_yaml_resources(
-                original_resources=self.resources,
-                incoming_resources=incoming_resources,
-                original_resource_mappings=original_resource_mappings,
-                incoming_resource_mappings=incoming_resource_mappings,
-                force=force,
-                format=format,
-            )
+        # For most resources - a resource is a single file
+        # For MultiResourceYamlResources - a resource is a part of a file,
+        # So first compute the whole file, then do merge process separately for each file.
+        total = sum(len(res) for res in incoming_resources.values())
+
+        multi_conflicts, current = self._update_multi_resource_yaml_resources(
+            original_resources=self.resources,
+            incoming_resources=incoming_resources,
+            original_resource_mappings=original_resource_mappings,
+            incoming_resource_mappings=incoming_resource_mappings,
+            force=force,
+            format=format,
+            on_save=on_save,
+            progress_offset=0,
+            progress_total=total,
         )
+
+        files_with_conflicts.extend(multi_conflicts)
 
         # For other resources, we follow the usual process
         for resource_type, incoming in incoming_resources.items():
@@ -745,6 +775,9 @@ class AgentStudioProject:
                 continue
 
             for resource_id, incoming_resource in incoming.items():
+                current += 1
+                if on_save:
+                    on_save(current, total)
                 # If force is True, overwrite local changes
                 # If the resource is not loaded, save it directly
                 if force or (
@@ -1621,7 +1654,7 @@ class AgentStudioProject:
             )
             deployment_id = (deployments.get(name) or {}).get("deployment_id")
             if not deployment_id:
-                logger.warning(f"No active deployment found for environment '{name}'.")
+                logger.error(f"No active deployment found for environment '{name}'.")
                 return {}
             logger.info(f"Pulling resources from deployment '{deployment_id}' ({name})...")
             return self.api_handler.pull_deployment_resources(deployment_id)
@@ -1652,7 +1685,7 @@ class AgentStudioProject:
                 )
                 return self.api_handler.pull_deployment_resources(deployment_id)
 
-        logger.warning(f"Name '{name}' not found in environments, branches, or deployments.")
+        logger.error(f"Name '{name}' not found in environments, branches, or deployments.")
         return {}
 
     def diff_remote_named_versions(
@@ -1663,7 +1696,7 @@ class AgentStudioProject:
         after_resources = self.get_remote_resources_by_name(after_name)
 
         if not before_resources or not after_resources:
-            logger.warning(
+            logger.error(
                 "Could not retrieve resources for one or both specified names: "
                 f"before={before_name}, after={after_name}"
             )
@@ -2018,6 +2051,7 @@ class AgentStudioProject:
         force: bool = False,
         format: bool = False,
         projection_json: Optional[dict[str, Any]] = None,
+        on_save: Callable[[int, int], None] | None = None,
     ) -> tuple[bool, dict[str, Any]]:
         """Switch to a different branch in the project.
 
@@ -2027,6 +2061,8 @@ class AgentStudioProject:
             format (bool): If True, format resources after switching branches.
             projection_json (dict[str, Any]): A dictionary containing the projection
                 If provided, the projection will be used instead of fetching it from the API.
+            on_save: Optional callback invoked with (current, total)
+                during the resource save loop.
 
         Returns:
             bool: True if the switch was successful, False otherwise
@@ -2045,7 +2081,7 @@ class AgentStudioProject:
         if success:
             self.branch_id = branches[branch_name]
             _, projection = self.pull_project(
-                force=force, format=format, projection_json=projection_json
+                force=force, format=format, projection_json=projection_json, on_save=on_save
             )
         return success, projection
 
