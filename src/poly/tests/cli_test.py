@@ -157,10 +157,19 @@ class FormatCommandTest(unittest.TestCase):
 class BranchCreateFromEnvTest(unittest.TestCase):
     """Tests for branch_create with --env flag.
 
-    When pulling from pre-release or live, pull_project_from_env must receive the
-    requested env and format=False. After create_branch, push_project uses
-    force=True so the pre-push merge pull does not overwrite deployment-pulled
-    files with the new branch's main fork.
+    Test cases for the AgentStudioCLI.branch_create method when using the --env flag.
+
+    These tests confirm correct behavior creating a branch from a specified environment:
+    - Blocks creation if there are uncommitted local changes (unless --force is used).
+    - Proceeds with creation if --force is specified, bypassing local changes check.
+    - Pulls resources from the specified environment and creates a branch as expected.
+
+    Additionally handles cases such as:
+    - No resources are returned from the environment.
+    - Skips pulling from the environment if the environment is "sandbox" or not specified.
+    - Does not skip environment pull when a supported environment (e.g., "live") is specified.
+    - Does not push changes if branch creation fails.
+
     """
 
     def setUp(self):
@@ -181,7 +190,7 @@ class BranchCreateFromEnvTest(unittest.TestCase):
 
     def test_branch_create_env_blocks_on_local_changes_without_force(self):
         """branch create --env live raises ValueError if local changes exist."""
-        self.proj.get_diffs.return_value = {"file.py": "some diff"}
+        self.proj.get_diffs.return_value = {"file.py": " diff"}
 
         with self.assertRaises(ValueError) as ctx:
             AgentStudioCLI.branch_create(TEST_DIR, "my-branch", env="live", force=False)
@@ -193,7 +202,7 @@ class BranchCreateFromEnvTest(unittest.TestCase):
 
     def test_branch_create_env_force_bypasses_check(self):
         """branch create --env live --force proceeds despite local changes."""
-        self.proj.get_diffs.return_value = {"file.py": "some diff"}
+        self.proj.get_diffs.return_value = {"file.py": "example diff"}
 
         AgentStudioCLI.branch_create(TEST_DIR, "my-branch", env="live", force=True)
 
