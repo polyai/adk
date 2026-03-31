@@ -1521,7 +1521,7 @@ class AgentStudioCLI:
                     "Branches can only be created from the [bold]main[/bold] branch (sandbox). "
                     "Please switch and try again."
                 )
-            return
+            sys.exit(1)
 
         if env in ["pre-release", "live"]:
             # Checks for any local changes on main before creating env branch.
@@ -1564,7 +1564,7 @@ class AgentStudioCLI:
             success(f"Branch '{branch_name}' created (ID: {new_branch_id})")
         else:
             error("Failed to create the branch.")
-            return
+            sys.exit(1)
 
         # Pushes existing state of env to provide clean slate for hotfixes.
         if env in ["pre-release", "live"]:
