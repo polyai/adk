@@ -448,6 +448,21 @@ class AgentStudioCLI:
         branch_create_parser.add_argument(
             "branch_name", nargs="?", help="Name of the branch to create."
         )
+        branch_create_parser.add_argument(
+            "--env",
+            "--environment",
+            type=str,
+            choices=["sandbox", "pre-release", "live"],
+            default=None,
+            dest="environment",
+            help="Initiate the new branch from this environment instead of sandbox (main).",
+        )
+        branch_create_parser.add_argument(
+            "--force",
+            "-f",
+            action="store_true",
+            help="Force switch to a different branch/create new branch and discard changes.",
+        )
         branch_create_parser.set_defaults(branch_subcommand="create")
 
         branch_switch_parser = branch_subparsers.add_parser(
@@ -711,7 +726,13 @@ class AgentStudioCLI:
                 cls.branch_list(args.path, args.json)
 
             elif args.branch_subcommand == "create":
-                cls.branch_create(args.path, args.branch_name, args.json)
+                cls.branch_create(
+                    args.path,
+                    args.branch_name,
+                    args.json,
+                    getattr(args, "environment", None),
+                    getattr(args, "force", False),
+                )
 
             elif args.branch_subcommand == "switch":
                 cls.branch_switch(
@@ -1477,7 +1498,12 @@ class AgentStudioCLI:
 
     @classmethod
     def branch_create(
-        cls, base_path: str, branch_name: str = None, output_json: bool = False
+        cls,
+        base_path: str,
+        branch_name: str = None,
+        output_json: bool = False,
+        env: str = None,
+        force: bool = False,
     ) -> None:
         """Create a new branch in the Agent Studio project."""
         project = cls._load_project(base_path, output_json=output_json)
@@ -1495,7 +1521,17 @@ class AgentStudioCLI:
                     "Branches can only be created from the [bold]main[/bold] branch (sandbox). "
                     "Please switch and try again."
                 )
-            sys.exit(1)
+            return
+
+        if env in ["pre-release", "live"]:
+            # Checks for any local changes on main before creating env branch.
+            if diffs := project.get_diffs(all_files=True):
+                if not force:
+                    raise ValueError(
+                        f"Uncommitted changes on main branch, diffs: {list(diffs.keys())}"
+                    )
+            project.pull_project_from_env(env=env, format=False)
+            success(f"Pulled {project.account_id}/{project.project_id}")
 
         if not branch_name:
             if output_json:
@@ -1528,7 +1564,17 @@ class AgentStudioCLI:
             success(f"Branch '{branch_name}' created (ID: {new_branch_id})")
         else:
             error("Failed to create the branch.")
-            sys.exit(1)
+            return
+
+        # Pushes existing state of env to provide clean slate for hotfixes.
+        if env in ["pre-release", "live"]:
+            project.push_project(
+                force=True,
+                skip_validation=True,
+                dry_run=False,
+                format=False,
+                email=None,
+            )
 
     @classmethod
     def branch_switch(
