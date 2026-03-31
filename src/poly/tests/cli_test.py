@@ -154,6 +154,138 @@ class FormatCommandTest(unittest.TestCase):
         proj.format_files.assert_called_once_with(files=None, check_only=False)
 
 
+class BranchCreateFromEnvTest(unittest.TestCase):
+    """Tests for branch_create with --env flag.
+
+    When pulling from pre-release or live, pull_project_from_env must receive the
+    requested env and format=False. After create_branch, push_project uses
+    force=True so the pre-push merge pull does not overwrite deployment-pulled
+    files with the new branch's main fork.
+    """
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli.AgentStudioCLI._load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.branch_id = "main"
+        self.proj.account_id = "test_account"
+        self.proj.project_id = "test_project"
+        self.proj.get_diffs.return_value = {}
+        self.proj.pull_project_from_env = MagicMock()
+        self.proj.push_project = MagicMock(return_value=(True, "Push successful", []))
+        self.proj.create_branch.return_value = "new-branch-id"
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_branch_create_env_blocks_on_local_changes_without_force(self):
+        """branch create --env live raises ValueError if local changes exist."""
+        self.proj.get_diffs.return_value = {"file.py": "some diff"}
+
+        with self.assertRaises(ValueError) as ctx:
+            AgentStudioCLI.branch_create(TEST_DIR, "my-branch", env="live", force=False)
+
+        self.assertIn("Uncommitted changes", str(ctx.exception))
+        self.proj.pull_project_from_env.assert_not_called()
+        self.proj.create_branch.assert_not_called()
+        self.proj.push_project.assert_not_called()
+
+    def test_branch_create_env_force_bypasses_check(self):
+        """branch create --env live --force proceeds despite local changes."""
+        self.proj.get_diffs.return_value = {"file.py": "some diff"}
+
+        AgentStudioCLI.branch_create(TEST_DIR, "my-branch", env="live", force=True)
+
+        self.proj.pull_project_from_env.assert_called_once()
+        call_kwargs = self.proj.pull_project_from_env.call_args[1]
+        self.assertEqual(call_kwargs["env"], "live")
+        self.assertIs(call_kwargs["format"], False)
+        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.push_project.assert_called_once_with(
+            force=True,
+            skip_validation=True,
+            dry_run=False,
+            format=False,
+            email=None,
+        )
+
+    def test_branch_create_env_pulls_from_specified_env(self):
+        """branch create --env pre-release pulls resources from pre-release."""
+        self.proj.get_diffs.return_value = {}
+
+        AgentStudioCLI.branch_create(TEST_DIR, "my-branch", env="pre-release", force=False)
+
+        self.proj.pull_project_from_env.assert_called_once()
+        call_kwargs = self.proj.pull_project_from_env.call_args[1]
+        self.assertEqual(call_kwargs["env"], "pre-release")
+        self.assertIs(call_kwargs["format"], False)
+        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.push_project.assert_called_once_with(
+            force=True,
+            skip_validation=True,
+            dry_run=False,
+            format=False,
+            email=None,
+        )
+
+    def test_branch_create_env_raises_when_live_deployment_missing(self):
+        """If live (or pre-release) has no active deployment, pull_project_from_env raises."""
+        self.proj.get_diffs.return_value = {}
+        self.proj.pull_project_from_env.side_effect = ValueError(
+            "No resources returned from environment 'live'."
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            AgentStudioCLI.branch_create(TEST_DIR, "my-branch", env="live", force=False)
+
+        self.assertIn("No resources returned from environment 'live'", str(ctx.exception))
+        self.proj.pull_project_from_env.assert_called_once()
+        pull_kwargs = self.proj.pull_project_from_env.call_args[1]
+        self.assertEqual(pull_kwargs["env"], "live")
+        self.assertIs(pull_kwargs["format"], False)
+        self.proj.create_branch.assert_not_called()
+        self.proj.push_project.assert_not_called()
+
+    def test_branch_create_env_sandbox_skips_env_pull(self):
+        """branch create --env sandbox behaves like normal branch create (no env pull)."""
+        AgentStudioCLI.branch_create(TEST_DIR, "my-branch", env="sandbox", force=False)
+
+        self.proj.pull_project_from_env.assert_not_called()
+        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.push_project.assert_not_called()
+
+    def test_branch_create_blocked_when_not_on_main(self):
+        """branch create from non-main branch returns early without action."""
+        self.proj.branch_id = "example-feature-branch"
+
+        AgentStudioCLI.branch_create(TEST_DIR, "my-branch", env="live", force=False)
+
+        self.proj.pull_project_from_env.assert_not_called()
+        self.proj.create_branch.assert_not_called()
+        self.proj.push_project.assert_not_called()
+
+    def test_branch_create_env_none_behaves_like_normal(self):
+        """branch create with env=None skips env pull (default behavior)."""
+        AgentStudioCLI.branch_create(TEST_DIR, "my-branch", env=None, force=False)
+
+        self.proj.pull_project_from_env.assert_not_called()
+        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.push_project.assert_not_called()
+
+    def test_branch_create_env_does_not_push_when_create_branch_fails(self):
+        """After failed branch creation, push_project is not called."""
+        self.proj.get_diffs.return_value = {}
+        self.proj.create_branch.return_value = None
+
+        AgentStudioCLI.branch_create(TEST_DIR, "my-branch", env="live", force=False)
+
+        self.proj.pull_project_from_env.assert_called_once()
+        self.assertIs(self.proj.pull_project_from_env.call_args[1]["format"], False)
+        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.push_project.assert_not_called()
+
+
 class CompletionCommandTest(unittest.TestCase):
     """Tests for the completion command."""
 

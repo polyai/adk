@@ -2656,6 +2656,28 @@ class PullProjectTest(unittest.TestCase):
         self.assertEqual(files_with_conflicts, [])
 
 
+class PullProjectFromEnvTest(unittest.TestCase):
+    """Tests for pull_project_from_env when targeting deployment environments."""
+
+    def setUp(self):
+        self.mock_get_remote = patch.object(
+            AgentStudioProject,
+            "get_remote_resources_by_name",
+            return_value={},
+        ).start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_pull_project_from_env_raises_when_no_active_deployment(self):
+        """Empty resource map (e.g. live not deployed yet) must error with a clear message."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        with self.assertRaises(ValueError) as ctx:
+            project.pull_project_from_env(env="live", format=False)
+        self.assertIn("No resources returned from environment 'live'", str(ctx.exception))
+        self.mock_get_remote.assert_called_once_with("live")
+
+
 class DocsTest(unittest.TestCase):
     """Tests for the docs module"""
 
