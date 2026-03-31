@@ -265,11 +265,13 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         self.proj.push_project.assert_not_called()
 
     def test_branch_create_blocked_when_not_on_main(self):
-        """branch create from non-main branch returns early without action."""
+        """branch create from non-main branch exits with an error."""
         self.proj.branch_id = "example-feature-branch"
 
-        AgentStudioCLI.branch_create(TEST_DIR, "my-branch", env="live", force=False)
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.branch_create(TEST_DIR, "my-branch", env="live", force=False)
 
+        self.assertEqual(ctx.exception.code, 1)
         self.proj.pull_project_from_env.assert_not_called()
         self.proj.create_branch.assert_not_called()
         self.proj.push_project.assert_not_called()
@@ -283,12 +285,14 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         self.proj.push_project.assert_not_called()
 
     def test_branch_create_env_does_not_push_when_create_branch_fails(self):
-        """After failed branch creation, push_project is not called."""
+        """After failed branch creation, push_project is not called and process exits."""
         self.proj.get_diffs.return_value = {}
         self.proj.create_branch.return_value = None
 
-        AgentStudioCLI.branch_create(TEST_DIR, "my-branch", env="live", force=False)
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.branch_create(TEST_DIR, "my-branch", env="live", force=False)
 
+        self.assertEqual(ctx.exception.code, 1)
         self.proj.pull_project_from_env.assert_called_once()
         self.assertIs(self.proj.pull_project_from_env.call_args[1]["format"], False)
         self.proj.create_branch.assert_called_once_with("my-branch")
