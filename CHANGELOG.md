@@ -1,6 +1,73 @@
 # CHANGELOG
 
 
+## v0.6.2 (2026-03-31)
+
+### Bug Fixes
+
+- **API Integration**: Generate API integration IDs in server-expected format
+  ([#53](https://github.com/polyai/adk/pull/53),
+  [`c82e7dc`](https://github.com/polyai/adk/commit/c82e7dc625a1b9f7a027c39dc17abc1e47c34980))
+
+## Summary - `generate_uuid` was building API integration IDs using the resource name key
+  (`api_integration` → `API_INTEGRATION-<hex>`), but the server validates against a regex that
+  expects `API-INTEGRATION-<UPPERCASE_HEX>` - Fix uses `resource_id_prefix` from the resource class
+  (when defined) with uppercase hex, matching the server's expected format (e.g.
+  `API-INTEGRATION-2861A95D`) - Other resource types are unaffected — the fallback path is unchanged
+
+## Test plan - [x] Existing `ApiIntegrationTest` suite passes (`uv run pytest src/poly/tests/ -v -k
+  api_integration`) - [x] Push a new API integration and verify it is accepted by the server without
+  a `ZodValidationError`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+### Documentation
+
+- Auto-update from feat(cli): machine-readable --json, projection-based pull/push, and serialized
+  push commands ([#46](https://github.com/polyai/adk/pull/46),
+  [`dee84ef`](https://github.com/polyai/adk/commit/dee84ef3ad0d901496c74eea8fa0a1354d2976f8))
+
+## Summary
+
+This PR is related to https://github.com/polyai/adk/pull/41
+
+## Motivation
+
+This is the first trial run of the docs auto-update workflow that was added to
+  https://github.com/polyai/adk/pull/35
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+---------
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+
 ## v0.6.1 (2026-03-30)
 
 ### Bug Fixes

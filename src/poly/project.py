@@ -2015,6 +2015,9 @@ class AgentStudioProject:
         Returns:
             str: A new UUID string.
         """
+        prefix = getattr(resource_type, "resource_id_prefix", None)
+        if prefix:
+            return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
         return f"{RESOURCE_CLASS_TO_NAME[resource_type].upper()}-{uuid.uuid4().hex[:8]}"
 
     def get_branches(self) -> tuple[Optional[str], dict[str, str]]:
