@@ -524,6 +524,63 @@ class AgentStudioProject:
 
         return files_with_conflicts, projection
 
+    def pull_project_from_env(self, env: str = "sandbox", format: bool = False) -> list[str]:
+        """Pull resources from a named environment (live / pre-release / sandbox) and apply
+        them as a force-overwrite, discarding any local changes.
+
+        NB: Can potentially make more modular to avoid duplication of pull_project,
+        currently leaving as is for stability.
+
+        Raises ValueError if no active deployment exists for the requested environment.
+
+        Args:
+            env (str): Target environment name — "live", "pre-release", or "sandbox".
+            format (bool): If True, format resources after writing.
+
+        Returns:
+            list[str]: Always empty (force overwrite produces no conflicts).
+        """
+        incoming_resources = self.get_remote_resources_by_name(env)
+        if not incoming_resources:
+            raise ValueError(f"No resources returned from environment '{env}'.")
+        self.branch_id = self.api_handler.branch_id
+
+        self._check_no_duplicate_resource_paths(incoming_resources)
+
+        files_with_conflicts = self._update_pulled_resources(
+            original_resources=self.resources,
+            incoming_resources=incoming_resources,
+            force=True,
+            format=format,
+            on_save=None,
+        )
+
+        flow_folder = os.path.join(self.root_path, "flows")
+        if os.path.exists(flow_folder):
+            self._delete_empty_folders(flow_folder)
+
+        self.resources = incoming_resources
+        self.file_structure_info = self.compute_file_structure_info(incoming_resources)
+
+        new_resources, _, _ = self.find_new_kept_deleted(self.discover_local_resources())
+        pronunciations = []
+        for resource_mapping in new_resources:
+            # Because pronunciation uses position as a "name", deleting these out of order
+            # effectively "changes" the name, causing some resources not to be deleted.
+            if resource_mapping.resource_type == Pronunciation:
+                pronunciations.append(resource_mapping.file_path)
+            else:
+                resource_mapping.resource_type.delete_resource(resource_mapping.file_path)
+
+        for file_path in self._sort_paths_for_reverse_deletion(pronunciations, Pronunciation):
+            Pronunciation.delete_resource(file_path)
+
+        utils.export_decorators(DECORATORS, self.root_path)
+        utils.save_imports(self.root_path)
+        self.save_config()
+
+        return files_with_conflicts
+
     @staticmethod
     def _delete_empty_folders(folder_path: str) -> None:
         """Delete empty flow folders in the given path recursively."""
