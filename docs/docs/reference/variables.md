@@ -6,7 +6,7 @@ description: Understand how state variables are discovered, stored, and referenc
 # Variables
 
 <p class="lead">
-Variables are not files on disk. They represent values stored in <code>conv.state</code> and are discovered automatically by scanning function code.
+Variables represent values stored in <code>conv.state</code> and are discovered automatically by scanning function code.
 </p>
 
 ## How variables work
