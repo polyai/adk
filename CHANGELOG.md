@@ -1,6 +1,130 @@
 # CHANGELOG
 
 
+## v0.7.1 (2026-04-01)
+
+### Bug Fixes
+
+- Match API integration operations by name when resource_id absent
+  ([#60](https://github.com/polyai/adk/pull/60),
+  [`a3a56ab`](https://github.com/polyai/adk/commit/a3a56ab240f5d1883d12a4bafcc5f0be52fc9f17))
+
+## Summary
+
+Fix a bug where `poly push` always issued a delete + create for every API integration operation
+  instead of computing the true diff.
+
+## Motivation
+
+`ApiIntegrationOperation.to_yaml_dict()` intentionally omits `resource_id`, so operations loaded
+  from YAML always have `resource_id = ""`. The previous diff logic in
+  `get_new_updated_deleted_subresources` matched operations by `resource_id` only — meaning every
+  local op was treated as new (create) and every remote op as deleted, regardless of whether
+  anything had actually changed.
+
+A secondary bug meant multiple new operations all keyed on `""` in `new_subresources`, so only the
+  last one survived and only 1 of N creates was ever emitted.
+
+## Changes
+
+- Match operations by `resource_id` when present; fall back to **name-based matching** for
+  YAML-loaded ops (no ID stored) - Carry the remote `resource_id` forward when matched by name so
+  update commands target the correct remote resource - Generate a fresh UUID eagerly for genuinely
+  new ops to avoid key collisions in `new_subresources`
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly push --dry-run --debug`) - [x] Tested
+  against a live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface - [x] Commit messages follow [conventional
+  commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+### Documentation
+
+- Fix: use Python 3.13 in docs CI ([#58](https://github.com/polyai/adk/pull/58),
+  [`c4cc68b`](https://github.com/polyai/adk/commit/c4cc68b4aab5a87c779242aed075f767e0b4320e))
+
+docs/pyproject.toml: relax requires-python from >=3.14 to >=3.11 .github/workflows/build-docs.yaml:
+  pin to python 3.13 (latest stable)
+
+Python 3.14 is pre-release and not available on GitHub Actions runners, causing setup-python to fall
+  back to 3.11 which then fails the >=3.14 constraint. mkdocs has no dependency on 3.14.
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+- Improve clarity, active language, and add Google Analytics
+  ([#43](https://github.com/polyai/adk/pull/43),
+  [`a721bca`](https://github.com/polyai/adk/commit/a721bcab21dd6f11dcecf1b451b571c8a12cbb9a))
+
+## Summary
+
+- **Remove AI-isms**: replaced "trust the model", "the agent does the heavy lifting", "composable",
+  and similar LLM-adjacent framing with plain, concrete language - **Active language throughout**:
+  rewrote passive constructions and vague headers ("What it enables" → "What you can do with the
+  ADK"; "Before you continue" → "Checklist") - **Remove internal history**: deleted the "Local Agent
+  Studio" provenance paragraph from `what-is-the-adk.md` — not useful for external developers -
+  **Prerequisites improvements**: added Python 3.14+ install guidance (Homebrew, pyenv, python.org),
+  the official `uv` install command (`astral.sh`), and a proper checklist - **Installation
+  cleanup**: removed the "Running tests" section (it belongs in `testing.md`, not install) -
+  **Testing page**: added `uv run pytest` as the canonical invocation - **Build-an-agent tutorial**:
+  removed the empty Summary table, clarified AI-agent workflow steps with concrete task headings -
+  **Tooling page**: VS Code extension URL is now a proper hyperlink - **Consistency**: fixed
+  "Pre-requisites" → "Prerequisites" across index and access pages; import line note in
+  `functions.md` now explains the consequence of modifying it
+
+## Test plan
+
+- [x] Review rendered docs for visual regressions - [x] Confirm all internal links still resolve -
+  [x] Read through get-started flow end-to-end
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+Co-authored-by: Aaron Forinton <aaron.forinton@googlemail.com>
+
+
 ## v0.7.0 (2026-04-01)
 
 ### Chores
