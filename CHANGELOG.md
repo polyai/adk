@@ -1,6 +1,67 @@
 # CHANGELOG
 
 
+## v0.7.0 (2026-04-01)
+
+### Chores
+
+- Migrate docs dependencies to pyproject.toml ([#55](https://github.com/polyai/adk/pull/55),
+  [`13716d0`](https://github.com/polyai/adk/commit/13716d0005713d20e7a45a0b9306e576fb111671))
+
+- Move documentation dependencies from `requirements.txt` to `pyproject.toml` - Create new
+  `docs/pyproject.toml` with mkdocs and related packages - Delete `docs/requirements.txt` - Update
+  CI workflows to install dependencies using `pip install .` instead of `pip install -r
+  requirements.txt`
+
+This consolidates dependency management and follows modern Python packaging standards.
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+### Features
+
+- Adk branch create --env flag to specify source env for new branch
+  ([#56](https://github.com/polyai/adk/pull/56),
+  [`e9dd3b9`](https://github.com/polyai/adk/commit/e9dd3b93e6246b577a0826dd2e77b73aa1578516))
+
+## Summary
+
+Adds a `--env` flag to `poly branch create` that sources a new branch from a live or pre-release
+  deployment snapshot instead of sandbox main.
+
+Additional points: - Specifying `sandbox` as env arg will default to existing behaviour (sandbox
+  being the default 'base'). - Branch creation is also followed by push, to leave a 'clean slate'
+  for any hotfix changes required. - `--force` flag will force overwrite of any local changes on
+  `main` (restrictions still apply for creating new branch from main only).
+
+## Motivation
+
+The motivation is to facilitate hotfixes to main live environment, bypassing any subsequent changes
+  in testing environments. This should be used with caution and usual protocol to be followed with
+  pushing the change.
+
+## Changes
+
+- project.py: added pull_project_from_env(env, format) method to class AgentStudioProject. - cli.py:
+  add `--env/--environment` (choices: sandbox, pre-release, live) and `--force/-f` to `branch
+  create` - cli.py: when --env live/pre-release is set, pull from that environment before creating
+  the branch and push immediately after
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.6.2 (2026-03-31)
 
 ### Bug Fixes
