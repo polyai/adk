@@ -155,6 +155,10 @@ poly review --delete
 
 Start an interactive chat session with your agent.
 
+!!! info "Push before chatting"
+
+    `poly chat` runs against the version of your agent in Agent Studio, not your local files. Run `poly push` before `poly chat` to ensure your latest changes are reflected.
+
 Examples:
 
 ~~~bash

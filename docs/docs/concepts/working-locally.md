@@ -105,7 +105,7 @@ The standard workflow is:
 5. inspect changes with `poly diff` and `poly status`
 6. validate locally with `poly validate`
 7. push changes with `poly push`
-8. test and chat with the agent using `poly chat`
+8. test and chat with the agent using `poly chat` — this runs against the pushed version in Agent Studio, so push before chatting
 9. optionally generate a review gist with `poly review`
 10. merge the branch in Agent Studio
 
@@ -134,6 +134,27 @@ These references let settings, prompts, and behaviors point to resources by name
 !!! tip "A Git-like workflow for Agent Studio"
 
     Think of the ADK as a synchronization layer between your local files and the Agent Studio platform.
+
+## Development setup from source
+
+If you are contributing to the ADK itself or working directly from the repository, you can set it up locally from source instead.
+
+~~~bash
+git clone https://github.com/polyai/adk.git
+cd adk
+uv venv --python=3.14 --seed
+source .venv/bin/activate
+uv pip install -e ".[dev]"
+pre-commit install
+~~~
+
+This installs the project in editable mode and enables the repository's development hooks. To run the test suite:
+
+~~~bash
+pytest
+~~~
+
+Test files are located in `src/poly/tests/`.
 
 ## Related pages
 

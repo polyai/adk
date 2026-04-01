@@ -128,7 +128,11 @@ At this point, configure any API keys or environment variables needed for the pr
 
 ### Step 3 - Run the agent locally
 
-Start an interactive chat session to confirm the connection works and inspect runtime behaviour.
+Start an interactive chat session to confirm the connection works and inspect runtime behavior.
+
+!!! info "Chat runs against the pushed version"
+
+    `poly chat` connects to the version of your agent in Agent Studio, not your local files. Always run `poly push` before `poly chat` to make sure your latest changes are reflected.
 
 ~~~bash
 poly chat
@@ -177,7 +181,7 @@ Add or edit knowledge-base topics used for retrieval.
 
 #### Agent settings
 
-Update the personality, role, and rules that define the agent’s global behaviour.
+Update the personality, role, and rules that define the agent’s global behavior.
 
 #### Flows
 
@@ -193,7 +197,7 @@ Define escalation paths, SMS templates, and per-variant configuration.
 
 #### ASR and response control
 
-Tune speech recognition and control TTS behaviour.
+Tune speech recognition and control TTS behavior.
 
 #### Experimental config
 
@@ -226,7 +230,7 @@ poly push --skip-validation
 
 ### Step 8 - Test against sandbox
 
-Validate the behaviour in the sandbox environment.
+Validate the behavior in the sandbox environment.
 
 ~~~bash
 poly chat --environment sandbox

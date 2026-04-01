@@ -35,13 +35,13 @@ pip install polyai-adk
 
 ## Generate API key
 
-Log in to the Agent Studio platform and generate an API key. Then set it as an environment variable:
+Log in to Agent Studio and open your workspace. In the **Data Access** tab (next to the **Users** tab), click **+ API Key** in the top right to generate a key. Then set it as an environment variable:
 
 ~~~bash
 export POLY_ADK_KEY=<your-api-key>
 ~~~
 
-The `POLY_ADK_KEY` environment variable must be set before running any `poly` commands.
+The `POLY_ADK_KEY` environment variable must be set before running any `poly` commands. To make it permanent, add the export line to your shell profile (for example, `~/.zshrc` or `~/.bashrc`).
 
 Once the ADK is installed and your API key is set, you can use the `poly` command to interact with Agent Studio projects locally.
 
