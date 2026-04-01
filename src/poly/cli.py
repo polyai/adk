@@ -44,6 +44,7 @@ from poly.handlers.interface import (
     REGIONS,
     AgentStudioInterface,
 )
+from poly import telemetry
 from poly.resources import resource_utils
 from poly.project import (
     PROJECT_CONFIG_FILE,
@@ -660,6 +661,28 @@ class AgentStudioCLI:
             logging.basicConfig(level=logging.DEBUG)
         else:
             logging.basicConfig(level=logging.WARNING)
+
+        # --- Usage telemetry (anonymous, fire-and-forget) ---
+        _subcommand = getattr(args, "action", None)
+        _project_ctx: dict = {}
+        if args.command not in {"init", "docs", "completion"}:
+            try:
+                _p = cls.read_project_config(getattr(args, "path", "."))
+                if _p:
+                    _project_ctx = {
+                        "account_id": getattr(_p, "account_id", None),
+                        "project_id": getattr(_p, "project_id", None),
+                        "region": getattr(_p, "region", None),
+                    }
+            except Exception:
+                pass
+        telemetry.track(
+            args.command,
+            subcommand=_subcommand,
+            dry_run=bool(getattr(args, "dry_run", False)),
+            **_project_ctx,
+        )
+        # ---
 
         if args.command == "init":
             cls.init_project(
