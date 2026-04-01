@@ -3,12 +3,6 @@ title: What is the PolyAI ADK?
 description: Learn what the PolyAI Agent Development Kit is, why it exists, and how it supports local development workflows for Agent Studio.
 ---
 
-!!! warning "Early access"
-
-    The PolyAI ADK is currently in Early Access. Availability is limited, and some functionality may change before general release.
-
-    [Join the waitlist](https://fehky.share-eu1.hsforms.com/2oSGLpUctRvyqXcb6K44DAQ){ target="_blank" rel="noopener" }
-
 The **PolyAI ADK (Agent Development Kit)** is a **CLI tool and Python package** for managing **Agent Studio** projects on your local machine.
 
 It gives you a Git-like workflow for synchronizing project configuration between your local filesystem and the Agent Studio platform.

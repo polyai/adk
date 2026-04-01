@@ -3,12 +3,6 @@ title: Build an agent with the ADK
 description: Follow the end-to-end workflow for going from a blank Agent Studio project to a production-ready voice agent with the PolyAI ADK.
 ---
 
-!!! warning "Early access"
-
-    The PolyAI ADK is currently in Early Access. Availability is limited, and some functionality may change before general release.
-
-    [Join the waitlist](https://fehky.share-eu1.hsforms.com/2oSGLpUctRvyqXcb6K44DAQ){ target="_blank" rel="noopener" }
-
 This guide walks through how to go from a blank slate to a production-ready voice agent using **Agent Studio**, the **PolyAI ADK**, and optionally a coding tool such as **Claude Code**.
 
 There are two common ways to build with the ADK:

@@ -3,12 +3,6 @@ title: Access and waitlist
 description: Learn how access to the PolyAI ADK currently works during the Early Access Program.
 ---
 
-!!! warning "Early access"
-
-    The PolyAI ADK is currently in Early Access. Availability is limited, and some functionality may change before general release.
-
-    [Join the waitlist](https://fehky.share-eu1.hsforms.com/2oSGLpUctRvyqXcb6K44DAQ){ target="_blank" rel="noopener" }
-
 The **PolyAI ADK** is currently available through an **Early Access Program (EAP)**.
 
 ## Current availability

@@ -5,12 +5,6 @@ description: Documentation for the PolyAI Agent Development Kit.
 
 ![PolyAI ADK](assets/poly-ai-adk.png)
 
-!!! warning "Early access"
-
-    The PolyAI ADK is currently in Early Access. Availability is limited, and some functionality may change before general release.
-
-    [Join the waitlist](https://fehky.share-eu1.hsforms.com/2oSGLpUctRvyqXcb6K44DAQ){ target="_blank" rel="noopener" }
-
 Build, edit, and deploy Agent Studio projects locally with the **PolyAI ADK**.
 
 The ADK gives you a local, Git-like workflow for Agent Studio projects: pull, edit with standard tooling, validate, and push.
