@@ -141,7 +141,7 @@ When `--env live` or `--env pre-release` is specified:
 
 !!! warning "Use `--env live` with caution"
 
-    Branching from a live deployment snapshot is intended for hotfixes that need to bypass subsequent changes in testing environments. Follow your usual protocol when pushing the resulting change.
+    Branching from a live deployment snapshot is intended for hotfixes that need to bypass subsequent changes in testing environments. Once the hotfix is pushed, you should ensure this change is also replicated for the next live push.
 
 ### `poly format`
 
