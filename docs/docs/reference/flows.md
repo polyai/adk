@@ -248,7 +248,7 @@ Python should be used for:
 
 Function steps live in `function_steps/*.py`.
 
-These are deterministic Python steps with no LLM decision-making involved. They are ideal for:
+These are deterministic Python steps. They execute directly, with no model interpretation. Use them for:
 
 - API calls
 - validation

@@ -1,6 +1,6 @@
 ---
 title: Testing
-description: Run tests and validate project changes when working with the PolyAI ADK.
+description: Validate project changes when working with the PolyAI ADK.
 ---
 
 # Testing
@@ -10,20 +10,6 @@ Testing helps confirm that your project changes behave as expected before they a
 </p>
 
 In the ADK workflow, testing usually sits alongside validation and manual review in Agent Studio.
-
-## Run the test suite
-
-Run tests with:
-
-~~~bash
-pytest
-~~~
-
-Test files are located in:
-
-~~~text
-src/poly/tests/
-~~~
 
 ## What testing is for
 
@@ -35,12 +21,6 @@ Testing is useful when you want to:
 - support safer review and collaboration
 
 <div class="grid cards" markdown>
-
--   **Automated tests**
-
-    ---
-
-    Use `pytest` to run the project's test suite locally.
 
 -   **Validation**
 
@@ -63,13 +43,8 @@ A typical development loop looks like this:
 1. edit files locally
 2. inspect changes with `poly status` and `poly diff`
 3. run `poly validate`
-4. run `pytest` where relevant
-5. push changes with `poly push`
-6. test the branch in Agent Studio
-
-!!! tip "Validation and testing are complementary"
-
-    `poly validate` checks configuration correctness. `pytest` checks code behavior. They solve different problems and are both useful.
+4. push changes with `poly push`
+5. test the branch in Agent Studio
 
 ## What to test
 
@@ -83,11 +58,9 @@ The exact tests will depend on the kind of work you are doing, but common areas 
 
 ## Best practices
 
-- run tests before pushing substantial changes
-- keep tests focused and readable
 - use validation as part of the normal workflow, not just before merge
 - test important error paths, not only success cases
-- combine automated testing with interactive review when behavior depends on conversation flow
+- combine interactive review when behavior depends on conversation flow
 
 ## Related pages
 
