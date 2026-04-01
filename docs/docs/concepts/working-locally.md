@@ -105,9 +105,9 @@ The standard workflow is:
 5. inspect changes with `poly diff` and `poly status`
 6. validate locally with `poly validate`
 7. push changes with `poly push`
-8. test and chat with the agent using `poly chat` — this runs against the pushed version in Agent Studio, so push before chatting
-9. optionally generate a review gist with `poly review`
-10. merge the branch in Agent Studio
+8. optionally generate a review gist with `poly review`
+9. merge the branch in Agent Studio
+10. test by chatting with the agent using `poly chat` — this connects to main on the Sandbox, so merge your branch first
 
 !!! tip "Run commands from the project folder"
 

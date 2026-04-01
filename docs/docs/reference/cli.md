@@ -155,9 +155,9 @@ poly review --delete
 
 Start an interactive chat session with your agent.
 
-!!! info "Push before chatting"
+!!! warning "Merge before chatting"
 
-    `poly chat` runs against the version of your agent in Agent Studio, not your local files. Run `poly push` before `poly chat` to ensure your latest changes are reflected.
+    `poly chat` connects to the **main branch** of your Sandbox environment in Agent Studio — not your local files, and not your current branch. To test changes made on a feature branch, you must first push the branch with `poly push`, merge it in Agent Studio, and then run `poly chat`.
 
 Examples:
 
