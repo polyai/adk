@@ -55,6 +55,10 @@ markdown_extensions:
       permalink: true
 
 extra:
+  analytics:
+    provider: google
+    property: G-TTMRZWJPP4
+
   first_repo_url: https://github.com/polyai/adk
   first_repo_name: adk
   first_repo_icon: fontawesome/brands/github
@@ -87,7 +91,7 @@ nav:
       - What is the PolyAI ADK?: get-started/what-is-the-adk.md
       - Walkthrough video: get-started/walkthrough-video.md
       - Access and waitlist: get-started/access-and-waitlist.md
-      - Pre-requisites: get-started/prerequisites.md
+      - Prerequisites: get-started/prerequisites.md
       - Installation: get-started/installation.md
       - First commands: get-started/first-commands.md
 

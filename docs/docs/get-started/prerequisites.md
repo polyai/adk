@@ -1,9 +1,9 @@
 ---
-title: Pre-requisites
+title: Prerequisites
 description: Understand the access requirements and local tools needed before using the PolyAI ADK.
 ---
 
-Before using the **PolyAI ADK**, you need both the correct **platform access** and the required **local tools**.
+Before using the **PolyAI ADK**, you need the correct **platform access** and the required **local tools**.
 
 ## Platform access
 
@@ -20,47 +20,37 @@ If you need access to the PolyAI platform, contact:
 
 ## Local requirements
 
-You will also need the following installed on your machine:
+Install the following tools before continuing:
 
-<div class="grid cards" markdown>
+| Tool | Version | Notes |
+|---|---|---|
+| **uv** | latest | Manages Python and virtual environments |
+| **Git** | any | Required to clone the repository or contribute |
 
--   **Python 3.14 or higher**
+### Install uv
 
-    ---
+`uv` manages Python versions for you, including the version required by the ADK. Install it with:
 
-    The ADK requires a modern Python runtime.
+~~~bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+~~~
 
--   **uv**
-
-    ---
-
-    Recommended for local development setup from source.
-
--   **Git**
-
-    ---
-
-    Required if you plan to clone the repository or contribute from source.
-
-</div>
-
-## Install uv
-
-If you use Homebrew on macOS, you can install `uv` with:
+Alternatively, with Homebrew on macOS:
 
 ~~~bash
 brew install uv
 ~~~
 
-## Before you continue
+See the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/){ target="_blank" rel="noopener" } for more options.
 
-Before moving on, make sure you have:
+## Checklist
 
-- confirmed access to **Agent Studio**
-- obtained an **API key**
-- installed **Python 3.14+**
-- installed `uv` if you are using the development setup
-- confirmed that **Git** is available locally
+Before continuing, confirm:
+
+- [ ] You have access to an **Agent Studio workspace**
+- [ ] You have obtained an **API key** from your PolyAI contact
+- [ ] `uv` is installed
+- [ ] `git` is available locally
 
 ## Next step
 

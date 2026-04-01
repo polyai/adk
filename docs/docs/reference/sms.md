@@ -87,7 +87,7 @@ SMS templates can be referenced in rules, topics, and related instructions using
 {{twilio_sms:template_name}}
 ~~~
 
-This lets the model refer to the correct SMS template by name, rather than embedding the message body directly into prompt text.
+This lets you reference the correct template by name without embedding the full message body in prompt text.
 
 ## Using variables
 

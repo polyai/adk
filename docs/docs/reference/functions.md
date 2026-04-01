@@ -83,13 +83,13 @@ Every `.py` file must define a function with the same name as the file, excludin
 
 That function is the entry point when the file is called by the model or runtime.
 
-Use this import pattern:
+Every function file must include this import line:
 
 ~~~python
 from _gen import *  # <AUTO GENERATED>
 ~~~
 
-This line must match the expected pattern exactly.
+Do not modify this line. The ADK matches it exactly when reading function files.
 
 ## Decorators
 
@@ -147,7 +147,7 @@ Prefer naming functions after the **event that should trigger them**, rather tha
 - `store_first_name`
 - `send_confirmation`
 
-This helps the model understand when the function should be called.
+This tells the model when to call the function.
 
 ## Returns and control flow
 

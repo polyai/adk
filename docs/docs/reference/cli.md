@@ -5,7 +5,7 @@ description: Reference for the core commands provided by the PolyAI ADK CLI.
 
 <p class="lead">
 The PolyAI ADK is accessed through the <code>poly</code> command.
-Use the CLI help output as the first source of truth.
+When in doubt about a flag or option, run the command with <code>--help</code> - that output reflects your installed version exactly.
 </p>
 
 ## Start with help
@@ -22,9 +22,9 @@ Each command also supports its own help output. For example:
 poly push --help
 ~~~
 
-!!! tip "Use help output as the source of truth"
+!!! tip "Help output reflects your installed version"
 
-    The installed CLI is the fastest way to confirm the commands and flags available in your local environment.
+    This reference page covers the standard commands. Run `poly <command> --help` to confirm the exact flags available in your environment.
 
 ## Core commands
 
@@ -178,6 +178,10 @@ poly review --delete
 
 Start an interactive chat session with your agent.
 
+!!! warning "Merge before chatting"
+
+    `poly chat` connects to the **main branch** of your Sandbox environment in Agent Studio — not your local files, and not your current branch. To test changes made on a feature branch, you must first push the branch with `poly push`, merge it in Agent Studio, and then run `poly chat`.
+
 Examples:
 
 ~~~bash
@@ -199,7 +203,7 @@ poly docs --all
 poly docs --all --output rules.md
 ~~~
 
-Use `--output` to write the documentation to a local file. This is useful when working with AI coding tools — pass the output file as context to give the agent accurate knowledge of ADK resource types and conventions.
+Use `--output` to write the documentation to a local file. This is useful when working with AI coding tools - pass the output file as context to give the agent accurate knowledge of ADK resource types and conventions.
 
 ## Machine-readable JSON output
 
