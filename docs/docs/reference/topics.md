@@ -90,7 +90,6 @@ This split is important: content is for facts, actions are for behavior.
 
 - use no more than **20** example queries
 - cover meaningful variation, not every minor wording change
-- the system generalizes from your examples; exhaustive coverage is not needed
 
 ## Content
 
