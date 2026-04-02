@@ -106,12 +106,12 @@ class PlatformAPIHandler:
 
         try:
             api_response.raise_for_status()
-        except requests.HTTPError as e:
-            logger.exception(
+        except requests.HTTPError:
+            logger.debug(
                 f"Error in request. url={url!r} headers={headers!r} body={data!r}"
                 f" status_code={api_response.status_code!r} response={api_response.text!r}"
             )
-            raise e
+            raise
 
         try:
             api_response = api_response.json()
