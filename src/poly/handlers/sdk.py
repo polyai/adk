@@ -187,9 +187,9 @@ class SourcererSDK:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
                 except (ValueError, KeyError):
-                    error_msg = f"API Error {e.response.status_code}: {e.response.text}"
+                    error_msg = f"API request failed: {e}"
             else:
-                error_msg = f"Request failed: {str(e)}"
+                error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
     def create_branch(
@@ -228,9 +228,9 @@ class SourcererSDK:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
                 except (ValueError, KeyError):
-                    error_msg = f"API Error {e.response.status_code}: {e.response.text}"
+                    error_msg = f"API request failed: {e}"
             else:
-                error_msg = f"Request failed: {str(e)}"
+                error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
     def merge_branch(
@@ -337,9 +337,9 @@ class SourcererSDK:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
                 except (ValueError, KeyError):
-                    error_msg = f"API Error {e.response.status_code}: {e.response.text}"
+                    error_msg = f"API request failed: {e}"
             else:
-                error_msg = f"Request failed: {str(e)}"
+                error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
     def delete_branch(self, branch_id: str) -> None:
@@ -363,9 +363,9 @@ class SourcererSDK:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
                 except (ValueError, KeyError):
-                    error_msg = f"API Error {e.response.status_code}: {e.response.text}"
+                    error_msg = f"API request failed: {e}"
             else:
-                error_msg = f"Request failed: {str(e)}"
+                error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
     def fetch_last_known_sequence_number(self) -> int:
@@ -386,9 +386,9 @@ class SourcererSDK:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
                 except (ValueError, KeyError):
-                    error_msg = f"API Error {e.response.status_code}: {e.response.text}"
+                    error_msg = f"API request failed: {e}"
             else:
-                error_msg = f"Request failed: {str(e)}"
+                error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
     def fetch_projection(self, force_refresh: bool = False) -> dict[str, Any]:

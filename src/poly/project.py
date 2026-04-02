@@ -2524,10 +2524,10 @@ class AgentStudioProject:
         if branch_name == "main":
             raise ValueError("Deleting 'main' branch is not supported.")
 
-        success = self.api_handler.delete_branch(branches[branch_name])
-        if success and self.branch_id == branches[branch_name]:
+        self.api_handler.delete_branch(branches[branch_name])
+        if self.branch_id == branches[branch_name]:
             self.switch_branch("main", force=True)
-        return success
+        return True
 
     def sync_ids_with_sandbox(self, email: str = None) -> bool:
         """Sync ids of resources in sandbox into current branch

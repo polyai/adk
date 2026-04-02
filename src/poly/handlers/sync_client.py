@@ -1125,7 +1125,7 @@ class SyncClientHandler:
             self.sdk.delete_branch(branch_id=branch_id)
         except SourcererAPIError as e:
             logger.debug(f"Failed to delete branch ID:'{branch_id}': {e}")
-            return False
+            raise
 
         logger.info(f"Successfully deleted branch ID:'{branch_id}'")
         return True
