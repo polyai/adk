@@ -428,6 +428,7 @@ class AgentStudioCLI:
                 "  poly branch create new-branch\n"
                 "  poly branch switch existing-branch\n"
                 "  poly branch current\n"
+                "  poly branch delete\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -508,6 +509,19 @@ class AgentStudioCLI:
             help="Show the current branch.",
         )
         branch_current_parser.set_defaults(branch_subcommand="current")
+
+        branch_delete_parser = branch_subparsers.add_parser(
+            "delete",
+            parents=[branch_path_parent],
+            help="Interactively select and delete a branch.",
+        )
+        branch_delete_parser.add_argument(
+            "branch_name",
+            nargs="?",
+            default=None,
+            help="Name of the branch to delete directly, skipping the interactive prompt.",
+        )
+        branch_delete_parser.set_defaults(branch_subcommand="delete")
 
         # FORMAT
         format_parser = subparsers.add_parser(
@@ -747,6 +761,9 @@ class AgentStudioCLI:
 
             elif args.branch_subcommand == "current":
                 cls.get_current_branch(args.path, args.json)
+
+            elif args.branch_subcommand == "delete":
+                cls.branch_delete(args.path, args.branch_name, args.json)
 
         elif args.command == "format":
             cls.format(
@@ -1686,6 +1703,84 @@ class AgentStudioCLI:
             )
             return
         plain(f"Current branch: [bold]{current_branch}[/bold]")
+
+    @classmethod
+    def branch_delete(
+        cls,
+        base_path: str,
+        branch_name: Optional[str] = None,
+        output_json: bool = False,
+    ) -> None:
+        """Interactively select and delete a branch from the Agent Studio project.
+
+        If branch_name is provided, delete that specific branch without an interactive prompt.
+        """
+        project = cls._load_project(base_path, output_json=output_json)
+        current_branch, branches = project.get_branches()
+
+        # Filter out 'main' — it cannot be deleted
+        deletable = {name: bid for name, bid in branches.items() if name != "main"}
+
+        if branch_name:
+            if branch_name not in deletable:
+                msg = f"Branch '{branch_name}' does not exist or cannot be deleted."
+                if output_json:
+                    json_print({"success": False, "message": msg})
+                else:
+                    error(msg)
+                return
+            try:
+                deleted = project.delete_branch(branch_name)
+            except (ValueError, Exception) as e:
+                if output_json:
+                    json_print({"success": False, "message": str(e)})
+                else:
+                    error(str(e))
+                return
+            if output_json:
+                json_print({"success": deleted})
+            else:
+                if deleted:
+                    success(f"Deleted branch: {branch_name}")
+                else:
+                    error(f"Failed to delete branch '{branch_name}'.")
+            return
+
+        if not deletable:
+            plain("[muted]No deletable branches found.[/muted]")
+            return
+
+        choices = []
+        for name in deletable:
+            label = f"{name} (current)" if name == current_branch else name
+            choices.append(label)
+
+        selected = questionary.checkbox("Select branches to delete", choices=choices).ask()
+        if not selected:
+            warning("No branches selected. Exiting.")
+            return
+
+        deleted_count = 0
+        for label in selected:
+            name = label.replace(" (current)", "")
+            try:
+                deleted = project.delete_branch(name)
+                if deleted:
+                    deleted_count += 1
+                    if not output_json:
+                        plain(f"  [muted]Deleted branch:[/muted] {name}")
+                else:
+                    if not output_json:
+                        error(f"Failed to delete branch '{name}'.")
+            except (ValueError, Exception) as e:
+                if not output_json:
+                    error(str(e))
+
+        if output_json:
+            json_print({"success": deleted_count > 0, "deleted": deleted_count})
+        else:
+            if deleted_count:
+                success(f"Deleted {deleted_count} branch(es).")
 
     @classmethod
     def format(
