@@ -73,18 +73,24 @@ class AgentStudioInterface:
         return PlatformAPIHandler.get_projects(region, account_id)
 
     @staticmethod
-    def create_project(region: str, account_id: str, project_name: str) -> dict[str, str]:
+    def create_project(
+        region: str,
+        account_id: str,
+        project_name: str,
+        project_id: str = None,
+    ) -> dict[str, str]:
         """Create a new project in an account.
 
         Args:
             region (str): The region name
             account_id (str): The account ID
-            project_name (str): The name for the new project
+            project_name (str): The display name for the new project
+            project_id (str | None): Optional slug/ID for the project
 
         Returns:
             dict[str, str]: A dictionary with the created project's 'id' and 'name'
         """
-        return PlatformAPIHandler.create_project(region, account_id, project_name)
+        return PlatformAPIHandler.create_project(region, account_id, project_name, project_id)
 
     @staticmethod
     def get_deployments(region: str, account_id: str, project_id: str) -> dict[str, str]:
