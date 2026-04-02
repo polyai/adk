@@ -68,7 +68,9 @@ class AgentStudioCLI:
     """CLI Interface for Agent Studio."""
 
     @staticmethod
-    def _branch_name_completer(prefix: str, parsed_args: Any, **kwargs: Any) -> list[str]:
+    def _branch_name_completer(
+        prefix: str, action: Any = None, parser: Any = None, parsed_args: Any = None, **kwargs: Any
+    ) -> list[str]:
         """Return deletable branch names for argcomplete tab-completion."""
         try:
             from poly.project import AgentStudioProject
