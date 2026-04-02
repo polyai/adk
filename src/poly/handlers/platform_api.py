@@ -39,6 +39,14 @@ class PlatformAPIHandler:
         "studio": "https://api.studio.poly.ai/adk/v1",
     }
 
+    region_to_sourcerer_url = {
+        "dev": "https://sourcerer.dev.platform.polyai.app/api/v1",
+        "staging": "https://sourcerer.staging.platform.polyai.app/api/v1",
+        "euw-1": "https://sourcerer.euw-1.platform.polyai.app/api/v1",
+        "uk-1": "https://sourcerer.uk-1.platform.polyai.app/api/v1",
+        "us-1": "https://sourcerer.us-1.platform.polyai.app/api/v1",
+    }
+
     @staticmethod
     def get_base_url(region: str) -> str:
         """Get the base URL for the Platform API based on the region.
@@ -51,6 +59,27 @@ class PlatformAPIHandler:
         if base_url := PlatformAPIHandler.region_to_base_url.get(region):
             return base_url
         raise ValueError(f"Unknown region: {region}")
+
+    @staticmethod
+    def get_sourcerer_url(region: str) -> str:
+        """Get the Sourcerer API base URL for the given region.
+
+        Args:
+            region (str): The region name
+        Returns:
+            str: The Sourcerer API base URL
+        """
+        if base_url := PlatformAPIHandler.region_to_sourcerer_url.get(region):
+            return base_url
+        raise ValueError(f"Unknown region: {region}")
+
+    @staticmethod
+    def _retrieve_api_key() -> str:
+        """Get API key from environment"""
+        try:
+            return os.getenv("POLY_ADK_KEY")
+        except Exception:
+            raise ValueError("POLY_ADK_KEY environment variable is required")
 
     @staticmethod
     def make_request(
@@ -201,21 +230,72 @@ class PlatformAPIHandler:
         return projects
 
     @staticmethod
-    def create_project(region: str, account_id: str, project_name: str) -> dict[str, str]:
-        """Create a new project in an account.
+    def create_project(
+        region: str,
+        account_id: str,
+        project_name: str,
+        project_id: str = None,
+    ) -> dict[str, str]:
+        """Create a new project in an account via the Sourcerer API.
 
         Args:
             region (str): The region name
             account_id (str): The account ID
-            project_name (str): The name for the new project
+            project_name (str): The display name for the new project
+            project_id (str | None): Optional slug/ID for the project.
+                Defaults to a slugified version of the project name.
 
         Returns:
             dict[str, str]: A dictionary with the created project's 'id' and 'name'
         """
+        if not project_id:
+            project_id = project_name.lower().replace(" ", "-")
+
         endpoint = PROJECTS_URL.format(account_id=account_id)
-        data = {"name": project_name}
-        response = PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
-        return {"id": response.get("id"), "name": response.get("name")}
+        url = PlatformAPIHandler.get_sourcerer_url(region) + endpoint
+        data = {
+            "name": project_name,
+            "project_id": project_id,
+            "config": {
+                "voice_id": "VOICE-afe2b8e8",
+                "model_id": "MODEL-27a9c7af",
+                "config": {"language_code": "en-US"},
+            },
+            "topic_names": [],
+            "knowledge_base": {
+                "welcome_message": "Hello, how can I help you?",
+                "additional_context": {},
+                "knowledge_base": {"rules": {"behaviour": ""}},
+            },
+        }
+
+        correlation_id = f"adk-{uuid.uuid4()}"
+        headers = {
+            "X-API-KEY": PlatformAPIHandler._retrieve_api_key(),
+            "X-PolyAI-Correlation-Id": correlation_id,
+            "Content-Type": "application/json",
+        }
+
+        logger.info(f"Creating project at {url}")
+        response = requests.request(
+            method="POST",
+            url=url,
+            headers=headers,
+            allow_redirects=False,
+            data=json.dumps(data),
+        )
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError:
+            logger.debug(
+                f"Error creating project. url={url!r} status_code={response.status_code!r}"
+                f" response={response.text!r}"
+            )
+            raise
+
+        result = response.json()
+        return {"id": result.get("id"), "name": result.get("name")}
 
     @staticmethod
     def get_deployments(
