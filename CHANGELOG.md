@@ -1,6 +1,31 @@
 # CHANGELOG
 
 
+## v0.7.2 (2026-04-02)
+
+### Bug Fixes
+
+- Standardise gist naming with Poly ADK prefix ([#62](https://github.com/polyai/adk/pull/62),
+  [`01992e4`](https://github.com/polyai/adk/commit/01992e4d22cc1171d13f2a762b987b7a05aa024e))
+
+## Summary - Add "Poly ADK: " prefix to the gist description for local → remote reviews, matching
+  the existing format used by `--before`/`--after` reviews
+
+## Context When using `poly review --before x --after y`, the gist description was `"Poly ADK:
+  project: x → y"`. But `poly review` (local → remote) produced `"project: local → remote"` without
+  the prefix. Now both use the same `"Poly ADK: "` prefix for consistency.
+
+## Test plan - [x] Run `poly review` (local → remote) and verify the gist description starts with
+  "Poly ADK: " - [x] Run `poly review --before x --after y` and verify the format is unchanged
+
+<img width="908" height="74" alt="image"
+  src="https://github.com/user-attachments/assets/7d97e433-7b39-4308-8e88-0ba756dbe015" />
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.7.1 (2026-04-01)
 
 ### Bug Fixes
