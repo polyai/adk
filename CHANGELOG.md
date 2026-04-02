@@ -1,6 +1,39 @@
 # CHANGELOG
 
 
+## v0.7.3 (2026-04-02)
+
+### Bug Fixes
+
+- Suppress verbose error logging and API key leak on HTTP errors
+  ([#61](https://github.com/polyai/adk/pull/61),
+  [`8e54b2d`](https://github.com/polyai/adk/commit/8e54b2d76590f20f998542ec71ef81a7b71d4e2f))
+
+## Summary - Downgrade `logger.exception` to `logger.debug` in `PlatformAPIHandler.make_request` so
+  failed API calls no longer dump full tracebacks to stderr by default - Change `raise e` to bare
+  `raise` for cleaner traceback if verbose mode is used
+
+## Context When running `poly review --before x --after y` and getting a 403, users saw the full
+  `ERROR:poly.handlers.platform_api:Error in request...` log (including the API key in headers) plus
+  the traceback, before the clean error message. Now only the clean `Error: API request failed: 403
+  ...` message is shown, since `handle_exception()` in `console.py` already formats `HTTPError`
+  nicely.
+
+## Test plan - [x] Run `poly review --before draft --after pre-release` against a project with
+  insufficient permissions — verify only the clean error line is shown - [x] Run the same with
+  `--verbose` — verify the debug log appears with request details (minus headers) - [x] `uv run
+  pytest src/poly/tests/ -v` passes (415 tests)
+
+<img width="1659" height="396" alt="image"
+  src="https://github.com/user-attachments/assets/c00ce1ea-6a39-4916-b60b-e2e6580cd76f" />
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.7.2 (2026-04-02)
 
 ### Bug Fixes
