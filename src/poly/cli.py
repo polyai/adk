@@ -67,16 +67,21 @@ def _format_gist_choice(g: dict) -> str:
 class AgentStudioCLI:
     """CLI Interface for Agent Studio."""
 
-    @staticmethod
+    @classmethod
     def _branch_name_completer(
-        prefix: str, action: Any = None, parser: Any = None, parsed_args: Any = None, **kwargs: Any
+        cls,
+        prefix: str,
+        action: Any = None,
+        parser: Any = None,
+        parsed_args: Any = None,
+        **kwargs: Any,
     ) -> list[str]:
         """Return deletable branch names for argcomplete tab-completion."""
         try:
-            from poly.project import AgentStudioProject
-
             base_path = getattr(parsed_args, "path", None) or os.getcwd()
-            project = AgentStudioProject(base_path)
+            project = cls.read_project_config(base_path)
+            if project is None:
+                return []
             _, branches = project.get_branches()
             return [name for name in branches if name != "main" and name.startswith(prefix)]
         except Exception:
@@ -828,7 +833,7 @@ class AgentStudioCLI:
     def main(cls, sys_args=None):
         """Main entry point for the CLI tool."""
         parser = cls._create_parser()
-        argcomplete.autocomplete(parser)
+        argcomplete.autocomplete(parser, always_complete_options=False)
 
         try:
             if sys_args:
@@ -836,7 +841,7 @@ class AgentStudioCLI:
             else:
                 args = parser.parse_args()
 
-            set_verbose(args.verbose)
+            set_verbose(getattr(args, "verbose", False))
             cls._run_command(args)
         except SystemExit:
             raise

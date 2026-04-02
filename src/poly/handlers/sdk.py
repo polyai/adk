@@ -343,7 +343,7 @@ class SourcererSDK:
             raise SourcererAPIError(error_msg) from e
 
     def delete_branch(self, branch_id: str) -> None:
-        """Delete the current branch from the project
+        """Delete a branch from the project.
 
         Args:
             branch_id: The ID of the branch to delete
@@ -352,8 +352,15 @@ class SourcererSDK:
             SourcererAPIError: If the API request fails
         """
         try:
+            # Fetch the branch's projection to get its sequence number
+            projection_url = f"{self._get_branches_url()}/{branch_id}/projection"
+            proj_response = self.session.get(projection_url)
+            proj_response.raise_for_status()
+            seq = int(proj_response.json().get("lastKnownSequence", 0))
+
             url = f"{self._get_branches_url()}/{branch_id}"
-            data = {"expectedBranchLastKnownSequence": self.get_last_known_sequence() or 0}
+            logger.info(f"Deleting branch {branch_id} with sequence={seq}")
+            data = {"expectedBranchLastKnownSequence": seq}
             response = self.session.delete(url, json=data)
             response.raise_for_status()
             logger.info(f"Branch {branch_id} deleted successfully")
