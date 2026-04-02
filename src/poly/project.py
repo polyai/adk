@@ -2518,7 +2518,7 @@ class AgentStudioProject:
             bool: True if the branch was deleted successfully, False otherwise
         """
         branches = self.api_handler.get_branches()
-        if branch_name not in branches.values():
+        if branch_name not in branches:
             raise ValueError(f"Branch {branch_name} does not exist.")
 
         if branch_name == "main":
