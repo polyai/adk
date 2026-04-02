@@ -201,10 +201,28 @@ class PlatformAPIHandler:
         return projects
 
     @staticmethod
+    def create_project(region: str, account_id: str, project_name: str) -> dict[str, str]:
+        """Create a new project in an account.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+            project_name (str): The name for the new project
+
+        Returns:
+            dict[str, str]: A dictionary with the created project's 'id' and 'name'
+        """
+        endpoint = PROJECTS_URL.format(account_id=account_id)
+        data = {"name": project_name}
+        response = PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
+        return {"id": response.get("id"), "name": response.get("name")}
+
+    @staticmethod
     def get_deployments(
         region: str, account_id: str, project_id: str, client_env: str = "sandbox"
     ) -> list[dict[str, ty.Any]]:
         """Get the deployments for a given project and client environment.
+
         Args:
             region (str): The region name
             account_id (str): The account ID
