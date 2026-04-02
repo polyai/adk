@@ -67,6 +67,19 @@ def _format_gist_choice(g: dict) -> str:
 class AgentStudioCLI:
     """CLI Interface for Agent Studio."""
 
+    @staticmethod
+    def _branch_name_completer(prefix: str, parsed_args: Any, **kwargs: Any) -> list[str]:
+        """Return branch names for argcomplete tab-completion."""
+        try:
+            from poly.project import AgentStudioProject
+
+            base_path = getattr(parsed_args, "path", None) or os.getcwd()
+            project = AgentStudioProject(base_path)
+            _, branches = project.get_branches()
+            return [name for name in branches if name != "main" and name.startswith(prefix)]
+        except Exception:
+            return []
+
     @classmethod
     def _create_parser(cls) -> ArgumentParser:
         """Create and configure the CLI command parser."""
@@ -520,7 +533,7 @@ class AgentStudioCLI:
             nargs="?",
             default=None,
             help="Name of the branch to delete directly, skipping the interactive prompt.",
-        )
+        ).completer = cls._branch_name_completer
         branch_delete_parser.set_defaults(branch_subcommand="delete")
 
         # FORMAT
@@ -1729,6 +1742,13 @@ class AgentStudioCLI:
                 else:
                     error(msg)
                 return
+            if not output_json:
+                confirmed = questionary.confirm(
+                    f"Delete branch '{branch_name}'?", default=False
+                ).ask()
+                if not confirmed:
+                    warning("Aborted.")
+                    return
             try:
                 deleted = project.delete_branch(branch_name)
             except (ValueError, Exception) as e:
@@ -1758,6 +1778,13 @@ class AgentStudioCLI:
         selected = questionary.checkbox("Select branches to delete", choices=choices).ask()
         if not selected:
             warning("No branches selected. Exiting.")
+            return
+
+        branch_names = [label.replace(" (current)", "") for label in selected]
+        confirm_msg = f"Delete {len(branch_names)} branch(es): {', '.join(branch_names)}?"
+        confirmed = questionary.confirm(confirm_msg, default=False).ask()
+        if not confirmed:
+            warning("Aborted.")
             return
 
         deleted_count = 0

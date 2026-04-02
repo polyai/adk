@@ -317,9 +317,12 @@ class BranchDeleteTest(unittest.TestCase):
 
     # -- Direct deletion (branch_name provided) --
 
+    @patch("poly.cli.questionary")
     @patch("poly.cli.success")
-    def test_direct_delete_existing_branch_shows_success(self, mock_success):
+    def test_direct_delete_existing_branch_shows_success(self, mock_success, mock_q):
         """Deleting an existing branch by name prints a success message."""
+        mock_q.confirm.return_value.ask.return_value = True
+
         AgentStudioCLI.branch_delete(TEST_DIR, branch_name="feature-a")
 
         self.proj.delete_branch.assert_called_once_with("feature-a")
@@ -363,9 +366,11 @@ class BranchDeleteTest(unittest.TestCase):
         mock_error.assert_called_once()
         self.assertIn("does not exist or cannot be deleted", mock_error.call_args[0][0])
 
+    @patch("poly.cli.questionary")
     @patch("poly.cli.error")
-    def test_direct_delete_when_project_raises_shows_error(self, mock_error):
+    def test_direct_delete_when_project_raises_shows_error(self, mock_error, mock_q):
         """If project.delete_branch raises, the error is shown to the user."""
+        mock_q.confirm.return_value.ask.return_value = True
         self.proj.delete_branch.side_effect = ValueError("API failure")
 
         AgentStudioCLI.branch_delete(TEST_DIR, branch_name="feature-a")
@@ -385,9 +390,11 @@ class BranchDeleteTest(unittest.TestCase):
         self.assertFalse(payload["success"])
         self.assertIn("API failure", payload["message"])
 
+    @patch("poly.cli.questionary")
     @patch("poly.cli.error")
-    def test_direct_delete_returns_false_shows_failure(self, mock_error):
+    def test_direct_delete_returns_false_shows_failure(self, mock_error, mock_q):
         """If project.delete_branch returns False, a failure message is shown."""
+        mock_q.confirm.return_value.ask.return_value = True
         self.proj.delete_branch.return_value = False
 
         AgentStudioCLI.branch_delete(TEST_DIR, branch_name="feature-a")
@@ -436,6 +443,7 @@ class BranchDeleteTest(unittest.TestCase):
     def test_interactive_single_branch_deleted(self, mock_success, mock_q):
         """Selecting one branch in the checkbox deletes it and reports success."""
         mock_q.checkbox.return_value.ask.return_value = ["feature-a"]
+        mock_q.confirm.return_value.ask.return_value = True
 
         AgentStudioCLI.branch_delete(TEST_DIR)
 
@@ -448,6 +456,7 @@ class BranchDeleteTest(unittest.TestCase):
     def test_interactive_multiple_branches_deleted(self, mock_success, mock_q):
         """Selecting multiple branches deletes each and reports total count."""
         mock_q.checkbox.return_value.ask.return_value = ["feature-a", "feature-b"]
+        mock_q.confirm.return_value.ask.return_value = True
 
         AgentStudioCLI.branch_delete(TEST_DIR)
 
@@ -461,6 +470,7 @@ class BranchDeleteTest(unittest.TestCase):
         """The ' (current)' suffix is stripped from labels before calling delete_branch."""
         self.proj.get_branches.return_value = ("feature-a", dict(self.SAMPLE_BRANCHES))
         mock_q.checkbox.return_value.ask.return_value = ["feature-a (current)"]
+        mock_q.confirm.return_value.ask.return_value = True
 
         AgentStudioCLI.branch_delete(TEST_DIR)
 
@@ -471,6 +481,7 @@ class BranchDeleteTest(unittest.TestCase):
     def test_interactive_json_mode_reports_deleted_count(self, mock_json, mock_q):
         """In JSON mode, interactive deletion prints success and deleted count."""
         mock_q.checkbox.return_value.ask.return_value = ["feature-a", "feature-b"]
+        mock_q.confirm.return_value.ask.return_value = True
 
         AgentStudioCLI.branch_delete(TEST_DIR, output_json=True)
 
@@ -488,6 +499,7 @@ class BranchDeleteTest(unittest.TestCase):
         """If one branch fails to delete, others still proceed."""
         self.proj.delete_branch.side_effect = [ValueError("oops"), True]
         mock_q.checkbox.return_value.ask.return_value = ["feature-a", "feature-b"]
+        mock_q.confirm.return_value.ask.return_value = True
 
         AgentStudioCLI.branch_delete(TEST_DIR)
 
