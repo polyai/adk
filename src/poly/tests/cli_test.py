@@ -474,17 +474,17 @@ class PrintDeploymentsTest(unittest.TestCase):
         """print_deployments with no versions calls error('No versions found.')."""
         self.proj.get_deployments.return_value = ([], {})
 
-        AgentStudioCLI.print_deployments(TEST_DIR)
+        AgentStudioCLI.deployments(TEST_DIR)
 
         mock_error.assert_called_once()
         self.assertIn("No versions found", mock_error.call_args[0][0])
 
-    @patch("poly.cli.print_deployments")
+    @patch("poly.CLI.deployments")
     def test_default_call_shows_first_ten(self, mock_print_dep):
         """Default call (no hash, no json) displays the first 10 versions."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
 
-        AgentStudioCLI.print_deployments(TEST_DIR)
+        AgentStudioCLI.deployments(TEST_DIR)
 
         mock_print_dep.assert_called_once()
         displayed_versions = mock_print_dep.call_args[0][0]
@@ -496,7 +496,7 @@ class PrintDeploymentsTest(unittest.TestCase):
         """print_deployments with output_json=True calls json_print."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
 
-        AgentStudioCLI.print_deployments(TEST_DIR, output_json=True)
+        AgentStudioCLI.deployments(TEST_DIR, output_json=True)
 
         mock_json_print.assert_called_once()
         output = mock_json_print.call_args[0][0]
@@ -504,12 +504,12 @@ class PrintDeploymentsTest(unittest.TestCase):
         self.assertIn("active_deployment_hashes", output)
         self.assertEqual(len(output["versions"]), 10)
 
-    @patch("poly.cli.print_deployments")
+    @patch("poly.CLI.deployments")
     def test_hash_sets_offset(self, mock_print_dep):
         """print_deployments with hash finds version index and uses it as offset."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
 
-        AgentStudioCLI.print_deployments(TEST_DIR, hash="hash00005")
+        AgentStudioCLI.deployments(TEST_DIR, hash="hash00005")
 
         mock_print_dep.assert_called_once()
         displayed_versions = mock_print_dep.call_args[0][0]
@@ -520,29 +520,29 @@ class PrintDeploymentsTest(unittest.TestCase):
         """print_deployments with unknown hash calls error."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
 
-        AgentStudioCLI.print_deployments(TEST_DIR, hash="zzz999999")
+        AgentStudioCLI.deployments(TEST_DIR, hash="zzz999999")
 
         mock_error.assert_called_once()
         self.assertIn("not found", mock_error.call_args[0][0])
 
-    @patch("poly.cli.print_deployments")
+    @patch("poly.CLI.deployments")
     def test_limit_and_offset_applied(self, mock_print_dep):
         """print_deployments with custom limit and offset slices correctly."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
 
-        AgentStudioCLI.print_deployments(TEST_DIR, limit=3, offset=2)
+        AgentStudioCLI.deployments(TEST_DIR, limit=3, offset=2)
 
         mock_print_dep.assert_called_once()
         displayed_versions = mock_print_dep.call_args[0][0]
         self.assertEqual(len(displayed_versions), 3)
         self.assertEqual(displayed_versions[0]["name"], "v2")
 
-    @patch("poly.cli.print_deployments")
+    @patch("poly.CLI.deployments")
     def test_details_passed_through(self, mock_print_dep):
         """print_deployments with details=True passes it to the console function."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
 
-        AgentStudioCLI.print_deployments(TEST_DIR, details=True)
+        AgentStudioCLI.deployments(TEST_DIR, details=True)
 
         mock_print_dep.assert_called_once()
         call_kwargs = mock_print_dep.call_args[1]

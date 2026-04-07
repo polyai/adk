@@ -57,6 +57,7 @@ poly branch     # Manage branches
 poly format     # Format resources
 poly validate   # Validate configuration
 poly review     # Create a review gist
+poly deployments  # List deployment history
 poly docs       # Output reference documentation
 ```
 
@@ -71,15 +72,16 @@ pip install polyai-adk
 Once installed, the `poly` CLI command becomes available.
 
 ```bash
-poly init       # Initialize a project (interactive)
-poly pull       # Pull latest configuration
-poly push       # Push local changes
-poly status     # View project status
-poly diff       # View local changes
-poly branch     # Manage branches
-poly format     # Format resources
-poly validate   # Validate configuration
-poly review     # Create a review gist
+poly init         # Initialize a project (interactive)
+poly pull         # Pull latest configuration
+poly push         # Push local changes
+poly status       # View project status
+poly diff         # View local changes
+poly branch       # Manage branches
+poly format       # Format resources
+poly validate     # Validate configuration
+poly review       # Create a review gist
+poly deployments  # List deployment history
 ```
 
 Run:
@@ -143,11 +145,13 @@ poly status
 
 ### `poly diff`
 
-Show diffs between your local project and the remote version:
+Show diffs between your local project and the remote version, or between two named versions:
 
 ```bash
-poly diff              # all changes
-poly diff file1.yaml   # specific files
+poly diff                              # local vs remote (all changes)
+poly diff --files file1.yaml           # specific files only
+poly diff abc1234                      # version hash vs its predecessor
+poly diff --before hash1 --after hash2 # compare two specific versions
 ```
 
 ### `poly revert`
@@ -155,7 +159,7 @@ poly diff file1.yaml   # specific files
 Revert local changes:
 
 ```bash
-poly revert --all                  # revert everything
+poly revert                        # revert all changes
 poly revert file1.yaml file2.yaml  # revert specific files
 ```
 
@@ -176,9 +180,9 @@ poly branch switch my-feature --force  # discard uncommitted changes
 Format project resources (Python via ruff, YAML/JSON via in-process formatting). Use `--check` to only report files that would change; use `--ty` to also run type checking.
 
 ```bash
-poly format              # all resources
-poly format file1.py     # specific files
-poly format --check      # check only, no writes
+poly format                        # all resources
+poly format --files file1.py       # specific files
+poly format --check                # check only, no writes
 ```
 
 ### `poly validate`
@@ -194,9 +198,24 @@ poly validate
 Create a GitHub gist for reviewing changes, similar to a pull request:
 
 ```bash
-poly review                                      # local vs remote
-poly review --before main --after feature-branch  # compare branches
-poly review --delete                              # delete all review gists
+poly review create                                        # local vs remote
+poly review create abc1234                                # version hash vs its predecessor
+poly review create --before hash1 --after hash2           # compare two specific versions
+poly review create --before main --after feature-branch   # compare branches
+poly review list                                          # list existing review gists
+poly review delete                                        # delete all review gists
+```
+
+### `poly deployments`
+
+List deployment history for the project:
+
+```bash
+poly deployments                          # last 10 sandbox deployments
+poly deployments --env live               # live environment
+poly deployments --limit 20 --offset 10   # pagination
+poly deployments --hash abc1234           # start from a specific version
+poly deployments --details                # full metadata per deployment
 ```
 
 ### `poly chat`
