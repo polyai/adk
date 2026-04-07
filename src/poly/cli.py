@@ -1774,7 +1774,7 @@ class AgentStudioCLI:
             return
 
         if not deletable:
-            plain("[muted]No deletable branches found.[/muted]")
+            plain("[muted]No branches found.[/muted]")
             return
 
         choices = []
