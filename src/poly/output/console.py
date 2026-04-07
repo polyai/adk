@@ -251,7 +251,13 @@ def _format_deployment_timestamp(created_at: str) -> str:
 def print_deployments(
     versions: list[dict[str, Any]], active_deployment_hashes: dict[str, str], details: bool = False
 ) -> None:
-    """Print deployments for the project."""
+    """Print deployments for the project.
+
+    Args:
+        versions: A list of deployment versions.
+        active_deployment_hashes: A dictionary mapping deployment types to active version hashes.
+        details: Whether to print detailed information for each deployment.
+    """
     table = None
     if not details:
         table = Table(

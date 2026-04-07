@@ -1313,8 +1313,8 @@ class AgentStudioCLI:
 
         if not before:
             versions, deployment_hashes = project.get_deployments()
-            if before in deployment_hashes:
-                before = deployment_hashes[before]
+            if after in deployment_hashes:
+                after = deployment_hashes[after]
             if not versions:
                 error("No versions found.")
                 return
@@ -1398,11 +1398,17 @@ class AgentStudioCLI:
             after = hash
             description = f"Poly ADK: {project_name}: {hash}"
 
-        if not (before or after):
+        elif not (before or after):
             description = f"Poly ADK: {project_name}: local → remote"
 
-        if before and after:
+        elif before and after:
             description = f"Poly ADK: {project_name}: {before} → {after}"
+
+        elif after:
+            description = f"Poly ADK: {project_name}: {after}"
+
+        else:
+            description = f"Poly ADK: {project_name}: {before} → local"
 
         diffs = cls._compute_diff(base_path, files=files, before=before, after=after) or {}
 
