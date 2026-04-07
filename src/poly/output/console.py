@@ -9,6 +9,7 @@ import json
 import sys
 from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from rich.console import Console
 from rich.panel import Panel
@@ -233,13 +234,16 @@ def print_turn_metadata(
 # ── DEPLOYMENTS ───────────────────────────────────────────────────────
 
 
-def _format_deployment_timestamp_compact(created_at: str) -> str:
-    """Parse API timestamps (RFC 2822, ISO) and return a short UTC label."""
+def _format_deployment_timestamp(created_at: str) -> str:
+    """Format a deployment timestamp into a compact string."""
     if not created_at:
         return "-"
     try:
+        tz_str = created_at.split()[-1]  # "GMT"
         dt = datetime.strptime(created_at, "%a, %d %b %Y %H:%M:%S %Z")
-        return dt.strftime("%d/%m/%y %H:%M")
+        dt = dt.replace(tzinfo=ZoneInfo(tz_str))
+        dt = dt.astimezone()
+        return dt.strftime("%d %b %y %H:%M %Z")
     except (TypeError, ValueError):
         return "-"
 
@@ -280,7 +284,7 @@ def print_deployments(
 
         badges_str = " ".join(badges) if badges else ""
         if not details:
-            date_compact = _format_deployment_timestamp_compact(created_at)
+            date_compact = _format_deployment_timestamp(created_at)
             table.add_row(
                 str(deployment_type or "—"),
                 (version_hash or "")[:9],

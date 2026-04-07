@@ -8,9 +8,9 @@ import json
 import logging
 import os
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, fields
 from datetime import datetime
-from collections.abc import Callable
 from typing import Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
