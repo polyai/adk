@@ -386,30 +386,37 @@ class AgentStudioCLI:
             default=os.getcwd(),
             help="Base path to the project. Defaults to current working directory.",
         )
-        review_parser.add_argument(
+
+        review_subparsers = review_parser.add_subparsers(dest="review_subcommand")
+
+        review_create_parser = review_subparsers.add_parser(
+            "create",
+            parents=[verbose_parent, json_parent],
+            help="Create a review gist for the current changes.",
+        )
+        review_create_parser.add_argument(
             "hash",
             nargs="?",
             default=None,
             type=str,
             help="Hash of the version to compare against. If not specified, it will be inferred from the --before and --after arguments.",
         )
-        review_parser.add_argument(
+        review_create_parser.add_argument(
             "--before",
             type=str,
             help="Name of the original branch or version to compare with.",
         )
-        review_parser.add_argument(
+        review_create_parser.add_argument(
             "--after",
             type=str,
             help="Name of the branch or version to compare with.",
         )
-        review_parser.add_argument(
+        review_create_parser.add_argument(
             "--files",
             nargs="*",
             help=("List of files to show changes for. If not specified, shows all changes."),
         )
-        review_parser.set_defaults(review_subcommand=None)
-        review_subparsers = review_parser.add_subparsers(dest="review_subcommand")
+        review_create_parser.set_defaults(review_subcommand="create")
 
         review_list_parser = review_subparsers.add_parser(
             "list",
@@ -785,15 +792,14 @@ class AgentStudioCLI:
             elif args.review_subcommand == "list":
                 cls.list_gists(output_json=args.json)
             else:
-                if args.before and args.after:
-                    cls.review(
-                        base_path=args.path,
-                        before_name=args.before,
-                        after_name=args.after,
-                        output_json=args.json,
-                    )
-                else:
-                    cls.review(args.path, output_json=args.json)
+                cls.review(
+                    base_path=args.path,
+                    files=args.files,
+                    hash=args.hash,
+                    before=args.before,
+                    after=args.after,
+                    output_json=args.json,
+                )
 
         elif args.command == "branch":
             if args.branch_subcommand == "list":
@@ -1413,6 +1419,7 @@ class AgentStudioCLI:
         diffs = cls._compute_diff(base_path, files=files, before=before, after=after) or {}
 
         if not diffs:
+            breakpoint()
             if output_json:
                 json_print({"success": False, "message": "No changes to review."})
             else:
