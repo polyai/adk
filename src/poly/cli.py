@@ -1765,10 +1765,15 @@ class AgentStudioCLI:
                     error(str(e))
                 return
             if output_json:
-                json_print({"success": deleted})
+                result = {"success": deleted}
+                if deleted and branch_name == current_branch:
+                    result["switched_to"] = "main"
+                json_print(result)
             else:
                 if deleted:
                     success(f"Deleted branch: {branch_name}")
+                    if branch_name == current_branch:
+                        info("Switched to branch 'main'.")
                 else:
                     error(f"Failed to delete branch '{branch_name}'.")
             return
@@ -1803,6 +1808,8 @@ class AgentStudioCLI:
                     deleted_count += 1
                     if not output_json:
                         plain(f"  [muted]Deleted branch:[/muted] {name}")
+                        if name == current_branch:
+                            info("Switched to branch 'main'.")
                 else:
                     if not output_json:
                         error(f"Failed to delete branch '{name}'.")
@@ -1810,8 +1817,12 @@ class AgentStudioCLI:
                 if not output_json:
                     error(str(e))
 
+        switched = any(label.replace(" (current)", "") == current_branch for label in selected)
         if output_json:
-            json_print({"success": deleted_count > 0, "deleted": deleted_count})
+            result = {"success": deleted_count > 0, "deleted": deleted_count}
+            if switched and deleted_count > 0:
+                result["switched_to"] = "main"
+            json_print(result)
         else:
             if deleted_count:
                 success(f"Deleted {deleted_count} branch(es).")

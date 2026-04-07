@@ -2524,8 +2524,8 @@ class AgentStudioProject:
         if branch_name == "main":
             raise ValueError("Deleting 'main' branch is not supported.")
 
-        self.api_handler.delete_branch(branches[branch_name])
-        if self.branch_id == branches[branch_name]:
+        success = self.api_handler.delete_branch(branches[branch_name])
+        if success and self.branch_id == branches[branch_name]:
             self.switch_branch("main", force=True)
         return True
 
