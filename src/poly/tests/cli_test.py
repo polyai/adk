@@ -479,7 +479,7 @@ class PrintDeploymentsTest(unittest.TestCase):
         mock_error.assert_called_once()
         self.assertIn("No versions found", mock_error.call_args[0][0])
 
-    @patch("poly.CLI.deployments")
+    @patch("poly.cli.print_deployments")
     def test_default_call_shows_first_ten(self, mock_print_dep):
         """Default call (no hash, no json) displays the first 10 versions."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
@@ -504,7 +504,7 @@ class PrintDeploymentsTest(unittest.TestCase):
         self.assertIn("active_deployment_hashes", output)
         self.assertEqual(len(output["versions"]), 10)
 
-    @patch("poly.CLI.deployments")
+    @patch("poly.cli.print_deployments")
     def test_hash_sets_offset(self, mock_print_dep):
         """print_deployments with hash finds version index and uses it as offset."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
@@ -525,7 +525,7 @@ class PrintDeploymentsTest(unittest.TestCase):
         mock_error.assert_called_once()
         self.assertIn("not found", mock_error.call_args[0][0])
 
-    @patch("poly.CLI.deployments")
+    @patch("poly.cli.print_deployments")
     def test_limit_and_offset_applied(self, mock_print_dep):
         """print_deployments with custom limit and offset slices correctly."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
@@ -537,7 +537,7 @@ class PrintDeploymentsTest(unittest.TestCase):
         self.assertEqual(len(displayed_versions), 3)
         self.assertEqual(displayed_versions[0]["name"], "v2")
 
-    @patch("poly.CLI.deployments")
+    @patch("poly.cli.print_deployments")
     def test_details_passed_through(self, mock_print_dep):
         """print_deployments with details=True passes it to the console function."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
