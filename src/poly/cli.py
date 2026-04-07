@@ -1419,7 +1419,6 @@ class AgentStudioCLI:
         diffs = cls._compute_diff(base_path, files=files, before=before, after=after) or {}
 
         if not diffs:
-            breakpoint()
             if output_json:
                 json_print({"success": False, "message": "No changes to review."})
             else:
