@@ -301,7 +301,7 @@ class AgentStudioCLI:
             "revert",
             parents=[verbose_parent, json_parent],
             help="Revert changes in the project.",
-            description="Revert changes in the project.\n\nExamples:\n  poly revert\n  poly revert --files file1.yaml file2.yaml",
+            description="Revert changes in the project.\n\nExamples:\n  poly revert\n  poly revert file1.yaml file2.yaml",
             formatter_class=RawTextHelpFormatter,
         )
         revert_parser.add_argument(
@@ -323,7 +323,7 @@ class AgentStudioCLI:
             "diff",
             parents=[verbose_parent, json_parent],
             help="Show the changes made to the project.",
-            description="Show the changes made to the project.\n\nExamples:\n  poly diff\n  poly diff file1.yaml",
+            description="Show the changes made to the project.\n\nExamples:\n  poly diff\n  poly diff sandbox\n  poly diff --before hash1 --after hash2\n  poly diff --files file1.yaml",
             formatter_class=RawTextHelpFormatter,
         )
         diff_parser.add_argument(
@@ -349,12 +349,12 @@ class AgentStudioCLI:
         diff_parser.add_argument(
             "--before",
             type=str,
-            help="Name of the original branch or version to compare with",
+            help="Name of the original branch or version to compare with. If specified without --after, it will be compared against the current local project (before vs local).",
         )
         diff_parser.add_argument(
             "--after",
             type=str,
-            help="Name of the branch or version to compare against",
+            help="Name of the branch or version to compare against. If specified without --before, it will be compared against the previous version",
         )
 
         # REVIEW
@@ -2163,7 +2163,7 @@ class AgentStudioCLI:
                 "versions": versions,
                 "active_deployment_hashes": active_deployment_hashes,
             }
-            print(json.dumps(json_output))
+            json_print(json_output)
         else:
             print_deployments(versions, active_deployment_hashes, details=details)
 
