@@ -412,7 +412,7 @@ class BranchDeleteTest(unittest.TestCase):
         AgentStudioCLI.branch_delete(TEST_DIR)
 
         mock_plain.assert_called_once()
-        self.assertIn("No deletable branches", mock_plain.call_args[0][0])
+        self.assertIn("[muted]No branches found.[/muted]", mock_plain.call_args[0][0])
         self.proj.delete_branch.assert_not_called()
 
     @patch("poly.cli.questionary")
