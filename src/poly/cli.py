@@ -12,7 +12,9 @@ import os
 import shutil
 import subprocess
 import sys
+import webbrowser
 from argparse import SUPPRESS, ArgumentParser, RawTextHelpFormatter
+from contextlib import nullcontext
 from importlib.metadata import version as get_package_version
 from typing import Any, Optional
 
@@ -53,6 +55,14 @@ from poly.project import (
 logger = logging.getLogger(__name__)
 
 DOCUMENT_CHOICES = AgentStudioProject.discover_docs()
+
+
+def _format_gist_choice(g: dict) -> str:
+    """Format a gist dict as a human-readable choice label."""
+    id_hint = g["id"][:7]
+    date = g.get("created_at", "")[:10]  # YYYY-MM-DD
+    parts = [p for p in [date, id_hint, g["description"]] if p]
+    return "  ".join(parts)
 
 
 class AgentStudioCLI:
@@ -350,8 +360,8 @@ class AgentStudioCLI:
         # REVIEW
         review_parser = subparsers.add_parser(
             "review",
-            parents=[verbose_parent],
-            help="Create an experience similar to a Pull Request, so that people can review changes locally or between versions/branches.",
+            parents=[verbose_parent, json_parent],
+            help="Create a GitHub Gist of Agent Studio project changes to share changes.",
             description=(
                 "Make a review page against project configuration in Agent Studio.\n\n"
                 "If you do not specify --before/--after, it compares your local project "
@@ -363,6 +373,10 @@ class AgentStudioCLI:
                 "  poly review --path /path/to/project --before main --after feature-branch\n"
                 "  poly review --path /path/to/project --before sandbox --after live\n"
                 "  poly review --path /path/to/project --before version-hash-1 --after version-hash-2\n"
+                "  poly review list\n"
+                "  poly review list --json\n"
+                "  poly review delete\n"
+                "  poly review delete --id GIST_ID\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -382,71 +396,142 @@ class AgentStudioCLI:
         review_parser.add_argument(
             "--before",
             type=str,
-            help="Name of the original branch or version to compare with",
+            help="Name of the original branch or version to compare with.",
         )
         review_parser.add_argument(
             "--after",
             type=str,
-            help="Name of the branch or version to compare against",
+            help="Name of the branch or version to compare with.",
         )
         review_parser.add_argument(
             "--files",
             nargs="*",
             help=("List of files to show changes for. If not specified, shows all changes."),
         )
-        review_parser.add_argument(
-            "--delete",
-            action="store_true",
-            help="Delete all the fully diff gists in your GitHub account.",
+        review_parser.set_defaults(review_subcommand=None)
+        review_subparsers = review_parser.add_subparsers(dest="review_subcommand")
+
+        review_list_parser = review_subparsers.add_parser(
+            "list",
+            parents=[json_parent],
+            help="Interactively select a review gist to open in the browser.",
         )
+        review_list_parser.set_defaults(review_subcommand="list")
+
+        review_delete_parser = review_subparsers.add_parser(
+            "delete",
+            parents=[json_parent],
+            help="Interactively select and delete review gists.",
+        )
+        review_delete_parser.add_argument(
+            "--id",
+            type=str,
+            default=None,
+            metavar="GIST_ID",
+            help="Gist ID (or first 7 characters) to delete directly, skipping the interactive prompt.",
+        )
+        review_delete_parser.set_defaults(review_subcommand="delete")
 
         # Branch
-        # GET BRANCHES 'branch list'
+        branch_path_parent = ArgumentParser(add_help=False)
+        branch_path_parent.add_argument(
+            "--path",
+            type=str,
+            default=os.getcwd(),
+            help="Base path to the project. Defaults to current working directory.",
+        )
+
         branches_parser = subparsers.add_parser(
             "branch",
             parents=[verbose_parent, json_parent],
             help="Manage branches in the Agent Studio project.",
-            description="Manage branches in the Agent Studio project.\n\nExamples:\n  poly branch list\n  poly branch create new-branch\n  poly branch switch existing-branch",
+            description=(
+                "Manage branches in the Agent Studio project.\n\n"
+                "Examples:\n"
+                "  poly branch list\n"
+                "  poly branch create new-branch\n"
+                "  poly branch switch existing-branch\n"
+                "  poly branch current\n"
+            ),
             formatter_class=RawTextHelpFormatter,
         )
-        branches_parser.add_argument(
-            "--path",
+        branch_subparsers = branches_parser.add_subparsers(dest="branch_subcommand", required=True)
+
+        branch_list_parser = branch_subparsers.add_parser(
+            "list",
+            parents=[branch_path_parent],
+            help="List all branches in the project.",
+        )
+        branch_list_parser.set_defaults(branch_subcommand="list")
+
+        branch_create_parser = branch_subparsers.add_parser(
+            "create",
+            parents=[branch_path_parent],
+            help="Create a new branch.",
+        )
+        branch_create_parser.add_argument(
+            "branch_name", nargs="?", help="Name of the branch to create."
+        )
+        branch_create_parser.add_argument(
+            "--env",
+            "--environment",
             type=str,
-            default=os.getcwd(),
-            help="Base path to push the project. Defaults to current working directory.",
+            choices=["sandbox", "pre-release", "live"],
+            default=None,
+            dest="environment",
+            help="Initiate the new branch from this environment instead of sandbox (main).",
         )
-        branches_parser.add_argument(
-            "action",
-            choices=["list", "create", "switch", "current"],
+        branch_create_parser.add_argument(
+            "--force",
+            "-f",
+            action="store_true",
+            help="Force switch to a different branch/create new branch and discard changes.",
         )
-        branches_parser.add_argument(
-            "branch_name", nargs="?", help="Name of the branch to create or switch to."
+        branch_create_parser.set_defaults(branch_subcommand="create")
+
+        branch_switch_parser = branch_subparsers.add_parser(
+            "switch",
+            parents=[branch_path_parent],
+            help="Switch to a different branch.",
         )
-        branches_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
-        branches_parser.add_argument(
+        branch_switch_parser.add_argument(
+            "branch_name", nargs="?", help="Name of the branch to switch to."
+        )
+        branch_switch_parser.add_argument(
+            "--debug", action="store_true", help="Display debug logs."
+        )
+        branch_switch_parser.add_argument(
             "--format",
             action="store_true",
             help="Format the project after switching branches.",
         )
-        branches_parser.add_argument(
+        branch_switch_parser.add_argument(
             "--force",
             "-f",
             action="store_true",
             help="Force switch to a different branch and discard changes.",
         )
-        branches_parser.add_argument(
+        branch_switch_parser.add_argument(
             "--from-projection",
             type=str,
             metavar="JSON|-",
             help=SUPPRESS,
             default=None,
         )
-        branches_parser.add_argument(
+        branch_switch_parser.add_argument(
             "--output-json-projection",
             action="store_true",
             help="Output the projection in json format",
             default=False,
         )
+        branch_switch_parser.set_defaults(branch_subcommand="switch")
+
+        branch_current_parser = branch_subparsers.add_parser(
+            "current",
+            parents=[branch_path_parent],
+            help="Show the current branch.",
+        )
+        branch_current_parser.set_defaults(branch_subcommand="current")
 
         # FORMAT
         format_parser = subparsers.add_parser(
@@ -695,26 +780,35 @@ class AgentStudioCLI:
             cls.diff(args.path, args.files, args.hash, args.before, args.after, args.json)
 
         elif args.command == "review":
-            if args.delete:
-                cls.delete_gists()
+            if args.review_subcommand == "delete":
+                cls.delete_gists(gist_id=args.id, output_json=args.json)
+            elif args.review_subcommand == "list":
+                cls.list_gists(output_json=args.json)
             else:
                 if args.before and args.after:
                     cls.review(
                         base_path=args.path,
                         before_name=args.before,
                         after_name=args.after,
+                        output_json=args.json,
                     )
                 else:
-                    cls.review(args.path)
+                    cls.review(args.path, output_json=args.json)
 
         elif args.command == "branch":
-            if args.action == "list":
+            if args.branch_subcommand == "list":
                 cls.branch_list(args.path, args.json)
 
-            elif args.action == "create":
-                cls.branch_create(args.path, args.branch_name, args.json)
+            elif args.branch_subcommand == "create":
+                cls.branch_create(
+                    args.path,
+                    args.branch_name,
+                    args.json,
+                    getattr(args, "environment", None),
+                    getattr(args, "force", False),
+                )
 
-            elif args.action == "switch":
+            elif args.branch_subcommand == "switch":
                 cls.branch_switch(
                     args.path,
                     args.branch_name,
@@ -725,7 +819,7 @@ class AgentStudioCLI:
                     from_projection=args.from_projection,
                 )
 
-            elif args.action == "current":
+            elif args.branch_subcommand == "current":
                 cls.get_current_branch(args.path, args.json)
 
         elif args.command == "format":
@@ -966,14 +1060,26 @@ class AgentStudioCLI:
             json_errors=output_json or output_json_projection,
         )
 
-        project, projection = AgentStudioProject.init_project(
-            base_path=base_path,
-            region=region,
-            account_id=account_id,
-            project_id=project_id,
-            format=format,
-            projection_json=projection_json,
+        ctx = (
+            console.status("[info]Saving resources...[/info]") if not output_json else nullcontext()
         )
+        on_save = None
+
+        with ctx as status:
+            if status:
+
+                def on_save(current: int, total: int) -> None:
+                    status.update(f"[info]Saving resources ({current}/{total})...[/info]")
+
+            project, projection = AgentStudioProject.init_project(
+                base_path=base_path,
+                region=region,
+                account_id=account_id,
+                project_id=project_id,
+                format=format,
+                projection_json=projection_json,
+                on_save=on_save,
+            )
 
         if not project:
             if output_json:
@@ -1019,9 +1125,22 @@ class AgentStudioCLI:
         )
 
         original_branch_id = project.branch_id
-        files_with_conflicts, projection = project.pull_project(
-            force=force, format=format, projection_json=projection_json
+
+        ctx = (
+            console.status("[info]Saving resources...[/info]") if not output_json else nullcontext()
         )
+        on_save = None
+
+        with ctx as status:
+            if status:
+
+                def on_save(current: int, total: int) -> None:
+                    status.update(f"[info]Saving resources ({current}/{total})...[/info]")
+
+            files_with_conflicts, projection = project.pull_project(
+                force=force, format=format, projection_json=projection_json, on_save=on_save
+            )
+
         new_branch_name = None
         if original_branch_id != project.branch_id:
             new_branch_name = project.get_current_branch()
@@ -1259,6 +1378,7 @@ class AgentStudioCLI:
         hash: str = None,
         before: str = None,
         after: str = None,
+        output_json: bool = False,
     ) -> None:
         """Show the changes made to the project in a Pull Request format.
         Args:
@@ -1267,25 +1387,30 @@ class AgentStudioCLI:
             hash: Optional hash of the version to compare against. If not specified, it will be inferred from the --before and --after arguments.
             before: Optional name of base branch (for comparing two remote branches)
             after: Optional name of compare branch (for comparing two remote branches)
+            output_json: If True, print result as a JSON object instead of rich text
         """
+        project_name = "/".join(os.path.abspath(base_path).split(os.sep)[-2:])
         if hash and (before or after):
             error("Cannot specify both hash and before/after versions.")
             return
 
         if hash:
             after = hash
-            description = f"Diff for hash '{hash}'"
+            description = f"Poly ADK: {project_name}: {hash}"
 
         if not (before or after):
-            description = f"Diff for {'/'.join(base_path.split(os.sep)[-2:])}"
+            description = f"Poly ADK: {project_name}: local → remote"
 
         if before and after:
-            description = f"Diff between '{before}' and '{after}'"
+            description = f"Poly ADK: {project_name}: {before} → {after}"
 
         diffs = cls._compute_diff(base_path, files=files, before=before, after=after) or {}
 
         if not diffs:
-            plain("[muted]No changes detected.[/muted]")
+            if output_json:
+                json_print({"success": False, "message": "No changes to review."})
+            else:
+                error("[muted]No changes detected.[/muted]")
             return
 
         body = {}
@@ -1300,26 +1425,141 @@ class AgentStudioCLI:
                 description=description,
                 public=False,
             )
-            success(f"Gist created: {url}")
+            if output_json:
+                json_print({"success": True, "link": url})
+            else:
+                success(f"Gist created: {url}")
         except requests.HTTPError as e:
-            error(f"GitHub API error: {e}")
+            if output_json:
+                json_print({"success": False, "message": f"GitHub API error: {e}"})
+            else:
+                error(f"GitHub API error: {e}")
         except OSError as e:
-            error(str(e))
-        return
+            if output_json:
+                json_print({"success": False, "message": str(e)})
+            else:
+                error(str(e))
 
     @classmethod
-    def delete_gists(cls) -> None:
-        """Delete the gists made for the reviews of the project."""
+    def list_gists(cls, output_json: bool = False) -> None:
+        """Interactively select a review gist and open it in the browser."""
         try:
-            deleted = GitHubAPIHandler.delete_diff_gists()
-            for gist_id in deleted:
-                plain(f"  [muted]Deleted gist:[/muted] {gist_id}")
-            success("All diff gists deleted.")
+            gists = GitHubAPIHandler.list_diff_gists()
         except requests.HTTPError as e:
-            error(f"GitHub API error: {e}")
+            if output_json:
+                json_print({"success": False, "message": f"GitHub API error: {e}"})
+            else:
+                error(f"GitHub API error: {e}")
+            return
         except OSError as e:
-            error(str(e))
-        return
+            if output_json:
+                json_print({"success": False, "message": str(e)})
+            else:
+                error(str(e))
+            return
+
+        if output_json:
+            json_print(gists)
+            return
+
+        if not gists:
+            plain("[muted]No review gists found.[/muted]")
+            return
+
+        url_by_choice = {_format_gist_choice(g): g["html_url"] for g in gists}
+        selected = questionary.select("Select a gist to open", choices=list(url_by_choice)).ask()
+        if not selected:
+            return
+
+        webbrowser.open(url_by_choice[selected])
+
+    @classmethod
+    def delete_gists(cls, gist_id: Optional[str] = None, output_json: bool = False) -> None:
+        """Interactively select and delete review gists from the user's GitHub account.
+
+        If gist_id is provided (full ID or first 7 characters), delete that specific gist
+        without an interactive prompt.
+        """
+        try:
+            gists = GitHubAPIHandler.list_diff_gists()
+        except requests.HTTPError as e:
+            if output_json:
+                json_print({"success": False, "message": f"GitHub API error: {e}"})
+            else:
+                error(f"GitHub API error: {e}")
+            return
+        except OSError as e:
+            if output_json:
+                json_print({"success": False, "message": str(e)})
+            else:
+                error(str(e))
+            return
+
+        if gist_id:
+            matched = next(
+                (g for g in gists if g["id"].startswith(gist_id)),
+                None,
+            )
+            if not matched:
+                if output_json:
+                    json_print(
+                        {"success": False, "message": f"No review gist found matching '{gist_id}'."}
+                    )
+                else:
+                    error(f"No review gist found matching '{gist_id}'.")
+                return
+            try:
+                GitHubAPIHandler.delete_gist(matched["id"])
+            except requests.HTTPError as e:
+                if output_json:
+                    json_print({"success": False, "message": f"GitHub API error: {e}"})
+                else:
+                    error(f"GitHub API error: {e}")
+                return
+            except OSError as e:
+                if output_json:
+                    json_print({"success": False, "message": str(e)})
+                else:
+                    error(str(e))
+                return
+            if output_json:
+                json_print({"success": True})
+            else:
+                success(f"Deleted gist: {matched['id']}")
+            return
+
+        if not gists:
+            plain("[muted]No review gists found.[/muted]")
+            return
+
+        choices = [_format_gist_choice(g) for g in gists]
+        description_to_id = {_format_gist_choice(g): g["id"] for g in gists}
+
+        selected = questionary.checkbox("Select gists to delete", choices=choices).ask()
+        if not selected:
+            warning("No gists selected. Exiting.")
+            return
+
+        try:
+            for description in selected:
+                gist_id = description_to_id[description]
+                GitHubAPIHandler.delete_gist(gist_id)
+                if not output_json:
+                    plain(f"  [muted]Deleted gist:[/muted] {description}")
+            if output_json:
+                json_print({"success": True})
+            else:
+                success(f"Deleted {len(selected)} gist(s).")
+        except requests.HTTPError as e:
+            if output_json:
+                json_print({"success": False, "message": f"GitHub API error: {e}"})
+            else:
+                error(f"GitHub API error: {e}")
+        except OSError as e:
+            if output_json:
+                json_print({"success": False, "message": str(e)})
+            else:
+                error(str(e))
 
     @classmethod
     def branch_list(cls, base_path: str, output_json: bool = False) -> None:
@@ -1350,7 +1590,12 @@ class AgentStudioCLI:
 
     @classmethod
     def branch_create(
-        cls, base_path: str, branch_name: str = None, output_json: bool = False
+        cls,
+        base_path: str,
+        branch_name: str = None,
+        output_json: bool = False,
+        env: str = None,
+        force: bool = False,
     ) -> None:
         """Create a new branch in the Agent Studio project."""
         project = cls._load_project(base_path, output_json=output_json)
@@ -1369,6 +1614,16 @@ class AgentStudioCLI:
                     "Please switch and try again."
                 )
             sys.exit(1)
+
+        if env in ["pre-release", "live"]:
+            # Checks for any local changes on main before creating env branch.
+            if diffs := project.get_diffs(all_files=True):
+                if not force:
+                    raise ValueError(
+                        f"Uncommitted changes on main branch, diffs: {list(diffs.keys())}"
+                    )
+            project.pull_project_from_env(env=env, format=False)
+            success(f"Pulled {project.account_id}/{project.project_id}")
 
         if not branch_name:
             if output_json:
@@ -1402,6 +1657,16 @@ class AgentStudioCLI:
         else:
             error("Failed to create the branch.")
             sys.exit(1)
+
+        # Pushes existing state of env to provide clean slate for hotfixes.
+        if env in ["pre-release", "live"]:
+            project.push_project(
+                force=True,
+                skip_validation=True,
+                dry_run=False,
+                format=False,
+                email=None,
+            )
 
     @classmethod
     def branch_switch(
@@ -1456,9 +1721,25 @@ class AgentStudioCLI:
             json_errors=output_json or output_json_projection,
         )
 
-        switch_ok, projection = project.switch_branch(
-            branch_name, force=force, format=format, projection_json=projection_json
+        ctx = (
+            console.status("[info]Saving resources...[/info]") if not output_json else nullcontext()
         )
+        on_save = None
+
+        with ctx as status:
+            if status:
+
+                def on_save(current: int, total: int) -> None:
+                    status.update(f"[info]Saving resources ({current}/{total})...[/info]")
+
+            switch_ok, projection = project.switch_branch(
+                branch_name,
+                force=force,
+                format=format,
+                projection_json=projection_json,
+                on_save=on_save,
+            )
+
         if output_json or output_json_projection:
             json_output = {
                 "success": switch_ok,

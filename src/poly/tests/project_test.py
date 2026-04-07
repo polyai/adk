@@ -70,6 +70,61 @@ class InitTest(unittest.TestCase):
         self.assertEqual(project.project_id, "test_project")
 
 
+class InitProjectOnSaveTest(unittest.TestCase):
+    """Tests for the on_save callback in init_project"""
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.mock_save_config = patch.object(AgentStudioProject, "save_config").start()
+        self.mock_save_imports = patch("poly.utils.save_imports").start()
+        self.mock_export_decorators = patch("poly.utils.export_decorators").start()
+        self.mock_resource_save = patch.object(Resource, "save").start()
+        self.mock_write_cache = patch.object(
+            MultiResourceYamlResource, "write_cache_to_file"
+        ).start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_on_save_called_with_correct_progress(self):
+        """on_save should be called once per resource with (current, total)"""
+        self.mock_api_handler.pull_resources.return_value = (
+            AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR).resources,
+            {},
+        )
+        on_save = MagicMock()
+
+        project, _ = AgentStudioProject.init_project(
+            base_path=os.path.join(TEST_DIR, "tmp"),
+            region="us-1",
+            account_id="test_account",
+            project_id="test_project",
+            on_save=on_save,
+        )
+
+        total = len(project.all_resources)
+        self.assertEqual(on_save.call_count, total)
+        on_save.assert_any_call(1, total)
+        on_save.assert_any_call(total, total)
+
+    def test_no_on_save_does_not_error(self):
+        """init_project without on_save should work without errors"""
+        self.mock_api_handler.pull_resources.return_value = (
+            AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR).resources,
+            {},
+        )
+
+        project, _ = AgentStudioProject.init_project(
+            base_path=os.path.join(TEST_DIR, "tmp"),
+            region="us-1",
+            account_id="test_account",
+            project_id="test_project",
+        )
+        self.assertIsNotNone(project)
+
+
 class SortPathsForReverseDeletionTest(unittest.TestCase):
     """Tests for _sort_paths_for_reverse_deletion (Pronunciation vs lexicographic order)."""
 
@@ -2575,6 +2630,215 @@ class PullProjectTest(unittest.TestCase):
         saved_content = kp_calls[-1][0][0]
         self.assertIn("level: boosted", saved_content)
         self.assertNotIn("<<<<<<<", saved_content)
+
+    def test_pull_project_on_save_callback(self):
+        """on_save should be called during pull with correct final progress"""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+
+        on_save = MagicMock()
+        files_with_conflicts, _ = project.pull_project(on_save=on_save)
+
+        self.assertEqual(files_with_conflicts, [])
+        self.assertGreater(on_save.call_count, 0)
+        last_call = on_save.call_args_list[-1]
+        current, total = last_call[0]
+        self.assertEqual(current, total)
+
+    def test_pull_project_no_on_save_does_not_error(self):
+        """pull_project without on_save should work without errors"""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+
+        files_with_conflicts, _ = project.pull_project()
+        self.assertEqual(files_with_conflicts, [])
+
+
+class PullProjectFromEnvTest(unittest.TestCase):
+    """Tests for pull_project_from_env when targeting deployment environments.
+
+    These tests verify that pull_project_from_env behaves correctly end-to-end.
+    """
+
+    def setUp(self):
+        self.mock_get_remote = patch.object(
+            AgentStudioProject,
+            "get_remote_resources_by_name",
+        ).start()
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.mock_save_config = patch.object(AgentStudioProject, "save_config").start()
+        self.mock_save_imports = patch("poly.utils.save_imports").start()
+        self.mock_export_decorators = patch("poly.utils.export_decorators").start()
+        self.mock_resource_save = patch.object(Resource, "save").start()
+        self.mock_save_to_file = patch.object(Resource, "save_to_file").start()
+        self.mock_os_remove = patch("os.remove").start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    # ------------------------------------------------------------------
+    # Error handling
+    # ------------------------------------------------------------------
+
+    def test_raises_when_no_active_deployment(self):
+        """Empty resource map (e.g. live not yet deployed) raises with a clear message."""
+        self.mock_get_remote.return_value = {}
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        with self.assertRaises(ValueError) as ctx:
+            project.pull_project_from_env(env="live", format=False)
+
+        self.assertIn("No resources returned from environment 'live'", str(ctx.exception))
+        self.mock_get_remote.assert_called_once_with("live")
+        self.mock_save_config.assert_not_called()
+
+    def test_raises_for_pre_release_when_not_deployed(self):
+        """Same guard applies for pre-release, not just live."""
+        self.mock_get_remote.return_value = {}
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        with self.assertRaises(ValueError) as ctx:
+            project.pull_project_from_env(env="pre-release")
+
+        self.assertIn("No resources returned from environment 'pre-release'", str(ctx.exception))
+
+    # ------------------------------------------------------------------
+    # Correct env string forwarded
+    # ------------------------------------------------------------------
+
+    def test_calls_get_remote_with_correct_env(self):
+        """get_remote_resources_by_name is invoked with the exact env string passed in."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_get_remote.return_value = deepcopy(project.resources)
+
+        project.pull_project_from_env(env="pre-release")
+
+        self.mock_get_remote.assert_called_once_with("pre-release")
+
+    # ------------------------------------------------------------------
+    # Resource state after a successful pull
+    # ------------------------------------------------------------------
+
+    def test_no_changes_produces_no_conflicts(self):
+        """Pulling when the deployment matches local resources produces no conflicts."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+        self.mock_get_remote.return_value = incoming_resources
+
+        files_with_conflicts = project.pull_project_from_env(env="live")
+
+        self.assertEqual(files_with_conflicts, [])
+        self.assertEqual(project.resources, incoming_resources)
+        self.mock_save_config.assert_called_once()
+
+    def test_remote_modification_applied_to_disk(self):
+        """A resource modified in the deployment snapshot is written to disk."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+        func_id = "FUNCTION-test_function"
+        modified_func = deepcopy(incoming_resources[Function][func_id])
+        modified_func.code = (
+            'def test_function(conv: Conversation):\n    """Modified in live."""\n    return "Live"\n'
+        )
+        incoming_resources[Function][func_id] = modified_func
+        self.mock_get_remote.return_value = incoming_resources
+
+        files_with_conflicts = project.pull_project_from_env(env="live")
+
+        self.assertEqual(files_with_conflicts, [])
+        self.assertEqual(project.resources[Function][func_id].code, modified_func.code)
+        self.assertTrue(self.mock_save_to_file.called or self.mock_resource_save.called)
+
+    def test_new_remote_resource_written_locally(self):
+        """A resource present in the deployment but not locally is written to disk."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+        new_topic = Topic(
+            resource_id="TOPIC-live_only_topic",
+            name="live_only_topic",
+            actions="Use {{fn:test_function}}",
+            content="Topic that only exists in live.",
+            example_queries=["live query"],
+        )
+        incoming_resources.setdefault(Topic, {})["TOPIC-live_only_topic"] = new_topic
+        self.mock_get_remote.return_value = incoming_resources
+
+        files_with_conflicts = project.pull_project_from_env(env="live")
+
+        self.assertEqual(files_with_conflicts, [])
+        self.assertIn("TOPIC-live_only_topic", project.resources.get(Topic, {}))
+
+    # ------------------------------------------------------------------
+    # Force-overwrite semantics (always on for pull_project_from_env)
+    # ------------------------------------------------------------------
+
+    def test_local_changes_overwritten_without_conflicts(self):
+        """Local modifications are silently overwritten — force is always True."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+        func_id = "FUNCTION-test_function"
+        incoming_resources[Function][func_id].code = (
+            'def test_function(conv: Conversation):\n    return "From live"\n'
+        )
+        self.mock_get_remote.return_value = incoming_resources
+
+        with mock_read_from_file(
+            {
+                os.path.join(
+                    TEST_DIR, "functions", "test_function.py"
+                ): 'from _gen import *  # <AUTO GENERATED>\n\ndef test_function(conv: Conversation):\n    return "Local diverged"\n'
+            }
+        ):
+            files_with_conflicts = project.pull_project_from_env(env="pre-release")
+
+        self.assertEqual(files_with_conflicts, [])
+        self.assertEqual(
+            project.resources[Function][func_id].code,
+            incoming_resources[Function][func_id].code,
+        )
+
+    def test_locally_added_resource_deleted_when_absent_from_deployment(self):
+        """A locally-added resource absent from the deployment is deleted."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+        if Topic in incoming_resources and "TOPIC-Topic 1" in incoming_resources[Topic]:
+            del incoming_resources[Topic]["TOPIC-Topic 1"]
+        self.mock_get_remote.return_value = incoming_resources
+
+        files_with_conflicts = project.pull_project_from_env(env="live")
+
+        self.assertEqual(files_with_conflicts, [])
+        self.mock_os_remove.assert_called()
+        self.assertNotIn("TOPIC-Topic 1", project.resources.get(Topic, {}))
+
+    # ------------------------------------------------------------------
+    # Side-effects: config + imports saved
+    # ------------------------------------------------------------------
+
+    def test_save_config_and_imports_called_on_success(self):
+        """save_config and save_imports are always called after a successful pull."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_get_remote.return_value = deepcopy(project.resources)
+
+        project.pull_project_from_env(env="live")
+
+        self.mock_save_config.assert_called_once()
+        self.mock_save_imports.assert_called_once()
+
+    def test_save_config_not_called_when_no_deployment(self):
+        """save_config must not be called if the deployment lookup fails."""
+        self.mock_get_remote.return_value = {}
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        with self.assertRaises(ValueError):
+            project.pull_project_from_env(env="live")
+
+        self.mock_save_config.assert_not_called()
+
 
 class DocsTest(unittest.TestCase):
     """Tests for the docs module"""

@@ -9,13 +9,13 @@ Once the ADK is installed, the fastest way to get oriented is to inspect the CLI
 
 ## View top-level help
 
-To see all available commands and options, run:
+Run `poly --help` to see every available command:
 
 ~~~bash
 poly --help
 ~~~
 
-Each command also supports its own help output. For example:
+Each command also accepts `--help` for its own flags and options:
 
 ~~~bash
 poly push --help
@@ -95,15 +95,9 @@ The ADK provides the following core commands:
 
 </div>
 
-## Recommended starting point
+## Explore any command
 
-A good way to explore the CLI is:
-
-1. run `poly --help`
-2. identify the command you need
-3. run that command with `--help`
-
-For example:
+To learn what a command does and what flags it accepts, run it with `--help`:
 
 ~~~bash
 poly init --help
@@ -113,7 +107,7 @@ poly push --help
 
 ## Next step
 
-Once you understand the CLI shape, continue to the command reference or the tutorial.
+Continue to the command reference for a complete listing, or go straight to the tutorial to see a real workflow.
 
 <div class="grid cards" markdown>
 

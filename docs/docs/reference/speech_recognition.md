@@ -9,7 +9,7 @@ description: Configure how the agent processes spoken input on the voice channel
 Speech recognition resources control how the agent processes user speech input on the voice channel.
 </p>
 
-These resources live under `voice/speech_recognition/` and are used to tune how the agent listens, recognises, and post-processes spoken input.
+These resources live under `voice/speech_recognition/` and are used to tune how the agent listens, recognizes, and post-processes spoken input.
 
 ## Location
 

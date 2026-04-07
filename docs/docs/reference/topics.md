@@ -89,8 +89,7 @@ This split is important: content is for facts, actions are for behavior.
 ### Limits and guidance
 
 - use no more than **20** example queries
-- cover meaningful variation, not every tiny wording change
-- trust the model to generalize from the examples you give it
+- cover meaningful variation, not every minor wording change
 
 ## Content
 
@@ -164,9 +163,10 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
 - prefer structured `##` branches in actions
 - disable topics with `enabled: false` during development instead of deleting them
 
-!!! tip "Tell, don't script"
+!!! tip “Tell, don't script”
 
-    Prefer instructions like “Tell the user that ...” over hard-coded dialogue such as `Say: '...'`. This gives the agent more room to behave naturally, especially across languages.
+
+    Prefer instructions like “Tell the user that ...” over hard-coded dialogue such as `Say: '...'`. This lets the agent vary phrasing naturally, especially across languages.
 
 ## Related pages
 

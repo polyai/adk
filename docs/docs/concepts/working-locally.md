@@ -3,15 +3,9 @@ title: Working locally
 description: Understand how the PolyAI ADK maps Agent Studio projects onto a local development workflow.
 ---
 
-The **PolyAI ADK** is a CLI tool and Python package for managing **PolyAI Agent Studio** projects locally.
+With the ADK, you work on Agent Studio projects from your local machine instead of exclusively through the browser.
 
-It provides a Git-like workflow for synchronizing project configuration between your local filesystem and the Agent Studio platform, so agent development can fit into normal engineering build, review, and collaboration cycles.
-
-## What “working locally” means
-
-With the ADK, you are not building an agent only inside the browser.
-
-Instead, you work with a project on your machine, where you can:
+Your local filesystem becomes your primary editing surface. You can:
 
 - edit agent resources directly
 - review changes with Git-style workflows
@@ -57,7 +51,7 @@ A typical project structure looks like this:
 
 ~~~text
 <account>/<project>/
-├── _gen/                               # Generated stubs — do not edit
+├── _gen/                               # Generated stubs - do not edit
 ├── agent_settings/                     # Agent identity and behavior
 │   ├── personality.yaml
 │   ├── role.yaml
@@ -74,7 +68,7 @@ A typical project structure looks like this:
 │   └── response_control/
 ├── chat/                               # Chat channel settings
 │   └── configuration.yaml
-├── flows/                              # Optional — flow definitions
+├── flows/                              # Optional - flow definitions
 ├── functions/                          # Global functions
 ├── topics/                             # Knowledge base topics
 └── project.yaml                        # Project metadata
@@ -111,9 +105,9 @@ The standard workflow is:
 5. inspect changes with `poly diff` and `poly status`
 6. validate locally with `poly validate`
 7. push changes with `poly push`
-8. test and chat with the agent using `poly chat`
-9. optionally generate a review gist with `poly review`
-10. merge the branch in Agent Studio
+8. optionally generate a review gist with `poly review`
+9. merge the branch in Agent Studio
+10. test by chatting with the agent using `poly chat` — this connects to main on the Sandbox, so merge your branch first
 
 !!! tip "Run commands from the project folder"
 
@@ -135,21 +129,32 @@ These placeholders are used in prompts, rules, topic actions, and related text f
 | `{{ho:handoff_name}}` | Handoff destination | Rules |
 | `{{vrbl:variable_name}}` | State variable | Prompts, topic actions, SMS templates |
 
-These references make the local project composable: settings, prompts, and behaviors can refer to resources by name rather than hard-coding values.
-
-## Why local development matters
-
-Working locally makes the ADK especially useful for teams that want to:
-
-- review changes before deployment
-- reuse patterns across projects
-- work with large or complex resource trees
-- generate or modify resources using coding agents
-- fit agent development into existing engineering processes
+These references let settings, prompts, and behaviors point to resources by name rather than repeating hard-coded values.
 
 !!! tip "A Git-like workflow for Agent Studio"
 
-    The ADK is easiest to understand if you think of it as a synchronization layer between your local project files and the Agent Studio platform.
+    Think of the ADK as a synchronization layer between your local files and the Agent Studio platform.
+
+## Development setup from source
+
+If you are contributing to the ADK itself or working directly from the repository, you can set it up locally from source instead.
+
+~~~bash
+git clone https://github.com/polyai/adk.git
+cd adk
+uv venv --python=3.14 --seed
+source .venv/bin/activate
+uv pip install -e ".[dev]"
+pre-commit install
+~~~
+
+This installs the project in editable mode and enables the repository's development hooks. To run the test suite:
+
+~~~bash
+pytest
+~~~
+
+Test files are located in `src/poly/tests/`.
 
 ## Related pages
 

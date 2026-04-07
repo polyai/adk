@@ -392,20 +392,37 @@ class ApiIntegration(MultiResourceYamlResource):
     def get_new_updated_deleted_subresources(
         self, old_resource: Optional["ApiIntegration"]
     ) -> tuple[list[SubResource], list[SubResource], list[SubResource]]:
-        """Return new, updated, and deleted operations and environment configs (integration_id set)."""
+        """Return new, updated, and deleted operations and environment configs (integration_id set).
+
+        Operations are matched by resource_id when present (local ops with explicit IDs), or by
+        name when resource_id is absent (local ops loaded from YAML, which does not persist IDs).
+        When matched by name, the remote resource_id is carried forward so that update commands
+        target the correct remote resource.
+        """
         old_integration = old_resource if isinstance(old_resource, ApiIntegration) else None
         old_ops_list = old_integration.operations if old_integration else []
-        old_ops: dict[str, ApiIntegrationOperation] = {}
-        for op_obj in old_ops_list:
-            old_ops[op_obj.resource_id] = op_obj
+        old_ops_by_id: dict[str, ApiIntegrationOperation] = {
+            op.resource_id: op for op in old_ops_list if op.resource_id
+        }
+        old_ops_by_name: dict[str, ApiIntegrationOperation] = {op.name: op for op in old_ops_list}
         new_ops: list[SubResource] = []
         updated_ops: list[SubResource] = []
         deleted_ops: list[SubResource] = []
+        matched_old_ids: set[str] = set()
 
         for op_obj in self.operations:
-            old = old_ops.get(op_obj.resource_id)
+            # Prefer resource_id match; fall back to name match for YAML-loaded ops (no ID stored)
+            old = (
+                old_ops_by_id.get(op_obj.resource_id)
+                if op_obj.resource_id
+                else old_ops_by_name.get(op_obj.name)
+            )
+            # When matched by name but local op has no resource_id, borrow it from remote.
+            # For genuinely new ops (no match), generate a stable UUID now so that multiple
+            # new ops don't all collide on the "" key when stored in new_subresources.
+            effective_id = op_obj.resource_id or (old.resource_id if old else str(uuid.uuid4()))
             op_with_parent = ApiIntegrationOperation(
-                resource_id=op_obj.resource_id,
+                resource_id=effective_id,
                 name=op_obj.name,
                 method=op_obj.method,
                 resource=op_obj.resource,
@@ -414,6 +431,7 @@ class ApiIntegration(MultiResourceYamlResource):
             if old is None:
                 new_ops.append(op_with_parent)
             else:
+                matched_old_ids.add(old.resource_id)
                 if (
                     old.name != op_obj.name
                     or old.method != op_obj.method
@@ -421,8 +439,8 @@ class ApiIntegration(MultiResourceYamlResource):
                 ):
                     updated_ops.append(op_with_parent)
 
-        for key, old in old_ops.items():
-            if not any(o.resource_id == key for o in self.operations):
+        for old in old_ops_list:
+            if old.resource_id not in matched_old_ids:
                 deleted_ops.append(
                     ApiIntegrationOperation(
                         resource_id=old.resource_id,

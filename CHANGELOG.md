@@ -1,6 +1,418 @@
 # CHANGELOG
 
 
+## v0.7.3 (2026-04-02)
+
+### Bug Fixes
+
+- Suppress verbose error logging and API key leak on HTTP errors
+  ([#61](https://github.com/polyai/adk/pull/61),
+  [`8e54b2d`](https://github.com/polyai/adk/commit/8e54b2d76590f20f998542ec71ef81a7b71d4e2f))
+
+## Summary - Downgrade `logger.exception` to `logger.debug` in `PlatformAPIHandler.make_request` so
+  failed API calls no longer dump full tracebacks to stderr by default - Change `raise e` to bare
+  `raise` for cleaner traceback if verbose mode is used
+
+## Context When running `poly review --before x --after y` and getting a 403, users saw the full
+  `ERROR:poly.handlers.platform_api:Error in request...` log (including the API key in headers) plus
+  the traceback, before the clean error message. Now only the clean `Error: API request failed: 403
+  ...` message is shown, since `handle_exception()` in `console.py` already formats `HTTPError`
+  nicely.
+
+## Test plan - [x] Run `poly review --before draft --after pre-release` against a project with
+  insufficient permissions — verify only the clean error line is shown - [x] Run the same with
+  `--verbose` — verify the debug log appears with request details (minus headers) - [x] `uv run
+  pytest src/poly/tests/ -v` passes (415 tests)
+
+<img width="1659" height="396" alt="image"
+  src="https://github.com/user-attachments/assets/c00ce1ea-6a39-4916-b60b-e2e6580cd76f" />
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.7.2 (2026-04-02)
+
+### Bug Fixes
+
+- Standardise gist naming with Poly ADK prefix ([#62](https://github.com/polyai/adk/pull/62),
+  [`01992e4`](https://github.com/polyai/adk/commit/01992e4d22cc1171d13f2a762b987b7a05aa024e))
+
+## Summary - Add "Poly ADK: " prefix to the gist description for local → remote reviews, matching
+  the existing format used by `--before`/`--after` reviews
+
+## Context When using `poly review --before x --after y`, the gist description was `"Poly ADK:
+  project: x → y"`. But `poly review` (local → remote) produced `"project: local → remote"` without
+  the prefix. Now both use the same `"Poly ADK: "` prefix for consistency.
+
+## Test plan - [x] Run `poly review` (local → remote) and verify the gist description starts with
+  "Poly ADK: " - [x] Run `poly review --before x --after y` and verify the format is unchanged
+
+<img width="908" height="74" alt="image"
+  src="https://github.com/user-attachments/assets/7d97e433-7b39-4308-8e88-0ba756dbe015" />
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.7.1 (2026-04-01)
+
+### Bug Fixes
+
+- Match API integration operations by name when resource_id absent
+  ([#60](https://github.com/polyai/adk/pull/60),
+  [`a3a56ab`](https://github.com/polyai/adk/commit/a3a56ab240f5d1883d12a4bafcc5f0be52fc9f17))
+
+## Summary
+
+Fix a bug where `poly push` always issued a delete + create for every API integration operation
+  instead of computing the true diff.
+
+## Motivation
+
+`ApiIntegrationOperation.to_yaml_dict()` intentionally omits `resource_id`, so operations loaded
+  from YAML always have `resource_id = ""`. The previous diff logic in
+  `get_new_updated_deleted_subresources` matched operations by `resource_id` only — meaning every
+  local op was treated as new (create) and every remote op as deleted, regardless of whether
+  anything had actually changed.
+
+A secondary bug meant multiple new operations all keyed on `""` in `new_subresources`, so only the
+  last one survived and only 1 of N creates was ever emitted.
+
+## Changes
+
+- Match operations by `resource_id` when present; fall back to **name-based matching** for
+  YAML-loaded ops (no ID stored) - Carry the remote `resource_id` forward when matched by name so
+  update commands target the correct remote resource - Generate a fresh UUID eagerly for genuinely
+  new ops to avoid key collisions in `new_subresources`
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly push --dry-run --debug`) - [x] Tested
+  against a live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface - [x] Commit messages follow [conventional
+  commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+### Documentation
+
+- Fix: use Python 3.13 in docs CI ([#58](https://github.com/polyai/adk/pull/58),
+  [`c4cc68b`](https://github.com/polyai/adk/commit/c4cc68b4aab5a87c779242aed075f767e0b4320e))
+
+docs/pyproject.toml: relax requires-python from >=3.14 to >=3.11 .github/workflows/build-docs.yaml:
+  pin to python 3.13 (latest stable)
+
+Python 3.14 is pre-release and not available on GitHub Actions runners, causing setup-python to fall
+  back to 3.11 which then fails the >=3.14 constraint. mkdocs has no dependency on 3.14.
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+- Improve clarity, active language, and add Google Analytics
+  ([#43](https://github.com/polyai/adk/pull/43),
+  [`a721bca`](https://github.com/polyai/adk/commit/a721bcab21dd6f11dcecf1b451b571c8a12cbb9a))
+
+## Summary
+
+- **Remove AI-isms**: replaced "trust the model", "the agent does the heavy lifting", "composable",
+  and similar LLM-adjacent framing with plain, concrete language - **Active language throughout**:
+  rewrote passive constructions and vague headers ("What it enables" → "What you can do with the
+  ADK"; "Before you continue" → "Checklist") - **Remove internal history**: deleted the "Local Agent
+  Studio" provenance paragraph from `what-is-the-adk.md` — not useful for external developers -
+  **Prerequisites improvements**: added Python 3.14+ install guidance (Homebrew, pyenv, python.org),
+  the official `uv` install command (`astral.sh`), and a proper checklist - **Installation
+  cleanup**: removed the "Running tests" section (it belongs in `testing.md`, not install) -
+  **Testing page**: added `uv run pytest` as the canonical invocation - **Build-an-agent tutorial**:
+  removed the empty Summary table, clarified AI-agent workflow steps with concrete task headings -
+  **Tooling page**: VS Code extension URL is now a proper hyperlink - **Consistency**: fixed
+  "Pre-requisites" → "Prerequisites" across index and access pages; import line note in
+  `functions.md` now explains the consequence of modifying it
+
+## Test plan
+
+- [x] Review rendered docs for visual regressions - [x] Confirm all internal links still resolve -
+  [x] Read through get-started flow end-to-end
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+Co-authored-by: Aaron Forinton <aaron.forinton@googlemail.com>
+
+
+## v0.7.0 (2026-04-01)
+
+### Chores
+
+- Migrate docs dependencies to pyproject.toml ([#55](https://github.com/polyai/adk/pull/55),
+  [`13716d0`](https://github.com/polyai/adk/commit/13716d0005713d20e7a45a0b9306e576fb111671))
+
+- Move documentation dependencies from `requirements.txt` to `pyproject.toml` - Create new
+  `docs/pyproject.toml` with mkdocs and related packages - Delete `docs/requirements.txt` - Update
+  CI workflows to install dependencies using `pip install .` instead of `pip install -r
+  requirements.txt`
+
+This consolidates dependency management and follows modern Python packaging standards.
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+### Features
+
+- Adk branch create --env flag to specify source env for new branch
+  ([#56](https://github.com/polyai/adk/pull/56),
+  [`e9dd3b9`](https://github.com/polyai/adk/commit/e9dd3b93e6246b577a0826dd2e77b73aa1578516))
+
+## Summary
+
+Adds a `--env` flag to `poly branch create` that sources a new branch from a live or pre-release
+  deployment snapshot instead of sandbox main.
+
+Additional points: - Specifying `sandbox` as env arg will default to existing behaviour (sandbox
+  being the default 'base'). - Branch creation is also followed by push, to leave a 'clean slate'
+  for any hotfix changes required. - `--force` flag will force overwrite of any local changes on
+  `main` (restrictions still apply for creating new branch from main only).
+
+## Motivation
+
+The motivation is to facilitate hotfixes to main live environment, bypassing any subsequent changes
+  in testing environments. This should be used with caution and usual protocol to be followed with
+  pushing the change.
+
+## Changes
+
+- project.py: added pull_project_from_env(env, format) method to class AgentStudioProject. - cli.py:
+  add `--env/--environment` (choices: sandbox, pre-release, live) and `--force/-f` to `branch
+  create` - cli.py: when --env live/pre-release is set, pull from that environment before creating
+  the branch and push immediately after
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
+## v0.6.2 (2026-03-31)
+
+### Bug Fixes
+
+- **API Integration**: Generate API integration IDs in server-expected format
+  ([#53](https://github.com/polyai/adk/pull/53),
+  [`c82e7dc`](https://github.com/polyai/adk/commit/c82e7dc625a1b9f7a027c39dc17abc1e47c34980))
+
+## Summary - `generate_uuid` was building API integration IDs using the resource name key
+  (`api_integration` → `API_INTEGRATION-<hex>`), but the server validates against a regex that
+  expects `API-INTEGRATION-<UPPERCASE_HEX>` - Fix uses `resource_id_prefix` from the resource class
+  (when defined) with uppercase hex, matching the server's expected format (e.g.
+  `API-INTEGRATION-2861A95D`) - Other resource types are unaffected — the fallback path is unchanged
+
+## Test plan - [x] Existing `ApiIntegrationTest` suite passes (`uv run pytest src/poly/tests/ -v -k
+  api_integration`) - [x] Push a new API integration and verify it is accepted by the server without
+  a `ZodValidationError`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+### Documentation
+
+- Auto-update from feat(cli): machine-readable --json, projection-based pull/push, and serialized
+  push commands ([#46](https://github.com/polyai/adk/pull/46),
+  [`dee84ef`](https://github.com/polyai/adk/commit/dee84ef3ad0d901496c74eea8fa0a1354d2976f8))
+
+## Summary
+
+This PR is related to https://github.com/polyai/adk/pull/41
+
+## Motivation
+
+This is the first trial run of the docs auto-update workflow that was added to
+  https://github.com/polyai/adk/pull/35
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+---------
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+
+## v0.6.1 (2026-03-30)
+
+### Bug Fixes
+
+- Update poly review --delete to interactive select-and-delete flow
+  ([#47](https://github.com/polyai/adk/pull/47),
+  [`9ea826a`](https://github.com/polyai/adk/commit/9ea826aba9837073172dd28bffc3c2e22a9684c9))
+
+## Summary - Updates gist description format from `Diff for account/project` to `project: local →
+  remote` / `project: before → after` - Replaces `poly review --delete` bulk-delete with a
+  `questionary.checkbox` prompt so users can select individual gists to delete - Adds `poly review
+  --list` to interactively select and open a gist in the browser - Adds `list_diff_gists()` and
+  `delete_gist()` helpers to `GitHubAPIHandler`; refactors `delete_diff_gists()` to use them - Exits
+  gracefully with a warning if no gists exist or none are selected - Adds `--json` flag for
+  outputting results using JSON - Adds unit tests for gist commands in `tests/review_test.py` -
+  Converts `poly review list` and `poly review delete` from a positional `action` argument to proper
+  argparse subparsers, so each subcommand owns only its relevant flags (`--id` now only appears
+  under `poly review delete --help`) - Applies the same refactor to `poly branch` (`list`, `create`,
+  `switch`, `current`), so `--force`, `--format`, `--from-projection` etc. only appear under `poly
+  branch switch --help` for standardisation
+
+## Test plan - [x] Run `poly review` to create one or more review gists - [x] Run `poly review
+  --delete` and verify the checkbox menu appears listing gists by description - [x] Select a subset
+  and confirm only those are deleted - [x] Run again with no gists present and confirm "No review
+  gists found." message - [x] Press Ctrl-C / select nothing and confirm "No gists selected.
+  Exiting." warning - [x] Run `poly review --list` and confirm a select menu appears; selecting a
+  gist opens it in the browser
+
+<img width="942" height="413" alt="image"
+  src="https://github.com/user-attachments/assets/abace417-edc0-4d5f-ac87-fa20832e0bb6" /> <img
+  width="711" height="62" alt="image"
+  src="https://github.com/user-attachments/assets/44a03254-03cc-4265-8ed0-9d590313df5b" /> <img
+  width="637" height="72" alt="image"
+  src="https://github.com/user-attachments/assets/91ef9899-9666-479f-94ec-9084e488253e" /> <img
+  width="664" height="215" alt="image"
+  src="https://github.com/user-attachments/assets/b57168a2-999e-4450-a166-42e92a429ee0" /> <img
+  width="341" height="75" alt="image"
+  src="https://github.com/user-attachments/assets/19b83928-5a20-4e05-a51a-73c549383db2" />
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+Co-authored-by: Ruari Phipps <ruari@poly-ai.com>
+
+
+## v0.6.0 (2026-03-27)
+
+### Features
+
+- Add resource caching and progress spinner for init/pull/branch
+  ([#50](https://github.com/polyai/adk/pull/50),
+  [`2d4fc0a`](https://github.com/polyai/adk/commit/2d4fc0ae78c348d0cc9269d7f0749c83a06adedd))
+
+## Summary
+
+Batch `MultiResourceYamlResource` writes during `poly init` so each YAML file is written once
+  instead of once per resource, and add a progress spinner to `init`, `pull`, and `branch switch` so
+  the CLI doesn't appear stuck on large projects.
+
+Also edited CONTRIBUTING.md to edit the clone url - changed org to PolyAI.
+
+## Motivation
+
+`poly init` is very slow on projects with many pronunciations (or other multi-resource YAML types)
+  because `save()` rewrites the full YAML file for every single item. On large projects like pacden,
+  the process appears stuck with no output. The `save_to_cache` + `write_cache_to_file` pattern
+  already exists for `poly pull` — this reuses it for `init` and adds a progress spinner across all
+  three commands.
+
+## Changes
+
+- Use `save_to_cache=True` for all `MultiResourceYamlResource` saves during `init_project()`, then
+  flush to disk once via `write_cache_to_file()` - Add an optional `on_save(current, total)`
+  callback to `init_project()`, `pull_project()`, `_update_multi_resource_yaml_resources()`,
+  `_update_pulled_resources()`, and `switch_branch()` for progress reporting - Wire up
+  `console.status()` spinners in `cli.py` for `init`, `pull`, and `branch switch`, using
+  `nullcontext` to skip the spinner in `--json` mode - Progress counter includes both multi-resource
+  (per batch total) and non-multi-resource types for an accurate total
+
+- CONTRIBUTING.md to edit the clone url - changed org from PolyAI-LDN to PolyAI.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (361 tests, 0 failures)
+  - [x] No breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit
+  messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs Before: <img width="1683" height="1066" alt="Screenshot 2026-03-25 at 10 04
+  14 PM" src="https://github.com/user-attachments/assets/0dd22d4d-7c3a-4342-9dd4-3d6d1ec4c2ff" />
+
+After: <img width="1693" height="322" alt="Screenshot 2026-03-25 at 10 04 01 PM"
+  src="https://github.com/user-attachments/assets/b1f8441f-498c-40a3-bc3c-e7093c56c0a5" />
+
+
 ## v0.5.1 (2026-03-27)
 
 ### Bug Fixes
