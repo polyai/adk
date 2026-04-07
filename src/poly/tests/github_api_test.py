@@ -403,7 +403,7 @@ class ReviewDescriptionTest(unittest.TestCase):
     """Tests for AgentStudioCLI.review gist description formatting."""
 
     @patch("poly.cli.GitHubAPIHandler.create_gist", return_value="https://gist.github.com/xyz")
-    @patch("poly.cli.AgentStudioCLI._review", return_value={"file.diff": {"content": "+line"}})
+    @patch("poly.cli.AgentStudioCLI._compute_diff", return_value={"file": "+line"})
     @patch("poly.cli.success")
     def test_local_to_remote_description_includes_project_name(
         self, mock_success, mock_review, mock_create
@@ -416,7 +416,7 @@ class ReviewDescriptionTest(unittest.TestCase):
         self.assertIn("local → remote", description)
 
     @patch("poly.cli.GitHubAPIHandler.create_gist", return_value="https://gist.github.com/xyz")
-    @patch("poly.cli.AgentStudioCLI._review", return_value={"file.diff": {"content": "+line"}})
+    @patch("poly.cli.AgentStudioCLI._compute_diff", return_value={"file": "+line"})
     @patch("poly.cli.success")
     def test_branch_comparison_description_includes_branch_names(
         self, mock_success, mock_review, mock_create
@@ -424,8 +424,8 @@ class ReviewDescriptionTest(unittest.TestCase):
         """Branch-to-branch review uses 'project_name: before -> after' description."""
         AgentStudioCLI.review(
             base_path="/some/my-project",
-            before_name="main",
-            after_name="dev",
+            before="main",
+            after="dev",
         )
 
         description = mock_create.call_args[1]["description"]
@@ -433,15 +433,15 @@ class ReviewDescriptionTest(unittest.TestCase):
         self.assertIn("main → dev", description)
 
     @patch("poly.cli.GitHubAPIHandler.create_gist")
-    @patch("poly.cli.AgentStudioCLI._review", return_value={})
+    @patch("poly.cli.AgentStudioCLI._compute_diff", return_value={})
     def test_empty_diff_does_not_create_gist(self, mock_review, mock_create):
-        """When _review returns an empty dict, no gist is created."""
+        """When _compute_diff returns an empty dict, no gist is created."""
         AgentStudioCLI.review(base_path="/some/my-project")
 
         mock_create.assert_not_called()
 
     @patch("poly.cli.GitHubAPIHandler.create_gist", return_value="https://gist.github.com/xyz")
-    @patch("poly.cli.AgentStudioCLI._review", return_value={"file.diff": {"content": "+line"}})
+    @patch("poly.cli.AgentStudioCLI._compute_diff", return_value={"file": "+line"})
     @patch("poly.cli.success")
     def test_gist_created_as_private(self, mock_success, mock_review, mock_create):
         """Review gists are always created as private (public=False)."""
@@ -450,7 +450,7 @@ class ReviewDescriptionTest(unittest.TestCase):
         self.assertFalse(mock_create.call_args[1]["public"])
 
     @patch("poly.cli.GitHubAPIHandler.create_gist", return_value="https://gist.github.com/xyz")
-    @patch("poly.cli.AgentStudioCLI._review", return_value={"file.diff": {"content": "+line"}})
+    @patch("poly.cli.AgentStudioCLI._compute_diff", return_value={"file": "+line"})
     @patch("poly.cli.json_print")
     def test_json_output_prints_success_and_link(self, mock_json_print, mock_review, mock_create):
         """With output_json=True, a successful review prints {success: true, link: url}."""
@@ -461,7 +461,7 @@ class ReviewDescriptionTest(unittest.TestCase):
         )
 
     @patch("poly.cli.GitHubAPIHandler.create_gist")
-    @patch("poly.cli.AgentStudioCLI._review", return_value={})
+    @patch("poly.cli.AgentStudioCLI._compute_diff", return_value={})
     @patch("poly.cli.json_print")
     def test_json_output_empty_diff_prints_failure(self, mock_json_print, mock_review, mock_create):
         """With output_json=True, an empty diff prints {success: false, message: ...}."""
