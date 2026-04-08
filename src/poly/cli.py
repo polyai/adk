@@ -1800,12 +1800,15 @@ class AgentStudioCLI:
             return
 
         deleted_count = 0
+        current_branch_deleted = False
         for label in selected:
             name = label.replace(" (current)", "")
             try:
                 deleted = project.delete_branch(name)
                 if deleted:
                     deleted_count += 1
+                    if name == current_branch:
+                        current_branch_deleted = True
                     if not output_json:
                         plain(f"  [muted]Deleted branch:[/muted] {name}")
                         if name == current_branch:
@@ -1817,10 +1820,9 @@ class AgentStudioCLI:
                 if not output_json:
                     error(str(e))
 
-        switched = any(label.replace(" (current)", "") == current_branch for label in selected)
         if output_json:
             result = {"success": deleted_count > 0, "deleted": deleted_count}
-            if switched and deleted_count > 0:
+            if current_branch_deleted:
                 result["switched_to"] = "main"
             json_print(result)
         else:
