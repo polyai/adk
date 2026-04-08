@@ -1008,7 +1008,16 @@ class AgentStudioCLI:
                     sys.exit(1)
                 warning("No project selected. Exiting.")
                 return
+            project_name = project_menu
             project_id = projects[project_menu]
+        else:
+            # project_id was passed directly — look up the name
+            projects = api_handler.get_projects(region, account_id)
+            # Reverse lookup: find name for the given ID
+            project_name = next(
+                (name for name, pid in projects.items() if pid == project_id),
+                None,
+            )
 
         if not output_json:
             info(f"Initializing project [bold]{account_id}/{project_id}[/bold]...")
@@ -1034,6 +1043,7 @@ class AgentStudioCLI:
                 region=region,
                 account_id=account_id,
                 project_id=project_id,
+                project_name=project_name,
                 format=format,
                 projection_json=projection_json,
                 on_save=on_save,

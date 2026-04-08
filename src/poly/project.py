@@ -141,6 +141,7 @@ class AgentStudioProject:
     resources: ResourceMap
     last_updated: datetime
     branch_id: str = None
+    project_name: str = None
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
 
@@ -174,11 +175,14 @@ class AgentStudioProject:
 
     def build_project_config(self) -> dict:
         """Build the project configuration dictionary"""
-        return {
+        config = {
             "project_id": self.project_id,
             "account_id": self.account_id,
             "region": self.region,
         }
+        if self.project_name:
+            config["project_name"] = self.project_name
+        return config
 
     @classmethod
     def _load_resources_from_status_dict(
@@ -247,6 +251,7 @@ class AgentStudioProject:
             last_updated=last_updated,
             file_structure_info={},
             branch_id=status_dict.get("branch_id", "main"),
+            project_name=config_dict.get("project_name") or status_dict.get("project_name"),
             _not_loaded_resources=not_loaded_resources,
         )
 
@@ -265,6 +270,7 @@ class AgentStudioProject:
             "last_updated": (self.last_updated.isoformat() if self.last_updated else None),
             "file_structure_info": self.file_structure_info,
             "branch_id": self.branch_id,
+            "project_name": self.project_name,
         }
 
     @classmethod
@@ -283,6 +289,7 @@ class AgentStudioProject:
             last_updated=datetime.fromisoformat(data.get("last_updated", "1970-01-01T00:00:00")),
             file_structure_info=file_structure_info,
             branch_id=data.get("branch_id", "main"),
+            project_name=data.get("project_name"),
             _not_loaded_resources=not_loaded_resources,
         )
 
@@ -320,6 +327,7 @@ class AgentStudioProject:
         region: str,
         account_id: str,
         project_id: str,
+        project_name: str = None,
         format: bool = False,
         projection_json: Optional[dict[str, Any]] = None,
         on_save: Callable[[int, int], None] | None = None,
@@ -331,6 +339,7 @@ class AgentStudioProject:
             region (str): The region of the project
             account_id (str): The account ID of the project
             project_id (str): The project ID
+            project_name (str): The human-readable project name
             format (bool): If True, format resources after pulling
             projection_json (dict[str, Any]): A dictionary containing the projection
                 If provided, the projection will be used instead of fetching it from the API.
@@ -352,6 +361,7 @@ class AgentStudioProject:
             resources={},
             last_updated=datetime.now(),
             branch_id="main",
+            project_name=project_name,
         )
         project.resources, projection = project.api_handler.pull_resources(
             projection_json=projection_json
