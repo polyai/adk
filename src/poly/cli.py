@@ -44,6 +44,7 @@ from poly.handlers.interface import (
     REGIONS,
     AgentStudioInterface,
 )
+from poly.handlers.sdk import SourcererAPIError
 from poly.resources import resource_utils
 from poly.project import (
     PROJECT_CONFIG_FILE,
@@ -1027,38 +1028,69 @@ class AgentStudioCLI:
             json_errors=output_json or output_json_projection,
         )
 
+        account_path = os.path.join(base_path, account_id)
+        project_path = os.path.join(account_path, project_id)
+
         ctx = (
             console.status("[info]Saving resources...[/info]") if not output_json else nullcontext()
         )
         on_save = None
 
-        with ctx as status:
-            if status:
+        project = None
+        projection = None
+        init_error = None
 
-                def on_save(current: int, total: int) -> None:
-                    status.update(f"[info]Saving resources ({current}/{total})...[/info]")
+        try:
+            with ctx as status:
+                if status:
 
-            project, projection = AgentStudioProject.init_project(
-                base_path=base_path,
-                region=region,
-                account_id=account_id,
-                project_id=project_id,
-                project_name=project_name,
-                format=format,
-                projection_json=projection_json,
-                on_save=on_save,
-            )
+                    def on_save(current: int, total: int) -> None:
+                        status.update(f"[info]Saving resources ({current}/{total})...[/info]")
+
+                project, projection = AgentStudioProject.init_project(
+                    base_path=base_path,
+                    region=region,
+                    account_id=account_id,
+                    project_id=project_id,
+                    project_name=project_name,
+                    format=format,
+                    projection_json=projection_json,
+                    on_save=on_save,
+                )
+        except (requests.HTTPError, SourcererAPIError) as e:
+            # Clean up any partially created directories
+            if os.path.exists(project_path):
+                shutil.rmtree(project_path)
+            if os.path.exists(account_path) and not os.listdir(account_path):
+                shutil.rmtree(account_path)
+
+            # Extract error_code from the response body
+            error_code = None
+            response = getattr(e, "response", None)
+            if response is None and e.__cause__ is not None:
+                response = getattr(e.__cause__, "response", None)
+            if response is not None:
+                try:
+                    error_code = response.json().get("error_code")
+                except (json.JSONDecodeError, ValueError, AttributeError):
+                    pass
+
+            if error_code == "FORBIDDEN":
+                init_error = (
+                    f"Forbidden: you do not have permission to access "
+                    f"project '{project_id}' in account '{account_id}'."
+                )
+            elif error_code == "DEPLOYMENT_NOT_FOUND":
+                init_error = f"Project '{project_id}' not found in account '{account_id}'."
+            else:
+                init_error = f"API error: {e}"
 
         if not project:
+            err_msg = init_error or "Failed to initialize the project."
             if output_json:
-                json_print(
-                    {
-                        "success": False,
-                        "error": "Failed to initialize the project.",
-                    }
-                )
+                json_print({"success": False, "error": err_msg})
             else:
-                error("Failed to initialize the project.")
+                error(err_msg)
             sys.exit(1)
 
         if output_json or output_json_projection:
