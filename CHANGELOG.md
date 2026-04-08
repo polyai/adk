@@ -1,6 +1,57 @@
 # CHANGELOG
 
 
+## v0.8.0 (2026-04-08)
+
+### Features
+
+- Add `poly branch delete` command ([#63](https://github.com/polyai/adk/pull/63),
+  [`463a663`](https://github.com/polyai/adk/commit/463a66379a4c8506102f75193461320e07b2ae2a))
+
+## Summary
+
+Adds `poly branch delete` — an interactive command for deleting branches, following the same UX
+  pattern as `poly review delete`.
+
+## Motivation
+
+Branch deletion was already implemented in the backend (`project.delete_branch()`) but not exposed
+  through the CLI.
+
+## Changes
+
+- Added `delete` subcommand to `poly branch` with optional `branch_name` argument - Interactive
+  checkbox selection (via questionary) when no branch name is provided - Direct deletion mode when
+  branch name is passed as argument - JSON output mode support (`--json`) - Filters out `main`
+  branch (cannot be deleted) - 16 new unit tests covering all code paths
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+<img width="1532" height="560" alt="image"
+  src="https://github.com/user-attachments/assets/3336c7d5-ac70-4c5c-99e9-ddb27ff147a0" /> <img
+  width="1348" height="122" alt="image"
+  src="https://github.com/user-attachments/assets/1c7f31fc-4de3-4ec3-bc55-aba98799d870" /> <img
+  width="650" height="57" alt="image"
+  src="https://github.com/user-attachments/assets/702fbdaf-1b14-49f8-b607-b7404f39e898" />
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (431 tests) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+Co-authored-by: Ruari Phipps <ruari@poly-ai.com>
+
+
 ## v0.7.3 (2026-04-02)
 
 ### Bug Fixes
