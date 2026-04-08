@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import os
+import shutil
 import uuid
 from dataclasses import dataclass, fields
 from datetime import datetime
@@ -17,9 +18,12 @@ from google.protobuf.message import Message
 
 import poly.resources.resource_utils as resource_utils
 import poly.utils as utils
+import requests
+
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
+from poly.handlers.sdk import SourcererAPIError
 from poly.resources import (
     ApiIntegration,
     AsrSettings,
@@ -141,6 +145,7 @@ class AgentStudioProject:
     resources: ResourceMap
     last_updated: datetime
     branch_id: str = None
+    project_name: str = None
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
 
@@ -174,11 +179,14 @@ class AgentStudioProject:
 
     def build_project_config(self) -> dict:
         """Build the project configuration dictionary"""
-        return {
+        config = {
             "project_id": self.project_id,
             "account_id": self.account_id,
             "region": self.region,
         }
+        if self.project_name:
+            config["project_name"] = self.project_name
+        return config
 
     @classmethod
     def _load_resources_from_status_dict(
@@ -247,6 +255,7 @@ class AgentStudioProject:
             last_updated=last_updated,
             file_structure_info={},
             branch_id=status_dict.get("branch_id", "main"),
+            project_name=config_dict.get("project_name") or status_dict.get("project_name"),
             _not_loaded_resources=not_loaded_resources,
         )
 
@@ -265,6 +274,7 @@ class AgentStudioProject:
             "last_updated": (self.last_updated.isoformat() if self.last_updated else None),
             "file_structure_info": self.file_structure_info,
             "branch_id": self.branch_id,
+            "project_name": self.project_name,
         }
 
     @classmethod
@@ -283,6 +293,7 @@ class AgentStudioProject:
             last_updated=datetime.fromisoformat(data.get("last_updated", "1970-01-01T00:00:00")),
             file_structure_info=file_structure_info,
             branch_id=data.get("branch_id", "main"),
+            project_name=data.get("project_name"),
             _not_loaded_resources=not_loaded_resources,
         )
 
@@ -320,6 +331,7 @@ class AgentStudioProject:
         region: str,
         account_id: str,
         project_id: str,
+        project_name: str = None,
         format: bool = False,
         projection_json: Optional[dict[str, Any]] = None,
         on_save: Callable[[int, int], None] | None = None,
@@ -331,6 +343,7 @@ class AgentStudioProject:
             region (str): The region of the project
             account_id (str): The account ID of the project
             project_id (str): The project ID
+            project_name (str): The human-readable project name
             format (bool): If True, format resources after pulling
             projection_json (dict[str, Any]): A dictionary containing the projection
                 If provided, the projection will be used instead of fetching it from the API.
@@ -342,52 +355,90 @@ class AgentStudioProject:
             dict[str, Any]: The projection data
         """
 
-        base_path = os.path.join(base_path, account_id, project_id)
+        account_path = os.path.join(base_path, account_id)
+        project_path = os.path.join(account_path, project_id)
 
-        project = cls(
-            region=region,
-            account_id=account_id,
-            project_id=project_id,
-            root_path=base_path,
-            resources={},
-            last_updated=datetime.now(),
-            branch_id="main",
-        )
-        project.resources, projection = project.api_handler.pull_resources(
-            projection_json=projection_json
-        )
-        project._check_no_duplicate_resource_paths(project.resources)
+        try:
+            project = cls(
+                region=region,
+                account_id=account_id,
+                project_id=project_id,
+                root_path=project_path,
+                resources={},
+                last_updated=datetime.now(),
+                branch_id="main",
+                project_name=project_name,
+            )
+            project.resources, projection = project.api_handler.pull_resources(
+                projection_json=projection_json
+            )
+            project._check_no_duplicate_resource_paths(project.resources)
 
-        resource_mappings: list[ResourceMapping] = project._make_resource_mappings(
-            project.resources
-        )
-
-        all_resources = project.all_resources
-        total = len(all_resources)
-
-        MultiResourceYamlResource._file_cache.clear()
-
-        for i, resource in enumerate(all_resources, 1):
-            if on_save:
-                on_save(i, total)
-            is_multi = isinstance(resource, MultiResourceYamlResource)
-            resource.save(
-                base_path,
-                resource_mappings=resource_mappings,
-                resource_name=resource.name,
-                format=format,
-                save_to_cache=is_multi,
+            resource_mappings: list[ResourceMapping] = project._make_resource_mappings(
+                project.resources
             )
 
-        MultiResourceYamlResource.write_cache_to_file()
-        MultiResourceYamlResource._file_cache.clear()
+            all_resources = project.all_resources
+            total = len(all_resources)
 
-        project.save_config(write_project_yaml=True)
+            MultiResourceYamlResource._file_cache.clear()
 
-        utils.export_decorators(DECORATORS, base_path)
-        utils.save_imports(base_path)
+            for i, resource in enumerate(all_resources, 1):
+                if on_save:
+                    on_save(i, total)
+                is_multi = isinstance(resource, MultiResourceYamlResource)
+                resource.save(
+                    project_path,
+                    resource_mappings=resource_mappings,
+                    resource_name=resource.name,
+                    format=format,
+                    save_to_cache=is_multi,
+                )
 
-        return project, projection
+            MultiResourceYamlResource.write_cache_to_file()
+            MultiResourceYamlResource._file_cache.clear()
+
+            project.save_config(write_project_yaml=True)
+
+            utils.export_decorators(DECORATORS, project_path)
+            utils.save_imports(project_path)
+
+            return project, projection
+
+        except (requests.HTTPError, SourcererAPIError) as e:
+            # Clean up any partially created directories
+            if os.path.exists(project_path):
+                shutil.rmtree(project_path)
+            if os.path.exists(account_path) and not os.listdir(account_path):
+                shutil.rmtree(account_path)
+
+            # Extract error_code from the response body
+            error_code = cls._extract_error_code(e)
+
+            if error_code == "FORBIDDEN":
+                raise ValueError(
+                    f"Forbidden: you do not have permission to access "
+                    f"project '{project_id}' in account '{account_id}'."
+                ) from e
+            elif error_code == "DEPLOYMENT_NOT_FOUND":
+                raise ValueError(
+                    f"Project '{project_id}' not found in account '{account_id}'."
+                ) from e
+            else:
+                raise ValueError(f"API error: {e}") from e
+
+    @staticmethod
+    def _extract_error_code(e: Exception) -> Optional[str]:
+        """Extract the error_code from an API error response."""
+        response = getattr(e, "response", None)
+        if response is None and e.__cause__ is not None:
+            response = getattr(e.__cause__, "response", None)
+        if response is not None:
+            try:
+                return response.json().get("error_code")
+            except (json.JSONDecodeError, ValueError, AttributeError):
+                pass
+        return None
 
     def save_config(self, write_project_yaml: bool = False) -> None:
         """Save the project configuration to a file
