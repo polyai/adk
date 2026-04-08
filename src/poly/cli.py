@@ -1170,7 +1170,7 @@ class AgentStudioCLI:
                 "dry_run": dry_run,
             }
             if new_branch_name:
-                json_output["new_branch_name"] = new_branch_name
+                json_output["switched_to"] = new_branch_name
                 json_output["new_branch_id"] = project.branch_id
             if output_commands:
                 json_output["commands"] = commands_to_dicts(commands)
