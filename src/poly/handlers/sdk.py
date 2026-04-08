@@ -373,11 +373,17 @@ class SourcererSDK:
             raise SourcererAPIError(error_msg) from e
 
     def fetch_last_known_sequence_number(self, branch_id: Optional[str] = None) -> int:
-        """Get the sequence number from the API
+        """Get the sequence number from the API.
+
+        Args:
+            branch_id (Optional[str]): The branch ID to fetch the sequence number for.
+                Defaults to the current branch if not provided.
+
         Returns:
-            The sequence number as an integer
+            The sequence number as an integer.
+
         Raises:
-            SourcererAPIError: If the API request fails
+            SourcererAPIError: If the API request fails.
         """
         if branch_id is None:
             branch_id = self.branch_id
