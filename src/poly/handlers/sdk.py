@@ -353,10 +353,7 @@ class SourcererSDK:
         """
         try:
             # Fetch the branch's projection to get its sequence number
-            projection_url = f"{self._get_branches_url()}/{branch_id}/projection"
-            proj_response = self.session.get(projection_url)
-            proj_response.raise_for_status()
-            seq = int(proj_response.json().get("lastKnownSequence", 0))
+            seq: int = self.fetch_last_known_sequence_number(branch_id=branch_id)
 
             url = f"{self._get_branches_url()}/{branch_id}"
             logger.info(f"Deleting branch {branch_id} with sequence={seq}")
@@ -375,15 +372,17 @@ class SourcererSDK:
                 error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
-    def fetch_last_known_sequence_number(self) -> int:
+    def fetch_last_known_sequence_number(self, branch_id: Optional[str] = None) -> int:
         """Get the sequence number from the API
         Returns:
             The sequence number as an integer
         Raises:
             SourcererAPIError: If the API request fails
         """
+        if branch_id is None:
+            branch_id = self.branch_id
         try:
-            url = f"{self._get_branches_url()}/{self.branch_id}/sequence"
+            url = f"{self._get_branches_url()}/{branch_id}/sequence"
             response = self.session.get(url)
             response.raise_for_status()
             return int(response.json()["lastKnownSequence"])
