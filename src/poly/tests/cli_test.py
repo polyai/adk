@@ -544,3 +544,234 @@ class CompletionCommandTest(unittest.TestCase):
         """Parser rejects shell choices outside bash/zsh/fish."""
         with self.assertRaises(SystemExit):
             AgentStudioCLI.main(sys_args=["completion", "powershell"])
+
+
+class CreateProjectTest(unittest.TestCase):
+    """Tests for the create-project command."""
+
+    @patch("poly.cli.AgentStudioCLI.init_project")
+    @patch("poly.cli.AgentStudioInterface")
+    def test_non_interactive_creates_project_and_inits(self, mock_iface_cls, mock_init):
+        """create-project with all args provided creates the project and inits locally."""
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.create_project.return_value = {"id": "proj-123", "name": "my-project"}
+
+        AgentStudioCLI.create_project(
+            TEST_DIR,
+            region="us-1",
+            account_id="acc-456",
+            project_name="my-project",
+            output_json=False,
+        )
+
+        mock_iface.create_project.assert_called_once_with("us-1", "acc-456", "my-project")
+        mock_init.assert_called_once_with(
+            TEST_DIR,
+            region="us-1",
+            account_id="acc-456",
+            project_id="proj-123",
+            output_json=False,
+        )
+
+    @patch("poly.cli.AgentStudioCLI.init_project")
+    @patch("poly.cli.AgentStudioInterface")
+    @patch("poly.cli.questionary")
+    def test_interactive_flow_selects_region_account_and_name(
+        self, mock_q, mock_iface_cls, mock_init
+    ):
+        """create-project with no args prompts for region, account, and name."""
+        mock_q.select.return_value.ask.side_effect = ["us-1", "My Account"]
+        mock_q.text.return_value.ask.return_value = "new-project"
+
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_accounts.return_value = {"My Account": "acc-789"}
+        mock_iface.create_project.return_value = {"id": "proj-001", "name": "new-project"}
+
+        AgentStudioCLI.create_project(
+            TEST_DIR,
+            region=None,
+            account_id=None,
+            project_name=None,
+            output_json=False,
+        )
+
+        mock_iface.get_accounts.assert_called_once_with("us-1")
+        mock_iface.create_project.assert_called_once_with("us-1", "acc-789", "new-project")
+        mock_init.assert_called_once_with(
+            TEST_DIR,
+            region="us-1",
+            account_id="acc-789",
+            project_id="proj-001",
+            output_json=False,
+        )
+
+    @patch("poly.cli.AgentStudioInterface")
+    def test_json_mode_requires_all_args(self, mock_iface_cls):
+        """create-project --json without all args exits with error."""
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.create_project(
+                TEST_DIR,
+                region="us-1",
+                account_id=None,
+                project_name=None,
+                output_json=True,
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_iface_cls.return_value.create_project.assert_not_called()
+
+    @patch("poly.cli.AgentStudioCLI.init_project")
+    @patch("poly.cli.AgentStudioInterface")
+    @patch("poly.cli.questionary")
+    def test_user_cancels_region_selection(self, mock_q, mock_iface_cls, mock_init):
+        """create-project returns early when user cancels region selection."""
+        mock_q.select.return_value.ask.return_value = None
+
+        AgentStudioCLI.create_project(
+            TEST_DIR,
+            region=None,
+            account_id=None,
+            project_name=None,
+            output_json=False,
+        )
+
+        mock_iface_cls.return_value.create_project.assert_not_called()
+        mock_init.assert_not_called()
+
+    @patch("poly.cli.AgentStudioCLI.init_project")
+    @patch("poly.cli.AgentStudioInterface")
+    @patch("poly.cli.questionary")
+    def test_user_cancels_account_selection(self, mock_q, mock_iface_cls, mock_init):
+        """create-project returns early when user cancels account selection."""
+        mock_q.select.return_value.ask.side_effect = ["us-1", None]
+
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_accounts.return_value = {"Acme Corp": "acc-100"}
+
+        AgentStudioCLI.create_project(
+            TEST_DIR,
+            region=None,
+            account_id=None,
+            project_name=None,
+            output_json=False,
+        )
+
+        mock_iface.create_project.assert_not_called()
+        mock_init.assert_not_called()
+
+    @patch("poly.cli.AgentStudioCLI.init_project")
+    @patch("poly.cli.AgentStudioInterface")
+    @patch("poly.cli.questionary")
+    def test_user_cancels_project_name_entry(self, mock_q, mock_iface_cls, mock_init):
+        """create-project returns early when user enters empty project name."""
+        mock_q.select.return_value.ask.side_effect = ["us-1", "My Account"]
+        mock_q.text.return_value.ask.return_value = ""
+
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_accounts.return_value = {"My Account": "acc-200"}
+
+        AgentStudioCLI.create_project(
+            TEST_DIR,
+            region=None,
+            account_id=None,
+            project_name=None,
+            output_json=False,
+        )
+
+        mock_iface.create_project.assert_not_called()
+        mock_init.assert_not_called()
+
+    @patch("poly.cli.AgentStudioCLI.init_project")
+    @patch("poly.cli.AgentStudioInterface")
+    def test_api_error_during_creation_reports_failure(self, mock_iface_cls, mock_init):
+        """create-project reports error and does not init when API call fails."""
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.create_project.side_effect = RuntimeError("API is down")
+
+        AgentStudioCLI.create_project(
+            TEST_DIR,
+            region="us-1",
+            account_id="acc-300",
+            project_name="bad-project",
+            output_json=False,
+        )
+
+        mock_iface.create_project.assert_called_once()
+        mock_init.assert_not_called()
+
+    @patch("poly.cli.AgentStudioCLI.init_project")
+    @patch("poly.cli.AgentStudioInterface")
+    def test_api_error_in_json_mode_returns_error_json(self, mock_iface_cls, mock_init):
+        """create-project --json returns error JSON when API call fails."""
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.create_project.side_effect = RuntimeError("Server error")
+
+        AgentStudioCLI.create_project(
+            TEST_DIR,
+            region="us-1",
+            account_id="acc-400",
+            project_name="failing-project",
+            output_json=True,
+        )
+
+        mock_init.assert_not_called()
+
+    @patch("poly.cli.AgentStudioCLI.init_project")
+    @patch("poly.cli.AgentStudioInterface")
+    @patch("poly.cli.questionary")
+    def test_no_accounts_found_returns_early(self, mock_q, mock_iface_cls, mock_init):
+        """create-project returns early when no accounts exist for the region."""
+        mock_q.select.return_value.ask.return_value = "us-1"
+
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_accounts.return_value = {}
+
+        AgentStudioCLI.create_project(
+            TEST_DIR,
+            region=None,
+            account_id=None,
+            project_name=None,
+            output_json=False,
+        )
+
+        mock_iface.create_project.assert_not_called()
+        mock_init.assert_not_called()
+
+    @patch("poly.cli.AgentStudioCLI.init_project")
+    @patch("poly.cli.AgentStudioInterface")
+    def test_no_project_id_in_response_does_not_init(self, mock_iface_cls, mock_init):
+        """create-project does not init when API response has no project ID."""
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.create_project.return_value = {"id": None, "name": "orphan"}
+
+        AgentStudioCLI.create_project(
+            TEST_DIR,
+            region="us-1",
+            account_id="acc-500",
+            project_name="orphan",
+            output_json=False,
+        )
+
+        mock_init.assert_not_called()
+
+    @patch("poly.cli.AgentStudioCLI.init_project")
+    @patch("poly.cli.AgentStudioInterface")
+    @patch("poly.cli.questionary")
+    def test_project_name_is_stripped(self, mock_q, mock_iface_cls, mock_init):
+        """create-project strips whitespace from interactively entered project name."""
+        mock_q.select.return_value.ask.side_effect = ["euw-1", "My Account"]
+        mock_q.text.return_value.ask.return_value = "  spaced-name  "
+
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_accounts.return_value = {"My Account": "acc-600"}
+        mock_iface.create_project.return_value = {"id": "proj-007", "name": "spaced-name"}
+
+        AgentStudioCLI.create_project(
+            TEST_DIR,
+            region=None,
+            account_id=None,
+            project_name=None,
+            output_json=False,
+        )
+
+        mock_iface.create_project.assert_called_once_with("euw-1", "acc-600", "spaced-name")
