@@ -1368,7 +1368,10 @@ class AgentStudioCLI:
             return project.get_diffs(all_files=not files, files=files)
 
         if not before:
-            versions, deployment_hashes = project.get_deployments()
+            client_env = "sandbox"
+            if after in {"pre-release", "live"}:
+                client_env = after
+            versions, deployment_hashes = project.get_deployments(client_env=client_env)
             if after in deployment_hashes:
                 after = deployment_hashes[after]
             if not versions:
