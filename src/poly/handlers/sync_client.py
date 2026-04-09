@@ -1106,14 +1106,17 @@ class SyncClientHandler:
         logger.info(f"Fetched {len(branches)} branches branches={branches!r}")
         return branches
 
-    def delete_branch(self, branch_id):
+    def delete_branch(self, branch_id: str) -> bool:
         """Delete a branch in the project.
 
         Args:
             branch_id (str): The ID of the branch to delete
 
         Returns:
-            bool: True if the branch was deleted successfully, False otherwise
+            bool: True if the branch was deleted successfully.
+
+        Raises:
+            SourcererAPIError: If the API request fails.
         """
         if branch_id == "main":
             logger.error("Cannot delete 'main' branch.")
@@ -1124,8 +1127,8 @@ class SyncClientHandler:
         try:
             self.sdk.delete_branch(branch_id=branch_id)
         except SourcererAPIError as e:
-            logger.error(f"Failed to delete branch ID:'{branch_id}': {e}")
-            return False
+            logger.debug(f"Failed to delete branch ID:'{branch_id}': {e}")
+            raise
 
         logger.info(f"Successfully deleted branch ID:'{branch_id}'")
         return True

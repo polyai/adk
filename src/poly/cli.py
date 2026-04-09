@@ -68,6 +68,26 @@ class AgentStudioCLI:
     """CLI Interface for Agent Studio."""
 
     @classmethod
+    def _branch_name_completer(
+        cls,
+        prefix: str,
+        action: Any = None,
+        parser: Any = None,
+        parsed_args: Any = None,
+        **kwargs: Any,
+    ) -> list[str]:
+        """Return deletable branch names for argcomplete tab-completion."""
+        try:
+            base_path = getattr(parsed_args, "path", None) or os.getcwd()
+            project = cls.read_project_config(base_path)
+            if project is None:
+                return []
+            _, branches = project.get_branches()
+            return [name for name in branches if name != "main" and name.startswith(prefix)]
+        except Exception:
+            return []
+
+    @classmethod
     def _create_parser(cls) -> ArgumentParser:
         """Create and configure the CLI command parser."""
         try:
@@ -419,7 +439,7 @@ class AgentStudioCLI:
 
         branches_parser = subparsers.add_parser(
             "branch",
-            parents=[verbose_parent, json_parent],
+            parents=[verbose_parent],
             help="Manage branches in the Agent Studio project.",
             description=(
                 "Manage branches in the Agent Studio project.\n\n"
@@ -428,6 +448,7 @@ class AgentStudioCLI:
                 "  poly branch create new-branch\n"
                 "  poly branch switch existing-branch\n"
                 "  poly branch current\n"
+                "  poly branch delete\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -435,14 +456,14 @@ class AgentStudioCLI:
 
         branch_list_parser = branch_subparsers.add_parser(
             "list",
-            parents=[branch_path_parent],
+            parents=[branch_path_parent, json_parent],
             help="List all branches in the project.",
         )
         branch_list_parser.set_defaults(branch_subcommand="list")
 
         branch_create_parser = branch_subparsers.add_parser(
             "create",
-            parents=[branch_path_parent],
+            parents=[branch_path_parent, json_parent],
             help="Create a new branch.",
         )
         branch_create_parser.add_argument(
@@ -467,7 +488,7 @@ class AgentStudioCLI:
 
         branch_switch_parser = branch_subparsers.add_parser(
             "switch",
-            parents=[branch_path_parent],
+            parents=[branch_path_parent, json_parent],
             help="Switch to a different branch.",
         )
         branch_switch_parser.add_argument(
@@ -504,10 +525,23 @@ class AgentStudioCLI:
 
         branch_current_parser = branch_subparsers.add_parser(
             "current",
-            parents=[branch_path_parent],
+            parents=[branch_path_parent, json_parent],
             help="Show the current branch.",
         )
         branch_current_parser.set_defaults(branch_subcommand="current")
+
+        branch_delete_parser = branch_subparsers.add_parser(
+            "delete",
+            parents=[branch_path_parent, json_parent],
+            help="Interactively select and delete a branch.",
+        )
+        branch_delete_parser.add_argument(
+            "branch_name",
+            nargs="?",
+            default=None,
+            help="Name of the branch to delete directly, skipping the interactive prompt.",
+        ).completer = cls._branch_name_completer
+        branch_delete_parser.set_defaults(branch_subcommand="delete")
 
         # FORMAT
         format_parser = subparsers.add_parser(
@@ -748,6 +782,9 @@ class AgentStudioCLI:
             elif args.branch_subcommand == "current":
                 cls.get_current_branch(args.path, args.json)
 
+            elif args.branch_subcommand == "delete":
+                cls.branch_delete(args.path, args.branch_name, args.json)
+
         elif args.command == "format":
             cls.format(
                 args.path,
@@ -796,7 +833,7 @@ class AgentStudioCLI:
     def main(cls, sys_args=None):
         """Main entry point for the CLI tool."""
         parser = cls._create_parser()
-        argcomplete.autocomplete(parser)
+        argcomplete.autocomplete(parser, always_complete_options=False)
 
         try:
             if sys_args:
@@ -804,7 +841,7 @@ class AgentStudioCLI:
             else:
                 args = parser.parse_args()
 
-            set_verbose(args.verbose)
+            set_verbose(getattr(args, "verbose", False))
             cls._run_command(args)
         except SystemExit:
             raise
@@ -1133,7 +1170,7 @@ class AgentStudioCLI:
                 "dry_run": dry_run,
             }
             if new_branch_name:
-                json_output["new_branch_name"] = new_branch_name
+                json_output["switched_to"] = new_branch_name
                 json_output["new_branch_id"] = project.branch_id
             if output_commands:
                 json_output["commands"] = commands_to_dicts(commands)
@@ -1320,7 +1357,7 @@ class AgentStudioCLI:
             description = f"Poly ADK: {project_name}: {before_name} → {after_name}"
         else:
             body = cls._review(base_path)
-            description = f"{project_name}: local → remote"
+            description = f"Poly ADK: {project_name}: local → remote"
 
         if not body:
             if output_json:
@@ -1686,6 +1723,111 @@ class AgentStudioCLI:
             )
             return
         plain(f"Current branch: [bold]{current_branch}[/bold]")
+
+    @classmethod
+    def branch_delete(
+        cls,
+        base_path: str,
+        branch_name: Optional[str] = None,
+        output_json: bool = False,
+    ) -> None:
+        """Interactively select and delete a branch from the Agent Studio project.
+
+        If branch_name is provided, delete that specific branch without an interactive prompt.
+        """
+        project = cls._load_project(base_path, output_json=output_json)
+        current_branch, branches = project.get_branches()
+
+        # Filter out 'main' — it cannot be deleted
+        deletable = {name: bid for name, bid in branches.items() if name != "main"}
+
+        if branch_name:
+            if branch_name not in deletable:
+                msg = f"Branch '{branch_name}' does not exist or cannot be deleted."
+                if output_json:
+                    json_print({"success": False, "message": msg})
+                else:
+                    error(msg)
+                return
+            if not output_json:
+                confirmed = questionary.confirm(
+                    f"Delete branch '{branch_name}'?", default=False
+                ).ask()
+                if not confirmed:
+                    warning("Aborted.")
+                    return
+            try:
+                deleted = project.delete_branch(branch_name)
+            except (ValueError, Exception) as e:
+                if output_json:
+                    json_print({"success": False, "message": str(e)})
+                else:
+                    error(str(e))
+                return
+            if output_json:
+                result = {"success": deleted}
+                if deleted and branch_name == current_branch:
+                    result["switched_to"] = "main"
+                json_print(result)
+            else:
+                if deleted:
+                    success(f"Deleted branch: {branch_name}")
+                    if branch_name == current_branch:
+                        info("Switched to branch 'main'.")
+                else:
+                    error(f"Failed to delete branch '{branch_name}'.")
+            return
+
+        if not deletable:
+            plain("[muted]No deletable branches found.[/muted]")
+            return
+
+        choices = []
+        for name in deletable:
+            label = f"{name} (current)" if name == current_branch else name
+            choices.append(label)
+
+        selected = questionary.checkbox("Select branches to delete", choices=choices).ask()
+        if not selected:
+            warning("No branches selected. Exiting.")
+            return
+
+        branch_names = [label.replace(" (current)", "") for label in selected]
+        confirm_msg = f"Delete {len(branch_names)} branch(es): {', '.join(branch_names)}?"
+        confirmed = questionary.confirm(confirm_msg, default=False).ask()
+        if not confirmed:
+            warning("Aborted.")
+            return
+
+        deleted_count = 0
+        current_branch_deleted = False
+        for label in selected:
+            name = label.replace(" (current)", "")
+            try:
+                deleted = project.delete_branch(name)
+                if deleted:
+                    deleted_count += 1
+                    if name == current_branch:
+                        current_branch_deleted = True
+                    if not output_json:
+                        plain(f"  [muted]Deleted branch:[/muted] {name}")
+                        if name == current_branch:
+                            info("Switched to branch 'main'.")
+                else:
+                    if not output_json:
+                        error(f"Failed to delete branch '{name}'.")
+            except (ValueError, Exception) as e:
+                if not output_json:
+                    error(str(e))
+
+        if output_json:
+            result = {"success": deleted_count > 0, "deleted": deleted_count}
+            if current_branch_deleted:
+                result["switched_to"] = "main"
+            json_print(result)
+        else:
+            if deleted_count:
+                success(f"Deleted {deleted_count} branch(es).")
 
     @classmethod
     def format(
