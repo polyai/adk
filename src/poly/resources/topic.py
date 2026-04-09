@@ -160,9 +160,10 @@ class Topic(YamlResource):
         if not os.path.exists(topics_path):
             return discovered_topics
 
-        for file_name in os.listdir(topics_path):
-            if file_name.endswith(".yaml") or file_name.endswith(".yml"):
-                file_path = os.path.join(topics_path, file_name)
-                discovered_topics.append(file_path)
+        for dirpath, _, filenames in os.walk(topics_path):
+            for file_name in filenames:
+                if file_name.endswith(".yaml") or file_name.endswith(".yml"):
+                    file_path = os.path.join(dirpath, file_name)
+                    discovered_topics.append(file_path)
 
         return discovered_topics

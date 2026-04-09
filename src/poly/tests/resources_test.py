@@ -1335,6 +1335,40 @@ example_queries: []
             self.assertEqual(result.content, "")
             self.assertEqual(result.example_queries, [])
 
+    def test_discover_resources(self):
+        """Test discovering topic YAML files from the topics directory."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            topics_dir = os.path.join(tmpdir, "topics")
+            os.makedirs(topics_dir)
+            open(os.path.join(topics_dir, "billing.yaml"), "w").close()
+            open(os.path.join(topics_dir, "support.yaml"), "w").close()
+            open(os.path.join(topics_dir, "not_a_topic.txt"), "w").close()
+
+            discovered = Topic.discover_resources(tmpdir)
+            self.assertEqual(len(discovered), 2)
+            self.assertIn(os.path.join(topics_dir, "billing.yaml"), discovered)
+            self.assertIn(os.path.join(topics_dir, "support.yaml"), discovered)
+
+    def test_discover_resources_nonexistent_path(self):
+        """discover_resources returns empty list when topics directory doesn't exist."""
+        self.assertEqual(Topic.discover_resources("/nonexistent"), [])
+
+    def test_discover_resources_finds_topics_in_subdirectories(self):
+        """Topics with '/' in the name create subdirectories; discover_resources should find them."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            topics_dir = os.path.join(tmpdir, "topics")
+            nested_dir = os.path.join(topics_dir, "billing")
+            os.makedirs(nested_dir)
+            open(os.path.join(topics_dir, "support.yaml"), "w").close()
+            open(os.path.join(nested_dir, "payments.yaml"), "w").close()
+
+            discovered = Topic.discover_resources(tmpdir)
+            self.assertEqual(len(discovered), 2)
+            self.assertIn(os.path.join(topics_dir, "support.yaml"), discovered)
+            self.assertIn(os.path.join(nested_dir, "payments.yaml"), discovered)
+
 
 TEST_DISCLAIMER = VoiceDisclaimerMessage(
     resource_id="disclaimer_123",
