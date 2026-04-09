@@ -1765,9 +1765,9 @@ class AgentStudioProject:
         # 3) Deployment version hash prefix -> deployment resources
         version_hash = (name or "")[:9].lower()
         if version_hash:
-            deployments, _ = self.get_deployments(client_env="sandbox")
+            deployments, _ = self.get_deployments()
             deployment = next(
-                (d for d in deployments if d.get("version_hash")[:9] == version_hash), {}
+                (d for d in deployments if (d.get("version_hash") or "")[:9] == version_hash), {}
             )
             deployment_id = deployment.get("id")
             if deployment_id:

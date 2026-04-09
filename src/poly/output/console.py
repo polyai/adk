@@ -9,7 +9,7 @@ import json
 import sys
 from datetime import datetime
 from typing import Any
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from rich.console import Console
 from rich.panel import Panel
@@ -241,7 +241,10 @@ def _format_deployment_timestamp(created_at: str) -> str:
     try:
         tz_str = created_at.split()[-1]  # "GMT"
         dt = datetime.strptime(created_at, "%a, %d %b %Y %H:%M:%S %Z")
-        dt = dt.replace(tzinfo=ZoneInfo(tz_str))
+        try:
+            dt = dt.replace(tzinfo=ZoneInfo(tz_str))
+        except ZoneInfoNotFoundError:
+            dt = dt.replace(tzinfo=ZoneInfo("UTC"))
         dt = dt.astimezone()
         return dt.strftime("%d %b %y %H:%M %Z")
     except (TypeError, ValueError):

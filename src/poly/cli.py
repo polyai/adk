@@ -848,7 +848,7 @@ class AgentStudioCLI:
                 cls.review(
                     base_path=args.path,
                     files=args.files,
-                    hash=args.hash,
+                    version_hash=args.hash,
                     before=args.before,
                     after=args.after,
                     output_json=args.json,
@@ -1341,6 +1341,14 @@ class AgentStudioCLI:
         files = [os.path.abspath(os.path.join(os.getcwd(), file)) for file in files or []]
 
         files_reverted = project.revert_changes(files=files)
+        if output_json:
+            json_print(
+                {
+                    "success": True,
+                    "files_reverted": files_reverted,
+                }
+            )
+            return
         if not files_reverted:
             plain("[muted]No changes to revert.[/muted]")
             return
@@ -1378,7 +1386,12 @@ class AgentStudioCLI:
                 error("No versions found.")
                 return
             version_idx = next(
-                (i for i, v in enumerate(versions) if v.get("version_hash")[:9] == after[:9]), None
+                (
+                    i
+                    for i, v in enumerate(versions)
+                    if (v.get("version_hash") or "")[:9] == after[:9]
+                ),
+                None,
             )
             if version_idx is None:
                 error(f"Version hash '{after}' not found.")
@@ -1387,7 +1400,7 @@ class AgentStudioCLI:
                 error("No previous version found.")
                 return
             previous_version_idx = version_idx + 1
-            before = versions[previous_version_idx].get("version_hash")[:9]
+            before = (versions[previous_version_idx].get("version_hash") or "")[:9]
 
         if not after:
             after = "local"
@@ -1399,7 +1412,7 @@ class AgentStudioCLI:
         cls,
         base_path: str,
         files: list[str] = None,
-        hash: str = None,
+        version_hash: str = None,
         before: str = None,
         after: str = None,
         output_json: bool = False,
@@ -1410,12 +1423,12 @@ class AgentStudioCLI:
         Pass a version hash to compare that version against its predecessor.
         Use --before / --after to compare any two named versions or branches.
         """
-        if hash and (before or after):
+        if version_hash and (before or after):
             error("Cannot specify both hash and before/after versions.")
             return
 
-        if hash:
-            after = hash
+        if version_hash:
+            after = version_hash
 
         diffs = cls._compute_diff(base_path, files, before, after, output_json=output_json)
 
@@ -1446,7 +1459,7 @@ class AgentStudioCLI:
         cls,
         base_path: str,
         files: list[str] = None,
-        hash: str = None,
+        version_hash: str = None,
         before: str = None,
         after: str = None,
         output_json: bool = False,
@@ -1460,19 +1473,19 @@ class AgentStudioCLI:
         Args:
             base_path: Base path for the project (used to read project config).
             files: Files to include in the review. If not specified, includes all changes.
-            hash: Version hash to compare against its predecessor.
+            version_hash: Version hash to compare against its predecessor.
             before: Base version or branch name for comparison.
             after: Target version or branch name for comparison.
             output_json: If True, print result as JSON instead of rich text.
         """
         project_name = "/".join(os.path.abspath(base_path).split(os.sep)[-2:])
-        if hash and (before or after):
+        if version_hash and (before or after):
             error("Cannot specify both hash and before/after versions.")
             return
 
-        if hash:
-            after = hash
-            description = f"Poly ADK: {project_name}: {hash}"
+        if version_hash:
+            after = version_hash
+            description = f"Poly ADK: {project_name}: {version_hash}"
 
         elif not (before or after):
             description = f"Poly ADK: {project_name}: local → remote"
@@ -2311,14 +2324,14 @@ class AgentStudioCLI:
         environment: str = "sandbox",
         limit: int = 10,
         offset: int = 0,
-        hash: str = None,
+        version_hash: str = None,
         output_json: bool = False,
         details: bool = False,
     ) -> None:
         """List deployment history for the project.
 
         By default shows the 10 most recent deployments for the sandbox environment.
-        Pass --hash to start the listing from a specific version. Use --details for
+        Pass version_hash to start the listing from a specific version. Use details for
         full per-deployment metadata.
 
         Args:
@@ -2326,7 +2339,7 @@ class AgentStudioCLI:
             environment: Environment to query — sandbox, pre-release, or live.
             limit: Maximum number of versions to show.
             offset: Number of versions to skip before showing results.
-            hash: Start listing from this version hash (overrides offset).
+            version_hash: Start listing from this version hash (overrides offset).
             output_json: If True, print result as JSON instead of rich text.
             details: If True, print full metadata for each deployment.
         """
@@ -2337,12 +2350,11 @@ class AgentStudioCLI:
             error("No versions found.")
             return
 
-        if hash:
-            hash = hash[:9]
-
-        if hash:
+        if version_hash:
+            version_hash = version_hash[:9]
             version_idx = next(
-                (i for i, v in enumerate(versions) if v.get("version_hash")[:9] == hash), None
+                (i for i, v in enumerate(versions) if v.get("version_hash")[:9] == version_hash),
+                None,
             )
             if version_idx is None:
                 error(f"Version hash '{hash}' not found.")
