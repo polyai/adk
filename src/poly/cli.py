@@ -719,20 +719,42 @@ class AgentStudioCLI:
         )
 
         # DEPLOYMENTS
-        deployments_parser = subparsers.add_parser(
-            "deployments",
-            parents=[verbose_parent],
-            help="List deployments for the project.",
-            description="List deployments for the project.",
-            formatter_class=RawTextHelpFormatter,
-        )
-        deployments_parser.add_argument(
+        deployments_path_parent = ArgumentParser(add_help=False)
+        deployments_path_parent.add_argument(
             "--path",
             type=str,
             default=os.getcwd(),
             help="Base path to the project. Defaults to current working directory.",
         )
-        deployments_parser.add_argument(
+
+        deployments_parser = subparsers.add_parser(
+            "deployments",
+            parents=[verbose_parent],
+            help="Manage deployments for the project.",
+            description=(
+                "Manage deployments for the project.\n\nExamples:\n  poly deployments list\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+
+        deployments_subparsers = deployments_parser.add_subparsers(
+            dest="deployments_subcommand", required=True
+        )
+
+        deployment_list_parser = deployments_subparsers.add_parser(
+            "list",
+            parents=[deployments_path_parent, json_parent],
+            help="List deployments for the project.",
+            description=(
+                "List deployments for the project.\n\n"
+                "Examples:\n"
+                "  poly deployments list\n"
+                "  poly deployments list --env live\n"
+                "  poly deployments list --details\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        deployment_list_parser.add_argument(
             "--env",
             "-e",
             type=str,
@@ -740,32 +762,27 @@ class AgentStudioCLI:
             choices=["sandbox", "pre-release", "live"],
             help="Environment to list deployments for. Defaults to sandbox.",
         )
-        deployments_parser.add_argument(
+        deployment_list_parser.add_argument(
             "--limit",
             type=int,
             default=10,
             help="Number of versions to show. Defaults to 10.",
         )
-        deployments_parser.add_argument(
+        deployment_list_parser.add_argument(
             "--offset",
             type=int,
             default=0,
             help="Number of versions to skip. Defaults to 0.",
         )
-        deployments_parser.add_argument(
+        deployment_list_parser.add_argument(
             "--hash",
             type=str,
             help="Hash of the version to start from.",
         )
-        deployments_parser.add_argument(
+        deployment_list_parser.add_argument(
             "--details",
             action="store_true",
             help="Output each deployment with detailed information.",
-        )
-        deployments_parser.add_argument(
-            "--json",
-            action="store_true",
-            help="Output deployments in JSON format.",
         )
 
         return parser
@@ -902,9 +919,10 @@ class AgentStudioCLI:
             cls.print_completion(args.shell)
 
         elif args.command == "deployments":
-            cls.deployments(
-                args.path, args.env, args.limit, args.offset, args.hash, args.json, args.details
-            )
+            if args.deployments_subcommand == "list":
+                cls.deployments_list(
+                    args.path, args.env, args.limit, args.offset, args.hash, args.json, args.details
+                )
 
     @classmethod
     def print_completion(cls, shell: str) -> None:
@@ -2284,7 +2302,7 @@ class AgentStudioCLI:
             plain(content)
 
     @classmethod
-    def deployments(
+    def deployments_list(
         cls,
         base_path: str,
         environment: str = "sandbox",
