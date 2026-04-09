@@ -59,12 +59,13 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 | `poly pull` | Pull remote config into local project (`-f` to force overwrite) |
 | `poly push` | Push local changes to Agent Studio (`-f` to force, `--dry-run` to preview, `--skip-validation`) |
 | `poly status` | List changed files |
-| `poly diff` | Show full diffs (optionally for specific files) |
-| `poly revert` | Revert local changes (`--all` or specific files) |
+| `poly diff` | Show full diffs (optionally for specific files, deployment hashes or between versions with `--before`/`--after`) |
+| `poly revert` | Revert local changes (all by default, or specific files) |
 | `poly branch` | Branch management: `list`, `create`, `switch`, `current` |
-| `poly format` | Format resource files (all or specific files) |
+| `poly format` | Format resource files (all or `--files` for specific files) |
 | `poly validate` | Validate project configuration locally |
-| `poly review` | Create a diff review page (local vs remote, or `--before`/`--after` for branch/version comparison) |
+| `poly review` | Diff review page: `create` (local vs remote, version hash, or `--before`/`--after`), `list`, `delete` |
+| `poly deployments` | Manage deployments (`list`, with `--env`, `--limit`, `--offset`, `--hash`, `--details`) |
 | `poly chat` | Interactive chat session with the agent (`--environment`, `--channel`, `--functions`, `--flows`, `--state`) |
 | `poly docs` | Output resource documentation (`poly docs flows functions topics`, or `--all` for everything) |
 

@@ -1611,7 +1611,7 @@ class AgentStudioProject:
         """Revert changes in the project.
 
         Args:
-            files (list[str]): List of specific files to revert.
+            files (list[str]): List of specific files to revert. If None, revert all changes.
         """
         reverted_files = []
         resource_mappings = self._make_resource_mappings(self.resources)
@@ -1733,6 +1733,7 @@ class AgentStudioProject:
         - **Environments**: sandbox / pre-release / live (active deployments)
         - **Branches**: branch names (event sourcing projects only)
         - **Deployment versions**: version hash prefix (first 9 chars)
+        - **Local**: "local" for local resources
         """
         env_names = {"sandbox", "pre-release", "live"}
 
