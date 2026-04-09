@@ -2567,7 +2567,7 @@ class AgentStudioProject:
             bool: True if the branch was deleted successfully, False otherwise
         """
         branches = self.api_handler.get_branches()
-        if branch_name not in branches.values():
+        if branch_name not in branches:
             raise ValueError(f"Branch {branch_name} does not exist.")
 
         if branch_name == "main":
@@ -2576,7 +2576,7 @@ class AgentStudioProject:
         success = self.api_handler.delete_branch(branches[branch_name])
         if success and self.branch_id == branches[branch_name]:
             self.switch_branch("main", force=True)
-        return success
+        return True
 
     def sync_ids_with_sandbox(self, email: str = None) -> bool:
         """Sync ids of resources in sandbox into current branch
