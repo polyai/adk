@@ -1912,7 +1912,7 @@ class AgentStudioProject:
             )
         except Exception as e:
             raise ValueError(
-                f"Error reading resource {resource.resource_name} at {resource.file_path}"
+                f"Error reading resource {resource.resource_name} at {resource.file_path}: {str(e)}"
             ) from e
 
         return resource
