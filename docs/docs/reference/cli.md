@@ -118,6 +118,20 @@ poly branch current
 poly branch create my-feature
 poly branch switch my-feature
 poly branch switch my-feature --force
+poly branch delete
+poly branch delete my-feature
+~~~
+
+#### `poly branch delete`
+
+Interactively select and delete one or more branches. The `main` branch cannot be deleted.
+
+- Run without arguments to open an interactive checkbox prompt for selecting branches to delete.
+- Pass a branch name directly to skip the interactive prompt and delete that branch after confirmation.
+
+~~~bash
+poly branch delete
+poly branch delete my-feature
 ~~~
 
 ### `poly format`
@@ -195,7 +209,10 @@ poly diff --json
 poly revert --json --all
 poly branch list --json
 poly branch create my-feature --json
+poly branch switch my-feature --json
 poly branch current --json
+poly branch delete --json
+poly branch delete my-feature --json
 poly format --json
 poly init --region us-1 --account_id 123 --project_id my_project --json
 ~~~
@@ -220,9 +237,13 @@ The exact fields vary by command. Common fields include:
 | `poly revert --json` | `success`, `files_reverted` |
 | `poly branch list --json` | `current_branch`, `branches` |
 | `poly branch create --json` | `success`, `new_branch_id`, `branch_name` |
+| `poly branch switch --json` | `success`, `switched_to`, `dry_run` |
 | `poly branch current --json` | `current_branch` |
+| `poly branch delete --json` | `success`, `deleted` |
 | `poly format --json` | `success`, `check_only`, `format_errors`, `affected`, `ty_ran`, `ty_returncode`, `ty_timed_out` |
 | `poly init --json` | `success`, `root_path` |
+
+For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
 
 Error responses always include `{ "success": false, "error": "..." }`.
 
