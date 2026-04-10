@@ -26,6 +26,7 @@ from poly.resources import (
     BaseFlowStep,
     ChatGreeting,
     ChatStylePrompt,
+    Condition,
     Entity,
     ExperimentalConfig,
     FlowConfig,
@@ -1545,6 +1546,56 @@ class AgentStudioProject:
         for variant in updated_variants:
             if not variant.is_default:
                 updated_resources[Variant].pop(variant.resource_id, None)
+
+        # Don't delete condition if parent step is being deleted
+        for flow_step in list(deleted_resources.get(FlowStep, {}).values()):
+            for condition in flow_step.conditions:
+                deleted_resources.get(Condition, {}).pop(condition.resource_id, None)
+
+        # If we are deleting a step and pointing a condition to a different step, the delete will auto delete the condition so the update will fail. We should instead make it a create
+        deleted_steps = list(deleted_resources.get(FlowStep, {}).values()) + list(
+            deleted_resources.get(FunctionStep, {}).values()
+        )
+        updated_conditions = list(updated_resources.get(Condition, {}).items())
+        if deleted_steps:
+            flows_with_deleted_steps = {deleted_step.flow_id for deleted_step in deleted_steps}
+            for condition_id, condition in updated_conditions:
+                if condition.flow_id not in flows_with_deleted_steps:
+                    continue
+                original_flow_step: FlowStep = next(
+                    (
+                        flow_step
+                        for flow_step in self.resources.get(FlowStep, {}).values()
+                        if flow_step.flow_id == condition.flow_id
+                        and flow_step.step_id == condition.step_id
+                    ),
+                    None,
+                )
+                if not original_flow_step:
+                    continue
+                original_condition: Condition = next(
+                    (
+                        cond
+                        for cond in original_flow_step.conditions
+                        if cond.resource_id == condition_id
+                    ),
+                    None,
+                )
+                if not original_condition:
+                    continue
+
+                deleted_original_step = next(
+                    (
+                        step
+                        for step in deleted_steps
+                        if step.flow_id == condition.flow_id
+                        and step.step_id == original_condition.child_step
+                    ),
+                    None,
+                )
+                if deleted_original_step:
+                    new_resources.setdefault(Condition, {})[condition_id] = condition
+                    updated_resources.get(Condition, {}).pop(condition_id, None)
 
         return PushPhaseChangeSet(
             main=ResourceChangeSet(
