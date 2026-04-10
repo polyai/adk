@@ -2220,7 +2220,7 @@ class AgentStudioCLI:
         """
         conversation_ended = False
         restart = False
-        url = None
+        url = project.get_conversation_url(conversation_id)
         turns: list[dict] = (
             [{"input": None, **initial_response}] if output_json and initial_response else []
         )
@@ -2277,7 +2277,6 @@ class AgentStudioCLI:
             if not conversation_ended:
                 try:
                     project.end_chat(conversation_id, environment)
-                    url = project.get_conversation_url(conversation_id)
                     if not output_json:
                         info(f"Chat session ended (conversation: {conversation_id})")
                         plain(f"[info]Call Link:[/info] [link={url}]{url}[/link]")
