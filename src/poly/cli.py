@@ -599,7 +599,7 @@ class AgentStudioCLI:
         # CHAT
         chat_parser = subparsers.add_parser(
             "chat",
-            parents=[verbose_parent],
+            parents=[verbose_parent, json_parent],
             help="Start an interactive chat session with the agent.",
             description=(
                 "Start an interactive chat session with the agent.\n\n"
@@ -607,6 +607,19 @@ class AgentStudioCLI:
                 "  poly chat\n"
                 "  poly chat --environment live\n"
                 "  poly chat --path /path/to/project -e sandbox\n"
+                "\n"
+                "Non-interactive (scripted) mode:\n"
+                "  poly chat -m 'Hello' -m 'What can you help with?'\n"
+                "  poly chat --input-file ./script.txt\n"
+                "  echo -e 'Hello\\nGoodbye' | poly chat --input-file -\n"
+                "\n"
+                "Resume an existing conversation:\n"
+                "  poly chat --conv-id <conversation_id>\n"
+                "  poly chat --conv-id <conversation_id> -m 'Follow-up message'\n"
+                "\n"
+                "Machine-readable output (emits a single JSON object when done):\n"
+                "  poly chat --json -m 'Hello'\n"
+                "  poly chat --json --input-file ./script.txt\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -667,6 +680,28 @@ class AgentStudioCLI:
             action="store_true",
             default=False,
             help="Push the project before starting the chat session.",
+        )
+        chat_parser.add_argument(
+            "--message",
+            "-m",
+            action="append",
+            dest="messages",
+            metavar="MSG",
+            help="Send a message non-interactively (repeatable).",
+        )
+        chat_parser.add_argument(
+            "--input-file",
+            type=str,
+            default=None,
+            metavar="FILE",
+            help="Read messages line-by-line from a file (- for stdin).",
+        )
+        chat_parser.add_argument(
+            "--conversation-id",
+            "--conv-id",
+            type=str,
+            default=None,
+            help="Conversation ID for the chat session. If a current session, chats with that conversation",
         )
 
         # completion
@@ -812,6 +847,13 @@ class AgentStudioCLI:
 
         elif args.command == "chat":
             show_all = args.metadata
+            input_messages = None
+            if args.input_file:
+                src = sys.stdin if args.input_file == "-" else open(args.input_file)
+                with src:
+                    input_messages = [line.rstrip("\n") for line in src if line.strip()]
+            elif args.messages:
+                input_messages = args.messages
             cls.chat(
                 args.path,
                 args.environment,
@@ -821,6 +863,9 @@ class AgentStudioCLI:
                 show_flow=show_all or args.flows,
                 show_state=show_all or args.state,
                 push_before_chat=args.push,
+                input_messages=input_messages,
+                conversation_id=args.conversation_id,
+                output_json=args.json,
             )
 
         elif args.command == "completion":
@@ -1983,6 +2028,8 @@ class AgentStudioCLI:
         show_flow: bool = False,
         show_state: bool = False,
         output_json: bool = False,
+        input_messages: Optional[list[str]] = None,
+        conversation_id: str = None,
     ) -> None:
         """Start an interactive chat session with the agent."""
         project = cls._load_project(base_path)
@@ -1990,31 +2037,31 @@ class AgentStudioCLI:
         if push_before_chat:
             if not output_json:
                 info("Pushing project before starting chat session...")
-            success, errors = project.push_project(
+            push_success, error, _ = project.push_project(
                 force=False,
                 skip_validation=False,
                 dry_run=False,
                 format=False,
                 email=None,
-                output_json=output_json,
             )
+            if error == "No changes detected":
+                push_success = True  # Not an error if there are no changes to push
 
-            if success and not output_json:
+            if push_success and not output_json:
                 success("Project pushed successfully.")
 
-            if not success:
+            if not push_success:
                 if output_json:
                     json_print(
                         {
                             "success": False,
                             "message": "Failed to push project before chat session.",
-                            "errors": errors,
+                            "error": error,
                         }
                     )
                 else:
                     error("Failed to push project before chat session:")
-                    for err in errors:
-                        plain(f"  [red]{err}[/red]")
+                    plain(f"[red]{error}[/red]")
                 sys.exit(1)
 
         branch_id = project.branch_id
@@ -2039,10 +2086,29 @@ class AgentStudioCLI:
             label += f" ({environment})"
         if variant:
             label += f" variant=[bold]{variant}[/bold]"
-        info(f"Starting chat for {label}...")
+        if not output_json:
+            info(f"Starting chat for {label}...")
+
+        # Resume an existing conversation — skip session creation.
+        if conversation_id:
+            if output_json:
+                json_print({"type": "session_resumed", "conversation_id": conversation_id})
+            else:
+                success(f"Resuming conversation: {conversation_id}")
+            cls._run_chat_loop(
+                project,
+                conversation_id,
+                environment,
+                show_functions=show_functions,
+                show_flow=show_flow,
+                show_state=show_state,
+                input_messages=input_messages,
+                output_json=output_json,
+            )
+            return
 
         while True:
-            if environment == "draft":
+            if environment == "draft" and not output_json:
                 info("Preparing branch deployment...")
             try:
                 response = project.create_chat_session(
@@ -2051,30 +2117,55 @@ class AgentStudioCLI:
                     variant,
                 )
             except (requests.HTTPError, ValueError) as e:
-                error(f"Failed to create chat session: {e}")
+                if output_json:
+                    json_print({"success": False, "error": str(e)})
+                else:
+                    error(f"Failed to create chat session: {e}")
                 return
 
             conversation_id = response.get("conversation_id")
             if not conversation_id:
-                error(f"Unexpected response when creating chat: {response}")
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No conversation_id in response",
+                            "response": response,
+                        }
+                    )
+                else:
+                    error(f"Unexpected response when creating chat: {response}")
                 return
 
             url = project.get_conversation_url(conversation_id)
-            success(f"Chat session started (conversation: [link={url}]{conversation_id}[/link])")
-            print_turn_metadata(response, show_functions, show_flow, show_state)
             greeting = response.get("response", "")
-            if greeting:
-                plain(f"\n[bold]Agent:[/bold] {greeting}")
+            if output_json:
+                json_print(
+                    {
+                        "type": "session_start",
+                        "conversation_id": conversation_id,
+                        "greeting": greeting,
+                    }
+                )
+            else:
+                success(
+                    f"Chat session started (conversation: [link={url}]{conversation_id}[/link])"
+                )
+                print_turn_metadata(response, show_functions, show_flow, show_state)
+                if greeting:
+                    plain(f"\n[bold]Agent:[/bold] {greeting}")
 
             if response.get("conversation_ended"):
-                plain("[muted]Conversation ended by agent.[/muted]")
+                if not output_json:
+                    plain("[muted]Conversation ended by agent.[/muted]")
                 return
 
-            plain(
-                "[muted]Type your messages below. "
-                "Press Ctrl+C or type '/exit' to quit. "
-                "Type '/restart' to begin a new chat.[/muted]"
-            )
+            if not output_json:
+                plain(
+                    "[muted]Type your messages below. "
+                    "Press Ctrl+C or type '/exit' to quit. "
+                    "Type '/restart' to begin a new chat.[/muted]"
+                )
 
             restart = cls._run_chat_loop(
                 project,
@@ -2083,12 +2174,16 @@ class AgentStudioCLI:
                 show_functions=show_functions,
                 show_flow=show_flow,
                 show_state=show_state,
+                input_messages=input_messages,
+                output_json=output_json,
+                initial_response=response,
             )
 
             if not restart:
                 return
 
-            info("Restarting chat session...")
+            if not output_json:
+                info("Restarting chat session...")
 
     @classmethod
     def _run_chat_loop(
@@ -2099,6 +2194,9 @@ class AgentStudioCLI:
         show_functions: bool = False,
         show_flow: bool = False,
         show_state: bool = False,
+        input_messages: Optional[list[str]] = None,
+        output_json: bool = False,
+        initial_response: Optional[dict] = None,
     ) -> bool:
         """Run the interactive message loop.
 
@@ -2107,13 +2205,24 @@ class AgentStudioCLI:
         """
         conversation_ended = False
         restart = False
+        turns: list[dict] = (
+            [{"input": None, **initial_response}] if output_json and initial_response else []
+        )
         try:
             while True:
-                try:
-                    user_input = input("\nYou: ").strip()
-                except (KeyboardInterrupt, EOFError):
-                    plain("")
-                    break
+                if input_messages is not None:
+                    if not input_messages:
+                        break
+                    user_input = input_messages.pop(0).strip()
+                    if not output_json:
+                        plain(f"\n[muted]You:[/muted] {user_input}")
+                else:
+                    try:
+                        user_input = input("\nYou: ").strip()
+                    except (KeyboardInterrupt, EOFError):
+                        if not output_json:
+                            plain("")
+                        break
 
                 if not user_input:
                     continue
@@ -2130,26 +2239,54 @@ class AgentStudioCLI:
                         environment,
                     )
                 except requests.HTTPError as e:
-                    error(f"Failed to send message: {e}")
+                    if output_json:
+                        turns.append({"input": user_input, "error": str(e)})
+                    else:
+                        error(f"Failed to send message: {e}")
                     continue
 
-                print_turn_metadata(reply, show_functions, show_flow, show_state)
-                agent_text = reply.get("response") or json.dumps(reply, indent=2)
-                plain(f"\n[bold]Agent:[/bold] {agent_text}")
+                if output_json:
+                    turns.append({"input": user_input, **reply})
+                else:
+                    print_turn_metadata(reply, show_functions, show_flow, show_state)
+                    agent_text = reply.get("response") or json.dumps(reply, indent=2)
+                    plain(f"\n[bold]Agent:[/bold] {agent_text}")
 
                 if reply.get("conversation_ended"):
                     conversation_ended = True
-                    plain("[muted]Conversation ended by agent.[/muted]")
+                    if not output_json:
+                        plain("[muted]Conversation ended by agent.[/muted]")
+                    else:
+                        json_print(
+                            {
+                                "conversation_id": conversation_id,
+                                "turns": turns,
+                                "conversation_ended": True,
+                            }
+                        )
                     break
         finally:
             if not conversation_ended:
                 try:
                     project.end_chat(conversation_id, environment)
-                    info(f"Chat session ended (conversation: {conversation_id})")
-                    url = project.get_conversation_url(conversation_id)
-                    plain(f"[info]Call Link:[/info] [link={url}]{url}[/link]")
+                    if output_json:
+                        url = project.get_conversation_url(conversation_id)
+                        json_print({"conversation_id": conversation_id, "url": url, "turns": turns})
+                    else:
+                        info(f"Chat session ended (conversation: {conversation_id})")
+                        url = project.get_conversation_url(conversation_id)
+                        plain(f"[info]Call Link:[/info] [link={url}]{url}[/link]")
                 except requests.HTTPError:
-                    warning("Failed to end chat session on server.")
+                    if output_json:
+                        json_print(
+                            {
+                                "conversation_id": conversation_id,
+                                "turns": turns,
+                                "error": "Failed to end chat session on server.",
+                            }
+                        )
+                    else:
+                        warning("Failed to end chat session on server.")
 
         return restart
 
