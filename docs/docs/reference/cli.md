@@ -5,7 +5,7 @@ description: Reference for the core commands provided by the PolyAI ADK CLI.
 
 <p class="lead">
 The PolyAI ADK is accessed through the <code>poly</code> command.
-When in doubt about a flag or option, run the command with <code>--help</code> - that output reflects your installed version exactly.
+Use the CLI help output as the first source of truth.
 </p>
 
 ## Start with help
@@ -22,9 +22,9 @@ Each command also supports its own help output. For example:
 poly push --help
 ~~~
 
-!!! tip "Help output reflects your installed version"
+!!! tip "Use help output as the source of truth"
 
-    This reference page covers the standard commands. Run `poly <command> --help` to confirm the exact flags available in your environment.
+    The installed CLI is the fastest way to confirm the commands and flags available in your local environment.
 
 ## Core commands
 
@@ -53,6 +53,10 @@ poly pull --force
 poly pull --format
 ~~~
 
+If the branch you are currently on no longer exists in Agent Studio, `poly pull` automatically switches to the `main` branch and displays a warning message with the new branch name.
+
+When using JSON output (`--json`), the response includes `new_branch_name` and `new_branch_id` fields if a branch switch occurred.
+
 ### `poly push`
 
 Push local changes to Agent Studio.
@@ -65,16 +69,11 @@ poly push --dry-run
 poly push --skip-validation
 poly push --force
 poly push --format
-poly push --email user@example.com
 ~~~
 
-| Flag | Description |
-|---|---|
-| `--force` | Force overwrite — load the latest remote version and push on top of it. |
-| `--dry-run` | Validate and stage changes without actually sending them. |
-| `--skip-validation` | Skip local validation before pushing. |
-| `--format` | Format resources before pushing. |
-| `--email EMAIL` | Email address to use for metadata when creating commands. |
+When pushing creates a new branch (for example, when pushing to Agent Studio for the first time on a branch), the CLI displays a message with the new branch name.
+
+When using JSON output (`--json`), the response includes `new_branch_name` and `new_branch_id` fields if a new branch was created.
 
 ### `poly status`
 
@@ -155,23 +154,39 @@ poly validate
 
 ### `poly review`
 
-Create a GitHub gist for reviewing changes.
+Create a GitHub Gist of Agent Studio project changes to share with others.
+
+Running `poly review` without a subcommand creates a new gist comparing local changes against the remote project. Use `--before` and `--after` to compare two remote branches or versions.
 
 Examples:
 
 ~~~bash
 poly review
 poly review --before main --after feature-branch
-poly review --delete
+~~~
+
+#### `poly review list`
+
+Interactively select a review gist and open it in the browser.
+
+~~~bash
+poly review list
+poly review list --json
+~~~
+
+#### `poly review delete`
+
+Interactively select and delete review gists. Use `--id` to delete a specific gist directly without an interactive prompt.
+
+~~~bash
+poly review delete
+poly review delete --id GIST_ID
+poly review delete --json
 ~~~
 
 ### `poly chat`
 
 Start an interactive chat session with your agent.
-
-!!! warning "Merge before chatting"
-
-    `poly chat` connects to the **main branch** of your Sandbox environment in Agent Studio — not your local files, and not your current branch. To test changes made on a feature branch, you must first push the branch with `poly push`, merge it in Agent Studio, and then run `poly chat`.
 
 Examples:
 
@@ -194,7 +209,7 @@ poly docs --all
 poly docs --all --output rules.md
 ~~~
 
-Use `--output` to write the documentation to a local file. This is useful when working with AI coding tools - pass the output file as context to give the agent accurate knowledge of ADK resource types and conventions.
+Use `--output` to write the documentation to a local file. This is useful when working with AI coding tools — pass the output file as context to give the agent accurate knowledge of ADK resource types and conventions.
 
 ## Machine-readable JSON output
 
@@ -277,6 +292,7 @@ The `--output-json-projection` flag on `pull`, `init`, and `branch switch` inclu
 poly pull --json --output-json-projection | jq .projection > proj.json
 poly push --from-projection - < proj.json
 ~~~
+
 
 ## Working pattern
 
