@@ -17,6 +17,7 @@ from argparse import SUPPRESS, ArgumentParser, RawTextHelpFormatter
 from contextlib import nullcontext
 from importlib.metadata import version as get_package_version
 from typing import Any, Optional
+from xml.parsers.expat import errors
 
 import argcomplete
 import requests
@@ -2050,14 +2051,14 @@ class AgentStudioCLI:
         if push_before_chat:
             if not output_json:
                 info("Pushing project before starting chat session...")
-            push_success, error, _ = project.push_project(
+            push_success, output, _ = project.push_project(
                 force=False,
                 skip_validation=False,
                 dry_run=False,
                 format=False,
                 email=None,
             )
-            if error == "No changes detected":
+            if output == "No changes detected":
                 push_success = True  # Not an error if there are no changes to push
 
             if push_success and not output_json:
@@ -2073,8 +2074,10 @@ class AgentStudioCLI:
                         }
                     )
                 else:
-                    error("Failed to push project before chat session:")
-                    plain(f"[red]{error}[/red]")
+                    error(
+                        f"Failed to push {project.account_id}/{project.project_id} to Agent Studio."
+                    )
+                    plain(output)
                 sys.exit(1)
 
         branch_id = project.branch_id
