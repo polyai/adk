@@ -1,6 +1,46 @@
 # CHANGELOG
 
 
+## v0.8.2 (2026-04-10)
+
+### Bug Fixes
+
+- Allow ?query ending for API operations ([#70](https://github.com/polyai/adk/pull/70),
+  [`4199800`](https://github.com/polyai/adk/commit/419980010c63e3e4b6b1a780ff26d4f80e552cbd))
+
+## Summary Update validation regex to allow API operation with ?query ending <!-- What does this PR
+  do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+
 ## v0.8.1 (2026-04-10)
 
 ### Bug Fixes
