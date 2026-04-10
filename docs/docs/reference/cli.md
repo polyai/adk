@@ -191,8 +191,6 @@ poly docs --all --output rules.md
 
 Use `--output` to write the documentation to a local file. This is useful when working with AI coding tools — pass the output file as context to give the agent accurate knowledge of ADK resource types and conventions.
 
-Use `--output` to write the documentation to a local file. This is useful when working with AI coding tools - pass the output file as context to give the agent accurate knowledge of ADK resource types and conventions.
-
 ## Machine-readable JSON output
 
 All core subcommands accept a `--json` flag that switches stdout to a single JSON object. This is designed for scripting, CI pipelines, and any integration that needs stable, parseable output rather than human-readable console text.
