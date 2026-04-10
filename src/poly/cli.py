@@ -849,7 +849,11 @@ class AgentStudioCLI:
             show_all = args.metadata
             input_messages = None
             if args.input_file:
-                src = sys.stdin if args.input_file == "-" else open(args.input_file)
+                try:
+                    src = sys.stdin if args.input_file == "-" else open(args.input_file)
+                except FileNotFoundError:
+                    error(f"Input file not found: {args.input_file}")
+                    sys.exit(1)
                 with src:
                     input_messages = [line.rstrip("\n") for line in src if line.strip()]
             elif args.messages:
@@ -2091,11 +2095,9 @@ class AgentStudioCLI:
 
         # Resume an existing conversation — skip session creation.
         if conversation_id:
-            if output_json:
-                json_print({"type": "session_resumed", "conversation_id": conversation_id})
-            else:
+            if not output_json:
                 success(f"Resuming conversation: {conversation_id}")
-            cls._run_chat_loop(
+            _, conversation = cls._run_chat_loop(
                 project,
                 conversation_id,
                 environment,
@@ -2105,8 +2107,11 @@ class AgentStudioCLI:
                 input_messages=input_messages,
                 output_json=output_json,
             )
+            if output_json:
+                json_print({"conversations": [conversation]})
             return
 
+        conversations: list[dict] = []
         while True:
             if environment == "draft" and not output_json:
                 info("Preparing branch deployment...")
@@ -2139,15 +2144,7 @@ class AgentStudioCLI:
 
             url = project.get_conversation_url(conversation_id)
             greeting = response.get("response", "")
-            if output_json:
-                json_print(
-                    {
-                        "type": "session_start",
-                        "conversation_id": conversation_id,
-                        "greeting": greeting,
-                    }
-                )
-            else:
+            if not output_json:
                 success(
                     f"Chat session started (conversation: [link={url}]{conversation_id}[/link])"
                 )
@@ -2167,7 +2164,7 @@ class AgentStudioCLI:
                     "Type '/restart' to begin a new chat.[/muted]"
                 )
 
-            restart = cls._run_chat_loop(
+            restart, conversation = cls._run_chat_loop(
                 project,
                 conversation_id,
                 environment,
@@ -2178,8 +2175,12 @@ class AgentStudioCLI:
                 output_json=output_json,
                 initial_response=response,
             )
+            if output_json:
+                conversations.append(conversation)
 
             if not restart:
+                if output_json:
+                    json_print({"conversations": conversations})
                 return
 
             if not output_json:
@@ -2197,14 +2198,17 @@ class AgentStudioCLI:
         input_messages: Optional[list[str]] = None,
         output_json: bool = False,
         initial_response: Optional[dict] = None,
-    ) -> bool:
+    ) -> tuple[bool, dict]:
         """Run the interactive message loop.
 
         Returns:
-            True if the user requested a restart, False otherwise.
+            A tuple of (restart, conversation) where restart is True if the user
+            requested a new session, and conversation is a dict with conversation_id,
+            url, and turns (populated when output_json=True).
         """
         conversation_ended = False
         restart = False
+        url = None
         turns: list[dict] = (
             [{"input": None, **initial_response}] if output_json and initial_response else []
         )
@@ -2256,39 +2260,20 @@ class AgentStudioCLI:
                     conversation_ended = True
                     if not output_json:
                         plain("[muted]Conversation ended by agent.[/muted]")
-                    else:
-                        json_print(
-                            {
-                                "conversation_id": conversation_id,
-                                "turns": turns,
-                                "conversation_ended": True,
-                            }
-                        )
                     break
         finally:
             if not conversation_ended:
                 try:
                     project.end_chat(conversation_id, environment)
-                    if output_json:
-                        url = project.get_conversation_url(conversation_id)
-                        json_print({"conversation_id": conversation_id, "url": url, "turns": turns})
-                    else:
+                    url = project.get_conversation_url(conversation_id)
+                    if not output_json:
                         info(f"Chat session ended (conversation: {conversation_id})")
-                        url = project.get_conversation_url(conversation_id)
                         plain(f"[info]Call Link:[/info] [link={url}]{url}[/link]")
                 except requests.HTTPError:
-                    if output_json:
-                        json_print(
-                            {
-                                "conversation_id": conversation_id,
-                                "turns": turns,
-                                "error": "Failed to end chat session on server.",
-                            }
-                        )
-                    else:
+                    if not output_json:
                         warning("Failed to end chat session on server.")
 
-        return restart
+        return restart, {"conversation_id": conversation_id, "url": url, "turns": turns}
 
     @classmethod
     def validate_project(cls, base_path: str, output_json: bool = False) -> None:
