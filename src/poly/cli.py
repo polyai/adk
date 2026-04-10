@@ -662,6 +662,12 @@ class AgentStudioCLI:
             default=False,
             help="Show all metadata (functions, flows, and state). Equivalent to --functions --flows --state.",
         )
+        chat_parser.add_argument(
+            "--push",
+            action="store_true",
+            default=False,
+            help="Push the project before starting the chat session.",
+        )
 
         # completion
         completion_parser = subparsers.add_parser(
@@ -814,6 +820,7 @@ class AgentStudioCLI:
                 show_functions=show_all or args.functions,
                 show_flow=show_all or args.flows,
                 show_state=show_all or args.state,
+                push_before_chat=args.push,
             )
 
         elif args.command == "completion":
@@ -1971,12 +1978,45 @@ class AgentStudioCLI:
         environment: str = None,
         variant: str = None,
         channel: str = None,
+        push_before_chat: bool = False,
         show_functions: bool = False,
         show_flow: bool = False,
         show_state: bool = False,
+        output_json: bool = False,
     ) -> None:
         """Start an interactive chat session with the agent."""
         project = cls._load_project(base_path)
+
+        if push_before_chat:
+            if not output_json:
+                info("Pushing project before starting chat session...")
+            success, errors = project.push_project(
+                force=False,
+                skip_validation=False,
+                dry_run=False,
+                format=False,
+                email=None,
+                output_json=output_json,
+            )
+
+            if success and not output_json:
+                success("Project pushed successfully.")
+
+            if not success:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "message": "Failed to push project before chat session.",
+                            "errors": errors,
+                        }
+                    )
+                else:
+                    error("Failed to push project before chat session:")
+                    for err in errors:
+                        plain(f"  [red]{err}[/red]")
+                sys.exit(1)
+
         branch_id = project.branch_id
         branch_label = None
 
