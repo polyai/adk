@@ -5928,6 +5928,20 @@ class TestApiIntegrationValidate(unittest.TestCase):
         )
         integration.validate()  # should not raise
 
+    def test_operation_resource_with_query_string_is_valid(self):
+        """Validation accepts resources with an optional ?query (e.g. fixed query params)."""
+        integration = self._make_integration(
+            operations=[
+                ApiIntegrationOperation(
+                    resource_id="op-1",
+                    name="create_patient",
+                    method="POST",
+                    resource="/Patient/Create?locationId={location_id}",
+                ),
+            ]
+        )
+        integration.validate()  # should not raise
+
     def test_duplicate_operation_name_and_method_raises_value_error(self):
         """Validation rejects two operations that share the same name and method."""
         integration = self._make_integration(
