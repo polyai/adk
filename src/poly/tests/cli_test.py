@@ -559,14 +559,14 @@ class ChatLoopTest(unittest.TestCase):
 
     def test_restart_command_returns_true_without_sending(self):
         """/restart returns True so the caller can create a new session."""
-        result = AgentStudioCLI._run_chat_loop(
+        restart, _ = AgentStudioCLI._run_chat_loop(
             self.proj,
             "conv-123",
             "sandbox",
             input_messages=["/restart"],
         )
 
-        self.assertTrue(result)
+        self.assertTrue(restart)
         self.proj.send_message.assert_not_called()
 
     def test_json_output_returns_all_turns(self):
