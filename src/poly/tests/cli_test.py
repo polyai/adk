@@ -299,6 +299,216 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         self.proj.push_project.assert_not_called()
 
 
+class BranchDeleteTest(unittest.TestCase):
+    """Tests for AgentStudioCLI.branch_delete interactive and direct deletion flow."""
+
+    SAMPLE_BRANCHES = {"main": "main-id", "feature-a": "branch-a-id", "feature-b": "branch-b-id"}
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli.AgentStudioCLI._load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.get_branches.return_value = ("main", dict(self.SAMPLE_BRANCHES))
+        self.proj.delete_branch.return_value = True
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    # -- Direct deletion (branch_name provided) --
+
+    @patch("poly.cli.questionary")
+    @patch("poly.cli.success")
+    def test_direct_delete_existing_branch_shows_success(self, mock_success, mock_q):
+        """Deleting an existing branch by name prints a success message."""
+        mock_q.confirm.return_value.ask.return_value = True
+
+        AgentStudioCLI.branch_delete(TEST_DIR, branch_name="feature-a")
+
+        self.proj.delete_branch.assert_called_once_with("feature-a")
+        mock_success.assert_called_once()
+        self.assertIn("feature-a", mock_success.call_args[0][0])
+
+    @patch("poly.cli.json_print")
+    def test_direct_delete_existing_branch_json_mode(self, mock_json):
+        """Deleting a branch with output_json=True prints JSON with success=True."""
+        AgentStudioCLI.branch_delete(TEST_DIR, branch_name="feature-a", output_json=True)
+
+        self.proj.delete_branch.assert_called_once_with("feature-a")
+        mock_json.assert_called_once_with({"success": True})
+
+    @patch("poly.cli.error")
+    def test_direct_delete_nonexistent_branch_shows_error(self, mock_error):
+        """Attempting to delete a branch that doesn't exist shows an error."""
+        AgentStudioCLI.branch_delete(TEST_DIR, branch_name="no-such-branch")
+
+        self.proj.delete_branch.assert_not_called()
+        mock_error.assert_called_once()
+        self.assertIn("does not exist", mock_error.call_args[0][0])
+
+    @patch("poly.cli.json_print")
+    def test_direct_delete_nonexistent_branch_json_mode(self, mock_json):
+        """Non-existent branch with output_json=True prints JSON with success=False."""
+        AgentStudioCLI.branch_delete(TEST_DIR, branch_name="no-such-branch", output_json=True)
+
+        self.proj.delete_branch.assert_not_called()
+        mock_json.assert_called_once()
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("does not exist", payload["message"])
+
+    @patch("poly.cli.error")
+    def test_direct_delete_main_branch_shows_error(self, mock_error):
+        """Attempting to delete 'main' shows an error because main is not deletable."""
+        AgentStudioCLI.branch_delete(TEST_DIR, branch_name="main")
+
+        self.proj.delete_branch.assert_not_called()
+        mock_error.assert_called_once()
+        self.assertIn("does not exist or cannot be deleted", mock_error.call_args[0][0])
+
+    @patch("poly.cli.questionary")
+    @patch("poly.cli.error")
+    def test_direct_delete_when_project_raises_shows_error(self, mock_error, mock_q):
+        """If project.delete_branch raises, the error is shown to the user."""
+        mock_q.confirm.return_value.ask.return_value = True
+        self.proj.delete_branch.side_effect = ValueError("API failure")
+
+        AgentStudioCLI.branch_delete(TEST_DIR, branch_name="feature-a")
+
+        mock_error.assert_called_once()
+        self.assertIn("API failure", mock_error.call_args[0][0])
+
+    @patch("poly.cli.json_print")
+    def test_direct_delete_when_project_raises_json_mode(self, mock_json):
+        """If project.delete_branch raises in JSON mode, error is printed as JSON."""
+        self.proj.delete_branch.side_effect = ValueError("API failure")
+
+        AgentStudioCLI.branch_delete(TEST_DIR, branch_name="feature-a", output_json=True)
+
+        mock_json.assert_called_once()
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("API failure", payload["message"])
+
+    @patch("poly.cli.questionary")
+    @patch("poly.cli.error")
+    def test_direct_delete_returns_false_shows_failure(self, mock_error, mock_q):
+        """If project.delete_branch returns False, a failure message is shown."""
+        mock_q.confirm.return_value.ask.return_value = True
+        self.proj.delete_branch.return_value = False
+
+        AgentStudioCLI.branch_delete(TEST_DIR, branch_name="feature-a")
+
+        mock_error.assert_called_once()
+        self.assertIn("Failed to delete", mock_error.call_args[0][0])
+
+    # -- Interactive mode (no branch_name) --
+
+    @patch("poly.cli.plain")
+    def test_interactive_no_deletable_branches_shows_message(self, mock_plain):
+        """When only 'main' exists, a 'no deletable branches' message is shown."""
+        self.proj.get_branches.return_value = ("main", {"main": "main-id"})
+
+        AgentStudioCLI.branch_delete(TEST_DIR)
+
+        mock_plain.assert_called_once()
+        self.assertIn("[muted]No deletable branches found.[/muted]", mock_plain.call_args[0][0])
+        self.proj.delete_branch.assert_not_called()
+
+    @patch("poly.cli.questionary")
+    @patch("poly.cli.warning")
+    def test_interactive_user_selects_nothing_shows_warning(self, mock_warning, mock_q):
+        """When user cancels the checkbox, a warning is shown and nothing is deleted."""
+        mock_q.checkbox.return_value.ask.return_value = []
+
+        AgentStudioCLI.branch_delete(TEST_DIR)
+
+        mock_warning.assert_called_once()
+        self.assertIn("No branches selected", mock_warning.call_args[0][0])
+        self.proj.delete_branch.assert_not_called()
+
+    @patch("poly.cli.questionary")
+    @patch("poly.cli.warning")
+    def test_interactive_user_returns_none_shows_warning(self, mock_warning, mock_q):
+        """When questionary returns None (Ctrl+C), a warning is shown."""
+        mock_q.checkbox.return_value.ask.return_value = None
+
+        AgentStudioCLI.branch_delete(TEST_DIR)
+
+        mock_warning.assert_called_once()
+        self.proj.delete_branch.assert_not_called()
+
+    @patch("poly.cli.questionary")
+    @patch("poly.cli.success")
+    def test_interactive_single_branch_deleted(self, mock_success, mock_q):
+        """Selecting one branch in the checkbox deletes it and reports success."""
+        mock_q.checkbox.return_value.ask.return_value = ["feature-a"]
+        mock_q.confirm.return_value.ask.return_value = True
+
+        AgentStudioCLI.branch_delete(TEST_DIR)
+
+        self.proj.delete_branch.assert_called_once_with("feature-a")
+        mock_success.assert_called_once()
+        self.assertIn("1 branch(es)", mock_success.call_args[0][0])
+
+    @patch("poly.cli.questionary")
+    @patch("poly.cli.success")
+    def test_interactive_multiple_branches_deleted(self, mock_success, mock_q):
+        """Selecting multiple branches deletes each and reports total count."""
+        mock_q.checkbox.return_value.ask.return_value = ["feature-a", "feature-b"]
+        mock_q.confirm.return_value.ask.return_value = True
+
+        AgentStudioCLI.branch_delete(TEST_DIR)
+
+        self.assertEqual(self.proj.delete_branch.call_count, 2)
+        mock_success.assert_called_once()
+        self.assertIn("2 branch(es)", mock_success.call_args[0][0])
+
+    @patch("poly.cli.questionary")
+    @patch("poly.cli.success")
+    def test_interactive_current_branch_label_stripped(self, mock_success, mock_q):
+        """The ' (current)' suffix is stripped from labels before calling delete_branch."""
+        self.proj.get_branches.return_value = ("feature-a", dict(self.SAMPLE_BRANCHES))
+        mock_q.checkbox.return_value.ask.return_value = ["feature-a (current)"]
+        mock_q.confirm.return_value.ask.return_value = True
+
+        AgentStudioCLI.branch_delete(TEST_DIR)
+
+        self.proj.delete_branch.assert_called_once_with("feature-a")
+
+    @patch("poly.cli.questionary")
+    @patch("poly.cli.json_print")
+    def test_interactive_json_mode_reports_deleted_count(self, mock_json, mock_q):
+        """In JSON mode, interactive deletion prints success and deleted count."""
+        mock_q.checkbox.return_value.ask.return_value = ["feature-a", "feature-b"]
+        mock_q.confirm.return_value.ask.return_value = True
+
+        AgentStudioCLI.branch_delete(TEST_DIR, output_json=True)
+
+        mock_json.assert_called_once()
+        payload = mock_json.call_args[0][0]
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["deleted"], 2)
+
+    @patch("poly.cli.questionary")
+    @patch("poly.cli.error")
+    @patch("poly.cli.success")
+    def test_interactive_error_on_one_branch_continues_others(
+        self, mock_success, mock_error, mock_q
+    ):
+        """If one branch fails to delete, others still proceed."""
+        self.proj.delete_branch.side_effect = [ValueError("oops"), True]
+        mock_q.checkbox.return_value.ask.return_value = ["feature-a", "feature-b"]
+        mock_q.confirm.return_value.ask.return_value = True
+
+        AgentStudioCLI.branch_delete(TEST_DIR)
+
+        self.assertEqual(self.proj.delete_branch.call_count, 2)
+        mock_error.assert_called_once()
+        mock_success.assert_called_once()
+        self.assertIn("1 branch(es)", mock_success.call_args[0][0])
+
+
 class CompletionCommandTest(unittest.TestCase):
     """Tests for the completion command."""
 

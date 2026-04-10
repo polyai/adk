@@ -187,9 +187,9 @@ class SourcererSDK:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
                 except (ValueError, KeyError):
-                    error_msg = f"API Error {e.response.status_code}: {e.response.text}"
+                    error_msg = f"API request failed: {e}"
             else:
-                error_msg = f"Request failed: {str(e)}"
+                error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
     def create_branch(
@@ -228,9 +228,9 @@ class SourcererSDK:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
                 except (ValueError, KeyError):
-                    error_msg = f"API Error {e.response.status_code}: {e.response.text}"
+                    error_msg = f"API request failed: {e}"
             else:
-                error_msg = f"Request failed: {str(e)}"
+                error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
     def merge_branch(
@@ -337,13 +337,13 @@ class SourcererSDK:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
                 except (ValueError, KeyError):
-                    error_msg = f"API Error {e.response.status_code}: {e.response.text}"
+                    error_msg = f"API request failed: {e}"
             else:
-                error_msg = f"Request failed: {str(e)}"
+                error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
     def delete_branch(self, branch_id: str) -> None:
-        """Delete the current branch from the project
+        """Delete a branch from the project.
 
         Args:
             branch_id: The ID of the branch to delete
@@ -352,8 +352,12 @@ class SourcererSDK:
             SourcererAPIError: If the API request fails
         """
         try:
+            # Fetch the branch's projection to get its sequence number
+            seq: int = self.fetch_last_known_sequence_number(branch_id=branch_id)
+
             url = f"{self._get_branches_url()}/{branch_id}"
-            data = {"expectedBranchLastKnownSequence": self.get_last_known_sequence() or 0}
+            logger.info(f"Deleting branch {branch_id} with sequence={seq}")
+            data = {"expectedBranchLastKnownSequence": seq}
             response = self.session.delete(url, json=data)
             response.raise_for_status()
             logger.info(f"Branch {branch_id} deleted successfully")
@@ -363,20 +367,28 @@ class SourcererSDK:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
                 except (ValueError, KeyError):
-                    error_msg = f"API Error {e.response.status_code}: {e.response.text}"
+                    error_msg = f"API request failed: {e}"
             else:
-                error_msg = f"Request failed: {str(e)}"
+                error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
-    def fetch_last_known_sequence_number(self) -> int:
-        """Get the sequence number from the API
+    def fetch_last_known_sequence_number(self, branch_id: Optional[str] = None) -> int:
+        """Get the sequence number from the API.
+
+        Args:
+            branch_id (Optional[str]): The branch ID to fetch the sequence number for.
+                Defaults to the current branch if not provided.
+
         Returns:
-            The sequence number as an integer
+            The sequence number as an integer.
+
         Raises:
-            SourcererAPIError: If the API request fails
+            SourcererAPIError: If the API request fails.
         """
+        if branch_id is None:
+            branch_id = self.branch_id
         try:
-            url = f"{self._get_branches_url()}/{self.branch_id}/sequence"
+            url = f"{self._get_branches_url()}/{branch_id}/sequence"
             response = self.session.get(url)
             response.raise_for_status()
             return int(response.json()["lastKnownSequence"])
@@ -386,9 +398,9 @@ class SourcererSDK:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
                 except (ValueError, KeyError):
-                    error_msg = f"API Error {e.response.status_code}: {e.response.text}"
+                    error_msg = f"API request failed: {e}"
             else:
-                error_msg = f"Request failed: {str(e)}"
+                error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
     def fetch_projection(self, force_refresh: bool = False) -> dict[str, Any]:
