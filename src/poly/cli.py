@@ -21,6 +21,7 @@ from typing import Any, Optional
 import argcomplete
 import requests
 import questionary
+import traceback
 
 from poly.output.console import (
     console,
@@ -695,129 +696,137 @@ class AgentStudioCLI:
         else:
             logging.basicConfig(level=logging.WARNING)
 
-        if args.command == "init":
-            cls.init_project(
-                args.base_path,
-                args.region,
-                args.account_id,
-                args.project_id,
-                args.format,
-                args.from_projection,
-                output_json=args.json,
-                output_json_projection=args.output_json_projection,
-            )
-
-        elif args.command == "pull":
-            cls.pull(
-                args.path,
-                args.force,
-                args.format,
-                args.from_projection,
-                output_json=args.json,
-                output_json_projection=args.output_json_projection,
-            )
-
-        elif args.command == "push":
-            cls.push(
-                args.path,
-                args.force,
-                args.skip_validation,
-                args.dry_run,
-                args.format,
-                args.email,
-                args.from_projection,
-                output_json=args.json,
-                output_commands=args.output_json_commands,
-            )
-
-        elif args.command == "status":
-            cls.status(args.path, args.json)
-
-        elif args.command == "revert":
-            cls.revert(args.path, args.all, args.files, output_json=args.json)
-
-        elif args.command == "diff":
-            cls.diff(args.path, args.files, args.json)
-
-        elif args.command == "review":
-            if args.review_subcommand == "delete":
-                cls.delete_gists(gist_id=args.id, output_json=args.json)
-            elif args.review_subcommand == "list":
-                cls.list_gists(output_json=args.json)
-            else:
-                if args.before and args.after:
-                    cls.review(
-                        base_path=args.path,
-                        before_name=args.before,
-                        after_name=args.after,
-                        output_json=args.json,
-                    )
-                else:
-                    cls.review(args.path, output_json=args.json)
-
-        elif args.command == "branch":
-            if args.branch_subcommand == "list":
-                cls.branch_list(args.path, args.json)
-
-            elif args.branch_subcommand == "create":
-                cls.branch_create(
-                    args.path,
-                    args.branch_name,
-                    args.json,
-                    getattr(args, "environment", None),
-                    getattr(args, "force", False),
-                )
-
-            elif args.branch_subcommand == "switch":
-                cls.branch_switch(
-                    args.path,
-                    args.branch_name,
-                    getattr(args, "force", False),
-                    getattr(args, "format", False),
-                    args.json,
+        try:
+            if args.command == "init":
+                cls.init_project(
+                    args.base_path,
+                    args.region,
+                    args.account_id,
+                    args.project_id,
+                    args.format,
+                    args.from_projection,
+                    output_json=args.json,
                     output_json_projection=args.output_json_projection,
-                    from_projection=args.from_projection,
                 )
 
-            elif args.branch_subcommand == "current":
-                cls.get_current_branch(args.path, args.json)
+            elif args.command == "pull":
+                cls.pull(
+                    args.path,
+                    args.force,
+                    args.format,
+                    args.from_projection,
+                    output_json=args.json,
+                    output_json_projection=args.output_json_projection,
+                )
 
-            elif args.branch_subcommand == "delete":
-                cls.branch_delete(args.path, args.branch_name, args.json)
+            elif args.command == "push":
+                cls.push(
+                    args.path,
+                    args.force,
+                    args.skip_validation,
+                    args.dry_run,
+                    args.format,
+                    args.email,
+                    args.from_projection,
+                    output_json=args.json,
+                    output_commands=args.output_json_commands,
+                )
 
-        elif args.command == "format":
-            cls.format(
-                args.path,
-                args.files,
-                getattr(args, "check", False),
-                getattr(args, "ty", False),
-                output_json=args.json,
-            )
+            elif args.command == "status":
+                cls.status(args.path, args.json)
 
-        elif args.command == "validate":
-            cls.validate_project(args.path, args.json)
+            elif args.command == "revert":
+                cls.revert(args.path, args.all, args.files, output_json=args.json)
 
-        elif args.command == "docs":
-            cls.docs(
-                documents=args.documents,
-                all_documents=getattr(args, "all", False),
-                output=getattr(args, "output", None),
-            )
+            elif args.command == "diff":
+                cls.diff(args.path, args.files, args.json)
 
-        elif args.command == "chat":
-            show_all = args.metadata
-            cls.chat(
-                args.path,
-                args.environment,
-                args.variant,
-                args.channel,
-                show_functions=show_all or args.functions,
-                show_flow=show_all or args.flows,
-                show_state=show_all or args.state,
-            )
+            elif args.command == "review":
+                if args.review_subcommand == "delete":
+                    cls.delete_gists(gist_id=args.id, output_json=args.json)
+                elif args.review_subcommand == "list":
+                    cls.list_gists(output_json=args.json)
+                else:
+                    if args.before and args.after:
+                        cls.review(
+                            base_path=args.path,
+                            before_name=args.before,
+                            after_name=args.after,
+                            output_json=args.json,
+                        )
+                    else:
+                        cls.review(args.path, output_json=args.json)
 
-        elif args.command == "completion":
-            cls.print_completion(args.shell)
+            elif args.command == "branch":
+                if args.branch_subcommand == "list":
+                    cls.branch_list(args.path, args.json)
+
+                elif args.branch_subcommand == "create":
+                    cls.branch_create(
+                        args.path,
+                        args.branch_name,
+                        args.json,
+                        getattr(args, "environment", None),
+                        getattr(args, "force", False),
+                    )
+
+                elif args.branch_subcommand == "switch":
+                    cls.branch_switch(
+                        args.path,
+                        args.branch_name,
+                        getattr(args, "force", False),
+                        getattr(args, "format", False),
+                        args.json,
+                        output_json_projection=args.output_json_projection,
+                        from_projection=args.from_projection,
+                    )
+
+                elif args.branch_subcommand == "current":
+                    cls.get_current_branch(args.path, args.json)
+
+                elif args.branch_subcommand == "delete":
+                    cls.branch_delete(args.path, args.branch_name, args.json)
+
+            elif args.command == "format":
+                cls.format(
+                    args.path,
+                    args.files,
+                    getattr(args, "check", False),
+                    getattr(args, "ty", False),
+                    output_json=args.json,
+                )
+
+            elif args.command == "validate":
+                cls.validate_project(args.path, args.json)
+
+            elif args.command == "docs":
+                cls.docs(
+                    documents=args.documents,
+                    all_documents=getattr(args, "all", False),
+                    output=getattr(args, "output", None),
+                )
+
+            elif args.command == "chat":
+                show_all = args.metadata
+                cls.chat(
+                    args.path,
+                    args.environment,
+                    args.variant,
+                    args.channel,
+                    show_functions=show_all or args.functions,
+                    show_flow=show_all or args.flows,
+                    show_state=show_all or args.state,
+                )
+
+            elif args.command == "completion":
+                cls.print_completion(args.shell)
+
+        except Exception as e:
+            if hasattr(args, "json") and args.json:
+                json_print({"success": False, "error": str(e), "traceback": traceback.format_exc()})
+                sys.exit(1)
+            else:
+                raise
 
     @classmethod
     def print_completion(cls, shell: str) -> None:

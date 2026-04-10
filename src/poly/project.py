@@ -1106,7 +1106,7 @@ class AgentStudioProject:
                     "hash"
                 )
 
-                has_changed, _ = resource.get_status(original_resource_hash)
+                has_changed = resource.is_modified(original_resource_hash)
 
                 if has_changed:
                     updated_resources.setdefault(resource_type, {})[resource_id] = resource
@@ -1595,15 +1595,21 @@ class AgentStudioProject:
                 os.path.relpath(kept_local_resource_mapping.file_path, self.root_path),
                 {},
             ).get("hash")
+
+            local_content = kept_local_resource_mapping.resource_type.read_from_file(
+                kept_local_resource_mapping.file_path
+            )
+            if resource_utils.contains_merge_conflict(local_content):
+                files_with_conflicts.append(kept_local_resource_mapping.file_path)
+                continue
+
             local_resource = self.read_local_resource(
                 resource=kept_local_resource_mapping, resource_mappings=local_resources_mappings
             )
 
-            modified, has_conflict = local_resource.get_status(original_hash)
+            modified = local_resource.is_modified(original_hash)
             if modified:
                 modified_files.append(kept_local_resource_mapping.file_path)
-            if has_conflict:
-                files_with_conflicts.append(kept_local_resource_mapping.file_path)
 
         return files_with_conflicts, modified_files, new_files, deleted_files
 
@@ -1649,11 +1655,24 @@ class AgentStudioProject:
                 os.path.relpath(local_resource_mapping.file_path, self.root_path), {}
             ).get("hash")
 
+            local_content = local_resource_mapping.resource_type.read_from_file(
+                local_resource_mapping.file_path
+            )
+            if resource_utils.contains_merge_conflict(local_content):
+                original_resource = self.resources.get(
+                    local_resource_mapping.resource_type, {}
+                ).get(local_resource_mapping.resource_id)
+                original_content = original_resource.raw if original_resource else ""
+                diffs[local_resource_mapping.file_path] = resource_utils.get_diff(
+                    original_content, local_content
+                )
+                continue
+
             local_resource = self.read_local_resource(
                 resource=local_resource_mapping, resource_mappings=local_resources_mappings
             )
 
-            modified, _ = local_resource.get_status(original_hash)
+            modified = local_resource.is_modified(original_hash)
             if not modified:
                 continue
 
@@ -1893,7 +1912,7 @@ class AgentStudioProject:
             )
         except Exception as e:
             raise ValueError(
-                f"Error reading resource {resource.resource_name} at {resource.file_path}"
+                f"Error reading resource {resource.resource_name} at {resource.file_path}: {str(e)}"
             ) from e
 
         return resource

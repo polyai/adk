@@ -572,59 +572,58 @@ class Function(Resource):
         parameters: list[FunctionParameters] = []
         description: str = None
         latency_control = FunctionLatencyControl()
-        try:
-            target = Function._get_target_function(code, function_name)
-            if target:
-                removable_lines: set[int] = set()
-                for decorator in target.decorator_list:
-                    if not (hasattr(decorator, "func") and hasattr(decorator.func, "id")):
-                        continue
+        target = Function._get_target_function(code, function_name)
+        if target:
+            removable_lines: set[int] = set()
+            for decorator in target.decorator_list:
+                if not (hasattr(decorator, "func") and hasattr(decorator.func, "id")):
+                    continue
 
-                    decorator_name = decorator.func.id
+                decorator_name = decorator.func.id
 
-                    if decorator_name == "func_parameter" and len(decorator.args) == 2:
-                        name, desc = (arg.value for arg in decorator.args)
-                        _type = next(
-                            (arg.annotation.id for arg in target.args.args if arg.arg == name),
-                            None,
+                if decorator_name == "func_parameter" and len(decorator.args) == 2:
+                    name, desc = (arg.value for arg in decorator.args)
+                    matched_arg = next((arg for arg in target.args.args if arg.arg == name), None)
+                    if matched_arg is None or matched_arg.annotation is None:
+                        raise ValueError(
+                            f"Parameter {name!r} has no type annotation. "
+                            f"Supported types: str, int, float, bool."
                         )
-                        if not _type:
-                            raise SyntaxError(f"Parameter {name!r} is missing a type.")
-
-                        _id = next(
-                            (param.id for param in known_parameters if param.name == name),
-                            f"PARAMETER-{uuid.uuid4().hex[:8]}",
+                    if not hasattr(matched_arg.annotation, "id"):
+                        raise ValueError(
+                            f"Parameter {name!r} has an unsupported type annotation. "
+                            f"Supported types: str, int, float, bool."
                         )
+                    _type = matched_arg.annotation.id
 
-                        if _type in PY_TO_SCHEMA:
-                            parameters.append(
-                                FunctionParameters(
-                                    id=_id,
-                                    name=name,
-                                    description=desc,
-                                    type=PY_TO_SCHEMA[_type],
-                                )
-                            )
-                            removable_lines.update(
-                                range(decorator.lineno - 1, decorator.end_lineno)
-                            )
-                    elif decorator_name == "func_description" and len(decorator.args) == 1:
-                        description = (decorator.args[0].value).strip()
-                        removable_lines.update(range(decorator.lineno - 1, decorator.end_lineno))
-
-                    elif decorator_name == "func_latency_control":
-                        latency_control = Function._parse_latency_control_decorator(
-                            decorator, known_latency_control
-                        )
-                        removable_lines.update(range(decorator.lineno - 1, decorator.end_lineno))
-
-                if removable_lines:
-                    lines = code.splitlines(True)
-                    code = "".join(
-                        line for idx, line in enumerate(lines) if idx not in removable_lines
+                    _id = next(
+                        (param.id for param in known_parameters if param.name == name),
+                        f"PARAMETER-{uuid.uuid4().hex[:8]}",
                     )
-        except SyntaxError as e:
-            logger.error(f"error while extracting decorators from function e={e!r}")
+
+                    if _type in PY_TO_SCHEMA:
+                        parameters.append(
+                            FunctionParameters(
+                                id=_id,
+                                name=name,
+                                description=desc,
+                                type=PY_TO_SCHEMA[_type],
+                            )
+                        )
+                        removable_lines.update(range(decorator.lineno - 1, decorator.end_lineno))
+                elif decorator_name == "func_description" and len(decorator.args) == 1:
+                    description = (decorator.args[0].value).strip()
+                    removable_lines.update(range(decorator.lineno - 1, decorator.end_lineno))
+
+                elif decorator_name == "func_latency_control":
+                    latency_control = Function._parse_latency_control_decorator(
+                        decorator, known_latency_control
+                    )
+                    removable_lines.update(range(decorator.lineno - 1, decorator.end_lineno))
+
+            if removable_lines:
+                lines = code.splitlines(True)
+                code = "".join(line for idx, line in enumerate(lines) if idx not in removable_lines)
         return code, parameters, description, latency_control
 
     @staticmethod
