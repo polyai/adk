@@ -154,14 +154,34 @@ poly validate
 
 ### `poly review`
 
-Create a GitHub gist for reviewing changes.
+Create a GitHub Gist of Agent Studio project changes to share with others.
+
+Running `poly review` without a subcommand creates a new gist comparing local changes against the remote project. Use `--before` and `--after` to compare two remote branches or versions.
 
 Examples:
 
 ~~~bash
 poly review
 poly review --before main --after feature-branch
-poly review --delete
+~~~
+
+#### `poly review list`
+
+Interactively select a review gist and open it in the browser.
+
+~~~bash
+poly review list
+poly review list --json
+~~~
+
+#### `poly review delete`
+
+Interactively select and delete review gists. Use `--id` to delete a specific gist directly without an interactive prompt.
+
+~~~bash
+poly review delete
+poly review delete --id GIST_ID
+poly review delete --json
 ~~~
 
 ### `poly chat`
