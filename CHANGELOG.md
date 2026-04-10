@@ -1,6 +1,179 @@
 # CHANGELOG
 
 
+## v0.8.2 (2026-04-10)
+
+### Bug Fixes
+
+- Allow ?query ending for API operations ([#70](https://github.com/polyai/adk/pull/70),
+  [`4199800`](https://github.com/polyai/adk/commit/419980010c63e3e4b6b1a780ff26d4f80e552cbd))
+
+## Summary Update validation regex to allow API operation with ?query ending <!-- What does this PR
+  do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+
+## v0.8.1 (2026-04-10)
+
+### Bug Fixes
+
+- Raise proper error message for invalid format functions
+  ([#68](https://github.com/polyai/adk/pull/68),
+  [`5222f3e`](https://github.com/polyai/adk/commit/5222f3ec56da9821c0de54b648f9561e442b7d4f))
+
+## Summary
+
+Fixes two related issues: untyped or unsupported function parameters now raise a clear `ValueError`
+  instead of crashing with `AttributeError`, and merge-conflicted files are correctly excluded from
+  `modified_files` in `project_status` and handled without crashing in `get_diffs`. Also surfaces
+  all CLI errors as structured JSON when `--json` is set.
+
+## Motivation
+
+In v0.6.x, functions with untyped parameters (e.g. `def f(conv, booking_ref)`) caused
+  `_extract_decorators` to crash with `AttributeError: 'NoneType' has no attribute 'id'`.
+  Separately, files with merge conflicts were being passed to `read_local_resource`, which would now
+  raise rather than silently fail. Both issues needed to be fixed together for `poly status` and
+  `poly diff` to be reliable after a branch pull with conflicts.
+
+Closes #<!-- issue number -->
+
+## Changes
+
+- `_extract_decorators`: guard `arg.annotation` access before reading `.id`; raise `ValueError` with
+  a distinct message for missing vs unsupported type annotations; remove the `try/except
+  SyntaxError` wrapper so errors propagate to the user - `resource.py`: rename `get_status` →
+  `is_modified`, removing merge conflict detection from the resource itself - `project_status`:
+  check for merge conflicts on raw file content before calling `read_local_resource`; conflicted
+  files now appear only in `files_with_conflicts`, not also in `modified_files` - `get_diffs`: same
+  conflict-before-parse pattern; shows diff of conflict markers vs original; fix
+  `type(resource_type)` key bug and missing second arg to `get_diff` - `cli.py`: wrap the command
+  dispatch in `try/except`; when `--json` is set, errors are returned as `{"success": false,
+  "error": "...", "traceback": "..."}` instead of raising - `src/poly/docs/functions.md`: note that
+  all parameters must have a supported type annotation
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+### Documentation
+
+- Feat: add poly branch delete command ([#67](https://github.com/polyai/adk/pull/67),
+  [`285327b`](https://github.com/polyai/adk/commit/285327bdad9869eaed8fae4f43472226e465adfe))
+
+## Summary
+
+This PR is related to https://github.com/polyai/adk/pull/63
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Fix prerequisites around API key generation ([#59](https://github.com/polyai/adk/pull/59),
+  [`4fea771`](https://github.com/polyai/adk/commit/4fea771354c28164884d4fbfd2df4c15e50c3e37))
+
+## Summary
+
+This PR relates to https://github.com/polyai/adk/pull/45 and updates API key generation info
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+
 ## v0.8.0 (2026-04-08)
 
 ### Features

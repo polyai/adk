@@ -30,9 +30,10 @@ from poly.resources.resource import (
 
 logger = logging.getLogger(__name__)
 
-# RFC 3986 path chars + {param} placeholders (e.g. /users/{id}/orders)
+# RFC 3986 path + {param} placeholders; optional ?query (query allows pchar, /, ?)
 OPERATION_RESOURCE_PATTERN = re.compile(
-    r"^(/([a-zA-Z0-9._~!$&'()*+,;=:@%-]|%[0-9A-Fa-f]{2}|\{[a-zA-Z_][a-zA-Z0-9_]*\})*)+$"
+    r"^(/([a-zA-Z0-9._~!$&'()*+,;=:@%-]|%[0-9A-Fa-f]{2}|\{[a-zA-Z_][a-zA-Z0-9_]*\})*)+"
+    r"(?:\?([a-zA-Z0-9._~!$&'()*+,;=:@%/?-]|%[0-9A-Fa-f]{2}|\{[a-zA-Z_][a-zA-Z0-9_]*\})*)?$"
 )
 
 AVAILABLE_OPERATIONS = {"GET", "POST", "PATCH", "PUT", "DELETE"}
