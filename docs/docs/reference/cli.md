@@ -177,6 +177,83 @@ poly docs --all --output rules.md
 
 Use `--output` to write the documentation to a local file. This is useful when working with AI coding tools — pass the output file as context to give the agent accurate knowledge of ADK resource types and conventions.
 
+Use `--output` to write the documentation to a local file. This is useful when working with AI coding tools - pass the output file as context to give the agent accurate knowledge of ADK resource types and conventions.
+
+## Machine-readable JSON output
+
+All core subcommands accept a `--json` flag that switches stdout to a single JSON object. This is designed for scripting, CI pipelines, and any integration that needs stable, parseable output rather than human-readable console text.
+
+~~~bash
+poly status --json
+poly push --json
+poly pull --json
+poly validate --json
+poly diff --json
+poly revert --json --all
+poly branch list --json
+poly branch create my-feature --json
+poly branch current --json
+poly format --json
+poly init --region us-1 --account_id 123 --project_id my_project --json
+~~~
+
+When `--json` is used:
+
+- stdout contains exactly one JSON object
+- the process exits with code `0` on success and non-zero on failure
+- human-readable console messages are suppressed
+
+### JSON output shapes
+
+The exact fields vary by command. Common fields include:
+
+| Command | Key fields |
+|---|---|
+| `poly status --json` | `files_with_conflicts`, `modified_files`, `new_files`, `deleted_files` |
+| `poly push --json` | `success`, `message`, `dry_run` |
+| `poly pull --json` | `success`, `files_with_conflicts` |
+| `poly validate --json` | `valid`, `errors` |
+| `poly diff --json` | `diffs` |
+| `poly revert --json` | `success`, `files_reverted` |
+| `poly branch list --json` | `current_branch`, `branches` |
+| `poly branch create --json` | `success`, `new_branch_id`, `branch_name` |
+| `poly branch current --json` | `current_branch` |
+| `poly format --json` | `success`, `check_only`, `format_errors`, `affected`, `ty_ran`, `ty_returncode`, `ty_timed_out` |
+| `poly init --json` | `success`, `root_path` |
+
+Error responses always include `{ "success": false, "error": "..." }`.
+
+!!! info "`init` with `--json` requires explicit flags"
+
+    When using `poly init --json`, you must supply `--region`, `--account_id`, and `--project_id` explicitly. Interactive prompts are not supported in JSON mode.
+
+### `poly push --output-json-commands`
+
+Adds a `commands` array to the JSON output of `poly push`, containing the serialized Agent Studio commands that were staged. Useful for dry-run review and integration testing.
+
+~~~bash
+poly push --json --dry-run --output-json-commands
+~~~
+
+The output will include a `commands` key with each command serialized from its protobuf representation.
+
+### Driving pull/push from a captured projection
+
+The `--from-projection` flag on `pull`, `push`, `init`, and `branch switch` lets you supply a projection JSON directly (as a string or via stdin with `-`) instead of fetching it from the API. This is useful for offline workflows and integration testing.
+
+~~~bash
+poly pull --from-projection - < projection.json
+poly push --from-projection '{"topics": [...], ...}'
+cat projection.json | poly pull --from-projection -
+~~~
+
+The `--output-json-projection` flag on `pull`, `init`, and `branch switch` includes the projection in the JSON output when `--json` is also set. This lets you capture a projection from one command and feed it into another.
+
+~~~bash
+poly pull --json --output-json-projection | jq .projection > proj.json
+poly push --from-projection - < proj.json
+~~~
+
 
 ## Working pattern
 
