@@ -1585,10 +1585,13 @@ class AgentStudioProject:
                     continue
 
                 deleted_original_step = next(
-                    step
-                    for step in deleted_steps
-                    if step.flow_id == condition.flow_id
-                    and step.step_id == original_condition.child_step
+                    (
+                        step
+                        for step in deleted_steps
+                        if step.flow_id == condition.flow_id
+                        and step.step_id == original_condition.child_step
+                    ),
+                    None,
                 )
                 if deleted_original_step:
                     new_resources.setdefault(Condition, {})[condition_id] = condition
