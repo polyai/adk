@@ -663,6 +663,40 @@ class ComputeDiffTest(unittest.TestCase):
             before_name="abc123456", after_name="def789012"
         )
 
+    def test_only_after_environment_name_queries_correct_env(self):
+        """after='live' should fetch deployments for the live environment, not sandbox."""
+        versions = [
+            {"version_hash": "abc123456xyz"},
+            {"version_hash": "def789012xyz"},
+        ]
+        deployment_hashes = {"live": "abc123456xyz"}
+        self.proj.get_deployments.return_value = (versions, deployment_hashes)
+
+        AgentStudioCLI._compute_diff(TEST_DIR, after="live")
+
+        self.proj.get_deployments.assert_called_once_with(client_env="live")
+
+
+class RevertTest(unittest.TestCase):
+    """Tests for the revert CLI method."""
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli.AgentStudioCLI._load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_revert_no_files_reverts_all(self):
+        """Calling revert with no files should revert all changes (new default behaviour)."""
+        self.proj.revert_changes.return_value = ["file1.yaml"]
+
+        AgentStudioCLI.revert(TEST_DIR, files=[])
+
+        self.proj.revert_changes.assert_called_once_with(files=[])
+
 
 class PrintDeploymentsTest(unittest.TestCase):
     """Tests for the print_deployments CLI method."""
@@ -719,7 +753,7 @@ class PrintDeploymentsTest(unittest.TestCase):
         """print_deployments with hash finds version index and uses it as offset."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
 
-        AgentStudioCLI.deployments_list(TEST_DIR, hash="hash00005")
+        AgentStudioCLI.deployments_list(TEST_DIR, version_hash="hash00005")
 
         mock_print_dep.assert_called_once()
         displayed_versions = mock_print_dep.call_args[0][0]
@@ -730,7 +764,7 @@ class PrintDeploymentsTest(unittest.TestCase):
         """print_deployments with unknown hash calls error."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
 
-        AgentStudioCLI.deployments_list(TEST_DIR, hash="zzz999999")
+        AgentStudioCLI.deployments_list(TEST_DIR, version_hash="zzz999999")
 
         mock_error.assert_called_once()
         self.assertIn("not found", mock_error.call_args[0][0])
