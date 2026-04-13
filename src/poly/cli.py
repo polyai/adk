@@ -544,6 +544,19 @@ class AgentStudioCLI:
         ).completer = cls._branch_name_completer
         branch_delete_parser.set_defaults(branch_subcommand="delete")
 
+        branch_merge_parser = branch_subparsers.add_parser(
+            "merge",
+            parents=[branch_path_parent, json_parent],
+            help="Merge branch into main",
+        )
+        branch_merge_parser.add_argument(
+            "message",
+            nargs="?",
+            default=None,
+            help="Commit message for the merge.",
+        )
+        branch_merge_parser.set_defaults(branch_subcommand="merge")
+
         # FORMAT
         format_parser = subparsers.add_parser(
             "format",
@@ -786,6 +799,9 @@ class AgentStudioCLI:
 
                 elif args.branch_subcommand == "delete":
                     cls.branch_delete(args.path, args.branch_name, args.json)
+
+                elif args.branch_subcommand == "merge":
+                    cls.branch_merge(args.path, args.message, args.json)
 
             elif args.command == "format":
                 cls.format(
@@ -1837,6 +1853,38 @@ class AgentStudioCLI:
         else:
             if deleted_count:
                 success(f"Deleted {deleted_count} branch(es).")
+
+    def branch_merge(
+        cls,
+        base_path: str,
+        message: str = None,
+        output_json: bool = False,
+    ):
+        """Merge a branch into the current branch, with optional conflict resolutions."""
+        project = cls._load_project(base_path)
+
+        branch_name = project.get_current_branch()
+        success, conflicts, errors = project.merge_branch(message=message)
+
+        if output_json:
+            output = {"success": success}
+            if conflicts or errors:
+                output["conflicts"] = conflicts
+                output["errors"] = errors
+
+            if not success:
+                sys.exit(1)
+        else:
+            if success:
+                success(f"Branch '{branch_name}' merged successfully.")
+            else:
+                error(f"Failed to merge branch '{branch_name}'.")
+                if conflicts:
+                    print_file_list("Merge conflicts", conflicts, "filename.conflict")
+                if errors:
+                    plain("\n[red]Errors:[/red]")
+                    for err in errors:
+                        plain(f"[red]{err}[/red]")
 
     @classmethod
     def format(
