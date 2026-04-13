@@ -17,7 +17,6 @@ from argparse import SUPPRESS, ArgumentParser, RawTextHelpFormatter
 from contextlib import nullcontext
 from importlib.metadata import version as get_package_version
 from typing import Any, Optional
-from xml.parsers.expat import errors
 
 import argcomplete
 import requests
@@ -2070,7 +2069,7 @@ class AgentStudioCLI:
                         {
                             "success": False,
                             "message": "Failed to push project before chat session.",
-                            "error": error,
+                            "error": output,
                         }
                     )
                 else:
