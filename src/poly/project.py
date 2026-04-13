@@ -2517,15 +2517,7 @@ class AgentStudioProject:
             self.switch_branch("main", force=True)
             return True, [], []
 
-        error_messages = []
-        conflict_messages = []
-        if conflicts:
-            conflict_messages = [conflict["path"] for conflict in conflicts]
-            logger.debug(f"Merge conflicts detected: conflicts={conflicts!r}")
-        if errors:
-            error_messages = [f"{error['path']}: {error['message']}" for error in errors]
-            logger.debug(f"Merge errors detected: errors={errors!r}")
-        return False, conflict_messages, error_messages
+        return False, conflicts, errors
 
     def delete_branch(self, branch_name: str) -> bool:
         """Delete a branch in the project.

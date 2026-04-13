@@ -120,6 +120,13 @@ class AgentStudioCLI:
             help="Print a single JSON object on stdout (machine-readable).",
         )
 
+        debug_parent = ArgumentParser(add_help=False)
+        debug_parent.add_argument(
+            "--debug",
+            action="store_true",
+            help="Display debug logs.",
+        )
+
         subparsers = parser.add_subparsers(dest="command", required=True)
 
         # DOCS
@@ -154,7 +161,7 @@ class AgentStudioCLI:
         # INIT
         init_parser = subparsers.add_parser(
             "init",
-            parents=[verbose_parent, json_parent],
+            parents=[verbose_parent, json_parent, debug_parent],
             help="Initialize a new Agent Studio project.",
             description="Initialize a new Agent Studio project.\n\nExamples:\n  poly init --region eu-west-1 --account_id 123 --project_id my_project\n  poly init  # (interactive selection)",
             formatter_class=RawTextHelpFormatter,
@@ -199,12 +206,11 @@ class AgentStudioCLI:
             help=SUPPRESS,
             default=False,
         )
-        init_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
 
         # PULL
         pull_parser = subparsers.add_parser(
             "pull",
-            parents=[verbose_parent, json_parent],
+            parents=[verbose_parent, json_parent, debug_parent],
             help="Pull the latest project configuration from Agent Studio.",
             description="Pull the latest project configuration from Agent Studio.\n\nExamples:\n  poly pull --path /path/to/project\n  poly pull -f  # force overwrite local changes",
             formatter_class=RawTextHelpFormatter,
@@ -240,12 +246,11 @@ class AgentStudioCLI:
             help=SUPPRESS,
             default=False,
         )
-        pull_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
 
         # PUSH
         push_parser = subparsers.add_parser(
             "push",
-            parents=[verbose_parent, json_parent],
+            parents=[verbose_parent, json_parent, debug_parent],
             help="Push the project configuration to Agent Studio.",
             description="Push the project configuration to Agent Studio.\n\nExamples:\n  poly push --path /path/to/project\n  poly push --skip-validation --dry-run",
             formatter_class=RawTextHelpFormatter,
@@ -278,7 +283,6 @@ class AgentStudioCLI:
             help="Format resources before pushing.",
             default=False,
         )
-        push_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
         push_parser.add_argument(
             "--from-projection",
             type=str,
@@ -440,7 +444,7 @@ class AgentStudioCLI:
 
         branches_parser = subparsers.add_parser(
             "branch",
-            parents=[verbose_parent],
+            parents=[],
             help="Manage branches in the Agent Studio project.",
             description=(
                 "Manage branches in the Agent Studio project.\n\n"
@@ -457,14 +461,14 @@ class AgentStudioCLI:
 
         branch_list_parser = branch_subparsers.add_parser(
             "list",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
             help="List all branches in the project.",
         )
         branch_list_parser.set_defaults(branch_subcommand="list")
 
         branch_create_parser = branch_subparsers.add_parser(
             "create",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
             help="Create a new branch.",
         )
         branch_create_parser.add_argument(
@@ -489,14 +493,11 @@ class AgentStudioCLI:
 
         branch_switch_parser = branch_subparsers.add_parser(
             "switch",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
             help="Switch to a different branch.",
         )
         branch_switch_parser.add_argument(
             "branch_name", nargs="?", help="Name of the branch to switch to."
-        )
-        branch_switch_parser.add_argument(
-            "--debug", action="store_true", help="Display debug logs."
         )
         branch_switch_parser.add_argument(
             "--format",
@@ -526,14 +527,14 @@ class AgentStudioCLI:
 
         branch_current_parser = branch_subparsers.add_parser(
             "current",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
             help="Show the current branch.",
         )
         branch_current_parser.set_defaults(branch_subcommand="current")
 
         branch_delete_parser = branch_subparsers.add_parser(
             "delete",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
             help="Interactively select and delete a branch.",
         )
         branch_delete_parser.add_argument(
@@ -546,7 +547,7 @@ class AgentStudioCLI:
 
         branch_merge_parser = branch_subparsers.add_parser(
             "merge",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
             help="Merge branch into main",
         )
         branch_merge_parser.add_argument(
@@ -613,7 +614,7 @@ class AgentStudioCLI:
         # CHAT
         chat_parser = subparsers.add_parser(
             "chat",
-            parents=[verbose_parent],
+            parents=[verbose_parent, debug_parent],
             help="Start an interactive chat session with the agent.",
             description=(
                 "Start an interactive chat session with the agent.\n\n"
@@ -651,7 +652,6 @@ class AgentStudioCLI:
             choices=["voice", "webchat"],
             help="Channel to chat against. Defaults to voice.",
         )
-        chat_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
         chat_parser.add_argument(
             "--functions",
             action="store_true",
@@ -1854,6 +1854,7 @@ class AgentStudioCLI:
             if deleted_count:
                 success(f"Deleted {deleted_count} branch(es).")
 
+    @classmethod
     def branch_merge(
         cls,
         base_path: str,
@@ -1861,22 +1862,23 @@ class AgentStudioCLI:
         output_json: bool = False,
     ):
         """Merge a branch into the current branch, with optional conflict resolutions."""
-        project = cls._load_project(base_path)
+        project = cls._load_project(base_path, output_json=output_json)
 
         branch_name = project.get_current_branch()
-        success, conflicts, errors = project.merge_branch(message=message)
+        merge_success, conflicts, errors = project.merge_branch(message=message)
 
         if output_json:
-            output = {"success": success}
+            output = {"success": merge_success}
             if conflicts or errors:
                 output["conflicts"] = conflicts
                 output["errors"] = errors
-
-            if not success:
+            json_print(output)
+            if not merge_success:
                 sys.exit(1)
         else:
-            if success:
+            if merge_success:
                 success(f"Branch '{branch_name}' merged successfully.")
+                info('Switched to "main" branch after merge.')
             else:
                 error(f"Failed to merge branch '{branch_name}'.")
                 if conflicts:

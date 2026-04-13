@@ -1160,7 +1160,6 @@ class SyncClientHandler:
 
         try:
             result = self.sdk.merge_branch(
-                expected_branch_last_known_sequence=self.sdk._last_known_sequence,
                 deployment_message=message,
                 conflict_resolutions=conflict_resolutions,
             )
