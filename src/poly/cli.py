@@ -2240,7 +2240,7 @@ class AgentStudioCLI:
                             plain("")
                         break
 
-                if not user_input:
+                if user_input is None:
                     continue
                 if user_input.lower() == "/exit":
                     break
