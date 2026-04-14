@@ -26,6 +26,7 @@ from poly.resources import (
     BaseFlowStep,
     ChatGreeting,
     ChatStylePrompt,
+    Condition,
     Entity,
     ExperimentalConfig,
     FlowConfig,
@@ -1110,7 +1111,7 @@ class AgentStudioProject:
                     "hash"
                 )
 
-                has_changed, _ = resource.get_status(original_resource_hash)
+                has_changed = resource.is_modified(original_resource_hash)
 
                 if has_changed:
                     updated_resources.setdefault(resource_type, {})[resource_id] = resource
@@ -1550,6 +1551,56 @@ class AgentStudioProject:
             if not variant.is_default:
                 updated_resources[Variant].pop(variant.resource_id, None)
 
+        # Don't delete condition if parent step is being deleted
+        for flow_step in list(deleted_resources.get(FlowStep, {}).values()):
+            for condition in flow_step.conditions:
+                deleted_resources.get(Condition, {}).pop(condition.resource_id, None)
+
+        # If we are deleting a step and pointing a condition to a different step, the delete will auto delete the condition so the update will fail. We should instead make it a create
+        deleted_steps = list(deleted_resources.get(FlowStep, {}).values()) + list(
+            deleted_resources.get(FunctionStep, {}).values()
+        )
+        updated_conditions = list(updated_resources.get(Condition, {}).items())
+        if deleted_steps:
+            flows_with_deleted_steps = {deleted_step.flow_id for deleted_step in deleted_steps}
+            for condition_id, condition in updated_conditions:
+                if condition.flow_id not in flows_with_deleted_steps:
+                    continue
+                original_flow_step: FlowStep = next(
+                    (
+                        flow_step
+                        for flow_step in self.resources.get(FlowStep, {}).values()
+                        if flow_step.flow_id == condition.flow_id
+                        and flow_step.step_id == condition.step_id
+                    ),
+                    None,
+                )
+                if not original_flow_step:
+                    continue
+                original_condition: Condition = next(
+                    (
+                        cond
+                        for cond in original_flow_step.conditions
+                        if cond.resource_id == condition_id
+                    ),
+                    None,
+                )
+                if not original_condition:
+                    continue
+
+                deleted_original_step = next(
+                    (
+                        step
+                        for step in deleted_steps
+                        if step.flow_id == condition.flow_id
+                        and step.step_id == original_condition.child_step
+                    ),
+                    None,
+                )
+                if deleted_original_step:
+                    new_resources.setdefault(Condition, {})[condition_id] = condition
+                    updated_resources.get(Condition, {}).pop(condition_id, None)
+
         return PushPhaseChangeSet(
             main=ResourceChangeSet(
                 new=new_resources,
@@ -1599,15 +1650,21 @@ class AgentStudioProject:
                 os.path.relpath(kept_local_resource_mapping.file_path, self.root_path),
                 {},
             ).get("hash")
+
+            local_content = kept_local_resource_mapping.resource_type.read_from_file(
+                kept_local_resource_mapping.file_path
+            )
+            if resource_utils.contains_merge_conflict(local_content):
+                files_with_conflicts.append(kept_local_resource_mapping.file_path)
+                continue
+
             local_resource = self.read_local_resource(
                 resource=kept_local_resource_mapping, resource_mappings=local_resources_mappings
             )
 
-            modified, has_conflict = local_resource.get_status(original_hash)
+            modified = local_resource.is_modified(original_hash)
             if modified:
                 modified_files.append(kept_local_resource_mapping.file_path)
-            if has_conflict:
-                files_with_conflicts.append(kept_local_resource_mapping.file_path)
 
         return files_with_conflicts, modified_files, new_files, deleted_files
 
@@ -1653,11 +1710,24 @@ class AgentStudioProject:
                 os.path.relpath(local_resource_mapping.file_path, self.root_path), {}
             ).get("hash")
 
+            local_content = local_resource_mapping.resource_type.read_from_file(
+                local_resource_mapping.file_path
+            )
+            if resource_utils.contains_merge_conflict(local_content):
+                original_resource = self.resources.get(
+                    local_resource_mapping.resource_type, {}
+                ).get(local_resource_mapping.resource_id)
+                original_content = original_resource.raw if original_resource else ""
+                diffs[local_resource_mapping.file_path] = resource_utils.get_diff(
+                    original_content, local_content
+                )
+                continue
+
             local_resource = self.read_local_resource(
                 resource=local_resource_mapping, resource_mappings=local_resources_mappings
             )
 
-            modified, _ = local_resource.get_status(original_hash)
+            modified = local_resource.is_modified(original_hash)
             if not modified:
                 continue
 
@@ -1897,7 +1967,7 @@ class AgentStudioProject:
             )
         except Exception as e:
             raise ValueError(
-                f"Error reading resource {resource.resource_name} at {resource.file_path}"
+                f"Error reading resource {resource.resource_name} at {resource.file_path}: {str(e)}"
             ) from e
 
         return resource

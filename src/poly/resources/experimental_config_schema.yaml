@@ -439,6 +439,32 @@ components:
               minimum: 0
               maximum: 1000
               default: 100
+        krisp:
+          type: object
+          description: Krisp audio enhancement configuration (noise cancellation)
+          properties:
+            model:
+              type: string
+              description: |
+                Krisp model variant: "noise-cancellation", "voice-isolation", "telephony", "telephony-lite", "transcription"
+              default: "telephony-lite"
+            noise_suppression_level:
+              type: integer
+              description: Noise suppression intensity (0=off, 100=max)
+              minimum: 0
+              maximum: 100
+              default: 100
+            frame_duration_ms:
+              type: integer
+              description: Audio frame duration in milliseconds
+              enum: [10, 15, 20, 30, 32]
+              default: 20
+            timeout_ms:
+              type: integer
+              description: Max time in milliseconds to wait for enhancement per chunk before falling back to original audio (0=no timeout)
+              minimum: 0
+              maximum: 1000
+              default: 100
       examples:
         - ai-coustics:
             enabled: true
@@ -456,6 +482,46 @@ components:
             enabled: true
             noise_reduction: 0.5
             timeout_ms: 500
+        - krisp:
+            model: telephony-lite
+            noise_suppression_level: 100
+        - krisp:
+            model: telephony-lite
+            noise_suppression_level: 100
+            frame_duration_ms: 20
+            timeout_ms: 100
+
+    dtmf:
+      type: object
+      description: Configure DTMF behavior, including disabling speech recognition for DTMF-only steps
+      additionalProperties: false
+      properties:
+        flow_overrides:
+          type: object
+          description: Flow-specific DTMF configuration overrides. Each key should be a flow name.
+          additionalProperties:
+            type: object
+            description: Configuration for a specific flow
+            additionalProperties: false
+            properties:
+              disable_speech:
+                type: boolean
+                description: Whether to disable speech recognition when DTMF is enabled for this flow
+              steps:
+                type: object
+                description: Step-specific DTMF configuration overrides. Each key should be a step name.
+                additionalProperties:
+                  type: object
+                  description: Configuration for a specific step
+                  additionalProperties: false
+                  properties:
+                    disable_speech:
+                      type: boolean
+                      description: Whether to disable speech recognition when DTMF is enabled for this step, takes precedence over flow-level setting
+                    first_digit_timeout:
+                      type: integer
+                      description: Timeout in seconds for the first DTMF digit input for this step
+                      minimum: 1
 
     barge_in:
       type: object
@@ -770,6 +836,12 @@ components:
       type: object
       description: Configure Agent Memory features.
       properties:
+        identifier_source:
+          type: string
+          description: >
+            Custom source for the memory lookup identifier.
+            If not set, defaults to the caller/callee phone number.
+          pattern: "^(sip_headers|integration_attributes|state):.+$"
         repeat_caller:
           type: object
           description: Configure repeat caller features.
@@ -998,6 +1070,13 @@ components:
                 The transcription model to use for audio input transcription.
                 If not specified, defaults to "whisper-1".
                 See https://platform.openai.com/docs/guides/realtime-transcription for a list of available models.
+            set_transcriber_language:
+              type: boolean
+              default: false
+              description: >
+                When true, the conversation language code is passed to the transcriber in the session configuration.
+                This makes the model more strictly adhere to the specified language, which means it should not be
+                used in multilingual projects with a language detection component.
         vad:
           type: object
           description: Configure model Voice Activity Detection.
@@ -1079,7 +1158,11 @@ components:
           $ref: "#/components/schemas/llm_inference_parameters"
         include_kb_functions_in_flows:
           type: boolean
-          description: Whether to include knowledge base functions from retrieved RAG topics when showing functions to the model.
+          description: >-
+            When true, KB functions from retrieved RAG topics are shown to the model inside flows
+            (even on steps that have their own functions_referenced). When false, KB functions are
+            hidden inside flows. This setting only affects behaviour inside flows; outside flows,
+            KB functions are always shown. Can be overridden per-flow or per-step.
           default: false
         mcp_servers:
           type: array
@@ -1388,6 +1471,8 @@ components:
           $ref: "#/components/schemas/agentic_dial"
         webhooks:
           $ref: "#/components/schemas/webhooks"
+        dtmf:
+          $ref: "#/components/schemas/dtmf"
       additionalProperties: false
 
 paths:
