@@ -2047,6 +2047,8 @@ class AgentStudioCLI:
         """Start an interactive chat session with the agent."""
         project = cls._load_project(base_path)
 
+        json_output = {}
+
         if push_before_chat:
             if not output_json:
                 info("Pushing project before starting chat session...")
@@ -2060,18 +2062,20 @@ class AgentStudioCLI:
             if output == "No changes detected":
                 push_success = True  # Not an error if there are no changes to push
 
-            if push_success and not output_json:
-                success("Project pushed successfully.")
+            if push_success:
+                if not output_json:
+                    success("Project pushed successfully.")
+                else:
+                    json_output["push"] = {"success": True, "message": output}
 
             if not push_success:
                 if output_json:
-                    json_print(
-                        {
-                            "success": False,
-                            "message": "Failed to push project before chat session.",
-                            "error": output,
-                        }
-                    )
+                    json_output["push"] = {
+                        "success": False,
+                        "message": "Failed to push project before chat session.",
+                        "error": output,
+                    }
+                    json_print(json_output)
                 else:
                     error(
                         f"Failed to push {project.account_id}/{project.project_id} to Agent Studio."
@@ -2104,69 +2108,55 @@ class AgentStudioCLI:
         if not output_json:
             info(f"Starting chat for {label}...")
 
-        # Resume an existing conversation — skip session creation.
-        if conversation_id:
-            if not output_json:
-                success(f"Resuming conversation: {conversation_id}")
-            _, conversation = cls._run_chat_loop(
-                project,
-                conversation_id,
-                environment,
-                show_functions=show_functions,
-                show_flow=show_flow,
-                show_state=show_state,
-                input_messages=input_messages,
-                output_json=output_json,
-            )
-            if output_json:
-                json_print({"conversations": [conversation]})
-            return
-
         conversations: list[dict] = []
         while True:
-            if environment == "draft" and not output_json:
-                info("Preparing branch deployment...")
-            try:
-                response = project.create_chat_session(
-                    environment,
-                    channel,
-                    variant,
-                )
-            except (requests.HTTPError, ValueError) as e:
-                if output_json:
-                    json_print({"success": False, "error": str(e)})
-                else:
-                    error(f"Failed to create chat session: {e}")
-                return
-
-            conversation_id = response.get("conversation_id")
-            if not conversation_id:
-                if output_json:
-                    json_print(
-                        {
-                            "success": False,
-                            "error": "No conversation_id in response",
-                            "response": response,
-                        }
-                    )
-                else:
-                    error(f"Unexpected response when creating chat: {response}")
-                return
-
-            url = project.get_conversation_url(conversation_id)
-            greeting = response.get("response", "")
-            if not output_json:
-                success(
-                    f"Chat session started (conversation: [link={url}]{conversation_id}[/link])"
-                )
-                print_turn_metadata(response, show_functions, show_flow, show_state)
-                if greeting:
-                    plain(f"\n[bold]Agent:[/bold] {greeting}")
-
-            if response.get("conversation_ended"):
+            if conversation_id:
                 if not output_json:
-                    plain("[muted]Conversation ended by agent.[/muted]")
-                return
+                    info(f"Resuming chat session (conversation: {conversation_id})...")
+                initial_response = None
+            else:
+                if environment == "draft" and not output_json:
+                    info("Preparing branch deployment...")
+                try:
+                    response = project.create_chat_session(
+                        environment,
+                        channel,
+                        variant,
+                    )
+                except (requests.HTTPError, ValueError) as e:
+                    if output_json:
+                        json_output["success"] = False
+                        json_output["error"] = str(e)
+                        json_print(json_output)
+                    else:
+                        error(f"Failed to create chat session: {e}")
+                    return
+
+                conversation_id = response.get("conversation_id")
+                if not conversation_id:
+                    if output_json:
+                        json_output["success"] = False
+                        json_output["error"] = "No conversation_id in response"
+                        json_output["response"] = response
+                        json_print(json_output)
+                    else:
+                        error(f"Unexpected response when creating chat: {response}")
+                    return
+
+                url = project.get_conversation_url(conversation_id)
+                greeting = response.get("response", "")
+                if not output_json:
+                    success(
+                        f"Chat session started (conversation: [link={url}]{conversation_id}[/link])"
+                    )
+                    print_turn_metadata(response, show_functions, show_flow, show_state)
+                    if greeting:
+                        plain(f"\n[bold]Agent:[/bold] {greeting}")
+
+                if response.get("conversation_ended"):
+                    if not output_json:
+                        plain("[muted]Conversation ended by agent.[/muted]")
+                    return
 
             if not output_json:
                 plain(
@@ -2191,11 +2181,15 @@ class AgentStudioCLI:
 
             if not restart:
                 if output_json:
-                    json_print({"conversations": conversations})
+                    json_output["conversations"] = conversations
+                    json_print(json_output)
                 return
 
             if not output_json:
                 info("Restarting chat session...")
+
+            # Create a new chat session in the next loop iteration
+            conversation_id = None
 
     @classmethod
     def _run_chat_loop(
@@ -2221,7 +2215,16 @@ class AgentStudioCLI:
         restart = False
         url = project.get_conversation_url(conversation_id)
         turns: list[dict] = (
-            [{"input": None, **initial_response}] if output_json and initial_response else []
+            [
+                {
+                    "input": None,
+                    **cls._process_json_chat_reply(
+                        initial_response, show_functions, show_flow, show_state
+                    ),
+                }
+            ]
+            if output_json and initial_response
+            else []
         )
         try:
             while True:
@@ -2261,7 +2264,11 @@ class AgentStudioCLI:
                     continue
 
                 if output_json:
-                    turns.append({"input": user_input, **reply})
+                    # Filter reply for relevant fields to avoid dumping large state
+                    processed_reply = cls._process_json_chat_reply(
+                        reply, show_functions, show_flow, show_state
+                    )
+                    turns.append({"input": user_input, **processed_reply})
                 else:
                     print_turn_metadata(reply, show_functions, show_flow, show_state)
                     agent_text = reply.get("response") or json.dumps(reply, indent=2)
@@ -2284,6 +2291,66 @@ class AgentStudioCLI:
                         warning("Failed to end chat session on server.")
 
         return restart, {"conversation_id": conversation_id, "url": url, "turns": turns}
+
+    @staticmethod
+    def _process_json_chat_reply(
+        reply: dict, show_functions: bool, show_flow: bool, show_state: bool
+    ) -> dict:
+        """Process the raw reply from the chat API to extract relevant information based on the flags."""
+        processed_json = dict(
+            response=reply.get("response"),
+            conversation_ended=reply.get("conversation_ended", False),
+        )
+        turn_metadata = reply.get("metadata", {})
+        if show_functions:
+            function_replies = []
+            for function_event in turn_metadata.get("function_events", []):
+                function_reply = {
+                    "name": function_event.get("name"),
+                    "arguments": function_event.get("arguments"),
+                    "utterance": function_event.get("utterance"),
+                    "hangup": function_event.get("hangup"),
+                    "handoff": function_event.get("handoff"),
+                    "error": function_event.get("error"),
+                    "logs": function_event.get("logs"),
+                    "transition": function_event.get("transition"),
+                }
+                filtered_function_reply = {k: v for k, v in function_reply.items() if v is not None}
+                function_replies.append(filtered_function_reply)
+
+            processed_json["function_events"] = function_replies
+
+        if show_flow:
+            flow_reply = {}
+            in_flow = turn_metadata.get("in_flow")
+            in_step = turn_metadata.get("in_step")
+            if in_flow:
+                flow_reply["in_flow"] = in_flow
+            if in_step:
+                flow_reply["in_step"] = in_step
+            if flow_reply:
+                processed_json["flow"] = flow_reply
+
+        if show_state:
+            state_reply = []
+            for function_event in turn_metadata.get("function_events", []):
+                sc = function_event.get("state_changes", {})
+                added = sc.get("added", {})
+                updated = sc.get("updated", {})
+                removed = sc.get("removed", [])
+                if added or updated or removed:
+                    event_state_reply = {}
+                    if added:
+                        event_state_reply["added"] = added
+                    if updated:
+                        event_state_reply["updated"] = updated
+                    if removed:
+                        event_state_reply["removed"] = removed
+                    state_reply.append(event_state_reply)
+            if state_reply:
+                processed_json["state_changes"] = state_reply
+
+        return processed_json
 
     @classmethod
     def validate_project(cls, base_path: str, output_json: bool = False) -> None:
