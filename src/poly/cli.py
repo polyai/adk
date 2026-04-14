@@ -703,7 +703,7 @@ class AgentStudioCLI:
             "--conv-id",
             type=str,
             default=None,
-            help="Conversation ID for the chat session. If a current session, chats with that conversation",
+            help="Reuse an existing conversation ID instead of starting a new conversation.",
         )
 
         # completion
@@ -788,16 +788,25 @@ class AgentStudioCLI:
                 input_messages = None
                 if args.input_file:
                     try:
-                        src = (
-                            sys.stdin
-                            if args.input_file == "-"
-                            else open(args.input_file, encoding="utf-8")
-                        )
+                        if args.input_file == "-":
+                            with nullcontext(sys.stdin) as f:
+                                src = f.read()
+                        else:
+                            with open(args.input_file, "r", encoding="utf-8") as f:
+                                src = f.read()
                     except FileNotFoundError:
-                        error(f"Input file not found: {args.input_file}")
+                        if args.json:
+                            json_print(
+                                {
+                                    "success": False,
+                                    "error": f"Input file not found: {args.input_file}",
+                                }
+                            )
+                        else:
+                            error(f"Input file not found: {args.input_file}")
                         sys.exit(1)
                     with src:
-                        input_messages = [line.rstrip("\n") for line in src]
+                        input_messages = [line.rstrip("\r\n") for line in src]
                 elif args.messages:
                     input_messages = args.messages
                 cls.chat(
@@ -2317,10 +2326,10 @@ class AgentStudioCLI:
             response=reply.get("response"),
             conversation_ended=reply.get("conversation_ended", False),
         )
-        turn_metadata = reply.get("metadata", {})
+        turn_metadata = reply.get("metadata") or {}
         if show_functions:
             function_replies = []
-            for function_event in turn_metadata.get("function_events", []):
+            for function_event in turn_metadata.get("function_events") or []:
                 function_reply = {
                     "name": function_event.get("name"),
                     "arguments": function_event.get("arguments"),
@@ -2349,8 +2358,8 @@ class AgentStudioCLI:
 
         if show_state:
             state_reply = []
-            for function_event in turn_metadata.get("function_events", []):
-                sc = function_event.get("state_changes", {})
+            for function_event in turn_metadata.get("function_events") or []:
+                sc = function_event.get("state_changes") or {}
                 added = sc.get("added", {})
                 updated = sc.get("updated", {})
                 removed = sc.get("removed", [])
