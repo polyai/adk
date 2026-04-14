@@ -115,6 +115,8 @@ Examples:
 poly branch list
 poly branch current
 poly branch create my-feature
+poly branch create my-hotfix --env live
+poly branch create my-hotfix --env live --force
 poly branch switch my-feature
 poly branch switch my-feature --force
 poly branch delete
@@ -132,6 +134,27 @@ Interactively select and delete one or more branches. The `main` branch cannot b
 poly branch delete
 poly branch delete my-feature
 ~~~
+
+#### `poly branch create`
+
+Creates a new branch. By default the branch is sourced from sandbox main.
+
+| Flag | Description |
+|---|---|
+| `--env`, `--environment` | Source the new branch from a deployment snapshot instead of sandbox main. Choices: `sandbox`, `pre-release`, `live`. |
+| `--force`, `-f` | Force branch creation even if there are uncommitted local changes on main. |
+
+When `--env live` or `--env pre-release` is specified:
+
+- the version of the deployed environment is pulled into your local workspace
+- a branch is created from that snapshot
+- the version is immediately pushed to the new branch, leaving a clean slate for hotfix changes
+- the command can only be run from `main`
+- if there are local changes, the command will fail unless `--force` is also passed
+
+!!! warning "Use `--env live` with caution"
+
+    Branching from a live deployment snapshot will overwrite your local project with the live state. Merging this branch back to main may roll back changes that were introduced after the snapshot was taken.
 
 ### `poly format`
 
@@ -173,6 +196,7 @@ Interactively select a review gist and open it in the browser.
 poly review list
 poly review list --json
 ~~~
+<<<<<<< docs/auto-update-e9dd3b9
 
 #### `poly review delete`
 
@@ -186,6 +210,21 @@ poly review delete --json
 
 ### `poly chat`
 
+=======
+
+#### `poly review delete`
+
+Interactively select and delete review gists. Use `--id` to delete a specific gist directly without an interactive prompt.
+
+~~~bash
+poly review delete
+poly review delete --id GIST_ID
+poly review delete --json
+~~~
+
+### `poly chat`
+
+>>>>>>> main
 Start an interactive chat session with your agent.
 
 Examples:
