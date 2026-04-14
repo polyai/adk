@@ -46,6 +46,7 @@ from poly.resources.handoff import (
 )
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.phrase_filter import PhraseFilter
+from poly.resources.safety_filters import VoiceSafetyFilters, SafetyFilters
 from poly.resources.pronunciation import Pronunciation
 from poly.resources.resource import (
     BaseResource,

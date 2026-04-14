@@ -38,6 +38,7 @@ from poly.resources import (
     Pronunciation,
     RegularExpressionRule,
     Resource,
+    SafetyFilters,
     SettingsPersonality,
     SettingsRole,
     SettingsRules,
@@ -49,6 +50,7 @@ from poly.resources import (
     VariantAttribute,
     VoiceDisclaimerMessage,
     VoiceGreeting,
+    VoiceSafetyFilters,
     VoiceStylePrompt,
 )
 
@@ -141,6 +143,7 @@ class SyncClientHandler:
             KeyphraseBoosting: cls._read_keyphrase_boosting_from_projection(projection),
             TranscriptCorrection: cls._read_transcript_corrections_from_projection(projection),
             **cls._read_asr_settings_from_projection(projection),
+            SafetyFilters: cls._read_safety_filters_from_projection(projection),
             ApiIntegration: cls._read_api_integrations_from_projection(projection),
         }  # ty:ignore[invalid-return-type]
 
@@ -397,6 +400,12 @@ class SyncClientHandler:
                     resource_id="voice_style_prompt",
                     name="voice_style_prompt",
                     prompt=voice_style_prompt.get("prompt", ""),
+                )
+            }
+        if voice_safety_filters := voice_config.get("safetyFilters", None):
+            settings[VoiceSafetyFilters] = {
+                "voice_safety_filters": VoiceSafetyFilters.from_projection_data(
+                    voice_safety_filters
                 )
             }
         if voice_disclaimer := voice_settings.get("disclaimer", None):
@@ -819,6 +828,13 @@ class SyncClientHandler:
                 )
             }
         }
+
+    @staticmethod
+    def _read_safety_filters_from_projection(projection: dict) -> dict[str, SafetyFilters]:
+        data = projection.get("contentFilterSettings", {})
+        if not data:
+            return {}
+        return {"safety_filters": SafetyFilters.from_projection_data(data)}
 
     @staticmethod
     def _read_api_integrations_from_projection(

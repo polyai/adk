@@ -24,6 +24,11 @@ from poly.resources.api_integration import (
     ApiIntegrationOperation,
 )
 from poly.resources.asr_settings import AsrSettings
+from poly.resources.safety_filters import (
+    SafetyFilters,
+    VoiceSafetyFilters,
+    _SafetyFilterCategory,
+)
 from poly.resources.channel_settings import (
     ChatGreeting,
     ChatStylePrompt,
@@ -60,6 +65,7 @@ from poly.resources.topic import (
     FUNCTION_REGEX,
     Topic,
 )
+from poly.handlers.sync_client import SyncClientHandler
 from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
 from poly.resources.variable import Variable
 from poly.resources.variant_attributes import Variant, VariantAttribute
@@ -5969,6 +5975,321 @@ class TestApiIntegrationValidate(unittest.TestCase):
         )
         with self.assertRaises(ValueError, msg="Operation name cannot be empty."):
             integration.validate()
+
+
+class SafetyFiltersTests(unittest.TestCase):
+    """Tests for SafetyFilters and VoiceSafetyFilters resources."""
+
+    _SAMPLE_YAML = (
+        "enabled: true\n"
+        "type: azure\n"
+        "categories:\n"
+        "  violence:\n"
+        "    enabled: true\n"
+        "    level: strict\n"
+        "  hate:\n"
+        "    enabled: false\n"
+        "    level: medium\n"
+        "  sexual:\n"
+        "    enabled: false\n"
+        "    level: lenient\n"
+        "  self_harm:\n"
+        "    enabled: true\n"
+        "    level: strict\n"
+    )
+
+    def test_from_yaml_dict_roundtrip(self):
+        """to_yaml_dict -> from_yaml_dict roundtrip preserves all fields."""
+        sf = SafetyFilters(
+            resource_id="sf-1",
+            name="safety_filters",
+            enabled=True,
+            filter_type="azure",
+            categories={
+                "violence": _SafetyFilterCategory(enabled=True, level="strict"),
+                "hate": _SafetyFilterCategory(enabled=False, level="medium"),
+                "sexual": _SafetyFilterCategory(enabled=False, level="lenient"),
+                "self_harm": _SafetyFilterCategory(enabled=True, level="strict"),
+            },
+        )
+        d = sf.to_yaml_dict()
+        sf2 = SafetyFilters.from_yaml_dict(d, resource_id="sf-1", name="safety_filters")
+
+        self.assertEqual(sf2.enabled, sf.enabled)
+        self.assertEqual(sf2.filter_type, sf.filter_type)
+        for cat in ("violence", "hate", "sexual", "self_harm"):
+            self.assertEqual(sf2.categories[cat].enabled, sf.categories[cat].enabled)
+            self.assertEqual(sf2.categories[cat].level, sf.categories[cat].level)
+        self.assertEqual(d["categories"]["sexual"]["level"], "lenient")
+        self.assertNotIn("precision", d["categories"]["sexual"])
+
+    def test_from_yaml_dict_defaults(self):
+        """Missing optional fields fall back to sane defaults."""
+        sf = SafetyFilters.from_yaml_dict({}, resource_id="sf-1", name="safety_filters")
+        self.assertTrue(sf.enabled)
+        self.assertEqual(sf.filter_type, "azure")
+        for cat in ("violence", "hate", "sexual", "self_harm"):
+            self.assertFalse(sf.categories[cat].enabled)
+            self.assertEqual(sf.categories[cat].level, "medium")
+
+    def test_from_yaml_dict_supports_legacy_precision_key(self):
+        """Legacy `precision` yaml key is accepted and normalized to `level`."""
+        sf = SafetyFilters.from_yaml_dict(
+            {
+                "categories": {
+                    "sexual": {"enabled": True, "precision": "LOOSE"},
+                    "hate": {"enabled": False, "precision": "medium"},
+                }
+            },
+            resource_id="sf-legacy",
+            name="safety_filters",
+        )
+        self.assertEqual(sf.categories["sexual"].level, "lenient")
+        self.assertEqual(sf.categories["hate"].level, "medium")
+
+    # ------------------------------------------------------------------ #
+    # read_local_resource                                                  #
+    # ------------------------------------------------------------------ #
+
+    def test_read_local_resource(self):
+        """read_local_resource parses safety_filters from YAML correctly."""
+
+        def exists_sf(path):
+            return "safety_filters.yaml" in str(path) or os.path.exists(path)
+
+        def isfile_sf(path):
+            return "safety_filters.yaml" in str(path) or os.path.isfile(path)
+
+        with mock_read_from_file(self._SAMPLE_YAML):
+            with unittest.mock.patch(
+                "poly.resources.resource.os.path.exists", side_effect=exists_sf
+            ), unittest.mock.patch(
+                "poly.resources.resource.os.path.isfile", side_effect=isfile_sf
+            ):
+                result = SafetyFilters.read_local_resource(
+                    file_path="agent_settings/safety_filters.yaml",
+                    resource_id="sf-1",
+                    resource_name="safety_filters",
+                )
+
+        self.assertEqual(result.resource_id, "sf-1")
+        self.assertTrue(result.enabled)
+        self.assertEqual(result.filter_type, "azure")
+        self.assertTrue(result.categories["violence"].enabled)
+        self.assertEqual(result.categories["violence"].level, "strict")
+        self.assertFalse(result.categories["hate"].enabled)
+        self.assertEqual(result.categories["sexual"].level, "lenient")
+
+    def test_build_update_proto_general(self):
+        """SafetyFilters.build_update_proto returns correct protobuf message."""
+        sf = SafetyFilters(
+            resource_id="sf-1",
+            name="safety_filters",
+            enabled=False,
+            filter_type="azure",
+            categories={
+                "violence": _SafetyFilterCategory(enabled=True, level="strict"),
+                "hate": _SafetyFilterCategory(enabled=False, level="medium"),
+                "sexual": _SafetyFilterCategory(enabled=False, level="lenient"),
+                "self_harm": _SafetyFilterCategory(enabled=True, level="medium"),
+            },
+        )
+        proto = sf.build_update_proto()
+
+        self.assertTrue(proto.disabled)
+        self.assertEqual(proto.type, "azure")
+        self.assertTrue(proto.azure_config.violence.is_active)
+        self.assertEqual(proto.azure_config.violence.precision, "STRICT")
+        self.assertFalse(proto.azure_config.hate.is_active)
+        self.assertEqual(proto.azure_config.sexual.precision, "LOOSE")
+
+    def test_build_update_proto_voice_channel(self):
+        """VoiceSafetyFilters.build_update_proto wraps in Channel_UpdateSafetyFilters."""
+        from poly.handlers.protobuf.channels_pb2 import VOICE
+
+        vsf = VoiceSafetyFilters(
+            resource_id="vsf-1",
+            name="voice_safety_filters",
+            enabled=True,
+            filter_type="azure",
+            categories={
+                "violence": _SafetyFilterCategory(enabled=True, level="medium"),
+                "hate": _SafetyFilterCategory(enabled=False, level="medium"),
+                "sexual": _SafetyFilterCategory(enabled=False, level="medium"),
+                "self_harm": _SafetyFilterCategory(enabled=False, level="medium"),
+            },
+        )
+        proto = vsf.build_update_proto()
+
+        self.assertEqual(proto.channel_type, VOICE)
+        self.assertFalse(proto.safety_filters.disabled)  # enabled=True → disabled=False
+        self.assertTrue(proto.safety_filters.azure_config.violence.is_active)
+        self.assertEqual(proto.safety_filters.azure_config.violence.precision, "MEDIUM")
+
+    def _make_content_filter_projection(
+        self, disabled=False, violence_active=True, violence_precision="STRICT"
+    ) -> dict:
+        return {
+            "disabled": disabled,
+            "type": "azure",
+            "azureConfig": {
+                "violence": {"isActive": violence_active, "precision": violence_precision},
+                "hate": {"isActive": False, "precision": "MEDIUM"},
+                "sexual": {"isActive": False, "precision": "LOOSE"},
+                "selfHarm": {"isActive": True, "precision": "STRICT"},
+            },
+        }
+
+    def test_read_safety_filters_from_projection(self):
+        """_read_safety_filters_from_projection parses a full projection correctly."""
+        projection = {"contentFilterSettings": self._make_content_filter_projection()}
+        result = SyncClientHandler._read_safety_filters_from_projection(projection)
+
+        self.assertIn("safety_filters", result)
+        sf = result["safety_filters"]
+        self.assertIsInstance(sf, SafetyFilters)
+        self.assertTrue(sf.enabled)
+        self.assertEqual(sf.filter_type, "azure")
+        self.assertTrue(sf.categories["violence"].enabled)
+        self.assertEqual(sf.categories["violence"].level, "strict")
+        self.assertFalse(sf.categories["hate"].enabled)
+        self.assertTrue(sf.categories["self_harm"].enabled)
+
+    def test_read_safety_filters_from_projection_empty(self):
+        """_read_safety_filters_from_projection returns {} when key absent."""
+        result = SyncClientHandler._read_safety_filters_from_projection({})
+        self.assertEqual(result, {})
+
+    def test_read_voice_safety_filters_from_channel_settings_projection(self):
+        """_read_channel_settings_from_projection parses voice channel safety filters."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "config": {
+                        "safetyFilters": self._make_content_filter_projection(
+                            disabled=True, violence_active=False, violence_precision="LOOSE"
+                        )
+                    }
+                }
+            }
+        }
+        result = SyncClientHandler._read_channel_settings_from_projection(projection)
+
+        self.assertIn(VoiceSafetyFilters, result)
+        self.assertIn("voice_safety_filters", result[VoiceSafetyFilters])
+        vsf = result[VoiceSafetyFilters]["voice_safety_filters"]
+        self.assertIsInstance(vsf, VoiceSafetyFilters)
+        self.assertFalse(vsf.enabled)  # disabled=True → enabled=False
+        self.assertFalse(vsf.categories["violence"].enabled)
+        self.assertEqual(vsf.categories["violence"].level, "lenient")
+
+    def test_read_voice_safety_filters_from_channel_settings_projection_empty(self):
+        """_read_channel_settings_from_projection returns {} when channels are absent."""
+        result = SyncClientHandler._read_channel_settings_from_projection({})
+        self.assertEqual(result, {})
+
+    def test_read_channel_settings_projection_includes_voice_safety_filters(self):
+        """Voice safety filters are imported via channel settings projection parsing."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "config": {
+                        "greeting": {
+                            "welcomeMessage": "Hello there",
+                            "languageCode": "en-GB",
+                        },
+                        "safetyFilters": self._make_content_filter_projection(
+                            disabled=False, violence_active=True, violence_precision="STRICT"
+                        ),
+                    }
+                }
+            }
+        }
+
+        result = SyncClientHandler._read_channel_settings_from_projection(projection)
+
+        # Adds some coverage for other channel features.
+        self.assertIn(VoiceGreeting, result)
+        self.assertIn("voice_greeting", result[VoiceGreeting])
+        self.assertIn(VoiceSafetyFilters, result)
+        self.assertIn("voice_safety_filters", result[VoiceSafetyFilters])
+
+        vsf = result[VoiceSafetyFilters]["voice_safety_filters"]
+        self.assertIsInstance(vsf, VoiceSafetyFilters)
+        self.assertTrue(vsf.enabled)
+        self.assertTrue(vsf.categories["violence"].enabled)
+        self.assertEqual(vsf.categories["violence"].level, "strict")
+
+    def test_projection_precision_is_converted_to_yaml_level(self):
+        """Projection precision values are normalized to yaml levels."""
+        projection = {
+            "contentFilterSettings": self._make_content_filter_projection(
+                violence_precision="LOOSE"
+            )
+        }
+        sf = SyncClientHandler._read_safety_filters_from_projection(projection)["safety_filters"]
+        self.assertEqual(sf.categories["violence"].level, "lenient")
+        self.assertEqual(sf.to_yaml_dict()["categories"]["violence"]["level"], "lenient")
+
+    def test_validate_invalid_precision_raises(self):
+        """validate raises ValueError for an invalid level value."""
+        sf = SafetyFilters(
+            resource_id="sf-1",
+            name="safety_filters",
+            categories={
+                "violence": _SafetyFilterCategory(enabled=True, level="invalid"),
+                "hate": _SafetyFilterCategory(enabled=False, level="medium"),
+                "sexual": _SafetyFilterCategory(enabled=False, level="medium"),
+                "self_harm": _SafetyFilterCategory(enabled=False, level="medium"),
+            },
+        )
+        with self.assertRaises(ValueError) as cm:
+            sf.validate()
+        self.assertIn("Invalid level", str(cm.exception))
+        self.assertIn("violence", str(cm.exception))
+
+    def test_validate_passes_with_all_valid_precisions(self):
+        """validate passes for each valid level value."""
+        for level in ("lenient", "medium", "strict"):
+            sf = SafetyFilters(
+                resource_id="sf-1",
+                name="safety_filters",
+                categories={
+                    cat: _SafetyFilterCategory(enabled=False, level=level)
+                    for cat in ("violence", "hate", "sexual", "self_harm")
+                },
+            )
+            sf.validate()  # should not raise
+
+    def test_voice_safety_filters_validate_invalid_precision_raises(self):
+        """VoiceSafetyFilters.validate raises ValueError for invalid level."""
+        vsf = VoiceSafetyFilters(
+            resource_id="vsf-1",
+            name="voice_safety_filters",
+            categories={
+                "violence": _SafetyFilterCategory(enabled=False, level="medium"),
+                "hate": _SafetyFilterCategory(enabled=False, level="medium"),
+                "sexual": _SafetyFilterCategory(enabled=False, level="bad"),
+                "self_harm": _SafetyFilterCategory(enabled=False, level="medium"),
+            },
+        )
+        with self.assertRaises(ValueError) as cm:
+            vsf.validate()
+        self.assertIn("sexual", str(cm.exception))
+
+    # ------------------------------------------------------------------ #
+    # update_command_type                                                  #
+    # ------------------------------------------------------------------ #
+
+    def test_command_types(self):
+        """command_type and update_command_type return expected strings."""
+        sf = SafetyFilters(resource_id="sf-1", name="safety_filters")
+        self.assertEqual(sf.command_type, "content_filter_settings")
+        self.assertEqual(sf.update_command_type, "update_content_filter_settings")
+
+        vsf = VoiceSafetyFilters(resource_id="vsf-1", name="voice_safety_filters")
+        self.assertEqual(vsf.command_type, "voice_safety_filters")
+        self.assertEqual(vsf.update_command_type, "channel_update_safety_filters")
 
 
 if __name__ == "__main__":
