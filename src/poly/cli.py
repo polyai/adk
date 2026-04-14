@@ -2184,7 +2184,6 @@ class AgentStudioCLI:
                     json_output["conversations"] = conversations
                     json_print(json_output)
                 return
-
             if not output_json:
                 info("Restarting chat session...")
 
@@ -2289,6 +2288,15 @@ class AgentStudioCLI:
                 except requests.HTTPError:
                     if not output_json:
                         warning("Failed to end chat session on server.")
+
+        if input_messages and not restart:
+            # If the conversation ended, but there is still a restart queued.
+            # Pop the remaining messages until we get to a restart
+            while input_messages:
+                msg = input_messages.pop(0).strip()
+                if msg.lower() == "/restart":
+                    restart = True
+                    break
 
         return restart, {"conversation_id": conversation_id, "url": url, "turns": turns}
 
