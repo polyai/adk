@@ -105,6 +105,10 @@ Global and transition functions use decorators to describe themselves to the mod
 
 Function steps do not support `@func_description` or `@func_parameter`.
 
+!!! warning "All parameters must have a type annotation"
+
+    Every parameter decorated with `@func_parameter` must have a Python type annotation (for example, `booking_ref: str`). Parameters without an annotation, or with an unsupported annotation such as `Optional[str]`, will raise a `ValueError` when the function is processed. Only the types listed in the table below are supported.
+
 ## Parameter types
 
 Supported parameter types map to schema types as follows:
