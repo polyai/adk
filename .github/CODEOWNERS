@@ -1,0 +1,8 @@
+# CODEOWNERS
+
+# By default, devs own the entire repo
+* @polyai/dev
+
+# Just for documentation, the docs team takes precedence
+*.md @polyai/docs @polyai/dev
+/docs/ @polyai/docs @polyai/dev
