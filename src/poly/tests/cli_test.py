@@ -742,6 +742,60 @@ class ChatCommandTest(unittest.TestCase):
 
         self.assertEqual(self.proj.send_message.call_count, 2)
 
+    def test_push_before_chat_calls_push_project(self):
+        """push_before_chat=True calls push_project before creating the chat session."""
+        self.proj.push_project.return_value = (True, "Pushed successfully", None)
+
+        AgentStudioCLI.chat(
+            TEST_DIR,
+            environment="sandbox",
+            push_before_chat=True,
+            input_messages=[],
+        )
+
+        self.proj.push_project.assert_called_once_with(
+            force=False,
+            skip_validation=False,
+            dry_run=False,
+            format=False,
+            email=None,
+        )
+        self.proj.create_chat_session.assert_called_once()
+
+    def test_push_failure_exits_without_starting_chat(self):
+        """push_before_chat=True exits with code 1 when push fails, without creating a session."""
+        self.proj.push_project.return_value = (False, "Something went wrong", None)
+
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.chat(
+                TEST_DIR,
+                environment="sandbox",
+                push_before_chat=True,
+                input_messages=[],
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.proj.create_chat_session.assert_not_called()
+
+    @patch("poly.cli.json_print")
+    def test_push_failure_json_emits_error_and_exits(self, mock_json):
+        """In JSON mode, a push failure emits an error payload before exiting."""
+        self.proj.push_project.return_value = (False, "Something went wrong", None)
+
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI.chat(
+                TEST_DIR,
+                environment="sandbox",
+                push_before_chat=True,
+                input_messages=[],
+                output_json=True,
+            )
+
+        mock_json.assert_called_once()
+        payload = mock_json.call_args[0][0]
+        self.assertEqual(payload["push"]["success"], False)
+        self.assertIn("error", payload["push"])
+
 
 class CompletionCommandTest(unittest.TestCase):
     """Tests for the completion command."""

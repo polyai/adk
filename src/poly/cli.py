@@ -788,7 +788,11 @@ class AgentStudioCLI:
                 input_messages = None
                 if args.input_file:
                     try:
-                        src = sys.stdin if args.input_file == "-" else open(args.input_file)
+                        src = (
+                            sys.stdin
+                            if args.input_file == "-"
+                            else open(args.input_file, encoding="utf-8")
+                        )
                     except FileNotFoundError:
                         error(f"Input file not found: {args.input_file}")
                         sys.exit(1)
@@ -2045,7 +2049,7 @@ class AgentStudioCLI:
         show_state: bool = False,
         output_json: bool = False,
         input_messages: Optional[list[str]] = None,
-        conversation_id: str = None,
+        conversation_id: Optional[str] = None,
     ) -> None:
         """Start an interactive chat session with the agent."""
         project = cls._load_project(base_path)
@@ -2294,7 +2298,7 @@ class AgentStudioCLI:
                         warning("Failed to end chat session on server.")
 
         if input_messages and not restart:
-            # If the conversation ended, but there is still a restart queued.
+            # If the conversation ended, but there is still a restart queued in input messages
             # Pop the remaining messages until we get to a restart
             while input_messages:
                 msg = input_messages.pop(0).strip()
