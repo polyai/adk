@@ -196,6 +196,7 @@ Interactively select a review gist and open it in the browser.
 poly review list
 poly review list --json
 ~~~
+<<<<<<< docs/auto-update-e9dd3b9
 
 #### `poly review delete`
 
@@ -209,6 +210,21 @@ poly review delete --json
 
 ### `poly chat`
 
+=======
+
+#### `poly review delete`
+
+Interactively select and delete review gists. Use `--id` to delete a specific gist directly without an interactive prompt.
+
+~~~bash
+poly review delete
+poly review delete --id GIST_ID
+poly review delete --json
+~~~
+
+### `poly chat`
+
+>>>>>>> main
 Start an interactive chat session with your agent.
 
 Examples:
