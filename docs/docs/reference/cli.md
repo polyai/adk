@@ -260,7 +260,7 @@ The exact fields vary by command. Common fields include:
 
 For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
 
-Error responses always include `{ "success": false, "error": "..." }`.
+Error responses always include `{ "success": false, "error": "...", "traceback": "..." }`.
 
 !!! info "`init` with `--json` requires explicit flags"
 
