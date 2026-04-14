@@ -405,6 +405,12 @@ class AgentStudioCLI:
             type=str,
             help="Name of the branch or version to compare with.",
         )
+        review_parser.add_argument(
+            "--debug",
+            action="store_true",
+            default=False,
+            help="Enable debug logging.",
+        )
         review_parser.set_defaults(review_subcommand=None)
         review_subparsers = review_parser.add_subparsers(dest="review_subcommand")
 
@@ -742,6 +748,10 @@ class AgentStudioCLI:
                 cls.diff(args.path, args.files, args.json)
 
             elif args.command == "review":
+                if hasattr(args, "debug") and args.debug:
+                    logging.basicConfig(level=logging.DEBUG)
+                else:
+                    logging.basicConfig(level=logging.WARNING)
                 if args.review_subcommand == "delete":
                     cls.delete_gists(gist_id=args.id, output_json=args.json)
                 elif args.review_subcommand == "list":
@@ -1335,6 +1345,8 @@ class AgentStudioCLI:
 
         body = {}
         for file_path, diff in diffs.items():
+            if not diff:
+                continue
             # Use the file_path as-is (it's already relative or a file path)
             safe_name = file_path.replace(os.sep, "_")
             body[f"{safe_name}.diff"] = {"content": diff}
