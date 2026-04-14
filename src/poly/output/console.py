@@ -14,6 +14,8 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.theme import Theme
 
+import click
+
 # Global verbose flag — set by CLI before commands run
 _verbose = False
 
@@ -226,6 +228,17 @@ def print_turn_metadata(
                 padding=(0, 1),
             )
         )
+
+
+# ── Interactive editor ─────────────────────────────────────────────────
+
+
+def edit_in_editor(initial_content: str, extension: str = ".txt") -> str:
+    """Open the user's editor with initial content and return the edited result."""
+    edited = click.edit(initial_content, extension=extension)
+    if edited is None:
+        raise ValueError("No changes were made.")
+    return edited
 
 
 # ── Error handling ───────────────────────────────────────────────────
