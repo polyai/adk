@@ -146,11 +146,11 @@ Creates a new branch. By default the branch is sourced from sandbox main.
 
 When `--env live` or `--env pre-release` is specified:
 
-- the local project is overwritten with the state of that deployment snapshot
-- the branch is created from that snapshot
-- the snapshot is immediately pushed to the new branch, leaving a clean slate for hotfix changes
+- the version of the deployed environment is pulled into your local workspace
+- a branch is created from that snapshot
+- the version is immediately pushed to the new branch, leaving a clean slate for hotfix changes
 - the command can only be run from `main`
-- if there are uncommitted local changes, the command will fail unless `--force` is also passed
+- if there are local changes, the command will fail unless `--force` is also passed
 
 !!! warning "Use `--env live` with caution"
 
