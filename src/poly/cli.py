@@ -793,7 +793,7 @@ class AgentStudioCLI:
                         error(f"Input file not found: {args.input_file}")
                         sys.exit(1)
                     with src:
-                        input_messages = [line.rstrip("\n") for line in src if line.strip()]
+                        input_messages = [line.rstrip("\n") for line in src]
                 elif args.messages:
                     input_messages = args.messages
                 cls.chat(
@@ -2179,6 +2179,7 @@ class AgentStudioCLI:
                 output_json=output_json,
                 initial_response=response,
             )
+
             if output_json:
                 conversations.append(conversation)
 
@@ -2225,7 +2226,7 @@ class AgentStudioCLI:
                     ),
                 }
             ]
-            if output_json and initial_response
+            if output_json and initial_response is not None
             else []
         )
         try:
