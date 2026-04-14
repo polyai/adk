@@ -2116,7 +2116,7 @@ class AgentStudioCLI:
             if conversation_id:
                 if not output_json:
                     info(f"Resuming chat session (conversation: {conversation_id})...")
-                initial_response = None
+                response = None
             else:
                 if environment == "draft" and not output_json:
                     info("Preparing branch deployment...")
