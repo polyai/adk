@@ -558,7 +558,7 @@ class ProjectStatusTest(unittest.TestCase):
         self.assertEqual(
             files_with_conflicts, [os.path.join(TEST_DIR, "functions", "test_function.py")]
         )
-        self.assertEqual(modified_files, [os.path.join(TEST_DIR, "functions", "test_function.py")])
+        self.assertEqual(modified_files, [])
         self.assertEqual(new_files, [])
         self.assertEqual(deleted_files, [])
 

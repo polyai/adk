@@ -155,22 +155,18 @@ class Resource(BaseResource, ABC):
         """
         pass
 
-    def get_status(self, other_hash: str) -> tuple[bool, bool]:
-        """Check if the status of the resource
-        Has it changed locally and if it has a merge conflict
+    def is_modified(self, other_hash: str) -> bool:
+        """
 
         Args:
             other_hash (str): The other resource hash to compare to.
 
         Returns:
-            tuple[bool, bool]: A tuple containing two booleans:
-                - True if the resource has changed locally
-                - True if the resource has a merge conflict
+            bool: True if the resource has changed locally, False otherwise.
         """
         current_hash = self.compute_hash()
         modified = other_hash != current_hash
-        has_conflict = utils.contains_merge_conflict(self.raw)
-        return modified, has_conflict
+        return modified
 
     def get_diff(self, other_resource: "Resource") -> str:
         """Get the diff of the resource compared to the local version.

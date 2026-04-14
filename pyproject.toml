@@ -106,7 +106,7 @@ tag_format = "v{version}"
 
 [project]
 name = "polyai-adk"
-version = "0.8.0"
+version = "0.8.3"
 description = "Agent Development Kit (ADK) — a CLI for managing Agent Studio projects locally"
 readme = "README.md"
 requires-python = ">=3.14.0"
