@@ -1,6 +1,49 @@
 # CHANGELOG
 
 
+## v0.8.4 (2026-04-14)
+
+### Bug Fixes
+
+- Don't delete or fail to update conditions when their parent step…
+  ([#71](https://github.com/polyai/adk/pull/71),
+  [`85c6aea`](https://github.com/polyai/adk/commit/85c6aea87f2af72a877159aad6a63cb4df894dab))
+
+## Summary
+
+Fixes two bugs in `_clean_resources_before_push` that caused push failures when a flow step with
+  conditions was deleted.
+
+## Motivation
+
+When a FlowStep is deleted, Agent Studio automatically deletes its child Conditions server-side.
+  This caused two issues: 1. Explicitly including the condition in `deleted_resources` would result
+  in a double-delete error. 2. If a condition was also being *updated* (e.g. re-pointed to a new
+  step), the update request would fail because the platform had already deleted the condition when
+  the step was removed.
+
+## Changes
+
+- Strip conditions from `deleted_resources` when their parent `FlowStep` is being deleted (platform
+  handles the cascade) - Promote affected conditions from `updated_resources` to `new_resources`
+  when their original `child_step` is being deleted in the same push
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Copilot Autofix powered by AI <175728472+Copilot@users.noreply.github.com>
+
+
 ## v0.8.3 (2026-04-14)
 
 ### Bug Fixes
