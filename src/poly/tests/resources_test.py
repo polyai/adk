@@ -837,6 +837,30 @@ def test_code(conv: Conversation, test_param: int):
         func.code = 'def trans_func(conv: Conversation, flow: Flow):\n    # conv.goto_flow("Missing Flow")\n    conv.goto_flow("Other Flow")\n'
         self.assertIsNone(func.validate(resource_mappings=resource_mappings))
 
+    def test_extract_decorators_untyped_parameter_raises_value_error(self):
+        """A parameter without a type annotation raises ValueError."""
+        code = """@func_description('Book a table')
+@func_parameter('booking_ref', 'The booking reference')
+def my_func(conv: Conversation, booking_ref):
+    pass
+"""
+        with self.assertRaises(ValueError) as ctx:
+            Function._extract_decorators(code, "my_func", [])
+        self.assertIn("booking_ref", str(ctx.exception))
+        self.assertIn("has no type annotation", str(ctx.exception))
+
+    def test_extract_decorators_complex_type_annotation_raises_value_error(self):
+        """A parameter with a complex annotation (e.g. Optional[str]) raises ValueError."""
+        code = """@func_description('Book a table')
+@func_parameter('booking_ref', 'The booking reference')
+def my_func(conv: Conversation, booking_ref: Optional[str]):
+    pass
+"""
+        with self.assertRaises(ValueError) as ctx:
+            Function._extract_decorators(code, "my_func", [])
+        self.assertIn("booking_ref", str(ctx.exception))
+        self.assertIn("unsupported type annotation", str(ctx.exception))
+
 
 TEST_TOPIC = Topic(
     resource_id="123",
@@ -5899,6 +5923,20 @@ class TestApiIntegrationValidate(unittest.TestCase):
             operations=[
                 ApiIntegrationOperation(
                     resource_id="op-1", name="get_user", method="GET", resource="/users/{user_id}"
+                ),
+            ]
+        )
+        integration.validate()  # should not raise
+
+    def test_operation_resource_with_query_string_is_valid(self):
+        """Validation accepts resources with an optional ?query (e.g. fixed query params)."""
+        integration = self._make_integration(
+            operations=[
+                ApiIntegrationOperation(
+                    resource_id="op-1",
+                    name="create_patient",
+                    method="POST",
+                    resource="/Patient/Create?locationId={location_id}",
                 ),
             ]
         )
