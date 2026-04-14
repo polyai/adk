@@ -179,13 +179,14 @@ poly validate
 
 Create a GitHub Gist of Agent Studio project changes to share with others.
 
-Running `poly review` without a subcommand creates a new gist comparing local changes against the remote project. Use `--before` and `--after` to compare two remote branches or versions.
+Running `poly review` without a subcommand creates a new gist comparing local changes against the remote project. Use `--before` and `--after` to compare two remote branches or versions. Use `--debug` to enable DEBUG-level logging for troubleshooting.
 
 Examples:
 
 ~~~bash
 poly review
 poly review --before main --after feature-branch
+poly review --debug
 ~~~
 
 #### `poly review list`
