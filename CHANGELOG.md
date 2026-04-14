@@ -1,6 +1,57 @@
 # CHANGELOG
 
 
+## v0.8.3 (2026-04-14)
+
+### Bug Fixes
+
+- Empty diff entries caused a 422 error from the GitHub Gists API
+  ([#75](https://github.com/polyai/adk/pull/75),
+  [`6ffa08f`](https://github.com/polyai/adk/commit/6ffa08f49c419edc7db1240642e117600d4c3c0c))
+
+## Summary - Add `--debug` flag to `poly review` command that enables DEBUG-level logging for easier
+  troubleshooting - Fix bug where empty diff entries caused a 422 error from the GitHub Gists API
+  (`missing_field: files`)
+
+## Test plan - [x] Run `poly review --debug` and verify debug logs appear - [x] Run `poly review`
+  without `--debug` and verify only warnings are shown - [x] Verify that projects with empty diffs
+  no longer trigger a 422 gist creation error
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Chores
+
+- Update experimental config ([#73](https://github.com/polyai/adk/pull/73),
+  [`10840e5`](https://github.com/polyai/adk/commit/10840e5e4f46891f33955eef71832142801d715a))
+
+## Summary Update experimental config
+
+## Motivation Get new features
+
+## Changes Update to latest
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+
 ## v0.8.2 (2026-04-10)
 
 ### Bug Fixes
