@@ -6006,10 +6006,10 @@ class SafetyFiltersTests(unittest.TestCase):
             enabled=True,
             filter_type="azure",
             categories={
-                "violence": _SafetyFilterCategory(enabled=True, level="strict"),
-                "hate": _SafetyFilterCategory(enabled=False, level="medium"),
-                "sexual": _SafetyFilterCategory(enabled=False, level="lenient"),
-                "self_harm": _SafetyFilterCategory(enabled=True, level="strict"),
+                "violence": _SafetyFilterCategory(enabled=True, precision="STRICT"),
+                "hate": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "sexual": _SafetyFilterCategory(enabled=False, precision="LOOSE"),
+                "self_harm": _SafetyFilterCategory(enabled=True, precision="STRICT"),
             },
         )
         d = sf.to_yaml_dict()
@@ -6019,7 +6019,7 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertEqual(sf2.filter_type, sf.filter_type)
         for cat in ("violence", "hate", "sexual", "self_harm"):
             self.assertEqual(sf2.categories[cat].enabled, sf.categories[cat].enabled)
-            self.assertEqual(sf2.categories[cat].level, sf.categories[cat].level)
+            self.assertEqual(sf2.categories[cat].precision, sf.categories[cat].precision)
         self.assertEqual(d["categories"]["sexual"]["level"], "lenient")
         self.assertNotIn("precision", d["categories"]["sexual"])
 
@@ -6030,26 +6030,8 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertEqual(sf.filter_type, "azure")
         for cat in ("violence", "hate", "sexual", "self_harm"):
             self.assertFalse(sf.categories[cat].enabled)
-            self.assertEqual(sf.categories[cat].level, "medium")
-
-    def test_from_yaml_dict_supports_legacy_precision_key(self):
-        """Legacy `precision` yaml key is accepted and normalized to `level`."""
-        sf = SafetyFilters.from_yaml_dict(
-            {
-                "categories": {
-                    "sexual": {"enabled": True, "precision": "LOOSE"},
-                    "hate": {"enabled": False, "precision": "medium"},
-                }
-            },
-            resource_id="sf-legacy",
-            name="safety_filters",
-        )
-        self.assertEqual(sf.categories["sexual"].level, "lenient")
-        self.assertEqual(sf.categories["hate"].level, "medium")
-
-    # ------------------------------------------------------------------ #
-    # read_local_resource                                                  #
-    # ------------------------------------------------------------------ #
+            # Internal precision uses backend format (UPPERCASE)
+            self.assertEqual(sf.categories[cat].precision, "MEDIUM")
 
     def test_read_local_resource(self):
         """read_local_resource parses safety_filters from YAML correctly."""
@@ -6076,9 +6058,9 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertTrue(result.enabled)
         self.assertEqual(result.filter_type, "azure")
         self.assertTrue(result.categories["violence"].enabled)
-        self.assertEqual(result.categories["violence"].level, "strict")
+        self.assertEqual(result.categories["violence"].precision, "STRICT")
         self.assertFalse(result.categories["hate"].enabled)
-        self.assertEqual(result.categories["sexual"].level, "lenient")
+        self.assertEqual(result.categories["sexual"].precision, "LOOSE")
 
     def test_build_update_proto_general(self):
         """SafetyFilters.build_update_proto returns correct protobuf message."""
@@ -6088,10 +6070,10 @@ class SafetyFiltersTests(unittest.TestCase):
             enabled=False,
             filter_type="azure",
             categories={
-                "violence": _SafetyFilterCategory(enabled=True, level="strict"),
-                "hate": _SafetyFilterCategory(enabled=False, level="medium"),
-                "sexual": _SafetyFilterCategory(enabled=False, level="lenient"),
-                "self_harm": _SafetyFilterCategory(enabled=True, level="medium"),
+                "violence": _SafetyFilterCategory(enabled=True, precision="STRICT"),
+                "hate": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "sexual": _SafetyFilterCategory(enabled=False, precision="LOOSE"),
+                "self_harm": _SafetyFilterCategory(enabled=True, precision="MEDIUM"),
             },
         )
         proto = sf.build_update_proto()
@@ -6113,10 +6095,10 @@ class SafetyFiltersTests(unittest.TestCase):
             enabled=True,
             filter_type="azure",
             categories={
-                "violence": _SafetyFilterCategory(enabled=True, level="medium"),
-                "hate": _SafetyFilterCategory(enabled=False, level="medium"),
-                "sexual": _SafetyFilterCategory(enabled=False, level="medium"),
-                "self_harm": _SafetyFilterCategory(enabled=False, level="medium"),
+                "violence": _SafetyFilterCategory(enabled=True, precision="MEDIUM"),
+                "hate": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "sexual": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "self_harm": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
             },
         )
         proto = vsf.build_update_proto()
@@ -6127,13 +6109,13 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertEqual(proto.safety_filters.azure_config.violence.precision, "MEDIUM")
 
     def _make_content_filter_projection(
-        self, disabled=False, violence_active=True, violence_precision="STRICT"
+        self
     ) -> dict:
         return {
-            "disabled": disabled,
+            "disabled": False,
             "type": "azure",
             "azureConfig": {
-                "violence": {"isActive": violence_active, "precision": violence_precision},
+                "violence": {"isActive": True, "precision": "STRICT"},
                 "hate": {"isActive": False, "precision": "MEDIUM"},
                 "sexual": {"isActive": False, "precision": "LOOSE"},
                 "selfHarm": {"isActive": True, "precision": "STRICT"},
@@ -6151,7 +6133,7 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertTrue(sf.enabled)
         self.assertEqual(sf.filter_type, "azure")
         self.assertTrue(sf.categories["violence"].enabled)
-        self.assertEqual(sf.categories["violence"].level, "strict")
+        self.assertEqual(sf.categories["violence"].precision, "STRICT")
         self.assertFalse(sf.categories["hate"].enabled)
         self.assertTrue(sf.categories["self_harm"].enabled)
 
@@ -6166,9 +6148,7 @@ class SafetyFiltersTests(unittest.TestCase):
             "channels": {
                 "voice": {
                     "config": {
-                        "safetyFilters": self._make_content_filter_projection(
-                            disabled=True, violence_active=False, violence_precision="LOOSE"
-                        )
+                        "safetyFilters": self._make_content_filter_projection()
                     }
                 }
             }
@@ -6179,9 +6159,9 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertIn("voice_safety_filters", result[VoiceSafetyFilters])
         vsf = result[VoiceSafetyFilters]["voice_safety_filters"]
         self.assertIsInstance(vsf, VoiceSafetyFilters)
-        self.assertFalse(vsf.enabled)  # disabled=True → enabled=False
-        self.assertFalse(vsf.categories["violence"].enabled)
-        self.assertEqual(vsf.categories["violence"].level, "lenient")
+        self.assertTrue(vsf.enabled)  # disabled=False in projection → enabled=True
+        self.assertTrue(vsf.categories["self_harm"].enabled)
+        self.assertEqual(vsf.categories["self_harm"].precision, "STRICT")
 
     def test_read_voice_safety_filters_from_channel_settings_projection_empty(self):
         """_read_channel_settings_from_projection returns {} when channels are absent."""
@@ -6198,9 +6178,7 @@ class SafetyFiltersTests(unittest.TestCase):
                             "welcomeMessage": "Hello there",
                             "languageCode": "en-GB",
                         },
-                        "safetyFilters": self._make_content_filter_projection(
-                            disabled=False, violence_active=True, violence_precision="STRICT"
-                        ),
+                        "safetyFilters": self._make_content_filter_projection(),
                     }
                 }
             }
@@ -6218,29 +6196,31 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertIsInstance(vsf, VoiceSafetyFilters)
         self.assertTrue(vsf.enabled)
         self.assertTrue(vsf.categories["violence"].enabled)
-        self.assertEqual(vsf.categories["violence"].level, "strict")
+        # Internal precision uses backend format (UPPERCASE)
+        self.assertEqual(vsf.categories["violence"].precision, "STRICT")
 
     def test_projection_precision_is_converted_to_yaml_level(self):
-        """Projection precision values are normalized to yaml levels."""
-        projection = {
-            "contentFilterSettings": self._make_content_filter_projection(
-                violence_precision="LOOSE"
-            )
-        }
+        """Projection precision values  are converted to YAML level."""
+        projection = {"contentFilterSettings": self._make_content_filter_projection()}
         sf = SyncClientHandler._read_safety_filters_from_projection(projection)["safety_filters"]
-        self.assertEqual(sf.categories["violence"].level, "lenient")
-        self.assertEqual(sf.to_yaml_dict()["categories"]["violence"]["level"], "lenient")
+        # Internal precision stays in backend format (UPPERCASE)
+        self.assertEqual(sf.categories["violence"].precision, "STRICT")
+        self.assertEqual(sf.categories["sexual"].precision, "LOOSE")
+        # YAML output converts to lowercase level terminology
+        self.assertEqual(sf.to_yaml_dict()["categories"]["violence"]["level"], "strict")
+        self.assertEqual(sf.to_yaml_dict()["categories"]["sexual"]["level"], "lenient")
+        self.assertEqual(sf.to_yaml_dict()["categories"]["sexual"]["level"], "lenient")
 
     def test_validate_invalid_precision_raises(self):
-        """validate raises ValueError for an invalid level value."""
+        """validate raises ValueError for an invalid precision value."""
         sf = SafetyFilters(
             resource_id="sf-1",
             name="safety_filters",
             categories={
-                "violence": _SafetyFilterCategory(enabled=True, level="invalid"),
-                "hate": _SafetyFilterCategory(enabled=False, level="medium"),
-                "sexual": _SafetyFilterCategory(enabled=False, level="medium"),
-                "self_harm": _SafetyFilterCategory(enabled=False, level="medium"),
+                "violence": _SafetyFilterCategory(enabled=True, precision="INVALID"),
+                "hate": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "sexual": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "self_harm": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
             },
         )
         with self.assertRaises(ValueError) as cm:
@@ -6249,37 +6229,34 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertIn("violence", str(cm.exception))
 
     def test_validate_passes_with_all_valid_precisions(self):
-        """validate passes for each valid level value."""
-        for level in ("lenient", "medium", "strict"):
+        """validate passes for each valid precision value (backend format)."""
+        for precision in ("LOOSE", "MEDIUM", "STRICT"):
             sf = SafetyFilters(
                 resource_id="sf-1",
                 name="safety_filters",
                 categories={
-                    cat: _SafetyFilterCategory(enabled=False, level=level)
+                    cat: _SafetyFilterCategory(enabled=False, precision=precision)
                     for cat in ("violence", "hate", "sexual", "self_harm")
                 },
             )
             sf.validate()  # should not raise
 
     def test_voice_safety_filters_validate_invalid_precision_raises(self):
-        """VoiceSafetyFilters.validate raises ValueError for invalid level."""
+        """VoiceSafetyFilters.validate raises ValueError for invalid precision."""
         vsf = VoiceSafetyFilters(
             resource_id="vsf-1",
             name="voice_safety_filters",
             categories={
-                "violence": _SafetyFilterCategory(enabled=False, level="medium"),
-                "hate": _SafetyFilterCategory(enabled=False, level="medium"),
-                "sexual": _SafetyFilterCategory(enabled=False, level="bad"),
-                "self_harm": _SafetyFilterCategory(enabled=False, level="medium"),
+                "violence": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "hate": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "sexual": _SafetyFilterCategory(enabled=False, precision="BAD"),
+                "self_harm": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
             },
         )
         with self.assertRaises(ValueError) as cm:
             vsf.validate()
         self.assertIn("sexual", str(cm.exception))
 
-    # ------------------------------------------------------------------ #
-    # update_command_type                                                  #
-    # ------------------------------------------------------------------ #
 
     def test_command_types(self):
         """command_type and update_command_type return expected strings."""

@@ -17,7 +17,7 @@ from poly.handlers.protobuf.content_filter_settings_pb2 import (
 )
 from poly.resources.resource import ResourceMapping, YamlResource
 
-VALID_PRECISIONS = {"loose", "medium", "strict"}
+PRECISION_MAPPING = {"LOOSE": "lenient", "MEDIUM": "medium", "STRICT": "strict"}
 CATEGORIES = ("violence", "hate", "sexual", "self_harm")
 DEFAULT_PRECISION = "medium"
 _FILTER_TYPE = "azure"
@@ -29,13 +29,21 @@ class _SafetyFilterCategory:
     precision: str = DEFAULT_PRECISION
 
     def to_dict(self) -> dict:
-        return {"enabled": self.enabled, "precision": self.precision}
+        # Handle the mapping between UI terminology and backend terms.
+        ui_precision_phrase = PRECISION_MAPPING[self.precision]
+        return {"enabled": self.enabled, "level": ui_precision_phrase}
 
     @classmethod
     def from_dict(cls, data: dict) -> "_SafetyFilterCategory":
+        level = data.get("level", DEFAULT_PRECISION)
+        backend_precision_phrase = [k for k, v in PRECISION_MAPPING.items() if v == level]
+        if not backend_precision_phrase:
+            valid_levels = ", ".join(sorted(PRECISION_MAPPING.values()))
+            raise ValueError(f"Invalid level '{level}'. Must be one of: {valid_levels}")
+
         return cls(
             enabled=data.get("enabled", False),
-            precision=data.get("precision", DEFAULT_PRECISION),
+            precision=backend_precision_phrase[0],
         )
 
     def to_proto(self) -> AzureContentFilterCategory:
@@ -141,11 +149,13 @@ class _BaseSafetyFilters(YamlResource):
         )
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+        valid_precisions = PRECISION_MAPPING.keys()  # LOOSE, MEDIUM, STRICT
+        valid_levels = PRECISION_MAPPING.values()  # lenient, medium, strict (for error message)
         for cat_name, cat in self.categories.items():
-            if cat.precision not in VALID_PRECISIONS:
+            if cat.precision not in valid_precisions:
                 raise ValueError(
-                    f"Invalid precision '{cat.precision}' for category '{cat_name}'. "
-                    f"Must be one of: {', '.join(sorted(VALID_PRECISIONS))}"
+                    f"Invalid level set '{cat.precision}' for category '{cat_name}'. "
+                    f"Must be one of: {', '.join(sorted(valid_levels))}"
                 )
 
     def build_create_proto(self) -> Message:
