@@ -38,7 +38,7 @@ flows/{flow_name}/
 ## Decorators
 
 - **`@func_description('...')`** (required for global and transition functions): Description shown to the LLM to decide when to call the function.
-- **`@func_parameter('param_name', '...')`** (required for each parameter except `conv` and `flow`): Description of the parameter shown to the LLM.
+- **`@func_parameter('param_name', '...')`** (required for each parameter except `conv` and `flow`): Description of the parameter shown to the LLM. All parameters must also have a typed Python annotation (e.g. `booking_ref: str`)
 - **`@func_latency_control(...)`** (optional): Configure delay messages while the function runs.
 
 Function steps do not support `@func_parameter` or `@func_description`.

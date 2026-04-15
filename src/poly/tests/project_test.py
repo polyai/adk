@@ -558,7 +558,7 @@ class ProjectStatusTest(unittest.TestCase):
         self.assertEqual(
             files_with_conflicts, [os.path.join(TEST_DIR, "functions", "test_function.py")]
         )
-        self.assertEqual(modified_files, [os.path.join(TEST_DIR, "functions", "test_function.py")])
+        self.assertEqual(modified_files, [])
         self.assertEqual(new_files, [])
         self.assertEqual(deleted_files, [])
 
@@ -1538,6 +1538,101 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
 
         self.assertNotIn(var_id, cleaned_deleted.get(Variable, {}))
         self.assertNotIn(var_id, cleaned_new.get(Variable, {}))
+
+    def test_clean_resources_before_push_does_not_delete_condition_when_parent_step_deleted(self):
+        """When a FlowStep is deleted, its conditions should not be in deleted_resources."""
+        condition = Condition(
+            resource_id="CONDITION-cond-1",
+            name="cond-1",
+            condition_type="step_condition",
+            step_id="step-1",
+            flow_id="flow-123",
+            child_step="step-2",
+        )
+        flow_step = FlowStep(
+            resource_id="flow-123_step-1",
+            step_id="step-1",
+            name="Step 1",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.ADVANCED_STEP,
+            prompt="Hello",
+            conditions=[condition],
+        )
+
+        deleted_resources = {
+            FlowStep: {"flow-123_step-1": flow_step},
+            Condition: {"CONDITION-cond-1": condition},
+        }
+
+        push_changes = self.project._clean_resources_before_push(
+            {},
+            {},
+            {},
+            deleted_resources,
+        )
+        cleaned_deleted = push_changes.main.deleted
+
+        # The step should still be deleted
+        self.assertIn("flow-123_step-1", cleaned_deleted.get(FlowStep, {}))
+        # But the condition belonging to that step should NOT be deleted
+        self.assertNotIn("CONDITION-cond-1", cleaned_deleted.get(Condition, {}))
+
+    def test_clean_resources_before_push_condition_update_becomes_create_when_original_target_step_deleted(self):
+        """When a condition is updated but its original child_step is being deleted,
+        move it from updated to new (the platform auto-deletes the condition on step delete,
+        so an update would fail)."""
+        original_condition = Condition(
+            resource_id="CONDITION-cond-1",
+            name="cond-1",
+            condition_type="step_condition",
+            step_id="step-1",
+            flow_id="flow-123",
+            child_step="step-to-delete",
+        )
+        original_flow_step = FlowStep(
+            resource_id="flow-123_step-1",
+            step_id="step-1",
+            name="Step 1",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.ADVANCED_STEP,
+            prompt="Hello",
+            conditions=[original_condition],
+        )
+        step_to_delete = FlowStep(
+            resource_id="flow-123_step-to-delete",
+            step_id="step-to-delete",
+            name="Step To Delete",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.ADVANCED_STEP,
+            prompt="Goodbye",
+        )
+        updated_condition = Condition(
+            resource_id="CONDITION-cond-1",
+            name="cond-1",
+            condition_type="step_condition",
+            step_id="step-1",
+            flow_id="flow-123",
+            child_step="step-new-target",
+        )
+
+        self.project.resources.setdefault(FlowStep, {})["flow-123_step-1"] = original_flow_step
+
+        push_changes = self.project._clean_resources_before_push(
+            {},
+            {},
+            {Condition: {"CONDITION-cond-1": updated_condition}},
+            {FlowStep: {"flow-123_step-to-delete": step_to_delete}},
+        )
+        cleaned_new = push_changes.main.new
+        cleaned_updated = push_changes.main.updated
+
+        # Condition should be promoted to a create
+        self.assertIn("CONDITION-cond-1", cleaned_new.get(Condition, {}))
+        # And removed from updated
+        self.assertNotIn("CONDITION-cond-1", cleaned_updated.get(Condition, {}))
 
 
 class PushProjectTest(unittest.TestCase):

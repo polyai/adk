@@ -5,7 +5,7 @@ description: Reference for the core commands provided by the PolyAI ADK CLI.
 
 <p class="lead">
 The PolyAI ADK is accessed through the <code>poly</code> command.
-When in doubt about a flag or option, run the command with <code>--help</code> - that output reflects your installed version exactly.
+Use the CLI help output as the first source of truth.
 </p>
 
 ## Start with help
@@ -22,9 +22,9 @@ Each command also supports its own help output. For example:
 poly push --help
 ~~~
 
-!!! tip "Help output reflects your installed version"
+!!! tip "Use help output as the source of truth"
 
-    This reference page covers the standard commands. Run `poly <command> --help` to confirm the exact flags available in your environment.
+    The installed CLI is the fastest way to confirm the commands and flags available in your local environment.
 
 ## Core commands
 
@@ -53,6 +53,10 @@ poly pull --force
 poly pull --format
 ~~~
 
+If the branch you are currently on no longer exists in Agent Studio, `poly pull` automatically switches to the `main` branch and displays a warning message with the new branch name.
+
+When using JSON output (`--json`), the response includes `new_branch_name` and `new_branch_id` fields if a branch switch occurred.
+
 ### `poly push`
 
 Push local changes to Agent Studio.
@@ -65,16 +69,11 @@ poly push --dry-run
 poly push --skip-validation
 poly push --force
 poly push --format
-poly push --email user@example.com
 ~~~
 
-| Flag | Description |
-|---|---|
-| `--force` | Force overwrite — load the latest remote version and push on top of it. |
-| `--dry-run` | Validate and stage changes without actually sending them. |
-| `--skip-validation` | Skip local validation before pushing. |
-| `--format` | Format resources before pushing. |
-| `--email EMAIL` | Email address to use for metadata when creating commands. |
+When pushing creates a new branch (for example, when pushing to Agent Studio for the first time on a branch), the CLI displays a message with the new branch name.
+
+When using JSON output (`--json`), the response includes `new_branch_name` and `new_branch_id` fields if a new branch was created.
 
 ### `poly status`
 
@@ -116,9 +115,46 @@ Examples:
 poly branch list
 poly branch current
 poly branch create my-feature
+poly branch create my-hotfix --env live
+poly branch create my-hotfix --env live --force
 poly branch switch my-feature
 poly branch switch my-feature --force
+poly branch delete
+poly branch delete my-feature
 ~~~
+
+#### `poly branch delete`
+
+Interactively select and delete one or more branches. The `main` branch cannot be deleted.
+
+- Run without arguments to open an interactive checkbox prompt for selecting branches to delete.
+- Pass a branch name directly to skip the interactive prompt and delete that branch after confirmation.
+
+~~~bash
+poly branch delete
+poly branch delete my-feature
+~~~
+
+#### `poly branch create`
+
+Creates a new branch. By default the branch is sourced from sandbox main.
+
+| Flag | Description |
+|---|---|
+| `--env`, `--environment` | Source the new branch from a deployment snapshot instead of sandbox main. Choices: `sandbox`, `pre-release`, `live`. |
+| `--force`, `-f` | Force branch creation even if there are uncommitted local changes on main. |
+
+When `--env live` or `--env pre-release` is specified:
+
+- the version of the deployed environment is pulled into your local workspace
+- a branch is created from that snapshot
+- the version is immediately pushed to the new branch, leaving a clean slate for hotfix changes
+- the command can only be run from `main`
+- if there are local changes, the command will fail unless `--force` is also passed
+
+!!! warning "Use `--env live` with caution"
+
+    Branching from a live deployment snapshot will overwrite your local project with the live state. Merging this branch back to main may roll back changes that were introduced after the snapshot was taken.
 
 ### `poly format`
 
@@ -141,23 +177,56 @@ poly validate
 
 ### `poly review`
 
-Create a GitHub gist for reviewing changes.
+Create a GitHub Gist of Agent Studio project changes to share with others.
+
+Running `poly review` without a subcommand creates a new gist comparing local changes against the remote project. Use `--before` and `--after` to compare two remote branches or versions. Use `--debug` to enable DEBUG-level logging for troubleshooting.
 
 Examples:
 
 ~~~bash
 poly review
 poly review --before main --after feature-branch
-poly review --delete
+poly review --debug
+~~~
+
+#### `poly review list`
+
+Interactively select a review gist and open it in the browser.
+
+~~~bash
+poly review list
+poly review list --json
+~~~
+<<<<<<< docs/auto-update-e9dd3b9
+
+#### `poly review delete`
+
+Interactively select and delete review gists. Use `--id` to delete a specific gist directly without an interactive prompt.
+
+~~~bash
+poly review delete
+poly review delete --id GIST_ID
+poly review delete --json
 ~~~
 
 ### `poly chat`
 
+=======
+
+#### `poly review delete`
+
+Interactively select and delete review gists. Use `--id` to delete a specific gist directly without an interactive prompt.
+
+~~~bash
+poly review delete
+poly review delete --id GIST_ID
+poly review delete --json
+~~~
+
+### `poly chat`
+
+>>>>>>> main
 Start an interactive chat session with your agent.
-
-!!! warning "Merge before chatting"
-
-    `poly chat` connects to the **main branch** of your Sandbox environment in Agent Studio — not your local files, and not your current branch. To test changes made on a feature branch, you must first push the branch with `poly push`, merge it in Agent Studio, and then run `poly chat`.
 
 Examples:
 
@@ -180,7 +249,7 @@ poly docs --all
 poly docs --all --output rules.md
 ~~~
 
-Use `--output` to write the documentation to a local file. This is useful when working with AI coding tools - pass the output file as context to give the agent accurate knowledge of ADK resource types and conventions.
+Use `--output` to write the documentation to a local file. This is useful when working with AI coding tools — pass the output file as context to give the agent accurate knowledge of ADK resource types and conventions.
 
 ## Machine-readable JSON output
 
@@ -195,7 +264,10 @@ poly diff --json
 poly revert --json --all
 poly branch list --json
 poly branch create my-feature --json
+poly branch switch my-feature --json
 poly branch current --json
+poly branch delete --json
+poly branch delete my-feature --json
 poly format --json
 poly init --region us-1 --account_id 123 --project_id my_project --json
 ~~~
@@ -220,11 +292,15 @@ The exact fields vary by command. Common fields include:
 | `poly revert --json` | `success`, `files_reverted` |
 | `poly branch list --json` | `current_branch`, `branches` |
 | `poly branch create --json` | `success`, `new_branch_id`, `branch_name` |
+| `poly branch switch --json` | `success`, `switched_to`, `dry_run` |
 | `poly branch current --json` | `current_branch` |
+| `poly branch delete --json` | `success`, `deleted` |
 | `poly format --json` | `success`, `check_only`, `format_errors`, `affected`, `ty_ran`, `ty_returncode`, `ty_timed_out` |
 | `poly init --json` | `success`, `root_path` |
 
-Error responses always include `{ "success": false, "error": "..." }`.
+For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
+
+Error responses always include `{ "success": false, "error": "...", "traceback": "..." }`.
 
 !!! info "`init` with `--json` requires explicit flags"
 
@@ -256,6 +332,7 @@ The `--output-json-projection` flag on `pull`, `init`, and `branch switch` inclu
 poly pull --json --output-json-projection | jq .projection > proj.json
 poly push --from-projection - < proj.json
 ~~~
+
 
 ## Working pattern
 
