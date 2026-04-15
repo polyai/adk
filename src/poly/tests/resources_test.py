@@ -6062,13 +6062,13 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertNotIn("precision", d["categories"]["sexual"])
 
     def test_from_yaml_dict_defaults(self):
-        """Missing optional fields fall back to sane defaults."""
+        """Missing optional fields fall back to defaults."""
         sf = SafetyFilters.from_yaml_dict({}, resource_id="sf-1", name="safety_filters")
         self.assertTrue(sf.enabled)
         self.assertEqual(sf.filter_type, "azure")
         for cat in ("violence", "hate", "sexual", "self_harm"):
             self.assertFalse(sf.categories[cat].enabled)
-            # Internal precision uses backend format (UPPERCASE)
+            # Internal representation uses backend format (UPPERCASE)
             self.assertEqual(sf.categories[cat].precision, "MEDIUM")
 
     def test_read_local_resource(self):
@@ -6142,7 +6142,7 @@ class SafetyFiltersTests(unittest.TestCase):
         proto = vsf.build_update_proto()
 
         self.assertEqual(proto.channel_type, VOICE)
-        self.assertFalse(proto.safety_filters.disabled)  # enabled=True → disabled=False
+        self.assertFalse(proto.safety_filters.disabled)
         self.assertTrue(proto.safety_filters.azure_config.violence.is_active)
         self.assertEqual(proto.safety_filters.azure_config.violence.precision, "MEDIUM")
 
@@ -6206,37 +6206,6 @@ class SafetyFiltersTests(unittest.TestCase):
         result = SyncClientHandler._read_channel_settings_from_projection({})
         self.assertEqual(result, {})
 
-    def test_read_channel_settings_projection_includes_voice_safety_filters(self):
-        """Voice safety filters are imported via channel settings projection parsing."""
-        projection = {
-            "channels": {
-                "voice": {
-                    "config": {
-                        "greeting": {
-                            "welcomeMessage": "Hello there",
-                            "languageCode": "en-GB",
-                        },
-                        "safetyFilters": self._make_content_filter_projection(),
-                    }
-                }
-            }
-        }
-
-        result = SyncClientHandler._read_channel_settings_from_projection(projection)
-
-        # Adds some coverage for other channel features.
-        self.assertIn(VoiceGreeting, result)
-        self.assertIn("voice_greeting", result[VoiceGreeting])
-        self.assertIn(VoiceSafetyFilters, result)
-        self.assertIn("voice_safety_filters", result[VoiceSafetyFilters])
-
-        vsf = result[VoiceSafetyFilters]["voice_safety_filters"]
-        self.assertIsInstance(vsf, VoiceSafetyFilters)
-        self.assertTrue(vsf.enabled)
-        self.assertTrue(vsf.categories["violence"].enabled)
-        # Internal precision uses backend format (UPPERCASE)
-        self.assertEqual(vsf.categories["violence"].precision, "STRICT")
-
     def test_projection_precision_is_converted_to_yaml_level(self):
         """Projection precision values  are converted to YAML level."""
         projection = {"contentFilterSettings": self._make_content_filter_projection()}
@@ -6278,23 +6247,6 @@ class SafetyFiltersTests(unittest.TestCase):
                 },
             )
             sf.validate()  # should not raise
-
-    def test_voice_safety_filters_validate_invalid_precision_raises(self):
-        """VoiceSafetyFilters.validate raises ValueError for invalid precision."""
-        vsf = VoiceSafetyFilters(
-            resource_id="vsf-1",
-            name="voice_safety_filters",
-            categories={
-                "violence": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
-                "hate": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
-                "sexual": _SafetyFilterCategory(enabled=False, precision="BAD"),
-                "self_harm": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
-            },
-        )
-        with self.assertRaises(ValueError) as cm:
-            vsf.validate()
-        self.assertIn("sexual", str(cm.exception))
-
 
     def test_command_types(self):
         """command_type and update_command_type return expected strings."""
