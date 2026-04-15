@@ -2257,6 +2257,8 @@ class AgentStudioProject:
         environment: str,
         channel: str,
         variant: Optional[str],
+        input_lang: Optional[str] = None,
+        output_lang: Optional[str] = None,
     ) -> dict:
         """Create a chat session (standard or draft).
 
@@ -2267,6 +2269,8 @@ class AgentStudioProject:
             environment (str): The environment to create the chat session in: draft, sandbox, pre-release or live.
             channel (str): The channel to create the chat session in: chat.polyai or webchat.polyai.
             variant (ty.Optional[str]): The variant ID to create the chat session in.
+            input_lang (str): Optional. The language code for the input messages, e.g. "en-GB" or "fr-FR".
+            output_lang (str): Optional. The language code for the agent's responses, e.g. "en-GB" or "fr-FR".
 
         Returns:
             dict: API response with conversation_id and initial greeting.
@@ -2291,6 +2295,8 @@ class AgentStudioProject:
                 lambda_deployment_version=lambda_deployment_version,
                 channel=channel,
                 variant_id=variant,
+                input_lang=input_lang,
+                output_lang=output_lang,
             )
 
         return AgentStudioInterface.create_chat(
@@ -2300,6 +2306,8 @@ class AgentStudioProject:
             environment=environment,
             variant_id=variant,
             channel=channel,
+            input_lang=input_lang,
+            output_lang=output_lang,
         )
 
     def send_message(
@@ -2307,6 +2315,8 @@ class AgentStudioProject:
         conversation_id: str,
         text: str,
         environment: str,
+        input_lang: str = None,
+        output_lang: str = None,
     ) -> dict:
         """Send a message to an active chat conversation.
 
@@ -2314,6 +2324,8 @@ class AgentStudioProject:
             conversation_id (str): The ID of the conversation to send the message to.
             text (str): The user message text to send.
             environment (str): The environment of the conversation: draft, sandbox, pre-release or live.
+            input_lang (str): Optional. The language code of the input message, e.g. "en-GB" or "fr-FR".
+            output_lang (str): Optional. The language code for the agent's response, e.g. "en-GB" or "fr-FR".
 
         Returns:
             dict: API response with the agent's reply.
@@ -2328,6 +2340,8 @@ class AgentStudioProject:
                 project_id=self.project_id,
                 conversation_id=conversation_id,
                 text=text,
+                input_lang=input_lang,
+                output_lang=output_lang,
             )
         return AgentStudioInterface.send_chat_message(
             region=self.region,
@@ -2336,6 +2350,8 @@ class AgentStudioProject:
             conversation_id=conversation_id,
             text=text,
             environment=environment,
+            input_lang=input_lang,
+            output_lang=output_lang,
         )
 
     def end_chat(
