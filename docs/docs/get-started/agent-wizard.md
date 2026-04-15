@@ -17,7 +17,7 @@ If you do not yet have access to Agent Studio or an existing agent, start here.
 
 ### Step 1 — Get access to Agent Studio
 
-Go to [poly.ai/waitlist](https://poly.ai/waitlist) and sign up using a work email address for instant access. If your organisation already has a PolyAI workspace, ask your PolyAI contact to add you directly.
+Go to [poly.ai/waitlist](https://poly.ai/waitlist) and sign up using a work email address for instant access. If your organisation already has a PolyAI workspace, ask your PolyAI contact to add you directly. See [Access and waitlist](./access-and-waitlist.md) for details on the Early Access Program and what you need to get started.
 
 ### Step 2 — Run Agent Wizard
 
@@ -58,7 +58,7 @@ poly init --account_id <account_id> --project_id <project_id>
 poly pull
 ```
 
-`poly init` connects your local folder to the Agent Studio project. `poly pull` downloads all the configuration the wizard generated — flows, topics, agent settings, and more — as local YAML and Python files.
+[`poly init`](../reference/cli.md#poly-init) connects your local folder to the Agent Studio project. [`poly pull`](../reference/cli.md#poly-pull) downloads all the configuration the wizard generated — flows, topics, agent settings, and more — as local YAML and Python files.
 
 You now have a fully editable local copy of the agent that Agent Wizard built.
 
