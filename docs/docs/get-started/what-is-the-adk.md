@@ -42,6 +42,13 @@ It preserves the same guardrails as Agent Studio, so developers cannot push chan
 
 <div class="grid cards" markdown>
 
+-   **No agent yet? Start with Agent Wizard**
+
+    ---
+
+    Build a working agent from your website in minutes, then pull it into the ADK.
+    [Open Agent Wizard guide](./agent-wizard.md)
+
 -   **Install the ADK**
 
     ---
