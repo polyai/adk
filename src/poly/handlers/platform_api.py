@@ -221,6 +221,8 @@ class PlatformAPIHandler:
         environment: str = "sandbox",
         variant_id: ty.Optional[str] = None,
         channel: str = "chat.polyai",
+        input_lang: ty.Optional[str] = None,
+        output_lang: ty.Optional[str] = None,
     ) -> dict:
         """Create a new chat conversation.
 
@@ -230,6 +232,9 @@ class PlatformAPIHandler:
             project_id: The project ID
             environment: The environment to chat against (sandbox, pre-release, live)
             variant_id: Optional variant ID (e.g. 'Voice')
+            channel: The channel identifier (e.g. 'chat.polyai', 'webchat.polyai')
+            input_lang: Optional language code of the input message, e.g. "en-GB" or "fr-FR"
+            output_lang: Optional language code for the agent's response,
 
         Returns:
             dict: The API response containing the conversation ID
@@ -241,6 +246,10 @@ class PlatformAPIHandler:
         }
         if variant_id:
             data["variant_id"] = variant_id
+        if input_lang:
+            data["asr_lang_code"] = input_lang
+        if output_lang:
+            data["tts_lang_code"] = output_lang
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
     @staticmethod
@@ -251,6 +260,8 @@ class PlatformAPIHandler:
         conversation_id: str,
         text: str,
         environment: str = "sandbox",
+        input_lang: str = None,
+        output_lang: str = None,
     ) -> dict:
         """Send a message to an existing chat conversation.
 
@@ -261,6 +272,8 @@ class PlatformAPIHandler:
             conversation_id: The conversation ID
             text: The user message text
             environment: The environment (sandbox, pre-release, live)
+            input_lang: Optional language code of the input message, e.g. "en-GB" or "fr-FR"
+            output_lang: Optional language code for the agent's response, e.g. "en-
 
         Returns:
             dict: The API response containing the assistant's reply
@@ -271,6 +284,10 @@ class PlatformAPIHandler:
             conversation_id=conversation_id,
         )
         data = {"message": text, "client_env": environment}
+        if input_lang:
+            data["asr_lang_code"] = input_lang
+        if output_lang:
+            data["tts_lang_code"] = output_lang
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
     @staticmethod
@@ -311,6 +328,8 @@ class PlatformAPIHandler:
         lambda_deployment_version: str,
         channel: str = "chat.polyai",
         variant_id: ty.Optional[str] = None,
+        input_lang: ty.Optional[str] = None,
+        output_lang: ty.Optional[str] = None,
     ) -> dict:
         """Create a new chat conversation against a branch deployment.
 
@@ -322,6 +341,8 @@ class PlatformAPIHandler:
             lambda_deployment_version: Branch lambda version from sourcerer
             channel: The channel identifier (e.g. 'chat.polyai', 'webchat.polyai')
             variant_id: Optional variant ID (e.g. 'Voice')
+            input_lang: Optional language code of the input message, e.g. "en-GB" or "fr-FR"
+            output_lang: Optional language code for the agent's response, e.g. "en-
 
         Returns:
             dict: The API response containing the conversation ID
@@ -334,6 +355,10 @@ class PlatformAPIHandler:
         }
         if variant_id:
             data["variant_id"] = variant_id
+        if input_lang:
+            data["asr_lang_code"] = input_lang
+        if output_lang:
+            data["tts_lang_code"] = output_lang
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
     @staticmethod
@@ -343,6 +368,8 @@ class PlatformAPIHandler:
         project_id: str,
         conversation_id: str,
         text: str,
+        input_lang: str = None,
+        output_lang: str = None,
     ) -> dict:
         """Send a message to an existing draft chat conversation.
 
@@ -352,6 +379,8 @@ class PlatformAPIHandler:
             project_id: The project ID
             conversation_id: The conversation ID
             text: The user message text
+            input_lang: Optional language code of the input message, e.g. "en-GB" or "fr-FR"
+            output_lang: Optional language code for the agent's response, e.g. "en-
 
         Returns:
             dict: The API response containing the assistant's reply
@@ -362,4 +391,8 @@ class PlatformAPIHandler:
             conversation_id=conversation_id,
         )
         data = {"message": text}
+        if input_lang:
+            data["asr_lang_code"] = input_lang
+        if output_lang:
+            data["tts_lang_code"] = output_lang
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)

@@ -646,6 +646,21 @@ class AgentStudioCLI:
             help="Name of variant to use for the chat session.",
         )
         chat_parser.add_argument(
+            "--lang",
+            type=str,
+            help="Language tag for both input and output messages (e.g. en-US, fr-FR). If not specified use default for project",
+        )
+        chat_parser.add_argument(
+            "--input-lang",
+            type=str,
+            help="Language tag for input messages (e.g. en-US, fr-FR). If not specified use default for project",
+        )
+        chat_parser.add_argument(
+            "--output-lang",
+            type=str,
+            help="Language tag for output messages (e.g. en-US, fr-FR). If not specified use default for project",
+        )
+        chat_parser.add_argument(
             "--channel",
             type=str,
             default="voice",
@@ -786,6 +801,8 @@ class AgentStudioCLI:
             elif args.command == "chat":
                 show_all = args.metadata
                 input_messages = None
+                input_lang = args.input_lang or args.lang
+                output_lang = args.output_lang or args.lang
                 if args.input_file:
                     try:
                         if args.input_file == "-":
@@ -814,6 +831,8 @@ class AgentStudioCLI:
                     args.environment,
                     args.variant,
                     args.channel,
+                    input_lang=input_lang,
+                    output_lang=output_lang,
                     show_functions=show_all or args.functions,
                     show_flow=show_all or args.flows,
                     show_state=show_all or args.state,
@@ -2052,7 +2071,9 @@ class AgentStudioCLI:
         environment: str = None,
         variant: str = None,
         channel: str = None,
+        input_lang: str = None,
         push_before_chat: bool = False,
+        output_lang: str = None,
         show_functions: bool = False,
         show_flow: bool = False,
         show_state: bool = False,
@@ -2138,6 +2159,8 @@ class AgentStudioCLI:
                         environment,
                         channel,
                         variant,
+                        input_lang,
+                        output_lang,
                     )
                 except (requests.HTTPError, ValueError) as e:
                     if output_json:
@@ -2185,6 +2208,8 @@ class AgentStudioCLI:
                 project,
                 conversation_id,
                 environment,
+                input_lang=input_lang,
+                output_lang=output_lang,
                 show_functions=show_functions,
                 show_flow=show_flow,
                 show_state=show_state,
@@ -2213,6 +2238,8 @@ class AgentStudioCLI:
         project: AgentStudioProject,
         conversation_id: str,
         environment: str,
+        input_lang: str = None,
+        output_lang: str = None,
         show_functions: bool = False,
         show_flow: bool = False,
         show_state: bool = False,
@@ -2268,9 +2295,7 @@ class AgentStudioCLI:
 
                 try:
                     reply = project.send_message(
-                        conversation_id,
-                        user_input,
-                        environment,
+                        conversation_id, user_input, environment, input_lang, output_lang
                     )
                 except requests.HTTPError as e:
                     if output_json:
