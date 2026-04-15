@@ -2160,7 +2160,7 @@ class AgentStudioProject:
         if success:
             self.branch_id = branches[branch_name]
             _, projection = self.pull_project(
-                force=force, format=format, projection_json=projection_json, on_save=on_save
+                force=True, format=format, projection_json=projection_json, on_save=on_save
             )
         return success, projection
 
@@ -2481,12 +2481,12 @@ class AgentStudioProject:
         return validation_errors
 
     def merge_branch(
-        self, message: str, conflict_resolutions: list[dict[str, Any]] = None
+        self, message: Optional[str] = None, conflict_resolutions: list[dict[str, Any]] = None
     ) -> tuple[bool, list[str], list[str]]:
         """Merge a branch into the current branch in the project.
 
         Args:
-            message (str): The merge commit message.
+            message (Optional[str]): The merge commit message.
             conflict_resolutions (list[dict[str, Any]]): A list of conflict
                 resolutions. Each resolution should have:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
