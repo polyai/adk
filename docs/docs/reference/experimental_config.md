@@ -100,6 +100,133 @@ Common use cases include:
 
 </div>
 
+## Feature reference
+
+The following sections describe notable feature areas available in the schema.
+
+### Audio enhancement
+
+Configure audio enhancement processing applied to the incoming audio stream before speech recognition. Three providers are available: `ai-coustics`, `dolby`, and `krisp`.
+
+#### `krisp`
+
+Krisp provides noise cancellation and voice isolation. Settings include:
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `model` | string | Krisp model variant: `"noise-cancellation"`, `"voice-isolation"`, `"telephony"`, `"telephony-lite"`, `"transcription"` | `"telephony-lite"` |
+| `noise_suppression_level` | integer | Noise suppression intensity. `0` = off, `100` = max. | `100` |
+| `frame_duration_ms` | integer | Audio frame duration in milliseconds. Allowed values: `10`, `15`, `20`, `30`, `32`. | `20` |
+| `timeout_ms` | integer | Max milliseconds to wait for enhancement per chunk before falling back to original audio. `0` = no timeout. | `100` |
+
+Example:
+
+~~~json
+{
+  "audio_enhancement": {
+    "krisp": {
+      "model": "telephony-lite",
+      "noise_suppression_level": 100,
+      "frame_duration_ms": 20,
+      "timeout_ms": 100
+    }
+  }
+}
+~~~
+
+### DTMF
+
+Configure DTMF behavior, including disabling speech recognition for DTMF-only steps.
+
+The `dtmf` object supports a `flow_overrides` map where each key is a flow name. Per-flow settings include:
+
+| Field | Type | Description |
+|---|---|---|
+| `disable_speech` | boolean | Whether to disable speech recognition when DTMF is enabled for this flow. |
+| `steps` | object | Step-specific overrides. Each key is a step name. |
+
+Per-step settings (nested under `steps`) include:
+
+| Field | Type | Description |
+|---|---|---|
+| `disable_speech` | boolean | Whether to disable speech recognition for this step. Takes precedence over the flow-level setting. |
+| `first_digit_timeout` | integer | Timeout in seconds for the first DTMF digit input for this step. Minimum: `1`. |
+
+Example:
+
+~~~json
+{
+  "dtmf": {
+    "flow_overrides": {
+      "Payment Flow": {
+        "disable_speech": true,
+        "steps": {
+          "Enter Card Number": {
+            "disable_speech": true,
+            "first_digit_timeout": 5
+          }
+        }
+      }
+    }
+  }
+}
+~~~
+
+### Memory
+
+Configure agent memory features, including repeat-caller identification.
+
+#### `identifier_source`
+
+By default, memory lookups use the caller or callee phone number as the identifier. The `identifier_source` field lets you supply a custom source instead.
+
+| Field | Type | Description |
+|---|---|---|
+| `identifier_source` | string | Custom source for the memory lookup identifier. Must match the pattern `(sip_headers\|integration_attributes\|state):.+`. |
+
+Example:
+
+~~~json
+{
+  "memory": {
+    "identifier_source": "sip_headers:X-Customer-Id"
+  }
+}
+~~~
+
+### OpenAI Realtime
+
+Configure behavior for the OpenAI Realtime integration, including transcription settings.
+
+#### `set_transcriber_language`
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `set_transcriber_language` | boolean | When `true`, the conversation language code is passed to the transcriber in the session configuration, making the model adhere more strictly to the specified language. Do not use this in multilingual projects with a language detection component. | `false` |
+
+Example:
+
+~~~json
+{
+  "openai_realtime": {
+    "transcription": {
+      "set_transcriber_language": true
+    }
+  }
+}
+~~~
+
+### `include_kb_functions_in_flows`
+
+Controls whether knowledge base (KB) functions from retrieved RAG topics are shown to the model inside flows.
+
+| Value | Behaviour |
+|---|---|
+| `true` | KB functions from retrieved RAG topics are shown to the model inside flows, even on steps that have their own `functions_referenced`. |
+| `false` (default) | KB functions are hidden inside flows. |
+
+This setting only affects behavior inside flows. Outside flows, KB functions are always shown. It can be overridden per-flow or per-step.
+
 ## Best practices
 
 - only set values you actually intend to override
