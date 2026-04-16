@@ -102,7 +102,7 @@ Your local folder will mirror the project in Agent Studio and you can begin edit
 
 ## Next step
 
-Once you have an agent in Agent Studio, continue to the prerequisites page to set up your API key and local tools.
+Now that you have an agent in Agent Studio, the next thing you need is an **API key** — this is what allows the ADK to authenticate with Agent Studio and pull your project locally. Head to the prerequisites page to generate one and install the required local tools.
 
 <div class="grid cards" markdown>
 
@@ -110,7 +110,7 @@ Once you have an agent in Agent Studio, continue to the prerequisites page to se
 
     ---
 
-    Confirm the access and local tools needed before installation.
+    Generate your API key and confirm the local tools needed before installation.
     [Open prerequisites](./prerequisites.md)
 
 -   **What is the ADK?**
