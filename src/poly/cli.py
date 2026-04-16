@@ -1075,7 +1075,12 @@ class AgentStudioCLI:
                 else:
                     error("No accessible regions found for your API key.")
                 sys.exit(1)
-            region = questionary.select("Select Region", choices=regions).ask()
+            if len(regions) == 1:
+                region = regions[0]
+                if not output_json:
+                    info(f"Auto-selected region [bold]{region}[/bold].")
+            else:
+                region = questionary.select("Select Region", choices=regions).ask()
 
         if not account_id:
             accounts = api_handler.get_accounts(region)
