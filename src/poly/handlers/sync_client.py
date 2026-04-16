@@ -19,6 +19,7 @@ from poly.resources import (
     AsrSettings,
     BaseResource,
     ChatGreeting,
+    ChatSafetyFilters,
     ChatStylePrompt,
     Condition,
     DTMFConfig,
@@ -440,6 +441,10 @@ class SyncClientHandler:
                     name="chat_style_prompt",
                     prompt=chat_style_prompt.get("prompt", ""),
                 )
+            }
+        if chat_safety_filters := chat_config.get("safetyFilters", None):
+            settings[ChatSafetyFilters] = {
+                "chat_safety_filters": ChatSafetyFilters.from_projection_data(chat_safety_filters)
             }
 
         return settings

@@ -5,11 +5,11 @@ Copyright PolyAI Limited
 
 import os
 from dataclasses import dataclass
-from typing import Optional
+from typing import ClassVar, Optional
 
 from google.protobuf.message import Message
 
-from poly.handlers.protobuf.channels_pb2 import VOICE, Channel_UpdateSafetyFilters
+from poly.handlers.protobuf.channels_pb2 import Channel_UpdateSafetyFilters, ChannelType
 from poly.handlers.protobuf.content_filter_settings_pb2 import (
     AzureContentFilter,
     AzureContentFilterCategory,
@@ -85,27 +85,17 @@ def _build_update_content_filter_proto(
     )
 
 
+@dataclass
 class _BaseSafetyFilters(YamlResource):
     """Shared logic for project-level and channel-level safety filters."""
 
     enabled: bool = True
     filter_type: str = _FILTER_TYPE
-    categories: dict = None
+    categories: Optional[dict] = None
 
-    def __init__(
-        self,
-        *,
-        resource_id: str,
-        name: str,
-        enabled: bool = True,
-        filter_type: str = _FILTER_TYPE,
-        categories: Optional[dict] = None,
-    ):
-        self.resource_id = resource_id
-        self.name = name
-        self.enabled = enabled
-        self.filter_type = filter_type
-        self.categories = _parse_categories(categories or {})
+    def __post_init__(self) -> None:
+        """Parse raw category dicts into _SafetyFilterCategory objects."""
+        self.categories = _parse_categories(self.categories or {})
 
     @classmethod
     def get_categories_from_azure_config(cls, azure_config: dict) -> dict:
@@ -165,6 +155,7 @@ class _BaseSafetyFilters(YamlResource):
         raise NotImplementedError("Delete operation not supported for safety filters.")
 
 
+@dataclass
 class SafetyFilters(_BaseSafetyFilters):
     """Resource class for managing general (project-level) safety filter settings."""
 
@@ -203,50 +194,78 @@ class SafetyFilters(_BaseSafetyFilters):
         return [file_path]
 
 
-class VoiceSafetyFilters(_BaseSafetyFilters):
-    """Resource class for managing voice channel safety filter settings."""
+@dataclass
+class ChannelSafetyFilters(_BaseSafetyFilters):
+    """Base class for channel-level safety filter settings. Subclass for voice/chat."""
+
+    channel_type: ClassVar[ChannelType] = ChannelType.VOICE
+    channel_subpath: ClassVar[str] = "voice"
 
     @property
     def file_path(self) -> str:
-        return os.path.join("voice", "safety_filters.yaml")
+        """Get the file path for the channel safety filters resource."""
+        return os.path.join(self.channel_subpath, "safety_filters.yaml")
 
     @property
     def command_type(self) -> str:
-        return "voice_safety_filters"
+        """Get the command type for the resource."""
+        return f"{self.channel_subpath}_safety_filters"
 
     @property
     def update_command_type(self) -> str:
+        """Get the command type for updating the resource."""
         return "channel_update_safety_filters"
 
     def build_update_proto(self) -> Channel_UpdateSafetyFilters:
+        """Create a proto for updating the resource."""
         return Channel_UpdateSafetyFilters(
-            channel_type=VOICE,
+            channel_type=self.channel_type,
             safety_filters=_build_update_content_filter_proto(
                 self.enabled, self.filter_type, self.categories
             ),
         )
 
     def build_create_proto(self) -> Message:
-        raise NotImplementedError("Create operation not supported for voice safety filters.")
+        """Create a proto for creating the resource."""
+        raise NotImplementedError("Create operation not supported for channel safety filters.")
 
     def build_delete_proto(self) -> Message:
-        raise NotImplementedError("Delete operation not supported for voice safety filters.")
+        """Create a proto for deleting the resource."""
+        raise NotImplementedError("Delete operation not supported for channel safety filters.")
 
     @classmethod
-    def from_projection_data(cls, data: dict) -> "VoiceSafetyFilters":
-        """Instantiate from a raw voice channel safetyFilters projection dict."""
+    def from_projection_data(cls, data: dict) -> "ChannelSafetyFilters":
+        """Instantiate from a raw channel safetyFilters projection dict."""
         azure = data.get("azureConfig", {})
+        resource_name = f"{cls.channel_subpath}_safety_filters"
         return cls(
-            resource_id="voice_safety_filters",
-            name="voice_safety_filters",
+            resource_id=resource_name,
+            name=resource_name,
             enabled=not data.get("disabled", False),
             filter_type=data.get("type", _FILTER_TYPE),
             categories=cls.get_categories_from_azure_config(azure),
         )
 
-    @staticmethod
-    def discover_resources(base_path: str) -> list[str]:
-        file_path = os.path.join(base_path, "voice", "safety_filters.yaml")
+    @classmethod
+    def discover_resources(cls, base_path: str) -> list[str]:
+        """Discover resources of this type in the given base path."""
+        file_path = os.path.join(base_path, cls.channel_subpath, "safety_filters.yaml")
         if not os.path.exists(file_path):
             return []
         return [file_path]
+
+
+@dataclass
+class VoiceSafetyFilters(ChannelSafetyFilters):
+    """Voice channel safety filter settings."""
+
+    channel_type: ClassVar[ChannelType] = ChannelType.VOICE
+    channel_subpath: ClassVar[str] = "voice"
+
+
+@dataclass
+class ChatSafetyFilters(ChannelSafetyFilters):
+    """Chat (web chat) channel safety filter settings."""
+
+    channel_type: ClassVar[ChannelType] = ChannelType.WEB_CHAT
+    channel_subpath: ClassVar[str] = "chat"

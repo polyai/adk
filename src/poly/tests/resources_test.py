@@ -26,6 +26,7 @@ from poly.resources.api_integration import (
 from poly.resources.asr_settings import AsrSettings
 from poly.resources.safety_filters import (
     SafetyFilters,
+    ChatSafetyFilters,
     VoiceSafetyFilters,
     _SafetyFilterCategory,
 )
@@ -6257,6 +6258,126 @@ class SafetyFiltersTests(unittest.TestCase):
         vsf = VoiceSafetyFilters(resource_id="vsf-1", name="voice_safety_filters")
         self.assertEqual(vsf.command_type, "voice_safety_filters")
         self.assertEqual(vsf.update_command_type, "channel_update_safety_filters")
+
+        csf = ChatSafetyFilters(resource_id="csf-1", name="chat_safety_filters")
+        self.assertEqual(csf.command_type, "chat_safety_filters")
+        self.assertEqual(csf.update_command_type, "channel_update_safety_filters")
+
+    def test_build_update_proto_chat_channel(self):
+        """ChatSafetyFilters.build_update_proto wraps in Channel_UpdateSafetyFilters with WEB_CHAT."""
+        from poly.handlers.protobuf.channels_pb2 import WEB_CHAT
+
+        csf = ChatSafetyFilters(
+            resource_id="csf-1",
+            name="chat_safety_filters",
+            enabled=True,
+            filter_type="azure",
+            categories={
+                "violence": _SafetyFilterCategory(enabled=True, precision="MEDIUM"),
+                "hate": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "sexual": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "self_harm": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+            },
+        )
+        proto = csf.build_update_proto()
+
+        self.assertEqual(proto.channel_type, WEB_CHAT)
+        self.assertFalse(proto.safety_filters.disabled)
+        self.assertTrue(proto.safety_filters.azure_config.violence.is_active)
+        self.assertEqual(proto.safety_filters.azure_config.violence.precision, "MEDIUM")
+
+    def test_read_chat_safety_filters_from_channel_settings_projection(self):
+        """_read_channel_settings_from_projection parses chat channel safety filters."""
+        projection = {
+            "channels": {
+                "webChat": {
+                    "status": True,
+                    "config": {"safetyFilters": self._make_content_filter_projection()},
+                }
+            }
+        }
+        result = SyncClientHandler._read_channel_settings_from_projection(projection)
+
+        self.assertIn(ChatSafetyFilters, result)
+        self.assertIn("chat_safety_filters", result[ChatSafetyFilters])
+        csf = result[ChatSafetyFilters]["chat_safety_filters"]
+        self.assertIsInstance(csf, ChatSafetyFilters)
+        self.assertTrue(csf.enabled)
+        self.assertTrue(csf.categories["self_harm"].enabled)
+        self.assertEqual(csf.categories["self_harm"].precision, "STRICT")
+
+    def test_read_chat_safety_filters_skipped_when_webchat_status_false(self):
+        """_read_channel_settings_from_projection skips chat filters when webChat status is False."""
+        projection = {
+            "channels": {
+                "webChat": {
+                    "status": False,
+                    "config": {"safetyFilters": self._make_content_filter_projection()},
+                }
+            }
+        }
+        result = SyncClientHandler._read_channel_settings_from_projection(projection)
+
+        self.assertNotIn(ChatSafetyFilters, result)
+
+    def test_chat_safety_filters_file_path(self):
+        """ChatSafetyFilters.file_path returns the chat subdirectory path."""
+        csf = ChatSafetyFilters(resource_id="csf", name="chat_safety_filters")
+        self.assertEqual(csf.file_path, os.path.join("chat", "safety_filters.yaml"))
+
+    def test_chat_safety_filters_command_types(self):
+        """ChatSafetyFilters returns correct command_type and update_command_type."""
+        csf = ChatSafetyFilters(resource_id="csf-1", name="chat_safety_filters")
+        self.assertEqual(csf.command_type, "chat_safety_filters")
+        self.assertEqual(csf.update_command_type, "channel_update_safety_filters")
+
+    def test_from_projection_data_chat(self):
+        """ChatSafetyFilters.from_projection_data creates resource with correct id and name."""
+        data = self._make_content_filter_projection()
+        csf = ChatSafetyFilters.from_projection_data(data)
+
+        self.assertEqual(csf.resource_id, "chat_safety_filters")
+        self.assertEqual(csf.name, "chat_safety_filters")
+        self.assertTrue(csf.enabled)
+        self.assertEqual(csf.filter_type, "azure")
+        self.assertTrue(csf.categories["violence"].enabled)
+        self.assertEqual(csf.categories["violence"].precision, "STRICT")
+        self.assertFalse(csf.categories["hate"].enabled)
+        self.assertTrue(csf.categories["self_harm"].enabled)
+        self.assertEqual(csf.categories["self_harm"].precision, "STRICT")
+
+    def test_from_projection_data_chat_disabled(self):
+        """ChatSafetyFilters.from_projection_data handles disabled=True correctly."""
+        data = {
+            "disabled": True,
+            "type": "azure",
+            "azureConfig": {
+                "violence": {"isActive": False, "precision": "MEDIUM"},
+                "hate": {"isActive": False, "precision": "MEDIUM"},
+                "sexual": {"isActive": False, "precision": "MEDIUM"},
+                "selfHarm": {"isActive": False, "precision": "MEDIUM"},
+            },
+        }
+        csf = ChatSafetyFilters.from_projection_data(data)
+
+        self.assertFalse(csf.enabled)
+        self.assertEqual(csf.resource_id, "chat_safety_filters")
+
+    def test_from_yaml_dict_roundtrip_chat(self):
+        """ChatSafetyFilters to_yaml_dict -> from_projection_data roundtrip preserves data."""
+        # Build from projection (the reliable path) and verify to_yaml_dict output
+        data = self._make_content_filter_projection()
+        csf = ChatSafetyFilters.from_projection_data(data)
+        yaml_out = csf.to_yaml_dict()
+
+        self.assertTrue(yaml_out["enabled"])
+        self.assertEqual(yaml_out["type"], "azure")
+        self.assertEqual(yaml_out["categories"]["violence"]["enabled"], True)
+        self.assertEqual(yaml_out["categories"]["violence"]["level"], "strict")
+        self.assertEqual(yaml_out["categories"]["hate"]["enabled"], False)
+        self.assertEqual(yaml_out["categories"]["sexual"]["level"], "lenient")
+        self.assertEqual(yaml_out["categories"]["self_harm"]["enabled"], True)
+        self.assertEqual(yaml_out["categories"]["self_harm"]["level"], "strict")
 
 
 if __name__ == "__main__":
