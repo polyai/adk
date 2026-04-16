@@ -846,7 +846,7 @@ class AgentStudioCLI:
                     cls.delete_gists(gist_id=args.id, output_json=args.json)
                 elif args.review_subcommand == "list":
                     cls.list_gists(output_json=args.json)
-                else:
+                elif args.review_subcommand == "create":
                     cls.review(
                         base_path=args.path,
                         files=args.files,
