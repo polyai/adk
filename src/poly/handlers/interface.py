@@ -291,6 +291,8 @@ class AgentStudioInterface:
         environment: str = "sandbox",
         variant_id: Optional[str] = None,
         channel: str = "chat.polyai",
+        input_lang: Optional[str] = None,
+        output_lang: Optional[str] = None,
     ) -> dict:
         """Create a new chat conversation.
 
@@ -306,7 +308,14 @@ class AgentStudioInterface:
             dict: The API response containing the conversation ID and initial greeting
         """
         return PlatformAPIHandler.create_chat(
-            region, account_id, project_id, environment, variant_id, channel
+            region,
+            account_id,
+            project_id,
+            environment,
+            variant_id,
+            channel,
+            input_lang=input_lang,
+            output_lang=output_lang,
         )
 
     @staticmethod
@@ -317,6 +326,8 @@ class AgentStudioInterface:
         conversation_id: str,
         text: str,
         environment: str = "sandbox",
+        input_lang: str = None,
+        output_lang: str = None,
     ) -> dict:
         """Send a message to an existing chat conversation.
 
@@ -332,7 +343,14 @@ class AgentStudioInterface:
             dict: The API response containing the assistant's reply
         """
         return PlatformAPIHandler.send_chat_message(
-            region, account_id, project_id, conversation_id, text, environment
+            region,
+            account_id,
+            project_id,
+            conversation_id,
+            text,
+            environment,
+            input_lang=input_lang,
+            output_lang=output_lang,
         )
 
     def get_branch_chat_info(self, branch_id: str) -> dict:
@@ -359,6 +377,8 @@ class AgentStudioInterface:
         lambda_deployment_version: str,
         channel: str = "chat.polyai",
         variant_id: Optional[str] = None,
+        input_lang: str = None,
+        output_lang: str = None,
     ) -> dict:
         """Create a new chat conversation against a branch deployment.
 
@@ -382,6 +402,8 @@ class AgentStudioInterface:
             lambda_deployment_version,
             channel,
             variant_id,
+            input_lang=input_lang,
+            output_lang=output_lang,
         )
 
     @staticmethod
@@ -391,6 +413,8 @@ class AgentStudioInterface:
         project_id: str,
         conversation_id: str,
         text: str,
+        input_lang: str = None,
+        output_lang: str = None,
     ) -> dict:
         """Send a message to an existing draft chat conversation.
 
@@ -410,6 +434,8 @@ class AgentStudioInterface:
             project_id,
             conversation_id,
             text,
+            input_lang=input_lang,
+            output_lang=output_lang,
         )
 
     @staticmethod

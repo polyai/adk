@@ -509,6 +509,294 @@ class BranchDeleteTest(unittest.TestCase):
         self.assertIn("1 branch(es)", mock_success.call_args[0][0])
 
 
+class ChatLoopTest(unittest.TestCase):
+    """Tests for AgentStudioCLI._run_chat_loop.
+
+    Covers scripted (non-interactive) message delivery, JSON output accumulation,
+    slash-command handling, and HTTP error behaviour.
+    """
+
+    def setUp(self):
+        self.proj = MagicMock()
+        self.proj.send_message.return_value = {"response": "Agent reply", "conversation_ended": False}
+        self.proj.end_chat.return_value = None
+        self.proj.get_conversation_url.return_value = "https://example.com/conv-123"
+
+    def test_scripted_messages_sent_in_order(self):
+        """Each scripted message is forwarded to project.send_message in order."""
+        AgentStudioCLI._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_messages=["Hello", "Goodbye"],
+        )
+
+        self.assertEqual(self.proj.send_message.call_count, 2)
+        self.assertEqual(self.proj.send_message.call_args_list[0][0][1], "Hello")
+        self.assertEqual(self.proj.send_message.call_args_list[1][0][1], "Goodbye")
+
+    def test_scripted_messages_exits_cleanly_when_exhausted(self):
+        """Loop returns restart=False once all scripted messages are consumed."""
+        restart, _ = AgentStudioCLI._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_messages=["Hello"],
+        )
+
+        self.assertFalse(restart)
+
+    def test_exit_command_breaks_loop_without_sending(self):
+        """/exit in scripted messages stops the loop; subsequent messages are not sent."""
+        AgentStudioCLI._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_messages=["Hello", "/exit", "Never sent"],
+        )
+
+        self.assertEqual(self.proj.send_message.call_count, 1)
+
+    def test_restart_command_returns_true_without_sending(self):
+        """/restart returns True so the caller can create a new session."""
+        restart, _ = AgentStudioCLI._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_messages=["/restart"],
+        )
+
+        self.assertTrue(restart)
+        self.proj.send_message.assert_not_called()
+
+    def test_json_output_returns_all_turns(self):
+        """output_json=True returns a conversation dict with all turns."""
+        _, conversation = AgentStudioCLI._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_messages=["Hello", "Goodbye"],
+            output_json=True,
+        )
+
+        self.assertEqual(len(conversation["turns"]), 2)
+        self.assertEqual(conversation["turns"][0]["input"], "Hello")
+        self.assertEqual(conversation["turns"][1]["input"], "Goodbye")
+
+    def test_json_output_includes_conversation_id_and_url(self):
+        """The returned conversation dict includes conversation_id and url."""
+        _, conversation = AgentStudioCLI._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_messages=[],
+            output_json=True,
+        )
+
+        self.assertEqual(conversation["conversation_id"], "conv-123")
+        self.assertIn("url", conversation)
+
+    def test_json_output_initial_response_is_first_turn(self):
+        """initial_response is prepended as the first turn with input=None."""
+        initial = {"response": "Welcome!", "conversation_ended": False}
+
+        _, conversation = AgentStudioCLI._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_messages=["Hello"],
+            output_json=True,
+            initial_response=initial,
+        )
+
+        self.assertEqual(len(conversation["turns"]), 2)
+        self.assertIsNone(conversation["turns"][0]["input"])
+        self.assertEqual(conversation["turns"][0]["response"], "Welcome!")
+        self.assertEqual(conversation["turns"][1]["input"], "Hello")
+
+    def test_http_error_is_skipped_and_loop_continues(self):
+        """An HTTPError on one turn is absorbed; the next message still sends."""
+        import requests
+
+        self.proj.send_message.side_effect = [
+            requests.HTTPError("500"),
+            {"response": "Fine now", "conversation_ended": False},
+        ]
+
+        AgentStudioCLI._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_messages=["Bad", "Good"],
+        )
+
+        self.assertEqual(self.proj.send_message.call_count, 2)
+
+    def test_json_output_records_error_turn(self):
+        """HTTPErrors in JSON mode are stored as turns with an 'error' key."""
+        import requests
+
+        self.proj.send_message.side_effect = requests.HTTPError("500 Internal Server Error")
+
+        _, conversation = AgentStudioCLI._run_chat_loop(
+            self.proj,
+            "conv-123",
+            "sandbox",
+            input_messages=["Hello"],
+            output_json=True,
+        )
+
+        self.assertEqual(len(conversation["turns"]), 1)
+        self.assertEqual(conversation["turns"][0]["input"], "Hello")
+        self.assertIn("error", conversation["turns"][0])
+
+
+class ChatCommandTest(unittest.TestCase):
+    """Tests for AgentStudioCLI.chat.
+
+    Covers conversation-id shortcut, JSON session events, and scripted input threading.
+    """
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli.AgentStudioCLI._load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.branch_id = "main"
+        self.proj.account_id = "test_account"
+        self.proj.project_id = "test_project"
+        self.proj.create_chat_session.return_value = {
+            "conversation_id": "conv-123",
+            "response": "Hello!",
+            "conversation_ended": False,
+        }
+        self.proj.send_message.return_value = {"response": "Reply", "conversation_ended": False}
+        self.proj.end_chat.return_value = None
+        self.proj.get_conversation_url.return_value = "https://example.com/conv-123"
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_conversation_id_skips_session_creation(self):
+        """When conversation_id is provided, create_chat_session is not called."""
+        AgentStudioCLI.chat(
+            TEST_DIR,
+            environment="sandbox",
+            conversation_id="existing-conv",
+            input_messages=[],
+        )
+
+        self.proj.create_chat_session.assert_not_called()
+
+    def test_no_conversation_id_creates_new_session(self):
+        """Without conversation_id, create_chat_session is called to start a session."""
+        AgentStudioCLI.chat(
+            TEST_DIR,
+            environment="sandbox",
+            input_messages=[],
+        )
+
+        self.proj.create_chat_session.assert_called_once()
+
+    @patch("poly.cli.json_print")
+    def test_json_conv_id_emits_conversations_list(self, mock_json):
+        """output_json + conversation_id emits one JSON object with a conversations list."""
+        AgentStudioCLI.chat(
+            TEST_DIR,
+            environment="sandbox",
+            conversation_id="existing-conv",
+            input_messages=[],
+            output_json=True,
+        )
+
+        mock_json.assert_called_once()
+        payload = mock_json.call_args[0][0]
+        self.assertIn("conversations", payload)
+        self.assertEqual(len(payload["conversations"]), 1)
+        self.assertEqual(payload["conversations"][0]["conversation_id"], "existing-conv")
+
+    @patch("poly.cli.json_print")
+    def test_json_no_conv_id_greeting_is_first_turn_in_conversations(self, mock_json):
+        """output_json emits one object; greeting appears as turns[0] inside conversations[0]."""
+        AgentStudioCLI.chat(
+            TEST_DIR,
+            environment="sandbox",
+            input_messages=[],
+            output_json=True,
+        )
+
+        mock_json.assert_called_once()
+        payload = mock_json.call_args[0][0]
+        conv = payload["conversations"][0]
+        self.assertEqual(conv["conversation_id"], "conv-123")
+        self.assertIsNone(conv["turns"][0]["input"])
+        self.assertEqual(conv["turns"][0]["response"], "Hello!")
+
+    def test_scripted_messages_forwarded_to_loop(self):
+        """input_messages are forwarded and each one is sent via project.send_message."""
+        AgentStudioCLI.chat(
+            TEST_DIR,
+            environment="sandbox",
+            input_messages=["Hi", "Bye"],
+        )
+
+        self.assertEqual(self.proj.send_message.call_count, 2)
+
+    def test_push_before_chat_calls_push_project(self):
+        """push_before_chat=True calls push_project before creating the chat session."""
+        self.proj.push_project.return_value = (True, "Pushed successfully", None)
+
+        AgentStudioCLI.chat(
+            TEST_DIR,
+            environment="sandbox",
+            push_before_chat=True,
+            input_messages=[],
+        )
+
+        self.proj.push_project.assert_called_once_with(
+            force=False,
+            skip_validation=False,
+            dry_run=False,
+            format=False,
+            email=None,
+        )
+        self.proj.create_chat_session.assert_called_once()
+
+    def test_push_failure_exits_without_starting_chat(self):
+        """push_before_chat=True exits with code 1 when push fails, without creating a session."""
+        self.proj.push_project.return_value = (False, "Something went wrong", None)
+
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.chat(
+                TEST_DIR,
+                environment="sandbox",
+                push_before_chat=True,
+                input_messages=[],
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.proj.create_chat_session.assert_not_called()
+
+    @patch("poly.cli.json_print")
+    def test_push_failure_json_emits_error_and_exits(self, mock_json):
+        """In JSON mode, a push failure emits an error payload before exiting."""
+        self.proj.push_project.return_value = (False, "Something went wrong", None)
+
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI.chat(
+                TEST_DIR,
+                environment="sandbox",
+                push_before_chat=True,
+                input_messages=[],
+                output_json=True,
+            )
+
+        mock_json.assert_called_once()
+        payload = mock_json.call_args[0][0]
+        self.assertEqual(payload["push"]["success"], False)
+        self.assertIn("error", payload["push"])
+
+
 class CompletionCommandTest(unittest.TestCase):
     """Tests for the completion command."""
 

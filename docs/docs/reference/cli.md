@@ -115,6 +115,8 @@ Examples:
 poly branch list
 poly branch current
 poly branch create my-feature
+poly branch create my-hotfix --env live
+poly branch create my-hotfix --env live --force
 poly branch switch my-feature
 poly branch switch my-feature --force
 poly branch delete
@@ -132,6 +134,27 @@ Interactively select and delete one or more branches. The `main` branch cannot b
 poly branch delete
 poly branch delete my-feature
 ~~~
+
+#### `poly branch create`
+
+Creates a new branch. By default the branch is sourced from sandbox main.
+
+| Flag | Description |
+|---|---|
+| `--env`, `--environment` | Source the new branch from a deployment snapshot instead of sandbox main. Choices: `sandbox`, `pre-release`, `live`. |
+| `--force`, `-f` | Force branch creation even if there are uncommitted local changes on main. |
+
+When `--env live` or `--env pre-release` is specified:
+
+- the version of the deployed environment is pulled into your local workspace
+- a branch is created from that snapshot
+- the version is immediately pushed to the new branch, leaving a clean slate for hotfix changes
+- the command can only be run from `main`
+- if there are local changes, the command will fail unless `--force` is also passed
+
+!!! warning "Use `--env live` with caution"
+
+    Branching from a live deployment snapshot will overwrite your local project with the live state. Merging this branch back to main may roll back changes that were introduced after the snapshot was taken.
 
 ### `poly format`
 
@@ -156,13 +179,14 @@ poly validate
 
 Create a GitHub Gist of Agent Studio project changes to share with others.
 
-Running `poly review` without a subcommand creates a new gist comparing local changes against the remote project. Use `--before` and `--after` to compare two remote branches or versions.
+Running `poly review` without a subcommand creates a new gist comparing local changes against the remote project. Use `--before` and `--after` to compare two remote branches or versions. Use `--debug` to enable DEBUG-level logging for troubleshooting.
 
 Examples:
 
 ~~~bash
 poly review
 poly review --before main --after feature-branch
+poly review --debug
 ~~~
 
 #### `poly review list`
@@ -195,7 +219,21 @@ poly chat
 poly chat --environment live
 poly chat --channel webchat
 poly chat --metadata
+poly chat --lang fr-FR
+poly chat --input-lang en-US --output-lang fr-FR
 ~~~
+
+#### Language flags
+
+Use language flags to specify the expected input and output language when chatting against multilingual agents. If not specified, the project default is used.
+
+| Flag | Description |
+|---|---|
+| `--lang` | Sets both input and output language (e.g. `en-US`, `fr-FR`). |
+| `--input-lang` | Sets the input language (ASR) only. Overrides `--lang` for input. |
+| `--output-lang` | Sets the output language (TTS) only. Overrides `--lang` for output. |
+
+`--input-lang` and `--output-lang` take precedence over `--lang` when both are supplied.
 
 ### `poly docs`
 
@@ -260,7 +298,7 @@ The exact fields vary by command. Common fields include:
 
 For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
 
-Error responses always include `{ "success": false, "error": "..." }`.
+Error responses always include `{ "success": false, "error": "...", "traceback": "..." }`.
 
 !!! info "`init` with `--json` requires explicit flags"
 
