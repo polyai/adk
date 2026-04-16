@@ -197,7 +197,6 @@ Interactively select a review gist and open it in the browser.
 poly review list
 poly review list --json
 ~~~
-<<<<<<< docs/auto-update-e9dd3b9
 
 #### `poly review delete`
 
@@ -211,21 +210,6 @@ poly review delete --json
 
 ### `poly chat`
 
-=======
-
-#### `poly review delete`
-
-Interactively select and delete review gists. Use `--id` to delete a specific gist directly without an interactive prompt.
-
-~~~bash
-poly review delete
-poly review delete --id GIST_ID
-poly review delete --json
-~~~
-
-### `poly chat`
-
->>>>>>> main
 Start an interactive chat session with your agent.
 
 Examples:
@@ -235,7 +219,21 @@ poly chat
 poly chat --environment live
 poly chat --channel webchat
 poly chat --metadata
+poly chat --lang fr-FR
+poly chat --input-lang en-US --output-lang fr-FR
 ~~~
+
+#### Language flags
+
+Use language flags to specify the expected input and output language when chatting against multilingual agents. If not specified, the project default is used.
+
+| Flag | Description |
+|---|---|
+| `--lang` | Sets both input and output language (e.g. `en-US`, `fr-FR`). |
+| `--input-lang` | Sets the input language (ASR) only. Overrides `--lang` for input. |
+| `--output-lang` | Sets the output language (TTS) only. Overrides `--lang` for output. |
+
+`--input-lang` and `--output-lang` take precedence over `--lang` when both are supplied.
 
 ### `poly docs`
 
