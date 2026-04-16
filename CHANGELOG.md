@@ -1,6 +1,100 @@
 # CHANGELOG
 
 
+## v0.9.0 (2026-04-16)
+
+### Documentation
+
+- Allow specifying lang code in chat requests ([#81](https://github.com/polyai/adk/pull/81),
+  [`e6d8f3f`](https://github.com/polyai/adk/commit/e6d8f3f3ae460fd6cdd04113a5ae897d6d2b4ec8))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+### Features
+
+- Non-interactive scripted input, conversation resume, pre-chat push, and JSON output for `poly
+  chat` ([#69](https://github.com/polyai/adk/pull/69),
+  [`7a1ae59`](https://github.com/polyai/adk/commit/7a1ae5961f629cd2b0d8fa02991ef306a12392e9))
+
+## Summary
+
+Extends `poly chat` with four new capabilities: push before chatting (`--push`), scripted/file-based
+  message input (`-m`/`--input-file`), resuming an existing conversation (`--conv-id`), and
+  structured JSON output (`--json`). Interactive mode is fully unchanged.
+
+## Motivation
+
+Makes `poly chat` usable in automated testing pipelines and CI scripts without a human at the
+  terminal. `--push` removes the manual push step before testing a branch.
+
+## Changes
+
+- `--push`: pushes the project before creating the chat session so local changes are live before
+  testing - `--message`/`-m` (repeatable): supply utterances non-interactively, e.g. `-m "Hello" -m
+  "Goodbye"` - `--input-file FILE`: reads messages line-by-line from a file; use `-` for stdin -
+  `--conv-id`: resumes an existing conversation by ID, skipping session creation entirely -
+  `--json`: emits a single JSON object `{"conversations": [...]}` when the session ends; each
+  conversation contains `conversation_id`, `url`, and `turns` (greeting is `turns[0]` with `"input":
+  null`); restarts produce multiple entries in the array - `_run_chat_loop` now returns `(restart,
+  conversation_dict)` so the caller accumulates conversations across restarts before printing -
+  Clean error message when `--input-file` path does not exist - Updated `chat_parser` help text with
+  examples for all new flags
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+---------
+
+Co-authored-by: Copilot <175728472+Copilot@users.noreply.github.com>
+
+
 ## v0.8.5 (2026-04-15)
 
 ### Bug Fixes
