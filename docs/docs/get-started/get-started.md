@@ -5,7 +5,7 @@ description: Learn how to build your first PolyAI agent in minutes, then connect
 
 # Not sure where to start?
 
-If you do not yet have an agent in Agent Studio, or if you are feeling stuck before diving into local development, you can build a personalised agent from your company website in a few minutes — no configuration required. The agent lives in Agent Studio as a normal project, which means you can pull it straight into the ADK and continue development locally the moment it is ready.
+If you do not yet have an agent in Agent Studio, or if you are feeling stuck before diving into local development, you can build a personalized agent from your company website in a few minutes — no configuration required. The agent lives in Agent Studio as a normal project, which means you can pull it straight into the ADK and continue development locally the moment it is ready.
 
 ---
 
@@ -15,7 +15,7 @@ If you do not yet have access to Agent Studio or an existing agent, start here.
 
 ### Step 1 — Get access to Agent Studio
 
-Go to [poly.ai/waitlist](https://poly.ai/waitlist) and sign up using a work email address for instant access. If your organisation already has a PolyAI workspace, ask your PolyAI contact to add you directly. See [Access and waitlist](./access-and-waitlist.md) for details on the Early Access Program and what you need to get started.
+Go to [poly.ai/waitlist](https://poly.ai/waitlist) and sign up using a work email address for instant access. If your organization already has a PolyAI workspace, ask your PolyAI contact to add you directly. See [Access and waitlist](./access-and-waitlist.md) for details on the Early Access Program and what you need to get started.
 
 ### Step 2 — Create an agent from your website
 
