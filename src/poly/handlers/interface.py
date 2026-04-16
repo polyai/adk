@@ -48,6 +48,15 @@ class AgentStudioInterface:
             self.sync_client = SyncClientHandler(region, account_id, project_id, branch_id)
 
     @staticmethod
+    def get_accessible_regions() -> list[str]:
+        """Get the regions accessible to the current API key.
+
+        Returns:
+            list[str]: Region names the user has access to.
+        """
+        return PlatformAPIHandler.get_accessible_regions(REGIONS)
+
+    @staticmethod
     def get_accounts(region: str) -> dict[str, str]:
         """Get the accounts for a given region.
 

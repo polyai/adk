@@ -1059,12 +1059,23 @@ class AgentStudioCLI:
         if not output_json:
             info("Initialising project...")
 
-        if not region:
-            regions = REGIONS
-            region_menu = questionary.select("Select Region", choices=regions).ask()
-            region = region_menu
-
         api_handler = AgentStudioInterface()
+
+        if not region:
+            with console.status("[info]Fetching available regions...[/info]"):
+                regions = api_handler.get_accessible_regions()
+            if not regions:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No accessible regions found for your API key.",
+                        }
+                    )
+                else:
+                    error("No accessible regions found for your API key.")
+                sys.exit(1)
+            region = questionary.select("Select Region", choices=regions).ask()
 
         if not account_id:
             accounts = api_handler.get_accounts(region)
