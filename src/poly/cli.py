@@ -16,6 +16,7 @@ import webbrowser
 from argparse import SUPPRESS, ArgumentParser, RawTextHelpFormatter
 from contextlib import nullcontext
 from importlib.metadata import version as get_package_version
+from collections import Counter
 from typing import Any, Optional
 
 import argcomplete
@@ -39,6 +40,8 @@ from poly.output.console import (
     success,
     warning,
     edit_in_editor,
+    output_merge_conflict_table,
+    print_merge_conflict_interactive_header,
 )
 from poly.output.json_output import json_print, commands_to_dicts
 from poly.handlers.github_api_handler import GitHubAPIHandler
@@ -56,7 +59,48 @@ from poly.project import (
 
 logger = logging.getLogger(__name__)
 
+# Single-line values longer than this are treated like multiline (no terminal dump; editor for edit).
+_BRANCH_MERGE_LONG_LINE_THRESHOLD = 800
+
 DOCUMENT_CHOICES = AgentStudioProject.discover_docs()
+
+
+def _branch_merge_conflict_file_key(path: list[str]) -> str:
+    """Group field-level API conflicts by parent path (resource-ish key)."""
+    if not path:
+        return ""
+    if len(path) <= 1:
+        return os.sep.join(path)
+    return os.sep.join(path[:-1])
+
+
+def enrich_branch_merge_conflicts(conflicts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Add visual_path, merged_value, can_auto_merge, file_key, conflicts_in_resource for branch merge UI."""
+    user = [
+        c for c in conflicts if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
+    ]
+    counts: Counter[str] = Counter(_branch_merge_conflict_file_key(c["path"]) for c in user)
+    out: list[dict[str, Any]] = []
+    for c in conflicts:
+        row = dict(c)
+        path = row.get("path")
+        if not path or path[-1] in {"updatedAt", "createdAt"}:
+            out.append(row)
+            continue
+        merged = merge_strings(row["baseValue"], row["theirsValue"], row["oursValue"])
+        fk = _branch_merge_conflict_file_key(path)
+        row["visual_path"] = os.sep.join(path)
+        row["merged_value"] = merged
+        row["can_auto_merge"] = not contains_merge_conflict(merged)
+        row["file_key"] = fk
+        row["conflicts_in_resource"] = counts[fk]
+        out.append(row)
+    return out
+
+
+def _auto_merge_resolution(path: list[str], merged_value: str) -> dict[str, Any]:
+    """API payload shape for accepting the locally computed clean merge."""
+    return {"path": path, "value": merged_value, "strategy": "theirs"}
 
 
 def _format_gist_choice(g: dict) -> str:
@@ -556,7 +600,7 @@ class AgentStudioCLI:
             "message",
             nargs="?",
             default=None,
-            help="Commit message for the merge.",
+            help="Message for the merge.",
         )
         branch_merge_parser.add_argument(
             "--interactive",
@@ -1864,88 +1908,111 @@ class AgentStudioCLI:
 
     @staticmethod
     def _merge_interactively(
-        conflicts: list[dict],
-    ) -> list[dict[str, str]]:
-        """Helper function to interactively resolve merge conflicts."""
-        resolutions: list[dict[str, str]] = []
+        conflicts: list[dict[str, Any]],
+        branch_display_name: str = "",
+    ) -> list[dict[str, Any]]:
+        """Resolve merge conflicts with questionary; expects API conflicts optionally enriched."""
+        resolutions: list[dict[str, Any]] = []
+        index_in_resource: dict[str, int] = {}
+        branch_label = branch_display_name or "current branch"
+
+        def _is_heavy_content(c: dict[str, Any]) -> bool:
+            for key in ("baseValue", "theirsValue", "oursValue"):
+                v = c.get(key, "")
+                if not isinstance(v, str):
+                    return True
+                if "\n" in v:
+                    return True
+                if len(v) > _BRANCH_MERGE_LONG_LINE_THRESHOLD:
+                    return True
+            return False
 
         for conflict in conflicts:
-            # Skip timestamp conflicts
             if conflict["path"][-1] in {"updatedAt", "createdAt"}:
                 resolutions.append({"path": conflict["path"], "strategy": "theirs"})
                 continue
 
-            merged_version = merge_strings(
-                conflict["baseValue"], conflict["theirsValue"], conflict["oursValue"]
-            )
             path = conflict["path"]
-            clean_path = os.sep.join(conflict["path"])
+            clean_path = conflict.get("visual_path") or os.sep.join(path)
+            merged_version = conflict.get("merged_value")
+            if merged_version is None:
+                merged_version = merge_strings(
+                    conflict["baseValue"], conflict["theirsValue"], conflict["oursValue"]
+                )
+            auto_merged = conflict.get("can_auto_merge")
+            if auto_merged is None:
+                auto_merged = not contains_merge_conflict(merged_version)
 
-            auto_merged = not contains_merge_conflict(merged_version)
-            one_line = all(
-                isinstance(conflict[key], str) and "\n" not in conflict[key]
-                for key in ["baseValue", "theirsValue", "oursValue"]
+            fk = conflict.get("file_key") or _branch_merge_conflict_file_key(path)
+            index_in_resource[fk] = index_in_resource.get(fk, 0) + 1
+            idx = index_in_resource[fk]
+            total = int(conflict.get("conflicts_in_resource") or 1)
+            heavy = _is_heavy_content(conflict)
+            print_merge_conflict_interactive_header(
+                field_path=clean_path,
+                resource_key=fk,
+                conflict_index=idx,
+                conflict_total=total,
+                auto_mergeable=auto_merged,
+                heavy=heavy,
+                base_value=str(conflict.get("baseValue", "")),
+                branch_label=branch_label,
+                branch_value=str(conflict.get("theirsValue", "")),
+                main_value=str(conflict.get("oursValue", "")),
             )
 
-            # For small conflicts, show ours, theirs, and base side by side in the terminal
-            # 1 line conflicts will never auto merge
-            if one_line:
-                plain(f"\n[bold]Conflict in {clean_path}[/bold]")
-                plain(f"Base:   {conflict['baseValue']}")
-                plain(f"Theirs: {conflict['theirsValue']}")
-                plain(f"Ours:   {conflict['oursValue']}")
-                answer = questionary.select(
-                    "Select resolution",
-                    choices=[
-                        {"name": "Use base version", "value": "base"},
-                        {"name": "Use their version", "value": "theirs"},
-                        {"name": "Use our version", "value": "ours"},
-                        {"name": "Manually edit merged version", "value": "edit"},
-                    ],
-                ).ask()
-                if answer == "edit":
-                    edited = questionary.text(
-                        "Custom resolution", default=conflict["theirsValue"], multiline=True
-                    ).ask()
-                    resolutions.append({"path": path, "value": edited, "strategy": "theirs"})
-                else:
-                    resolutions.append({"path": path, "strategy": answer})
-            else:
-                plain(f"\n[bold]Conflict in {clean_path}[/bold]")
-                choices = [
-                    {"name": "Use base version", "value": "base"},
-                    {"name": "Use their version", "value": "theirs"},
-                    {"name": "Use our version", "value": "ours"},
-                    {"name": "Manually edit merged version", "value": "edit"},
+            choices: list[dict[str, str]] = []
+            if auto_merged:
+                choices.append({"name": "Accept auto-merge", "value": "merged"})
+            choices.extend(
+                [
+                    {"name": "Use main", "value": "ours"},
+                    {"name": f"Use branch — {branch_label}", "value": "theirs"},
+                    {"name": "Use original (base)", "value": "base"},
+                    {"name": "Edit in editor", "value": "edit"},
                 ]
-                if auto_merged:
-                    choices.insert(0, {"name": "Use merged version", "value": "merged"})
+            )
 
-                answer = questionary.select(
-                    "Select resolution",
-                    choices=choices,
-                ).ask()
+            extension = ".py" if path[-1] == "code" else ".txt"
 
+            while True:
+                answer = questionary.select("Select resolution", choices=choices).ask()
+                if answer is None:
+                    return []
                 if answer == "merged":
-                    resolutions[path] = merged_version
-                    continue
-                elif answer == "edit":
-                    if path[-1] == "code":
-                        extension = ".py"
-                    else:
-                        extension = ".txt"
-
-                    edited = edit_in_editor(merged_version, extension=extension)
+                    resolutions.append(_auto_merge_resolution(path, merged_version))
+                    break
+                if answer == "edit":
+                    try:
+                        if heavy:
+                            edited = edit_in_editor(merged_version, extension=extension)
+                        else:
+                            edited_q = questionary.text(
+                                "Custom resolution",
+                                default=str(conflict.get("theirsValue", "")),
+                                multiline=True,
+                            ).ask()
+                            if edited_q is None:
+                                return []
+                            edited = edited_q
+                    except ValueError:
+                        warning(
+                            "Editor closed without saving; choose another option or try Edit again."
+                        )
+                        continue
 
                     if contains_merge_conflict(edited):
                         warning(
-                            "Edited version still contains merge conflicts. Please resolve all conflicts before saving."
+                            "Edited version still contains merge conflict markers. "
+                            "Resolve them before continuing."
                         )
                         continue
 
                     resolutions.append({"path": path, "value": edited, "strategy": "theirs"})
-                else:
-                    resolutions.append({"path": path, "strategy": answer})
+                    break
+
+                resolutions.append({"path": path, "strategy": answer})
+                break
 
         return resolutions
 
@@ -1958,10 +2025,19 @@ class AgentStudioCLI:
         interactive: bool = False,
     ):
         """Merge a branch into the current branch, with optional conflict resolutions."""
+        if message is None or (isinstance(message, str) and not message.strip()):
+            if output_json:
+                json_print({"success": False, "error": "Merge message is required."})
+            else:
+                error("Merge message is required.")
+            sys.exit(1)
+
         project = cls._load_project(base_path, output_json=output_json)
 
         branch_name = project.get_current_branch()
-        merge_success, conflicts, errors = project.merge_branch(message=message)
+        ctx = console.status("[info]Merging branch...[/info]") if not output_json else nullcontext()
+        with ctx:
+            merge_success, conflicts, errors = project.merge_branch(message=message)
 
         if output_json:
             output = {"success": merge_success}
@@ -1981,35 +2057,74 @@ class AgentStudioCLI:
                     plain("\n[red]Errors:[/red]")
                     for err in errors:
                         plain(f"[red]{err}[/red]")
-                if conflicts:
-                    print_file_list("Merge conflicts", conflicts, "filename.conflict")
+
+                enriched = enrich_branch_merge_conflicts(conflicts) if conflicts else []
+                display_conflict = [
+                    c
+                    for c in enriched
+                    if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
+                ]
+                if display_conflict:
+                    output_merge_conflict_table(display_conflict, show_type=True)
 
                 if errors:
                     sys.exit(1)
 
-                if interactive:
-                    resolutions = cls._merge_interactively(conflicts)
-                    if not resolutions:
-                        warning("No resolutions provided. Exiting.")
-                        sys.exit(1)
-                    merge_success, merge_conflicts, merge_errors = project.merge_branch(
-                        message=message, conflict_resolutions=resolutions
+                if not interactive:
+                    plain(
+                        "Merge conflicts detected. To resolve:\n- Use 'poly branch merge --interactive' to resolve conflicts interactively\n- Use 'poly branch merge --resolutions' to provide a list of conflict resolutions\n- Merge manually on Agent Studio"
                     )
 
-                    if merge_success:
-                        success(f"Branch '{branch_name}' merged successfully.")
-                        info('Switched to "main" branch after merge.')
-                    else:
-                        error(f"Failed to merge branch '{branch_name}' after conflict resolution.")
-                        if merge_errors:
-                            plain("\n[red]Errors:[/red]")
-                            for err in merge_errors:
-                                plain(f"[red]{err}[/red]")
-                        if merge_conflicts:
-                            print_file_list(
-                                "Remaining merge conflicts", merge_conflicts, "filename.conflict"
+                resolutions: list[dict[str, Any]] = []
+                if interactive and conflicts:
+                    while True:
+                        batch = cls._merge_interactively(enriched, branch_name)
+                        if not batch:
+                            warning("No resolutions provided. Exiting.")
+                            sys.exit(1)
+                        resolutions.extend(batch)
+                        ctx2 = (
+                            console.status("[info]Merging branch...[/info]")
+                            if not output_json
+                            else nullcontext()
+                        )
+                        with ctx2:
+                            merge_success, conflicts, errors = project.merge_branch(
+                                message=message, conflict_resolutions=resolutions
                             )
-                        sys.exit(1)
+                        if merge_success:
+                            success(f"Branch '{branch_name}' merged successfully.")
+                            info('Switched to "main" branch after merge.')
+                            break
+                        if errors:
+                            error(
+                                f"Failed to merge branch '{branch_name}' after conflict resolution."
+                            )
+                            plain("\n[red]Errors:[/red]")
+                            for err in errors:
+                                plain(f"[red]{err}[/red]")
+                            sys.exit(1)
+                        if not conflicts:
+                            error(
+                                f"Failed to merge branch '{branch_name}' after conflict resolution "
+                                "(no conflicts or errors returned)."
+                            )
+                            sys.exit(1)
+                        warning("Merge still blocked; resolve the remaining conflicts below.")
+                        enriched = enrich_branch_merge_conflicts(conflicts)
+                        display_conflict = [
+                            c
+                            for c in enriched
+                            if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
+                        ]
+                        if display_conflict:
+                            output_merge_conflict_table(
+                                display_conflict,
+                                show_type=True,
+                                panel_title="Remaining merge conflicts",
+                            )
+                elif not merge_success:
+                    sys.exit(1)
 
     @classmethod
     def format(

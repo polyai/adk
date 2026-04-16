@@ -6,15 +6,17 @@ Copyright PolyAI Limited
 """
 
 import json
+import os
 import sys
 
-from rich.console import Console
+import click
+from rich import box
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
+from rich.text import Text
 from rich.theme import Theme
-
-import click
 
 # Global verbose flag — set by CLI before commands run
 _verbose = False
@@ -67,7 +69,7 @@ def plain(message: str) -> None:
     console.print(message)
 
 
-# ── Structured output ────────────────────────────────────────────────
+# ── Structured output ─────────────────────────────────────────────────
 
 
 def print_status(
@@ -230,7 +232,127 @@ def print_turn_metadata(
         )
 
 
-# ── Interactive editor ─────────────────────────────────────────────────
+# ── Merge ─────────────────────────────────────────────────────────────
+
+
+def _merge_preview_cell(value: str) -> str:
+    """Format a side value for display; empty string shows a dim placeholder."""
+    if value == "":
+        return "[dim italic](empty)[/dim italic]"
+    return value
+
+
+def print_merge_conflict_interactive_header(
+    *,
+    field_path: str,
+    resource_key: str,
+    conflict_index: int,
+    conflict_total: int,
+    auto_mergeable: bool,
+    heavy: bool,
+    base_value: str,
+    branch_label: str,
+    branch_value: str,
+    main_value: str,
+) -> None:
+    """Rich panel for one interactive merge conflict (metadata + optional three-way preview)."""
+    rows = Table(show_header=False, box=None, pad_edge=False, padding=(0, 1))
+    rows.add_column(
+        "Label", style="dim", justify="right", min_width=16, overflow="fold", no_wrap=False
+    )
+    rows.add_column("Value", overflow="fold")
+
+    rows.add_row("Field", Text(field_path, style="bright_cyan"))
+    # Only show resource when several fields conflict under the same parent (avoids repeating the path).
+    if conflict_total > 1:
+        rows.add_row(
+            "Resource",
+            Text.assemble(
+                (resource_key, "default"),
+                ("  ·  ", "dim"),
+                (f"conflict {conflict_index} of {conflict_total} here", "muted"),
+            ),
+        )
+    status_markup = (
+        "[success]Auto-mergeable[/success]"
+        if auto_mergeable
+        else "[warning]Needs decision[/warning]"
+    )
+    rows.add_row("Status", status_markup)
+
+    body: Table | Group
+    if heavy:
+        note = Text(
+            "Multiline or long values — choose a side, accept auto-merge, or use Edit to open your editor.",
+            style="dim",
+        )
+        body = Group(rows, Text(""), note)
+    else:
+        rows.add_row("", "")
+        # Same order as the CLI resolution menu: main, branch, original (then edit only in the menu).
+        rows.add_row("Main", _merge_preview_cell(str(main_value)))
+        rows.add_row(f"Branch ({branch_label})", _merge_preview_cell(str(branch_value)))
+        rows.add_row("Original (base)", _merge_preview_cell(str(base_value)))
+        body = rows
+
+    console.print()
+    console.print(
+        Panel(
+            body,
+            title="[bold]Resolve conflict[/bold]",
+            title_align="left",
+            border_style="bright_blue",
+            padding=(0, 1),
+        )
+    )
+
+
+def output_merge_conflict_table(
+    conflicts: list[dict],
+    show_type: bool,
+    panel_title: str = "Merge conflicts",
+) -> None:
+    """Print merge conflicts in a bordered table (optionally inside a titled panel).
+
+    When ``show_type`` is True, expect enriched rows from ``enrich_branch_merge_conflicts``.
+    """
+    table = Table(
+        show_header=True,
+        header_style="bold dim",
+        box=box.ROUNDED,
+        border_style="yellow",
+        padding=(0, 1),
+        expand=True,
+    )
+    table.add_column("Conflict", style="bright_cyan", overflow="fold", no_wrap=False, min_width=20)
+    if show_type:
+        table.add_column("Status", width=18, no_wrap=True)
+        table.add_column("In resource", justify="right", width=14)
+
+    for conflict in conflicts:
+        visual = conflict.get("visual_path")
+        if not visual and conflict.get("path"):
+            visual = os.sep.join(conflict["path"])
+        if show_type:
+            auto = conflict.get("can_auto_merge")
+            status_cell = (
+                "[success]Auto-mergeable[/success]" if auto else "[warning]Needs decision[/warning]"
+            )
+            n = int(conflict.get("conflicts_in_resource") or 1)
+            in_res = f"{n} conflict" + ("" if n == 1 else "s")
+            table.add_row(visual, status_cell, in_res)
+        else:
+            table.add_row(visual)
+
+    wrapped = Panel(
+        table,
+        title=f"[bold]{panel_title}[/bold]",
+        title_align="left",
+        border_style="bright_yellow",
+        padding=(0, 1),
+    )
+    console.print()
+    console.print(wrapped)
 
 
 def edit_in_editor(initial_content: str, extension: str = ".txt") -> str:

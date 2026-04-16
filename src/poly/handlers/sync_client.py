@@ -1168,7 +1168,7 @@ class SyncClientHandler:
             return False, [], []
 
         if result.get("hasConflicts", False) or result.get("errors", []):
-            logger.error(
+            logger.info(
                 f"Failed to merge branch '{self.sdk.branch_id}' into 'main' due to {len(result.get('conflicts', []))} conflicts and {len(result.get('errors', []))} errors"
             )
             conflicts = result.get("conflicts", [])
