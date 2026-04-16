@@ -36,6 +36,7 @@ class PlatformAPIHandler:
         "euw-1": "https://api.eu.poly.ai/adk/v1",
         "uk-1": "https://api.uk.poly.ai/adk/v1",
         "us-1": "https://api.us.poly.ai/adk/v1",
+        "studio": "https://api.studio.poly.ai/adk/v1",
     }
 
     @staticmethod

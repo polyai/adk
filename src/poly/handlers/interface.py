@@ -14,6 +14,7 @@ REGIONS = [
     "us-1",
     "euw-1",
     "uk-1",
+    "studio",
     "staging",
     "dev",
 ]
