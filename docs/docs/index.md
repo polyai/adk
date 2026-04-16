@@ -13,12 +13,12 @@ The ADK gives you a local, Git-like workflow for Agent Studio projects: pull, ed
 
 <div class="grid cards" markdown>
 
--   **No agent yet? Start with Agent Wizard**
+-   **Not sure where to start?**
 
     ---
 
     Build a working voice agent from your website in minutes, then pull it into the ADK.
-    [Open Agent Wizard guide](get-started/agent-wizard.md)
+    [Open getting started guide](get-started/get-started.md)
 
 -   **What is the ADK?**
 
@@ -56,7 +56,7 @@ This documentation follows the developer journey:
 
 If you are new to the ADK, follow this order:
 
-1. read **Not sure where to start? Try Agent Wizard** — especially if you do not yet have an agent in Agent Studio
+1. read **Not sure where to start?** — especially if you do not yet have an agent in Agent Studio
 2. read **What is the PolyAI ADK?**
 3. check **Access and waitlist**
 4. complete **Prerequisites**

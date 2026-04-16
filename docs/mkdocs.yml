@@ -88,7 +88,7 @@ nav:
   - Home: index.md
 
   - Get started:
-      - Not sure where to start? Try Agent Wizard: get-started/agent-wizard.md
+      - Getting started: get-started/get-started.md
       - What is the PolyAI ADK?: get-started/what-is-the-adk.md
       - Walkthrough video: get-started/walkthrough-video.md
       - Access and waitlist: get-started/access-and-waitlist.md

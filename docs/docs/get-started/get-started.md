@@ -27,7 +27,7 @@ Once you are inside Agent Studio:
 
 Agent Studio crawls your website and generates a working agent configuration — usually within a few minutes. While it builds, you can choose the voice your agent will use.
 
-![Agent Wizard building step — showing Analyzing website, Retrieving data, and voice selection](../assets/agent-wizard-build.png)
+![Agent building step — showing Analyzing website, Retrieving data, and voice selection](../assets/agent-wizard-build.png)
 
 !!! tip "What gets generated"
 
