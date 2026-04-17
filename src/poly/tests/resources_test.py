@@ -6063,15 +6063,71 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertEqual(d["categories"]["sexual"]["level"], "lenient")
         self.assertNotIn("precision", d["categories"]["sexual"])
 
-    def test_from_yaml_dict_defaults(self):
-        """Missing optional fields fall back to defaults."""
-        sf = SafetyFilters.from_yaml_dict({}, resource_id="sf-1", name="safety_filters")
-        self.assertTrue(sf.enabled)
-        self.assertEqual(sf.filter_type, "azure")
-        for cat in ("violence", "hate", "sexual", "self_harm"):
-            self.assertFalse(sf.categories[cat].enabled)
-            # Internal representation uses backend format (UPPERCASE)
-            self.assertEqual(sf.categories[cat].precision, "MEDIUM")
+    def test_from_yaml_dict_missing_top_level_fields_raises(self):
+        """Missing top-level YAML fields raise ValueError."""
+        with self.assertRaises(ValueError) as cm:
+            SafetyFilters.from_yaml_dict({}, resource_id="sf-1", name="safety_filters")
+        self.assertIn("Missing required field", str(cm.exception))
+
+    def test_from_yaml_dict_missing_category_raises(self):
+        """Missing a required category raises ValueError."""
+        yaml_dict = {
+            "enabled": True,
+            "type": "azure",
+            "categories": {
+                "violence": {"enabled": True, "level": "strict"},
+                "hate": {"enabled": False, "level": "medium"},
+                "sexual": {"enabled": False, "level": "lenient"},
+                # self_harm missing
+            },
+        }
+        with self.assertRaises(ValueError) as cm:
+            SafetyFilters.from_yaml_dict(
+                yaml_dict, resource_id="sf-1", name="safety_filters"
+            )
+        self.assertIn("self_harm", str(cm.exception))
+
+    def test_from_yaml_dict_missing_category_field_raises(self):
+        """Missing a required field inside a category raises ValueError."""
+        yaml_dict = {
+            "enabled": True,
+            "type": "azure",
+            "categories": {
+                "violence": {"level": "strict"},  # enabled missing
+                "hate": {"enabled": False, "level": "medium"},
+                "sexual": {"enabled": False, "level": "lenient"},
+                "self_harm": {"enabled": True, "level": "strict"},
+            },
+        }
+        with self.assertRaises(ValueError) as cm:
+            SafetyFilters.from_yaml_dict(
+                yaml_dict, resource_id="sf-1", name="safety_filters"
+            )
+        self.assertIn("enabled", str(cm.exception))
+
+    def test_parse_categories_from_azure_config_missing_category_raises(self):
+        """Missing a required azure category raises ValueError."""
+        azure = {
+            "violence": {"isActive": True, "precision": "STRICT"},
+            "hate": {"isActive": False, "precision": "MEDIUM"},
+            "sexual": {"isActive": False, "precision": "LOOSE"},
+            # selfHarm missing
+        }
+        with self.assertRaises(ValueError) as cm:
+            parse_categories_from_azure_config(azure)
+        self.assertIn("selfHarm", str(cm.exception))
+
+    def test_parse_categories_from_azure_config_missing_field_raises(self):
+        """Missing a required field inside an azure category raises ValueError."""
+        azure = {
+            "violence": {"precision": "STRICT"},  # isActive missing
+            "hate": {"isActive": False, "precision": "MEDIUM"},
+            "sexual": {"isActive": False, "precision": "LOOSE"},
+            "selfHarm": {"isActive": True, "precision": "STRICT"},
+        }
+        with self.assertRaises(ValueError) as cm:
+            parse_categories_from_azure_config(azure)
+        self.assertIn("isActive", str(cm.exception))
 
     def test_read_local_resource(self):
         """read_local_resource parses safety_filters from YAML correctly."""

@@ -18,15 +18,18 @@ from poly.handlers.protobuf.content_filter_settings_pb2 import (
 from poly.resources.resource import ResourceMapping, YamlResource
 
 PRECISION_MAPPING = {"LOOSE": "lenient", "MEDIUM": "medium", "STRICT": "strict"}
-CATEGORIES = ("violence", "hate", "sexual", "self_harm")
-DEFAULT_PRECISION = "medium"
-_FILTER_TYPE = "azure"
+_AZURE_CATEGORY_KEYS = {
+    "violence": "violence",
+    "hate": "hate",
+    "sexual": "sexual",
+    "self_harm": "selfHarm",
+}
 
 
 @dataclass
 class _SafetyFilterCategory:
-    enabled: bool = False
-    precision: str = DEFAULT_PRECISION
+    enabled: bool
+    precision: str
 
     def to_dict(self) -> dict:
         # Handle the mapping between UI terminology and backend terms.
@@ -35,14 +38,19 @@ class _SafetyFilterCategory:
 
     @classmethod
     def from_dict(cls, data: dict) -> "_SafetyFilterCategory":
-        level = data.get("level", DEFAULT_PRECISION)
+        for required in ("enabled", "level"):
+            if required not in data:
+                raise ValueError(
+                    f"Missing required field '{required}' in safety filter category config."
+                )
+        level = data["level"]
         backend_precision_phrase = [k for k, v in PRECISION_MAPPING.items() if v == level]
         if not backend_precision_phrase:
             valid_levels = ", ".join(sorted(PRECISION_MAPPING.values()))
             raise ValueError(f"Invalid level '{level}'. Must be one of: {valid_levels}")
 
         return cls(
-            enabled=data.get("enabled", False),
+            enabled=data["enabled"],
             precision=backend_precision_phrase[0],
         )
 
@@ -55,14 +63,21 @@ class _SafetyFilterCategory:
 
 def _parse_categories(raw: dict) -> dict:
     parsed = {}
-    for cat in CATEGORIES:
-        category = raw.get(cat, {})
+    for cat in _AZURE_CATEGORY_KEYS.keys():
+        if cat not in raw:
+            raise ValueError(
+                f"Missing required safety filter category '{cat}'. "
+                f"All of {', '.join(_AZURE_CATEGORY_KEYS.keys())} must be provided."
+            )
+        category = raw[cat]
         if isinstance(category, _SafetyFilterCategory):
             parsed[cat] = category
         elif isinstance(category, dict):
             parsed[cat] = _SafetyFilterCategory.from_dict(category)
         else:
-            parsed[cat] = _SafetyFilterCategory()
+            raise ValueError(
+                f"Safety filter category '{cat}' must be a dict, got {type(category).__name__}."
+            )
     return parsed
 
 
@@ -87,24 +102,29 @@ def _build_update_content_filter_proto(
 
 def parse_categories_from_azure_config(azure_config: dict) -> dict:
     """Parse category data from a camelCase azure projection dict."""
-    return {
-        "violence": _SafetyFilterCategory(
-            enabled=azure_config.get("violence", {}).get("isActive", False),
-            precision=azure_config.get("violence", {}).get("precision", DEFAULT_PRECISION),
-        ),
-        "hate": _SafetyFilterCategory(
-            enabled=azure_config.get("hate", {}).get("isActive", False),
-            precision=azure_config.get("hate", {}).get("precision", DEFAULT_PRECISION),
-        ),
-        "sexual": _SafetyFilterCategory(
-            enabled=azure_config.get("sexual", {}).get("isActive", False),
-            precision=azure_config.get("sexual", {}).get("precision", DEFAULT_PRECISION),
-        ),
-        "self_harm": _SafetyFilterCategory(
-            enabled=azure_config.get("selfHarm", {}).get("isActive", False),
-            precision=azure_config.get("selfHarm", {}).get("precision", DEFAULT_PRECISION),
-        ),
-    }
+    parsed = {}
+    for cat, proj_key in _AZURE_CATEGORY_KEYS.items():
+        if proj_key not in azure_config:
+            raise ValueError(
+                f"Missing required safety filter category '{proj_key}' in azure config."
+            )
+        category_data = azure_config[proj_key]
+        if not isinstance(category_data, dict):
+            raise ValueError(
+                f"Safety filter category '{proj_key}' must be a dict, got "
+                f"{type(category_data).__name__}."
+            )
+        for required in ("isActive", "precision"):
+            if required not in category_data:
+                raise ValueError(
+                    f"Missing required field '{required}' for safety filter category "
+                    f"'{proj_key}' in azure config."
+                )
+        parsed[cat] = _SafetyFilterCategory(
+            enabled=category_data["isActive"],
+            precision=category_data["precision"],
+        )
+    return parsed
 
 
 @dataclass
@@ -112,30 +132,37 @@ class _BaseSafetyFilters(YamlResource):
     """Shared logic for project-level and channel-level safety filters."""
 
     enabled: bool = True
-    filter_type: str = _FILTER_TYPE
+    filter_type: str = "azure"
     categories: Optional[dict] = None
 
     def __post_init__(self) -> None:
         """Parse raw category dicts into _SafetyFilterCategory objects."""
-        self.categories = _parse_categories(self.categories or {})
+        if self.categories is None:
+            return
+        self.categories = _parse_categories(self.categories)
 
     def to_yaml_dict(self) -> dict:
         return {
             "enabled": self.enabled,
             "type": self.filter_type,
-            "categories": {cat: self.categories[cat].to_dict() for cat in CATEGORIES},
+            "categories": {
+                cat: self.categories[cat].to_dict() for cat in _AZURE_CATEGORY_KEYS.keys()
+            },
         }
 
     @classmethod
     def from_yaml_dict(
         cls, yaml_dict: dict, resource_id: str, name: str, **kwargs
     ) -> "_BaseSafetyFilters":
+        for required in ("enabled", "type", "categories"):
+            if required not in yaml_dict:
+                raise ValueError(f"Missing required field '{required}' in safety filter config.")
         return cls(
             resource_id=resource_id,
             name=name,
-            enabled=yaml_dict.get("enabled", True),
-            filter_type=yaml_dict.get("type", _FILTER_TYPE),
-            categories=yaml_dict.get("categories", {}),
+            enabled=yaml_dict["enabled"],
+            filter_type=yaml_dict["type"],
+            categories=yaml_dict["categories"],
         )
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
