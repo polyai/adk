@@ -21,16 +21,15 @@ Go to [poly.ai/waitlist](https://poly.ai/waitlist) and sign up using a work emai
 
 ![Quick setup button Agent Studio](../assets/quick-agent-setup.png)
 
-
 Once you are inside Agent Studio:
 
 1. Click the **+ Agent** button in the top-right corner.
 2. Select **Quick Agent Setup** from the dropdown.
 3. Enter your company website URL and click **Create agent**.
 
-Agent Studio crawls your website and generates a working agent configuration — usually within a few minutes. While it builds, you can choose the voice your agent will use.
+Agent Studio crawls your website and generates a working agent configuration — usually within a few minutes. Before it builds, you can choose the voice your agent will use.
 
-![Agent building step — showing Analyzing website, Retrieving data, and voice selection](../assets/agent-wizard-build.png)
+![Agent building step — showing Analyzing website, Retrieving data, and voice selection](../assets/agent-build.png)
 
 !!! tip "What gets generated"
 
