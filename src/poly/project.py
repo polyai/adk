@@ -8,9 +8,9 @@ import json
 import logging
 import os
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, fields
 from datetime import datetime
-from collections.abc import Callable
 from typing import Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
@@ -1664,17 +1664,17 @@ class AgentStudioProject:
 
         return files_with_conflicts, modified_files, new_files, deleted_files
 
-    def revert_changes(self, all_files: bool = False, files: list[str] = None) -> list[str]:
+    def revert_changes(self, files: list[str] = None) -> list[str]:
         """Revert changes in the project.
 
         Args:
-            all_files (bool): If True, revert all changes.
-            files (list[str]): List of specific files to revert.
+            files (list[str]): List of specific files to revert. If None, revert all changes.
         """
         reverted_files = []
         resource_mappings = self._make_resource_mappings(self.resources)
+        all_files = not files
         for resource in self.all_resources:
-            if not all_files and files and resource.get_path(self.root_path) not in files:
+            if not all_files and resource.get_path(self.root_path) not in files:
                 continue
 
             resource.save(self.root_path, resource_mappings=resource_mappings)
@@ -1763,12 +1763,47 @@ class AgentStudioProject:
 
         return diffs
 
+    def get_deployments(
+        self, client_env: str = "sandbox"
+    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        """Get the deployments for the project.
+        Args:
+            client_env (str): The client environment (sandbox, pre-release, live)
+                defaults to sandbox
+        Returns:
+            tuple[list[dict[str, Any]], dict[str, str]]: A tuple containing:
+                - list[dict[str, Any]]: A list of deployment information
+                - dict[str, str]: A dictionary mapping environment names to deployment hashes
+        """
+        env_names = {"sandbox", "pre-release", "live"}
+        if client_env not in env_names:
+            raise ValueError(f"Invalid client environment: {client_env}")
+
+        active_deployments = self.api_handler.get_active_deployments(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+        )
+        active_deployment_hashes = {
+            env: deployment.get("version") for env, deployment in active_deployments.items()
+        }
+
+        deployments = self.api_handler.get_deployments(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            client_env=client_env,
+        )
+
+        return deployments, active_deployment_hashes
+
     def get_remote_resources_by_name(self, name: str) -> ResourceMap:
         """Resolve and fetch a remote project state by name.
         Supports:
         - **Environments**: sandbox / pre-release / live (active deployments)
         - **Branches**: branch names (event sourcing projects only)
         - **Deployment versions**: version hash prefix (first 9 chars)
+        - **Local**: "local" for local resources
         """
         env_names = {"sandbox", "pre-release", "live"}
 
@@ -1800,17 +1835,32 @@ class AgentStudioProject:
         # 3) Deployment version hash prefix -> deployment resources
         version_hash = (name or "")[:9].lower()
         if version_hash:
-            deployments = self.api_handler.get_deployments(
-                region=self.region,
-                account_id=self.account_id,
-                project_id=self.project_id,
+            deployments, _ = self.get_deployments()
+            deployment = next(
+                (d for d in deployments if (d.get("version_hash") or "")[:9] == version_hash), {}
             )
-            deployment_id = deployments.get(version_hash)
+            deployment_id = deployment.get("id")
             if deployment_id:
                 logger.info(
                     f"Pulling resources from deployment '{deployment_id}' (version {version_hash})..."
                 )
                 return self.api_handler.pull_deployment_resources(deployment_id)
+
+        # 4) Local resources -> local resources
+        if name == "local":
+            new_resources_mappings, kept_resources_mappings, _ = self.find_new_kept_deleted(
+                self.discover_local_resources()
+            )
+            local_resources_mappings = new_resources_mappings + kept_resources_mappings
+            resources: ResourceMap = {}
+            for resource_mapping in local_resources_mappings:
+                resource = self.read_local_resource(
+                    resource=resource_mapping, resource_mappings=local_resources_mappings
+                )
+                resources.setdefault(resource_mapping.resource_type, {})[
+                    resource_mapping.resource_id
+                ] = resource
+            return resources
 
         logger.error(f"Name '{name}' not found in environments, branches, or deployments.")
         return {}
