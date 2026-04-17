@@ -1498,10 +1498,10 @@ class AgentStudioCLI:
             )
             if version_idx is None:
                 error(f"Version hash '{after}' not found.")
-                return
+                return None
             if version_idx == len(versions) - 1:
                 error("No previous version found.")
-                return
+                return None
             previous_version_idx = version_idx + 1
             before = (versions[previous_version_idx].get("version_hash") or "")[:9]
 
@@ -2647,11 +2647,15 @@ class AgentStudioCLI:
         if version_hash:
             version_hash = version_hash[:9]
             version_idx = next(
-                (i for i, v in enumerate(versions) if v.get("version_hash")[:9] == version_hash),
+                (
+                    i
+                    for i, v in enumerate(versions)
+                    if (v.get("version_hash") or "")[:9] == version_hash
+                ),
                 None,
             )
             if version_idx is None:
-                error(f"Version hash '{hash}' not found.")
+                error(f"Version hash '{version_hash}' not found.")
                 return
             offset = version_idx
 
