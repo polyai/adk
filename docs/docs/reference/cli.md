@@ -210,7 +210,7 @@ poly review delete --json
 
 ### `poly chat`
 
-Start an interactive chat session with your agent, or run scripted/automated conversations non-interactively.
+Start an interactive chat session with your agent, or run scripted/automated conversations.
 
 Examples:
 
