@@ -15,9 +15,9 @@ If you do not yet have access to Agent Studio or an existing agent, start here. 
 
 ### Step 1 — Get access to Agent Studio
 
-![Agent Studio sign up for the first time](../assets/agent-studio-login.png)
+Go to [studio.poly.ai](https://studio.poly.ai) and sign up. You can sign up with your email or login with SSO.
 
-Go to [studio.poly.ai](https://studio.poly.ai) and sign up. 
+![Agent Studio sign up for the first time](../assets/agent-studio-login.png)
 
 ### Step 2 — Create an agent from your website
 
