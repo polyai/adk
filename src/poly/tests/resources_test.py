@@ -25,10 +25,11 @@ from poly.resources.api_integration import (
 )
 from poly.resources.asr_settings import AsrSettings
 from poly.resources.safety_filters import (
-    SafetyFilters,
     ChatSafetyFilters,
+    SafetyFilters,
     VoiceSafetyFilters,
     _SafetyFilterCategory,
+    parse_categories_from_azure_config,
 )
 from poly.resources.channel_settings import (
     ChatGreeting,
@@ -6331,10 +6332,17 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertEqual(csf.command_type, "chat_safety_filters")
         self.assertEqual(csf.update_command_type, "channel_update_safety_filters")
 
-    def test_from_projection_data_chat(self):
-        """ChatSafetyFilters.from_projection_data creates resource with correct id and name."""
+    def test_parse_categories_from_azure_config_chat(self):
+        """parse_categories_from_azure_config + direct construction produces correct resource."""
         data = self._make_content_filter_projection()
-        csf = ChatSafetyFilters.from_projection_data(data)
+        azure = data.get("azureConfig", {})
+        csf = ChatSafetyFilters(
+            resource_id="chat_safety_filters",
+            name="chat_safety_filters",
+            enabled=not data.get("disabled", False),
+            filter_type=data.get("type", "azure"),
+            categories=parse_categories_from_azure_config(azure),
+        )
 
         self.assertEqual(csf.resource_id, "chat_safety_filters")
         self.assertEqual(csf.name, "chat_safety_filters")
@@ -6346,8 +6354,8 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertTrue(csf.categories["self_harm"].enabled)
         self.assertEqual(csf.categories["self_harm"].precision, "STRICT")
 
-    def test_from_projection_data_chat_disabled(self):
-        """ChatSafetyFilters.from_projection_data handles disabled=True correctly."""
+    def test_parse_categories_from_azure_config_disabled(self):
+        """Direct construction handles disabled=True correctly."""
         data = {
             "disabled": True,
             "type": "azure",
@@ -6358,16 +6366,29 @@ class SafetyFiltersTests(unittest.TestCase):
                 "selfHarm": {"isActive": False, "precision": "MEDIUM"},
             },
         }
-        csf = ChatSafetyFilters.from_projection_data(data)
+        azure = data.get("azureConfig", {})
+        csf = ChatSafetyFilters(
+            resource_id="chat_safety_filters",
+            name="chat_safety_filters",
+            enabled=not data.get("disabled", False),
+            filter_type=data.get("type", "azure"),
+            categories=parse_categories_from_azure_config(azure),
+        )
 
         self.assertFalse(csf.enabled)
         self.assertEqual(csf.resource_id, "chat_safety_filters")
 
     def test_from_yaml_dict_roundtrip_chat(self):
-        """ChatSafetyFilters to_yaml_dict -> from_projection_data roundtrip preserves data."""
-        # Build from projection (the reliable path) and verify to_yaml_dict output
+        """ChatSafetyFilters constructed from azure config produces correct YAML output."""
         data = self._make_content_filter_projection()
-        csf = ChatSafetyFilters.from_projection_data(data)
+        azure = data.get("azureConfig", {})
+        csf = ChatSafetyFilters(
+            resource_id="chat_safety_filters",
+            name="chat_safety_filters",
+            enabled=not data.get("disabled", False),
+            filter_type=data.get("type", "azure"),
+            categories=parse_categories_from_azure_config(azure),
+        )
         yaml_out = csf.to_yaml_dict()
 
         self.assertTrue(yaml_out["enabled"])

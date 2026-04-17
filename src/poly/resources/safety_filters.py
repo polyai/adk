@@ -85,6 +85,28 @@ def _build_update_content_filter_proto(
     )
 
 
+def parse_categories_from_azure_config(azure_config: dict) -> dict:
+    """Parse category data from a camelCase azure projection dict."""
+    return {
+        "violence": _SafetyFilterCategory(
+            enabled=azure_config.get("violence", {}).get("isActive", False),
+            precision=azure_config.get("violence", {}).get("precision", DEFAULT_PRECISION),
+        ),
+        "hate": _SafetyFilterCategory(
+            enabled=azure_config.get("hate", {}).get("isActive", False),
+            precision=azure_config.get("hate", {}).get("precision", DEFAULT_PRECISION),
+        ),
+        "sexual": _SafetyFilterCategory(
+            enabled=azure_config.get("sexual", {}).get("isActive", False),
+            precision=azure_config.get("sexual", {}).get("precision", DEFAULT_PRECISION),
+        ),
+        "self_harm": _SafetyFilterCategory(
+            enabled=azure_config.get("selfHarm", {}).get("isActive", False),
+            precision=azure_config.get("selfHarm", {}).get("precision", DEFAULT_PRECISION),
+        ),
+    }
+
+
 @dataclass
 class _BaseSafetyFilters(YamlResource):
     """Shared logic for project-level and channel-level safety filters."""
@@ -96,28 +118,6 @@ class _BaseSafetyFilters(YamlResource):
     def __post_init__(self) -> None:
         """Parse raw category dicts into _SafetyFilterCategory objects."""
         self.categories = _parse_categories(self.categories or {})
-
-    @classmethod
-    def get_categories_from_azure_config(cls, azure_config: dict) -> dict:
-        """Parse category data from the camelCase azure projection dict."""
-        return {
-            "violence": _SafetyFilterCategory(
-                enabled=azure_config.get("violence", {}).get("isActive", False),
-                precision=azure_config.get("violence", {}).get("precision", DEFAULT_PRECISION),
-            ),
-            "hate": _SafetyFilterCategory(
-                enabled=azure_config.get("hate", {}).get("isActive", False),
-                precision=azure_config.get("hate", {}).get("precision", DEFAULT_PRECISION),
-            ),
-            "sexual": _SafetyFilterCategory(
-                enabled=azure_config.get("sexual", {}).get("isActive", False),
-                precision=azure_config.get("sexual", {}).get("precision", DEFAULT_PRECISION),
-            ),
-            "self_harm": _SafetyFilterCategory(
-                enabled=azure_config.get("selfHarm", {}).get("isActive", False),
-                precision=azure_config.get("selfHarm", {}).get("precision", DEFAULT_PRECISION),
-            ),
-        }
 
     def to_yaml_dict(self) -> dict:
         return {
@@ -174,18 +174,6 @@ class SafetyFilters(_BaseSafetyFilters):
     def build_update_proto(self) -> ContentFilterSettings_UpdateContentFilterSettings:
         return _build_update_content_filter_proto(self.enabled, self.filter_type, self.categories)
 
-    @classmethod
-    def from_projection_data(cls, data: dict) -> "SafetyFilters":
-        """Instantiate from a raw contentFilterSettings projection dict."""
-        azure = data.get("azureConfig", {})
-        return cls(
-            resource_id="safety_filters",
-            name="safety_filters",
-            enabled=not data.get("disabled", False),
-            filter_type=data.get("type", _FILTER_TYPE),
-            categories=cls.get_categories_from_azure_config(azure),
-        )
-
     @staticmethod
     def discover_resources(base_path: str) -> list[str]:
         file_path = os.path.join(base_path, "agent_settings", "safety_filters.yaml")
@@ -232,19 +220,6 @@ class ChannelSafetyFilters(_BaseSafetyFilters):
     def build_delete_proto(self) -> Message:
         """Create a proto for deleting the resource."""
         raise NotImplementedError("Delete operation not supported for channel safety filters.")
-
-    @classmethod
-    def from_projection_data(cls, data: dict) -> "ChannelSafetyFilters":
-        """Instantiate from a raw channel safetyFilters projection dict."""
-        azure = data.get("azureConfig", {})
-        resource_name = f"{cls.channel_subpath}_safety_filters"
-        return cls(
-            resource_id=resource_name,
-            name=resource_name,
-            enabled=not data.get("disabled", False),
-            filter_type=data.get("type", _FILTER_TYPE),
-            categories=cls.get_categories_from_azure_config(azure),
-        )
 
     @classmethod
     def discover_resources(cls, base_path: str) -> list[str]:

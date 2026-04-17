@@ -21,6 +21,7 @@ from poly.resources import (
     ChatGreeting,
     ChatSafetyFilters,
     ChatStylePrompt,
+    parse_categories_from_azure_config,
     Condition,
     DTMFConfig,
     Entity,
@@ -404,9 +405,14 @@ class SyncClientHandler:
                 )
             }
         if voice_safety_filters := voice_config.get("safetyFilters", None):
+            azure = voice_safety_filters.get("azureConfig", {})
             settings[VoiceSafetyFilters] = {
-                "voice_safety_filters": VoiceSafetyFilters.from_projection_data(
-                    voice_safety_filters
+                "voice_safety_filters": VoiceSafetyFilters(
+                    resource_id="voice_safety_filters",
+                    name="voice_safety_filters",
+                    enabled=not voice_safety_filters.get("disabled", False),
+                    filter_type=voice_safety_filters.get("type", "azure"),
+                    categories=parse_categories_from_azure_config(azure),
                 )
             }
         if voice_disclaimer := voice_settings.get("disclaimer", None):
@@ -443,8 +449,15 @@ class SyncClientHandler:
                 )
             }
         if chat_safety_filters := chat_config.get("safetyFilters", None):
+            azure = chat_safety_filters.get("azureConfig", {})
             settings[ChatSafetyFilters] = {
-                "chat_safety_filters": ChatSafetyFilters.from_projection_data(chat_safety_filters)
+                "chat_safety_filters": ChatSafetyFilters(
+                    resource_id="chat_safety_filters",
+                    name="chat_safety_filters",
+                    enabled=not chat_safety_filters.get("disabled", False),
+                    filter_type=chat_safety_filters.get("type", "azure"),
+                    categories=parse_categories_from_azure_config(azure),
+                )
             }
 
         return settings
@@ -839,7 +852,16 @@ class SyncClientHandler:
         data = projection.get("contentFilterSettings", {})
         if not data:
             return {}
-        return {"safety_filters": SafetyFilters.from_projection_data(data)}
+        azure = data.get("azureConfig", {})
+        return {
+            "safety_filters": SafetyFilters(
+                resource_id="safety_filters",
+                name="safety_filters",
+                enabled=not data.get("disabled", False),
+                filter_type=data.get("type", "azure"),
+                categories=parse_categories_from_azure_config(azure),
+            )
+        }
 
     @staticmethod
     def _read_api_integrations_from_projection(
