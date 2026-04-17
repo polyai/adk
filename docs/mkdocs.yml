@@ -129,8 +129,5 @@ nav:
           - Speech recognition: reference/speech_recognition.md
           - Response control: reference/response_control.md
 
-  - Development:
-      - Docs workflow: development/docs.md
-
   - Legal:
       - Licensing: legal/licensing.md
