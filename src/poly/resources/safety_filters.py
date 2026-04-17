@@ -183,7 +183,7 @@ class _BaseSafetyFilters(YamlResource):
 
 
 @dataclass
-class SafetyFilters(_BaseSafetyFilters):
+class GeneralSafetyFilters(_BaseSafetyFilters):
     """Resource class for managing general (project-level) safety filter settings."""
 
     @property

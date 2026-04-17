@@ -40,7 +40,7 @@ from poly.resources import (
     Pronunciation,
     RegularExpressionRule,
     Resource,
-    SafetyFilters,
+    GeneralSafetyFilters,
     SettingsPersonality,
     SettingsRole,
     SettingsRules,
@@ -145,7 +145,7 @@ class SyncClientHandler:
             KeyphraseBoosting: cls._read_keyphrase_boosting_from_projection(projection),
             TranscriptCorrection: cls._read_transcript_corrections_from_projection(projection),
             **cls._read_asr_settings_from_projection(projection),
-            SafetyFilters: cls._read_safety_filters_from_projection(projection),
+            GeneralSafetyFilters: cls._read_safety_filters_from_projection(projection),
             ApiIntegration: cls._read_api_integrations_from_projection(projection),
         }  # ty:ignore[invalid-return-type]
 
@@ -848,13 +848,13 @@ class SyncClientHandler:
         }
 
     @staticmethod
-    def _read_safety_filters_from_projection(projection: dict) -> dict[str, SafetyFilters]:
+    def _read_safety_filters_from_projection(projection: dict) -> dict[str, GeneralSafetyFilters]:
         data = projection.get("contentFilterSettings", {})
         if not data:
             return {}
         azure = data.get("azureConfig", {})
         return {
-            "safety_filters": SafetyFilters(
+            "safety_filters": GeneralSafetyFilters(
                 resource_id="safety_filters",
                 name="safety_filters",
                 enabled=not data.get("disabled", False),

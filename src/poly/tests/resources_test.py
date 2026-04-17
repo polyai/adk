@@ -26,7 +26,7 @@ from poly.resources.api_integration import (
 from poly.resources.asr_settings import AsrSettings
 from poly.resources.safety_filters import (
     ChatSafetyFilters,
-    SafetyFilters,
+    GeneralSafetyFilters,
     VoiceSafetyFilters,
     _SafetyFilterCategory,
     parse_categories_from_azure_config,
@@ -6017,8 +6017,8 @@ class TestApiIntegrationValidate(unittest.TestCase):
             integration.validate()
 
 
-class SafetyFiltersTests(unittest.TestCase):
-    """Tests for SafetyFilters and VoiceSafetyFilters resources."""
+class GeneralSafetyFiltersTests(unittest.TestCase):
+    """Tests for GeneralSafetyFilters and VoiceSafetyFilters resources."""
 
     _SAMPLE_YAML = (
         "enabled: true\n"
@@ -6040,7 +6040,7 @@ class SafetyFiltersTests(unittest.TestCase):
 
     def test_from_yaml_dict_roundtrip(self):
         """to_yaml_dict -> from_yaml_dict roundtrip preserves all fields."""
-        sf = SafetyFilters(
+        sf = GeneralSafetyFilters(
             resource_id="sf-1",
             name="safety_filters",
             enabled=True,
@@ -6053,7 +6053,7 @@ class SafetyFiltersTests(unittest.TestCase):
             },
         )
         d = sf.to_yaml_dict()
-        sf2 = SafetyFilters.from_yaml_dict(d, resource_id="sf-1", name="safety_filters")
+        sf2 = GeneralSafetyFilters.from_yaml_dict(d, resource_id="sf-1", name="safety_filters")
 
         self.assertEqual(sf2.enabled, sf.enabled)
         self.assertEqual(sf2.filter_type, sf.filter_type)
@@ -6066,7 +6066,7 @@ class SafetyFiltersTests(unittest.TestCase):
     def test_from_yaml_dict_missing_top_level_fields_raises(self):
         """Missing top-level YAML fields raise ValueError."""
         with self.assertRaises(ValueError) as cm:
-            SafetyFilters.from_yaml_dict({}, resource_id="sf-1", name="safety_filters")
+            GeneralSafetyFilters.from_yaml_dict({}, resource_id="sf-1", name="safety_filters")
         self.assertIn("Missing required field", str(cm.exception))
 
     def test_from_yaml_dict_missing_category_raises(self):
@@ -6082,7 +6082,7 @@ class SafetyFiltersTests(unittest.TestCase):
             },
         }
         with self.assertRaises(ValueError) as cm:
-            SafetyFilters.from_yaml_dict(
+            GeneralSafetyFilters.from_yaml_dict(
                 yaml_dict, resource_id="sf-1", name="safety_filters"
             )
         self.assertIn("self_harm", str(cm.exception))
@@ -6100,7 +6100,7 @@ class SafetyFiltersTests(unittest.TestCase):
             },
         }
         with self.assertRaises(ValueError) as cm:
-            SafetyFilters.from_yaml_dict(
+            GeneralSafetyFilters.from_yaml_dict(
                 yaml_dict, resource_id="sf-1", name="safety_filters"
             )
         self.assertIn("enabled", str(cm.exception))
@@ -6144,7 +6144,7 @@ class SafetyFiltersTests(unittest.TestCase):
             ), unittest.mock.patch(
                 "poly.resources.resource.os.path.isfile", side_effect=isfile_sf
             ):
-                result = SafetyFilters.read_local_resource(
+                result = GeneralSafetyFilters.read_local_resource(
                     file_path="agent_settings/safety_filters.yaml",
                     resource_id="sf-1",
                     resource_name="safety_filters",
@@ -6159,8 +6159,8 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertEqual(result.categories["sexual"].precision, "LOOSE")
 
     def test_build_update_proto_general(self):
-        """SafetyFilters.build_update_proto returns correct protobuf message."""
-        sf = SafetyFilters(
+        """GeneralSafetyFilters.build_update_proto returns correct protobuf message."""
+        sf = GeneralSafetyFilters(
             resource_id="sf-1",
             name="safety_filters",
             enabled=False,
@@ -6225,7 +6225,7 @@ class SafetyFiltersTests(unittest.TestCase):
 
         self.assertIn("safety_filters", result)
         sf = result["safety_filters"]
-        self.assertIsInstance(sf, SafetyFilters)
+        self.assertIsInstance(sf, GeneralSafetyFilters)
         self.assertTrue(sf.enabled)
         self.assertEqual(sf.filter_type, "azure")
         self.assertTrue(sf.categories["violence"].enabled)
@@ -6278,7 +6278,7 @@ class SafetyFiltersTests(unittest.TestCase):
 
     def test_validate_invalid_precision_raises(self):
         """validate raises ValueError for an invalid precision value."""
-        sf = SafetyFilters(
+        sf = GeneralSafetyFilters(
             resource_id="sf-1",
             name="safety_filters",
             categories={
@@ -6296,7 +6296,7 @@ class SafetyFiltersTests(unittest.TestCase):
     def test_validate_passes_with_all_valid_precisions(self):
         """validate passes for each valid precision value (backend format)."""
         for precision in ("LOOSE", "MEDIUM", "STRICT"):
-            sf = SafetyFilters(
+            sf = GeneralSafetyFilters(
                 resource_id="sf-1",
                 name="safety_filters",
                 categories={
@@ -6308,7 +6308,7 @@ class SafetyFiltersTests(unittest.TestCase):
 
     def test_command_types(self):
         """command_type and update_command_type return expected strings."""
-        sf = SafetyFilters(resource_id="sf-1", name="safety_filters")
+        sf = GeneralSafetyFilters(resource_id="sf-1", name="safety_filters")
         self.assertEqual(sf.command_type, "content_filter_settings")
         self.assertEqual(sf.update_command_type, "update_content_filter_settings")
 

@@ -48,7 +48,7 @@ from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.safety_filters import (
     ChatSafetyFilters,
-    SafetyFilters,
+    GeneralSafetyFilters,
     VoiceSafetyFilters,
     parse_categories_from_azure_config,
 )
