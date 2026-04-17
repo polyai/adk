@@ -8,6 +8,9 @@ Copyright PolyAI Limited
 import json
 import os
 import sys
+from datetime import datetime
+from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import click
 from rich import box
@@ -361,6 +364,99 @@ def edit_in_editor(initial_content: str, extension: str = ".txt") -> str:
     if edited is None:
         raise ValueError("No changes were made.")
     return edited
+
+
+# ── DEPLOYMENTS ───────────────────────────────────────────────────────
+
+
+def _format_deployment_timestamp(created_at: str) -> str:
+    """Format a deployment timestamp into a compact string."""
+    if not created_at:
+        return "-"
+    try:
+        tz_str = created_at.split()[-1]  # "GMT"
+        dt = datetime.strptime(created_at, "%a, %d %b %Y %H:%M:%S %Z")
+        try:
+            dt = dt.replace(tzinfo=ZoneInfo(tz_str))
+        except ZoneInfoNotFoundError:
+            dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+        dt = dt.astimezone()
+        return dt.strftime("%d %b %y %H:%M %Z")
+    except (TypeError, ValueError):
+        return "-"
+
+
+def print_deployments(
+    versions: list[dict[str, Any]], active_deployment_hashes: dict[str, str], details: bool = False
+) -> None:
+    """Print deployments for the project.
+
+    Args:
+        versions: A list of deployment versions.
+        active_deployment_hashes: A dictionary mapping deployment types to active version hashes.
+        details: Whether to print detailed information for each deployment.
+    """
+    table = None
+    if not details:
+        table = Table(
+            box=None,
+            show_header=False,
+            header_style="bold",
+            padding=(0, 1),
+        )
+        table.add_column("Type", style="cyan", no_wrap=True)
+        table.add_column("Hash", style="bold yellow", no_wrap=True, max_width=11)
+        table.add_column("When", no_wrap=True)
+        table.add_column("By", overflow="ellipsis", no_wrap=True)
+        table.add_column("Message", overflow="fold")
+        table.add_column("Active", overflow="fold")
+    for version in versions:
+        meta = version.get("deployment_metadata", {})
+        deployment_message = meta.get("deployment_message") or "-"
+        deployment_type = meta.get("deployment_type")
+        created_at = version.get("created_at", "")
+        created_by = version.get("created_by", "")
+        version_hash = version.get("version_hash")
+
+        badges = []
+        if active_deployment_hashes.get("sandbox") == version_hash:
+            badges.append("[bold bright blue]sandbox[/bold bright blue]")
+        if active_deployment_hashes.get("pre-release") == version_hash:
+            badges.append("[bold yellow]pre-release[/bold yellow]")
+        if active_deployment_hashes.get("live") == version_hash:
+            badges.append("[bold green]live[/bold green]")
+
+        badges_str = " ".join(badges) if badges else ""
+        if not details:
+            date_compact = _format_deployment_timestamp(created_at)
+            table.add_row(
+                str(deployment_type or "—"),
+                (version_hash or "")[:9],
+                date_compact,
+                str(created_by or "—"),
+                deployment_message,
+                badges_str,
+            )
+        else:
+            deployment_id = version.get("id")
+            client_env = version.get("client_env")
+            artifact_version = version.get("artifact_version")
+            lambda_deployment_version = version.get("function_deployment_version")
+            console.print(
+                f"([cyan]{deployment_type}[/cyan]) [bold][yellow]{version_hash}[/yellow][/bold] {badges_str}"
+            )
+            console.print(f"Date: {created_at}")
+            console.print(f"By: {created_by}")
+            console.print(f"Deployment ID: {deployment_id}")
+            console.print(f"Artifact Version: {artifact_version}")
+            console.print(f"Lambda Deployment Version: {lambda_deployment_version}")
+            console.print(f"Client Environment: {client_env}")
+            console.print(f"Message: {deployment_message}")
+            console.print()
+
+    if table:
+        console.print(table)
+        return
 
 
 # ── Error handling ───────────────────────────────────────────────────

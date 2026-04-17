@@ -872,6 +872,8 @@ class SyncClientHandler:
         # the variable will be deleted as well. So we need to delete variables
         # first or its delete command will fail.
         Variable,
+        # Conditions should be deleted before steps, as steps auto delete their conditions
+        Condition,
     ]
 
     PRIORITY_UPDATE_TYPES = [

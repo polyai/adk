@@ -8,9 +8,9 @@ import json
 import logging
 import os
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, fields
 from datetime import datetime
-from collections.abc import Callable
 from typing import Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
@@ -26,6 +26,7 @@ from poly.resources import (
     BaseFlowStep,
     ChatGreeting,
     ChatStylePrompt,
+    Condition,
     Entity,
     ExperimentalConfig,
     FlowConfig,
@@ -1546,6 +1547,56 @@ class AgentStudioProject:
             if not variant.is_default:
                 updated_resources[Variant].pop(variant.resource_id, None)
 
+        # Don't delete condition if parent step is being deleted
+        for flow_step in list(deleted_resources.get(FlowStep, {}).values()):
+            for condition in flow_step.conditions:
+                deleted_resources.get(Condition, {}).pop(condition.resource_id, None)
+
+        # If we are deleting a step and pointing a condition to a different step, the delete will auto delete the condition so the update will fail. We should instead make it a create
+        deleted_steps = list(deleted_resources.get(FlowStep, {}).values()) + list(
+            deleted_resources.get(FunctionStep, {}).values()
+        )
+        updated_conditions = list(updated_resources.get(Condition, {}).items())
+        if deleted_steps:
+            flows_with_deleted_steps = {deleted_step.flow_id for deleted_step in deleted_steps}
+            for condition_id, condition in updated_conditions:
+                if condition.flow_id not in flows_with_deleted_steps:
+                    continue
+                original_flow_step: FlowStep = next(
+                    (
+                        flow_step
+                        for flow_step in self.resources.get(FlowStep, {}).values()
+                        if flow_step.flow_id == condition.flow_id
+                        and flow_step.step_id == condition.step_id
+                    ),
+                    None,
+                )
+                if not original_flow_step:
+                    continue
+                original_condition: Condition = next(
+                    (
+                        cond
+                        for cond in original_flow_step.conditions
+                        if cond.resource_id == condition_id
+                    ),
+                    None,
+                )
+                if not original_condition:
+                    continue
+
+                deleted_original_step = next(
+                    (
+                        step
+                        for step in deleted_steps
+                        if step.flow_id == condition.flow_id
+                        and step.step_id == original_condition.child_step
+                    ),
+                    None,
+                )
+                if deleted_original_step:
+                    new_resources.setdefault(Condition, {})[condition_id] = condition
+                    updated_resources.get(Condition, {}).pop(condition_id, None)
+
         return PushPhaseChangeSet(
             main=ResourceChangeSet(
                 new=new_resources,
@@ -1613,17 +1664,17 @@ class AgentStudioProject:
 
         return files_with_conflicts, modified_files, new_files, deleted_files
 
-    def revert_changes(self, all_files: bool = False, files: list[str] = None) -> list[str]:
+    def revert_changes(self, files: list[str] = None) -> list[str]:
         """Revert changes in the project.
 
         Args:
-            all_files (bool): If True, revert all changes.
-            files (list[str]): List of specific files to revert.
+            files (list[str]): List of specific files to revert. If None, revert all changes.
         """
         reverted_files = []
         resource_mappings = self._make_resource_mappings(self.resources)
+        all_files = not files
         for resource in self.all_resources:
-            if not all_files and files and resource.get_path(self.root_path) not in files:
+            if not all_files and resource.get_path(self.root_path) not in files:
                 continue
 
             resource.save(self.root_path, resource_mappings=resource_mappings)
@@ -1712,12 +1763,47 @@ class AgentStudioProject:
 
         return diffs
 
+    def get_deployments(
+        self, client_env: str = "sandbox"
+    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        """Get the deployments for the project.
+        Args:
+            client_env (str): The client environment (sandbox, pre-release, live)
+                defaults to sandbox
+        Returns:
+            tuple[list[dict[str, Any]], dict[str, str]]: A tuple containing:
+                - list[dict[str, Any]]: A list of deployment information
+                - dict[str, str]: A dictionary mapping environment names to deployment hashes
+        """
+        env_names = {"sandbox", "pre-release", "live"}
+        if client_env not in env_names:
+            raise ValueError(f"Invalid client environment: {client_env}")
+
+        active_deployments = self.api_handler.get_active_deployments(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+        )
+        active_deployment_hashes = {
+            env: deployment.get("version") for env, deployment in active_deployments.items()
+        }
+
+        deployments = self.api_handler.get_deployments(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            client_env=client_env,
+        )
+
+        return deployments, active_deployment_hashes
+
     def get_remote_resources_by_name(self, name: str) -> ResourceMap:
         """Resolve and fetch a remote project state by name.
         Supports:
         - **Environments**: sandbox / pre-release / live (active deployments)
         - **Branches**: branch names (event sourcing projects only)
         - **Deployment versions**: version hash prefix (first 9 chars)
+        - **Local**: "local" for local resources
         """
         env_names = {"sandbox", "pre-release", "live"}
 
@@ -1749,17 +1835,32 @@ class AgentStudioProject:
         # 3) Deployment version hash prefix -> deployment resources
         version_hash = (name or "")[:9].lower()
         if version_hash:
-            deployments = self.api_handler.get_deployments(
-                region=self.region,
-                account_id=self.account_id,
-                project_id=self.project_id,
+            deployments, _ = self.get_deployments()
+            deployment = next(
+                (d for d in deployments if (d.get("version_hash") or "")[:9] == version_hash), {}
             )
-            deployment_id = deployments.get(version_hash)
+            deployment_id = deployment.get("id")
             if deployment_id:
                 logger.info(
                     f"Pulling resources from deployment '{deployment_id}' (version {version_hash})..."
                 )
                 return self.api_handler.pull_deployment_resources(deployment_id)
+
+        # 4) Local resources -> local resources
+        if name == "local":
+            new_resources_mappings, kept_resources_mappings, _ = self.find_new_kept_deleted(
+                self.discover_local_resources()
+            )
+            local_resources_mappings = new_resources_mappings + kept_resources_mappings
+            resources: ResourceMap = {}
+            for resource_mapping in local_resources_mappings:
+                resource = self.read_local_resource(
+                    resource=resource_mapping, resource_mappings=local_resources_mappings
+                )
+                resources.setdefault(resource_mapping.resource_type, {})[
+                    resource_mapping.resource_id
+                ] = resource
+            return resources
 
         logger.error(f"Name '{name}' not found in environments, branches, or deployments.")
         return {}
@@ -2206,6 +2307,8 @@ class AgentStudioProject:
         environment: str,
         channel: str,
         variant: Optional[str],
+        input_lang: Optional[str] = None,
+        output_lang: Optional[str] = None,
     ) -> dict:
         """Create a chat session (standard or draft).
 
@@ -2216,6 +2319,8 @@ class AgentStudioProject:
             environment (str): The environment to create the chat session in: draft, sandbox, pre-release or live.
             channel (str): The channel to create the chat session in: chat.polyai or webchat.polyai.
             variant (ty.Optional[str]): The variant ID to create the chat session in.
+            input_lang (str): Optional. The language code for the input messages, e.g. "en-GB" or "fr-FR".
+            output_lang (str): Optional. The language code for the agent's responses, e.g. "en-GB" or "fr-FR".
 
         Returns:
             dict: API response with conversation_id and initial greeting.
@@ -2240,6 +2345,8 @@ class AgentStudioProject:
                 lambda_deployment_version=lambda_deployment_version,
                 channel=channel,
                 variant_id=variant,
+                input_lang=input_lang,
+                output_lang=output_lang,
             )
 
         return AgentStudioInterface.create_chat(
@@ -2249,6 +2356,8 @@ class AgentStudioProject:
             environment=environment,
             variant_id=variant,
             channel=channel,
+            input_lang=input_lang,
+            output_lang=output_lang,
         )
 
     def send_message(
@@ -2256,6 +2365,8 @@ class AgentStudioProject:
         conversation_id: str,
         text: str,
         environment: str,
+        input_lang: str = None,
+        output_lang: str = None,
     ) -> dict:
         """Send a message to an active chat conversation.
 
@@ -2263,6 +2374,8 @@ class AgentStudioProject:
             conversation_id (str): The ID of the conversation to send the message to.
             text (str): The user message text to send.
             environment (str): The environment of the conversation: draft, sandbox, pre-release or live.
+            input_lang (str): Optional. The language code of the input message, e.g. "en-GB" or "fr-FR".
+            output_lang (str): Optional. The language code for the agent's response, e.g. "en-GB" or "fr-FR".
 
         Returns:
             dict: API response with the agent's reply.
@@ -2277,6 +2390,8 @@ class AgentStudioProject:
                 project_id=self.project_id,
                 conversation_id=conversation_id,
                 text=text,
+                input_lang=input_lang,
+                output_lang=output_lang,
             )
         return AgentStudioInterface.send_chat_message(
             region=self.region,
@@ -2285,6 +2400,8 @@ class AgentStudioProject:
             conversation_id=conversation_id,
             text=text,
             environment=environment,
+            input_lang=input_lang,
+            output_lang=output_lang,
         )
 
     def end_chat(

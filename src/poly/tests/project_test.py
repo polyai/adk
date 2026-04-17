@@ -722,6 +722,22 @@ class GetDiffsTest(unittest.TestCase):
         func_path = os.path.join(TEST_DIR, "functions", "extra_function.py")
         self.assertNotIn(func_path, diffs)
 
+    def test_get_diffs_no_diff_for_reordered_extracted_entities(self):
+        """Reordering extracted_entities should not produce a diff."""
+        project_data = deepcopy(PROJECT_DATA)
+        # Reverse the extracted_entities order so it differs from local YAML
+        step = project_data["resources"]["flow_steps"][
+            "test_flow_with_punctuation!_welcome_step"
+        ]
+        step["extracted_entities"] = list(reversed(step["extracted_entities"]))
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+        diffs = project.get_diffs(all_files=True)
+
+        step_path = os.path.join(
+            "flows", "test_flow_with_punctuation!", "steps", "welcome_step.yaml"
+        )
+        self.assertNotIn(step_path, diffs)
+
 
 class CleanResourcesBeforePushTest(unittest.TestCase):
     """Tests for the _clean_resources_before_push method"""
@@ -1538,6 +1554,101 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
 
         self.assertNotIn(var_id, cleaned_deleted.get(Variable, {}))
         self.assertNotIn(var_id, cleaned_new.get(Variable, {}))
+
+    def test_clean_resources_before_push_does_not_delete_condition_when_parent_step_deleted(self):
+        """When a FlowStep is deleted, its conditions should not be in deleted_resources."""
+        condition = Condition(
+            resource_id="CONDITION-cond-1",
+            name="cond-1",
+            condition_type="step_condition",
+            step_id="step-1",
+            flow_id="flow-123",
+            child_step="step-2",
+        )
+        flow_step = FlowStep(
+            resource_id="flow-123_step-1",
+            step_id="step-1",
+            name="Step 1",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.ADVANCED_STEP,
+            prompt="Hello",
+            conditions=[condition],
+        )
+
+        deleted_resources = {
+            FlowStep: {"flow-123_step-1": flow_step},
+            Condition: {"CONDITION-cond-1": condition},
+        }
+
+        push_changes = self.project._clean_resources_before_push(
+            {},
+            {},
+            {},
+            deleted_resources,
+        )
+        cleaned_deleted = push_changes.main.deleted
+
+        # The step should still be deleted
+        self.assertIn("flow-123_step-1", cleaned_deleted.get(FlowStep, {}))
+        # But the condition belonging to that step should NOT be deleted
+        self.assertNotIn("CONDITION-cond-1", cleaned_deleted.get(Condition, {}))
+
+    def test_clean_resources_before_push_condition_update_becomes_create_when_original_target_step_deleted(self):
+        """When a condition is updated but its original child_step is being deleted,
+        move it from updated to new (the platform auto-deletes the condition on step delete,
+        so an update would fail)."""
+        original_condition = Condition(
+            resource_id="CONDITION-cond-1",
+            name="cond-1",
+            condition_type="step_condition",
+            step_id="step-1",
+            flow_id="flow-123",
+            child_step="step-to-delete",
+        )
+        original_flow_step = FlowStep(
+            resource_id="flow-123_step-1",
+            step_id="step-1",
+            name="Step 1",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.ADVANCED_STEP,
+            prompt="Hello",
+            conditions=[original_condition],
+        )
+        step_to_delete = FlowStep(
+            resource_id="flow-123_step-to-delete",
+            step_id="step-to-delete",
+            name="Step To Delete",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.ADVANCED_STEP,
+            prompt="Goodbye",
+        )
+        updated_condition = Condition(
+            resource_id="CONDITION-cond-1",
+            name="cond-1",
+            condition_type="step_condition",
+            step_id="step-1",
+            flow_id="flow-123",
+            child_step="step-new-target",
+        )
+
+        self.project.resources.setdefault(FlowStep, {})["flow-123_step-1"] = original_flow_step
+
+        push_changes = self.project._clean_resources_before_push(
+            {},
+            {},
+            {Condition: {"CONDITION-cond-1": updated_condition}},
+            {FlowStep: {"flow-123_step-to-delete": step_to_delete}},
+        )
+        cleaned_new = push_changes.main.new
+        cleaned_updated = push_changes.main.updated
+
+        # Condition should be promoted to a create
+        self.assertIn("CONDITION-cond-1", cleaned_new.get(Condition, {}))
+        # And removed from updated
+        self.assertNotIn("CONDITION-cond-1", cleaned_updated.get(Condition, {}))
 
 
 class PushProjectTest(unittest.TestCase):
@@ -2838,6 +2949,145 @@ class PullProjectFromEnvTest(unittest.TestCase):
             project.pull_project_from_env(env="live")
 
         self.mock_save_config.assert_not_called()
+
+
+class GetDeploymentsTest(unittest.TestCase):
+    """Tests for AgentStudioProject.get_deployments."""
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.mock_api_handler.get_active_deployments.return_value = {
+            "sandbox": {"version": "abc123456xyz", "deployment_id": "dep-1"},
+            "live": {"version": "def789012xyz", "deployment_id": "dep-2"},
+        }
+        self.mock_api_handler.get_deployments.return_value = [
+            {"id": "dep-1", "version_hash": "abc123456xyz"},
+            {"id": "dep-2", "version_hash": "def789012xyz"},
+        ]
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_raises_on_invalid_client_env(self):
+        """get_deployments raises ValueError for an unrecognised client_env."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        with self.assertRaises(ValueError) as ctx:
+            project.get_deployments(client_env="production")
+
+        self.assertIn("Invalid client environment", str(ctx.exception))
+
+    def test_returns_deployments_and_active_hashes(self):
+        """get_deployments returns the deployment list and active env hashes."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        deployments, active_hashes = project.get_deployments(client_env="sandbox")
+
+        self.assertEqual(len(deployments), 2)
+        self.assertEqual(active_hashes["sandbox"], "abc123456xyz")
+        self.assertEqual(active_hashes["live"], "def789012xyz")
+
+    def test_passes_client_env_to_api(self):
+        """get_deployments forwards client_env to the API handler."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        project.get_deployments(client_env="live")
+
+        self.mock_api_handler.get_deployments.assert_called_once()
+        call_kwargs = self.mock_api_handler.get_deployments.call_args[1]
+        self.assertEqual(call_kwargs["client_env"], "live")
+
+    def test_accepts_all_valid_environments(self):
+        """get_deployments accepts sandbox, pre-release, and live without raising."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        for env in ("sandbox", "pre-release", "live"):
+            with self.subTest(env=env):
+                project.get_deployments(client_env=env)  # should not raise
+
+
+class RevertChangesTest(unittest.TestCase):
+    """Tests for AgentStudioProject.revert_changes."""
+
+    def setUp(self):
+        patch.object(Resource, "save_to_file").start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_revert_all_returns_all_resource_paths(self):
+        """revert_changes with no files reverts all resources and returns their paths."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        expected_count = len(project.all_resources)
+
+        reverted = project.revert_changes()
+
+        self.assertEqual(len(reverted), expected_count)
+        for path in reverted:
+            self.assertIsInstance(path, str)
+
+    def test_revert_specific_file_only_reverts_that_file(self):
+        """revert_changes with a specific file only reverts that file."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        target = project.all_resources[0].get_path(project.root_path)
+
+        reverted = project.revert_changes(files=[target])
+
+        self.assertEqual(reverted, [target])
+
+    def test_revert_unknown_file_reverts_nothing(self):
+        """revert_changes with a path that matches no resource returns an empty list."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        reverted = project.revert_changes(files=["/nonexistent/path/file.yaml"])
+
+        self.assertEqual(reverted, [])
+
+
+class GetRemoteResourcesByNameLocalTest(unittest.TestCase):
+    """Tests for the 'local' resolution mode of get_remote_resources_by_name."""
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.mock_api_handler.get_deployments.return_value = [
+            {"id": "dep-1", "version_hash": "abc123456xyz"},
+        ]
+        self.mock_api_handler.get_active_deployments.return_value = {}
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_local_returns_local_resources(self):
+        """'local' should resolve to the current local filesystem state."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        result = project.get_remote_resources_by_name("local")
+
+        self.assertIsInstance(result, dict)
+        self.assertGreater(len(result), 0)
+
+    def test_local_resources_match_project_resources(self):
+        """Resources returned for 'local' should have the same resource types as project.resources."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        result = project.get_remote_resources_by_name("local")
+
+        self.assertEqual(set(result.keys()), set(project.resources.keys()))
+
+    def test_hash_lookup_tolerates_none_version_hash(self):
+        """A deployment record with version_hash=None should not raise TypeError during hash lookup."""
+        self.mock_api_handler.get_deployments.return_value = [
+            {"id": "dep-1", "version_hash": None},
+            {"id": "dep-2", "version_hash": "abc123456xyz"},
+        ]
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        # Should not raise — the None entry is skipped, abc123456 is found and used
+        project.get_remote_resources_by_name("abc123456")
 
 
 class DocsTest(unittest.TestCase):

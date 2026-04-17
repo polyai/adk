@@ -115,6 +115,8 @@ Examples:
 poly branch list
 poly branch current
 poly branch create my-feature
+poly branch create my-hotfix --env live
+poly branch create my-hotfix --env live --force
 poly branch switch my-feature
 poly branch switch my-feature --force
 poly branch delete
@@ -132,6 +134,27 @@ Interactively select and delete one or more branches. The `main` branch cannot b
 poly branch delete
 poly branch delete my-feature
 ~~~
+
+#### `poly branch create`
+
+Creates a new branch. By default the branch is sourced from sandbox main.
+
+| Flag | Description |
+|---|---|
+| `--env`, `--environment` | Source the new branch from a deployment snapshot instead of sandbox main. Choices: `sandbox`, `pre-release`, `live`. |
+| `--force`, `-f` | Force branch creation even if there are uncommitted local changes on main. |
+
+When `--env live` or `--env pre-release` is specified:
+
+- the version of the deployed environment is pulled into your local workspace
+- a branch is created from that snapshot
+- the version is immediately pushed to the new branch, leaving a clean slate for hotfix changes
+- the command can only be run from `main`
+- if there are local changes, the command will fail unless `--force` is also passed
+
+!!! warning "Use `--env live` with caution"
+
+    Branching from a live deployment snapshot will overwrite your local project with the live state. Merging this branch back to main may roll back changes that were introduced after the snapshot was taken.
 
 ### `poly format`
 
@@ -156,13 +179,14 @@ poly validate
 
 Create a GitHub Gist of Agent Studio project changes to share with others.
 
-Running `poly review` without a subcommand creates a new gist comparing local changes against the remote project. Use `--before` and `--after` to compare two remote branches or versions.
+Running `poly review` without a subcommand creates a new gist comparing local changes against the remote project. Use `--before` and `--after` to compare two remote branches or versions. Use `--debug` to enable DEBUG-level logging for troubleshooting.
 
 Examples:
 
 ~~~bash
 poly review
 poly review --before main --after feature-branch
+poly review --debug
 ~~~
 
 #### `poly review list`
@@ -186,7 +210,7 @@ poly review delete --json
 
 ### `poly chat`
 
-Start an interactive chat session with your agent.
+Start an interactive chat session with your agent, or run scripted/automated conversations.
 
 Examples:
 
@@ -195,7 +219,81 @@ poly chat
 poly chat --environment live
 poly chat --channel webchat
 poly chat --metadata
+poly chat --lang fr-FR
+poly chat --input-lang en-US --output-lang fr-FR
 ~~~
+
+#### Non-interactive (scripted) mode
+
+Supply messages directly on the command line or from a file to run `poly chat` without a human at the terminal. This is useful for automated testing pipelines and CI scripts.
+
+**Inline messages** — use `-m`/`--message` (repeatable):
+
+~~~bash
+poly chat -m 'Hello' -m 'What can you help with?'
+~~~
+
+**File-based input** — use `--input-file`:
+
+~~~bash
+poly chat --input-file ./script.txt
+echo -e 'Hello\nGoodbye' | poly chat --input-file -
+~~~
+
+Each line of the file is sent as a separate message. Use `-` to read from stdin.
+
+If the file path does not exist, `poly chat` exits with an error.
+
+#### Resuming an existing conversation
+
+Use `--conversation-id` (or `--conv-id`) to resume an existing conversation by its ID instead of creating a new session:
+
+~~~bash
+poly chat --conv-id <conversation_id>
+poly chat --conv-id <conversation_id> -m 'Follow-up message'
+~~~
+
+#### Pushing before chatting
+
+Use `--push` to push the local project to Agent Studio before starting the chat session. This ensures local changes are live before testing without requiring a separate `poly push` step:
+
+~~~bash
+poly chat --push
+poly chat --push -m 'Hello'
+~~~
+
+If the push fails, the command exits without starting the chat session.
+
+#### Language flags
+
+Use language flags to specify the expected input and output language when chatting against multilingual agents. If not specified, the project default is used.
+
+| Flag | Description |
+|---|---|
+| `--lang` | Sets both input and output language (e.g. `en-US`, `fr-FR`). |
+| `--input-lang` | Sets the input language (ASR) only. Overrides `--lang` for input. |
+| `--output-lang` | Sets the output language (TTS) only. Overrides `--lang` for output. |
+
+`--input-lang` and `--output-lang` take precedence over `--lang` when both are supplied.
+
+#### `poly chat` flags summary
+
+| Flag | Description |
+|---|---|
+| `--push` | Push the project before starting the chat session. |
+| `-m`, `--message MSG` | Send a message non-interactively (repeatable). |
+| `--input-file FILE` | Read messages line-by-line from a file (`-` for stdin). |
+| `--conversation-id`, `--conv-id` | Resume an existing conversation by ID. |
+| `--json` | Emit a single JSON object when the session ends (see below). |
+| `--environment` | Target environment. Choices: `branch`, `sandbox`, `pre-release`, `live`. Defaults to `sandbox`. `branch` chats against the last **pushed** state of your current branch (not local uncommitted changes); on main it falls back to `sandbox`. Use `--push` to push local changes before chatting. |
+| `--channel` | Channel to use (e.g. `webchat`, `voice`). |
+| `--lang` | Set both input and output language. |
+| `--input-lang` | Set input language only. |
+| `--output-lang` | Set output language only. |
+| `--functions` | Show function events in output. |
+| `--flows` | Show flow metadata in output. |
+| `--state` | Show state changes in output. |
+| `--metadata` | Show all metadata (equivalent to `--functions --flows --state`). |
 
 ### `poly docs`
 
@@ -230,6 +328,8 @@ poly branch delete --json
 poly branch delete my-feature --json
 poly format --json
 poly init --region us-1 --account_id 123 --project_id my_project --json
+poly chat --json -m 'Hello'
+poly chat --json --input-file ./script.txt
 ~~~
 
 When `--json` is used:
@@ -257,14 +357,39 @@ The exact fields vary by command. Common fields include:
 | `poly branch delete --json` | `success`, `deleted` |
 | `poly format --json` | `success`, `check_only`, `format_errors`, `affected`, `ty_ran`, `ty_returncode`, `ty_timed_out` |
 | `poly init --json` | `success`, `root_path` |
+| `poly chat --json` | `conversations` (array); optional `push` (when `--push` is used) |
 
 For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
 
-Error responses always include `{ "success": false, "error": "..." }`.
+Error responses always include `{ "success": false, "error": "...", "traceback": "..." }`.
 
 !!! info "`init` with `--json` requires explicit flags"
 
     When using `poly init --json`, you must supply `--region`, `--account_id`, and `--project_id` explicitly. Interactive prompts are not supported in JSON mode.
+
+#### `poly chat --json` output shape
+
+When `--json` is used with `poly chat`, the command emits a single JSON object when the session ends:
+
+~~~json
+{
+  "conversations": [
+    {
+      "conversation_id": "conv-123",
+      "url": "https://...",
+      "turns": [
+        { "input": null, "response": "Hello! How can I help?", "conversation_ended": false },
+        { "input": "What are your hours?", "response": "We are open 9am–5pm.", "conversation_ended": false }
+      ]
+    }
+  ]
+}
+~~~
+
+- `conversations` is an array because `/restart` in scripted input produces multiple entries.
+- `turns[0]` is always the agent greeting, with `"input": null`.
+- If `--push` is also supplied, the output includes a `push` key: `{ "push": { "success": true, "message": "..." } }`.
+- If `--functions`, `--flows`, or `--state` are also set, the relevant metadata fields are included in each turn.
 
 ### `poly push --output-json-commands`
 
