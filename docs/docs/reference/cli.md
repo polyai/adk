@@ -210,7 +210,7 @@ poly review delete --json
 
 ### `poly chat`
 
-Start an interactive chat session with your agent, or run scripted/automated conversations.
+Start an interactive chat session with your agent.
 
 Examples:
 
@@ -223,47 +223,6 @@ poly chat --lang fr-FR
 poly chat --input-lang en-US --output-lang fr-FR
 ~~~
 
-#### Non-interactive (scripted) mode
-
-Supply messages directly on the command line or from a file to run `poly chat` without a human at the terminal. This is useful for automated testing pipelines and CI scripts.
-
-**Inline messages** — use `-m`/`--message` (repeatable):
-
-~~~bash
-poly chat -m 'Hello' -m 'What can you help with?'
-~~~
-
-**File-based input** — use `--input-file`:
-
-~~~bash
-poly chat --input-file ./script.txt
-echo -e 'Hello\nGoodbye' | poly chat --input-file -
-~~~
-
-Each line of the file is sent as a separate message. Use `-` to read from stdin.
-
-If the file path does not exist, `poly chat` exits with an error.
-
-#### Resuming an existing conversation
-
-Use `--conversation-id` (or `--conv-id`) to resume an existing conversation by its ID instead of creating a new session:
-
-~~~bash
-poly chat --conv-id <conversation_id>
-poly chat --conv-id <conversation_id> -m 'Follow-up message'
-~~~
-
-#### Pushing before chatting
-
-Use `--push` to push the local project to Agent Studio before starting the chat session. This ensures local changes are live before testing without requiring a separate `poly push` step:
-
-~~~bash
-poly chat --push
-poly chat --push -m 'Hello'
-~~~
-
-If the push fails, the command exits without starting the chat session.
-
 #### Language flags
 
 Use language flags to specify the expected input and output language when chatting against multilingual agents. If not specified, the project default is used.
@@ -275,25 +234,6 @@ Use language flags to specify the expected input and output language when chatti
 | `--output-lang` | Sets the output language (TTS) only. Overrides `--lang` for output. |
 
 `--input-lang` and `--output-lang` take precedence over `--lang` when both are supplied.
-
-#### `poly chat` flags summary
-
-| Flag | Description |
-|---|---|
-| `--push` | Push the project before starting the chat session. |
-| `-m`, `--message MSG` | Send a message non-interactively (repeatable). |
-| `--input-file FILE` | Read messages line-by-line from a file (`-` for stdin). |
-| `--conversation-id`, `--conv-id` | Resume an existing conversation by ID. |
-| `--json` | Emit a single JSON object when the session ends (see below). |
-| `--environment` | Target environment. Choices: `branch`, `sandbox`, `pre-release`, `live`. Defaults to `sandbox`. Use `branch` to target your current feature branch (resolves to `draft` for non-main branches). |
-| `--channel` | Channel to use (e.g. `webchat`, `voice`). |
-| `--lang` | Set both input and output language. |
-| `--input-lang` | Set input language only. |
-| `--output-lang` | Set output language only. |
-| `--functions` | Show function events in output. |
-| `--flows` | Show flow metadata in output. |
-| `--state` | Show state changes in output. |
-| `--metadata` | Show all metadata (equivalent to `--functions --flows --state`). |
 
 ### `poly docs`
 
@@ -328,8 +268,6 @@ poly branch delete --json
 poly branch delete my-feature --json
 poly format --json
 poly init --region us-1 --account_id 123 --project_id my_project --json
-poly chat --json -m 'Hello'
-poly chat --json --input-file ./script.txt
 ~~~
 
 When `--json` is used:
@@ -357,7 +295,6 @@ The exact fields vary by command. Common fields include:
 | `poly branch delete --json` | `success`, `deleted` |
 | `poly format --json` | `success`, `check_only`, `format_errors`, `affected`, `ty_ran`, `ty_returncode`, `ty_timed_out` |
 | `poly init --json` | `success`, `root_path` |
-| `poly chat --json` | `conversations` (array); optional `push` (when `--push` is used) |
 
 For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
 
@@ -366,30 +303,6 @@ Error responses always include `{ "success": false, "error": "...", "traceback":
 !!! info "`init` with `--json` requires explicit flags"
 
     When using `poly init --json`, you must supply `--region`, `--account_id`, and `--project_id` explicitly. Interactive prompts are not supported in JSON mode.
-
-#### `poly chat --json` output shape
-
-When `--json` is used with `poly chat`, the command emits a single JSON object when the session ends:
-
-~~~json
-{
-  "conversations": [
-    {
-      "conversation_id": "conv-123",
-      "url": "https://...",
-      "turns": [
-        { "input": null, "response": "Hello! How can I help?", "conversation_ended": false },
-        { "input": "What are your hours?", "response": "We are open 9am–5pm.", "conversation_ended": false }
-      ]
-    }
-  ]
-}
-~~~
-
-- `conversations` is an array because `/restart` in scripted input produces multiple entries.
-- `turns[0]` is always the agent greeting, with `"input": null`.
-- If `--push` is also supplied, the output includes a `push` key: `{ "push": { "success": true, "message": "..." } }`.
-- If `--functions`, `--flows`, or `--state` are also set, the relevant metadata fields are included in each turn.
 
 ### `poly push --output-json-commands`
 
