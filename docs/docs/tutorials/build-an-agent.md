@@ -68,7 +68,7 @@ When an Agent Studio project is linked locally, it follows this general structur
 │   └── response_control/
 │       ├── pronunciations.yaml
 │       └── phrase_filtering.yaml
-├── chat/
+├── chat/                               # Optional - chat channel settings
 │   └── configuration.yaml
 ├── flows/
 │   └── {flow_name}/
@@ -268,6 +268,9 @@ Make test calls, inspect transcripts, refine prompts, flows, and functions, and 
 
 Once the changes are pushed and validated, merge the branch in Agent Studio and deploy the project.
 
+!!! note "Merging requires the Agent Studio web UI"
+    There is no `poly merge` command. To merge a branch, open the project in Agent Studio, switch to the branch, and merge it through the interface. After merging, run `poly chat --environment sandbox` to test.
+
 ### Step 11 - Monitor performance
 
 Use Agent Studio analytics to monitor containment, CSAT, handle time, and flagged transcripts. Pull changes back locally as needed and continue iterating.
@@ -354,6 +357,9 @@ poly pull
 
 The ADK acts as the bridge between your local environment and Agent Studio. It lets the coding tool read from and write back to the project.
 
+!!! tip "Run `poly docs --all` before generating any files"
+    Immediately after pulling, run `poly docs --all` to produce a complete resource reference. Without it, a coding agent has no schema context for resource structure and field names, and will hallucinate them. This should be the first thing the coding tool does after `poly pull`.
+
 ### Step 4 - Give the coding tool its context
 
 Provide the coding tool with the information you gathered earlier.
@@ -437,7 +443,7 @@ Check that the key parts of the agent look correct:
 
 Once everything looks right:
 
-1. merge the branch into the main project
+1. merge the branch into the main project through the Agent Studio web UI — there is no `poly merge` command
 2. deploy the project
 
 At that point, the agent is live.

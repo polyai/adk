@@ -10,6 +10,9 @@ Voice settings configure how the agent behaves on the voice channel.
 They are defined in <code>voice/configuration.yaml</code>.
 </p>
 
+!!! note "Platform-provisioned — update only"
+    Voice settings (`voice/configuration.yaml`) are created automatically when a project is initialised in Agent Studio. They always exist on an initialised project and can be updated with `poly push`, but cannot be created from scratch via the ADK. If this file appears in a project directory without a matching entry in `.agent_studio_config` — for example, after copying a directory from another project — the push will fail with a "Create operation not supported" error. Always start a new project with `poly init` and `poly pull` rather than copying an existing directory.
+
 Voice settings control what the agent says at the start of a call and how it should sound throughout the conversation.
 
 ## Location

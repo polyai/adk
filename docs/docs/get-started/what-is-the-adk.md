@@ -7,6 +7,9 @@ The **PolyAI ADK (Agent Development Kit)** is a **CLI tool and Python package** 
 
 It gives you a Git-like workflow for synchronizing project configuration between your local filesystem and the Agent Studio platform.
 
+!!! note "The ADK manages configuration files — it does not run your agent"
+    The ADK handles pulling, editing, validating, and pushing project configuration between your local machine and Agent Studio. Agent execution — processing calls, running conversations — happens entirely inside Agent Studio. There is no local runtime.
+
 ## What you can do with the ADK
 
 - Build and edit Agent Studio projects locally using standard tooling

@@ -159,6 +159,25 @@ Example pattern:
 
 If the user is expected to answer, put the full question in the utterance and let the turn end normally.
 
+## Don't copy project directories between projects
+
+Copying an existing ADK project directory and pointing it at a different Agent Studio project will cause push failures.
+
+The `.agent_studio_config` file contains resource IDs from the source project. When the ADK compares local files against the target project, those IDs do not match what the remote has registered. Resources that are not registered on the target project get classified as new creates — and several resources (voice settings, chat settings, personality, role, and ASR settings) cannot be created through the ADK because they are provisioned automatically by Agent Studio when a project is initialised.
+
+### Wrong
+
+Copying a project directory, updating `project.yaml` or `project.json` with new IDs, then running `poly push` against a different project.
+
+### Right
+
+~~~bash
+poly init --account_id <account_id> --project_id <project_id>
+poly pull
+~~~
+
+Start every new project fresh with `poly init` and `poly pull`. If you need to reuse flows, functions, or topics from an existing project, copy those individual resource files into the new directory — do not copy `.agent_studio_config` or the whole project directory.
+
 ## Quick reference
 
 | Anti-pattern | Better approach |
@@ -169,6 +188,7 @@ If the user is expected to answer, put the full question in the utterance and le
 | Dedicated “Anything else?” step | Exit the flow and return the closing prompt directly |
 | `conv.exit_flow()` plus navigation | Choose exit **or** transition, not both |
 | `end_turn=False` while waiting for a user answer | Only use it when the agent continues immediately in the same turn |
+| Copying a project directory to a new project | Use `poly init` + `poly pull` for the target project; copy individual resource files as needed |
 
 ## Design principle
 

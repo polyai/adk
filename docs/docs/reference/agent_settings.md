@@ -10,6 +10,9 @@ Agent settings define the agent's identity and behavioral rules.
 They live in <code>agent_settings/</code> and are made up of personality, role, and rules resources.
 </p>
 
+!!! note "Personality and role are platform-provisioned — update only"
+    The personality and role resources are created automatically when a project is initialised in Agent Studio. They always exist on an initialised project and can be updated with `poly push`, but cannot be created from scratch via the ADK. If these files appear in a project directory without matching entries in `.agent_studio_config` — for example, after copying a directory from another project — the push will fail with a "Create operation not supported" error. Always start a new project with `poly init` and `poly pull` rather than copying an existing directory.
+
 These settings shape how the agent presents itself and how it should behave across the conversation.
 
 ## Location
