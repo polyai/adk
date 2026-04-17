@@ -9,6 +9,9 @@ description: Validate project changes when working with the PolyAI ADK.
 Testing helps confirm that your project changes behave as expected before they are pushed, reviewed, or merged.
 </p>
 
+!!! warning "There is no local runtime"
+    The ADK does not execute your agent on your local machine. There is no `poly serve` command or local simulator. All agent execution happens inside Agent Studio's Sandbox environment. To test runtime behavior, push your changes and use `poly chat`, or test interactively through Agent Studio.
+
 In the ADK workflow, testing usually sits alongside validation and manual review in Agent Studio.
 
 ## What testing is for

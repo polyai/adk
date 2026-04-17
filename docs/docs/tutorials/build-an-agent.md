@@ -68,7 +68,7 @@ When an Agent Studio project is linked locally, it follows this general structur
 │   └── response_control/
 │       ├── pronunciations.yaml
 │       └── phrase_filtering.yaml
-├── chat/
+├── chat/                               # Optional - chat channel settings
 │   └── configuration.yaml
 ├── flows/
 │   └── {flow_name}/
@@ -94,7 +94,7 @@ This structure mirrors the parts of the agent that Agent Studio understands: set
 
 The CLI workflow is the manual developer path. You use the ADK directly, edit the project locally, and push changes back to Agent Studio.
 
-### Step 1 - Initialise your project
+### Step 1 - Initialize your project
 
 Link a local folder to an existing Agent Studio project. The agent must already exist in Agent Studio.
 
@@ -159,7 +159,7 @@ Resource-specific documentation is available in the reference section:
 [response control](../reference/response_control.md), and
 [experimental config](../reference/experimental_config.md).
 
-### Step 5 - Customise the agent
+### Step 5 - Customize the agent
 
 This is the core build phase. Create a branch, edit resources locally, track changes, and push them back.
 
@@ -268,6 +268,9 @@ Make test calls, inspect transcripts, refine prompts, flows, and functions, and 
 
 Once the changes are pushed and validated, merge the branch in Agent Studio and deploy the project.
 
+!!! note "Merging requires the Agent Studio web UI"
+    There is no `poly merge` command. To merge a branch, open the project in Agent Studio, switch to the branch, and merge it through the interface. After merging, run `poly chat --environment sandbox` to test.
+
 ### Step 11 - Monitor performance
 
 Use Agent Studio analytics to monitor containment, CSAT, handle time, and flagged transcripts. Pull changes back locally as needed and continue iterating.
@@ -354,6 +357,9 @@ poly pull
 
 The ADK acts as the bridge between your local environment and Agent Studio. It lets the coding tool read from and write back to the project.
 
+!!! tip "Run `poly docs --all` before generating any files"
+    Immediately after pulling, run `poly docs --all` to produce a complete resource reference. Without it, a coding agent has no schema context for resource structure and field names, and will hallucinate them. This should be the first thing the coding tool does after `poly pull`.
+
 ### Step 4 - Give the coding tool its context
 
 Provide the coding tool with the information you gathered earlier.
@@ -383,7 +389,7 @@ This produces the assets the agent needs, including:
 
     ---
 
-    Dialogue logic and routing for the agent.
+    Dialog logic and routing for the agent.
 
 -   **Callable functions**
 
@@ -437,7 +443,7 @@ Check that the key parts of the agent look correct:
 
 Once everything looks right:
 
-1. merge the branch into the main project
+1. merge the branch into the main project through the Agent Studio web UI — there is no `poly merge` command
 2. deploy the project
 
 At that point, the agent is live.
@@ -446,7 +452,7 @@ At that point, the agent is live.
 
 | Command | Description |
 |---|---|
-| **poly init** | Initialise a new project locally |
+| **poly init** | Initialize a new project locally |
 | **poly pull** | Pull remote config into the local project |
 | **poly push** | Push local changes to Agent Studio |
 | **poly status** | List changed files |

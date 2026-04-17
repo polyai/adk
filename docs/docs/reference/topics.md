@@ -166,7 +166,7 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
 !!! tip “Tell, don't script”
 
 
-    Prefer instructions like “Tell the user that ...” over hard-coded dialogue such as `Say: '...'`. This lets the agent vary phrasing naturally, especially across languages.
+    Prefer instructions like “Tell the user that ...” over hard-coded dialog such as `Say: '...'`. This lets the agent vary phrasing naturally, especially across languages.
 
 ## Related pages
 
