@@ -371,7 +371,7 @@ class FlowStep(BaseFlowStep, YamlResource):
 
         if self.step_type == StepType.DEFAULT_STEP:
             output["conditions"] = [condition.to_yaml_dict() for condition in self.conditions]
-            output["extracted_entities"] = self.extracted_entities
+            output["extracted_entities"] = sorted(self.extracted_entities)
 
         output["prompt"] = self.prompt
         return output

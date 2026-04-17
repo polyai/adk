@@ -722,6 +722,22 @@ class GetDiffsTest(unittest.TestCase):
         func_path = os.path.join(TEST_DIR, "functions", "extra_function.py")
         self.assertNotIn(func_path, diffs)
 
+    def test_get_diffs_no_diff_for_reordered_extracted_entities(self):
+        """Reordering extracted_entities should not produce a diff."""
+        project_data = deepcopy(PROJECT_DATA)
+        # Reverse the extracted_entities order so it differs from local YAML
+        step = project_data["resources"]["flow_steps"][
+            "test_flow_with_punctuation!_welcome_step"
+        ]
+        step["extracted_entities"] = list(reversed(step["extracted_entities"]))
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+        diffs = project.get_diffs(all_files=True)
+
+        step_path = os.path.join(
+            "flows", "test_flow_with_punctuation!", "steps", "welcome_step.yaml"
+        )
+        self.assertNotIn(step_path, diffs)
+
 
 class CleanResourcesBeforePushTest(unittest.TestCase):
     """Tests for the _clean_resources_before_push method"""
