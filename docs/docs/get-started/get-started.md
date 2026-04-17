@@ -33,7 +33,7 @@ Agent Studio crawls your website and generates a working agent configuration —
 
 !!! tip "What gets generated"
 
-    Agent Studio creates flows, topics, and agent settings based on your website's public content. Everything it produces is standard ADK-compatible configuration — you can pull it down and edit every file locally.
+    Agent Studio populates **topics** (knowledge base entries) and basic **agent settings** (personality, role, rules) from your website's public content. This gives you an agent that knows about your company and can answer questions — but it does not generate flows, variants, entities, handoffs, or integrations. Those are for you to build locally with the ADK. Everything that is generated is standard ADK-compatible configuration and fully editable once pulled down.
 
 ### Step 3 — Test your agent in Agent Studio
 
