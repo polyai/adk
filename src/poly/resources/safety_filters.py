@@ -32,33 +32,51 @@ class _SafetyFilterCategory:
     precision: str
 
     def to_dict(self) -> dict:
-        # Handle the mapping between UI terminology and backend terms.
-        ui_precision_phrase = PRECISION_MAPPING[self.precision]
-        return {"enabled": self.enabled, "level": ui_precision_phrase}
+        """Serialize using internal (backend) field names."""
+        return {"enabled": self.enabled, "precision": self.precision}
 
     @classmethod
     def from_dict(cls, data: dict) -> "_SafetyFilterCategory":
-        for required in ("enabled", "level"):
+        """Construct from a dict using internal (backend) field names."""
+        for required in ("enabled", "precision"):
             if required not in data:
                 raise ValueError(
                     f"Missing required field '{required}' in safety filter category config."
                 )
-        level = data["level"]
-        backend_precision_phrase = [k for k, v in PRECISION_MAPPING.items() if v == level]
-        if not backend_precision_phrase:
-            valid_levels = ", ".join(sorted(PRECISION_MAPPING.values()))
-            raise ValueError(f"Invalid level '{level}'. Must be one of: {valid_levels}")
-
-        return cls(
-            enabled=data["enabled"],
-            precision=backend_precision_phrase[0],
-        )
+        precision = data["precision"]
+        if precision not in PRECISION_MAPPING:
+            valid_precisions = ", ".join(sorted(PRECISION_MAPPING.keys()))
+            raise ValueError(f"Invalid precision '{precision}'. Must be one of: {valid_precisions}")
+        return cls(enabled=data["enabled"], precision=precision)
 
     def to_proto(self) -> AzureContentFilterCategory:
         return AzureContentFilterCategory(
             is_active=self.enabled,
             precision=self.precision,
         )
+
+
+def _category_to_yaml_dict(category: _SafetyFilterCategory) -> dict:
+    """Translate an internal category to YAML/UI vocab (level: lenient/medium/strict)."""
+    return {
+        "enabled": category.enabled,
+        "level": PRECISION_MAPPING[category.precision],
+    }
+
+
+def _category_from_yaml_dict(data: dict, cat_name: str) -> dict:
+    """Translate a YAML/UI-vocab category dict to internal-vocab dict."""
+    for required in ("enabled", "level"):
+        if required not in data:
+            raise ValueError(
+                f"Missing required field '{required}' for safety filter category '{cat_name}'."
+            )
+    level = data["level"]
+    matches = [k for k, v in PRECISION_MAPPING.items() if v == level]
+    if not matches:
+        valid_levels = ", ".join(sorted(PRECISION_MAPPING.values()))
+        raise ValueError(f"Invalid level '{level}'. Must be one of: {valid_levels}")
+    return {"enabled": data["enabled"], "precision": matches[0]}
 
 
 def _parse_categories(raw: dict) -> dict:
@@ -146,7 +164,8 @@ class _BaseSafetyFilters(YamlResource):
             "enabled": self.enabled,
             "type": self.filter_type,
             "categories": {
-                cat: self.categories[cat].to_dict() for cat in _AZURE_CATEGORY_KEYS.keys()
+                cat: _category_to_yaml_dict(self.categories[cat])
+                for cat in _AZURE_CATEGORY_KEYS.keys()
             },
         }
 
@@ -156,13 +175,20 @@ class _BaseSafetyFilters(YamlResource):
     ) -> "_BaseSafetyFilters":
         for required in ("enabled", "type", "categories"):
             if required not in yaml_dict:
-                raise ValueError(f"Missing required field '{required}' in safety filter config.")
+                raise ValueError(
+                    f"Missing required field '{required}' in safety filter config: {yaml_dict}."
+                )
+        raw_categories = yaml_dict["categories"]
+        translated = {
+            cat_name: _category_from_yaml_dict(cat_data, cat_name)
+            for cat_name, cat_data in raw_categories.items()
+        }
         return cls(
             resource_id=resource_id,
             name=name,
             enabled=yaml_dict["enabled"],
             filter_type=yaml_dict["type"],
-            categories=yaml_dict["categories"],
+            categories=translated,
         )
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
