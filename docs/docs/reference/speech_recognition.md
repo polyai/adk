@@ -12,7 +12,7 @@ Speech recognition resources control how the agent processes user speech input o
 These resources live under `voice/speech_recognition/` and are used to tune how the agent listens, recognizes, and post-processes spoken input.
 
 !!! note "ASR settings are platform-provisioned — update only"
-    `asr_settings.yaml` is created automatically when a project is initialised in Agent Studio. It always exists on an initialised project and can be updated with `poly push`, but cannot be created from scratch via the ADK. If this file appears in a project directory without a matching entry in `.agent_studio_config` — for example, after copying a directory from another project — the push will fail with a "Create operation not supported" error. Always start a new project with `poly init` and `poly pull` rather than copying an existing directory.
+    `asr_settings.yaml` is created automatically by the platform when a project is created. It always exists on any Agent Studio project and can be updated with `poly push`, but cannot be created from scratch via the ADK. If this file appears in a project directory without a matching entry in `.agent_studio_config` — for example, after copying a directory from another project — the push will fail with a "Create operation not supported" error. Always start a new project with `poly init` and `poly pull` rather than copying an existing directory.
 
 ## Location
 

@@ -220,7 +220,7 @@ Example:
 
 Controls whether knowledge base (KB) functions from retrieved RAG topics are shown to the model inside flows.
 
-| Value | Behaviour |
+| Value | Behavior |
 |---|---|
 | `true` | KB functions from retrieved RAG topics are shown to the model inside flows, even on steps that have their own `functions_referenced`. |
 | `false` (default) | KB functions are hidden inside flows. |

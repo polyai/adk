@@ -163,7 +163,7 @@ If the user is expected to answer, put the full question in the utterance and le
 
 Copying an existing ADK project directory and pointing it at a different Agent Studio project will cause push failures.
 
-The `.agent_studio_config` file contains resource IDs from the source project. When the ADK compares local files against the target project, those IDs do not match what the remote has registered. Resources that are not registered on the target project get classified as new creates — and several resources (voice settings, chat settings, personality, role, and ASR settings) cannot be created through the ADK because they are provisioned automatically by Agent Studio when a project is initialised.
+The `.agent_studio_config` file contains resource IDs from the source project. When the ADK compares local files against the target project, those IDs do not match what the remote has registered. Resources that are not registered on the target project get classified as new creates — and several resources (voice settings, chat settings, personality, role, and ASR settings) cannot be created through the ADK because they are provisioned automatically by the platform when a project is created.
 
 ### Wrong
 

@@ -94,7 +94,7 @@ This structure mirrors the parts of the agent that Agent Studio understands: set
 
 The CLI workflow is the manual developer path. You use the ADK directly, edit the project locally, and push changes back to Agent Studio.
 
-### Step 1 - Initialise your project
+### Step 1 - Initialize your project
 
 Link a local folder to an existing Agent Studio project. The agent must already exist in Agent Studio.
 
@@ -159,7 +159,7 @@ Resource-specific documentation is available in the reference section:
 [response control](../reference/response_control.md), and
 [experimental config](../reference/experimental_config.md).
 
-### Step 5 - Customise the agent
+### Step 5 - Customize the agent
 
 This is the core build phase. Create a branch, edit resources locally, track changes, and push them back.
 
@@ -389,7 +389,7 @@ This produces the assets the agent needs, including:
 
     ---
 
-    Dialogue logic and routing for the agent.
+    Dialog logic and routing for the agent.
 
 -   **Callable functions**
 
@@ -452,7 +452,7 @@ At that point, the agent is live.
 
 | Command | Description |
 |---|---|
-| **poly init** | Initialise a new project locally |
+| **poly init** | Initialize a new project locally |
 | **poly pull** | Pull remote config into the local project |
 | **poly push** | Push local changes to Agent Studio |
 | **poly status** | List changed files |
