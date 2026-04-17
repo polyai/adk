@@ -51,7 +51,21 @@ https://studio.poly.ai/<account_id>/<project_id>/...
 
 Copy both values — you will need them in the next step.
 
-### Step 5 — Pull the agent into the ADK
+### Step 5 — Generate an API key
+
+The ADK uses an API key to authenticate with Agent Studio. In your workspace, open the **API Keys** tab (next to the **Users** tab) and click **+ API key** to generate one.
+
+![Generating an API key in Agent Studio — API Keys tab with the + API key button highlighted](../assets/api-key-data-access.png)
+
+Then set it as an environment variable:
+
+```bash
+export POLY_ADK_KEY=<your-api-key>
+```
+
+To make it permanent, add the export line to your shell profile (`~/.zshrc` or `~/.bashrc`).
+
+### Step 6 — Pull the agent into the ADK
 
 Once the [ADK is installed](./installation.md), link your local folder to the project and pull its configuration down:
 
@@ -64,7 +78,7 @@ poly pull
 
 You now have a fully editable local copy of your agent.
 
-### Step 6 — Continue with the ADK
+### Step 7 — Continue with the ADK
 
 From here, the standard ADK workflow applies. You can:
 
@@ -106,16 +120,16 @@ Your local folder will mirror the project in Agent Studio and you can begin edit
 
 ## Next step
 
-Now that you have an agent in Agent Studio, the next thing you need is an **API key** — this is what allows the ADK to authenticate with Agent Studio and pull your project locally. Head to the prerequisites page to generate one and install the required local tools.
+Install the ADK and confirm your local tools are in place before running your first commands.
 
 <div class="grid cards" markdown>
 
--   **Prerequisites**
+-   **Installation**
 
     ---
 
-    Generate your API key and confirm the local tools needed before installation.
-    [Open prerequisites](./prerequisites.md)
+    Install the ADK and set up your local environment.
+    [Open installation](./installation.md)
 
 -   **What is the ADK?**
 
