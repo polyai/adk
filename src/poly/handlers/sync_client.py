@@ -66,6 +66,7 @@ class SyncClientHandler:
         "euw-1": ("euw", "prod"),
         "uk-1": ("uk", "prod"),
         "us-1": ("us", "prod"),
+        "studio": ("studio", "prod"),
         "staging": ("us", "staging"),
         "dev": ("us", "dev"),
     }

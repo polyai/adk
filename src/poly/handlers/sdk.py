@@ -41,6 +41,7 @@ class SourcererSDK:
         "euw-prod": "https://api.eu.poly.ai/adk/v1",
         "us-prod": "https://api.us.poly.ai/adk/v1",
         "uk-prod": "https://api.uk.poly.ai/adk/v1",
+        "studio-prod": "https://api.studio.poly.ai/adk/v1",
     }
 
     def __init__(
