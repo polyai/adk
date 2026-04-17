@@ -12,7 +12,7 @@ It gives you a Git-like workflow for synchronizing project configuration between
 - Build and edit Agent Studio projects locally using standard tooling
 - Synchronize project configuration with Agent Studio using `poly push` and `poly pull`
 - Branch, validate, and review changes before deployment
-- Use AI coding tools such as **Claude Code** to generate and update project files
+- Use [AI coding tools](../reference/tooling.md) such as **Claude Code** to generate and update project files
 - Collaborate across multiple developers on the same project
 
 ## Why it exists
@@ -30,7 +30,7 @@ This makes it straightforward to:
 
 ## Multi-developer workflows
 
-The ADK supports team workflows out of the box.
+The ADK supports team workflows out of the box. See [multi-user workflows and guardrails](../concepts/multi-user-and-guardrails.md) for details on branching, validation, and review.
 
 It preserves the same guardrails as Agent Studio, so developers cannot push changes that are incompatible with the project.
 
@@ -41,6 +41,13 @@ It preserves the same guardrails as Agent Studio, so developers cannot push chan
 ## Next steps
 
 <div class="grid cards" markdown>
+
+-   **Not sure where to start?**
+
+    ---
+
+    Build a working agent from your website in minutes, then pull it into the ADK.
+    [Open getting started guide](./get-started.md)
 
 -   **Install the ADK**
 

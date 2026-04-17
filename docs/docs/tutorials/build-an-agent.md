@@ -143,11 +143,29 @@ poly docs --all
 poly docs flows functions topics
 ~~~
 
-Resource-specific documentation is available for agent settings, voice settings, chat settings, flows, functions, topics, entities, handoffs, variants, SMS templates, variables, speech recognition, response control, and experimental config.
+Resource-specific documentation is available in the reference section:
+[agent settings](../reference/agent_settings.md),
+[voice settings](../reference/voice_settings.md),
+[chat settings](../reference/chat_settings.md),
+[flows](../reference/flows.md),
+[functions](../reference/functions.md),
+[topics](../reference/topics.md),
+[entities](../reference/entities.md),
+[handoffs](../reference/handoffs.md),
+[variants](../reference/variants.md),
+[SMS templates](../reference/sms.md),
+[variables](../reference/variables.md),
+[speech recognition](../reference/speech_recognition.md),
+[response control](../reference/response_control.md), and
+[experimental config](../reference/experimental_config.md).
 
 ### Step 5 - Customise the agent
 
 This is the core build phase. Create a branch, edit resources locally, track changes, and push them back.
+
+!!! tip "Read the anti-patterns page first"
+
+    Before editing, review the [common anti-patterns](../concepts/anti-patterns.md) to avoid flow control bugs, logging noise, and prompt logic mistakes that are easy to introduce but hard to debug.
 
 #### Branching
 
@@ -160,7 +178,7 @@ poly branch list
 
 #### Functions
 
-Create or modify backend functions the agent calls at runtime.
+Create or modify backend functions the agent calls at runtime. See the [functions reference](../reference/functions.md) for the full API.
 
 Typical locations include:
 
@@ -171,31 +189,31 @@ Typical locations include:
 
 #### Topics
 
-Add or edit knowledge-base topics used for retrieval.
+Add or edit [knowledge-base topics](../reference/topics.md) used for retrieval.
 
 #### Agent settings
 
-Update the personality, role, and rules that define the agent’s global behavior.
+Update the [personality, role, and rules](../reference/agent_settings.md) that define the agent’s global behavior.
 
 #### Flows
 
-Build conversation flows, including prompts, step transitions, entities, and function steps.
+Build [conversation flows](../reference/flows.md), including prompts, step transitions, [entities](../reference/entities.md), and function steps.
 
 #### Channel-specific settings
 
-Adjust greeting messages, disclaimers, and style prompts for voice and chat.
+Adjust greeting messages, disclaimers, and style prompts for [voice](../reference/voice_settings.md) and [chat](../reference/chat_settings.md).
 
 #### Handoffs, SMS, and variants
 
-Define escalation paths, SMS templates, and per-variant configuration.
+Define [escalation paths](../reference/handoffs.md), [SMS templates](../reference/sms.md), and [per-variant configuration](../reference/variants.md).
 
 #### ASR and response control
 
-Tune speech recognition and control TTS behavior.
+Tune [speech recognition](../reference/speech_recognition.md) and control [TTS behavior](../reference/response_control.md).
 
 #### Experimental config
 
-Enable or tune experimental features where needed.
+Enable or tune [experimental features](../reference/experimental_config.md) where needed.
 
 ### Step 6 - Track and validate changes
 
