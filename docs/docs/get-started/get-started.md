@@ -55,6 +55,8 @@ Copy both values — you will need them in the next step.
 
 The ADK uses an API key to authenticate with Agent Studio. In your workspace, open the **API Keys** tab (next to the **Users** tab) and click **+ API key** to generate one.
 
+![Generating an API key in Agent Studio — API Keys tab with the + API key button highlighted](../assets/api-key-data-access.png)
+
 Then set it as an environment variable:
 
 ```bash

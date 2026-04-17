@@ -31,7 +31,7 @@ pip install polyai-adk
 
 Log in to Agent Studio and open your workspace. In the **API Keys** tab (next to the **Users** tab), click **+ API key** in the top right to generate a key.
 
-![Generating an API key in Agent Studio — Data Access tab with the + API Key button highlighted](../assets/api-key-data-access.png)
+![Generating an API key in Agent Studio — API Keys tab with the + API key button highlighted](../assets/api-key-data-access.png)
 
 Then set it as an environment variable:
 
