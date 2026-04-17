@@ -10,7 +10,7 @@ Your local filesystem becomes your primary editing surface. You can:
 - edit agent resources directly
 - review changes with Git-style workflows
 - validate changes before pushing
-- use AI coding tools such as **Cursor** or **Claude Code**
+- use [AI coding tools](../reference/tooling.md) such as **Cursor** or **Claude Code**
 - test and iterate before merging in Agent Studio
 
 <div class="grid cards" markdown>
@@ -121,13 +121,13 @@ These placeholders are used in prompts, rules, topic actions, and related text f
 
 | Syntax | Resolves to | Common use |
 |---|---|---|
-| `{{fn:function_name}}` | Global function | Rules, topic actions, advanced step prompts |
-| `{{ft:function_name}}` | Flow transition function | Advanced step prompts within the same flow |
-| `{{entity:entity_name}}` | Collected entity value | Flow prompts |
-| `{{attr:attribute_name}}` | Variant attribute | Rules, prompts, greetings, personality, role |
-| `{{twilio_sms:template_name}}` | SMS template | Rules, topic actions |
-| `{{ho:handoff_name}}` | Handoff destination | Rules |
-| `{{vrbl:variable_name}}` | State variable | Prompts, topic actions, SMS templates |
+| `{{fn:function_name}}` | [Global function](../reference/functions.md) | Rules, topic actions, advanced step prompts |
+| `{{ft:function_name}}` | [Flow transition function](../reference/flows.md) | Advanced step prompts within the same flow |
+| `{{entity:entity_name}}` | [Collected entity value](../reference/entities.md) | Flow prompts |
+| `{{attr:attribute_name}}` | [Variant attribute](../reference/variants.md) | Rules, prompts, greetings, personality, role |
+| `{{twilio_sms:template_name}}` | [SMS template](../reference/sms.md) | Rules, topic actions |
+| `{{ho:handoff_name}}` | [Handoff destination](../reference/handoffs.md) | Rules |
+| `{{vrbl:variable_name}}` | [State variable](../reference/variables.md) | Prompts, topic actions, SMS templates |
 
 These references let settings, prompts, and behaviors point to resources by name rather than repeating hard-coded values.
 

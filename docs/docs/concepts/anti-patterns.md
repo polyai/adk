@@ -9,7 +9,7 @@ The general rule is simple: keep prompts focused on conversation, keep Python fo
 
 ## Flow navigation
 
-Flow functions must **always advance** the flow.
+Flow functions must **always advance** the flow. See the [flows reference](../reference/flows.md) for navigation methods including `flow.goto_step()`.
 
 A flow function should never leave the agent sitting in the same logical place without a clear next step.
 
@@ -31,7 +31,7 @@ A flow function should never leave the agent sitting in the same logical place w
 
 ## Metrics and logging
 
-Metrics and logs should capture important events, not generate noise.
+Metrics and logs should capture important events, not generate noise. See the [functions reference](../reference/functions.md) for `conv.log` and metrics APIs.
 
 ### Avoid
 
@@ -176,4 +176,38 @@ If the user is expected to answer, put the full question in the utterance and le
 - keep prompts conversational
 - keep code deterministic
 - prefer simple, testable paths over clever prompt tricks
-  
+
+## Related pages
+
+<div class="grid cards" markdown>
+
+-   **Flows reference**
+
+    ---
+
+    Navigation methods, step transitions, and flow functions.
+    [Open flows reference](../reference/flows.md)
+
+-   **Functions reference**
+
+    ---
+
+    Logging, metrics, conv APIs, and lifecycle hooks.
+    [Open functions reference](../reference/functions.md)
+
+-   **Agent settings**
+
+    ---
+
+    Personality, role, and rules — the global prompt layer.
+    [Open agent settings](../reference/agent_settings.md)
+
+-   **Working locally**
+
+    ---
+
+    How the ADK maps resources to the local filesystem.
+    [Open working locally](./working-locally.md)
+
+</div>
+
