@@ -37,7 +37,9 @@ Agent Studio crawls your website and generates a working agent configuration —
 
 ### Step 3 — Test your agent in Agent Studio
 
-Once the agent is ready, test it inside Agent Studio to confirm it responds as expected. This gives you a working baseline before you move to local development.
+![Completed lite builder](../assets/setup-agent.png)
+
+Once the agent is ready, test it inside Agent Studio to confirm it's filled in with information as expected. This gives you a working baseline before you move to local development.
 
 ### Step 4 — Find your account and project IDs
 
