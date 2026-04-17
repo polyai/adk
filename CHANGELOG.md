@@ -1,6 +1,46 @@
 # CHANGELOG
 
 
+## v0.10.0 (2026-04-17)
+
+### Features
+
+- **cli**: Deployment history and version-scoped diff/review
+  ([#39](https://github.com/polyai/adk/pull/39),
+  [`0730d06`](https://github.com/polyai/adk/commit/0730d06fb80206af8a14c67fbea59036e250cd38))
+
+## Summary Adds **`poly deployments`**, extends **`diff`** / **`review`** with hash and **`--before`
+  / `--after` / `--files`**, updates. Updates **`review`** to be **`review create`** to be similar
+  with **`branch`** commands
+
+## Motivation Improves visibility into deployed versions and makes comparing local vs remote or
+  named versions consistent in the CLI.
+
+## Changes - **`poly deployments`** with `--env`, pagination, `--hash`, `--oneline`, `--json`; Rich
+  output with sandbox / pre-release / live badges. - **`get_deployments`** (API + project):
+  `client_env`, list return shape, tuple with active hashes on **`AgentStudioProject`**. - **`poly
+  diff` / `poly review`**: optional hash, `--files`, `--before` / `--after`; **`--delete`** on
+  review; shared diff computation. - **`poly review`** logic moved to `poly review create` - **`poly
+  revert`** / **`poly format`**: CLI shape updates to be consistent (`--all` removed; format uses
+  **`--files`**).
+
+## Test strategy - [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x]
+  Tested against a live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist - [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs <img width="671" height="79" alt="Screenshot 2026-03-27 at 14 23 31"
+  src="https://github.com/user-attachments/assets/fd6f9b1b-de45-4f5c-82b1-cd2394e473ba" />
+
+`--details` <img width="547" height="511" alt="Screenshot 2026-03-27 at 15 35 14"
+  src="https://github.com/user-attachments/assets/d3983a66-df51-4c43-a142-bd28f42fa2a2" />
+
+`--env` <img width="624" height="32" alt="Screenshot 2026-03-27 at 15 35 27"
+  src="https://github.com/user-attachments/assets/dfc2aab6-0206-45f8-a3ae-6387f09f196c" />
+
+
 ## v0.9.1 (2026-04-17)
 
 ### Bug Fixes
