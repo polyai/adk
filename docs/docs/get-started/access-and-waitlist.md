@@ -16,7 +16,7 @@ To use the ADK, you must have:
 - access to a **PolyAI Agent Studio workspace**
 - an **API key**
 
-Both are provided by your PolyAI contact. Without them, the ADK cannot connect to Agent Studio.
+Workspace access is provided by your PolyAI contact. Once you have access, you generate your own API key directly inside Agent Studio — see [Prerequisites](./prerequisites.md) for the steps. Without both, the ADK cannot connect to Agent Studio.
 
 ## Requesting access
 

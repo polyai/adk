@@ -65,7 +65,7 @@ See the [uv installation guide](https://docs.astral.sh/uv/getting-started/instal
 Before continuing, confirm:
 
 - [ ] You have access to an **Agent Studio workspace**
-- [ ] You have obtained an **API key** from your PolyAI contact
+- [ ] You have generated an **API key** in Agent Studio
 - [ ] `uv` is installed
 - [ ] `git` is available locally
 
