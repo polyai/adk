@@ -608,6 +608,17 @@ class AgentStudioCLI:
             action="store_true",
             help="Enable interactive mode for the merge.",
         )
+        branch_merge_parser.add_argument(
+            "--resolutions",
+            type=str,
+            default=None,
+            help=(
+                "Conflict resolutions as a JSON file path, inline JSON string, or '-' for stdin. "
+                "The JSON should be an array of objects, each with: "
+                '"path" (list of strings), "strategy" ("ours", "theirs", or "base"), '
+                'and optionally "value" (custom resolved string).'
+            ),
+        )
         branch_merge_parser.set_defaults(branch_subcommand="merge")
 
         # FORMAT
@@ -853,7 +864,9 @@ class AgentStudioCLI:
                     cls.branch_delete(args.path, args.branch_name, args.json)
 
                 elif args.branch_subcommand == "merge":
-                    cls.branch_merge(args.path, args.message, args.json, args.interactive)
+                    cls.branch_merge(
+                        args.path, args.message, args.json, args.interactive, args.resolutions
+                    )
 
             elif args.command == "format":
                 cls.format(
@@ -2023,6 +2036,7 @@ class AgentStudioCLI:
         message: str = None,
         output_json: bool = False,
         interactive: bool = False,
+        resolutions_file: str = None,
     ):
         """Merge a branch into the current branch, with optional conflict resolutions."""
         if message is None or (isinstance(message, str) and not message.strip()):
@@ -2032,12 +2046,42 @@ class AgentStudioCLI:
                 error("Merge message is required.")
             sys.exit(1)
 
+        if interactive and output_json:
+            json_print(
+                {
+                    "success": False,
+                    "error": "--interactive and --json cannot be used together.",
+                }
+            )
+            sys.exit(1)
+
+        file_resolutions: list[dict[str, Any]] | None = None
+        if resolutions_file:
+            try:
+                if resolutions_file == "-":
+                    file_resolutions = json.load(sys.stdin)
+                elif resolutions_file.lstrip().startswith("["):
+                    file_resolutions = json.loads(resolutions_file)
+                else:
+                    with open(resolutions_file) as f:
+                        file_resolutions = json.load(f)
+                if not isinstance(file_resolutions, list):
+                    raise ValueError("Resolutions must be a JSON array.")
+            except (OSError, json.JSONDecodeError, ValueError) as exc:
+                if output_json:
+                    json_print({"success": False, "error": f"Failed to parse resolutions: {exc}"})
+                else:
+                    error(f"Failed to parse resolutions: {exc}")
+                sys.exit(1)
+
         project = cls._load_project(base_path, output_json=output_json)
 
         branch_name = project.get_current_branch()
         ctx = console.status("[info]Merging branch...[/info]") if not output_json else nullcontext()
         with ctx:
-            merge_success, conflicts, errors = project.merge_branch(message=message)
+            merge_success, conflicts, errors = project.merge_branch(
+                message=message, conflict_resolutions=file_resolutions
+            )
 
         if output_json:
             output = {"success": merge_success}
@@ -2070,9 +2114,12 @@ class AgentStudioCLI:
                 if errors:
                     sys.exit(1)
 
-                if not interactive:
+                if not interactive and not resolutions_file:
                     plain(
-                        "Merge conflicts detected. To resolve:\n- Use 'poly branch merge --interactive' to resolve conflicts interactively\n- Use 'poly branch merge --resolutions' to provide a list of conflict resolutions\n- Merge manually on Agent Studio"
+                        "Merge conflicts detected. To resolve:\n"
+                        "- Use 'poly branch merge -i <message>' to resolve conflicts interactively\n"
+                        "- Use 'poly branch merge --resolutions <file.json> <message>' to provide pre-defined resolutions\n"
+                        "- Merge manually on Agent Studio"
                     )
 
                 resolutions: list[dict[str, Any]] = []
