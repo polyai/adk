@@ -64,10 +64,10 @@ See the [uv installation guide](https://docs.astral.sh/uv/getting-started/instal
 
 Before continuing, confirm:
 
-- [ ] You have access to an **Agent Studio workspace**
-- [ ] You have generated an **API key** in Agent Studio
-- [ ] `uv` is installed
-- [ ] `git` is available locally
+- You have access to an **Agent Studio workspace**
+- You have generated an **API key** in Agent Studio
+- `uv` is installed
+- `git` is available locally
 
 ## Next step
 
