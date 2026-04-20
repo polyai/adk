@@ -3225,7 +3225,7 @@ class AgentStudioCLI:
 
         try:
             project.promote_deployment(
-                deployment_version.get("id"), to_env, message=message or deployment_message
+                deployment_version.get("id"), to_env, message=message or deployment_message or ""
             )
             if output_json:
                 json_print({"success": True})
@@ -3286,7 +3286,7 @@ class AgentStudioCLI:
 
         try:
             project.rollback_deployment(
-                deployment_version.get("id"), message=message or deployment_message
+                deployment_version.get("id"), message=message or deployment_message or ""
             )
             if output_json:
                 json_print({"success": True})
