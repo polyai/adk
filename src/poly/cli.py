@@ -2765,7 +2765,7 @@ class AgentStudioCLI:
         base_path: str,
         from_deployment: str,
         to_env: str,
-        message: str = None,
+        message: Optional[str] = None,
         force: bool = False,
         output_json: bool = False,
     ) -> None:
@@ -2847,7 +2847,7 @@ class AgentStudioCLI:
         cls,
         base_path: str,
         deployment: str,
-        message: str = None,
+        message: Optional[str] = None,
         force: bool = False,
         output_json: bool = False,
     ):

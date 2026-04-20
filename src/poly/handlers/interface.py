@@ -464,7 +464,7 @@ class AgentStudioInterface:
 
     @staticmethod
     def promote_deployment(
-        region: str, project_id: str, deployment_id: str, target_env: str, message: str = None
+        region: str, project_id: str, deployment_id: str, target_env: str, message: str
     ) -> dict:
         """Promote a deployment to the next environment.
 
@@ -473,7 +473,7 @@ class AgentStudioInterface:
             project_id: The project ID
             deployment_id: The deployment ID
             target_env: The target environment to promote to (pre-release or live)
-            message: Optional message to include with the promotion
+            message: Message to include with the promotion
 
         Returns:
             dict: The API response
@@ -483,16 +483,14 @@ class AgentStudioInterface:
         )
 
     @staticmethod
-    def rollback_deployment(
-        region: str, project_id: str, deployment_id: str, message: str = None
-    ) -> dict:
+    def rollback_deployment(region: str, project_id: str, deployment_id: str, message: str) -> dict:
         """Rollback a deployment to the previous environment.
 
         Args:
             region: The region name
             project_id: The project ID
             deployment_id: The deployment ID
-            message: Optional message to include with the rollback
+            message: Message to include with the rollback
 
         Returns:
             dict: The API response

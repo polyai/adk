@@ -2785,7 +2785,7 @@ class AgentStudioProject:
 
         return True
 
-    def promote_deployment(self, deployment_id: str, target_env: str, message: str = None) -> bool:
+    def promote_deployment(self, deployment_id: str, target_env: str, message: str) -> bool:
         """Promote a deployment to specified environment.
 
         Args:
@@ -2807,7 +2807,7 @@ class AgentStudioProject:
         )
         return True
 
-    def rollback_deployment(self, deployment_id: str, message: str = None) -> bool:
+    def rollback_deployment(self, deployment_id: str, message: str) -> bool:
         """Rollback sandbox/main to a previous deployment.
 
         Args:
