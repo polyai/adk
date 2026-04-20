@@ -452,7 +452,6 @@ class PlatformAPIHandler:
             dict: The API response
         """
         endpoint = PROMOTE_URL.format(project_id=project_id, deploymentId=deployment_id)
-        target_env = "ERROR"
         body = {
             "targetEnvironment": target_env,
             "deploymentMessage": message,
