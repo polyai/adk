@@ -155,6 +155,26 @@ class MergeUtilsTests(unittest.TestCase):
         result = utils.merge_strings(original, updated, incoming)
         self.assertEqual(result, "Line 1 Updated\nLine 2\n")
 
+    def test_merge_strings_conflict_newline_before_markers(self):
+        """Conflict content without trailing newlines gets a newline appended.
+
+        When the last line in a conflict region lacks a trailing newline
+        (e.g. file has no final newline), the merge must still place
+        ======= and >>>>>>> on their own lines.
+        """
+        original = "line"
+        updated = "updated"
+        incoming = "incoming"
+        result = utils.merge_strings(original, updated, incoming)
+        # Each marker must be on its own line, not glued to content
+        self.assertIn("updated\n=======\n", result)
+        self.assertIn("incoming\n>>>>>>>\n", result)
+        # Full structure check
+        self.assertEqual(
+            result,
+            "<<<<<<<\nupdated\n=======\nincoming\n>>>>>>>\n",
+        )
+
     def test_contains_merge_conflict(self):
         no_merge_conflict_code = """import random
 def test_code(conv: Conversation, test_param: int):

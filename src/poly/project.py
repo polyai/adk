@@ -2598,12 +2598,12 @@ class AgentStudioProject:
         return validation_errors
 
     def merge_branch(
-        self, message: Optional[str] = None, conflict_resolutions: list[dict[str, Any]] = None
+        self, message: str, conflict_resolutions: list[dict[str, Any]] = None
     ) -> tuple[bool, list[str], list[str]]:
         """Merge a branch into the current branch in the project.
 
         Args:
-            message (Optional[str]): The merge commit message.
+            message (str): The merge commit message.
             conflict_resolutions (list[dict[str, Any]]): A list of conflict
                 resolutions. Each resolution should have:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])

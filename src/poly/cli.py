@@ -2315,7 +2315,7 @@ class AgentStudioCLI:
                 elif resolutions_file.lstrip().startswith("["):
                     file_resolutions = json.loads(resolutions_file)
                 else:
-                    with open(resolutions_file) as f:
+                    with open(resolutions_file, encoding="utf-8") as f:
                         file_resolutions = json.load(f)
                 if not isinstance(file_resolutions, list):
                     raise ValueError("Resolutions must be a JSON array.")
@@ -2352,7 +2352,7 @@ class AgentStudioCLI:
                 if errors:
                     plain("\n[red]Errors:[/red]")
                     for err in errors:
-                        plain(f"[red]{err}[/red]")
+                        error(f"- {err['path']}: {err['message']}")
 
                 enriched = enrich_branch_merge_conflicts(conflicts) if conflicts else []
                 display_conflict = [
@@ -2401,7 +2401,7 @@ class AgentStudioCLI:
                             )
                             plain("\n[red]Errors:[/red]")
                             for err in errors:
-                                plain(f"[red]{err}[/red]")
+                                error(f"- {err['path']}: {err['message']}")
                             sys.exit(1)
                         if not conflicts:
                             error(
