@@ -3246,7 +3246,7 @@ class AgentStudioCLI:
         message: Optional[str] = None,
         force: bool = False,
         output_json: bool = False,
-    ):
+    ) -> None:
         """Rollback sandbox/main to a previous deployment."""
         project = cls._load_project(base_path, output_json=output_json)
 
