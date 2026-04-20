@@ -957,7 +957,36 @@ class AgentStudioCLI:
             help="Force the promotion without confirmation. This is default in non-interactive mode (e.g. when --json is used)",
         )
 
-        deployment_promote_parser.add_argument(
+        deployment_rollback_parser = deployments_subparsers.add_parser(
+            "rollback",
+            parents=[deployments_path_parent, json_parent],
+            help="Rollback sandbox/main to a previous version.",
+            description=(
+                "Rollback a deployment to a previous version.\n\nExamples:\n  poly deployments rollback --to <deployment_id>\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        deployment_rollback_parser.add_argument(
+            "--to",
+            dest="to_deployment",
+            type=str,
+            required=True,
+            help="ID/env of the deployment to rollback to.",
+        )
+        deployment_rollback_parser.add_argument(
+            "--message",
+            "-m",
+            type=str,
+            required=False,
+            help="Optional message to include with the rollback (e.g. release notes or changelog). If not specified, current commit message will be used instead",
+        )
+        deployment_rollback_parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Force the rollback without confirmation. This is default in non-interactive mode (e.g. when --json is used)",
+        )
+
+        deployment_rollback_parser.add_argument(
             "--debug", action="store_true", help="Display debug logs."
         )
 
@@ -1148,6 +1177,14 @@ class AgentStudioCLI:
                         args.path,
                         args.from_deployment,
                         args.to_env,
+                        args.message,
+                        force=args.force,
+                        output_json=args.json,
+                    )
+                elif args.deployments_subcommand == "rollback":
+                    cls.deployments_rollback(
+                        args.path,
+                        args.to_deployment,
                         args.message,
                         force=args.force,
                         output_json=args.json,
@@ -3196,6 +3233,67 @@ class AgentStudioCLI:
                 json_print({"success": False, "error": str(e)})
             else:
                 error(f"Failed to promote deployment: {e}")
+            sys.exit(1)
+
+    @classmethod
+    def deployments_rollback(
+        cls,
+        base_path: str,
+        deployment: str,
+        message: str = None,
+        force: bool = False,
+        output_json: bool = False,
+    ):
+        """Rollback sandbox/main to a previous deployment."""
+        project = cls._load_project(base_path, output_json=output_json)
+
+        versions, active_deployment_hashes = project.get_deployments("sandbox")
+
+        deployment_hash = None
+        # Resolve deployment to full version hash
+        if deployment in active_deployment_hashes:
+            deployment_hash = active_deployment_hashes[deployment]
+        else:
+            deployment_hash = deployment
+
+        deployment_version = next(
+            (v for v in versions if v.get("version_hash", "")[:9] == deployment_hash[:9]),
+            None,
+        )
+
+        if not deployment_version:
+            msg = f"Deployment '{deployment}' not found in sandbox."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        deployment_metadata = deployment_version.get("deployment_metadata", {})
+        deployment_message = deployment_metadata.get("deployment_message")
+        if not output_json and not force:
+            confirm_msg = (
+                f"Rolling back sandbox to deployment '{deployment_version.get('version_hash')[:9]}: "
+                f"{deployment_message or '-'}'?"
+            )
+            console.print(f"{confirm_msg}")
+            if not questionary.confirm("Confirm?", default=False, auto_enter=False).ask():
+                warning("Aborted.")
+                sys.exit(0)
+
+        try:
+            project.rollback_deployment(
+                deployment_version.get("id"), message=message or deployment_message
+            )
+            if output_json:
+                json_print({"success": True})
+            else:
+                success(f"Sandbox rolled back to deployment {deployment}.")
+        except Exception as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(f"Failed to rollback deployment: {e}")
             sys.exit(1)
 
 
