@@ -949,7 +949,7 @@ class AgentStudioCLI:
             "-m",
             type=str,
             required=False,
-            help="Optional message to include with the promotion (e.g. release notes or changelog). If not specified, current commit message will be used instead",
+            help="Optional message to include with the promotion (e.g. release notes or changelog). If not specified, current deployment message will be used instead",
         )
         deployment_promote_parser.add_argument(
             "--force",
@@ -981,7 +981,7 @@ class AgentStudioCLI:
             "-m",
             type=str,
             required=False,
-            help="Optional message to include with the rollback (e.g. release notes or changelog). If not specified, current commit message will be used instead",
+            help="Optional message to include with the rollback (e.g. release notes or changelog). If not specified, current deployment message will be used instead",
         )
         deployment_rollback_parser.add_argument(
             "--force",
