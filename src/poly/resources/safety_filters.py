@@ -24,6 +24,8 @@ _AZURE_CATEGORY_KEYS = {
     "sexual": "sexual",
     "self_harm": "selfHarm",
 }
+# Const to auto-populate type for YAML roundtrip.
+_FILTER_TYPE = "azure"
 
 
 @dataclass
@@ -150,7 +152,7 @@ class _BaseSafetyFilters(YamlResource):
     """Shared logic for project-level and channel-level safety filters."""
 
     enabled: bool = True
-    filter_type: str = "azure"
+    filter_type: str = _FILTER_TYPE
     categories: Optional[dict] = None
 
     def __post_init__(self) -> None:
@@ -162,7 +164,6 @@ class _BaseSafetyFilters(YamlResource):
     def to_yaml_dict(self) -> dict:
         return {
             "enabled": self.enabled,
-            "type": self.filter_type,
             "categories": {
                 cat: _category_to_yaml_dict(self.categories[cat])
                 for cat in _AZURE_CATEGORY_KEYS.keys()
@@ -173,7 +174,7 @@ class _BaseSafetyFilters(YamlResource):
     def from_yaml_dict(
         cls, yaml_dict: dict, resource_id: str, name: str, **kwargs
     ) -> "_BaseSafetyFilters":
-        for required in ("enabled", "type", "categories"):
+        for required in ("enabled", "categories"):
             if required not in yaml_dict:
                 raise ValueError(
                     f"Missing required field '{required}' in safety filter config: {yaml_dict}."
@@ -187,7 +188,7 @@ class _BaseSafetyFilters(YamlResource):
             resource_id=resource_id,
             name=name,
             enabled=yaml_dict["enabled"],
-            filter_type=yaml_dict["type"],
+            filter_type=_FILTER_TYPE,
             categories=translated,
         )
 

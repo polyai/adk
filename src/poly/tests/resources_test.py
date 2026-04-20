@@ -6162,7 +6162,7 @@ class GeneralSafetyFiltersTests(unittest.TestCase):
             with self.subTest(missing=missing):
                 categories = self._full_yaml_categories()
                 del categories[missing]
-                yaml_dict = {"enabled": True, "type": "azure", "categories": categories}
+                yaml_dict = {"enabled": True, "categories": categories}
                 with self.assertRaises(ValueError) as cm:
                     GeneralSafetyFilters.from_yaml_dict(
                         yaml_dict, resource_id="sf-1", name="safety_filters"
@@ -6571,7 +6571,6 @@ class GeneralSafetyFiltersTests(unittest.TestCase):
         yaml_out = csf.to_yaml_dict()
 
         self.assertTrue(yaml_out["enabled"])
-        self.assertEqual(yaml_out["type"], "azure")
         self.assertEqual(yaml_out["categories"]["violence"]["enabled"], True)
         self.assertEqual(yaml_out["categories"]["violence"]["level"], "strict")
         self.assertEqual(yaml_out["categories"]["hate"]["enabled"], False)
