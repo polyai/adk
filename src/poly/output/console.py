@@ -12,7 +12,6 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-import click
 from rich import box
 from rich.console import Console, Group
 from rich.panel import Panel
@@ -358,10 +357,29 @@ def output_merge_conflict_table(
     console.print(wrapped)
 
 
-def edit_in_editor(initial_content: str, extension: str = ".txt") -> str:
+def edit_in_editor(initial_content: str, extension: str = ".txt", filename: str = "edit") -> str:
     """Open the user's editor with initial content and return the edited result."""
-    edited = click.edit(initial_content, extension=extension)
-    if edited is None:
+    import shlex
+    import subprocess
+    import tempfile
+
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
+
+    safe_name = filename.replace(os.sep, "_").replace("/", "_")
+    with tempfile.NamedTemporaryFile(
+        prefix=f"{safe_name}_", suffix=extension, mode="w", delete=False
+    ) as tmp:
+        tmp.write(initial_content)
+        tmp_path = tmp.name
+
+    try:
+        subprocess.run([*shlex.split(editor), tmp_path], check=True)
+        with open(tmp_path) as f:
+            edited = f.read()
+    finally:
+        os.unlink(tmp_path)
+
+    if edited == initial_content:
         raise ValueError("No changes were made.")
     return edited
 

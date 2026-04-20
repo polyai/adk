@@ -2248,7 +2248,9 @@ class AgentStudioCLI:
                 if answer == "edit":
                     try:
                         if heavy:
-                            edited = edit_in_editor(merged_version, extension=extension)
+                            edited = edit_in_editor(
+                                merged_version, extension=extension, filename=fk
+                            )
                         else:
                             edited_q = questionary.text(
                                 "Custom resolution",
