@@ -461,3 +461,38 @@ class AgentStudioInterface:
         return PlatformAPIHandler.end_chat(
             region, account_id, project_id, conversation_id, environment
         )
+
+    @staticmethod
+    def promote_deployment(
+        region: str, project_id: str, deployment_id: str, target_env: str, message: str
+    ) -> dict:
+        """Promote a deployment to the next environment.
+
+        Args:
+            region: The region name
+            project_id: The project ID
+            deployment_id: The deployment ID
+            target_env: The target environment to promote to (pre-release or live)
+            message: Message to include with the promotion
+
+        Returns:
+            dict: The API response
+        """
+        return PlatformAPIHandler.promote_deployment(
+            region, project_id, deployment_id, target_env, message
+        )
+
+    @staticmethod
+    def rollback_deployment(region: str, project_id: str, deployment_id: str, message: str) -> dict:
+        """Rollback a deployment to the previous environment.
+
+        Args:
+            region: The region name
+            project_id: The project ID
+            deployment_id: The deployment ID
+            message: Message to include with the rollback
+
+        Returns:
+            dict: The API response
+        """
+        return PlatformAPIHandler.rollback_deployment(region, project_id, deployment_id, message)
