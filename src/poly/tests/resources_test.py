@@ -3487,6 +3487,27 @@ prompt: This is a default step
             self.assertEqual(exit_cond.exit_flow_position, {"x": 10.0, "y": 10.0})
             self.assertEqual(exit_cond.description, "Exit the flow")
 
+    def test_to_yaml_dict_sorts_extracted_entities(self):
+        """Extracted entities should be sorted alphabetically in YAML output."""
+        step = FlowStep(
+            resource_id="flow-123_step-1",
+            step_id="step-1",
+            name="Test Step",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.DEFAULT_STEP,
+            asr_biasing=None,
+            dtmf_config=None,
+            conditions=[],
+            extracted_entities=["zebra", "apple", "mango"],
+            prompt="Extract some entities.",
+            position={"x": 0.0, "y": 0.0},
+        )
+
+        result = step.to_yaml_dict()
+
+        self.assertEqual(result["extracted_entities"], ["apple", "mango", "zebra"])
+
 
 class EntityTests(unittest.TestCase):
     def test_validate_entity(self):

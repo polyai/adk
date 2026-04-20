@@ -13,19 +13,19 @@ The ADK gives you a local, Git-like workflow for Agent Studio projects: pull, ed
 
 <div class="grid cards" markdown>
 
+-   **Not sure where to start?**
+
+    ---
+
+    Build a working voice agent from your website in minutes, then pull it into the ADK.
+    [Open getting started guide](get-started/get-started.md)
+
 -   **What is the ADK?**
 
     ---
 
     Understand what the ADK does and where it fits in the Agent Studio workflow.
     [Read the overview](get-started/what-is-the-adk.md)
-
--   **Installation**
-
-    ---
-
-    Install the ADK and prepare your local environment.
-    [Open installation](get-started/installation.md)
 
 -   **Build an agent**
 
@@ -56,9 +56,10 @@ This documentation follows the developer journey:
 
 If you are new to the ADK, follow this order:
 
-1. read **What is the PolyAI ADK?**
-2. check **Access and waitlist**
-3. complete **Prerequisites**
-4. follow **Installation**
-5. use **First commands**
-6. continue to **Build an agent with the ADK**
+1. read **Not sure where to start?** — especially if you do not yet have an agent in Agent Studio
+2. read **What is the PolyAI ADK?**
+3. check **Access and waitlist**
+4. complete **Prerequisites**
+5. follow **Installation**
+6. use **First commands**
+7. continue to **Build an agent with the ADK**

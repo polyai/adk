@@ -88,6 +88,7 @@ nav:
   - Home: index.md
 
   - Get started:
+      - Getting started: get-started/get-started.md
       - What is the PolyAI ADK?: get-started/what-is-the-adk.md
       - Walkthrough video: get-started/walkthrough-video.md
       - Access and waitlist: get-started/access-and-waitlist.md
@@ -127,9 +128,6 @@ nav:
       - Voice controls:
           - Speech recognition: reference/speech_recognition.md
           - Response control: reference/response_control.md
-
-  - Development:
-      - Docs workflow: development/docs.md
 
   - Legal:
       - Licensing: legal/licensing.md

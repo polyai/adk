@@ -38,6 +38,7 @@ from poly.output.console import (
     set_verbose,
     success,
     warning,
+    print_deployments,
 )
 from poly.output.json_output import json_print, commands_to_dicts
 from poly.handlers.github_api_handler import GitHubAPIHandler
@@ -321,7 +322,7 @@ class AgentStudioCLI:
             "revert",
             parents=[verbose_parent, json_parent],
             help="Revert changes in the project.",
-            description="Revert changes in the project.\n\nExamples:\n  poly revert --all\n  poly revert file1.yaml file2.yaml",
+            description="Revert changes in the project.\n\nExamples:\n  poly revert\n  poly revert file1.yaml file2.yaml",
             formatter_class=RawTextHelpFormatter,
         )
         revert_parser.add_argument(
@@ -333,15 +334,9 @@ class AgentStudioCLI:
             """,
         )
         revert_parser.add_argument(
-            "--all",
-            "-a",
-            action="store_true",
-            help="Revert all changes in the project.",
-        )
-        revert_parser.add_argument(
             "files",
             nargs="*",
-            help="List of files to revert.",
+            help="List of files to revert. If not specified, it will revert all changes.",
         )
 
         # DIFF
@@ -349,7 +344,7 @@ class AgentStudioCLI:
             "diff",
             parents=[verbose_parent, json_parent],
             help="Show the changes made to the project.",
-            description="Show the changes made to the project.\n\nExamples:\n  poly diff\n  poly diff file1.yaml",
+            description="Show the changes made to the project.\n\nExamples:\n  poly diff\n  poly diff sandbox\n  poly diff --before hash1 --after hash2\n  poly diff --files file1.yaml",
             formatter_class=RawTextHelpFormatter,
         )
         diff_parser.add_argument(
@@ -361,9 +356,26 @@ class AgentStudioCLI:
             """,
         )
         diff_parser.add_argument(
-            "files",
+            "hash",
+            nargs="?",
+            default=None,
+            type=str,
+            help="Hash of the version to compare against. If not specified, it will be inferred from the --before and --after arguments.",
+        )
+        diff_parser.add_argument(
+            "--files",
             nargs="*",
             help=("List of files to show changes for. If not specified, shows all changes."),
+        )
+        diff_parser.add_argument(
+            "--before",
+            type=str,
+            help="Name of the original branch or version to compare with. If specified without --after, it will be compared against the current local project (before vs local).",
+        )
+        diff_parser.add_argument(
+            "--after",
+            type=str,
+            help="Name of the branch or version to compare against. If specified without --before, it will be compared against the previous version",
         )
 
         # REVIEW
@@ -378,10 +390,12 @@ class AgentStudioCLI:
                 "If you provide --before and --after, it compares those versions or "
                 "branches directly.\n\n"
                 "Examples:\n"
-                "  poly review --path /path/to/project\n"
-                "  poly review --path /path/to/project --before main --after feature-branch\n"
-                "  poly review --path /path/to/project --before sandbox --after live\n"
-                "  poly review --path /path/to/project --before version-hash-1 --after version-hash-2\n"
+                "  poly review create\n"
+                "  poly review create --path /path/to/project\n"
+                "  poly review create version-hash-1\n"
+                "  poly review create --before main --after feature-branch\n"
+                "  poly review create --before sandbox --after live\n"
+                "  poly review create --before version-hash-1 --after version-hash-2\n"
                 "  poly review list\n"
                 "  poly review list --json\n"
                 "  poly review delete\n"
@@ -395,19 +409,37 @@ class AgentStudioCLI:
             default=os.getcwd(),
             help="Base path to the project. Defaults to current working directory.",
         )
-        review_parser.add_argument(
+
+        review_subparsers = review_parser.add_subparsers(dest="review_subcommand")
+
+        review_create_parser = review_subparsers.add_parser(
+            "create",
+            parents=[verbose_parent, json_parent],
+            help="Create a review gist for the current changes.",
+        )
+        review_create_parser.add_argument(
+            "hash",
+            nargs="?",
+            default=None,
+            type=str,
+            help="Hash of the version to compare against. If not specified, it will be inferred from the --before and --after arguments.",
+        )
+        review_create_parser.add_argument(
             "--before",
             type=str,
-            help="Name of the original branch or version to compare against.",
+            help="Name of the original branch or version to compare with.",
         )
-        review_parser.add_argument(
+        review_create_parser.add_argument(
             "--after",
             type=str,
             help="Name of the branch or version to compare with.",
         )
-        review_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
-        review_parser.set_defaults(review_subcommand=None)
-        review_subparsers = review_parser.add_subparsers(dest="review_subcommand")
+        review_create_parser.add_argument(
+            "--files",
+            nargs="*",
+            help=("List of files to show changes for. If not specified, shows all changes."),
+        )
+        review_create_parser.set_defaults(review_subcommand="create")
 
         review_list_parser = review_subparsers.add_parser(
             "list",
@@ -568,7 +600,7 @@ class AgentStudioCLI:
             help="Base path to run format/lint. Defaults to current working directory.",
         )
         format_parser.add_argument(
-            "files",
+            "--files",
             nargs="*",
             help="Specific files/dirs to format. If not specified, runs on the whole --path tree.",
         )
@@ -601,7 +633,7 @@ class AgentStudioCLI:
         # CHAT
         chat_parser = subparsers.add_parser(
             "chat",
-            parents=[verbose_parent],
+            parents=[verbose_parent, json_parent],
             help="Start an interactive chat session with the agent.",
             description=(
                 "Start an interactive chat session with the agent.\n\n"
@@ -609,6 +641,19 @@ class AgentStudioCLI:
                 "  poly chat\n"
                 "  poly chat --environment live\n"
                 "  poly chat --path /path/to/project -e sandbox\n"
+                "\n"
+                "Non-interactive (scripted) mode:\n"
+                "  poly chat -m 'Hello' -m 'What can you help with?'\n"
+                "  poly chat --input-file ./script.txt\n"
+                "  echo -e 'Hello\\nGoodbye' | poly chat --input-file -\n"
+                "\n"
+                "Resume an existing conversation:\n"
+                "  poly chat --conv-id <conversation_id>\n"
+                "  poly chat --conv-id <conversation_id> -m 'Follow-up message'\n"
+                "\n"
+                "Machine-readable output (emits a single JSON object when done):\n"
+                "  poly chat --json -m 'Hello'\n"
+                "  poly chat --json --input-file ./script.txt\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -631,6 +676,21 @@ class AgentStudioCLI:
             type=str,
             default=None,
             help="Name of variant to use for the chat session.",
+        )
+        chat_parser.add_argument(
+            "--lang",
+            type=str,
+            help="Language tag for both input and output messages (e.g. en-US, fr-FR). If not specified use default for project",
+        )
+        chat_parser.add_argument(
+            "--input-lang",
+            type=str,
+            help="Language tag for input messages (e.g. en-US, fr-FR). If not specified use default for project",
+        )
+        chat_parser.add_argument(
+            "--output-lang",
+            type=str,
+            help="Language tag for output messages (e.g. en-US, fr-FR). If not specified use default for project",
         )
         chat_parser.add_argument(
             "--channel",
@@ -664,8 +724,36 @@ class AgentStudioCLI:
             default=False,
             help="Show all metadata (functions, flows, and state). Equivalent to --functions --flows --state.",
         )
+        chat_parser.add_argument(
+            "--push",
+            action="store_true",
+            default=False,
+            help="Push the project before starting the chat session.",
+        )
+        chat_parser.add_argument(
+            "--message",
+            "-m",
+            action="append",
+            dest="messages",
+            metavar="MSG",
+            help="Send a message non-interactively (repeatable).",
+        )
+        chat_parser.add_argument(
+            "--input-file",
+            type=str,
+            default=None,
+            metavar="FILE",
+            help="Read messages line-by-line from a file (- for stdin).",
+        )
+        chat_parser.add_argument(
+            "--conversation-id",
+            "--conv-id",
+            type=str,
+            default=None,
+            help="Reuse an existing conversation ID instead of starting a new conversation.",
+        )
 
-        # completion
+        # COMPLETION
         completion_parser = subparsers.add_parser(
             "completion",
             formatter_class=RawTextHelpFormatter,
@@ -685,6 +773,73 @@ class AgentStudioCLI:
             "shell",
             choices=["bash", "zsh", "fish"],
             help="Shell type to generate completions for.",
+        )
+
+        # DEPLOYMENTS
+        deployments_path_parent = ArgumentParser(add_help=False)
+        deployments_path_parent.add_argument(
+            "--path",
+            type=str,
+            default=os.getcwd(),
+            help="Base path to the project. Defaults to current working directory.",
+        )
+
+        deployments_parser = subparsers.add_parser(
+            "deployments",
+            parents=[verbose_parent],
+            help="Manage deployments for the project.",
+            description=(
+                "Manage deployments for the project.\n\nExamples:\n  poly deployments list\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+
+        deployments_subparsers = deployments_parser.add_subparsers(
+            dest="deployments_subcommand", required=True
+        )
+
+        deployment_list_parser = deployments_subparsers.add_parser(
+            "list",
+            parents=[deployments_path_parent, json_parent],
+            help="List deployments for the project.",
+            description=(
+                "List deployments for the project.\n\n"
+                "Examples:\n"
+                "  poly deployments list\n"
+                "  poly deployments list --env live\n"
+                "  poly deployments list --details\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        deployment_list_parser.add_argument(
+            "--env",
+            "-e",
+            type=str,
+            default="sandbox",
+            choices=["sandbox", "pre-release", "live"],
+            help="Environment to list deployments for. Defaults to sandbox.",
+        )
+        deployment_list_parser.add_argument(
+            "--limit",
+            type=int,
+            default=10,
+            help="Number of versions to show. Defaults to 10.",
+        )
+        deployment_list_parser.add_argument(
+            "--offset",
+            type=int,
+            default=0,
+            help="Number of versions to skip. Defaults to 0.",
+        )
+        deployment_list_parser.add_argument(
+            "--hash",
+            type=str,
+            help="Hash of the version to start from.",
+        )
+        deployment_list_parser.add_argument(
+            "--details",
+            action="store_true",
+            help="Output each deployment with detailed information.",
         )
 
         return parser
@@ -737,26 +892,69 @@ class AgentStudioCLI:
                 cls.status(args.path, args.json)
 
             elif args.command == "revert":
-                cls.revert(args.path, args.all, args.files, output_json=args.json)
+                cls.revert(args.path, args.files, output_json=args.json)
 
             elif args.command == "diff":
-                cls.diff(args.path, args.files, args.json)
+                cls.diff(args.path, args.files, args.hash, args.before, args.after, args.json)
+
+            elif args.command == "chat":
+                show_all = args.metadata
+                input_messages = None
+                input_lang = args.input_lang or args.lang
+                output_lang = args.output_lang or args.lang
+                if args.input_file:
+                    try:
+                        if args.input_file == "-":
+                            with nullcontext(sys.stdin) as f:
+                                src = f.read()
+                        else:
+                            with open(args.input_file, "r", encoding="utf-8") as f:
+                                src = f.read()
+                    except FileNotFoundError:
+                        if args.json:
+                            json_print(
+                                {
+                                    "success": False,
+                                    "error": f"Input file not found: {args.input_file}",
+                                }
+                            )
+                        else:
+                            error(f"Input file not found: {args.input_file}")
+                        sys.exit(1)
+                    with src:
+                        input_messages = [line.rstrip("\r\n") for line in src]
+                elif args.messages:
+                    input_messages = args.messages
+                cls.chat(
+                    args.path,
+                    args.environment,
+                    args.variant,
+                    args.channel,
+                    input_lang=input_lang,
+                    output_lang=output_lang,
+                    show_functions=show_all or args.functions,
+                    show_flow=show_all or args.flows,
+                    show_state=show_all or args.state,
+                    push_before_chat=args.push,
+                    input_messages=input_messages,
+                    conversation_id=args.conversation_id,
+                    output_json=args.json,
+                )
 
             elif args.command == "review":
                 if args.review_subcommand == "delete":
                     cls.delete_gists(gist_id=args.id, output_json=args.json)
                 elif args.review_subcommand == "list":
                     cls.list_gists(output_json=args.json)
-                else:
-                    if args.before and args.after:
-                        cls.review(
-                            base_path=args.path,
-                            before_name=args.before,
-                            after_name=args.after,
-                            output_json=args.json,
-                        )
-                    else:
-                        cls.review(args.path, output_json=args.json)
+                elif args.review_subcommand == "create":
+                    cls.review(
+                        base_path=args.path,
+                        files=args.files,
+                        version_hash=args.hash,
+                        before=args.before,
+                        after=args.after,
+                        output_json=args.json,
+                    )
 
             elif args.command == "branch":
                 if args.branch_subcommand == "list":
@@ -807,20 +1005,20 @@ class AgentStudioCLI:
                     output=getattr(args, "output", None),
                 )
 
-            elif args.command == "chat":
-                show_all = args.metadata
-                cls.chat(
-                    args.path,
-                    args.environment,
-                    args.variant,
-                    args.channel,
-                    show_functions=show_all or args.functions,
-                    show_flow=show_all or args.flows,
-                    show_state=show_all or args.state,
-                )
-
             elif args.command == "completion":
                 cls.print_completion(args.shell)
+
+            elif args.command == "deployments":
+                if args.deployments_subcommand == "list":
+                    cls.deployments_list(
+                        args.path,
+                        args.env,
+                        args.limit,
+                        args.offset,
+                        args.hash,
+                        args.json,
+                        args.details,
+                    )
 
         except Exception as e:
             if hasattr(args, "json") and args.json:
@@ -1236,38 +1434,24 @@ class AgentStudioCLI:
     def revert(
         cls,
         base_path: str,
-        all_files: bool = False,
         files: list[str] = None,
         output_json: bool = False,
     ) -> None:
         """Revert changes in the project."""
-        if not all_files and not files:
-            if output_json:
-                json_print(
-                    {
-                        "success": False,
-                        "error": "No files specified to revert. Use --all or list files.",
-                    }
-                )
-                sys.exit(1)
-            error("No files specified to revert. Use [bold]--all[/bold] to revert all changes.")
-            return
-
         project = cls._load_project(base_path, output_json=output_json)
 
         # If relative paths are provided, convert them to absolute paths
         files = [os.path.abspath(os.path.join(os.getcwd(), file)) for file in files or []]
 
-        files_reverted = project.revert_changes(all_files=all_files, files=files)
+        files_reverted = project.revert_changes(files=files)
         if output_json:
             json_print(
                 {
-                    "success": bool(files_reverted),
+                    "success": True,
                     "files_reverted": files_reverted,
                 }
             )
             return
-
         if not files_reverted:
             plain("[muted]No changes to revert.[/muted]")
             return
@@ -1275,35 +1459,98 @@ class AgentStudioCLI:
         success("Changes reverted successfully.")
 
     @classmethod
-    def _diff(
-        cls, base_path: str, files: list[str] = None, output_json: bool = False
-    ) -> dict[str, str]:
-        """Compute local diffs; may print a human hint when there are no changes."""
+    def _compute_diff(
+        cls,
+        base_path: str,
+        files: list[str] = None,
+        before: str = None,
+        after: str = None,
+        output_json: bool = False,
+    ) -> Optional[dict[str, str]]:
+        """Compute the diffs between the project and the given versions or branches.
 
+        If before and after are not specified, it will compute the diffs between the project and the remote version.
+        If before and after are specified, it will compute the diffs between the two remote versions.
+        If only after is specified, it will compare between after and the previous version.
+        """
         project = cls._load_project(base_path, output_json=output_json)
-
         files = [os.path.abspath(os.path.join(os.getcwd(), file)) for file in files or []]
+        if not (before or after):
+            return project.get_diffs(all_files=not files, files=files)
 
-        diffs = project.get_diffs(all_files=not files, files=files) or {}
+        if not before:
+            client_env = "sandbox"
+            if after in {"pre-release", "live"}:
+                client_env = after
+            versions, deployment_hashes = project.get_deployments(client_env=client_env)
+            if after in deployment_hashes:
+                after = deployment_hashes[after]
+            if not versions:
+                error("No versions found.")
+                return
+            version_idx = next(
+                (
+                    i
+                    for i, v in enumerate(versions)
+                    if (v.get("version_hash") or "")[:9] == after[:9]
+                ),
+                None,
+            )
+            if version_idx is None:
+                error(f"Version hash '{after}' not found.")
+                return None
+            if version_idx == len(versions) - 1:
+                error("No previous version found.")
+                return None
+            previous_version_idx = version_idx + 1
+            before = (versions[previous_version_idx].get("version_hash") or "")[:9]
 
-        if not diffs and not output_json:
-            plain("[muted]No changes detected.[/muted]")
+        if not after:
+            after = "local"
 
-        return diffs
+        return project.diff_remote_named_versions(before_name=before, after_name=after)
 
     @classmethod
-    def diff(cls, base_path: str, files: list[str] = None, output_json: bool = False) -> None:
-        """Show the changes made to the project."""
-        diffs = cls._diff(base_path, files, output_json=output_json)
+    def diff(
+        cls,
+        base_path: str,
+        files: list[str] = None,
+        version_hash: str = None,
+        before: str = None,
+        after: str = None,
+        output_json: bool = False,
+    ) -> None:
+        """Show diffs for the project.
+
+        With no arguments, shows local changes against the remote version.
+        Pass a version hash to compare that version against its predecessor.
+        Use --before / --after to compare any two named versions or branches.
+        """
+        if version_hash and (before or after):
+            error("Cannot specify both hash and before/after versions.")
+            return
+
+        if version_hash:
+            after = version_hash
+
+        diffs = cls._compute_diff(base_path, files, before, after, output_json=output_json)
+
+        if not diffs:
+            if output_json and diffs is not None:
+                json_print({"success": False, "message": "No changes detected"})
+            elif output_json:
+                json_print({"success": False, "message": "Failed to compute diffs."})
+            else:
+                plain("[muted]No changes detected.[/muted]")
+            return
+
         if output_json:
             json_print(
                 {
+                    "success": True,
                     "diffs": diffs,
                 }
             )
-            return
-
-        if not diffs:
             return
 
         for file_path, diff_text in diffs.items():
@@ -1311,28 +1558,62 @@ class AgentStudioCLI:
             print_diff(diff_text)
 
     @classmethod
-    def _review(
+    def review(
         cls,
         base_path: str,
-        before_name: str = None,
-        after_name: str = None,
-    ) -> dict:
-        """Review the changes made to the project.
+        files: list[str] = None,
+        version_hash: str = None,
+        before: str = None,
+        after: str = None,
+        output_json: bool = False,
+    ) -> None:
+        """Create a GitHub gist for reviewing changes, similar to a pull request.
+
+        With no arguments, reviews local changes against the remote version.
+        Pass a version hash to review that version against its predecessor.
+        Use --before / --after to compare any two named versions or branches.
+
         Args:
-            base_path: Base path for the project (used to read project config)
-            before_name: Optional name of base branch (for comparing two remote branches)
-            after_name: Optional name of compare branch (for comparing two remote branches)
+            base_path: Base path for the project (used to read project config).
+            files: Files to include in the review. If not specified, includes all changes.
+            version_hash: Version hash to compare against its predecessor.
+            before: Base version or branch name for comparison.
+            after: Target version or branch name for comparison.
+            output_json: If True, print result as JSON instead of rich text.
         """
-        if before_name and after_name:
-            # Compare two remote versions/branches/environments
-            project = cls._load_project(base_path)
-            diffs = project.diff_remote_named_versions(before_name, after_name) or {}
+        project_name = "/".join(os.path.abspath(base_path).split(os.sep)[-2:])
+        if version_hash and (before or after):
+            error("Cannot specify both hash and before/after versions.")
+            return
+
+        if version_hash:
+            after = version_hash
+            description = f"Poly ADK: {project_name}: {version_hash}"
+
+        elif not (before or after):
+            description = f"Poly ADK: {project_name}: local → remote"
+
+        elif before and after:
+            description = f"Poly ADK: {project_name}: {before} → {after}"
+
+        elif after:
+            description = f"Poly ADK: {project_name}: {after}"
+
         else:
-            # Compare local vs remote (existing behavior)
-            diffs = cls._diff(base_path)
+            description = f"Poly ADK: {project_name}: {before} → local"
+
+        diffs = cls._compute_diff(
+            base_path, files=files, before=before, after=after, output_json=output_json
+        )
 
         if not diffs:
-            return {}
+            if output_json and diffs is not None:
+                json_print({"success": False, "message": "No changes to review."})
+            elif output_json:
+                json_print({"success": False, "message": "Failed to compute diffs."})
+            else:
+                plain("[muted]No changes detected.[/muted]")
+            return
 
         body = {}
         for file_path, diff in diffs.items():
@@ -1341,40 +1622,6 @@ class AgentStudioCLI:
             # Use the file_path as-is (it's already relative or a file path)
             safe_name = file_path.replace(os.sep, "_")
             body[f"{safe_name}.diff"] = {"content": diff}
-
-        return body
-
-    @classmethod
-    def review(
-        cls,
-        base_path: str,
-        before_name: str = None,
-        after_name: str = None,
-        output_json: bool = False,
-    ) -> None:
-        """Show the changes made to the project in a Pull Request format.
-        Args:
-            base_path: Base path for the project (used to read project config)
-            before_name: Optional name of base branch (for comparing two remote branches)
-            after_name: Optional name of compare branch (for comparing two remote branches)
-            output_json: If True, print result as a JSON object instead of rich text
-        """
-        project_name = "/".join(os.path.abspath(base_path).split(os.sep)[-2:])
-        if before_name and after_name:
-            body = cls._review(
-                base_path=base_path,
-                before_name=before_name,
-                after_name=after_name,
-            )
-            description = f"Poly ADK: {project_name}: {before_name} → {after_name}"
-        else:
-            body = cls._review(base_path)
-            description = f"Poly ADK: {project_name}: local → remote"
-
-        if not body:
-            if output_json:
-                json_print({"success": False, "message": "No changes to review."})
-            return
 
         try:
             url = GitHubAPIHandler.create_gist(
@@ -1983,12 +2230,55 @@ class AgentStudioCLI:
         environment: str = None,
         variant: str = None,
         channel: str = None,
+        input_lang: str = None,
+        push_before_chat: bool = False,
+        output_lang: str = None,
         show_functions: bool = False,
         show_flow: bool = False,
         show_state: bool = False,
+        output_json: bool = False,
+        input_messages: Optional[list[str]] = None,
+        conversation_id: Optional[str] = None,
     ) -> None:
         """Start an interactive chat session with the agent."""
         project = cls._load_project(base_path)
+
+        json_output = {}
+
+        if push_before_chat:
+            if not output_json:
+                info("Pushing project before starting chat session...")
+            push_success, output, _ = project.push_project(
+                force=False,
+                skip_validation=False,
+                dry_run=False,
+                format=False,
+                email=None,
+            )
+            if output == "No changes detected":
+                push_success = True  # Not an error if there are no changes to push
+
+            if push_success:
+                if not output_json:
+                    success("Project pushed successfully.")
+                else:
+                    json_output["push"] = {"success": True, "message": output}
+
+            if not push_success:
+                if output_json:
+                    json_output["push"] = {
+                        "success": False,
+                        "message": "Failed to push project before chat session.",
+                        "error": output,
+                    }
+                    json_print(json_output)
+                else:
+                    error(
+                        f"Failed to push {project.account_id}/{project.project_id} to Agent Studio."
+                    )
+                    plain(output)
+                sys.exit(1)
+
         branch_id = project.branch_id
         branch_label = None
 
@@ -2011,56 +2301,95 @@ class AgentStudioCLI:
             label += f" ({environment})"
         if variant:
             label += f" variant=[bold]{variant}[/bold]"
-        info(f"Starting chat for {label}...")
+        if not output_json:
+            info(f"Starting chat for {label}...")
 
+        conversations: list[dict] = []
         while True:
-            if environment == "draft":
-                info("Preparing branch deployment...")
-            try:
-                response = project.create_chat_session(
-                    environment,
-                    channel,
-                    variant,
+            if conversation_id:
+                if not output_json:
+                    info(f"Resuming chat session (conversation: {conversation_id})...")
+                response = None
+            else:
+                if environment == "draft" and not output_json:
+                    info("Preparing branch deployment...")
+                try:
+                    response = project.create_chat_session(
+                        environment,
+                        channel,
+                        variant,
+                        input_lang,
+                        output_lang,
+                    )
+                except (requests.HTTPError, ValueError) as e:
+                    if output_json:
+                        json_output["success"] = False
+                        json_output["error"] = str(e)
+                        json_print(json_output)
+                    else:
+                        error(f"Failed to create chat session: {e}")
+                    return
+
+                conversation_id = response.get("conversation_id")
+                if not conversation_id:
+                    if output_json:
+                        json_output["success"] = False
+                        json_output["error"] = "No conversation_id in response"
+                        json_output["response"] = response
+                        json_print(json_output)
+                    else:
+                        error(f"Unexpected response when creating chat: {response}")
+                    return
+
+                url = project.get_conversation_url(conversation_id)
+                greeting = response.get("response", "")
+                if not output_json:
+                    success(
+                        f"Chat session started (conversation: [link={url}]{conversation_id}[/link])"
+                    )
+                    print_turn_metadata(response, show_functions, show_flow, show_state)
+                    if greeting:
+                        plain(f"\n[bold]Agent:[/bold] {greeting}")
+
+                if response.get("conversation_ended"):
+                    if not output_json:
+                        plain("[muted]Conversation ended by agent.[/muted]")
+                    return
+
+            if not output_json:
+                plain(
+                    "[muted]Type your messages below. "
+                    "Press Ctrl+C or type '/exit' to quit. "
+                    "Type '/restart' to begin a new chat.[/muted]"
                 )
-            except (requests.HTTPError, ValueError) as e:
-                error(f"Failed to create chat session: {e}")
-                return
 
-            conversation_id = response.get("conversation_id")
-            if not conversation_id:
-                error(f"Unexpected response when creating chat: {response}")
-                return
-
-            url = project.get_conversation_url(conversation_id)
-            success(f"Chat session started (conversation: [link={url}]{conversation_id}[/link])")
-            print_turn_metadata(response, show_functions, show_flow, show_state)
-            greeting = response.get("response", "")
-            if greeting:
-                plain(f"\n[bold]Agent:[/bold] {greeting}")
-
-            if response.get("conversation_ended"):
-                plain("[muted]Conversation ended by agent.[/muted]")
-                return
-
-            plain(
-                "[muted]Type your messages below. "
-                "Press Ctrl+C or type '/exit' to quit. "
-                "Type '/restart' to begin a new chat.[/muted]"
-            )
-
-            restart = cls._run_chat_loop(
+            restart, conversation = cls._run_chat_loop(
                 project,
                 conversation_id,
                 environment,
+                input_lang=input_lang,
+                output_lang=output_lang,
                 show_functions=show_functions,
                 show_flow=show_flow,
                 show_state=show_state,
+                input_messages=input_messages,
+                output_json=output_json,
+                initial_response=response,
             )
 
-            if not restart:
-                return
+            if output_json:
+                conversations.append(conversation)
 
-            info("Restarting chat session...")
+            if not restart:
+                if output_json:
+                    json_output["conversations"] = conversations
+                    json_print(json_output)
+                return
+            if not output_json:
+                info("Restarting chat session...")
+
+            # Create a new chat session in the next loop iteration
+            conversation_id = None
 
     @classmethod
     def _run_chat_loop(
@@ -2068,26 +2397,54 @@ class AgentStudioCLI:
         project: AgentStudioProject,
         conversation_id: str,
         environment: str,
+        input_lang: str = None,
+        output_lang: str = None,
         show_functions: bool = False,
         show_flow: bool = False,
         show_state: bool = False,
-    ) -> bool:
+        input_messages: Optional[list[str]] = None,
+        output_json: bool = False,
+        initial_response: Optional[dict] = None,
+    ) -> tuple[bool, dict]:
         """Run the interactive message loop.
 
         Returns:
-            True if the user requested a restart, False otherwise.
+            A tuple of (restart, conversation) where restart is True if the user
+            requested a new session, and conversation is a dict with conversation_id,
+            url, and turns (populated when output_json=True).
         """
         conversation_ended = False
         restart = False
+        url = project.get_conversation_url(conversation_id)
+        turns: list[dict] = (
+            [
+                {
+                    "input": None,
+                    **cls._process_json_chat_reply(
+                        initial_response, show_functions, show_flow, show_state
+                    ),
+                }
+            ]
+            if output_json and initial_response is not None
+            else []
+        )
         try:
             while True:
-                try:
-                    user_input = input("\nYou: ").strip()
-                except (KeyboardInterrupt, EOFError):
-                    plain("")
-                    break
+                if input_messages is not None:
+                    if not input_messages:
+                        break
+                    user_input = input_messages.pop(0).strip()
+                    if not output_json:
+                        plain(f"\n[muted]You:[/muted] {user_input}")
+                else:
+                    try:
+                        user_input = input("\nYou: ").strip()
+                    except (KeyboardInterrupt, EOFError):
+                        if not output_json:
+                            plain("")
+                        break
 
-                if not user_input:
+                if user_input is None:
                     continue
                 if user_input.lower() == "/exit":
                     break
@@ -2097,33 +2454,112 @@ class AgentStudioCLI:
 
                 try:
                     reply = project.send_message(
-                        conversation_id,
-                        user_input,
-                        environment,
+                        conversation_id, user_input, environment, input_lang, output_lang
                     )
                 except requests.HTTPError as e:
-                    error(f"Failed to send message: {e}")
+                    if output_json:
+                        turns.append({"input": user_input, "error": str(e)})
+                    else:
+                        error(f"Failed to send message: {e}")
                     continue
 
-                print_turn_metadata(reply, show_functions, show_flow, show_state)
-                agent_text = reply.get("response") or json.dumps(reply, indent=2)
-                plain(f"\n[bold]Agent:[/bold] {agent_text}")
+                if output_json:
+                    # Filter reply for relevant fields to avoid dumping large state
+                    processed_reply = cls._process_json_chat_reply(
+                        reply, show_functions, show_flow, show_state
+                    )
+                    turns.append({"input": user_input, **processed_reply})
+                else:
+                    print_turn_metadata(reply, show_functions, show_flow, show_state)
+                    agent_text = reply.get("response") or json.dumps(reply, indent=2)
+                    plain(f"\n[bold]Agent:[/bold] {agent_text}")
 
                 if reply.get("conversation_ended"):
                     conversation_ended = True
-                    plain("[muted]Conversation ended by agent.[/muted]")
+                    if not output_json:
+                        plain("[muted]Conversation ended by agent.[/muted]")
                     break
         finally:
             if not conversation_ended:
                 try:
                     project.end_chat(conversation_id, environment)
-                    info(f"Chat session ended (conversation: {conversation_id})")
-                    url = project.get_conversation_url(conversation_id)
-                    plain(f"[info]Call Link:[/info] [link={url}]{url}[/link]")
+                    if not output_json:
+                        info(f"Chat session ended (conversation: {conversation_id})")
+                        plain(f"[info]Call Link:[/info] [link={url}]{url}[/link]")
                 except requests.HTTPError:
-                    warning("Failed to end chat session on server.")
+                    if not output_json:
+                        warning("Failed to end chat session on server.")
 
-        return restart
+        if input_messages and not restart:
+            # If the conversation ended, but there is still a restart queued in input messages
+            # Pop the remaining messages until we get to a restart
+            while input_messages:
+                msg = input_messages.pop(0).strip()
+                if msg.lower() == "/restart":
+                    restart = True
+                    break
+
+        return restart, {"conversation_id": conversation_id, "url": url, "turns": turns}
+
+    @staticmethod
+    def _process_json_chat_reply(
+        reply: dict, show_functions: bool, show_flow: bool, show_state: bool
+    ) -> dict:
+        """Process the raw reply from the chat API to extract relevant information based on the flags."""
+        processed_json = dict(
+            response=reply.get("response"),
+            conversation_ended=reply.get("conversation_ended", False),
+        )
+        turn_metadata = reply.get("metadata") or {}
+        if show_functions:
+            function_replies = []
+            for function_event in turn_metadata.get("function_events") or []:
+                function_reply = {
+                    "name": function_event.get("name"),
+                    "arguments": function_event.get("arguments"),
+                    "utterance": function_event.get("utterance"),
+                    "hangup": function_event.get("hangup"),
+                    "handoff": function_event.get("handoff"),
+                    "error": function_event.get("error"),
+                    "logs": function_event.get("logs"),
+                    "transition": function_event.get("transition"),
+                }
+                filtered_function_reply = {k: v for k, v in function_reply.items() if v is not None}
+                function_replies.append(filtered_function_reply)
+
+            processed_json["function_events"] = function_replies
+
+        if show_flow:
+            flow_reply = {}
+            in_flow = turn_metadata.get("in_flow")
+            in_step = turn_metadata.get("in_step")
+            if in_flow:
+                flow_reply["in_flow"] = in_flow
+            if in_step:
+                flow_reply["in_step"] = in_step
+            if flow_reply:
+                processed_json["flow"] = flow_reply
+
+        if show_state:
+            state_reply = []
+            for function_event in turn_metadata.get("function_events") or []:
+                sc = function_event.get("state_changes") or {}
+                added = sc.get("added", {})
+                updated = sc.get("updated", {})
+                removed = sc.get("removed", [])
+                if added or updated or removed:
+                    event_state_reply = {}
+                    if added:
+                        event_state_reply["added"] = added
+                    if updated:
+                        event_state_reply["updated"] = updated
+                    if removed:
+                        event_state_reply["removed"] = removed
+                    state_reply.append(event_state_reply)
+            if state_reply:
+                processed_json["state_changes"] = state_reply
+
+        return processed_json
 
     @classmethod
     def validate_project(cls, base_path: str, output_json: bool = False) -> None:
@@ -2174,6 +2610,64 @@ class AgentStudioCLI:
             success(f"Documentation written to {output_path}")
         else:
             plain(content)
+
+    @classmethod
+    def deployments_list(
+        cls,
+        base_path: str,
+        environment: str = "sandbox",
+        limit: int = 10,
+        offset: int = 0,
+        version_hash: str = None,
+        output_json: bool = False,
+        details: bool = False,
+    ) -> None:
+        """List deployment history for the project.
+
+        By default shows the 10 most recent deployments for the sandbox environment.
+        Pass version_hash to start the listing from a specific version. Use details for
+        full per-deployment metadata.
+
+        Args:
+            base_path: Base path for the project.
+            environment: Environment to query — sandbox, pre-release, or live.
+            limit: Maximum number of versions to show.
+            offset: Number of versions to skip before showing results.
+            version_hash: Start listing from this version hash (overrides offset).
+            output_json: If True, print result as JSON instead of rich text.
+            details: If True, print full metadata for each deployment.
+        """
+        project = cls._load_project(base_path)
+        versions, active_deployment_hashes = project.get_deployments(client_env=environment)
+
+        if not versions:
+            error("No versions found.")
+            return
+
+        if version_hash:
+            version_hash = version_hash[:9]
+            version_idx = next(
+                (
+                    i
+                    for i, v in enumerate(versions)
+                    if (v.get("version_hash") or "")[:9] == version_hash
+                ),
+                None,
+            )
+            if version_idx is None:
+                error(f"Version hash '{version_hash}' not found.")
+                return
+            offset = version_idx
+
+        versions = versions[offset : offset + limit]
+        if output_json:
+            json_output = {
+                "versions": versions,
+                "active_deployment_hashes": active_deployment_hashes,
+            }
+            json_print(json_output)
+        else:
+            print_deployments(versions, active_deployment_hashes, details=details)
 
 
 def main():
