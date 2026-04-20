@@ -358,7 +358,10 @@ def output_merge_conflict_table(
 
 
 def edit_in_editor(initial_content: str, extension: str = ".txt", filename: str = "edit") -> str:
-    """Open the user's editor with initial content and return the edited result."""
+    """Open the user's editor with initial content and return the edited result.
+
+    Uses $VISUAL, $EDITOR, or falls back to ``vi``.
+    """
     import shlex
     import subprocess
     import tempfile

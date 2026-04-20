@@ -639,7 +639,7 @@ class AgentStudioCLI:
             "--interactive",
             "-i",
             action="store_true",
-            help="Enable interactive mode for the merge.",
+            help="Enable interactive mode for resolving any merge conflicts. Set $EDITOR or $VISUAL to your preferred editor for editing merge conflict values if needed.",
         )
         branch_merge_parser.add_argument(
             "--resolutions",
