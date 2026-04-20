@@ -2819,7 +2819,7 @@ class AgentStudioCLI:
         deployment_message = deployment_metadata.get("deployment_message")
         if not output_json and not force:
             confirm_msg = (
-                f"Promoting deployment '{deployment_version.get('version_hash')[:9]}: "
+                f"Promoting deployment '{(deployment_version.get('version_hash') or '')[:9]}: "
                 f"{deployment_message or '-'}' to [info]{to_env}[/info]?"
             )
             console.print(f"{confirm_msg}")
@@ -2880,7 +2880,7 @@ class AgentStudioCLI:
         deployment_message = deployment_metadata.get("deployment_message")
         if not output_json and not force:
             confirm_msg = (
-                f"Rolling back sandbox to deployment '{deployment_version.get('version_hash')[:9]}: "
+                f"Rolling back sandbox to deployment '{(deployment_version.get('version_hash') or '')[:9]}: "
                 f"{deployment_message or '-'}'?"
             )
             console.print(f"{confirm_msg}")
