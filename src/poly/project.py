@@ -2784,3 +2784,43 @@ class AgentStudioProject:
         self.save_config()
 
         return True
+
+    def promote_deployment(self, deployment_id: str, target_env: str, message: str = None) -> bool:
+        """Promote a deployment to specified environment.
+
+        Args:
+            deployment_id (str): The ID of the deployment to promote.
+            target_env (str): The target environment to promote to (pre-release or live)
+            message (str, optional): Optional message to include with the promotion
+
+        Returns:
+            bool: True if the promotion was successful, False otherwise
+        """
+        if target_env not in {"pre-release", "live"}:
+            raise ValueError("target_env must be either 'pre-release' or 'live'.")
+        self.api_handler.promote_deployment(
+            region=self.region,
+            project_id=self.project_id,
+            deployment_id=deployment_id,
+            target_env=target_env,
+            message=message,
+        )
+        return True
+
+    def rollback_deployment(self, deployment_id: str, message: str = None) -> bool:
+        """Rollback sandbox/main to a previous deployment.
+
+        Args:
+            deployment_id (str): The ID of the deployment to rollback.
+            message (str, optional): Optional message to include with the rollback
+
+        Returns:
+            bool: True if the rollback was successful, False otherwise
+        """
+        self.api_handler.rollback_deployment(
+            region=self.region,
+            project_id=self.project_id,
+            deployment_id=deployment_id,
+            message=message,
+        )
+        return True
