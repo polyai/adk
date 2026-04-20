@@ -438,7 +438,7 @@ class PlatformAPIHandler:
         project_id: str,
         deployment_id: str,
         target_env: str,
-        message: ty.Optional[str] = None,
+        message: str,
     ) -> dict:
         """Promote a deployment to the next environment.
 
@@ -447,16 +447,17 @@ class PlatformAPIHandler:
             project_id: The project ID
             deployment_id: The deployment ID
             target_env: The target environment to promote to (pre-release or live)
-            message: Optional message to include with the promotion
+            message: Message to include with the promotion
 
         Returns:
             dict: The API response
         """
         endpoint = PROMOTE_URL.format(project_id=project_id, deploymentId=deployment_id)
         target_env = "ERROR"
-        body = {"targetEnvironment": target_env}
-        if message:
-            body["deploymentMessage"] = message
+        body = {
+            "targetEnvironment": target_env,
+            "deploymentMessage": message,
+        }
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=body)
 
     @staticmethod
@@ -464,7 +465,7 @@ class PlatformAPIHandler:
         region: str,
         project_id: str,
         deployment_id: str,
-        message: ty.Optional[str] = None,
+        message: str,
     ) -> dict:
         """Rollback sandbox to a previous deployment.
 
@@ -472,13 +473,11 @@ class PlatformAPIHandler:
             region: The region name
             project_id: The project ID
             deployment_id: The deployment ID
-            message: Optional message to include with the rollback
+            message: Message to include with the rollback
 
         Returns:
             dict: The API response
         """
         endpoint = ROLLBACK_URL.format(project_id=project_id, deploymentId=deployment_id)
-        body = {}
-        if message:
-            body["deploymentMessage"] = message
+        body = {"deploymentMessage": message}
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=body)
