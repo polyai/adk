@@ -878,6 +878,9 @@ class AgentStudioCLI:
             action="store_true",
             help="Force the promotion without confirmation. This is default in non-interactive mode (e.g. when --json is used)",
         )
+        deployment_promote_parser.add_argument(
+            "--debug", action="store_true", help="Display debug logs."
+        )
 
         deployment_rollback_parser = deployments_subparsers.add_parser(
             "rollback",
