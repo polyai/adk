@@ -162,6 +162,7 @@ class _BaseSafetyFilters(YamlResource):
         self.categories = _parse_categories(self.categories)
 
     def to_yaml_dict(self) -> dict:
+        # Type:azure is not displayed in YAML.
         return {
             "enabled": self.enabled,
             "categories": {
@@ -188,7 +189,7 @@ class _BaseSafetyFilters(YamlResource):
             resource_id=resource_id,
             name=name,
             enabled=yaml_dict["enabled"],
-            filter_type=_FILTER_TYPE,
+            filter_type=_FILTER_TYPE,  # Populated from default const.
             categories=translated,
         )
 
