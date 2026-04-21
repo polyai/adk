@@ -91,18 +91,26 @@ nav:
       - Getting started: get-started/get-started.md
       - What is the PolyAI ADK?: get-started/what-is-the-adk.md
       - Walkthrough video: get-started/walkthrough-video.md
-      - Access and waitlist: get-started/access-and-waitlist.md
       - Prerequisites: get-started/prerequisites.md
       - Installation: get-started/installation.md
       - First commands: get-started/first-commands.md
 
   - Tutorials:
+      - Tutorials: tutorials/index.md
       - Build an agent with the ADK: tutorials/build-an-agent.md
+      - Build a restaurant booking agent: tutorials/restaurant-booking-agent.md
 
   - Core concepts:
       - Working locally: concepts/working-locally.md
+      - Resource architecture: concepts/resource-architecture.md
       - Multi-user workflows and guardrails: concepts/multi-user-and-guardrails.md
       - Anti-patterns: concepts/anti-patterns.md
+
+  - Examples:
+      - Examples: examples/index.md
+      - Confirm caller ID before SMS: examples/confirm-caller-id-before-sms.md
+      - Venue-specific goodbye: examples/venue-specific-goodbye.md
+      - SMS link with transfer fallback: examples/sms-or-transfer-fallback.md
 
   - Reference:
       - CLI reference: reference/cli.md

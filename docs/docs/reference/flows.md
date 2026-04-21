@@ -84,7 +84,7 @@ flows/
         └── {function_name}.py
 ~~~
 
-Directory and file names are cleaned to lowercase snake_case.
+The flow directory name is derived from the flow's `name` field, converted to lowercase snake_case. A flow named `Booking Flow` must live in `flows/booking_flow/`. If the directory name does not match, the ADK will not recognize the flow.
 
 ## Flow configuration
 
@@ -365,11 +365,32 @@ Logic reused across flows is usually better placed in global functions.
     Learn how global functions, transition functions, and function steps differ.
     [Open functions](./functions.md)
 
+-   **Topics**
+
+    ---
+
+    See how topics trigger flow entry via `conv.goto_flow` in their actions.
+    [Open topics](./topics.md)
+
 -   **Entities**
 
     ---
 
     See how structured data collection fits into flow steps and conditions.
     [Open entities](./entities.md)
+
+-   **Return values reference (platform)**
+
+    ---
+
+    All supported function return shapes used in flow transitions — utterance, hangup, goto_flow, and combined dicts.
+    [Open return values reference](https://docs.poly.ai/tools/return-values){ target="_blank" rel="noopener" }
+
+-   **Conversation object reference (platform)**
+
+    ---
+
+    Full reference for `conv.goto_flow`, `conv.exit_flow`, `flow.goto_step`, and all other flow navigation methods.
+    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object){ target="_blank" rel="noopener" }
 
 </div>

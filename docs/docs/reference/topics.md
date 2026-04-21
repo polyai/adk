@@ -126,7 +126,6 @@ This is the only place inside a topic where you should use references and behavi
 | Syntax | Meaning |
 |---|---|
 | `{{fn:function_name}}` | Call a global function |
-| `{{fn:function_name}}('arg')` | Call a global function with an argument |
 | `{{attr:attribute_name}}` | Read a variant attribute |
 | `{{twilio_sms:template_name}}` | Reference an SMS template |
 | `{{ho:handoff_name}}` | Reference a handoff |
@@ -179,11 +178,25 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
     Learn how global functions referenced in topic actions are defined.
     [Open functions](./functions.md)
 
+-   **Flows**
+
+    ---
+
+    See how topics hand off to structured processes using `conv.goto_flow`.
+    [Open flows](./flows.md)
+
 -   **Variants**
 
     ---
 
     See how variant attributes can be referenced from topic actions.
     [Open variants](./variants.md)
+
+-   **Managed Topics (platform)**
+
+    ---
+
+    How topics are retrieved, ranked, and injected — RAG mechanics, topic types, and retrieval tuning.
+    [Open Managed Topics overview](https://docs.poly.ai/managed-topics/introduction){ target="_blank" rel="noopener" }
 
 </div>

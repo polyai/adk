@@ -103,18 +103,16 @@ poly init
 poly init --region <region> --account_id <account_id> --project_id <project_id>
 ~~~
 
-This creates the local project structure and writes the metadata needed to connect the folder to Agent Studio.
+This creates the project directory at `{account_id}/{project_id}` inside your current working directory, pulls the current configuration, and writes the metadata needed to connect the folder to Agent Studio. Change into the project directory before running any further commands.
 
-### Step 2 - Pull remote config and set up the environment
+### Step 2 - Set up the environment
 
-Pull the current configuration into your local project.
+Configure any API keys or environment variables needed for the project. Use `poly pull` at any time to refresh the local project with the latest remote configuration.
 
 ~~~bash
 poly pull
 poly pull -f
 ~~~
-
-At this point, configure any API keys or environment variables needed for the project.
 
 !!! note "Run commands from the project folder"
 
@@ -124,9 +122,9 @@ At this point, configure any API keys or environment variables needed for the pr
 
 Start an interactive chat session to confirm the connection works and inspect runtime behavior.
 
-!!! warning "Chat runs against main on Sandbox"
+!!! info "What poly chat connects to at this stage"
 
-    `poly chat` connects to the **main branch** of your Sandbox environment in Agent Studio — not your local files, and not your current feature branch. At this stage it is useful for confirming the connection works. To chat against your own changes, push and merge your branch in Agent Studio first.
+    At this point in the setup you are on the main branch, so `poly chat` connects to your sandbox environment in Agent Studio — not local uncommitted files. This is useful for confirming the connection works. To chat against your own feature branch changes, push them first with `poly push`, then run `poly chat` from that branch (or use `poly chat --push` to push and chat in one step).
 
 ~~~bash
 poly chat
@@ -242,11 +240,11 @@ poly push --skip-validation
 
 ### Step 8 - Test against sandbox
 
-Once your branch is merged in Agent Studio, test the agent by chatting with it against the Sandbox environment.
+Once your branch is merged in Agent Studio, test the agent by chatting with it against the sandbox environment.
 
 !!! warning "Merge before chatting"
 
-    `poly chat` connects to the **main branch** of your Sandbox — not your feature branch. Push your changes with `poly push`, merge the branch in Agent Studio, then run `poly chat`.
+    `poly chat` connects to the **main branch** of your sandbox — not your feature branch. Push your changes with `poly push`, merge the branch in Agent Studio, then run `poly chat`.
 
 ~~~bash
 poly chat --environment sandbox

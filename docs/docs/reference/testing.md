@@ -10,7 +10,7 @@ Testing helps confirm that your project changes behave as expected before they a
 </p>
 
 !!! warning "There is no local runtime"
-    The ADK does not execute your agent on your local machine. There is no `poly serve` command or local simulator. All agent execution happens inside Agent Studio's Sandbox environment. To test runtime behavior, push your changes and use `poly chat`, or test interactively through Agent Studio.
+    The ADK does not execute your agent on your local machine. There is no `poly serve` command or local simulator. All agent execution happens inside Agent Studio's sandbox environment. To test runtime behavior, push your changes and use `poly chat`, or test interactively through Agent Studio.
 
 In the ADK workflow, testing usually sits alongside validation and manual review in Agent Studio.
 

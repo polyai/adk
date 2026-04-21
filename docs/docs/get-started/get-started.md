@@ -11,7 +11,7 @@ If you do not yet have an agent in Agent Studio, or if you are feeling stuck bef
 
 ## New to PolyAI — build your first agent
 
-If you do not yet have access to Agent Studio or an existing agent, start here. See [Access and waitlist](./access-and-waitlist.md) for details on the ADK Early Access Program and what you need to get started.
+If you do not yet have access to Agent Studio or an existing agent, start here.
 
 ### Step 1 — Get access to Agent Studio
 
@@ -47,9 +47,9 @@ Once the agent is ready, test it inside Agent Studio to confirm it's filled in w
 
 To pull the agent into the ADK, you need two identifiers from Agent Studio. You can find them in the URL when your project is open:
 
-```
+~~~
 https://studio.poly.ai/<account_id>/<project_id>/...
-```
+~~~
 
 Copy both values — you will need them in the next step.
 
@@ -63,9 +63,9 @@ The ADK uses an API key to authenticate with Agent Studio. Click **Back to agent
 
 Then set it as an environment variable:
 
-```bash
+~~~bash
 export POLY_ADK_KEY=<your-api-key>
-```
+~~~
 
 To make it permanent, add the export line to your shell profile (`~/.zshrc` or `~/.bashrc`).
 
@@ -78,7 +78,7 @@ poly init --account_id <account_id> --project_id <project_id>
 poly pull
 ```
 
-[`poly init`](../reference/cli.md#poly-init) connects your local folder to the Agent Studio project. [`poly pull`](../reference/cli.md#poly-pull) downloads all the configuration — flows, topics, agent settings, and more — as local YAML and Python files.
+[`poly init`](../reference/cli.md#poly-init) creates a subdirectory at `{account_id}/{project_id}` inside your current directory, then pulls the current configuration automatically. [`poly pull`](../reference/cli.md#poly-pull) can be used to refresh it at any time. Change into the project directory before running any further commands.
 
 You now have a fully editable local copy of your agent.
 
@@ -113,10 +113,10 @@ If you already have an agent in Agent Studio — built in the browser editor, by
 3. Find your `account_id` and `project_id` in the Agent Studio URL.
 4. Run:
 
-    ```bash
+    ~~~bash
     poly init --account_id <account_id> --project_id <project_id>
     poly pull
-    ```
+    ~~~
 
 Your local folder will mirror the project in Agent Studio and you can begin editing immediately.
 

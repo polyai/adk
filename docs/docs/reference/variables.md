@@ -29,7 +29,7 @@ This means variables are not manually declared in a separate configuration file.
 
 ## Why variables matter
 
-Variables allow you to carry state across turns and reuse values in prompts, topics, and templates.
+Use variables to carry state across turns and reuse values in prompts, topics, and templates.
 
 <div class="grid cards" markdown>
 
