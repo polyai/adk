@@ -229,6 +229,20 @@ poly revert
 poly revert <file>
 ~~~
 
+!!! warning "`poly format` may crash on projects with YAML sub-resources"
+
+    Running `poly format` on a project that contains YAML-defined sub-resources (such as `config/handoffs.yaml` or `voice/configuration.yaml`) can produce errors like:
+
+    ~~~text
+    [Errno 20] Not a directory: '.../config/handoffs.yaml/handoffs/Default_handoff'
+    ~~~
+
+    This is a known bug in how the formatter resolves paths inside YAML files. Use `--files` to format specific Python files instead:
+
+    ~~~bash
+    poly format --files functions/my_function.py
+    ~~~
+
 !!! warning "`poly validate` may fail on platform-generated functions"
 
     Projects built via Quick Agent Setup often include server-generated functions such as `handoff.py` or `hangup.py` whose signatures do not declare a `conv: Conversation` parameter. The ADK's local validator will reject these, blocking `poly push`.
@@ -377,7 +391,7 @@ The ADK acts as the bridge between your local environment and Agent Studio. It l
 !!! tip "Run `poly docs --all` before generating any files"
     Immediately after pulling, run `poly docs --all` to produce a complete resource reference. Without it, a coding agent has no schema context for resource structure and field names, and will hallucinate them. This should be the first thing the coding tool does after `poly pull`.
 
-    Note that `poly docs --all` documents the ADK's resource layer (topics, flows, entities, variants, and so on) but does not include the runtime `Conversation` object API — methods like `conv.goto_flow`, `conv.send_sms_template`, `conv.call_handoff`, and `conv.variant`. For those, direct the coding agent to the [conv object reference](https://docs.poly.ai/tools/classes/conv-object){ target="_blank" rel="noopener" } on the platform docs.
+    Note that `poly docs --all` documents the ADK's resource layer (topics, flows, entities, variants, and so on) but does not cover every runtime `Conversation` method. In particular, `conv.send_sms_template`, `conv.send_sms`, and `conv.caller_number` are not present in the output. For the full runtime API, direct the coding agent to the [conv object reference](https://docs.poly.ai/tools/classes/conv-object){ target="_blank" rel="noopener" } on the platform docs.
 
 ### Step 4 - Give the coding tool its context
 

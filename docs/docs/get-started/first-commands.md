@@ -131,6 +131,26 @@ poly branch switch <branch-name> --force
 
 This discards no actual work — the variables entries are virtual and will reappear after the next pull.
 
+### `poly chat` returns a 404 on a feature branch
+
+If you run `poly chat` while on a feature branch (before merging it in Agent Studio), the session endpoint returns a 404:
+
+~~~text
+Error: 404 ... /branches/<id>/sequence
+~~~
+
+This is a platform limitation — branch-level chat is not currently supported via the CLI. To test your changes, push them with `poly push`, merge the branch in the Agent Studio UI, then run:
+
+~~~bash
+poly chat --environment sandbox
+~~~
+
+### `poly branch delete` fails with a 404 or requires a TTY
+
+`poly branch delete` triggers the same platform endpoint as branch chat. If the endpoint is unavailable, the delete will fail with a 404 after the confirmation prompt. Additionally, running `poly branch delete` in a non-interactive environment (for example, from a script) throws `[Errno 22] Invalid argument` because the command requires a terminal for its confirmation prompt.
+
+If you are stuck with a branch you cannot delete from the CLI, delete it through the Agent Studio UI instead.
+
 ## Next step
 
 Continue to the command reference for a complete listing, or go straight to the tutorial to see a real workflow.
