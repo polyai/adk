@@ -365,6 +365,13 @@ Logic reused across flows is usually better placed in global functions.
     Learn how global functions, transition functions, and function steps differ.
     [Open functions](./functions.md)
 
+-   **Topics**
+
+    ---
+
+    See how topics trigger flow entry via `conv.goto_flow` in their actions.
+    [Open topics](./topics.md)
+
 -   **Entities**
 
     ---

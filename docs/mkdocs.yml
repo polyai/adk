@@ -96,6 +96,7 @@ nav:
       - First commands: get-started/first-commands.md
 
   - Tutorials:
+      - Tutorials: tutorials/index.md
       - Build an agent with the ADK: tutorials/build-an-agent.md
       - Build a restaurant booking agent: tutorials/restaurant-booking-agent.md
 

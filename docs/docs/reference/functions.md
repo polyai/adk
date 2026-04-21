@@ -169,11 +169,6 @@ Functions can influence the conversation in several ways.
 | `return {"transition": {...}}` | Navigates via returned transition |
 | `return {"utterance": "...", "end_turn": False}` | Speaks and immediately continues |
 
-!!! info "Full return value reference"
-
-    The platform documentation covers all supported return shapes, including combined `utterance` + `hangup`, transition objects, and edge cases.
-    [Return values reference →](https://docs.poly.ai/tools/return-values)
-
 !!! warning "Use `end_turn=False` carefully"
 
     Only use `end_turn=False` when the agent must continue immediately in the same turn. Do not use it when the user is expected to answer.
@@ -340,39 +335,11 @@ conv.log.error(...)
     Learn how state variables are discovered and referenced.
     [Open variables](./variables.md)
 
--   **Conversation object reference**
+-   **Topics**
 
     ---
 
-    Full reference for all `conv` attributes and methods — `caller_number`, `send_sms_template`, `write_metric`, `call_handoff`, and more.
-    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object)
-
--   **Return values reference**
-
-    ---
-
-    All supported function return shapes — strings, dicts, utterance, hangup, and transition objects.
-    [Open return values reference](https://docs.poly.ai/tools/return-values)
-
--   **conv.log reference**
-
-    ---
-
-    Structured logging and PII-scoped diagnostics available inside any function.
-    [Open conv.log reference](https://docs.poly.ai/tools/classes/conv-log)
-
--   **Start function**
-
-    ---
-
-    Lifecycle hook that runs before the first user input — initialize state, read SIP headers, route calls.
-    [Open start function reference](https://docs.poly.ai/tools/start-function)
-
--   **End function**
-
-    ---
-
-    Lifecycle hook that runs asynchronously after the call — log outcomes, write to CRM, trigger follow-ups.
-    [Open end function reference](https://docs.poly.ai/tools/end-function)
+    See how functions are called from topic actions using `{{fn:...}}`.
+    [Open topics](./topics.md)
 
 </div>

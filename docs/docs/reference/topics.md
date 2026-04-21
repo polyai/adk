@@ -178,6 +178,13 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
     Learn how global functions referenced in topic actions are defined.
     [Open functions](./functions.md)
 
+-   **Flows**
+
+    ---
+
+    See how topics hand off to structured processes using `conv.goto_flow`.
+    [Open flows](./flows.md)
+
 -   **Variants**
 
     ---
