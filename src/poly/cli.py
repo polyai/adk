@@ -2319,7 +2319,7 @@ class AgentStudioCLI:
         interactive: bool = False,
         resolutions_file: str = None,
     ):
-        """Merge a branch into the current branch, with optional conflict resolutions."""
+        """Merge the current branch into main, with optional conflict resolutions."""
         if message is None or (isinstance(message, str) and not message.strip()):
             if output_json:
                 json_print({"success": False, "error": "Merge message is required."})

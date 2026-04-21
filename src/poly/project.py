@@ -2600,7 +2600,7 @@ class AgentStudioProject:
     def merge_branch(
         self, message: str, conflict_resolutions: list[dict[str, Any]] = None
     ) -> tuple[bool, list[str], list[str]]:
-        """Merge a branch into the current branch in the project.
+        """Merge the current branch into main in the project.
 
         Args:
             message (str): The merge commit message.

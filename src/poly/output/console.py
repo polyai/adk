@@ -342,14 +342,14 @@ def output_merge_conflict_table(
         table.add_column("Status", width=18, no_wrap=True)
         table.add_column("In resource", justify="right", width=14)
 
-    current_resolution_paths = {tuple(r["path"]) for r in resolutions} if resolutions else set()
+    current_resolution_paths = {r["path"] for r in resolutions} if resolutions else set()
 
     for conflict in conflicts:
         visual = conflict.get("visual_path")
         if not visual and conflict.get("path"):
             visual = os.sep.join(conflict["path"])
         if show_type:
-            if tuple(conflict.get("path", [])) in current_resolution_paths:
+            if conflict.get("path") in current_resolution_paths:
                 status_cell = "[success]Resolution given[/success]"
             else:
                 auto = conflict.get("can_auto_merge")
