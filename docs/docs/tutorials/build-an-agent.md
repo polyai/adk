@@ -85,6 +85,8 @@ When an Agent Studio project is linked locally, it follows this general structur
 │   └── {function_name}.py
 ├── topics/
 │   └── {topic_name}.yaml
+├── variables/                          # Virtual — no files on disk
+│   └── {variable_name}
 └── project.yaml
 ~~~
 
@@ -191,7 +193,7 @@ Add or edit [knowledge-base topics](../reference/topics.md) used for retrieval.
 
 #### Agent settings
 
-Update the [personality, role, and rules](../reference/agent_settings.md) that define the agent's global behavior.
+Update the [personality, role, and rules](../reference/agent_settings.md) that define the agent’s global behavior.
 
 #### Flows
 
@@ -220,12 +222,22 @@ Inspect the local changes before pushing.
 ~~~bash
 poly status
 poly diff
-poly diff --files <file>
+poly diff <file>
 poly validate
 poly format
-poly revert
+poly revert --all
 poly revert <file>
 ~~~
+
+!!! warning "`poly validate` may fail on platform-generated functions"
+
+    Some projects include functions generated or modified server-side (such as `handoff.py` or `hangup.py`) whose signatures do not match the ADK's local validator. If `poly validate` reports that a function definition was not found in code, use `--skip-validation` on push:
+
+    ~~~bash
+    poly push --skip-validation
+    ~~~
+
+    This bypasses local signature checking and lets the platform validate the push instead.
 
 ### Step 7 - Push changes
 
@@ -256,8 +268,8 @@ poly chat --environment sandbox --functions --flows
 Review, refine, and test again. You can also use the review command to share diffs with teammates.
 
 ~~~bash
-poly review create
-poly review create --before main --after my-feature
+poly review
+poly review --before main --after my-feature
 ~~~
 
 Make test calls, inspect transcripts, refine prompts, flows, and functions, and then re-push.
@@ -365,7 +377,7 @@ Provide the coding tool with the information you gathered earlier.
 Include:
 
 - project-specific requirements
-- the URL to the business's public API documentation
+- the URL to the business’s public API documentation
 - relevant internal context
 - useful patterns or best practices from previous projects
 
@@ -454,13 +466,12 @@ At that point, the agent is live.
 | **poly pull** | Pull remote config into the local project |
 | **poly push** | Push local changes to Agent Studio |
 | **poly status** | List changed files |
-| **poly diff** | Show diffs (local vs remote, version hash, or `--before`/`--after`) |
-| **poly revert** | Revert local changes (all by default, or specific files) |
+| **poly diff** | Show diffs |
+| **poly revert** | Revert local changes |
 | **poly branch** | Branch management |
-| **poly format** | Format resource files (all or `--files` for specific files) |
+| **poly format** | Format resource files |
 | **poly validate** | Validate project configuration locally |
-| **poly review** | Diff review page: `create`, `list`, `delete` |
-| **poly deployments** | View deployment history (`list`, with `--env`, `--limit`, `--details`) |
+| **poly review** | Create a diff review page |
 | **poly chat** | Start an interactive session with the agent |
 | **poly docs** | Output resource documentation |
 

@@ -93,6 +93,7 @@ acme-corp/maison-reservations/
 │   └── rules.txt
 ├── config/
 │   └── handoffs.yaml
+├── variables/                          # Virtual — no files on disk
 └── voice/
     ├── configuration.yaml
     └── speech_recognition/
@@ -206,6 +207,10 @@ entities:
 ~~~
 
 These four entities will be collected across the steps of the booking flow.
+
+!!! info "`relative_date` and round-trips"
+
+    The `relative_date: true` field is valid and is sent to the platform on push. However, date entity config may not be returned by the platform on pull, so after a `poly pull` you may see `config: {}` for the `reservation_date` entity. This is a known platform behavior and does not affect how the entity works at runtime.
 
 !!! info "Automatic ASR biasing"
 
@@ -459,7 +464,16 @@ New files:
   /Users/yourname/maison/acme-corp/maison-reservations/functions/start_booking_flow.py
   /Users/yourname/maison/acme-corp/maison-reservations/functions/start_function.py
   /Users/yourname/maison/acme-corp/maison-reservations/topics/Make a Reservation.yaml
+  /Users/yourname/maison/acme-corp/maison-reservations/variables/booking_confirmed
+  /Users/yourname/maison/acme-corp/maison-reservations/variables/booking_date
+  /Users/yourname/maison/acme-corp/maison-reservations/variables/booking_name
+  /Users/yourname/maison/acme-corp/maison-reservations/variables/booking_size
+  /Users/yourname/maison/acme-corp/maison-reservations/variables/booking_time
 ~~~
+
+!!! info "Variables in `poly status`"
+
+    The `variables/` entries appear because the ADK scans your function code for `conv.state.*` assignments and tracks each one as a variable. These entries are virtual — they do not correspond to files on disk and are not something you need to create or manage. This is expected output.
 
 To see the exact content difference for any file, run `poly diff`:
 
@@ -484,19 +498,22 @@ Pushing local changes for acme-corp/maison-reservations...
 
 The agent is now deployed to the `booking-flow` branch. Sandbox remains on `main` and is unaffected.
 
-## Part 12 — Test with poly chat
+## Part 12 — Merge and test
 
-Test the agent against your branch:
+`poly chat` connects to the **main branch** of your sandbox — not a feature branch. To test the booking flow, merge `booking-flow` to `main` in the Agent Studio UI first.
+
+!!! note "Merging requires Agent Studio"
+
+    There is no `poly merge` command. Open your project in Agent Studio, switch to the `booking-flow` branch, and merge it through the interface. Once merged, the changes are live in sandbox.
+
+After merging, run `poly chat` against the sandbox environment:
 
 ~~~bash
-poly chat
+poly chat --environment sandbox
 ~~~
 
-Because you are on the `booking-flow` branch (not `main`), `poly chat` connects to the branch's deployed state by default.
-
-
 ~~~text
-Starting chat for acme-corp/maison-reservations branch=booking-flow...
+Starting chat for acme-corp/maison-reservations (sandbox)...
 Type your message. Press Ctrl+C to exit.
 
 Agent: Welcome to Maison. How can I help you today?
@@ -532,11 +549,9 @@ Agent: Done — you'll receive a confirmation shortly. We look forward to welcom
     - `poly chat --functions` — shows which functions the model called each turn
     - `poly chat --push` — pushes your latest changes before starting the session, useful during rapid iteration
 
-## Part 13 — Merge to main
+## Part 13 — After the merge
 
-When you are happy with the agent on the branch, merge it to `main` in Agent Studio. The ADK does not have a `poly merge` command — merging happens in the Agent Studio UI.
-
-After merging, switch back to `main` locally:
+After merging in Agent Studio, switch back to `main` locally:
 
 ~~~bash
 poly branch switch main
