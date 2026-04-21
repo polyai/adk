@@ -3,11 +3,9 @@ title: Prerequisites
 description: Understand the access requirements and local tools needed before using the PolyAI ADK.
 ---
 
+If you haven't already, start with the [Getting started](./get-started.md) page for an overview of what the ADK is and how to sign up for Agent Studio. If you run into any issues generating your API key, contact [developers@poly-ai.com](mailto:developers@poly-ai.com).
+
 Before using the **PolyAI ADK**, you need the correct **platform access** and the required **local tools**.
-
-Access is provided by your PolyAI contact:
-
-- `developers@poly-ai.com`
 
 ## Generate API key
 

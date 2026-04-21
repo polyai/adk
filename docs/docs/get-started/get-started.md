@@ -11,11 +11,11 @@ If you do not yet have an agent in Agent Studio, or if you are feeling stuck bef
 
 ## New to PolyAI — build your first agent
 
-If you do not yet have access to Agent Studio or an existing agent, start here. See [Access and waitlist](./access-and-waitlist.md) for details on the ADK Early Access Program and what you need to get started.
+If you do not yet have access to Agent Studio or an existing agent, start here.
 
 ### Step 1 — Get access to Agent Studio
 
-Go to [studio.poly.ai](https://studio.poly.ai) and sign up. You can sign up with your email or login with SSO.
+Go to [studio.poly.ai](https://studio.poly.ai) and sign up. You can sign up with your email or log in with SSO.
 
 ![Agent Studio sign up for the first time](../assets/agent-studio-login.png)
 
