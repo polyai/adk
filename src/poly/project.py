@@ -239,8 +239,6 @@ class AgentStudioProject:
         else:
             last_updated = datetime.now()
 
-        utils._migrate_legacy_topic_files(root_path)
-
         return cls(
             region=config_dict.get("region", ""),
             account_id=config_dict.get("account_id", ""),
@@ -274,8 +272,6 @@ class AgentStudioProject:
     def from_dict(cls, data: dict, root_path: str) -> "AgentStudioProject":
         """Load whole project class from a dictionary"""
         resources, not_loaded_resources = cls._load_resources_from_status_dict(data)
-
-        utils._migrate_legacy_topic_files(root_path)
 
         file_structure_info = cls.compute_file_structure_info(resources)
 
