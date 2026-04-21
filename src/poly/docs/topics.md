@@ -6,12 +6,15 @@ Topics are the agent's knowledge base, queried via RAG (retrieval-augmented gene
 
 ## Location
 
-`topics/`. One file per topic: `topics/{Topic Name}.yaml`.
+`topics/`. One file per topic: `topics/{topic_name}.yaml`.
+
+Directory and file names are cleaned to lowercase snake_case. For example, a topic named `"Opening Hours & Locations"` is stored as `topics/opening_hours_locations.yaml`.
 
 ## Structure
 
-Each topic has four fields:
+Each topic has six fields:
 
+- **name** (string): The display name of the topic. This is the canonical name — the filename is derived from it (cleaned to lowercase snake_case).
 - **enabled** (bool): Whether the topic is active. Default: `true`.
 - **example_queries**: List of example user inputs that should trigger this topic.
 - **content**: Factual information retrieved via RAG. No function calls or `$variables` allowed here.
@@ -19,6 +22,7 @@ Each topic has four fields:
 
 ## Example
 ```yaml
+name: Opening Hours & Locations
 enabled: true
 example_queries:
   - What are your opening hours?
@@ -37,6 +41,12 @@ actions: |-
   ## If the user wants to speak to someone
   Use {{fn:transfer_to_agent}} to connect them with a representative.
 ```
+
+## Naming and filenames
+
+- The `name` field in the YAML is the canonical topic name and can contain spaces, punctuation, and mixed case (e.g. `"Opening Hours & Locations"`).
+- The filename is cleaned to lowercase snake_case (e.g. `opening_hours_locations.yaml`).
+- The filename must match the cleaned version of `name` — a mismatch raises a validation error on `pull` or `push`.
 
 ## Example queries
 - Maximum **20 queries**.
