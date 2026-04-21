@@ -14,6 +14,7 @@ REGIONS = [
     "us-1",
     "euw-1",
     "uk-1",
+    "studio",
     "staging",
     "dev",
 ]
@@ -46,6 +47,15 @@ class AgentStudioInterface:
         self.project_id = project_id
         if region and account_id and project_id:
             self.sync_client = SyncClientHandler(region, account_id, project_id, branch_id)
+
+    @staticmethod
+    def get_accessible_regions() -> list[str]:
+        """Get the regions accessible to the current API key.
+
+        Returns:
+            list[str]: Region names the user has access to.
+        """
+        return PlatformAPIHandler.get_accessible_regions(REGIONS)
 
     @staticmethod
     def get_accounts(region: str) -> dict[str, str]:
