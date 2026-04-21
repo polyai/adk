@@ -1,0 +1,16 @@
+{
+  "name": "polyai-plugins",
+  "owner": {
+    "name": "PolyAI"
+  },
+  "metadata": {
+    "description": "PolyAI developer tools and plugins for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "poly-adk",
+      "source": "./",
+      "description": "Teaches Claude how to use the poly CLI to manage PolyAI voice agents — commands, resource formats, and workflows."
+    }
+  ]
+}

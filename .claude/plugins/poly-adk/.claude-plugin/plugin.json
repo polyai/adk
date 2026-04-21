@@ -1,0 +1,11 @@
+{
+  "name": "poly-adk",
+  "version": "1.0.0",
+  "description": "Teaches Claude how to use the poly CLI to manage PolyAI voice agents — commands, resource formats, and workflows.",
+  "author": {
+    "name": "PolyAI"
+  },
+  "repository": "https://github.com/polyai/adk",
+  "license": "MIT",
+  "keywords": ["polyai", "adk", "voice-agent", "agent-studio"]
+}
