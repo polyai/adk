@@ -90,6 +90,10 @@ All SMS templates are defined in a single `config/sms_templates.yaml` file under
 sms_templates:
   - name: booking_link
     text: "Here's your booking link: https://book.example.com"
+    env_phone_numbers:
+      sandbox: ""
+      pre_release: ""
+      live: ""
 ~~~
 
 ## Related pages

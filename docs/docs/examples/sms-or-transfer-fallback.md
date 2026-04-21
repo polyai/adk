@@ -63,6 +63,22 @@ actions: |-
   Use {{fn:send_link_or_transfer}} once they respond.
 ~~~
 
+## config/handoffs.yaml
+
+The `destination` value passed to `conv.call_handoff` must match the `name` of a handoff defined in `config/handoffs.yaml`. All handoffs are defined in a single file under the `handoffs` key.
+
+~~~yaml
+handoffs:
+  - name: agent_queue
+    description: Transfer to live agent queue
+    is_default: true
+    sip_config:
+      method: refer
+      phone_number: "+441234567890"
+~~~
+
+See the [handoffs reference](../reference/handoffs.md) for all SIP method options and field details.
+
 ## Per-environment sender number
 
 If the sender number differs between environments, the simplest approach is to configure `env_phone_numbers` directly in `config/sms_templates.yaml` — no code required:
