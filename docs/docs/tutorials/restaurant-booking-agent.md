@@ -372,7 +372,13 @@ This is what `{{fn:start_booking_flow}}` in your rules resolves to. When the mod
 
 ## Part 6 — Add a start function
 
-The start function runs once at the beginning of every call, before the first user input. Use it to initialize state. Create `functions/start_function.py`:
+The start function runs once at the beginning of every call, before the first user input. Use it to initialize state.
+
+!!! warning "`start_function.py` may already exist"
+
+    Projects built via Quick Agent Setup in Agent Studio often ship with a pre-populated `start_function.py` containing significant initialization logic. If the file already exists, add your initialization code to it rather than replacing it.
+
+Create or update `functions/start_function.py`:
 
 ~~~python
 from _gen import *  # <AUTO GENERATED>
@@ -549,6 +555,10 @@ Agent: Done — you'll receive a confirmation shortly. We look forward to welcom
     - `poly chat --functions` — shows which functions the model called each turn
     - `poly chat --push` — pushes your latest changes before starting the session, useful during rapid iteration
 
+!!! warning "`poly chat --push` can create conflict markers"
+
+    If the remote state has diverged from your local copy, `poly chat --push` may write merge-conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) directly into your YAML files. If this happens, open the affected file, resolve the conflict by hand, and push again before continuing.
+
 ## Part 13 — After the merge
 
 After merging in Agent Studio, switch back to `main` locally:
@@ -559,6 +569,10 @@ poly pull
 ~~~
 
 Pulling after a merge keeps your local copy in sync with the normalized remote state.
+
+!!! info "YAML key order changes after a round-trip"
+
+    After a push and pull, the platform returns YAML with keys in alphabetical order. Fields you wrote in logical order (such as `name:` before `description:`) will be reordered. This is cosmetic and does not affect behavior, but `poly diff` will show changes after the first round-trip even when the content is the same.
 
 ## What to explore next
 

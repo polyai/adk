@@ -20,6 +20,10 @@ topics/Send Booking Link.yaml         ← topic that triggers the flow
 
 Stash the raw `caller_number` at call start so it is available throughout the conversation.
 
+!!! warning "`start_function.py` may already exist"
+
+    If your project was set up via Quick Agent Setup, `start_function.py` likely already contains initialization logic. Add the `conv.state.caller_number` line to the existing function rather than replacing the file.
+
 ~~~python
 from _gen import *  # <AUTO GENERATED>
 

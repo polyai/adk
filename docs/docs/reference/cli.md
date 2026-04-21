@@ -43,20 +43,6 @@ poly init --base-path /path/to/projects
 poly init --format
 ~~~
 
-#### Region selection
-
-When no `--region` flag is supplied, `poly init` probes all known regions concurrently and displays only those your API key has access to. A loading spinner is shown while the check runs.
-
-Available regions include: `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, and `dev`.
-
-- If your key has access to **one region**, that region is selected automatically and a confirmation message is shown.
-- If your key has access to **multiple regions**, an interactive menu is displayed.
-- If your key has access to **no regions**, an error is displayed and the command exits with a non-zero code.
-
-#### Account selection
-
-When no `--account_id` flag is supplied and only one account is accessible in the selected region, that account is selected automatically. If multiple accounts are available, an interactive search menu is displayed.
-
 ### `poly pull`
 
 Pull the latest project configuration from Agent Studio.
@@ -89,6 +75,10 @@ poly push --format
 
 When pushing creates a new branch (for example, when pushing to Agent Studio for the first time on a branch), the CLI displays a message with the new branch name.
 
+!!! info "`poly push` exits non-zero when there is nothing to push"
+
+    If there are no local changes, `poly push` reports `No changes detected` and exits with a non-zero code. This is expected behavior, not an error. CI scripts that check the exit code should handle this case explicitly.
+
 When using JSON output (`--json`), the response includes `new_branch_name` and `new_branch_id` fields if a new branch was created.
 
 ### `poly status`
@@ -103,34 +93,21 @@ poly status
 
 Show differences between the local project and the remote version.
 
-With no arguments, shows local changes against the remote version. Pass a version hash to compare that version against its predecessor. Use `--before` and `--after` to compare any two named versions, environments, or branches.
-
 Examples:
 
 ~~~bash
 poly diff
-poly diff sandbox
-poly diff --before hash1 --after hash2
-poly diff --files file1.yaml
+poly diff file1.yaml
 ~~~
-
-#### `poly diff` flags
-
-| Flag | Description |
-|---|---|
-| `hash` | Optional positional. Hash of the version to compare against its predecessor. Cannot be combined with `--before`/`--after`. |
-| `--files` | List of files to show changes for. If not specified, shows all changes. |
-| `--before` | Name of the original branch, environment, or version hash to compare with. If specified without `--after`, compares against the current local project. |
-| `--after` | Name of the branch, environment, or version hash to compare against. If specified without `--before`, compares against the previous version. |
 
 ### `poly revert`
 
-Revert local changes. With no arguments, reverts all changes. Pass specific files to revert only those.
+Revert local changes.
 
 Examples:
 
 ~~~bash
-poly revert
+poly revert --all
 poly revert file1.yaml file2.yaml
 ~~~
 
@@ -193,12 +170,8 @@ Examples:
 
 ~~~bash
 poly format
-poly format --files file1.py
+poly format file1.py
 ~~~
-
-| Flag | Description |
-|---|---|
-| `--files` | Specific files or directories to format. If not specified, runs on the whole project tree. |
 
 ### `poly validate`
 
@@ -210,31 +183,17 @@ poly validate
 
 ### `poly review`
 
-Create and manage GitHub Gist diff reviews of Agent Studio project changes.
+Create a GitHub Gist of Agent Studio project changes to share with others.
 
-#### `poly review create`
-
-Create a GitHub Gist for reviewing changes, similar to a pull request.
-
-With no arguments, creates a gist comparing local changes against the remote project. Pass a version hash to review that version against its predecessor. Use `--before` and `--after` to compare any two named versions, environments, or branches.
+Running `poly review` without a subcommand creates a new gist comparing local changes against the remote project. Use `--before` and `--after` to compare two remote branches or versions. Use `--debug` to enable DEBUG-level logging for troubleshooting.
 
 Examples:
 
 ~~~bash
-poly review create
-poly review create --path /path/to/project
-poly review create version-hash-1
-poly review create --before main --after feature-branch
-poly review create --before sandbox --after live
-poly review create --before version-hash-1 --after version-hash-2
+poly review
+poly review --before main --after feature-branch
+poly review --debug
 ~~~
-
-| Flag | Description |
-|---|---|
-| `hash` | Optional positional. Hash of the version to compare against its predecessor. Cannot be combined with `--before`/`--after`. |
-| `--before` | Name of the original branch, environment, or version hash to compare with. |
-| `--after` | Name of the branch, environment, or version hash to compare against. |
-| `--files` | List of files to include in the review. If not specified, includes all changes. |
 
 #### `poly review list`
 
@@ -254,32 +213,6 @@ poly review delete
 poly review delete --id GIST_ID
 poly review delete --json
 ~~~
-
-### `poly deployments`
-
-Manage deployment history for the project.
-
-#### `poly deployments list`
-
-List deployment history for the project. Shows the most recent deployments for the specified environment, with Rich console output including sandbox / pre-release / live badges to indicate currently active versions.
-
-Examples:
-
-~~~bash
-poly deployments list
-poly deployments list --env live
-poly deployments list --details
-poly deployments list --limit 20 --offset 10
-poly deployments list --hash abc123456
-~~~
-
-| Flag | Description |
-|---|---|
-| `--env`, `-e` | Environment to list deployments for. Choices: `sandbox`, `pre-release`, `live`. Defaults to `sandbox`. |
-| `--limit` | Maximum number of versions to show. Defaults to `10`. |
-| `--offset` | Number of versions to skip before showing results. Defaults to `0`. |
-| `--hash` | Start listing from this version hash (overrides `--offset`). |
-| `--details` | Print full metadata for each deployment instead of the compact table view. |
 
 ### `poly chat`
 
@@ -392,7 +325,7 @@ poly push --json
 poly pull --json
 poly validate --json
 poly diff --json
-poly revert --json
+poly revert --json --all
 poly branch list --json
 poly branch create my-feature --json
 poly branch switch my-feature --json
@@ -403,7 +336,6 @@ poly format --json
 poly init --region us-1 --account_id 123 --project_id my_project --json
 poly chat --json -m 'Hello'
 poly chat --json --input-file ./script.txt
-poly deployments list --json
 ~~~
 
 When `--json` is used:
@@ -422,7 +354,7 @@ The exact fields vary by command. Common fields include:
 | `poly push --json` | `success`, `message`, `dry_run` |
 | `poly pull --json` | `success`, `files_with_conflicts` |
 | `poly validate --json` | `valid`, `errors` |
-| `poly diff --json` | `success`, `diffs` |
+| `poly diff --json` | `diffs` |
 | `poly revert --json` | `success`, `files_reverted` |
 | `poly branch list --json` | `current_branch`, `branches` |
 | `poly branch create --json` | `success`, `new_branch_id`, `branch_name` |
@@ -432,7 +364,6 @@ The exact fields vary by command. Common fields include:
 | `poly format --json` | `success`, `check_only`, `format_errors`, `affected`, `ty_ran`, `ty_returncode`, `ty_timed_out` |
 | `poly init --json` | `success`, `root_path` |
 | `poly chat --json` | `conversations` (array); optional `push` (when `--push` is used) |
-| `poly deployments list --json` | `versions`, `active_deployment_hashes` |
 
 For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
 
@@ -441,8 +372,6 @@ Error responses always include `{ "success": false, "error": "...", "traceback":
 !!! info "`init` with `--json` requires explicit flags"
 
     When using `poly init --json`, you must supply `--region`, `--account_id`, and `--project_id` explicitly. Interactive prompts are not supported in JSON mode.
-
-    If no `--region` is supplied in JSON mode and no accessible regions are found, the error response will be `{ "success": false, "error": "No accessible regions found for your API key." }`.
 
 #### `poly chat --json` output shape
 
@@ -506,7 +435,7 @@ A typical CLI workflow looks like this:
 4. inspect changes with `poly status` and `poly diff`
 5. validate with `poly validate`
 6. push with `poly push`
-7. optionally review with `poly review create`
+7. optionally review with `poly review`
 8. test or chat with the agent using `poly chat`
 
 !!! info "Run commands from the project folder"

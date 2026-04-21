@@ -231,13 +231,20 @@ poly revert <file>
 
 !!! warning "`poly validate` may fail on platform-generated functions"
 
-    Some projects include functions generated or modified server-side (such as `handoff.py` or `hangup.py`) whose signatures do not match the ADK's local validator. If `poly validate` reports that a function definition was not found in code, use `--skip-validation` on push:
+    Projects built via Quick Agent Setup often include server-generated functions such as `handoff.py` or `hangup.py` whose signatures do not declare a `conv: Conversation` parameter. The ADK's local validator will reject these, blocking `poly push`.
+
+    The cleanest fix is to add `conv: Conversation` to the function signature yourself:
+
+    ~~~python
+    def handoff(conv: Conversation):
+        ...
+    ~~~
+
+    Alternatively, skip local validation and let the platform validate the push instead:
 
     ~~~bash
     poly push --skip-validation
     ~~~
-
-    This bypasses local signature checking and lets the platform validate the push instead.
 
 ### Step 7 - Push changes
 
@@ -369,6 +376,8 @@ The ADK acts as the bridge between your local environment and Agent Studio. It l
 
 !!! tip "Run `poly docs --all` before generating any files"
     Immediately after pulling, run `poly docs --all` to produce a complete resource reference. Without it, a coding agent has no schema context for resource structure and field names, and will hallucinate them. This should be the first thing the coding tool does after `poly pull`.
+
+    Note that `poly docs --all` documents the ADK's resource layer (topics, flows, entities, variants, and so on) but does not include the runtime `Conversation` object API — methods like `conv.goto_flow`, `conv.send_sms_template`, `conv.call_handoff`, and `conv.variant`. For those, direct the coding agent to the [conv object reference](https://docs.poly.ai/tools/classes/conv-object){ target="_blank" rel="noopener" } on the platform docs.
 
 ### Step 4 - Give the coding tool its context
 
