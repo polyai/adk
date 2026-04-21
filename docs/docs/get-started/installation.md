@@ -12,20 +12,18 @@ We recommend installing in a virtual environment rather than installing to the g
 Run the following to create a virtual environment:
 
 ~~~bash
-uv venv --python=3.13 --seed
+uv venv --python=3.14 --seed
 ~~~
 
-!!! info "Python 3.14 users: suppress SyntaxWarnings"
+!!! info "Suppress SyntaxWarnings from platform-generated code"
 
-    The ADK supports Python 3.14, but platform-generated code uses regex patterns (such as `\d`) that trigger `SyntaxWarning` in Python 3.14's stricter string handling. This produces 40+ warning lines on every command and obscures normal output.
+    Platform-generated code uses regex patterns (such as `\d`) that trigger `SyntaxWarning` in Python 3.14's stricter string handling. This produces 40+ warning lines on every `poly` command and obscures normal output.
 
-    To suppress them, set this environment variable before running any `poly` command:
+    To suppress them, set this before running any `poly` command:
 
     ~~~bash
     export PYTHONWARNINGS=ignore
     ~~~
-
-    Or use Python 3.13, which does not produce these warnings.
 
 Activate the virtual environment:
 
