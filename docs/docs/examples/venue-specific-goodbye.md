@@ -96,6 +96,17 @@ Then access it in the function via `conv.variant.closing_message` as shown above
 
     The platform controls which variant is the default. After a push and pull, the `is_default` assignment in your local file may differ from what you wrote — the server picks the canonical default. This does not affect runtime behavior, but expect the value to change on round-trip.
 
+## Testing variants
+
+Use the `--variant` flag with `poly chat` to verify that each variant produces the correct closing message:
+
+~~~bash
+poly chat --variant london
+poly chat --variant new_york
+~~~
+
+The agent should end each session with the closing message configured for that variant. If `conv.variant` is `None` (for example, if no variants are pushed yet), the function falls back to the default string.
+
 ## Related pages
 
 <div class="grid cards" markdown>

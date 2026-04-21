@@ -75,9 +75,13 @@ poly push --format
 
 When pushing creates a new branch (for example, when pushing to Agent Studio for the first time on a branch), the CLI displays a message with the new branch name.
 
-!!! info "`poly push` exits non-zero when there is nothing to push"
+!!! info "Call Link URL in chat output may be malformed"
 
-    If there are no local changes, `poly push` reports `No changes detected` and exits with a non-zero code. This is expected behavior, not an error. CI scripts that check the exit code should handle this case explicitly.
+    Each chat session prints a Call Link URL for viewing the conversation in Agent Studio. On some deployments this URL has a doubled hostname (for example, `https://studio.studio.poly.ai/…`), which produces a 404. The conversation is still recorded — open Agent Studio directly and navigate to the conversation from there.
+
+!!! info "`poly push` reports an error message when there is nothing to push"
+
+    If there are no local changes, `poly push` prints `Error: Failed to push` and `No changes detected`. The exit code is 0, so CI scripts that check return codes are not affected. The message is misleading but the command has not actually failed.
 
 When using JSON output (`--json`), the response includes `new_branch_name` and `new_branch_id` fields if a new branch was created.
 
@@ -141,6 +145,12 @@ poly branch delete
 poly branch delete my-feature
 ~~~
 
+!!! warning "`poly branch delete` requires a TTY and may fail with a 404"
+
+    `poly branch delete` opens an interactive confirmation prompt and must be run in a terminal. In non-interactive environments (scripts, CI), it throws `[Errno 22] Invalid argument`.
+
+    On some projects, the delete command hits the same platform endpoint as branch chat and returns a 404 after the confirmation. If this happens, delete the branch through the Agent Studio UI instead.
+
 #### `poly branch create`
 
 Creates a new branch. By default the branch is sourced from sandbox main.
@@ -161,6 +171,10 @@ When `--env live` or `--env pre-release` is specified:
 !!! warning "Use `--env live` with caution"
 
     Branching from a live deployment snapshot will overwrite your local project with the live state. Merging this branch back to main may roll back changes that were introduced after the snapshot was taken.
+
+!!! info "Only one active branch is allowed at a time"
+
+    Agent Studio supports one non-main branch per project. Attempting to create a second branch while one already exists returns an error. Merge or delete the existing branch in Agent Studio before creating a new one.
 
 ### `poly format`
 
@@ -296,6 +310,7 @@ Use language flags to specify the expected input and output language when chatti
 | `--lang` | Set both input and output language. |
 | `--input-lang` | Set input language only. |
 | `--output-lang` | Set output language only. |
+| `--variant` | Name of the variant to use for the chat session. |
 | `--functions` | Show function events in output. |
 | `--flows` | Show flow metadata in output. |
 | `--state` | Show state changes in output. |
@@ -314,6 +329,27 @@ poly docs --all --output rules.md
 ~~~
 
 Use `--output` to write the documentation to a local file. This is useful when working with AI coding tools — pass the output file as context to give the agent accurate knowledge of ADK resource types and conventions.
+
+### `poly deployments`
+
+List deployments for the project.
+
+Examples:
+
+~~~bash
+poly deployments list
+poly deployments list --env live
+poly deployments list --details
+~~~
+
+| Flag | Description |
+|---|---|
+| `--env` | Environment to list deployments for. Choices: `sandbox`, `pre-release`, `live`. Defaults to `sandbox`. |
+| `--details` | Show additional deployment details. |
+
+!!! tip "Use `--details` for readable output"
+
+    The default tabular view may wrap long URLs across multiple rows, making it unreadable in narrow terminals. `--details` produces a vertical layout that is easier to read.
 
 ## Machine-readable JSON output
 

@@ -63,6 +63,10 @@ actions: |-
   Use {{fn:send_link_or_transfer}} once they respond.
 ~~~
 
+!!! warning "Testing via webchat: `caller_number` will be empty"
+
+    `conv.state.caller_number` is populated from the inbound call's caller ID, which is only available in voice sessions. When testing with `poly chat` (which uses webchat by default), `caller_number` is always empty — `wants_sms: True` will always hit the "unable to send" branch. To test the SMS path, use `poly chat --channel voice`, or mock the value by setting `conv.state.caller_number` directly in `start_function.py` for local testing.
+
 ## config/handoffs.yaml
 
 The `destination` value passed to `conv.call_handoff` must match the `name` of a handoff defined in `config/handoffs.yaml`. All handoffs are defined in a single file under the `handoffs` key.

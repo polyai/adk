@@ -499,7 +499,7 @@ poly push
 
 ~~~text
 Pushing local changes for acme-corp/maison-reservations...
-✓ Pushed acme-corp/maison-reservations to Agent Studio.
+Pushed acme-corp/maison-reservations to Agent Studio.
 ~~~
 
 The agent is now deployed to the `booking-flow` branch. Sandbox remains on `main` and is unaffected.

@@ -111,9 +111,13 @@ poly push --help
 
 After `poly init` or `poly pull`, `poly status` may report `variables/` entries as new files — for example, `variables/caller_number` or `variables/verified_record`. These are **virtual**: the ADK scans function code for `conv.state.*` assignments and tracks each one as a variable resource. No corresponding files exist on disk. This is expected and does not mean you have changes to push.
 
+### `poly status` shows platform-generated functions as modified
+
+After a fresh `poly init` or `poly pull`, `poly status` may report functions such as `functions/get_api_keys.py` or `functions/check_otp.py` as modified, even though you have not touched them. The diff is typically a single stripped blank line introduced by the platform. These are harmless — the ADK and the platform have slightly different whitespace conventions for generated code. You can push through them or ignore them.
+
 ### `poly branch switch` reports uncommitted changes
 
-If `poly status` shows phantom `variables/` entries and you try to switch branches, the ADK may block the switch:
+If `poly status` shows phantom `variables/` entries or modified platform functions and you try to switch branches, the ADK may block the switch:
 
 ~~~text
 Cannot switch branches with uncommitted changes. Use --force to switch and discard changes.
@@ -126,6 +130,26 @@ poly branch switch <branch-name> --force
 ~~~
 
 This discards no actual work — the variables entries are virtual and will reappear after the next pull.
+
+### `poly chat` returns a 404 on a feature branch
+
+If you run `poly chat` while on a feature branch (before merging it in Agent Studio), the session endpoint returns a 404:
+
+~~~text
+Error: 404 ... /branches/<id>/sequence
+~~~
+
+This is a platform limitation — branch-level chat is not currently supported via the CLI. To test your changes, push them with `poly push`, merge the branch in the Agent Studio UI, then run:
+
+~~~bash
+poly chat --environment sandbox
+~~~
+
+### `poly branch delete` fails with a 404 or requires a TTY
+
+`poly branch delete` triggers the same platform endpoint as branch chat. If the endpoint is unavailable, the delete will fail with a 404 after the confirmation prompt. Additionally, running `poly branch delete` in a non-interactive environment (for example, from a script) throws `[Errno 22] Invalid argument` because the command requires a terminal for its confirmation prompt.
+
+If you are stuck with a branch you cannot delete from the CLI, delete it through the Agent Studio UI instead.
 
 ## Next step
 
