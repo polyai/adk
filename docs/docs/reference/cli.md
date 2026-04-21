@@ -41,6 +41,20 @@ poly init --base-path /path/to/projects
 poly init --format
 ~~~
 
+#### Region selection
+
+When no `--region` flag is supplied, `poly init` probes all known regions concurrently and displays only those your API key has access to. A loading spinner is shown while the check runs.
+
+Available regions include: `us-1`, `euw-1`, `uk-1`, `studio`, `staging`, and `dev`.
+
+- If your key has access to **one region**, that region is selected automatically and a confirmation message is shown.
+- If your key has access to **multiple regions**, an interactive menu is displayed.
+- If your key has access to **no regions**, an error is displayed and the command exits with a non-zero code.
+
+#### Account selection
+
+When no `--account_id` flag is supplied and only one account is accessible in the selected region, that account is selected automatically. If multiple accounts are available, an interactive search menu is displayed.
+
 ### `poly pull`
 
 Pull the latest project configuration from Agent Studio.
@@ -425,6 +439,8 @@ Error responses always include `{ "success": false, "error": "...", "traceback":
 !!! info "`init` with `--json` requires explicit flags"
 
     When using `poly init --json`, you must supply `--region`, `--account_id`, and `--project_id` explicitly. Interactive prompts are not supported in JSON mode.
+
+    If no `--region` is supplied in JSON mode and no accessible regions are found, the error response will be `{ "success": false, "error": "No accessible regions found for your API key." }`.
 
 #### `poly chat --json` output shape
 
