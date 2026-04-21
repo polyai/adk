@@ -8,7 +8,7 @@ Step-by-step guides for real workflows.
 
     ---
 
-    Follow the end-to-end workflow from project initialisation to production deployment.
+    Follow the end-to-end workflow from project initialization to production deployment.
     [Open the tutorial](./build-an-agent.md)
 
 -   **Build a restaurant booking agent**
