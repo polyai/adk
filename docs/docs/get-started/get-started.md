@@ -15,7 +15,9 @@ If you do not yet have access to Agent Studio or an existing agent, start here.
 
 ### Step 1 — Get access to Agent Studio
 
-Go to [poly.ai/waitlist](https://poly.ai/waitlist) and sign up using a work email address for instant access. If your organization already has a PolyAI workspace, ask your PolyAI contact to add you directly. See [Access and waitlist](./access-and-waitlist.md) for details on the Early Access Program and what you need to get started.
+Go to [studio.poly.ai](https://studio.poly.ai) and sign up. You can sign up with your email or log in with SSO.
+
+![Agent Studio sign up for the first time](../assets/agent-studio-login.png)
 
 ### Step 2 — Create an agent from your website
 
@@ -53,7 +55,9 @@ Copy both values — you will need them in the next step.
 
 ### Step 5 — Generate an API key
 
-The ADK uses an API key to authenticate with Agent Studio. In your workspace, open the **API Keys** tab (next to the **Users** tab) and click **+ API key** to generate one.
+![Go back to key](../assets/go-back-to-key.png)
+
+The ADK uses an API key to authenticate with Agent Studio. Click **Back to agents** to return to your **workspace**, open the **API Keys** tab (next to the **Users** tab) and click **+ API key** to generate one.
 
 ![Generating an API key in Agent Studio — API Keys tab with the + API key button highlighted](../assets/api-key-data-access.png)
 

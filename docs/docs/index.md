@@ -47,7 +47,7 @@ The ADK gives you a local, Git-like workflow for Agent Studio projects: pull, ed
 
 This documentation follows the developer journey:
 
-- understanding what the ADK is and how to get access
+- understanding what the ADK is and how it fits into Agent Studio
 - installing it and running the first commands
 - building, reviewing, and deploying agents
 - reference for all CLI commands, resource types, and tooling
@@ -58,8 +58,7 @@ If you are new to the ADK, follow this order:
 
 1. read **Not sure where to start?** — especially if you do not yet have an agent in Agent Studio
 2. read **What is the PolyAI ADK?**
-3. check **Access and waitlist**
-4. complete **Prerequisites**
-5. follow **Installation**
-6. use **First commands**
-7. continue to **Build an agent with the ADK**
+3. complete **Prerequisites**
+4. follow **Installation**
+5. use **First commands**
+6. continue to **Build an agent with the ADK**
