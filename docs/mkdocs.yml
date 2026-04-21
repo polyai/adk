@@ -97,6 +97,7 @@ nav:
 
   - Tutorials:
       - Build an agent with the ADK: tutorials/build-an-agent.md
+      - Build a restaurant booking agent: tutorials/restaurant-booking-agent.md
 
   - Core concepts:
       - Working locally: concepts/working-locally.md
