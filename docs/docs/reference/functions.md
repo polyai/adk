@@ -105,9 +105,11 @@ Global and transition functions use decorators to describe themselves to the mod
 
 Function steps do not support `@func_description` or `@func_parameter`.
 
-!!! warning "All parameters must have a type annotation"
+!!! warning "All parameters must have a type annotation and no default value"
 
     Every parameter decorated with `@func_parameter` must have a Python type annotation (for example, `booking_ref: str`). Parameters without an annotation, or with an unsupported annotation such as `Optional[str]`, will raise a `ValueError` when the function is processed. Only the types listed in the table below are supported.
+
+    Default values are also not permitted. The ADK validates the function by constructing the expected signature string — `def name(conv: Conversation, param: type)` — and checking it appears literally in the code. A default value such as `param: str = ""` breaks this check and causes push to fail with `Function definition '...' not found in code`. If a parameter is logically optional, pass an explicit empty string or zero from the LLM call site instead.
 
 ## Parameter types
 

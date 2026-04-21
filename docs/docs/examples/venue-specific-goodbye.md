@@ -44,7 +44,9 @@ from _gen import *  # <AUTO GENERATED>
 )
 def goodbye_and_hang_up(conv: Conversation):
     # Use a variant attribute for site-specific closings, or a plain string for a single site.
-    closing = conv.variant.closing_message if conv.variant else "Thanks for calling. Goodbye!"
+    # getattr guards against AttributeError if the attribute is missing for the current variant.
+    default_closing = "Thanks for calling. Goodbye!"
+    closing = getattr(conv.variant, "closing_message", default_closing) if conv.variant else default_closing
     return {
         "utterance": closing,
         "hangup": True,
