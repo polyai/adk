@@ -137,4 +137,18 @@ conv.state.booking_ref = "ABC123"
     See how deterministic code can set variables and trigger SMS sending.
     [Open functions](./functions.md)
 
+-   **SMS setup (platform)**
+
+    ---
+
+    Configuring SMS channels, sender numbers, opt-out handling, and full template options.
+    [Open SMS setup](https://docs.poly.ai/sms/introduction)
+
+-   **Conversation object reference (platform)**
+
+    ---
+
+    Full reference for `conv.send_sms_template`, `conv.send_sms`, and all other `conv` methods.
+    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object)
+
 </div>

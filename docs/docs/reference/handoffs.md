@@ -151,4 +151,11 @@ Use {{fn:transfer_call}} when the user needs to be transferred to a specialist.
     Learn how handoffs are referenced in rules.
     [Open agent settings](./agent_settings.md)
 
+-   **Conversation object reference (platform)**
+
+    ---
+
+    Full reference for `conv.call_handoff` — destination, reason, utterance, and SIP header overrides.
+    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object)
+
 </div>

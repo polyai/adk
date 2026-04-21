@@ -200,4 +200,11 @@ Common uses include:
     Use variant attributes in greetings and disclaimers.
     [Open voice settings](./voice_settings.md)
 
+-   **Variant management (platform)**
+
+    ---
+
+    How variants are routed at runtime — SIP header routing, default selection, and `conv.variant` access.
+    [Open variant management](https://docs.poly.ai/variant-management/introduction)
+
 </div>

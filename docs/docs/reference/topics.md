@@ -185,4 +185,11 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
     See how variant attributes can be referenced from topic actions.
     [Open variants](./variants.md)
 
+-   **Managed Topics (platform)**
+
+    ---
+
+    How topics are retrieved, ranked, and injected — RAG mechanics, topic types, and retrieval tuning.
+    [Open Managed Topics overview](https://docs.poly.ai/managed-topics/introduction)
+
 </div>
