@@ -85,8 +85,6 @@ actions: |-
 
 Logic like "if `{{vrbl:caller_number}}` is available, do X; otherwise do Y" is unreliable when the variable is empty. The model cannot reliably detect an empty variable from prompt text alone. Write the branch in Python instead.
 
-See [checking variable presence in prose](./anti-patterns.md#checking-variable-presence-in-prose) for details.
-
 ## Where `start_function` fits
 
 `start_function.py` runs once at call start, before the first user input. It is the right place for:

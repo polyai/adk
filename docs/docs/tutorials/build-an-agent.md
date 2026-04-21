@@ -105,16 +105,14 @@ poly init --region <region> --account_id <account_id> --project_id <project_id>
 
 This creates the project directory at `{account_id}/{project_id}` inside your current working directory, pulls the current configuration, and writes the metadata needed to connect the folder to Agent Studio. Change into the project directory before running any further commands.
 
-### Step 2 - Pull remote config and set up the environment
+### Step 2 - Set up the environment
 
-Pull the current configuration into your local project.
+Configure any API keys or environment variables needed for the project. Use `poly pull` at any time to refresh the local project with the latest remote configuration.
 
 ~~~bash
 poly pull
 poly pull -f
 ~~~
-
-At this point, configure any API keys or environment variables needed for the project.
 
 !!! note "Run commands from the project folder"
 
