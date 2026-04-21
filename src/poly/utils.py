@@ -12,7 +12,7 @@ import os
 import re
 from typing import Callable, Optional
 
-from poly.resources import resource_utils, Resource, ResourceMapping, Function, FunctionStep, Topic
+from poly.resources import resource_utils, Resource, ResourceMapping, Function, FunctionStep
 
 logger = logging.getLogger(__name__)
 
@@ -404,39 +404,55 @@ def compute_variable_references(
     return var_refs
 
 
-def _migrate_legacy_topic_files(
-    root_path: str, resources: dict[type[Resource], dict[str, Resource]]
-) -> None:
+def _migrate_legacy_topic_files(root_path: str) -> None:
     """Migrate topic files from legacy format (name as filename) to new format
     (clean filename with name stored inside the YAML).
 
     This handles the transition where topic files were previously saved as
     ``topics/{name}.yaml`` and are now saved as ``topics/{clean_name}.yaml``
     with a ``name`` key inside the YAML content.
-    """
-    if Topic not in resources:
-        return
 
+    Migrates both existing (pulled) topics and new local-only topic files.
+    """
     topics_dir = os.path.join(root_path, "topics")
+
     if not os.path.isdir(topics_dir):
         return
 
-    for topic in resources[Topic].values():
-        new_path = os.path.join(root_path, topic.file_path)
-        if os.path.exists(new_path):
+    topics = {}
+    old_files = []
+
+    for topic in os.listdir(topics_dir):
+        if not topic.endswith(".yaml"):
             continue
 
-        # Check for legacy file at the old (unclean) path
-        legacy_path = os.path.join(root_path, "topics", f"{topic.name}.yaml")
-        if not os.path.exists(legacy_path):
+        topic_path = os.path.join(topics_dir, topic)
+        with open(topic_path, "r", encoding="utf-8") as f:
+            content = resource_utils.load_yaml(f.read())
+
+        if "name" in content:
+            # Already in new format, skip
             continue
 
-        # Read content, insert name field, write to new path, remove old file
-        content = Resource.read_from_file(legacy_path)
-        yaml_dict = resource_utils.load_yaml(content) or {}
-        if "name" not in yaml_dict:
-            yaml_dict = {"name": topic.name, **yaml_dict}
-            new_content = resource_utils.dump_yaml(yaml_dict)
-            with open(new_path, "w", encoding="utf-8") as f:
-                f.write(new_content)
-            os.remove(legacy_path)
+        file_name = os.path.splitext(topic)[0]
+        clean_file_name = resource_utils.clean_name(file_name)
+        if clean_file_name in topics:
+            raise ValueError(
+                "Cant migrate legacy topic files: multiple topics with the same file name after cleaning: "
+                + clean_file_name
+            )
+
+        new_content = {"name": file_name, **content}
+
+        topics[clean_file_name] = new_content
+        old_files.append(topic_path)
+
+    # Write new files
+    for clean_name, content in topics.items():
+        new_path = os.path.join(topics_dir, f"{clean_name}.yaml")
+        with open(new_path, "w", encoding="utf-8") as f:
+            f.write(resource_utils.dump_yaml(content))
+
+    # Remove old file
+    for old_file in old_files:
+        os.remove(old_file)
