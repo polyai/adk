@@ -2127,7 +2127,10 @@ class AgentStudioProject:
                         resource_name = flow_name
 
                     # Resource name in file path is cleaned, so we need to get the original name
-                    if issubclass(resource_type, MultiResourceYamlResource):
+                    if (
+                        issubclass(resource_type, MultiResourceYamlResource)
+                        or resource_type == Topic
+                    ):
                         resource = self.read_local_resource(
                             ResourceMapping(
                                 resource_id="temp_id",
