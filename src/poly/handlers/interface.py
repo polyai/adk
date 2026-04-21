@@ -14,6 +14,7 @@ REGIONS = [
     "us-1",
     "euw-1",
     "uk-1",
+    "studio",
     "staging",
     "dev",
 ]
@@ -48,6 +49,15 @@ class AgentStudioInterface:
             self.sync_client = SyncClientHandler(region, account_id, project_id, branch_id)
 
     @staticmethod
+    def get_accessible_regions() -> list[str]:
+        """Get the regions accessible to the current API key.
+
+        Returns:
+            list[str]: Region names the user has access to.
+        """
+        return PlatformAPIHandler.get_accessible_regions(REGIONS)
+
+    @staticmethod
     def get_accounts(region: str) -> dict[str, str]:
         """Get the accounts for a given region.
 
@@ -73,16 +83,20 @@ class AgentStudioInterface:
         return PlatformAPIHandler.get_projects(region, account_id)
 
     @staticmethod
-    def get_deployments(region: str, account_id: str, project_id: str) -> dict[str, str]:
-        """Get the deployments for a given project.
+    def get_deployments(
+        region: str, account_id: str, project_id: str, client_env: str = "sandbox"
+    ) -> list[dict[str, Any]]:
+        """Get the deployments for a given project and client environment.
         Args:
             region (str): The region name
             account_id (str): The account ID
             project_id (str): The project ID
+            client_env (str): The client environment (sandbox, pre-release, live)
+                defaults to sandbox
         Returns:
-            dict[str, str]: A dictionary mapping deployment versions to deployment IDs
+            list[dict[str, Any]]: A list of deployment records from the API
         """
-        return PlatformAPIHandler.get_deployments(region, account_id, project_id)
+        return PlatformAPIHandler.get_deployments(region, account_id, project_id, client_env)
 
     @staticmethod
     def get_active_deployments(

@@ -832,3 +832,250 @@ class CompletionCommandTest(unittest.TestCase):
         """Parser rejects shell choices outside bash/zsh/fish."""
         with self.assertRaises(SystemExit):
             AgentStudioCLI.main(sys_args=["completion", "powershell"])
+
+
+class ComputeDiffTest(unittest.TestCase):
+    """Tests for the _compute_diff method."""
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli.AgentStudioCLI._load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_no_before_no_after_returns_local_diffs(self):
+        """Without before/after, calls get_diffs with all_files=True."""
+        expected = {"file.py": "some diff"}
+        self.proj.get_diffs.return_value = expected
+
+        result = AgentStudioCLI._compute_diff(TEST_DIR)
+
+        self.proj.get_diffs.assert_called_once_with(all_files=True, files=[])
+        self.assertEqual(result, expected)
+
+    def test_no_before_no_after_with_files(self):
+        """Without before/after but with files, calls get_diffs with all_files=False."""
+        expected = {"file.py": "diff"}
+        self.proj.get_diffs.return_value = expected
+
+        AgentStudioCLI._compute_diff(TEST_DIR, files=["file.py"])
+
+        self.proj.get_diffs.assert_called_once()
+        call_kwargs = self.proj.get_diffs.call_args[1]
+        self.assertFalse(call_kwargs["all_files"])
+        self.assertEqual(len(call_kwargs["files"]), 1)
+
+    def test_only_after_finds_previous_version(self):
+        """With only after, resolves to previous version and diffs remote versions."""
+        versions = [
+            {"version_hash": "abc123456xyz"},
+            {"version_hash": "def789012xyz"},
+        ]
+        self.proj.get_deployments.return_value = (versions, {})
+
+        AgentStudioCLI._compute_diff(TEST_DIR, after="abc123456")
+
+        self.proj.diff_remote_named_versions.assert_called_once_with(
+            before_name="def789012", after_name="abc123456"
+        )
+        # before is truncated to [:9], after is passed as given by the caller
+
+    def test_only_after_resolves_deployment_hash(self):
+        """With only after matching a deployment key, resolves to its hash value."""
+        versions = [
+            {"version_hash": "abc123456xyz"},
+            {"version_hash": "def789012xyz"},
+        ]
+        deployment_hashes = {"live": "abc123456xyz"}
+        self.proj.get_deployments.return_value = (versions, deployment_hashes)
+
+        AgentStudioCLI._compute_diff(TEST_DIR, after="live")
+
+        self.proj.diff_remote_named_versions.assert_called_once()
+        call_kwargs = self.proj.diff_remote_named_versions.call_args[1]
+        # after is resolved from deployment_hashes (full hash), before is truncated to [:9]
+        self.assertEqual(call_kwargs["after_name"], "abc123456xyz")
+        self.assertEqual(call_kwargs["before_name"], "def789012")
+
+    @patch("poly.cli.error")
+    def test_only_after_version_not_found_returns_none(self, mock_error):
+        """With only after and hash not in versions, calls error and returns None."""
+        versions = [{"version_hash": "abc123456xyz"}]
+        self.proj.get_deployments.return_value = (versions, {})
+
+        result = AgentStudioCLI._compute_diff(TEST_DIR, after="zzz999999")
+
+        self.assertIsNone(result)
+        mock_error.assert_called_once()
+        self.assertIn("not found", mock_error.call_args[0][0])
+
+    @patch("poly.cli.error")
+    def test_only_after_no_previous_version_returns_none(self, mock_error):
+        """With only after matching the last version, returns None (no previous)."""
+        versions = [{"version_hash": "abc123456xyz"}]
+        self.proj.get_deployments.return_value = (versions, {})
+
+        result = AgentStudioCLI._compute_diff(TEST_DIR, after="abc123456")
+
+        self.assertIsNone(result)
+        mock_error.assert_called_once()
+        self.assertIn("No previous version", mock_error.call_args[0][0])
+
+    @patch("poly.cli.error")
+    def test_only_after_no_versions_returns_none(self, mock_error):
+        """With only after but no versions at all, calls error and returns None."""
+        self.proj.get_deployments.return_value = ([], {})
+
+        result = AgentStudioCLI._compute_diff(TEST_DIR, after="abc123456")
+
+        self.assertIsNone(result)
+        mock_error.assert_called_once()
+        self.assertIn("No versions found", mock_error.call_args[0][0])
+
+    def test_only_before_sets_after_to_local(self):
+        """With only before, sets after='local' and diffs remote named versions."""
+        AgentStudioCLI._compute_diff(TEST_DIR, before="abc123456")
+
+        self.proj.diff_remote_named_versions.assert_called_once_with(
+            before_name="abc123456", after_name="local"
+        )
+
+    def test_both_before_and_after(self):
+        """With both before and after, diffs between the two remote versions."""
+        AgentStudioCLI._compute_diff(TEST_DIR, before="abc123456", after="def789012")
+
+        self.proj.diff_remote_named_versions.assert_called_once_with(
+            before_name="abc123456", after_name="def789012"
+        )
+
+    def test_only_after_environment_name_queries_correct_env(self):
+        """after='live' should fetch deployments for the live environment, not sandbox."""
+        versions = [
+            {"version_hash": "abc123456xyz"},
+            {"version_hash": "def789012xyz"},
+        ]
+        deployment_hashes = {"live": "abc123456xyz"}
+        self.proj.get_deployments.return_value = (versions, deployment_hashes)
+
+        AgentStudioCLI._compute_diff(TEST_DIR, after="live")
+
+        self.proj.get_deployments.assert_called_once_with(client_env="live")
+
+
+class RevertTest(unittest.TestCase):
+    """Tests for the revert CLI method."""
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli.AgentStudioCLI._load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_revert_no_files_reverts_all(self):
+        """Calling revert with no files should revert all changes (new default behaviour)."""
+        self.proj.revert_changes.return_value = ["file1.yaml"]
+
+        AgentStudioCLI.revert(TEST_DIR, files=[])
+
+        self.proj.revert_changes.assert_called_once_with(files=[])
+
+
+class PrintDeploymentsTest(unittest.TestCase):
+    """Tests for the print_deployments CLI method."""
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli.AgentStudioCLI._load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.mock_load.return_value = self.proj
+
+        self.versions = [{"version_hash": f"hash{i:05d}xxxx", "name": f"v{i}"} for i in range(15)]
+        self.active_hashes = {"sandbox": "hash00000xxxx"}
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.cli.error")
+    def test_no_versions_calls_error(self, mock_error):
+        """print_deployments with no versions calls error('No versions found.')."""
+        self.proj.get_deployments.return_value = ([], {})
+
+        AgentStudioCLI.deployments_list(TEST_DIR)
+
+        mock_error.assert_called_once()
+        self.assertIn("No versions found", mock_error.call_args[0][0])
+
+    @patch("poly.cli.print_deployments")
+    def test_default_call_shows_first_ten(self, mock_print_dep):
+        """Default call (no hash, no json) displays the first 10 versions."""
+        self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
+
+        AgentStudioCLI.deployments_list(TEST_DIR)
+
+        mock_print_dep.assert_called_once()
+        displayed_versions = mock_print_dep.call_args[0][0]
+        self.assertEqual(len(displayed_versions), 10)
+        self.assertEqual(displayed_versions[0]["name"], "v0")
+
+    @patch("poly.cli.json_print")
+    def test_output_json_calls_json_print(self, mock_json_print):
+        """print_deployments with output_json=True calls json_print."""
+        self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
+
+        AgentStudioCLI.deployments_list(TEST_DIR, output_json=True)
+
+        mock_json_print.assert_called_once()
+        output = mock_json_print.call_args[0][0]
+        self.assertIn("versions", output)
+        self.assertIn("active_deployment_hashes", output)
+        self.assertEqual(len(output["versions"]), 10)
+
+    @patch("poly.cli.print_deployments")
+    def test_hash_sets_offset(self, mock_print_dep):
+        """print_deployments with hash finds version index and uses it as offset."""
+        self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
+
+        AgentStudioCLI.deployments_list(TEST_DIR, version_hash="hash00005")
+
+        mock_print_dep.assert_called_once()
+        displayed_versions = mock_print_dep.call_args[0][0]
+        self.assertEqual(displayed_versions[0]["name"], "v5")
+
+    @patch("poly.cli.error")
+    def test_hash_not_found_calls_error(self, mock_error):
+        """print_deployments with unknown hash calls error."""
+        self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
+
+        AgentStudioCLI.deployments_list(TEST_DIR, version_hash="zzz999999")
+
+        mock_error.assert_called_once()
+        self.assertIn("not found", mock_error.call_args[0][0])
+
+    @patch("poly.cli.print_deployments")
+    def test_limit_and_offset_applied(self, mock_print_dep):
+        """print_deployments with custom limit and offset slices correctly."""
+        self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
+
+        AgentStudioCLI.deployments_list(TEST_DIR, limit=3, offset=2)
+
+        mock_print_dep.assert_called_once()
+        displayed_versions = mock_print_dep.call_args[0][0]
+        self.assertEqual(len(displayed_versions), 3)
+        self.assertEqual(displayed_versions[0]["name"], "v2")
+
+    @patch("poly.cli.print_deployments")
+    def test_details_passed_through(self, mock_print_dep):
+        """print_deployments with details=True passes it to the console function."""
+        self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
+
+        AgentStudioCLI.deployments_list(TEST_DIR, details=True)
+
+        mock_print_dep.assert_called_once()
+        call_kwargs = mock_print_dep.call_args[1]
+        self.assertTrue(call_kwargs["details"])

@@ -8,6 +8,7 @@ import logging
 import os
 import typing as ty
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -35,6 +36,7 @@ class PlatformAPIHandler:
         "euw-1": "https://api.eu.poly.ai/adk/v1",
         "uk-1": "https://api.uk.poly.ai/adk/v1",
         "us-1": "https://api.us.poly.ai/adk/v1",
+        "studio": "https://api.studio.poly.ai/adk/v1",
     }
 
     @staticmethod
@@ -122,6 +124,41 @@ class PlatformAPIHandler:
         return api_response
 
     @staticmethod
+    def get_accessible_regions(regions: list[str]) -> list[str]:
+        """Return the subset of regions the current API key can access.
+
+        Probes each region concurrently by calling get_accounts. A region is
+        considered accessible if the call succeeds and returns at least one
+        account.
+
+        Args:
+            regions (list[str]): The full list of region names to probe.
+
+        Returns:
+            list[str]: Regions that returned at least one account, preserving
+                the original ordering.
+        """
+        accessible: set[str] = set()
+
+        def _probe(region: str) -> str | None:
+            try:
+                accounts = PlatformAPIHandler.get_accounts(region)
+                if accounts:
+                    return region
+            except Exception:
+                logger.debug(f"Region {region} is not accessible for this API key")
+            return None
+
+        with ThreadPoolExecutor(max_workers=len(regions)) as executor:
+            futures = {executor.submit(_probe, r): r for r in regions}
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    accessible.add(result)
+
+        return [r for r in regions if r in accessible]
+
+    @staticmethod
     def get_accounts(region: str) -> dict[str, str]:
         """Get the accounts for a given region.
 
@@ -169,31 +206,27 @@ class PlatformAPIHandler:
         return projects
 
     @staticmethod
-    def get_deployments(region: str, account_id: str, project_id: str) -> dict[str, str]:
-        """Get the deployments for a given project.
+    def get_deployments(
+        region: str, account_id: str, project_id: str, client_env: str = "sandbox"
+    ) -> list[dict[str, ty.Any]]:
+        """Get the deployments for a given project and client environment.
         Args:
             region (str): The region name
             account_id (str): The account ID
             project_id (str): The project ID
+            client_env (str): The client environment (sandbox, pre-release, live)
+                defaults to sandbox
         Returns:
-            dict[str, str]: A dictionary mapping deployment versions to deployment IDs
+            list[dict[str, Any]]: A list of deployment records from the API
         """
-        deployments = {}
         endpoint = DEPLOYMENTS_URL.format(account_id=account_id, project_id=project_id)
 
         deployments_data = PlatformAPIHandler.make_request(
-            region, endpoint, "GET", data=None, params={"client_env": "sandbox"}
+            region, endpoint, "GET", data=None, params={"client_env": client_env}
         )
         deployments_list = deployments_data.get("deployments", [])
 
-        if not isinstance(deployments_list, list):
-            raise ValueError("Expected a list of deployments")
-
-        for deployment in deployments_list:
-            if deployment.get("id") and deployment.get("version_hash"):
-                deployments[deployment.get("version_hash")[:9]] = deployment.get("id")
-
-        return deployments
+        return deployments_list
 
     @staticmethod
     def get_active_deployments(

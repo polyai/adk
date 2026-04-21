@@ -83,14 +83,6 @@ src/poly/                  # Main package
 
 Exclude both directories from linting and review.
 
-## Version Bumping Policy
-
-Version lives in `pyproject.toml`. An auto-tool bumps patch on every push to main. Only bump manually when needed:
-
-- **Patch** (auto): Bug fixes, small non-breaking features
-- **Minor** (manual): Changes to output format, CLI behavior, or feature additions
-- **Major** (manual): Complete rework or breaking changes
-
 ## Git Conventions
 
 - Use **conventional commits**: `feat:`, `fix:`, `refactor:`, `test:`, `chore:`, `docs:`

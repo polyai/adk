@@ -1,6 +1,418 @@
 # CHANGELOG
 
 
+## v0.11.0 (2026-04-21)
+
+### Documentation
+
+- Feat(cli): deployment history and version-scoped diff/review
+  ([#90](https://github.com/polyai/adk/pull/90),
+  [`bf0939d`](https://github.com/polyai/adk/commit/bf0939dbe776fc1055ba4b494ebba305b7e54fa9))
+
+## Summary
+
+This covers the work from https://github.com/polyai/adk/pull/39
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+### Features
+
+- Add 'studio' region and filter region selection based on permissions
+  ([#82](https://github.com/polyai/adk/pull/82),
+  [`d4af195`](https://github.com/polyai/adk/commit/d4af1955780253994c99a2a09f85dd093d0fd295))
+
+## Summary
+
+Updates `poly init` to only display regions the user's API key has access to, and adds the `studio`
+  region.
+
+## Motivation
+
+Previously, `poly init` showed all hardcoded regions regardless of whether the user had access. This
+  change probes regions concurrently and filters the list. Additionally, `studio` was not available
+  as a region.
+
+## Changes
+
+- Added `get_accessible_regions()` to `PlatformAPIHandler` that concurrently probes regions via
+  `get_accounts()` and returns only accessible ones - Added `get_accessible_regions()` to
+  `AgentStudioInterface` as the public interface - Updated `init_project()` in `cli.py` to fetch and
+  display only accessible regions (with a loading spinner), with an error message if none are found
+  - Added `"studio"` region pointing to `https://api.studio.poly.ai/adk/v1`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs <img width="385" height="85" alt="Screenshot 2026-04-21 at 11 20 47"
+  src="https://github.com/user-attachments/assets/77e51284-951c-43be-aad6-a7da0439fb2f" />
+
+
+## v0.10.0 (2026-04-17)
+
+### Features
+
+- **cli**: Deployment history and version-scoped diff/review
+  ([#39](https://github.com/polyai/adk/pull/39),
+  [`0730d06`](https://github.com/polyai/adk/commit/0730d06fb80206af8a14c67fbea59036e250cd38))
+
+## Summary Adds **`poly deployments`**, extends **`diff`** / **`review`** with hash and **`--before`
+  / `--after` / `--files`**, updates. Updates **`review`** to be **`review create`** to be similar
+  with **`branch`** commands
+
+## Motivation Improves visibility into deployed versions and makes comparing local vs remote or
+  named versions consistent in the CLI.
+
+## Changes - **`poly deployments`** with `--env`, pagination, `--hash`, `--oneline`, `--json`; Rich
+  output with sandbox / pre-release / live badges. - **`get_deployments`** (API + project):
+  `client_env`, list return shape, tuple with active hashes on **`AgentStudioProject`**. - **`poly
+  diff` / `poly review`**: optional hash, `--files`, `--before` / `--after`; **`--delete`** on
+  review; shared diff computation. - **`poly review`** logic moved to `poly review create` - **`poly
+  revert`** / **`poly format`**: CLI shape updates to be consistent (`--all` removed; format uses
+  **`--files`**).
+
+## Test strategy - [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x]
+  Tested against a live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist - [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs <img width="671" height="79" alt="Screenshot 2026-03-27 at 14 23 31"
+  src="https://github.com/user-attachments/assets/fd6f9b1b-de45-4f5c-82b1-cd2394e473ba" />
+
+`--details` <img width="547" height="511" alt="Screenshot 2026-03-27 at 15 35 14"
+  src="https://github.com/user-attachments/assets/d3983a66-df51-4c43-a142-bd28f42fa2a2" />
+
+`--env` <img width="624" height="32" alt="Screenshot 2026-03-27 at 15 35 27"
+  src="https://github.com/user-attachments/assets/dfc2aab6-0206-45f8-a3ae-6387f09f196c" />
+
+
+## v0.9.1 (2026-04-17)
+
+### Bug Fixes
+
+- Don't show diff for reordered entities ([#87](https://github.com/polyai/adk/pull/87),
+  [`2a0ff85`](https://github.com/polyai/adk/commit/2a0ff85a4c5bbbc6bd408a76a10c1458467a0dbe))
+
+## Summary
+
+Fix spurious diffs after push caused by `extracted_entities` list ordering differences between local
+  YAML and the platform.
+
+## Motivation
+
+After pushing, `poly diff` shows reordering-only changes to `extracted_entities` in flow steps. The
+  platform returns entity IDs in a different order than local YAML, producing false diffs with no
+  meaningful content change.
+
+## Changes
+
+- Sort `extracted_entities` in `FlowStep.to_yaml_dict()` so both local and remote representations
+  use a consistent alphabetical order
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+### Documentation
+
+- Add missing warnings for key ADK footguns and workflow gaps
+  ([#86](https://github.com/polyai/adk/pull/86),
+  [`4391333`](https://github.com/polyai/adk/commit/4391333b2e37e45daf5b639b2124ba9942cc5b78))
+
+## Summary
+
+Addresses the documentation gaps identified from a real end-to-end AI-agent workflow build (Bella
+  Vista reservation assistant) that caused significant lost time. Each change adds a targeted note
+  or warning where the docs were silent on a real failure mode.
+
+## Motivation
+
+A systematic audit against a live implementation identified six gaps where the docs' silence or
+  vagueness caused actual blockers — not theoretical ones. Several required digging through source
+  code to resolve.
+
+## Changes
+
+**Gap 1 — No local runtime** - `testing.md`: prominent warning that there is no `poly serve` or
+  local simulator; all execution is in Agent Studio Sandbox - `what-is-the-adk.md`: clarify the ADK
+  manages config files and does not execute agents
+
+**Gap 2 — API keys are workspace-scoped** - `prerequisites.md`: warning that `poly init` lists all
+  projects visible to the key; seeing unexpected projects means the wrong key is in use; also
+  removes a garbled duplicate section from a previous edit
+
+**Gap 3 — Platform-provisioned resources cannot be created via ADK** - `voice_settings.md`,
+  `chat_settings.md`, `agent_settings.md`, `speech_recognition.md`: note on each page that
+  greeting/style prompt/disclaimer/personality/role/ASR settings are provisioned by Agent Studio on
+  project init and can only be _updated_, not created; pushing them into a project without a
+  matching `.agent_studio_config` entry fails with `NotImplementedError: Create operation not
+  supported`
+
+**Gap 4 — Don't copy project directories** - `anti-patterns.md`: new section explaining why copying
+  a project directory to a different project causes push failures (`.agent_studio_config` IDs,
+  platform-provisioned resources); correct approach is `poly init` + `poly pull`
+
+**Gap 6 — No `poly merge` command** - `tutorials/build-an-agent.md`: note at Workflow 1 Step 10 and
+  Workflow 2 Step 7 that merging requires the Agent Studio web UI; there is no CLI command
+
+**Minor gaps** - `tutorials/build-an-agent.md`: mark `chat/` as optional in the project structure
+  diagram - `tutorials/build-an-agent.md`: add tip in AI-agent Workflow 2 Step 3 to run `poly docs
+  --all` immediately after `poly pull`, before generating any files — without it, a coding agent has
+  no schema context and will hallucinate resource structure
+
+## What was not addressed
+
+- `poly merge` CLI command — this is a code change, not a doc change; documented as a known gap -
+  Gap 5 (branch `--environment` 404) — `cli.md` already partially covers branch environment
+  behavior; the failure mode may be platform-specific and is not clearly reproducible
+
+## Test strategy
+
+- [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+> **Note:** `prerequisites.md` is also touched by #85 (tab rename). Whichever merges second will
+  need a quick rebase.
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+- Add onboarding page and wire into get-started nav ([#78](https://github.com/polyai/adk/pull/78),
+  [`b0654b5`](https://github.com/polyai/adk/commit/b0654b5aba2e3bcf61719d8ebb940b425fe83243))
+
+## Summary
+
+Adds a new `get-started/agent-wizard.md` page at the top of the Get Started section, before any ADK
+  content. Covers two user paths: new users building their first agent via Agent Wizard, and
+  existing Agent Studio users pulling down an existing project.
+
+## Motivation
+
+Users arriving at the ADK docs without an existing agent had no clear entry point. Agent Wizard is
+  the fastest way to create one, but there was no documentation connecting the two products.
+
+Closes #
+
+## Changes
+
+- New page `docs/docs/get-started/agent-wizard.md` — new user onboarding via Agent Wizard, including
+  the concrete `poly init --account_id ... --project_id ...` + `poly pull` handoff to local
+  development - `mkdocs.yml` — new page added as first item in Get Started nav - `index.md` — hero
+  card updated to surface Agent Wizard as the entry point for users without an agent -
+  `what-is-the-adk.md` — next steps now includes a card pointing to the Agent Wizard page
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Add agent-wizard-build.png to docs/docs/assets/ before merging -->
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Feat: non-interactive scripted input, conversation resume, pre-chat push, and JSON output for poly
+  chat ([#83](https://github.com/polyai/adk/pull/83),
+  [`1209129`](https://github.com/polyai/adk/commit/12091292dcd9576fae56d2d89969537fff322e50))
+
+## Summary
+
+This is the work from https://github.com/polyai/adk/pull/69
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+- Fix API key provisioning — self-generated, not provided by contact
+  ([#84](https://github.com/polyai/adk/pull/84),
+  [`a1c9250`](https://github.com/polyai/adk/commit/a1c92509825bc60c649cfb3b6c18516d11cf017e))
+
+## Summary
+
+Corrects the inaccurate claim that both workspace access and the API key are provided by a PolyAI
+  contact. The API key is self-generated by the user inside Agent Studio.
+
+## Motivation
+
+The docs stated "Both are provided by your PolyAI contact" — this is wrong for the API key. It also
+  meant the Getting Started flow sent users to Prerequisites for an API key *after* they'd already
+  been told to run `poly pull`, which requires the key.
+
+## Changes
+
+- `access-and-waitlist.md`: distinguish workspace access (from contact) vs API key (self-generated
+  in Agent Studio) - `prerequisites.md`: update checklist item from "obtained from your PolyAI
+  contact" to "generated in Agent Studio" - `get-started.md`: add **Step 5 — Generate an API key**
+  (with `POLY_ADK_KEY` env var export) between finding account/project IDs and pulling; renumber
+  Steps 5–6 → 6–7; replace the misplaced "Next step → Prerequisites" CTA with "Next step →
+  Installation"
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+- Improve first-steps get-started page ([#88](https://github.com/polyai/adk/pull/88),
+  [`cb99c5b`](https://github.com/polyai/adk/commit/cb99c5b4cfb5f30a6d516832b1e75d111238e141))
+
+## Summary - Adds missing screenshots (`agent-studio-login.png`, `go-back-to-key.png`) for the
+  get-started flow - Moves sign-up instructional text above the screenshot for better reading order
+
+## Test plan - [x] Verify images render correctly in the docs site - [x] Check that the get-started
+  page reads logically top to bottom
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+- Rename API Keys tab, add key-gen image to get-started, remove orphaned docs workflow page
+  ([#85](https://github.com/polyai/adk/pull/85),
+  [`22d50b4`](https://github.com/polyai/adk/commit/22d50b4515adad1c90f659dd8bab0298a94f98f1))
+
+## Summary
+
+Three clean-up fixes to the get-started docs: correct a stale UI label, fill a missing screenshot in
+  the new-user flow, and remove a stranded duplicate page.
+
+## Motivation
+
+- The "Data Access" tab was renamed to "API Keys" in Agent Studio — the docs still used the old
+  name. - The get-started new-user flow jumped from "find your IDs" to "poly pull" without showing
+  how to generate an API key, which is required for `poly pull` to work. - `development/docs.md`
+  (nav label: "Docs workflow") was an older, partial version of the AI-agent workflow that
+  `tutorials/build-an-agent.md` covers fully. Keeping it as a lone page under a "Development"
+  section with a mismatched title caused confusion.
+
+## Changes
+
+- `prerequisites.md`: "Data Access" tab → "API Keys", button label → "+ API key", image alt text
+  updated - `installation.md`: image alt text updated to match - `get-started.md`: add Step 5 —
+  Generate an API key (with screenshot and `POLY_ADK_KEY` export), renumber old Steps 5–6 to 6–7,
+  fix the bottom "Next step" card to point forward to Installation rather than back to Prerequisites
+  - `development/docs.md`: deleted — content fully covered by Workflow 2 in
+  `tutorials/build-an-agent.md` - `mkdocs.yml`: remove the now-empty Development nav section
+
+## Test strategy
+
+- [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+> **Note:** This PR overlaps with #84 on `prerequisites.md` and `get-started.md`. One will need a
+  rebase after the other merges.
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+
 ## v0.9.0 (2026-04-16)
 
 ### Documentation
