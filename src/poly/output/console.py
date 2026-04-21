@@ -370,14 +370,14 @@ def edit_in_editor(initial_content: str, extension: str = ".txt", filename: str 
 
     safe_name = filename.replace(os.sep, "_").replace("/", "_")
     with tempfile.NamedTemporaryFile(
-        prefix=f"{safe_name}_", suffix=extension, mode="w", delete=False
+        prefix=f"{safe_name}_", suffix=extension, mode="w", delete=False, encoding="utf-8"
     ) as tmp:
         tmp.write(initial_content)
         tmp_path = tmp.name
 
     try:
         subprocess.run([*shlex.split(editor), tmp_path], check=True)
-        with open(tmp_path) as f:
+        with open(tmp_path, encoding="utf-8") as f:
             edited = f.read()
     finally:
         os.unlink(tmp_path)

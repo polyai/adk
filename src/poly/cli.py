@@ -2260,6 +2260,18 @@ class AgentStudioCLI:
                             if edited_q is None:
                                 return []
                             edited = edited_q
+                    except FileNotFoundError:
+                        warning(
+                            "Could not open the configured editor. Check your $EDITOR or "
+                            "$VISUAL setting, then try Edit again."
+                        )
+                        continue
+                    except subprocess.CalledProcessError:
+                        warning(
+                            "The editor exited with an error. Fix the issue and try Edit "
+                            "again, or choose another resolution."
+                        )
+                        continue
                     except ValueError:
                         warning(
                             "Editor closed without saving; choose another option or try Edit again."
