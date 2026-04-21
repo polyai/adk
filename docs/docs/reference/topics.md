@@ -21,13 +21,6 @@ Each topic is stored as its own YAML file:
 topics/{Topic Name}.yaml
 ~~~
 
-### Filename conventions
-
-- use title case to match how the topic appears in Agent Studio (for example, `Opening Hours.yaml`, `Booking Policy.yaml`)
-- spaces in filenames are safe
-- keep names concise and descriptive — the topic name is derived directly from the filename
-- there is no enforced character limit, but very long names become difficult to reference in actions and logs
-
 ## What a topic contains
 
 Each topic has four main fields:
@@ -133,7 +126,6 @@ This is the only place inside a topic where you should use references and behavi
 | Syntax | Meaning |
 |---|---|
 | `{{fn:function_name}}` | Call a global function |
-| `{{fn:function_name}}('arg')` | Call a global function with an argument |
 | `{{attr:attribute_name}}` | Read a variant attribute |
 | `{{twilio_sms:template_name}}` | Reference an SMS template |
 | `{{ho:handoff_name}}` | Reference a handoff |
@@ -192,26 +184,5 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
 
     See how variant attributes can be referenced from topic actions.
     [Open variants](./variants.md)
-
--   **Managed Topics overview**
-
-    ---
-
-    Platform guide to topic types, RAG retrieval, handoffs, and SMS actions.
-    [Open Managed Topics overview](https://docs.poly.ai/managed-topics/introduction)
-
--   **How RAG retrieval works**
-
-    ---
-
-    How the platform scores and retrieves topics based on name, example queries, and content.
-    [Open RAG introduction](https://docs.poly.ai/managed-topics/RAG/introduction)
-
--   **Topic actions**
-
-    ---
-
-    Set up function calls, handoffs, and SMS triggers inside topic actions.
-    [Open actions guide](https://docs.poly.ai/managed-topics/how-to-setup-action/introduction)
 
 </div>
