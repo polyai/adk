@@ -121,6 +121,10 @@ For example:
 Use {{fn:transfer_call}} when the user needs to be transferred to a specialist.
 ~~~
 
+## Round-trip behavior
+
+After a push and pull, `sip_headers: []` may be added to handoff entries that did not originally define it. This is injected by the platform and does not affect runtime behavior — the empty list is equivalent to no SIP headers. Expect this field to appear on round-trip if you did not include it yourself.
+
 ## Best practices
 
 - use clear, descriptive handoff names
