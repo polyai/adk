@@ -88,7 +88,7 @@ def send_link_or_transfer(conv: Conversation, wants_sms: bool):
 
 !!! tip "Use secrets for sender numbers in production"
 
-    Avoid hardcoding phone numbers in function code. Store them as [secrets](../reference/tooling.md) and retrieve with `conv.utils.get_secret("sms_sender_live")`.
+    Avoid hardcoding phone numbers in function code. Store them as [secrets](https://docs.poly.ai/secrets/introduction) and retrieve with `conv.utils.get_secret("sms_sender_live")`.
 
 ## Related pages
 
@@ -114,5 +114,26 @@ def send_link_or_transfer(conv: Conversation, wants_sms: bool):
 
     Return values, conv API, and function structure.
     [Open functions](../reference/functions.md)
+
+-   **Conversation object reference**
+
+    ---
+
+    Full reference for `conv.send_sms_template`, `conv.call_handoff`, `conv.env`, and all other `conv` attributes.
+    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object)
+
+-   **Secrets (platform)**
+
+    ---
+
+    Store sensitive values like sender numbers and retrieve them at runtime with `conv.utils.get_secret`.
+    [Open secrets reference](https://docs.poly.ai/secrets/introduction)
+
+-   **SMS setup (platform)**
+
+    ---
+
+    Configuring SMS channels, sender numbers, and template structure.
+    [Open SMS setup](https://docs.poly.ai/sms/introduction)
 
 </div>

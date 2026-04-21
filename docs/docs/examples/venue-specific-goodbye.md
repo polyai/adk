@@ -105,4 +105,18 @@ Then access it in the function via `conv.variant.closing_message` as shown above
     Per-site configuration using variant attributes.
     [Open variants](../reference/variants.md)
 
+-   **Return values reference (platform)**
+
+    ---
+
+    All supported return shapes — `utterance`, `hangup`, combined dicts, and transition objects.
+    [Open return values reference](https://docs.poly.ai/tools/return-values)
+
+-   **Variant management (platform)**
+
+    ---
+
+    How variant attributes are defined, routed, and accessed via `conv.variant`.
+    [Open variant management](https://docs.poly.ai/variant-management/introduction)
+
 </div>

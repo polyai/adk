@@ -114,4 +114,25 @@ content: "Here's your booking link: https://book.example.com"
     Why prose conditionals on variable presence are unreliable.
     [Open anti-patterns](../concepts/anti-patterns.md)
 
+-   **Conversation object reference**
+
+    ---
+
+    Full reference for `conv.caller_number`, `conv.send_sms_template`, and all other `conv` attributes.
+    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object)
+
+-   **Start function (platform)**
+
+    ---
+
+    When start function runs, what it can access, and how to use it for initialization.
+    [Open start function reference](https://docs.poly.ai/tools/start-function)
+
+-   **SMS setup (platform)**
+
+    ---
+
+    Configuring SMS channels, sender numbers, and template structure.
+    [Open SMS setup](https://docs.poly.ai/sms/introduction)
+
 </div>

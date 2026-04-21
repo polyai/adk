@@ -129,4 +129,32 @@ It is **not** the right place for logic that only applies mid-conversation, or f
     Python functions for deterministic logic and lifecycle hooks.
     [Open functions](../reference/functions.md)
 
+-   **Managed Topics (platform)**
+
+    ---
+
+    How topics are retrieved, ranked, and used by the platform — including RAG mechanics and topic types.
+    [Open Managed Topics overview](https://docs.poly.ai/managed-topics/introduction)
+
+-   **Start function (platform)**
+
+    ---
+
+    Lifecycle hook reference — when it runs, what it can read, and common initialization patterns.
+    [Open start function reference](https://docs.poly.ai/tools/start-function)
+
+-   **Connected Knowledge (platform)**
+
+    ---
+
+    Alternative to Managed Topics for large, unstructured content sets — help articles, PDFs, FAQs.
+    [Open Connected Knowledge](https://docs.poly.ai/connected-knowledge/introduction)
+
+-   **Variant management (platform)**
+
+    ---
+
+    Per-site configuration using variant attributes — how routing and attribute lookup work.
+    [Open variant management](https://docs.poly.ai/variant-management/introduction)
+
 </div>

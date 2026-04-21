@@ -155,4 +155,18 @@ If you need to expose a structured value in prompts, convert it to a string in P
     See how state variables are used in reusable text messages.
     [Open SMS templates](./sms.md)
 
+-   **Platform variables reference**
+
+    ---
+
+    Built-in state keys set by the platform — `from_`, `to`, `call_sid`, language, and channel.
+    [Open platform variables reference](https://docs.poly.ai/tools/variables)
+
+-   **Conversation object reference**
+
+    ---
+
+    Full reference for `conv.state` and all other `conv` attributes and methods.
+    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object)
+
 </div>
