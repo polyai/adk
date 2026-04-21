@@ -101,8 +101,15 @@ nav:
 
   - Core concepts:
       - Working locally: concepts/working-locally.md
+      - Resource architecture: concepts/resource-architecture.md
       - Multi-user workflows and guardrails: concepts/multi-user-and-guardrails.md
       - Anti-patterns: concepts/anti-patterns.md
+
+  - Examples:
+      - Examples: examples/index.md
+      - Confirm caller ID before SMS: examples/confirm-caller-id-before-sms.md
+      - Venue-specific goodbye: examples/venue-specific-goodbye.md
+      - SMS link with transfer fallback: examples/sms-or-transfer-fallback.md
 
   - Reference:
       - CLI reference: reference/cli.md

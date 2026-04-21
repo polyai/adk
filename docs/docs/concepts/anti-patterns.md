@@ -75,6 +75,34 @@ When branching logic is buried in prompts:
 - routing becomes harder to debug
 - deterministic behavior becomes dependent on how the model interprets the instruction
 
+## Checking variable presence in prose
+
+A specific and common case of the above: checking whether a variable is empty or present using prose instructions does not work reliably.
+
+### Wrong
+
+~~~text
+If {{vrbl:caller_number}} is available, offer to send a link to the caller's number.
+Otherwise, ask the caller for their number.
+~~~
+
+When `caller_number` is not set — for example, during a chat session where the variable is always empty — the LLM may still follow the "if available" branch because the instruction itself describes the variable as potentially present.
+
+### Right
+
+Check variable presence in Python and return the appropriate prompt text:
+
+~~~python
+def check_caller_number(conv: Conversation):
+    if conv.state.caller_number:
+        return "Offer to send the link to the caller's number on file."
+    return "Ask the caller to provide the number where we should send the link."
+~~~
+
+!!! warning "Prose conditionals on empty variables are unreliable"
+
+    The LLM cannot reliably detect that a variable is empty from prompt text alone. Any logic that branches on whether a variable is present or absent belongs in a function.
+
 <div class="grid cards" markdown>
 
 -   **Prompts**
@@ -189,6 +217,7 @@ Start every new project fresh with `poly init` and `poly pull`. If you need to r
 | `conv.exit_flow()` plus navigation | Choose exit **or** transition, not both |
 | `end_turn=False` while waiting for a user answer | Only use it when the agent continues immediately in the same turn |
 | Copying a project directory to a new project | Use `poly init` + `poly pull` for the target project; copy individual resource files as needed |
+| Checking variable presence in prompt prose | Check in a function and return the right prompt text |
 
 ## Design principle
 

@@ -27,6 +27,8 @@ The ADK discovers variables by scanning:
 
 This means variables are not manually declared in a separate configuration file. They emerge from the code that uses them.
 
+Variables referenced via `{{vrbl:name}}` in YAML fields are also discovered. If a variable has not been pushed to Agent Studio before, it will appear as a new entry in the next `poly diff`. This is expected — the ADK is registering the variable with the platform for the first time.
+
 ## Why variables matter
 
 Variables allow you to carry state across turns and reuse values in prompts, topics, and templates.

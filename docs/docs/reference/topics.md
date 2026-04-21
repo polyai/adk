@@ -21,6 +21,13 @@ Each topic is stored as its own YAML file:
 topics/{Topic Name}.yaml
 ~~~
 
+### Filename conventions
+
+- use title case to match how the topic appears in Agent Studio (for example, `Opening Hours.yaml`, `Booking Policy.yaml`)
+- spaces in filenames are safe
+- keep names concise and descriptive — the topic name is derived directly from the filename
+- there is no enforced character limit, but very long names become difficult to reference in actions and logs
+
 ## What a topic contains
 
 Each topic has four main fields:

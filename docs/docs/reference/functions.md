@@ -335,4 +335,11 @@ conv.log.error(...)
     Learn how state variables are discovered and referenced.
     [Open variables](./variables.md)
 
+-   **Conversation object reference**
+
+    ---
+
+    Full reference for all `conv` attributes and methods — `caller_number`, `send_sms_template`, `write_metric`, `call_handoff`, and more.
+    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object)
+
 </div>
