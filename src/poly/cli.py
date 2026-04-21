@@ -2196,11 +2196,10 @@ class AgentStudioCLI:
                 resolutions.append({"path": conflict["path"], "strategy": "theirs"})
                 continue
 
-            existing_resolution = existing_resolutions.get(conflict["path"])
-
             path = conflict["path"]
             clean_path = conflict.get("visual_path") or os.sep.join(path)
             merged_version = conflict.get("merged_value")
+            existing_resolution = existing_resolutions.get(clean_path)
             if merged_version is None:
                 merged_version = merge_strings(
                     conflict["baseValue"], conflict["theirsValue"], conflict["oursValue"]
@@ -2407,7 +2406,7 @@ class AgentStudioCLI:
 
                 resolutions: list[dict[str, Any]] = []
                 existing_resolutions = {
-                    r["path"]: r for r in (file_resolutions or []) if "path" in r
+                    os.sep.join(r["path"]): r for r in (file_resolutions or []) if "path" in r
                 }
                 if interactive and conflicts:
                     while True:
