@@ -1,6 +1,89 @@
 # CHANGELOG
 
 
+## v0.11.0 (2026-04-21)
+
+### Documentation
+
+- Feat(cli): deployment history and version-scoped diff/review
+  ([#90](https://github.com/polyai/adk/pull/90),
+  [`bf0939d`](https://github.com/polyai/adk/commit/bf0939dbe776fc1055ba4b494ebba305b7e54fa9))
+
+## Summary
+
+This covers the work from https://github.com/polyai/adk/pull/39
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+### Features
+
+- Add 'studio' region and filter region selection based on permissions
+  ([#82](https://github.com/polyai/adk/pull/82),
+  [`d4af195`](https://github.com/polyai/adk/commit/d4af1955780253994c99a2a09f85dd093d0fd295))
+
+## Summary
+
+Updates `poly init` to only display regions the user's API key has access to, and adds the `studio`
+  region.
+
+## Motivation
+
+Previously, `poly init` showed all hardcoded regions regardless of whether the user had access. This
+  change probes regions concurrently and filters the list. Additionally, `studio` was not available
+  as a region.
+
+## Changes
+
+- Added `get_accessible_regions()` to `PlatformAPIHandler` that concurrently probes regions via
+  `get_accounts()` and returns only accessible ones - Added `get_accessible_regions()` to
+  `AgentStudioInterface` as the public interface - Updated `init_project()` in `cli.py` to fetch and
+  display only accessible regions (with a loading spinner), with an error message if none are found
+  - Added `"studio"` region pointing to `https://api.studio.poly.ai/adk/v1`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs <img width="385" height="85" alt="Screenshot 2026-04-21 at 11 20 47"
+  src="https://github.com/user-attachments/assets/77e51284-951c-43be-aad6-a7da0439fb2f" />
+
+
 ## v0.10.0 (2026-04-17)
 
 ### Features
