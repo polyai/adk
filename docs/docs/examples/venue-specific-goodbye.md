@@ -107,6 +107,10 @@ poly chat --variant new_york
 
 The agent should end each session with the closing message configured for that variant. If `conv.variant` is `None` (for example, if no variants are pushed yet), the function falls back to the default string.
 
+!!! info "`--variant` resolves against the deployed environment"
+
+    `--variant` looks up the variant name in the environment you are chatting against (default: sandbox main). If you pushed `variant_attributes.yaml` on a feature branch but have not merged it yet, the variant names will not exist in sandbox and the flag will have no effect. Merge the branch in Agent Studio first, then run `poly chat --variant <name>`.
+
 ## Related pages
 
 <div class="grid cards" markdown>
