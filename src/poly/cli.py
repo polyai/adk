@@ -1084,24 +1084,29 @@ class AgentStudioCLI:
 
         if not account_id:
             accounts = api_handler.get_accounts(region)
-            account_menu = questionary.select(
-                "Select Account",
-                choices=list(accounts.keys()),
-                use_search_filter=True,
-                use_jk_keys=False,
-            ).ask()
-            if not account_menu:
-                if output_json:
-                    json_print(
-                        {
-                            "success": False,
-                            "error": "No account selected.",
-                        }
-                    )
-                    sys.exit(1)
-                warning("No account selected. Exiting.")
-                return
-            account_id = accounts[account_menu]
+            if len(accounts) == 1:
+                account_name, account_id = next(iter(accounts.items()))
+                if not output_json:
+                    info(f"Auto-selected account [bold]{account_name}[/bold].")
+            else:
+                account_menu = questionary.select(
+                    "Select Account",
+                    choices=list(accounts.keys()),
+                    use_search_filter=True,
+                    use_jk_keys=False,
+                ).ask()
+                if not account_menu:
+                    if output_json:
+                        json_print(
+                            {
+                                "success": False,
+                                "error": "No account selected.",
+                            }
+                        )
+                        sys.exit(1)
+                    warning("No account selected. Exiting.")
+                    return
+                account_id = accounts[account_menu]
 
         if not project_id:
             projects = api_handler.get_projects(region, account_id)
