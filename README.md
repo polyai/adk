@@ -14,7 +14,7 @@ A CLI and Python package for managing [Agent Studio](https://studio.us.poly.ai) 
 
 ⚠️ **The PolyAI ADK is being continually updated.**
 
-Changes may be pushed frequently while the platform evolves. If you encounter issues, please ensure you are running the **latest version** of the ADK before reporting them. Updating may require you to re-initialse or force pulling your project to ensure it is in a compatible format
+Changes may be pushed frequently while the platform evolves. If you encounter issues, please ensure you are running the **latest version** of the ADK before reporting them. Updating may require you to re-initialse or run `poly pull --force` on your project to ensure it is in a compatible format.
 
 ## Prerequisites
 
