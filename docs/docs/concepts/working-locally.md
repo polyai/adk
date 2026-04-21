@@ -107,7 +107,7 @@ The standard workflow is:
 7. push changes with `poly push`
 8. optionally generate a review gist with `poly review`
 9. merge the branch in Agent Studio
-10. test by chatting with the agent using `poly chat` — this connects to main on the Sandbox, so merge your branch first
+10. test by chatting with the agent using `poly chat` — by default this connects to your current branch's pushed state. Use `poly push` first, or `poly chat --push` to push and start the session in one step. On the main branch it falls back to Sandbox.
 
 !!! tip "Run commands from the project folder"
 

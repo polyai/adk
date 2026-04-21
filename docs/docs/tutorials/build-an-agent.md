@@ -124,9 +124,9 @@ At this point, configure any API keys or environment variables needed for the pr
 
 Start an interactive chat session to confirm the connection works and inspect runtime behavior.
 
-!!! warning "Chat runs against main on Sandbox"
+!!! info "What poly chat connects to at this stage"
 
-    `poly chat` connects to the **main branch** of your Sandbox environment in Agent Studio — not your local files, and not your current feature branch. At this stage it is useful for confirming the connection works. To chat against your own changes, push and merge your branch in Agent Studio first.
+    At this point in the setup you are on the main branch, so `poly chat` connects to your Sandbox environment in Agent Studio — not local uncommitted files. This is useful for confirming the connection works. To chat against your own feature branch changes, push them first with `poly push`, then run `poly chat` from that branch (or use `poly chat --push` to push and chat in one step).
 
 ~~~bash
 poly chat
