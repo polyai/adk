@@ -75,9 +75,9 @@ poly push --format
 
 When pushing creates a new branch (for example, when pushing to Agent Studio for the first time on a branch), the CLI displays a message with the new branch name.
 
-!!! info "`poly push` exits non-zero when there is nothing to push"
+!!! info "`poly push` reports an error message when there is nothing to push"
 
-    If there are no local changes, `poly push` reports `No changes detected` and exits with a non-zero code. This is expected behavior, not an error. CI scripts that check the exit code should handle this case explicitly.
+    If there are no local changes, `poly push` prints `Error: Failed to push` and `No changes detected`. The exit code is 0, so CI scripts that check return codes are not affected. The message is misleading but the command has not actually failed.
 
 When using JSON output (`--json`), the response includes `new_branch_name` and `new_branch_id` fields if a new branch was created.
 

@@ -111,9 +111,13 @@ poly push --help
 
 After `poly init` or `poly pull`, `poly status` may report `variables/` entries as new files — for example, `variables/caller_number` or `variables/verified_record`. These are **virtual**: the ADK scans function code for `conv.state.*` assignments and tracks each one as a variable resource. No corresponding files exist on disk. This is expected and does not mean you have changes to push.
 
+### `poly status` shows platform-generated functions as modified
+
+After a fresh `poly init` or `poly pull`, `poly status` may report functions such as `functions/get_api_keys.py` or `functions/check_otp.py` as modified, even though you have not touched them. The diff is typically a single stripped blank line introduced by the platform. These are harmless — the ADK and the platform have slightly different whitespace conventions for generated code. You can push through them or ignore them.
+
 ### `poly branch switch` reports uncommitted changes
 
-If `poly status` shows phantom `variables/` entries and you try to switch branches, the ADK may block the switch:
+If `poly status` shows phantom `variables/` entries or modified platform functions and you try to switch branches, the ADK may block the switch:
 
 ~~~text
 Cannot switch branches with uncommitted changes. Use --force to switch and discard changes.

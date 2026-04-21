@@ -222,10 +222,10 @@ Inspect the local changes before pushing.
 ~~~bash
 poly status
 poly diff
-poly diff <file>
+poly diff --files <file>
 poly validate
 poly format
-poly revert --all
+poly revert
 poly revert <file>
 ~~~
 
@@ -275,8 +275,8 @@ poly chat --environment sandbox --functions --flows
 Review, refine, and test again. You can also use the review command to share diffs with teammates.
 
 ~~~bash
-poly review
-poly review --before main --after my-feature
+poly review create
+poly review create --before main --after my-feature
 ~~~
 
 Make test calls, inspect transcripts, refine prompts, flows, and functions, and then re-push.
