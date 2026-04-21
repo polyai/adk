@@ -103,7 +103,7 @@ poly init
 poly init --region <region> --account_id <account_id> --project_id <project_id>
 ~~~
 
-This creates the local project structure and writes the metadata needed to connect the folder to Agent Studio.
+This creates the project directory at `{account_id}/{project_id}` inside your current working directory, pulls the current configuration, and writes the metadata needed to connect the folder to Agent Studio. Change into the project directory before running any further commands.
 
 ### Step 2 - Pull remote config and set up the environment
 

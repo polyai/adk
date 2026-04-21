@@ -32,6 +32,8 @@ poly push --help
 
 Initialize a new Agent Studio project locally.
 
+`poly init` creates the project directory at `{base_path}/{account_id}/{project_id}` and immediately pulls the current configuration from Agent Studio. After it completes, change into the project directory before running any other commands.
+
 Examples:
 
 ~~~bash

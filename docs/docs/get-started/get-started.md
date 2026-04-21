@@ -78,7 +78,7 @@ poly init --account_id <account_id> --project_id <project_id>
 poly pull
 ```
 
-[`poly init`](../reference/cli.md#poly-init) connects your local folder to the Agent Studio project. [`poly pull`](../reference/cli.md#poly-pull) downloads all the configuration — flows, topics, agent settings, and more — as local YAML and Python files.
+[`poly init`](../reference/cli.md#poly-init) creates a subdirectory at `{account_id}/{project_id}` inside your current directory, then pulls the current configuration automatically. [`poly pull`](../reference/cli.md#poly-pull) can be used to refresh it at any time. Change into the project directory before running any further commands.
 
 You now have a fully editable local copy of your agent.
 
