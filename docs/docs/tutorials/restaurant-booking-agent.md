@@ -53,7 +53,7 @@ poly --version
 
 ### Initialize
 
-Create a directory for your project and run `poly init` inside it:
+Create a directory and run `poly init` inside it:
 
 ~~~bash
 mkdir maison && cd maison
@@ -68,51 +68,40 @@ poly init
 ? Select Project  maison-reservations
 
 Initializing project acme-corp/maison-reservations...
-✓ Project initialized at ~/projects/maison
+✓ Project initialized at /Users/yourname/maison/acme-corp/maison-reservations
 ~~~
 
-This creates a `project.yaml` file in your directory:
+!!! info "`poly init` creates a subdirectory"
 
-~~~yaml
-project_id: maison-reservations
-account_id: acme-corp
-region: us-1
-~~~
+    The project is created at `{cwd}/{account_id}/{project_id}`, not directly in your current directory. After init completes, change into the project directory before running any other commands:
 
-### Pull the current configuration
+    ~~~bash
+    cd acme-corp/maison-reservations
+    ~~~
 
-Pull the project's current state from Agent Studio:
+`poly init` also pulls the current configuration from Agent Studio automatically. There is no need to run `poly pull` separately.
 
-~~~bash
-poly pull
-~~~
+Your project directory now contains the initial configuration as YAML and Python files:
 
 ~~~text
-Pulling project acme-corp/maison-reservations...
-✓ Pulled acme-corp/maison-reservations
-~~~
-
-Your directory now contains the full project configuration as YAML and Python files. The structure looks like this:
-
-~~~text
-maison/
+acme-corp/maison-reservations/
 ├── project.yaml
+├── _gen/
 ├── agent_settings/
 │   ├── personality.yaml
 │   ├── role.yaml
 │   └── rules.txt
 ├── config/
-│   ├── entities.yaml
-│   ├── handoffs.yaml
-│   ├── sms_templates.yaml
-│   └── variant_attributes.yaml
-├── flows/
-├── functions/
-├── topics/
-└── _gen/
+│   └── handoffs.yaml
+└── voice/
+    ├── configuration.yaml
+    └── speech_recognition/
+        └── asr_settings.yaml
 ~~~
 
 The `_gen/` directory contains auto-generated platform code. Do not edit it — it is overwritten on every pull.
+
+Files like `config/entities.yaml`, `config/sms_templates.yaml`, `flows/`, and `topics/` are only created when you add those resources to the project. You will create them in this tutorial.
 
 ### Create a working branch
 
@@ -123,7 +112,7 @@ poly branch create booking-flow
 ~~~
 
 ~~~text
-✓ Created and switched to new branch 'booking-flow'.
+Branch 'booking-flow' created (ID: BRANCH-XXXXXXXX)
 ~~~
 
 You are now on the `booking-flow` branch. Any changes you push will go to that branch in Agent Studio, leaving `main` (and Sandbox) untouched.
@@ -140,11 +129,17 @@ Open `agent_settings/personality.yaml`. Adjust the adjectives to suit the Maison
 
 ~~~yaml
 adjectives:
-  Warm: true
-  Attentive: true
-  Professional: true
+  Polite: true
+  Calm: true
+  Kind: true
 custom: ""
 ~~~
+
+!!! info "Allowed adjective values"
+
+    The ADK validates adjectives against a fixed set. The allowed values are: `Polite`, `Calm`, `Kind`, `Funny`, `Energetic`, `Thoughtful`, and `Other`. Using any other value will cause `poly push` to fail with a validation error.
+
+    `Other` is a special case — it can only be set when no other adjective is selected.
 
 ### Role
 
@@ -166,13 +161,18 @@ Always be warm and welcoming.
 When a caller wants to make a reservation, use {{fn:start_booking_flow}} to begin the booking process.
 If a caller has special requests or accessibility needs, offer to transfer them to the host team using {{ho:host_team}}.
 Never tell the caller their reservation is confirmed until the booking flow has completed.
+After a booking is confirmed, offer to send an SMS confirmation using {{twilio_sms:booking_confirmation}}.
 ~~~
 
-Notice `{{fn:...}}` and `{{ho:...}}` — these reference functions and handoffs you will define later. The model uses these references to understand when to call them.
+`{{fn:...}}` references a global function you will define later. `{{ho:...}}` references a handoff. `{{twilio_sms:...}}` references an SMS template. The model uses these references to understand when to call them.
+
+!!! warning "`{{fn:...}}` only works for global functions"
+
+    Only functions in the top-level `functions/` directory can be referenced with `{{fn:...}}` in rules and topics. Flow function steps (files inside `flows/{name}/function_steps/`) are called automatically by the flow — they cannot be referenced this way.
 
 ## Part 3 — Define the entities
 
-Entities are the structured data values the agent can collect from a caller. Open `config/entities.yaml` and replace its contents with:
+Entities are the structured data values the agent can collect from a caller. Create `config/entities.yaml`:
 
 ~~~yaml
 entities:
@@ -213,17 +213,18 @@ These four entities will be collected across the steps of the booking flow.
 
 ## Part 4 — Build the booking flow
 
-Flows live under `flows/`. Each flow gets its own directory. Create the directory structure for the booking flow:
+Flows live under `flows/`. Each flow gets its own directory. The directory name must be the snake_case version of the flow's `name` field — so a flow named `Booking Flow` must live in `flows/booking_flow/`.
+
+Create the directory structure:
 
 ~~~bash
-mkdir -p flows/booking/steps
-mkdir -p flows/booking/function_steps
-mkdir -p flows/booking/functions
+mkdir -p flows/booking_flow/steps
+mkdir -p flows/booking_flow/function_steps
 ~~~
 
 ### Flow configuration
 
-Create `flows/booking/flow_config.yaml`:
+Create `flows/booking_flow/flow_config.yaml`:
 
 ~~~yaml
 name: Booking Flow
@@ -233,7 +234,7 @@ start_step: Collect Name
 
 ### Step 1 — Collect name
 
-Create `flows/booking/steps/collect_name.yaml`:
+Create `flows/booking_flow/steps/collect_name.yaml`:
 
 ~~~yaml
 step_type: default_step
@@ -258,7 +259,7 @@ extracted_entities:
 
 ### Step 2 — Collect party size
 
-Create `flows/booking/steps/collect_party_size.yaml`:
+Create `flows/booking_flow/steps/collect_party_size.yaml`:
 
 ~~~yaml
 step_type: default_step
@@ -285,7 +286,7 @@ extracted_entities:
 
 ### Step 3 — Collect date and time
 
-Create `flows/booking/steps/collect_date.yaml`:
+Create `flows/booking_flow/steps/collect_date.yaml`:
 
 ~~~yaml
 step_type: default_step
@@ -314,18 +315,18 @@ extracted_entities:
   - reservation_time
 ~~~
 
-Notice that `child_step: confirm_booking` uses the Python filename (without `.py`) rather than a step name — that is the convention for pointing to a function step.
+`child_step: confirm_booking` uses the Python filename (without `.py`) rather than a step name — that is the convention for pointing to a function step.
 
 ### Step 4 — Confirm booking (function step)
 
-Function steps are deterministic Python. They run without model interpretation. Create `flows/booking/function_steps/confirm_booking.py`:
+Function steps are deterministic Python. They run without model interpretation. Create `flows/booking_flow/function_steps/confirm_booking.py`:
 
 ~~~python
 from _gen import *  # <AUTO GENERATED>
 
 
 def confirm_booking(conv: Conversation, flow: Flow):
-    """Confirm the reservation and send an SMS."""
+    """Confirm the reservation and store the details."""
     name = conv.entities.customer_name.value if conv.entities.customer_name else "Guest"
     size = conv.entities.party_size.value if conv.entities.party_size else "?"
     date = conv.entities.reservation_date.value if conv.entities.reservation_date else "?"
@@ -346,7 +347,7 @@ def confirm_booking(conv: Conversation, flow: Flow):
     )
 ~~~
 
-After this function runs, the model receives the returned context string and uses it to continue the conversation — in this case, it will offer to send the SMS.
+After this function runs, the model receives the returned context string and uses it to continue the conversation.
 
 ## Part 5 — Add a global function to enter the flow
 
@@ -362,7 +363,7 @@ def start_booking_flow(conv: Conversation):
     conv.goto_flow("Booking Flow")
 ~~~
 
-This function is what `{{fn:start_booking_flow}}` in your rules resolves to. When the model decides to call it, the agent enters the booking flow at its start step.
+This is what `{{fn:start_booking_flow}}` in your rules resolves to. When the model decides to call it, the agent enters the booking flow at its start step.
 
 ## Part 6 — Add a start function
 
@@ -396,7 +397,7 @@ The model uses `content` and `example_queries` to understand when this topic app
 
 ## Part 8 — Add an SMS template
 
-When the booking is confirmed, the agent will offer to send an SMS with the details. Define the template in `config/sms_templates.yaml`:
+When the booking is confirmed, the agent will offer to send an SMS with the details. Create `config/sms_templates.yaml`:
 
 ~~~yaml
 sms_templates:
@@ -411,17 +412,11 @@ sms_templates:
       live: "+15551234567"
 ~~~
 
-The `{{vrbl:...}}` placeholders pull from `conv.state` values that were set in the `confirm_booking` function step.
-
-Reference the template in `agent_settings/rules.txt` by adding:
-
-~~~text
-After a booking is confirmed, offer to send an SMS confirmation using {{twilio_sms:booking_confirmation}}.
-~~~
+The `{{vrbl:...}}` placeholders pull from `conv.state` values set in the `confirm_booking` function step.
 
 ## Part 9 — Add a handoff
 
-If a caller has special requests, the agent should be able to transfer them to the host team. Define the handoff in `config/handoffs.yaml`:
+If a caller has special requests, the agent should be able to transfer them to the host team. Open `config/handoffs.yaml` and add the following entry (keeping any existing handoffs):
 
 ~~~yaml
 handoffs:
@@ -444,21 +439,23 @@ poly status
 ~~~text
 ╭─────────────── Project Status ────────────────╮
 │  Region          us-1                          │
-│  Account ID      acme-corp             │
-│  Project ID      maison-reservations              │
+│  Account ID      acme-corp                     │
+│  Project ID      maison-reservations           │
 │  Last Pulled     2026-04-21T09:15:00           │
 │  Current Branch  booking-flow                  │
 ╰───────────────────────────────────────────────╯
 
 New files:
-  flows/booking/flow_config.yaml
-  flows/booking/steps/collect_name.yaml
-  flows/booking/steps/collect_party_size.yaml
-  flows/booking/steps/collect_date.yaml
-  flows/booking/function_steps/confirm_booking.py
-  functions/start_booking_flow.py
-  functions/start_function.py
-  topics/Make a Reservation.yaml
+  /Users/yourname/maison/acme-corp/maison-reservations/config/entities.yaml
+  /Users/yourname/maison/acme-corp/maison-reservations/config/sms_templates.yaml
+  /Users/yourname/maison/acme-corp/maison-reservations/flows/booking_flow/flow_config.yaml
+  /Users/yourname/maison/acme-corp/maison-reservations/flows/booking_flow/steps/collect_name.yaml
+  /Users/yourname/maison/acme-corp/maison-reservations/flows/booking_flow/steps/collect_party_size.yaml
+  /Users/yourname/maison/acme-corp/maison-reservations/flows/booking_flow/steps/collect_date.yaml
+  /Users/yourname/maison/acme-corp/maison-reservations/flows/booking_flow/function_steps/confirm_booking.py
+  /Users/yourname/maison/acme-corp/maison-reservations/functions/start_booking_flow.py
+  /Users/yourname/maison/acme-corp/maison-reservations/functions/start_function.py
+  /Users/yourname/maison/acme-corp/maison-reservations/topics/Make a Reservation.yaml
 ~~~
 
 To see the exact content difference for any file, run `poly diff`:
@@ -467,7 +464,7 @@ To see the exact content difference for any file, run `poly diff`:
 poly diff
 ~~~
 
-This shows a unified diff of all local changes against the remote state. It is useful for reviewing before you push, and for producing a diff for a code review.
+This shows a unified diff of all local changes against the remote state, useful for reviewing before you push and for producing a diff for a code review.
 
 ## Part 11 — Push to Agent Studio
 
@@ -514,7 +511,7 @@ Agent: Perfect. And what time were you thinking for Saturday?
 
 You: Around 7:30 in the evening
 
-Agent: Wonderful. Let me confirm that for you — a table for 2 under Sarah Chen this Saturday at 7:30pm. Does that sound right?
+Agent: Wonderful. Let me confirm that — a table for 2 under Sarah Chen this Saturday at 7:30pm. Does that sound right?
 
 You: Yes, that's perfect
 
@@ -527,8 +524,8 @@ Agent: Done — you'll receive a confirmation shortly. We look forward to welcom
 
 !!! tip "Useful chat flags"
 
-    - `poly chat --show-state` — prints `conv.state` after each turn so you can verify values are being set correctly
-    - `poly chat --show-functions` — shows which functions the model called each turn
+    - `poly chat --state` — prints `conv.state` after each turn so you can verify values are being set correctly
+    - `poly chat --functions` — shows which functions the model called each turn
     - `poly chat --push` — pushes your latest changes before starting the session, useful during rapid iteration
 
 ## Part 13 — Merge to main
@@ -548,13 +545,13 @@ Pulling after a merge keeps your local copy in sync with the normalized remote s
 
 This tutorial covered a single flow with four steps. From here you can extend the agent in several directions.
 
-**Multi-location support with variants**: If Maison has multiple locations, you can use `config/variant_attributes.yaml` to define per-location phone numbers, opening hours, and capacity limits. The agent then reads the right values for each location at runtime using `{{attr:...}}` in prompts and `conv.variant.attribute_name` in code.
+**Multi-location support with variants**: If Maison has multiple locations, use `config/variant_attributes.yaml` to define per-location phone numbers, opening hours, and capacity limits. The agent reads the right values for each location at runtime using `{{attr:...}}` in prompts and `conv.variant.attribute_name` in code.
 
-**Handling no-shows and cancellations**: Add a second topic and flow for callers who want to cancel or modify a reservation. The confirmation flow is similar — collect a name or reference, confirm the record, then update state.
+**Handling cancellations**: Add a second topic and flow for callers who want to cancel or modify a reservation. The flow structure is similar — collect a name or reference, confirm the record, then update state.
 
 **External API calls**: Replace the stub booking logic in `confirm_booking.py` with a real HTTP call to your reservation system. Function steps are the right place for this — they run deterministically and can store results in `conv.state` for the model to reference.
 
-**Richer error paths**: Add an explicit error step to the flow for when the booking cannot be completed — for example, when the requested time is unavailable. Route to it from `confirm_booking.py` using `flow.goto_step("Error")` and return a context string explaining what happened.
+**Richer error paths**: Add an explicit error step to the flow for when the booking cannot be completed. Route to it from `confirm_booking.py` using `flow.goto_step("Error")` and return a context string explaining what happened.
 
 ## Related pages
 

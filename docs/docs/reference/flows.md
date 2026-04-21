@@ -84,7 +84,7 @@ flows/
         └── {function_name}.py
 ~~~
 
-Directory and file names are cleaned to lowercase snake_case.
+The flow directory name is derived from the flow's `name` field, converted to lowercase snake_case. A flow named `Booking Flow` must live in `flows/booking_flow/`. If the directory name does not match, the ADK will not recognize the flow.
 
 ## Flow configuration
 
