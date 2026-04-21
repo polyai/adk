@@ -68,7 +68,7 @@ When an Agent Studio project is linked locally, it follows this general structur
 │   └── response_control/
 │       ├── pronunciations.yaml
 │       └── phrase_filtering.yaml
-├── chat/
+├── chat/                               # Optional - chat channel settings
 │   └── configuration.yaml
 ├── flows/
 │   └── {flow_name}/
@@ -94,7 +94,7 @@ This structure mirrors the parts of the agent that Agent Studio understands: set
 
 The CLI workflow is the manual developer path. You use the ADK directly, edit the project locally, and push changes back to Agent Studio.
 
-### Step 1 - Initialise your project
+### Step 1 - Initialize your project
 
 Link a local folder to an existing Agent Studio project. The agent must already exist in Agent Studio.
 
@@ -143,11 +143,29 @@ poly docs --all
 poly docs flows functions topics
 ~~~
 
-Resource-specific documentation is available for agent settings, voice settings, chat settings, flows, functions, topics, entities, handoffs, variants, SMS templates, variables, speech recognition, response control, and experimental config.
+Resource-specific documentation is available in the reference section:
+[agent settings](../reference/agent_settings.md),
+[voice settings](../reference/voice_settings.md),
+[chat settings](../reference/chat_settings.md),
+[flows](../reference/flows.md),
+[functions](../reference/functions.md),
+[topics](../reference/topics.md),
+[entities](../reference/entities.md),
+[handoffs](../reference/handoffs.md),
+[variants](../reference/variants.md),
+[SMS templates](../reference/sms.md),
+[variables](../reference/variables.md),
+[speech recognition](../reference/speech_recognition.md),
+[response control](../reference/response_control.md), and
+[experimental config](../reference/experimental_config.md).
 
-### Step 5 - Customise the agent
+### Step 5 - Customize the agent
 
 This is the core build phase. Create a branch, edit resources locally, track changes, and push them back.
+
+!!! tip "Read the anti-patterns page first"
+
+    Before editing, review the [common anti-patterns](../concepts/anti-patterns.md) to avoid flow control bugs, logging noise, and prompt logic mistakes that are easy to introduce but hard to debug.
 
 #### Branching
 
@@ -160,7 +178,7 @@ poly branch list
 
 #### Functions
 
-Create or modify backend functions the agent calls at runtime.
+Create or modify backend functions the agent calls at runtime. See the [functions reference](../reference/functions.md) for the full API.
 
 Typical locations include:
 
@@ -171,31 +189,31 @@ Typical locations include:
 
 #### Topics
 
-Add or edit knowledge-base topics used for retrieval.
+Add or edit [knowledge-base topics](../reference/topics.md) used for retrieval.
 
 #### Agent settings
 
-Update the personality, role, and rules that define the agent’s global behavior.
+Update the [personality, role, and rules](../reference/agent_settings.md) that define the agent's global behavior.
 
 #### Flows
 
-Build conversation flows, including prompts, step transitions, entities, and function steps.
+Build [conversation flows](../reference/flows.md), including prompts, step transitions, [entities](../reference/entities.md), and function steps.
 
 #### Channel-specific settings
 
-Adjust greeting messages, disclaimers, and style prompts for voice and chat.
+Adjust greeting messages, disclaimers, and style prompts for [voice](../reference/voice_settings.md) and [chat](../reference/chat_settings.md).
 
 #### Handoffs, SMS, and variants
 
-Define escalation paths, SMS templates, and per-variant configuration.
+Define [escalation paths](../reference/handoffs.md), [SMS templates](../reference/sms.md), and [per-variant configuration](../reference/variants.md).
 
 #### ASR and response control
 
-Tune speech recognition and control TTS behavior.
+Tune [speech recognition](../reference/speech_recognition.md) and control [TTS behavior](../reference/response_control.md).
 
 #### Experimental config
 
-Enable or tune experimental features where needed.
+Enable or tune [experimental features](../reference/experimental_config.md) where needed.
 
 ### Step 6 - Track and validate changes
 
@@ -204,10 +222,10 @@ Inspect the local changes before pushing.
 ~~~bash
 poly status
 poly diff
-poly diff <file>
+poly diff --files <file>
 poly validate
 poly format
-poly revert --all
+poly revert
 poly revert <file>
 ~~~
 
@@ -240,8 +258,8 @@ poly chat --environment sandbox --functions --flows
 Review, refine, and test again. You can also use the review command to share diffs with teammates.
 
 ~~~bash
-poly review
-poly review --before main --after my-feature
+poly review create
+poly review create --before main --after my-feature
 ~~~
 
 Make test calls, inspect transcripts, refine prompts, flows, and functions, and then re-push.
@@ -249,6 +267,9 @@ Make test calls, inspect transcripts, refine prompts, flows, and functions, and 
 ### Step 10 - Deploy to production
 
 Once the changes are pushed and validated, merge the branch in Agent Studio and deploy the project.
+
+!!! note "Merging requires the Agent Studio web UI"
+    There is no `poly merge` command. To merge a branch, open the project in Agent Studio, switch to the branch, and merge it through the interface. After merging, run `poly chat --environment sandbox` to test.
 
 ### Step 11 - Monitor performance
 
@@ -336,6 +357,9 @@ poly pull
 
 The ADK acts as the bridge between your local environment and Agent Studio. It lets the coding tool read from and write back to the project.
 
+!!! tip "Run `poly docs --all` before generating any files"
+    Immediately after pulling, run `poly docs --all` to produce a complete resource reference. Without it, a coding agent has no schema context for resource structure and field names, and will hallucinate them. This should be the first thing the coding tool does after `poly pull`.
+
 ### Step 4 - Give the coding tool its context
 
 Provide the coding tool with the information you gathered earlier.
@@ -343,7 +367,7 @@ Provide the coding tool with the information you gathered earlier.
 Include:
 
 - project-specific requirements
-- the URL to the business’s public API documentation
+- the URL to the business's public API documentation
 - relevant internal context
 - useful patterns or best practices from previous projects
 
@@ -365,7 +389,7 @@ This produces the assets the agent needs, including:
 
     ---
 
-    Dialogue logic and routing for the agent.
+    Dialog logic and routing for the agent.
 
 -   **Callable functions**
 
@@ -419,7 +443,7 @@ Check that the key parts of the agent look correct:
 
 Once everything looks right:
 
-1. merge the branch into the main project
+1. merge the branch into the main project through the Agent Studio web UI — there is no `poly merge` command
 2. deploy the project
 
 At that point, the agent is live.
@@ -428,16 +452,17 @@ At that point, the agent is live.
 
 | Command | Description |
 |---|---|
-| **poly init** | Initialise a new project locally |
+| **poly init** | Initialize a new project locally |
 | **poly pull** | Pull remote config into the local project |
 | **poly push** | Push local changes to Agent Studio |
 | **poly status** | List changed files |
-| **poly diff** | Show diffs |
-| **poly revert** | Revert local changes |
+| **poly diff** | Show diffs (local vs remote, version hash, or `--before`/`--after`) |
+| **poly revert** | Revert local changes (all by default, or specific files) |
 | **poly branch** | Branch management |
-| **poly format** | Format resource files |
+| **poly format** | Format resource files (all or `--files` for specific files) |
 | **poly validate** | Validate project configuration locally |
-| **poly review** | Create a diff review page |
+| **poly review** | Diff review page: `create`, `list`, `delete` |
+| **poly deployments** | View deployment history (`list`, with `--env`, `--limit`, `--details`) |
 | **poly chat** | Start an interactive session with the agent |
 | **poly docs** | Output resource documentation |
 
