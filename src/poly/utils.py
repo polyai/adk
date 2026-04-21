@@ -12,9 +12,7 @@ import os
 import re
 from typing import Callable, Optional
 
-from poly.resources.flows import FunctionStep
-from poly.resources.function import Function
-from poly.resources.resource import Resource, ResourceMapping
+from poly.resources import resource_utils, Resource, ResourceMapping, Function, FunctionStep, Topic
 
 logger = logging.getLogger(__name__)
 
@@ -404,3 +402,41 @@ def compute_variable_references(
         for var_id in variable_references:
             var_refs.setdefault(var_id, {}).setdefault(field_name, {})[fn_id] = True
     return var_refs
+
+
+def _migrate_legacy_topic_files(
+    root_path: str, resources: dict[type[Resource], dict[str, Resource]]
+) -> None:
+    """Migrate topic files from legacy format (name as filename) to new format
+    (clean filename with name stored inside the YAML).
+
+    This handles the transition where topic files were previously saved as
+    ``topics/{name}.yaml`` and are now saved as ``topics/{clean_name}.yaml``
+    with a ``name`` key inside the YAML content.
+    """
+    if Topic not in resources:
+        return
+
+    topics_dir = os.path.join(root_path, "topics")
+    if not os.path.isdir(topics_dir):
+        return
+
+    for topic in resources[Topic].values():
+        new_path = os.path.join(root_path, topic.file_path)
+        if os.path.exists(new_path):
+            continue
+
+        # Check for legacy file at the old (unclean) path
+        legacy_path = os.path.join(root_path, "topics", f"{topic.name}.yaml")
+        if not os.path.exists(legacy_path):
+            continue
+
+        # Read content, insert name field, write to new path, remove old file
+        content = Resource.read_from_file(legacy_path)
+        yaml_dict = resource_utils.load_yaml(content) or {}
+        if "name" not in yaml_dict:
+            yaml_dict = {"name": topic.name, **yaml_dict}
+            new_content = resource_utils.dump_yaml(yaml_dict)
+            with open(new_path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+            os.remove(legacy_path)
