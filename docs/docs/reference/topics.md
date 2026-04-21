@@ -197,6 +197,6 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
     ---
 
     How topics are retrieved, ranked, and injected — RAG mechanics, topic types, and retrieval tuning.
-    [Open Managed Topics overview](https://docs.poly.ai/managed-topics/introduction)
+    [Open Managed Topics overview](https://docs.poly.ai/managed-topics/introduction){ target="_blank" rel="noopener" }
 
 </div>

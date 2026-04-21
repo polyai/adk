@@ -174,6 +174,6 @@ entities:
     ---
 
     Full reference for `conv.entities` — accessing collected values, checking presence, and entity object shape.
-    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object)
+    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object){ target="_blank" rel="noopener" }
 
 </div>

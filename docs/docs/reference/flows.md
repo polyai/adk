@@ -384,13 +384,13 @@ Logic reused across flows is usually better placed in global functions.
     ---
 
     All supported function return shapes used in flow transitions — utterance, hangup, goto_flow, and combined dicts.
-    [Open return values reference](https://docs.poly.ai/tools/return-values)
+    [Open return values reference](https://docs.poly.ai/tools/return-values){ target="_blank" rel="noopener" }
 
 -   **Conversation object reference (platform)**
 
     ---
 
     Full reference for `conv.goto_flow`, `conv.exit_flow`, `flow.goto_step`, and all other flow navigation methods.
-    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object)
+    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object){ target="_blank" rel="noopener" }
 
 </div>

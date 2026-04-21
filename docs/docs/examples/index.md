@@ -43,32 +43,16 @@ Examples work best alongside the conceptual and reference documentation.
 
 </div>
 
-## Available examples
+## What will appear here
 
-<div class="grid cards" markdown>
+Over time, this section can include examples such as:
 
--   **Confirm caller ID before sending SMS**
-
-    ---
-
-    Stash `caller_number` at call start, confirm the last four digits, then send an SMS — or ask if the number is not available.
-    [Open example](./confirm-caller-id-before-sms.md)
-
--   **Venue-specific goodbye with clean hangup**
-
-    ---
-
-    Return a location-specific closing utterance from a function and hang up without the LLM adding its own filler first.
-    [Open example](./venue-specific-goodbye.md)
-
--   **SMS link with transfer fallback**
-
-    ---
-
-    Offer an SMS link and transfer to a live agent if the caller prefers — with per-environment sender number support.
-    [Open example](./sms-or-transfer-fallback.md)
-
-</div>
+- simple flow structures
+- common function patterns
+- topic and action examples
+- entity collection patterns
+- variant-based configuration examples
+- review and validation workflows
 
 !!! info "Examples are intentionally small"
 

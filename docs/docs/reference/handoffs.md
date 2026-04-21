@@ -156,6 +156,6 @@ Use {{fn:transfer_call}} when the user needs to be transferred to a specialist.
     ---
 
     Full reference for `conv.call_handoff` — destination, reason, utterance, and SIP header overrides.
-    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object)
+    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object){ target="_blank" rel="noopener" }
 
 </div>

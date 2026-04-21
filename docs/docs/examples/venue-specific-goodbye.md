@@ -115,13 +115,13 @@ Then access it in the function via `conv.variant.closing_message` as shown above
     ---
 
     All supported return shapes — `utterance`, `hangup`, combined dicts, and transition objects.
-    [Open return values reference](https://docs.poly.ai/tools/return-values)
+    [Open return values reference](https://docs.poly.ai/tools/return-values){ target="_blank" rel="noopener" }
 
 -   **Variant management (platform)**
 
     ---
 
     How variant attributes are defined, routed, and accessed via `conv.variant`.
-    [Open variant management](https://docs.poly.ai/variant-management/introduction)
+    [Open variant management](https://docs.poly.ai/variant-management/introduction){ target="_blank" rel="noopener" }
 
 </div>

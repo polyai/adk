@@ -3,10 +3,6 @@ title: Multi-user workflows and guardrails
 description: Learn how the PolyAI ADK supports collaboration, branching, validation, and safe synchronization with Agent Studio.
 ---
 
-!!! note "What 'guardrails' means here"
-
-    This page covers **structural guardrails** — push validation, branching, and merge controls that prevent invalid resources from reaching Agent Studio. It does not cover content safety, PII redaction, or jailbreak protection, which are platform-side features.
-
 The **PolyAI ADK** was designed with **multi-user collaboration** in mind.
 
 It allows multiple developers to work on the same Agent Studio project while preserving the same platform guardrails that prevent incompatible or invalid changes from being pushed.
@@ -48,7 +44,7 @@ The ADK is designed to reduce those risks by combining local editing with valida
 
     ---
 
-    The CLI helps ensure that pushed changes remain valid for the project.
+    The CLI validates that pushed changes remain valid for the project.
 
 </div>
 
@@ -98,24 +94,6 @@ If the pulled changes conflict with your own local edits, the ADK will merge the
 
 The local workflow is not isolated from Agent Studio UI work - both sides affect branch state. Keep that in mind when collaborating.
 
-### Merge conflict paths
-
-When a merge conflict occurs, the error output shows paths in the form:
-
-~~~text
-config/entities.yaml/entities/phone_number
-~~~
-
-These are **synthetic conflict paths**, not real filesystem paths. The segment after the `.yaml` filename identifies the specific sub-resource where the conflict occurred (in this case, the `phone_number` entity inside `entities.yaml`). Open the file at the `.yaml` path and look for standard merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`).
-
-### Push normalization and re-pull
-
-When you push new resources for the first time, Agent Studio normalizes the stored format — expanding default fields and standardizing indentation. Your local copy does not reflect this normalization automatically.
-
-!!! warning "Pull after pushing new resources"
-
-    If you push new resources and then immediately edit and push again without pulling first, you may see a merge conflict caused by the normalization diff. Run `poly pull` after any push that introduces new resources to keep your local copy in sync with the normalized remote state.
-
 ## Review workflow
 
 When changes are ready for review, generate a review artifact:
@@ -142,7 +120,7 @@ In practice, this means:
 
 - project resources must still conform to Agent Studio expectations
 - references between resources must remain valid
-- branch merges still happen in Agent Studio — there is no `poly merge` command
+- branch merges still happen in Agent Studio
 - deployment still happens through Agent Studio
 
 !!! tip "Local flexibility, platform constraints"

@@ -15,7 +15,7 @@ If you do not yet have access to Agent Studio or an existing agent, start here.
 
 ### Step 1 — Get access to Agent Studio
 
-Go to [studio.poly.ai](https://studio.poly.ai) and sign up. You can sign up with your email or log in with SSO.
+Go to [studio.poly.ai](https://studio.poly.ai){ target="_blank" rel="noopener" } and sign up. You can sign up with your email or log in with SSO.
 
 ![Agent Studio sign up for the first time](../assets/agent-studio-login.png)
 
@@ -47,9 +47,9 @@ Once the agent is ready, test it inside Agent Studio to confirm it's filled in w
 
 To pull the agent into the ADK, you need two identifiers from Agent Studio. You can find them in the URL when your project is open:
 
-```
+~~~
 https://studio.poly.ai/<account_id>/<project_id>/...
-```
+~~~
 
 Copy both values — you will need them in the next step.
 
@@ -63,9 +63,9 @@ The ADK uses an API key to authenticate with Agent Studio. Click **Back to agent
 
 Then set it as an environment variable:
 
-```bash
+~~~bash
 export POLY_ADK_KEY=<your-api-key>
-```
+~~~
 
 To make it permanent, add the export line to your shell profile (`~/.zshrc` or `~/.bashrc`).
 
@@ -113,10 +113,10 @@ If you already have an agent in Agent Studio — built in the browser editor, by
 3. Find your `account_id` and `project_id` in the Agent Studio URL.
 4. Run:
 
-    ```bash
+    ~~~bash
     poly init --account_id <account_id> --project_id <project_id>
     poly pull
-    ```
+    ~~~
 
 Your local folder will mirror the project in Agent Studio and you can begin editing immediately.
 

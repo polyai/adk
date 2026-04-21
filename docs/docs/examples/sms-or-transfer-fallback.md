@@ -93,7 +93,7 @@ sms_templates:
       live: "+443333333333"
 ~~~
 
-The platform selects the right number automatically when `conv.send_sms_template()` is called. See the [SMS setup reference](https://docs.poly.ai/sms/introduction) for full template configuration options.
+The platform selects the right number automatically when `conv.send_sms_template()` is called. See the [SMS setup reference](https://docs.poly.ai/sms/introduction){ target="_blank" rel="noopener" } for full template configuration options.
 
 If you need more control — for example, when using `conv.send_sms()` to send free-form content rather than a template — you can read `conv.env` directly:
 
@@ -118,7 +118,7 @@ def send_link_or_transfer(conv: Conversation, wants_sms: bool):
 
 !!! tip "Use secrets for sender numbers in production"
 
-    Avoid hardcoding phone numbers in function code. Store them as [secrets](https://docs.poly.ai/secrets/introduction) and retrieve with `conv.utils.get_secret("sms_sender_live")`.
+    Avoid hardcoding phone numbers in function code. Store them as [secrets](https://docs.poly.ai/secrets/introduction){ target="_blank" rel="noopener" } and retrieve with `conv.utils.get_secret("sms_sender_live")`.
 
 ## Related pages
 
@@ -150,20 +150,20 @@ def send_link_or_transfer(conv: Conversation, wants_sms: bool):
     ---
 
     Full reference for `conv.send_sms_template`, `conv.call_handoff`, `conv.env`, and all other `conv` attributes.
-    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object)
+    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object){ target="_blank" rel="noopener" }
 
 -   **Secrets (platform)**
 
     ---
 
     Store sensitive values like sender numbers and retrieve them at runtime with `conv.utils.get_secret`.
-    [Open secrets reference](https://docs.poly.ai/secrets/introduction)
+    [Open secrets reference](https://docs.poly.ai/secrets/introduction){ target="_blank" rel="noopener" }
 
 -   **SMS setup (platform)**
 
     ---
 
     Configuring SMS channels, sender numbers, and template structure.
-    [Open SMS setup](https://docs.poly.ai/sms/introduction)
+    [Open SMS setup](https://docs.poly.ai/sms/introduction){ target="_blank" rel="noopener" }
 
 </div>

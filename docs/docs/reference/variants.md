@@ -205,6 +205,6 @@ Common uses include:
     ---
 
     How variants are routed at runtime — SIP header routing, default selection, and `conv.variant` access.
-    [Open variant management](https://docs.poly.ai/variant-management/introduction)
+    [Open variant management](https://docs.poly.ai/variant-management/introduction){ target="_blank" rel="noopener" }
 
 </div>

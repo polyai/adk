@@ -132,27 +132,27 @@ It is **not** the right place for logic that only applies mid-conversation, or f
     ---
 
     How topics are retrieved, ranked, and used by the platform — including RAG mechanics and topic types.
-    [Open Managed Topics overview](https://docs.poly.ai/managed-topics/introduction)
+    [Open Managed Topics overview](https://docs.poly.ai/managed-topics/introduction){ target="_blank" rel="noopener" }
 
 -   **Start function (platform)**
 
     ---
 
     Lifecycle hook reference — when it runs, what it can read, and common initialization patterns.
-    [Open start function reference](https://docs.poly.ai/tools/start-function)
+    [Open start function reference](https://docs.poly.ai/tools/start-function){ target="_blank" rel="noopener" }
 
 -   **Connected Knowledge (platform)**
 
     ---
 
     Alternative to Managed Topics for large, unstructured content sets — help articles, PDFs, FAQs.
-    [Open Connected Knowledge](https://docs.poly.ai/connected-knowledge/introduction)
+    [Open Connected Knowledge](https://docs.poly.ai/connected-knowledge/introduction){ target="_blank" rel="noopener" }
 
 -   **Variant management (platform)**
 
     ---
 
     Per-site configuration using variant attributes — how routing and attribute lookup work.
-    [Open variant management](https://docs.poly.ai/variant-management/introduction)
+    [Open variant management](https://docs.poly.ai/variant-management/introduction){ target="_blank" rel="noopener" }
 
 </div>

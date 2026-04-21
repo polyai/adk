@@ -126,20 +126,20 @@ sms_templates:
     ---
 
     Full reference for `conv.caller_number`, `conv.send_sms_template`, and all other `conv` attributes.
-    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object)
+    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object){ target="_blank" rel="noopener" }
 
 -   **Start function (platform)**
 
     ---
 
     When start function runs, what it can access, and how to use it for initialization.
-    [Open start function reference](https://docs.poly.ai/tools/start-function)
+    [Open start function reference](https://docs.poly.ai/tools/start-function){ target="_blank" rel="noopener" }
 
 -   **SMS setup (platform)**
 
     ---
 
     Configuring SMS channels, sender numbers, and template structure.
-    [Open SMS setup](https://docs.poly.ai/sms/introduction)
+    [Open SMS setup](https://docs.poly.ai/sms/introduction){ target="_blank" rel="noopener" }
 
 </div>
