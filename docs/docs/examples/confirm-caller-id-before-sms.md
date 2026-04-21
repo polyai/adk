@@ -10,10 +10,10 @@ This pattern covers a very common voice + SMS flow: the agent has the caller's n
 ## Files involved
 
 ~~~text
-functions/start_function.py       ← stash caller_number at call start
+functions/start_function.py           ← stash caller_number at call start
 functions/caller_number_confirmed.py  ← check presence, compare last four
-sms/booking_link.yaml             ← the SMS template
-topics/Send Booking Link.yaml     ← topic that triggers the flow
+config/sms_templates.yaml             ← the SMS template (alongside other templates)
+topics/Send Booking Link.yaml         ← topic that triggers the flow
 ~~~
 
 ## start_function.py
@@ -82,11 +82,14 @@ actions: |-
 
     The topic actions above use a natural-language conditional on `$caller_number`. This works when the variable is populated, but can behave unreliably if the variable is always empty (for example, in chat). If you need strict branching, move the presence check into `caller_number_confirmed` and call it unconditionally from the topic action.
 
-## SMS template (sms/booking_link.yaml)
+## SMS template (config/sms_templates.yaml)
+
+All SMS templates are defined in a single `config/sms_templates.yaml` file under the `sms_templates` key.
 
 ~~~yaml
-name: booking_link
-content: "Here's your booking link: https://book.example.com"
+sms_templates:
+  - name: booking_link
+    text: "Here's your booking link: https://book.example.com"
 ~~~
 
 ## Related pages

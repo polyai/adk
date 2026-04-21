@@ -73,19 +73,22 @@ actions: |-
 
 ## Variant attribute for site-specific closing messages
 
-If different locations need different goodbyes, define a `closing_message` attribute in each variant:
+If different locations need different goodbyes, add a `closing_message` attribute to `config/variant_attributes.yaml`. All variants and attributes are defined in this single file.
 
 ~~~yaml
-# variants/london.yaml
-attributes:
-  closing_message: "Thanks for calling the London store. Goodbye!"
+variants:
+  - name: london
+  - name: new_york
+    is_default: true
 
-# variants/new_york.yaml
 attributes:
-  closing_message: "Thanks for calling the New York store. Have a great day!"
+  - name: closing_message
+    values:
+      london: "Thanks for calling the London store. Goodbye!"
+      new_york: "Thanks for calling the New York store. Have a great day!"
 ~~~
 
-Then access it in the function via `conv.variant.closing_message` as shown above.
+Then access it in the function via `conv.variant.closing_message` as shown above. Every variant must have a value for every attribute — leave it as an empty string if a variant has no custom closing.
 
 ## Related pages
 

@@ -12,8 +12,8 @@ A common pattern in voice agents: offer to send the caller a link by SMS, but tr
 ~~~text
 functions/start_function.py           ← stash caller_number
 functions/send_link_or_transfer.py    ← SMS or handoff decision
-sms/booking_link.yaml                 ← SMS template
-handoffs/agent_queue.yaml             ← transfer destination
+config/sms_templates.yaml             ← SMS template (alongside other templates)
+config/handoffs.yaml                  ← transfer destination (alongside other handoffs)
 topics/Get Booking Link.yaml          ← triggers the pattern
 ~~~
 
@@ -65,7 +65,21 @@ actions: |-
 
 ## Per-environment sender number
 
-If the SMS sender number differs between sandbox and live environments, use `conv.env` in `send_link_or_transfer.py`:
+If the sender number differs between environments, the simplest approach is to configure `env_phone_numbers` directly in `config/sms_templates.yaml` — no code required:
+
+~~~yaml
+sms_templates:
+  - name: booking_link
+    text: "Here's your booking link: https://book.example.com"
+    env_phone_numbers:
+      sandbox: "+441111111111"
+      pre_release: "+442222222222"
+      live: "+443333333333"
+~~~
+
+The platform selects the right number automatically when `conv.send_sms_template()` is called. See the [SMS setup reference](https://docs.poly.ai/sms/introduction) for full template configuration options.
+
+If you need more control — for example, when using `conv.send_sms()` to send free-form content rather than a template — you can read `conv.env` directly:
 
 ~~~python
 ENV_SENDER_NUMBERS = {
