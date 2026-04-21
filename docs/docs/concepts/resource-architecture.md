@@ -43,8 +43,8 @@ Keep these separate. Mixing factual content and behavioral instructions in the s
 | Deterministic branching or routing logic | Function (`functions/`) |
 | Call initialization — routing, variant selection, reading SIP headers | `functions/start_function.py` |
 | A multi-step guided conversation | Flow (`flows/`) |
-| Reusable SMS message content | SMS template (`sms/`) |
-| Per-site or per-location configuration | Variant (`variants/`) |
+| Reusable SMS message content | SMS template (`config/sms_templates.yaml`) |
+| Per-site or per-location configuration | Variant attributes (`config/variant_attributes.yaml`) |
 | Agent identity and tone | `agent_settings/personality.yaml` and `role.yaml` |
 
 ## Rules vs topics vs functions

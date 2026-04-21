@@ -82,8 +82,6 @@ Allowed adjective values are:
 
 If `Other` is set to `true`, no other adjective can be selected.
 
-Adjectives not on this list — such as "Warm", "Friendly", or "Empathetic" — are not valid structured values. Use the `custom` field for any personality description that doesn't map to the list above.
-
 ### `custom`
 
 The `custom` field is a free-text description of the personality.
@@ -97,9 +95,9 @@ It supports:
 
 ~~~yaml
 adjectives:
-Polite: true
-Calm: true
-Kind: true
+  Polite: true
+  Calm: true
+  Kind: true
 custom: ""
 ~~~
 
@@ -117,7 +115,7 @@ This is usually the agent's role, title, or function in the business context.
 | `additional_info` | Extra context about the role |
 | `custom` | Free-text role description used when `value` is `other` |
 
-If `value` is set to `other`, the `custom` field is used instead. When `value` is `other`, `custom` must be non-empty — leaving it blank will cause a validation error.
+If `value` is set to `other`, the `custom` field is used instead.
 
 The `custom` field supports:
 
