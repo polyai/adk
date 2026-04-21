@@ -92,6 +92,10 @@ attributes:
 
 Then access it in the function via `conv.variant.closing_message` as shown above. Every variant must have a value for every attribute — leave it as an empty string if a variant has no custom closing.
 
+!!! info "`is_default` may be reassigned on push"
+
+    The platform controls which variant is the default. After a push and pull, the `is_default` assignment in your local file may differ from what you wrote — the server picks the canonical default. This does not affect runtime behavior, but expect the value to change on round-trip.
+
 ## Related pages
 
 <div class="grid cards" markdown>

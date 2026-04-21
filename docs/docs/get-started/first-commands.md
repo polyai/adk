@@ -105,6 +105,28 @@ poly pull --help
 poly push --help
 ~~~
 
+## Common first-run behavior
+
+### `poly status` shows variables you didn't create
+
+After `poly init` or `poly pull`, `poly status` may report `variables/` entries as new files — for example, `variables/caller_number` or `variables/verified_record`. These are **virtual**: the ADK scans function code for `conv.state.*` assignments and tracks each one as a variable resource. No corresponding files exist on disk. This is expected and does not mean you have changes to push.
+
+### `poly branch switch` reports uncommitted changes
+
+If `poly status` shows phantom `variables/` entries and you try to switch branches, the ADK may block the switch:
+
+~~~text
+Cannot switch branches with uncommitted changes. Use --force to switch and discard changes.
+~~~
+
+Use `--force` to override:
+
+~~~bash
+poly branch switch <branch-name> --force
+~~~
+
+This discards no actual work — the variables entries are virtual and will reappear after the next pull.
+
 ## Next step
 
 Continue to the command reference for a complete listing, or go straight to the tutorial to see a real workflow.

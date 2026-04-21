@@ -21,6 +21,8 @@ Each topic is stored as its own YAML file:
 topics/{Topic Name}.yaml
 ~~~
 
+Topic filenames may contain spaces — `topics/Make a Reservation.yaml` is valid. This differs from flow directories, which must be lowercase snake_case. The topic file name does not affect the topic's behavior or how it is referenced.
+
 ## What a topic contains
 
 Each topic has four main fields:
