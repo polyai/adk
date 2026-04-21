@@ -446,10 +446,6 @@ poly status
 ╰───────────────────────────────────────────────╯
 ~~~
 
-!!! info "Your region value may differ"
-
-    The `Region` field shows whichever region your project is on — `us-1`, `euw-1`, `uk-1`, or `studio`. All regions support `poly status`, `poly push`, and `poly pull`.
-
 ~~~text
 
 New files:
@@ -498,15 +494,6 @@ poly chat
 
 Because you are on the `booking-flow` branch (not `main`), `poly chat` connects to the branch's deployed state by default.
 
-!!! warning "Branch chat is not supported on the `studio` region"
-
-    If `poly chat` returns a 404 error, your project is on the `studio` region, where the branch sequence endpoint is not yet available. To test your changes, merge the `booking-flow` branch to `main` in the Agent Studio UI, then run:
-
-    ~~~bash
-    poly chat --environment sandbox
-    ~~~
-
-    This connects to the sandbox environment on `main`, which reflects the merged state.
 
 ~~~text
 Starting chat for acme-corp/maison-reservations branch=booking-flow...
