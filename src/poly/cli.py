@@ -2172,6 +2172,7 @@ class AgentStudioCLI:
     @staticmethod
     def _merge_interactively(
         conflicts: list[dict[str, Any]],
+        existing_resolutions: dict[str, dict[str, Any]],
         branch_display_name: str = "",
     ) -> list[dict[str, Any]]:
         """Resolve merge conflicts with questionary; expects API conflicts optionally enriched."""
@@ -2194,6 +2195,8 @@ class AgentStudioCLI:
             if conflict["path"][-1] in {"updatedAt", "createdAt"}:
                 resolutions.append({"path": conflict["path"], "strategy": "theirs"})
                 continue
+
+            existing_resolution = existing_resolutions.get(conflict["path"])
 
             path = conflict["path"]
             clean_path = conflict.get("visual_path") or os.sep.join(path)
@@ -2222,9 +2225,20 @@ class AgentStudioCLI:
                 branch_label=branch_label,
                 branch_value=str(conflict.get("theirsValue", "")),
                 main_value=str(conflict.get("oursValue", "")),
+                existing_resolution=existing_resolution,
             )
 
             choices: list[dict[str, str]] = []
+            if existing_resolution:
+                er_strategy = existing_resolution.get("strategy", "")
+                er_value = existing_resolution.get("value")
+                if er_value is not None:
+                    er_label = (
+                        er_value if isinstance(er_value, str) and "\n" not in er_value else "value"
+                    )
+                else:
+                    er_label = er_strategy
+                choices.append({"name": f"Use resolution: {er_label}", "value": "existing"})
             if auto_merged:
                 choices.append({"name": "Accept auto-merge", "value": "merged"})
             choices.extend(
@@ -2242,6 +2256,9 @@ class AgentStudioCLI:
                 answer = questionary.select("Select resolution", choices=choices).ask()
                 if answer is None:
                     return []
+                if answer == "existing":
+                    resolutions.append(existing_resolution)
+                    break
                 if answer == "merged":
                     resolutions.append(_auto_merge_resolution(path, merged_version))
                     break
@@ -2373,7 +2390,9 @@ class AgentStudioCLI:
                     if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
                 ]
                 if display_conflict:
-                    output_merge_conflict_table(display_conflict, show_type=True)
+                    output_merge_conflict_table(
+                        display_conflict, show_type=True, resolutions=file_resolutions
+                    )
 
                 if errors:
                     sys.exit(1)
@@ -2387,9 +2406,14 @@ class AgentStudioCLI:
                     )
 
                 resolutions: list[dict[str, Any]] = []
+                existing_resolutions = {
+                    r["path"]: r for r in (file_resolutions or []) if "path" in r
+                }
                 if interactive and conflicts:
                     while True:
-                        batch = cls._merge_interactively(enriched, branch_name)
+                        batch = cls._merge_interactively(
+                            enriched, existing_resolutions, branch_name
+                        )
                         if not batch:
                             warning("No resolutions provided. Exiting.")
                             sys.exit(1)

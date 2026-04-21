@@ -256,6 +256,7 @@ def print_merge_conflict_interactive_header(
     branch_label: str,
     branch_value: str,
     main_value: str,
+    existing_resolution: dict[str, Any] | None = None,
 ) -> None:
     """Rich panel for one interactive merge conflict (metadata + optional three-way preview)."""
     rows = Table(show_header=False, box=None, pad_edge=False, padding=(0, 1))
@@ -281,6 +282,15 @@ def print_merge_conflict_interactive_header(
         else "[warning]Needs decision[/warning]"
     )
     rows.add_row("Status", status_markup)
+
+    if existing_resolution:
+        strategy = existing_resolution.get("strategy", "")
+        value = existing_resolution.get("value")
+        if value is not None:
+            display = value if isinstance(value, str) and "\n" not in value else "value"
+        else:
+            display = strategy
+        rows.add_row("Resolution", Text(display, style="bright_green"))
 
     body: Table | Group
     if heavy:
@@ -312,6 +322,7 @@ def print_merge_conflict_interactive_header(
 def output_merge_conflict_table(
     conflicts: list[dict],
     show_type: bool,
+    resolutions: list[dict[str, str]] | None = None,
     panel_title: str = "Merge conflicts",
 ) -> None:
     """Print merge conflicts in a bordered table (optionally inside a titled panel).
@@ -331,15 +342,22 @@ def output_merge_conflict_table(
         table.add_column("Status", width=18, no_wrap=True)
         table.add_column("In resource", justify="right", width=14)
 
+    current_resolution_paths = {tuple(r["path"]) for r in resolutions} if resolutions else set()
+
     for conflict in conflicts:
         visual = conflict.get("visual_path")
         if not visual and conflict.get("path"):
             visual = os.sep.join(conflict["path"])
         if show_type:
-            auto = conflict.get("can_auto_merge")
-            status_cell = (
-                "[success]Auto-mergeable[/success]" if auto else "[warning]Needs decision[/warning]"
-            )
+            if tuple(conflict.get("path", [])) in current_resolution_paths:
+                status_cell = "[success]Resolution given[/success]"
+            else:
+                auto = conflict.get("can_auto_merge")
+                status_cell = (
+                    "[success]Auto-mergeable[/success]"
+                    if auto
+                    else "[warning]Needs decision[/warning]"
+                )
             n = int(conflict.get("conflicts_in_resource") or 1)
             in_res = f"{n} conflict" + ("" if n == 1 else "s")
             table.add_row(visual, status_cell, in_res)
