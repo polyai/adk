@@ -285,7 +285,7 @@ Use language flags to specify the expected input and output language when chatti
 | `--input-file FILE` | Read messages line-by-line from a file (`-` for stdin). |
 | `--conversation-id`, `--conv-id` | Resume an existing conversation by ID. |
 | `--json` | Emit a single JSON object when the session ends (see below). |
-| `--environment` | Target environment. Choices: `branch`, `sandbox`, `pre-release`, `live`. Defaults to `sandbox`. `branch` chats against the last **pushed** state of your current branch (not local uncommitted changes); on main it falls back to `sandbox`. Use `--push` to push local changes before chatting. |
+| `--environment` | Target environment. Choices: `branch`, `sandbox`, `pre-release`, `live`. Defaults to `branch`. `branch` chats against the last **pushed** state of your current branch (not local uncommitted changes); on main it falls back to `sandbox`. Use `--push` to push local changes before chatting. |
 | `--channel` | Channel to use (e.g. `webchat`, `voice`). |
 | `--lang` | Set both input and output language. |
 | `--input-lang` | Set input language only. |

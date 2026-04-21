@@ -27,9 +27,9 @@ Return the utterance and hangup from the function itself. The function speaks th
 ## Files involved
 
 ~~~text
-functions/goodbye_and_hang_up.py    ← closing utterance + hangup
-variants/                           ← per-site closing messages (optional)
-topics/Goodbye.yaml                 ← triggers the function
+functions/goodbye_and_hang_up.py        ← closing utterance + hangup
+config/variant_attributes.yaml         ← per-site closing messages (optional)
+topics/Goodbye.yaml                     ← triggers the function
 ~~~
 
 ## goodbye_and_hang_up.py
