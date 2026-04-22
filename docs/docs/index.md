@@ -5,7 +5,7 @@ description: Documentation for the PolyAI Agent Development Kit.
 
 ![PolyAI ADK](assets/poly-ai-adk.png)
 
-Build, edit, and deploy Agent Studio projects locally with the **PolyAI ADK**.
+Build and edit Agent Studio projects locally with the **PolyAI ADK**, then push them back to Agent Studio to review and deploy.
 
 The ADK gives you a local, Git-like workflow for Agent Studio projects: pull, edit with standard tooling, validate, and push.
 

@@ -120,13 +120,13 @@ poly pull -f
 
     All CLI commands should be run from within the local project folder, unless you explicitly use the relevant path flag.
 
-### Step 3 - Run the agent locally
+### Step 3 - Chat with the agent
 
 Start an interactive chat session to confirm the connection works and inspect runtime behavior.
 
-!!! info "What poly chat connects to at this stage"
+!!! info "`poly chat` runs against Agent Studio, not your local files"
 
-    At this point in the setup you are on the main branch, so `poly chat` connects to your sandbox environment in Agent Studio — not local uncommitted files. This is useful for confirming the connection works. To chat against your own feature branch changes, push them first with `poly push`, then run `poly chat` from that branch (or use `poly chat --push` to push and chat in one step).
+    The ADK has no local runtime — `poly chat` talks to the agent running in Agent Studio. At this stage you are on `main`, so the session connects to your sandbox. To chat against a feature branch, push it first with `poly push` and then run `poly chat` (or use `poly chat --push` to do both in one step).
 
 ~~~bash
 poly chat

@@ -129,7 +129,7 @@ Use `--force` to override:
 poly branch switch <branch-name> --force
 ~~~
 
-This discards no actual work — the variables entries are virtual and will reappear after the next pull.
+This does not lose any real work — the `variables/` entries are virtual and will reappear after the next pull.
 
 ### `poly chat` returns a 404 on a feature branch
 
