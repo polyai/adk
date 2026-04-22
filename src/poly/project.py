@@ -57,7 +57,12 @@ from poly.resources import (
 )
 from poly.resources.resource import _parse_multi_resource_path
 from poly.utils import compute_variable_references
-from poly.migration_utils import run_migrations, get_all_migration_flags, MigrationFlag
+from poly.migration_utils import (
+    run_migrations,
+    get_all_migration_flags,
+    MigrationFlag,
+    load_migration_flags,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -240,9 +245,7 @@ class AgentStudioProject:
         else:
             last_updated = datetime.now()
 
-        migration_flags = set(
-            MigrationFlag(flag) for flag in status_dict.get("migration_flags", [])
-        )
+        migration_flags = load_migration_flags(status_dict.get("migration_flags", []))
         migration_flags = run_migrations(root_path, migration_flags)
 
         return cls(
@@ -285,7 +288,7 @@ class AgentStudioProject:
 
         file_structure_info = cls.compute_file_structure_info(resources)
 
-        migration_flags = set(MigrationFlag(flag) for flag in data.get("migration_flags", []))
+        migration_flags = load_migration_flags(data.get("migration_flags", []))
         migration_flags = run_migrations(root_path, migration_flags)
 
         return cls(

@@ -20,6 +20,19 @@ class MigrationFlag(Enum):
     MIGRATED_LEGACY_TOPIC_FILES = "migrated_legacy_topic_files"
 
 
+def load_migration_flags(flags: list[str]) -> set[MigrationFlag]:
+    """Load a set of MigrationFlag from a list of strings. This can be used to
+    load the set of applied migrations from a file or other source.
+
+    Args:
+        flags: A list of strings representing the applied migration flags.
+    Returns:
+        A set of MigrationFlag values corresponding to the input strings.
+    """
+    valid_flags = set(flag.value for flag in MigrationFlag)
+    return set(MigrationFlag(flag) for flag in flags if flag in valid_flags)
+
+
 def get_all_migration_flags() -> set[MigrationFlag]:
     """Get a set of all migration flags. This can be used to initialize the set
     of applied migrations when first running the migrations.
@@ -66,41 +79,55 @@ def migrate_legacy_topic_files(root_path: str) -> None:
 
     topics = {}
     old_files = []
+    old_dirs = set()
 
-    for topic in os.listdir(topics_dir):
-        if not topic.endswith(".yaml"):
-            continue
+    # Walk recursively to catch legacy topics in nested subdirectories
+    # (e.g. topics/Billing/Refunds.yaml from a name containing "/")
+    for dirpath, _, filenames in os.walk(topics_dir):
+        for filename in filenames:
+            if not filename.endswith(".yaml"):
+                continue
 
-        topic_path = os.path.join(topics_dir, topic)
-        with open(topic_path, "r", encoding="utf-8") as f:
-            content = resource_utils.load_yaml(f.read())
+            topic_path = os.path.join(dirpath, filename)
+            with open(topic_path, "r", encoding="utf-8") as f:
+                content = resource_utils.load_yaml(f.read())
 
-        if "name" in content:
-            # Already in new format, skip
-            continue
+            if not isinstance(content, dict) or "name" in content:
+                # Already in new format, skip
+                continue
 
-        file_name = os.path.splitext(topic)[0]
-        clean_file_name = resource_utils.clean_name(file_name)
-        clean_file_path = os.path.join(topics_dir, f"{clean_file_name}.yaml")
-        if clean_file_path in topics:
-            raise ValueError(
-                "Cant migrate legacy topic files: multiple topics with the same file name after cleaning: "
-                + clean_file_name
-            )
+            # Reconstruct the original topic name from the relative path
+            # e.g. topics/Billing/Refunds.yaml -> "Billing/Refunds"
+            rel_path = os.path.relpath(topic_path, topics_dir)
+            file_name = os.path.splitext(rel_path)[0]
+            clean_file_name = resource_utils.clean_name(file_name)
+            clean_file_path = os.path.join(topics_dir, f"{clean_file_name}.yaml")
+            if clean_file_path in topics:
+                raise ValueError(
+                    "Can't migrate legacy topic files: "
+                    "multiple topics with the same file name after cleaning: " + clean_file_name
+                )
 
-        new_content = {"name": file_name, **content}
+            new_content = {"name": file_name, **content}
 
-        topics[clean_file_path] = new_content
-        old_files.append(topic_path)
+            topics[clean_file_path] = new_content
+            old_files.append(topic_path)
+            if dirpath != topics_dir:
+                old_dirs.add(dirpath)
 
-    # Write new files
+    # Write new files (always into the top-level topics/ dir)
     for clean_file_path, content in topics.items():
         with open(clean_file_path, "w", encoding="utf-8") as f:
             f.write(resource_utils.dump_yaml(content))
 
-    # Remove old file
+    # Remove old files
     for old_file in old_files:
         # Don't delete if old file is same as new file
         if old_file in topics:
             continue
         os.remove(old_file)
+
+    # Remove empty subdirectories left behind (deepest first)
+    for old_dir in sorted(old_dirs, key=lambda d: d.count(os.sep), reverse=True):
+        if os.path.isdir(old_dir) and not os.listdir(old_dir):
+            os.rmdir(old_dir)

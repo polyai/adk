@@ -15,8 +15,9 @@ class TestMigrateLegacyTopicFiles(unittest.TestCase):
     """Tests for migrate_legacy_topic_files."""
 
     def _write_topic(self, topics_dir: str, filename: str, content: dict) -> str:
-        """Helper to write a topic YAML file."""
+        """Helper to write a topic YAML file, creating parent dirs as needed."""
         path = os.path.join(topics_dir, filename)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(resource_utils.dump_yaml(content))
         return path
@@ -107,3 +108,25 @@ class TestMigrateLegacyTopicFiles(unittest.TestCase):
             with self.assertRaises(ValueError) as ctx:
                 migrate_legacy_topic_files(tmp)
             self.assertIn("topic_a", str(ctx.exception))
+
+    def test_migrates_nested_subdirectory_topics(self):
+        """Legacy topics with '/' in the name create nested dirs — migration should flatten them."""
+        with tempfile.TemporaryDirectory() as tmp:
+            topics_dir = os.path.join(tmp, "topics")
+            os.makedirs(topics_dir)
+            # Simulates a topic named "Billing/Refunds" saved as topics/Billing/Refunds.yaml
+            self._write_topic(topics_dir, "Billing/Refunds.yaml", {"enabled": True})
+            self.assertTrue(os.path.exists(os.path.join(topics_dir, "Billing", "Refunds.yaml")))
+
+            migrate_legacy_topic_files(tmp)
+
+            # Nested file and directory removed
+            self.assertFalse(os.path.exists(os.path.join(topics_dir, "Billing", "Refunds.yaml")))
+            self.assertFalse(os.path.isdir(os.path.join(topics_dir, "Billing")))
+            # Flattened file created with cleaned name
+            new_path = os.path.join(topics_dir, "billing_refunds.yaml")
+            self.assertTrue(os.path.exists(new_path))
+            with open(new_path, "r", encoding="utf-8") as f:
+                data = resource_utils.load_yaml(f.read())
+            self.assertEqual(data["name"], "Billing/Refunds")
+            self.assertTrue(data["enabled"])
