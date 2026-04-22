@@ -57,12 +57,12 @@ from poly.resources import (
 )
 from poly.resources.resource import _parse_multi_resource_path
 from poly.utils import compute_variable_references
+from poly.migration_utils import run_migrations, get_all_migration_flags, MigrationFlag
 
 logger = logging.getLogger(__name__)
 
 PROJECT_CONFIG_FILE = "project.yaml"
 STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
-_LEGACY_STATUS_FILE = ".agent_studio_config"
 
 
 # New resources to be added here
@@ -144,6 +144,7 @@ class AgentStudioProject:
     branch_id: str = None
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
+    _migration_flags: set[MigrationFlag] = None
 
     # Store resources that were not loaded from the status file
     # So they aren't considered locally deleted when pushing/pulling
@@ -239,6 +240,11 @@ class AgentStudioProject:
         else:
             last_updated = datetime.now()
 
+        migration_flags = set(
+            MigrationFlag(flag) for flag in status_dict.get("migration_flags", [])
+        )
+        migration_flags = run_migrations(root_path, migration_flags)
+
         return cls(
             region=config_dict.get("region", ""),
             account_id=config_dict.get("account_id", ""),
@@ -249,6 +255,7 @@ class AgentStudioProject:
             file_structure_info={},
             branch_id=status_dict.get("branch_id", "main"),
             _not_loaded_resources=not_loaded_resources,
+            _migration_flags=migration_flags,
         )
 
     def to_dict(self) -> dict:
@@ -266,6 +273,9 @@ class AgentStudioProject:
             "last_updated": (self.last_updated.isoformat() if self.last_updated else None),
             "file_structure_info": self.file_structure_info,
             "branch_id": self.branch_id,
+            "migration_flags": [flag.value for flag in self._migration_flags]
+            if self._migration_flags
+            else [],
         }
 
     @classmethod
@@ -274,6 +284,9 @@ class AgentStudioProject:
         resources, not_loaded_resources = cls._load_resources_from_status_dict(data)
 
         file_structure_info = cls.compute_file_structure_info(resources)
+
+        migration_flags = set(MigrationFlag(flag) for flag in data.get("migration_flags", []))
+        migration_flags = run_migrations(root_path, migration_flags)
 
         return cls(
             region=data.get("region", ""),
@@ -284,6 +297,7 @@ class AgentStudioProject:
             last_updated=datetime.fromisoformat(data.get("last_updated", "1970-01-01T00:00:00")),
             file_structure_info=file_structure_info,
             branch_id=data.get("branch_id", "main"),
+            _migration_flags=migration_flags,
             _not_loaded_resources=not_loaded_resources,
         )
 
@@ -353,6 +367,7 @@ class AgentStudioProject:
             resources={},
             last_updated=datetime.now(),
             branch_id="main",
+            _migration_flags=get_all_migration_flags(),
         )
         project.resources, projection = project.api_handler.pull_resources(
             projection_json=projection_json
