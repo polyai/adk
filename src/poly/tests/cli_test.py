@@ -570,9 +570,10 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
 
     @patch("poly.output.console.console.print")
     def test_output_merge_conflict_table_one_row_per_conflict_when_show_type(self, mock_print):
-        from poly.output.console import output_merge_conflict_table
         from rich.panel import Panel
         from rich.table import Table
+
+        from poly.output.console import output_merge_conflict_table
 
         conflicts = [
             {
@@ -596,8 +597,9 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
 
     @patch("poly.output.console.console.print")
     def test_output_merge_conflict_table_without_show_type_single_column(self, mock_print):
-        from poly.output.console import output_merge_conflict_table
         from rich.panel import Panel
+
+        from poly.output.console import output_merge_conflict_table
 
         conflicts = [{"visual_path": "p1", "path": ["p1"]}]
         output_merge_conflict_table(conflicts, show_type=False)
