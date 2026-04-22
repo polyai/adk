@@ -2608,7 +2608,7 @@ class AgentStudioProject:
                 resolutions. Each resolution should have:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
-                - value: Optional custom value (only used with custom strategy)
+                - value: Optional custom value
 
         Returns:
             bool: True if the merge was successful, False otherwise
@@ -2626,6 +2626,15 @@ class AgentStudioProject:
             raise ValueError(
                 f"Cannot merge branch with uncommitted changes, diffs: {list(diffs.keys())}"
             )
+
+        for resolution in conflict_resolutions or []:
+            if "path" not in resolution or "strategy" not in resolution:
+                raise ValueError(f"Resolution must include 'path' and 'strategy': {resolution}")
+            if resolution["strategy"] not in {"ours", "theirs", "base"}:
+                raise ValueError(
+                    f"Invalid conflict resolution strategy: {resolution['strategy']} for path {resolution['path']}. "
+                    f"Must be one of 'ours', 'theirs', or 'base'."
+                )
 
         success, conflicts, errors = self.api_handler.merge_branch(
             message=message, conflict_resolutions=conflict_resolutions
