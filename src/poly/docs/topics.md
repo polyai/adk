@@ -12,12 +12,12 @@ File names are cleaned to lowercase snake_case. For example, a topic named `"Ope
 
 ## Structure
 
-Each topic has six fields:
+Each topic has five fields:
 
 - **name** (string): The display name of the topic. This is the canonical name — the filename is derived from it (cleaned to lowercase snake_case).
 - **enabled** (bool): Whether the topic is active. Default: `true`.
 - **example_queries**: List of example user inputs that should trigger this topic.
-- **content**: Factual information retrieved via RAG. No function calls or `$variables` allowed here.
+- **content**: Factual information retrieved via RAG. No function calls or variable references allowed here.
 - **actions**: Behavioral instructions for the agent when the topic is triggered. This is where you use references.
 
 ## Example
