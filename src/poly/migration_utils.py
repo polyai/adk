@@ -81,7 +81,8 @@ def migrate_legacy_topic_files(root_path: str) -> None:
 
         file_name = os.path.splitext(topic)[0]
         clean_file_name = resource_utils.clean_name(file_name)
-        if clean_file_name in topics:
+        clean_file_path = os.path.join(topics_dir, f"{clean_file_name}.yaml")
+        if clean_file_path in topics:
             raise ValueError(
                 "Cant migrate legacy topic files: multiple topics with the same file name after cleaning: "
                 + clean_file_name
@@ -89,7 +90,6 @@ def migrate_legacy_topic_files(root_path: str) -> None:
 
         new_content = {"name": file_name, **content}
 
-        clean_file_path = os.path.join(topics_dir, f"{clean_file_name}.yaml")
         topics[clean_file_path] = new_content
         old_files.append(topic_path)
 

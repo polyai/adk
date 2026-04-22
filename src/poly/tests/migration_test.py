@@ -94,3 +94,16 @@ class TestMigrateLegacyTopicFiles(unittest.TestCase):
             with open(os.path.join(topics_dir, "new_topic.yaml"), "r", encoding="utf-8") as f:
                 data = resource_utils.load_yaml(f.read())
             self.assertEqual(data["name"], "New Topic")
+
+    def test_duplicate_clean_names_raises(self):
+        """Two legacy files that clean to the same name should raise ValueError."""
+        with tempfile.TemporaryDirectory() as tmp:
+            topics_dir = os.path.join(tmp, "topics")
+            os.makedirs(topics_dir)
+            # "Topic-A" and "Topic A" both clean to "topic_a"
+            self._write_topic(topics_dir, "Topic-A.yaml", {"enabled": True})
+            self._write_topic(topics_dir, "Topic A.yaml", {"enabled": True})
+
+            with self.assertRaises(ValueError) as ctx:
+                migrate_legacy_topic_files(tmp)
+            self.assertIn("topic_a", str(ctx.exception))
