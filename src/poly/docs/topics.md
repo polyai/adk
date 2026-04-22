@@ -8,7 +8,7 @@ Topics are the agent's knowledge base, queried via RAG (retrieval-augmented gene
 
 `topics/`. One file per topic: `topics/{topic_name}.yaml`.
 
-Directory and file names are cleaned to lowercase snake_case. For example, a topic named `"Opening Hours & Locations"` is stored as `topics/opening_hours_locations.yaml`.
+File names are cleaned to lowercase snake_case. For example, a topic named `"Opening Hours & Locations"` is stored as `topics/opening_hours_locations.yaml`.
 
 ## Structure
 
