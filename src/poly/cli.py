@@ -531,6 +531,7 @@ class AgentStudioCLI:
                 "  poly branch list\n"
                 "  poly branch create new-branch\n"
                 "  poly branch switch existing-branch\n"
+                "  poly branch merge 'Merge branch'"
                 "  poly branch current\n"
                 "  poly branch delete\n"
             ),
@@ -647,9 +648,10 @@ class AgentStudioCLI:
             default=None,
             help=(
                 "Conflict resolutions as a JSON file path, inline JSON string, or '-' for stdin. "
-                "The JSON should be an array of objects, each with: "
-                '"path" (list of strings), "strategy" ("ours", "theirs", or "base"), '
-                'and optionally "value" (custom resolved string).'
+                "JSON should be an array of objects, each representing a conflict resolution:\n"
+                '- path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])\n'
+                '- strategy: Resolution strategy - "ours", "theirs", or "base"\n'
+                '- value: Optional custom value (use "theirs" strategy)'
             ),
         )
         branch_merge_parser.set_defaults(branch_subcommand="merge")
