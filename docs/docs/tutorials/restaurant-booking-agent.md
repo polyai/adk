@@ -136,11 +136,24 @@ adjectives:
 custom: ""
 ~~~
 
+The file has two fields:
+
+- **`adjectives`** — a map of preset tonal traits. Each is set to `true` or `false`; every selected trait is combined into the agent's personality.
+- **`custom`** — a free-text description that can extend or replace the adjectives. It accepts `{{attr:...}}` and `{{vrbl:...}}` references, so the personality can vary per [variant](../reference/variants.md) or per call.
+
 !!! info "Allowed adjective values"
 
-    The ADK validates adjectives against a fixed set. The allowed values are: `Polite`, `Calm`, `Kind`, `Funny`, `Energetic`, `Thoughtful`, and `Other`. Using any other value will cause `poly push` to fail with a validation error.
+    `adjectives` keys must come from a fixed set: `Polite`, `Calm`, `Kind`, `Funny`, `Energetic`, `Thoughtful`, and `Other`. Any other key causes `poly push` to fail with a validation error.
 
-    `Other` is a special case — it can only be set when no other adjective is selected.
+!!! tip "How `Other` works"
+
+    `Other` is the "none of the above" switch. When you set `Other: true`, every other adjective must be `false` (or omitted) — combining `Other: true` with any other adjective set to `true` fails validation with:
+
+    ~~~text
+    Other adjective can only be set if no other adjectives are selected.
+    ~~~
+
+    Use `Other: true` together with the `custom` field when the six presets do not capture the tone you want and you would rather describe the personality entirely in free form. You do **not** need `Other: true` just to use `custom` — `custom` can always be added on top of preset adjectives to refine them further.
 
 ### Role
 
