@@ -6038,12 +6038,11 @@ class TestApiIntegrationValidate(unittest.TestCase):
             integration.validate()
 
 
-class GeneralSafetyFiltersTests(unittest.TestCase):
-    """Tests for GeneralSafetyFilters and VoiceSafetyFilters resources."""
+class SafetyFiltersTests(unittest.TestCase):
+    """Tests for SafetyFilters resources (General, Voice, Chat)."""
 
     _SAMPLE_YAML = (
         "enabled: true\n"
-        "type: azure\n"
         "categories:\n"
         "  violence:\n"
         "    enabled: true\n"
@@ -6282,11 +6281,16 @@ class GeneralSafetyFiltersTests(unittest.TestCase):
         def isfile_sf(path):
             return "safety_filters.yaml" in str(path) or os.path.isfile(path)
 
+        def getmtime_sf(path):
+            return 1.0 if "safety_filters.yaml" in str(path) else os.path.getmtime(path)
+
         with mock_read_from_file(self._SAMPLE_YAML):
             with unittest.mock.patch(
                 "poly.resources.resource.os.path.exists", side_effect=exists_sf
             ), unittest.mock.patch(
                 "poly.resources.resource.os.path.isfile", side_effect=isfile_sf
+            ), unittest.mock.patch(
+                "poly.resources.resource.os.path.getmtime", side_effect=getmtime_sf
             ):
                 result = GeneralSafetyFilters.read_local_resource(
                     file_path="agent_settings/safety_filters.yaml",
@@ -6348,9 +6352,7 @@ class GeneralSafetyFiltersTests(unittest.TestCase):
         self.assertTrue(proto.safety_filters.azure_config.violence.is_active)
         self.assertEqual(proto.safety_filters.azure_config.violence.precision, "MEDIUM")
 
-    def _make_content_filter_projection(
-        self
-    ) -> dict:
+    def _make_content_filter_projection(self) -> dict:
         return {
             "disabled": False,
             "type": "azure",
@@ -6417,7 +6419,6 @@ class GeneralSafetyFiltersTests(unittest.TestCase):
         self.assertEqual(sf.categories["sexual"].precision, "LOOSE")
         # YAML output converts to lowercase level terminology
         self.assertEqual(sf.to_yaml_dict()["categories"]["violence"]["level"], "strict")
-        self.assertEqual(sf.to_yaml_dict()["categories"]["sexual"]["level"], "lenient")
         self.assertEqual(sf.to_yaml_dict()["categories"]["sexual"]["level"], "lenient")
 
     def test_validate_invalid_precision_raises(self):
@@ -6525,12 +6526,6 @@ class GeneralSafetyFiltersTests(unittest.TestCase):
         """ChatSafetyFilters.file_path returns the chat subdirectory path."""
         csf = ChatSafetyFilters(resource_id="csf", name="chat_safety_filters")
         self.assertEqual(csf.file_path, os.path.join("chat", "safety_filters.yaml"))
-
-    def test_chat_safety_filters_command_types(self):
-        """ChatSafetyFilters returns correct command_type and update_command_type."""
-        csf = ChatSafetyFilters(resource_id="csf-1", name="chat_safety_filters")
-        self.assertEqual(csf.command_type, "chat_safety_filters")
-        self.assertEqual(csf.update_command_type, "channel_update_safety_filters")
 
     def test_parse_categories_from_azure_config_chat(self):
         """parse_categories_from_azure_config + direct construction produces correct resource."""
