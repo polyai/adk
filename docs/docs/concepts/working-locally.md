@@ -10,7 +10,7 @@ Your local filesystem becomes your primary editing surface. You can:
 - edit agent resources directly
 - review changes with Git-style workflows
 - validate changes before pushing
-- use [AI coding tools](../reference/tooling.md) such as **Cursor** or **Claude Code**
+- work in **VS Code** or **Cursor** with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor), or pair the ADK with [AI coding agents](../reference/tooling.md#claude-code) such as **Claude Code**
 - test and iterate before merging in Agent Studio
 
 <div class="grid cards" markdown>

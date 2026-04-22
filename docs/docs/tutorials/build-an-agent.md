@@ -3,7 +3,7 @@ title: Build an agent with the ADK
 description: Follow the end-to-end workflow for going from a blank Agent Studio project to a production-ready voice agent with the PolyAI ADK.
 ---
 
-This guide walks through how to go from a blank slate to a production-ready voice agent using **Agent Studio**, the **PolyAI ADK**, and optionally a coding tool such as **Claude Code**.
+This guide walks through how to go from a blank slate to a production-ready voice agent using **Agent Studio**, the **PolyAI ADK**, and — optionally — the **PolyAI ADK extension** for **VS Code** or **Cursor**, or a coding agent such as **Claude Code**.
 
 There are two common ways to build with the ADK:
 
@@ -308,7 +308,7 @@ Use Agent Studio analytics to monitor containment, CSAT, handle time, and flagge
 
 ## Workflow 2 - AI-agent workflow
 
-The AI-agent workflow uses a coding tool such as **Claude Code** to run the same development loop on your behalf.
+The AI-agent workflow uses a coding agent — such as **Claude Code**, or an in-editor agent in **VS Code** or **Cursor** paired with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) — to run the same development loop on your behalf.
 
 <div class="grid cards" markdown>
 
