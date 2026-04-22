@@ -5,8 +5,6 @@ description: Watch a walkthrough of building a production-ready voice agent with
 
 This walkthrough shows how to build a production-ready voice agent with the **PolyAI ADK**.
 
-It demonstrates the end-to-end developer workflow and shows how the ADK fits alongside a coding tool such as Claude Code.
-
 ## Watch the video
 
 <div style="padding:64.98% 0 0 0; position:relative;">
