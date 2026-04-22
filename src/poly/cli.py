@@ -2371,94 +2371,87 @@ class AgentStudioCLI:
             json_print(output)
             if not merge_success:
                 sys.exit(1)
-        else:
+            return
+
+        if merge_success:
+            success(f"Branch '{branch_name}' merged successfully.")
+            info('Switched to "main" branch after merge.')
+            return
+
+        # Failed branch merge
+        error(f"Failed to merge branch '{branch_name}'.")
+        if errors:
+            plain("\n[red]Errors:[/red]")
+            for err in errors:
+                error(f"- {err['path']}: {err['message']}")
+
+        enriched = enrich_branch_merge_conflicts(conflicts) if conflicts else []
+        display_conflict = [
+            c for c in enriched if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
+        ]
+        if display_conflict:
+            output_merge_conflict_table(
+                display_conflict, show_type=True, resolutions=file_resolutions
+            )
+
+        if errors:
+            sys.exit(1)
+
+        if not interactive:
+            plain(
+                "Merge conflicts detected. To resolve:\n"
+                "- Use 'poly branch merge -i <message>' to resolve conflicts interactively\n"
+                "- Use 'poly branch merge --resolutions <file.json> <message>' to provide pre-defined resolutions\n"
+                "- Merge manually on Agent Studio"
+            )
+            sys.exit(1)
+
+        existing_resolutions = {
+            os.sep.join(r["path"]): r for r in (file_resolutions or []) if "path" in r
+        }
+        while True:
+            resolutions = cls._merge_interactively(enriched, existing_resolutions, branch_name)
+            if not resolutions:
+                warning("No resolutions provided. Exiting.")
+                sys.exit(1)
+            ctx2 = (
+                console.status("[info]Merging branch...[/info]")
+                if not output_json
+                else nullcontext()
+            )
+            with ctx2:
+                merge_success, conflicts, errors = project.merge_branch(
+                    message=message, conflict_resolutions=resolutions
+                )
             if merge_success:
                 success(f"Branch '{branch_name}' merged successfully.")
                 info('Switched to "main" branch after merge.')
-            else:
-                error(f"Failed to merge branch '{branch_name}'.")
-                if errors:
-                    plain("\n[red]Errors:[/red]")
-                    for err in errors:
-                        error(f"- {err['path']}: {err['message']}")
-
-                enriched = enrich_branch_merge_conflicts(conflicts) if conflicts else []
-                display_conflict = [
-                    c
-                    for c in enriched
-                    if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
-                ]
-                if display_conflict:
-                    output_merge_conflict_table(
-                        display_conflict, show_type=True, resolutions=file_resolutions
-                    )
-
-                if errors:
-                    sys.exit(1)
-
-                if not interactive and not resolutions_file:
-                    plain(
-                        "Merge conflicts detected. To resolve:\n"
-                        "- Use 'poly branch merge -i <message>' to resolve conflicts interactively\n"
-                        "- Use 'poly branch merge --resolutions <file.json> <message>' to provide pre-defined resolutions\n"
-                        "- Merge manually on Agent Studio"
-                    )
-
-                resolutions: list[dict[str, Any]] = []
-                existing_resolutions = {
-                    os.sep.join(r["path"]): r for r in (file_resolutions or []) if "path" in r
-                }
-                if interactive and conflicts:
-                    while True:
-                        batch = cls._merge_interactively(
-                            enriched, existing_resolutions, branch_name
-                        )
-                        if not batch:
-                            warning("No resolutions provided. Exiting.")
-                            sys.exit(1)
-                        resolutions.extend(batch)
-                        ctx2 = (
-                            console.status("[info]Merging branch...[/info]")
-                            if not output_json
-                            else nullcontext()
-                        )
-                        with ctx2:
-                            merge_success, conflicts, errors = project.merge_branch(
-                                message=message, conflict_resolutions=resolutions
-                            )
-                        if merge_success:
-                            success(f"Branch '{branch_name}' merged successfully.")
-                            info('Switched to "main" branch after merge.')
-                            break
-                        if errors:
-                            error(
-                                f"Failed to merge branch '{branch_name}' after conflict resolution."
-                            )
-                            plain("\n[red]Errors:[/red]")
-                            for err in errors:
-                                error(f"- {err['path']}: {err['message']}")
-                            sys.exit(1)
-                        if not conflicts:
-                            error(
-                                f"Failed to merge branch '{branch_name}' after conflict resolution "
-                                "(no conflicts or errors returned)."
-                            )
-                            sys.exit(1)
-                        warning("Merge still blocked; resolve the remaining conflicts below.")
-                        enriched = enrich_branch_merge_conflicts(conflicts)
-                        display_conflict = [
-                            c
-                            for c in enriched
-                            if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
-                        ]
-                        if display_conflict:
-                            output_merge_conflict_table(
-                                display_conflict,
-                                show_type=True,
-                                panel_title="Remaining merge conflicts",
-                            )
-                elif not merge_success:
-                    sys.exit(1)
+                break
+            if errors:
+                error(f"Failed to merge branch '{branch_name}' after conflict resolution.")
+                plain("\n[red]Errors:[/red]")
+                for err in errors:
+                    error(f"- {err['path']}: {err['message']}")
+                sys.exit(1)
+            if not conflicts:
+                error(
+                    f"Failed to merge branch '{branch_name}' after conflict resolution "
+                    "(no conflicts or errors returned)."
+                )
+                sys.exit(1)
+            warning("Merge still blocked; resolve the remaining conflicts below.")
+            enriched = enrich_branch_merge_conflicts(conflicts)
+            display_conflict = [
+                c
+                for c in enriched
+                if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
+            ]
+            if display_conflict:
+                output_merge_conflict_table(
+                    display_conflict,
+                    show_type=True,
+                    panel_title="Remaining merge conflicts",
+                )
 
     @classmethod
     def format(
