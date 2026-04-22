@@ -5,7 +5,27 @@ description: Learn the core PolyAI ADK commands and how to inspect the CLI.
 
 # First commands
 
-Once the ADK is installed, the fastest way to get oriented is to inspect the CLI directly.
+Once the ADK is installed and your API key is set, the very first thing to do is create a local project with `poly init`. After that, the fastest way to get oriented is to inspect the CLI directly from inside that project folder.
+
+## Create your local project with `poly init`
+
+~~~bash
+poly init --account_id <account_id> --project_id <project_id>
+~~~
+
+`poly init` creates a subdirectory at `{account_id}/{project_id}` in your current directory and immediately pulls the project configuration down from Agent Studio. When it completes, `cd` into that folder — every other `poly` command runs from inside the project directory.
+
+!!! tip "Find your account ID and project ID"
+
+    Both IDs appear in the Agent Studio URL when your project is open:
+
+    ~~~
+    https://studio.poly.ai/<account_id>/<project_id>/...
+    ~~~
+
+    If you do not have the IDs to hand, run `poly init` with no flags and the CLI prompts you to pick a workspace and project from the ones your API key can see.
+
+If the project has already been initialized locally at a previous point, use `poly pull` to refresh it in place instead of running `poly init` again.
 
 ## View top-level help
 

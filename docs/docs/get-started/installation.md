@@ -37,6 +37,10 @@ Install the package with pip:
 pip install polyai-adk
 ~~~
 
+!!! tip "Optional — install the VS Code / Cursor extension"
+
+    If you plan to work in **VS Code** or **Cursor**, you can also install the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) for resource-aware editing on top of the CLI. The extension is additive — the `poly` command remains the source of truth for every workflow.
+
 ## Generate API key
 
 Log in to Agent Studio and open your workspace. In the **API Keys** tab (next to the **Users** tab), click **+ API key** in the top right to generate a key.
@@ -65,7 +69,7 @@ You should see the top-level command help if installation succeeded.
 
 ## Next step
 
-Continue to the first commands page to explore the CLI.
+With the ADK installed and your API key set, run `poly init` to create your local project and get familiar with the CLI.
 
 <div class="grid cards" markdown>
 
@@ -73,7 +77,7 @@ Continue to the first commands page to explore the CLI.
 
     ---
 
-    Learn the core ADK commands and how to inspect the CLI.
+    Start with `poly init`, then learn the rest of the core ADK commands.
     [Open first commands](./first-commands.md)
 
 </div>

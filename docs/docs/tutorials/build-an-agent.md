@@ -96,6 +96,8 @@ This structure mirrors the parts of the agent that Agent Studio understands: set
 
 The CLI workflow is the manual developer path. You use the ADK directly, edit the project locally, and push changes back to Agent Studio.
 
+You can run this workflow in whichever editing surface you prefer: a plain terminal, or **VS Code** / **Cursor** with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) for resource-aware navigation and validation. Both count as the CLI workflow — the difference is only the editing surface.
+
 ### Step 1 - Initialize your project
 
 Link a local folder to an existing Agent Studio project. The agent must already exist in Agent Studio.

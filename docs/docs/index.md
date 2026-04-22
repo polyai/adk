@@ -9,6 +9,18 @@ Build and edit Agent Studio projects locally with the **PolyAI ADK**, then push 
 
 The ADK gives you a local, Git-like workflow for Agent Studio projects: pull, edit with standard tooling, validate, and push.
 
+## From zero to a local project
+
+Three commands take you from an empty machine to a working local copy of your agent:
+
+~~~bash
+pip install polyai-adk
+export POLY_ADK_KEY=<your-api-key>
+poly init --account_id <account_id> --project_id <project_id>
+~~~
+
+See [Prerequisites](get-started/prerequisites.md) for how to generate an API key, and [Initialize your project](get-started/first-commands.md) for a short walkthrough of the third command.
+
 ## Start here
 
 <div class="grid cards" markdown>
@@ -60,5 +72,5 @@ If you are new to the ADK, follow this order:
 2. read **What is the PolyAI ADK?**
 3. complete **Prerequisites**
 4. follow **Installation**
-5. use **First commands**
+5. use **First commands** — run `poly init` to create your local project, then explore the rest of the CLI
 6. continue to **Build an agent with the ADK**
