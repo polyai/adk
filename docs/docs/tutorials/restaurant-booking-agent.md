@@ -9,7 +9,7 @@ description: A complete walkthrough building a voice agent that takes table rese
 This tutorial builds a complete voice agent for a restaurant. By the end you will have a working agent that greets callers, collects a reservation, confirms the details, and sends an SMS confirmation.
 </p>
 
-You will use the ADK to define, iterate on, and test the agent entirely from your terminal.
+You will use the ADK to define the agent, iterate on it, and push it for testing. Merging and deployment still happen in Agent Studio.
 
 ## What you will build
 

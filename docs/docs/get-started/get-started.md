@@ -5,7 +5,7 @@ description: Learn how to build your first PolyAI agent in minutes, then connect
 
 # Not sure where to start?
 
-If you do not yet have an agent in Agent Studio, or if you are feeling stuck before diving into local development, you can build a personalized agent from your company website in a few minutes — no configuration required. The agent lives in Agent Studio as a normal project, which means you can pull it straight into the ADK and continue development locally the moment it is ready.
+If you do not yet have an agent in Agent Studio, or you want a working starting point before setting up the ADK, you can build a personalized agent from your company website in a few minutes — no configuration required. The agent lives in Agent Studio as a normal project, so you can pull it straight into the ADK and continue development locally as soon as it is ready.
 
 ---
 

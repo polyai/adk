@@ -20,15 +20,15 @@ It gives you a Git-like workflow for synchronizing project configuration between
 
 ## Why it exists
 
-The ADK moves development work out of the browser and into your local environment.
+The ADK moves most build-and-edit work out of the browser and into your local environment. You still use Agent Studio to merge branches, deploy, and monitor the agent in production — but you no longer have to edit resources there by hand.
 
 Instead of editing everything directly inside Agent Studio, you pull a project locally, make changes using your normal tools, and push those changes back to the platform.
 
 This makes it straightforward to:
 
-- iterate quickly without browser round-trips
+- edit resources in your own editor, with the tooling you already use
 - collaborate across a team without overwriting each other's work
-- validate and test changes before pushing them live
+- validate and review changes before pushing them live
 - automate repetitive build work with coding tools
 
 ## Multi-developer workflows
