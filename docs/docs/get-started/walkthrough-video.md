@@ -5,7 +5,7 @@ description: Watch a walkthrough of building a production-ready voice agent with
 
 This walkthrough shows how to build a production-ready voice agent with the **PolyAI ADK**.
 
-It demonstrates the end-to-end developer workflow and shows how the ADK fits alongside the [PolyAI ADK extension for VS Code and Cursor](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor), or a coding agent such as Claude Code.
+It demonstrates the end-to-end developer workflow and shows how the ADK fits alongside the [PolyAI ADK extension for VS Code and Cursor](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor).
 
 ## Watch the video
 
@@ -29,25 +29,13 @@ It demonstrates the end-to-end developer workflow and shows how the ADK fits alo
 
     ---
 
-    See how agent work can move from the browser into a local development environment.
-
--   **AI-assisted development**
-
-    ---
-
-    Watch the ADK used alongside the PolyAI ADK extension for VS Code or Cursor, or a coding agent such as Claude Code, to accelerate implementation.
+    Watch the ADK used alongside the PolyAI ADK extension for VS Code or Cursor to accelerate implementation.
 
 -   **Fast iteration**
 
     ---
 
     Follow the flow from setup to a working agent in a short amount of time.
-
--   **Production mindset**
-
-    ---
-
-    See how the ADK supports building agents that are intended for real deployment, not just demos.
 
 </div>
 
