@@ -19,7 +19,7 @@ export POLY_ADK_KEY=<your-api-key>
 poly init --account_id <account_id> --project_id <project_id>
 ~~~
 
-See [Prerequisites](get-started/prerequisites.md) for how to generate an API key, and [Initialize your project](get-started/initialize-your-project.md) for a short walkthrough of the third command.
+See [Prerequisites](get-started/prerequisites.md) for how to generate an API key, and [Initialize your project](get-started/first-commands.md) for a short walkthrough of the third command.
 
 ## Start here
 
