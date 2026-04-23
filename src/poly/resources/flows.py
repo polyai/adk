@@ -473,7 +473,7 @@ class FlowStep(BaseFlowStep, YamlResource):
             step_type=step_type,
             asr_biasing=asr_biasing,
             dtmf_config=dtmf_config,
-            prompt=yaml_dict.get("prompt"),
+            prompt=yaml_dict.get("prompt", "").strip(),
             conditions=conditions,
             position=known_position,
             extracted_entities=extracted_entities,
