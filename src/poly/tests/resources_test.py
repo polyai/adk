@@ -6043,9 +6043,23 @@ class SafetyFiltersTests(unittest.TestCase):
 
     def test_from_yaml_dict_roundtrip(self):
         """to_yaml_dict -> from_yaml_dict roundtrip preserves all fields."""
-        sf = GeneralSafetyFilters(
-            resource_id="sf-1",
-            name="safety_filters",
+        sf = self._make_general_safety_filters()
+        d = sf.to_yaml_dict()
+        sf2 = GeneralSafetyFilters.from_yaml_dict(d, resource_id="sf-1", name="safety_filters")
+
+        self.assertEqual(sf2.enabled, sf.enabled)
+        self.assertEqual(sf2.filter_type, sf.filter_type)
+        for cat in ("violence", "hate", "sexual", "self_harm"):
+            self.assertEqual(sf2.categories[cat].enabled, sf.categories[cat].enabled)
+            self.assertEqual(sf2.categories[cat].precision, sf.categories[cat].precision)
+        self.assertEqual(d["categories"]["sexual"]["level"], "lenient")
+        self.assertNotIn("precision", d["categories"]["sexual"])
+
+    def test_from_yaml_dict_roundtrip_voice(self):
+        """VoiceSafetyFilters to_yaml_dict -> from_yaml_dict roundtrip preserves all fields."""
+        vsf = VoiceSafetyFilters(
+            resource_id="vsf-1",
+            name="voice_safety_filters",
             enabled=True,
             filter_type="azure",
             categories={
@@ -6055,14 +6069,14 @@ class SafetyFiltersTests(unittest.TestCase):
                 "self_harm": _SafetyFilterCategory(enabled=True, precision="STRICT"),
             },
         )
-        d = sf.to_yaml_dict()
-        sf2 = GeneralSafetyFilters.from_yaml_dict(d, resource_id="sf-1", name="safety_filters")
+        d = vsf.to_yaml_dict()
+        vsf2 = VoiceSafetyFilters.from_yaml_dict(d, resource_id="vsf-1", name="voice_safety_filters")
 
-        self.assertEqual(sf2.enabled, sf.enabled)
-        self.assertEqual(sf2.filter_type, sf.filter_type)
+        self.assertEqual(vsf2.enabled, vsf.enabled)
+        self.assertEqual(vsf2.filter_type, vsf.filter_type)
         for cat in ("violence", "hate", "sexual", "self_harm"):
-            self.assertEqual(sf2.categories[cat].enabled, sf.categories[cat].enabled)
-            self.assertEqual(sf2.categories[cat].precision, sf.categories[cat].precision)
+            self.assertEqual(vsf2.categories[cat].enabled, vsf.categories[cat].enabled)
+            self.assertEqual(vsf2.categories[cat].precision, vsf.categories[cat].precision)
         self.assertEqual(d["categories"]["sexual"]["level"], "lenient")
         self.assertNotIn("precision", d["categories"]["sexual"])
 
@@ -6132,7 +6146,7 @@ class SafetyFiltersTests(unittest.TestCase):
             parse_categories_from_azure_config(azure)
         self.assertIn("isActive", str(cm.exception))
 
-    def _full_yaml_categories(self) -> dict:
+    def _make_yaml_categories(self) -> dict:
         """Return a YAML-shaped categories dict with all four keys populated."""
         return {
             "violence": {"enabled": True, "level": "strict"},
@@ -6141,7 +6155,7 @@ class SafetyFiltersTests(unittest.TestCase):
             "self_harm": {"enabled": True, "level": "strict"},
         }
 
-    def _full_azure_categories(self) -> dict:
+    def _make_azure_categories(self) -> dict:
         """Return an Azure-projection-shaped categories dict with all four keys populated."""
         return {
             "violence": {"isActive": True, "precision": "STRICT"},
@@ -6150,7 +6164,7 @@ class SafetyFiltersTests(unittest.TestCase):
             "selfHarm": {"isActive": True, "precision": "STRICT"},
         }
 
-    def _full_internal_categories(self) -> dict:
+    def _make_internal_categories(self) -> dict:
         """Return an internal-vocab categories dict as emitted by resource_to_dict."""
         return {
             "violence": {"enabled": True, "precision": "STRICT"},
@@ -6159,11 +6173,41 @@ class SafetyFiltersTests(unittest.TestCase):
             "self_harm": {"enabled": True, "precision": "STRICT"},
         }
 
+    def _make_general_safety_filters(self, **kwargs) -> GeneralSafetyFilters:
+        """Return a GeneralSafetyFilters with sensible defaults."""
+        defaults = dict(
+            resource_id="sf-1",
+            name="safety_filters",
+            enabled=True,
+            filter_type="azure",
+            categories={
+                "violence": _SafetyFilterCategory(enabled=True, precision="STRICT"),
+                "hate": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "sexual": _SafetyFilterCategory(enabled=False, precision="LOOSE"),
+                "self_harm": _SafetyFilterCategory(enabled=True, precision="STRICT"),
+            },
+        )
+        defaults.update(kwargs)
+        return GeneralSafetyFilters(**defaults)
+
+    def _make_chat_safety_filters(self, **kwargs) -> ChatSafetyFilters:
+        """Return a ChatSafetyFilters built from the standard content-filter projection."""
+        data = self._make_content_filter_projection()
+        defaults = dict(
+            resource_id="chat_safety_filters",
+            name="chat_safety_filters",
+            enabled=not data.get("disabled", False),
+            filter_type=data.get("type", "azure"),
+            categories=parse_categories_from_azure_config(data["azureConfig"]),
+        )
+        defaults.update(kwargs)
+        return ChatSafetyFilters(**defaults)
+
     def test_from_yaml_dict_missing_any_category_key_raises(self):
         """Missing any single category key in YAML raises ValueError naming that key."""
         for missing in ("violence", "hate", "sexual", "self_harm"):
             with self.subTest(missing=missing):
-                categories = self._full_yaml_categories()
+                categories = self._make_yaml_categories()
                 del categories[missing]
                 yaml_dict = {"enabled": True, "categories": categories}
                 with self.assertRaises(ValueError) as cm:
@@ -6185,7 +6229,7 @@ class SafetyFiltersTests(unittest.TestCase):
         """Missing any single Azure category key raises ValueError naming that key."""
         for missing in ("violence", "hate", "sexual", "selfHarm"):
             with self.subTest(missing=missing):
-                azure = self._full_azure_categories()
+                azure = self._make_azure_categories()
                 del azure[missing]
                 with self.assertRaises(ValueError) as cm:
                     parse_categories_from_azure_config(azure)
@@ -6206,7 +6250,7 @@ class SafetyFiltersTests(unittest.TestCase):
         """
         for missing in ("violence", "hate", "sexual", "self_harm"):
             with self.subTest(missing=missing):
-                categories = self._full_internal_categories()
+                categories = self._make_internal_categories()
                 del categories[missing]
                 with self.assertRaises(ValueError) as cm:
                     GeneralSafetyFilters(
@@ -6526,16 +6570,8 @@ categories:
         self.assertEqual(csf.file_path, os.path.join("chat", "safety_filters.yaml"))
 
     def test_parse_categories_from_azure_config_chat(self):
-        """parse_categories_from_azure_config + direct construction produces correct resource."""
-        data = self._make_content_filter_projection()
-        azure = data.get("azureConfig", {})
-        csf = ChatSafetyFilters(
-            resource_id="chat_safety_filters",
-            name="chat_safety_filters",
-            enabled=not data.get("disabled", False),
-            filter_type=data.get("type", "azure"),
-            categories=parse_categories_from_azure_config(azure),
-        )
+        """Building ChatSafetyFilters from a content-filter projection produces correct fields."""
+        csf = self._make_chat_safety_filters()
 
         self.assertEqual(csf.resource_id, "chat_safety_filters")
         self.assertEqual(csf.name, "chat_safety_filters")
@@ -6548,41 +6584,15 @@ categories:
         self.assertEqual(csf.categories["self_harm"].precision, "STRICT")
 
     def test_parse_categories_from_azure_config_disabled(self):
-        """Direct construction handles disabled=True correctly."""
-        data = {
-            "disabled": True,
-            "type": "azure",
-            "azureConfig": {
-                "violence": {"isActive": False, "precision": "MEDIUM"},
-                "hate": {"isActive": False, "precision": "MEDIUM"},
-                "sexual": {"isActive": False, "precision": "MEDIUM"},
-                "selfHarm": {"isActive": False, "precision": "MEDIUM"},
-            },
-        }
-        azure = data.get("azureConfig", {})
-        csf = ChatSafetyFilters(
-            resource_id="chat_safety_filters",
-            name="chat_safety_filters",
-            enabled=not data.get("disabled", False),
-            filter_type=data.get("type", "azure"),
-            categories=parse_categories_from_azure_config(azure),
-        )
+        """Building ChatSafetyFilters with disabled=True in the projection sets enabled=False."""
+        csf = self._make_chat_safety_filters(enabled=False)
 
         self.assertFalse(csf.enabled)
         self.assertEqual(csf.resource_id, "chat_safety_filters")
 
-    def test_from_yaml_dict_roundtrip_chat(self):
-        """ChatSafetyFilters constructed from azure config produces correct YAML output."""
-        data = self._make_content_filter_projection()
-        azure = data.get("azureConfig", {})
-        csf = ChatSafetyFilters(
-            resource_id="chat_safety_filters",
-            name="chat_safety_filters",
-            enabled=not data.get("disabled", False),
-            filter_type=data.get("type", "azure"),
-            categories=parse_categories_from_azure_config(azure),
-        )
-        yaml_out = csf.to_yaml_dict()
+    def test_chat_to_yaml_dict_from_azure_projection(self):
+        """ChatSafetyFilters built from an azure projection serialises to correct YAML output."""
+        yaml_out = self._make_chat_safety_filters().to_yaml_dict()
 
         self.assertTrue(yaml_out["enabled"])
         self.assertEqual(yaml_out["categories"]["violence"]["enabled"], True)
