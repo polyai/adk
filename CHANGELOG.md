@@ -1,6 +1,320 @@
 # CHANGELOG
 
 
+## v0.12.0 (2026-04-23)
+
+### Documentation
+
+- Address gaps identified through live AI-agent development session
+  ([#92](https://github.com/polyai/adk/pull/92),
+  [`921ad8b`](https://github.com/polyai/adk/commit/921ad8b77cdd49a884b1ca960214788bd4573347))
+
+Covers a set of documentation gaps surfaced during a real deployment session using Claude Code with
+  the ADK. Changes span existing reference pages, concepts, and a new Examples section.
+
+Existing page edits: - concepts/multi-user-and-guardrails: add disambiguating note distinguishing
+  structural guardrails from content-safety features; document push normalization and the re-pull
+  requirement; explain synthetic merge-conflict paths; note that branch merges have no CLI command
+  and happen in Agent Studio - concepts/anti-patterns: add new entry for prose conditionals on
+  variable presence, with before/after example; add to quick-reference table - reference/variables:
+  note that variables referenced via {{vrbl:}} in YAML appear as new diff entries on first push
+  (expected behavior) - reference/topics: add filename conventions subsection (title case, spaces
+  safe, no hard limit) - reference/functions: add conv object reference cross-link to platform docs
+  in Related pages - reference/agent_settings: note that adjectives outside the allowed list go in
+  custom; clarify that role value:other requires non-empty custom
+
+New pages: - concepts/resource-architecture: decision guide for choosing between topics, rules,
+  functions, entities, and flows; decision table and explanation of common mistakes -
+  examples/confirm-caller-id-before-sms: stash caller_number, confirm last four digits, send SMS or
+  ask for number - examples/venue-specific-goodbye: return utterance+hangup from function to prevent
+  LLM filler before disconnect - examples/sms-or-transfer-fallback: offer SMS link or transfer, with
+  per-environment sender number pattern
+
+nav: add Resource architecture to Core concepts; add Examples section
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+- Address QA audit from new tutorials — poly chat, variables, validate etc
+  ([#95](https://github.com/polyai/adk/pull/95),
+  [`d5ea6e2`](https://github.com/polyai/adk/commit/d5ea6e2e8626ddb86a54ac63eea8bf2a2356db1f))
+
+## Summary
+
+- Fix poly chat tutorial contradiction: restaurant-booking-agent.md now correctly shows poly chat
+  --environment sandbox after merging, matching build-an-agent.md - Add variables/ to project
+  structure diagrams in both tutorials - Document variables/ in poly status as virtual (no files on
+  disk) with info callout - Add troubleshooting section to first-commands.md: phantom variables/
+  entries and poly branch switch --force workaround - Add poly validate warning in build-an-agent.md
+  for platform-generated functions that fail local signature checking, with --skip-validation escape
+  hatch - Document relative_date round-trip behavior in restaurant tutorial entities section - Fix
+  poly init --help region example: eu-west-1 (invalid) -> us-1 (valid)
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+- Document VS Code/Cursor ADK extension as a first-class IDE route
+  ([#99](https://github.com/polyai/adk/pull/99),
+  [`889446b`](https://github.com/polyai/adk/commit/889446b706106d78717606d283839b9ed05e7779))
+
+Adds the PolyAI ADK extension for VS Code and Cursor (published on Open VSX) as a first-class
+  tooling option, alongside Claude Code as an alternative coding-agent path. Reworks the reference
+  tooling page with install instructions from https://open-vsx.org/extension/PolyAI/adk-extension,
+  and updates prose in the walkthrough video, what-is-the-adk, working-locally, and build-an-agent
+  pages so the IDE route is sustainable without requiring an AI coding agent.
+
+- Feat: Add 'studio' region and filter region selection based on permissions
+  ([#93](https://github.com/polyai/adk/pull/93),
+  [`6235fa1`](https://github.com/polyai/adk/commit/6235fa1388e77b8db2c4899fc50b85e636cb87b6))
+
+## Summary
+
+This PR contains the work from https://github.com/polyai/adk/pull/82
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Fix command regressions from #95 — diff --files, revert, review…
+  ([#96](https://github.com/polyai/adk/pull/96),
+  [`73bc904`](https://github.com/polyai/adk/commit/73bc90477d9cd865e4cd7fe498b9e46f0b82209e))
+
+## Summary Three command forms in `build-an-agent.md` were broken by #95, plus two smaller fixes
+  carried forward:
+
+- `poly diff <file>` → `poly diff --files <file>` (positional arg is a version hash, not a path) -
+  `poly revert --all` → `poly revert` (no `--all` flag) - `poly review` / `poly review --before` →
+  `poly review create` / `poly review create --before` (requires subcommand) - Correct `poly push`
+  "No changes" admonition in `cli.md`: exit code is 0, not non-zero - Add "poly status shows
+  platform-generated functions as modified" section to `first-commands.md`
+
+## Files changed - `docs/docs/tutorials/build-an-agent.md` - `docs/docs/reference/cli.md` -
+  `docs/docs/get-started/first-commands.md` ## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+- Fix install blocker and correct two testing notes ([#97](https://github.com/polyai/adk/pull/97),
+  [`05a7980`](https://github.com/polyai/adk/commit/05a7980f96f8c6cab582ee754bfb888f2c5b56e7))
+
+- installation.md: revert to Python 3.14 (polyai-adk requires >=3.14; 3.13 broke installation); keep
+  PYTHONWARNINGS=ignore escape hatch for SyntaxWarning noise - sms-or-transfer-fallback.md: remove
+  incorrect --channel voice suggestion; caller_number is empty regardless of channel in poly chat;
+  show mock-via-start_function pattern instead - venue-specific-goodbye.md: add callout that
+  --variant resolves against the deployed environment; branch must be merged before variant names
+  exist in sandbox
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+- Make tutorial appropriate for AS Lite ([#101](https://github.com/polyai/adk/pull/101),
+  [`353dfef`](https://github.com/polyai/adk/commit/353dfeff31c7cd7c568f04e2432e5b2d2e5efa94))
+
+## Summary
+
+Tutorial was not working because of UI-based limitations around SMS and handoff. I've added response
+  control and pronunciation rules (and tested them) in AS Lite
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+- Promote poly init, clarify ingress modes, and document personality Other correctly
+  ([#100](https://github.com/polyai/adk/pull/100),
+  [`7c2f98b`](https://github.com/polyai/adk/commit/7c2f98b58b4d6bcfe292535588a5ff4fc3b41350))
+
+Three related docs fixes. (1) Gives poly init a front-page moment: adds a three-command quickstart
+  block under the front-page hero, makes poly init the lead section of First commands, and updates
+  the Recommended path and Installation next-step so install → init → explore reads as one flow. (2)
+  Sweeps the didactic flow for the three ingress modes (IDE, Claude Code, full terminal): the
+  Installation page now points at the VS Code/Cursor extension at install time, and the
+  build-an-agent tutorial clarifies that running the CLI workflow inside an IDE is still the CLI
+  workflow. (3) Rewrites the personality section of the restaurant-booking tutorial so the Other
+  adjective and the custom field are explained accurately — Other is a mutex switch over the six
+  preset adjectives, and custom works independently of it (unlike Role, where custom is gated on
+  value: other).
+
+- Swap walkthrough video, tighten wording ([#98](https://github.com/polyai/adk/pull/98),
+  [`73f5bbc`](https://github.com/polyai/adk/commit/73f5bbcc2baf1ace201d83b1173bcfee0b2549b6))
+
+Removes phrasing that implied the Agent Studio UI is never needed (merging, deploying, and
+  monitoring still happen there), swaps the walkthrough video for https://vimeo.com/1185280299, and
+  tightens a few confusing wordings across the get-started and tutorial pages.
+
+### Features
+
+- Add branch merge command with interactive conflict resolution
+  ([#89](https://github.com/polyai/adk/pull/89),
+  [`3da279b`](https://github.com/polyai/adk/commit/3da279beddf0cf42a5c4d4d996deb76fe05029a8))
+
+## Summary
+
+Add `poly branch merge` command that merges a branch into main via the CLI, with support for
+  interactive conflict resolution using a three-way merge workflow.
+
+## Motivation
+
+Branch merging previously required navigating to the Agent Studio web UI. This brings the full merge
+  workflow into the CLI, including viewing conflicts, auto-merging clean changes, and resolving
+  conflicts interactively (pick a side, edit in editor).
+
+## Changes
+
+- New `poly branch merge <message>` subcommand with `--interactive`/`-i` flag for conflict
+  resolution - Interactive mode: Rich-formatted conflict table showing auto-mergeability status,
+  questionary-driven resolution (auto-merge, pick main/branch/base, edit in editor) - Refactored
+  `--debug` flag into a shared argparse parent across all subcommands - `project.merge_branch()` now
+  returns raw conflict/error dicts instead of pre-formatted strings - `sdk.merge_branch()` computes
+  `expectedBranchLastKnownSequence` internally - Fixed `merge_strings` to ensure newlines before
+  conflict markers - Force-pull after branch switch to ensure local state is up to date
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots: <img width="1662" height="1078" alt="0e2e870c8cfd4468b3a3acdfecdeffbb"
+  src="https://github.com/user-attachments/assets/4a1f5676-50e1-4dfe-8040-9678322f0574" /> <img
+  width="1662" height="1078" alt="02b3ca30285d433ab92c0142cc920fa8"
+  src="https://github.com/user-attachments/assets/aade926a-38c3-44de-b04b-de2ee8d07443" />
+
+
 ## v0.11.0 (2026-04-21)
 
 ### Documentation
