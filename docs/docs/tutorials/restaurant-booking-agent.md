@@ -472,7 +472,71 @@ pronunciations:
 
 You can add entries for any word or phrase the TTS mispronounces. See the [response control reference](../reference/response_control.md) for the full field list, including phrase filtering.
 
-## Part 10 — Review your changes
+## Part 10 — (Optional) Send an SMS confirmation
+
+SMS templates are fully supported by the ADK, but are not editable in the Agent Studio UI and template references of the form `{{twilio_sms:...}}` do not resolve inside UI-editable fields. To keep SMS working reliably, trigger it from code instead of from a prompt reference — that keeps every moving part inside files the ADK owns.
+
+!!! info "Skip this part if you are only testing via chat"
+
+    `conv.send_sms_template` needs `conv.caller_number`, which is only populated on the voice channel. In `poly chat`, the template won't actually be dispatched — but the code path is wired the same way and will fire the moment a real call comes in.
+
+### Define the template
+
+Create `config/sms_templates.yaml`:
+
+~~~yaml
+sms_templates:
+  - name: booking_confirmation
+    text: >-
+      Hi {{vrbl:booking_name}}, your table for {{vrbl:booking_size}} at Maison
+      is confirmed for {{vrbl:booking_date}} at {{vrbl:booking_time}}.
+      We look forward to seeing you.
+    env_phone_numbers:
+      sandbox: ""
+      pre_release: ""
+      live: "+15551234567"
+~~~
+
+The `{{vrbl:...}}` placeholders pull from `conv.state` values — so the function step has to set them before sending.
+
+### Send it from the function step
+
+Replace the body of `flows/booking_flow/function_steps/confirm_booking.py` with:
+
+~~~python
+from _gen import *  # <AUTO GENERATED>
+
+
+def confirm_booking(conv: Conversation, flow: Flow):
+    """Confirm the reservation, store details on state, and send an SMS."""
+    name = conv.entities.customer_name.value if conv.entities.customer_name else "Guest"
+    size = conv.entities.party_size.value if conv.entities.party_size else "?"
+    date = conv.entities.reservation_date.value if conv.entities.reservation_date else "?"
+    time = conv.entities.reservation_time.value if conv.entities.reservation_time else "?"
+
+    # Populate the variables the SMS template consumes
+    conv.state.booking_name = name
+    conv.state.booking_size = str(size)
+    conv.state.booking_date = str(date)
+    conv.state.booking_time = str(time)
+    conv.state.booking_confirmed = True
+
+    # Send the SMS if we have a caller number (voice channel only)
+    if conv.caller_number:
+        conv.send_sms_template(
+            to_number=conv.caller_number,
+            template="booking_confirmation",
+        )
+
+    conv.exit_flow()
+    return f"Booking confirmed: table for {size} under {name} on {date} at {time}."
+~~~
+
+Because the decision to send happens in Python, the model doesn't need to resolve `{{twilio_sms:...}}` and the UI gap for SMS templates stops mattering for this tutorial.
+
+See the [SMS templates reference](../reference/sms.md) for the full field list, environment-specific sender numbers, and the `conv.send_sms` helper for free-form messages.
+
+## Part 11 — Review your changes
 
 Before pushing, check what has changed:
 
@@ -520,7 +584,7 @@ poly diff
 
 This shows a unified diff of all local changes against the remote state, useful for reviewing before you push and for producing a diff for a code review.
 
-## Part 11 — Push to Agent Studio
+## Part 12 — Push to Agent Studio
 
 Push the changes to your branch in Agent Studio:
 
@@ -535,7 +599,7 @@ Pushed <account_id>/<project_id> to Agent Studio.
 
 The agent is now deployed to the `booking-flow` branch. Sandbox remains on `main` and is unaffected.
 
-## Part 12 — Merge and test
+## Part 13 — Merge and test
 
 `poly chat` connects to the **main branch** of your sandbox — not a feature branch. To test the booking flow, merge `booking-flow` to `main` in the Agent Studio UI first.
 
@@ -586,7 +650,7 @@ Agent: Your reservation is confirmed. We look forward to welcoming you to Maison
 
     If the remote state has diverged from your local copy, `poly chat --push` may write merge-conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) directly into your YAML files. If this happens, open the affected file, resolve the conflict by hand, and push again before continuing.
 
-## Part 13 — After the merge
+## Part 14 — After the merge
 
 After merging in Agent Studio, switch back to `main` locally:
 
@@ -613,7 +677,7 @@ This tutorial covered a single flow with four steps. From here you can extend th
 
 **Richer error paths**: Add an explicit error step to the flow for when the booking cannot be completed. Route to it from `confirm_booking.py` using `flow.goto_step("Error")` and return a context string explaining what happened.
 
-**SMS confirmations and call handoffs**: Both are supported by the ADK. See [SMS templates](../reference/sms.md) to send a confirmation when a booking is made, and [handoffs](../reference/handoffs.md) to transfer a caller to a human for special requests. Both resources are ADK-only — they do not have a matching editor in the Agent Studio UI, and template references to them (`{{twilio_sms:...}}`, `{{ho:...}}`) must live in files you manage through `poly push`.
+**Call handoffs**: Define SIP transfer destinations in `config/handoffs.yaml` and trigger them from code with `conv.call_handoff(...)`. Handoffs are ADK-only — they do not have a matching editor in the Agent Studio UI — so, like SMS, the most reliable pattern is to call them from a function or function step rather than relying on a `{{ho:...}}` placeholder. See the [handoffs reference](../reference/handoffs.md).
 
 ## Related pages
 
