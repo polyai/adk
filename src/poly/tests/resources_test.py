@@ -6041,23 +6041,6 @@ class TestApiIntegrationValidate(unittest.TestCase):
 class SafetyFiltersTests(unittest.TestCase):
     """Tests for SafetyFilters resources (General, Voice, Chat)."""
 
-    _SAMPLE_YAML = (
-        "enabled: true\n"
-        "categories:\n"
-        "  violence:\n"
-        "    enabled: true\n"
-        "    level: strict\n"
-        "  hate:\n"
-        "    enabled: false\n"
-        "    level: medium\n"
-        "  sexual:\n"
-        "    enabled: false\n"
-        "    level: lenient\n"
-        "  self_harm:\n"
-        "    enabled: true\n"
-        "    level: strict\n"
-    )
-
     def test_from_yaml_dict_roundtrip(self):
         """to_yaml_dict -> from_yaml_dict roundtrip preserves all fields."""
         sf = GeneralSafetyFilters(
@@ -6274,6 +6257,21 @@ class SafetyFiltersTests(unittest.TestCase):
 
     def test_read_local_resource(self):
         """read_local_resource parses safety_filters from YAML correctly."""
+        yaml_content = """enabled: true
+categories:
+  violence:
+    enabled: true
+    level: strict
+  hate:
+    enabled: false
+    level: medium
+  sexual:
+    enabled: false
+    level: lenient
+  self_harm:
+    enabled: true
+    level: strict
+"""
 
         def exists_sf(path):
             return "safety_filters.yaml" in str(path) or os.path.exists(path)
@@ -6284,7 +6282,7 @@ class SafetyFiltersTests(unittest.TestCase):
         def getmtime_sf(path):
             return 1.0 if "safety_filters.yaml" in str(path) else os.path.getmtime(path)
 
-        with mock_read_from_file(self._SAMPLE_YAML):
+        with mock_read_from_file(yaml_content):
             with unittest.mock.patch(
                 "poly.resources.resource.os.path.exists", side_effect=exists_sf
             ), unittest.mock.patch(
