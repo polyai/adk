@@ -129,9 +129,62 @@ poly branch create my-hotfix --env live
 poly branch create my-hotfix --env live --force
 poly branch switch my-feature
 poly branch switch my-feature --force
+poly branch merge 'Merge feature branch'
+poly branch merge 'Merge feature branch' --interactive
 poly branch delete
 poly branch delete my-feature
 ~~~
+
+#### `poly branch merge`
+
+Merge the current branch into main via the CLI. A merge message is required.
+
+~~~bash
+poly branch merge 'Merge message'
+poly branch merge 'Merge message' --interactive
+poly branch merge 'Merge message' --resolutions resolutions.json
+~~~
+
+If the merge has no conflicts, the branch is merged immediately and the CLI switches to `main`.
+
+If there are conflicts, the command displays a conflict table showing each conflicting field and whether it can be auto-merged, then exits with a non-zero code. You can resolve conflicts using:
+
+- **`--interactive` / `-i`** — opens an interactive prompt for each conflict. For each one you can accept the auto-merge, pick main, pick branch, pick base, or open the value in your `$EDITOR` or `$VISUAL`. After resolving all conflicts the merge is re-attempted.
+- **`--resolutions <file>`** — supply pre-defined resolutions as a JSON file path, inline JSON string, or `-` for stdin. Resolutions that cover all conflicts allow the merge to proceed non-interactively.
+
+Both flags can be combined: `--resolutions` seeds the interactive session with your pre-defined choices while `--interactive` handles any remaining conflicts.
+
+!!! tip "Set `$EDITOR` or `$VISUAL` for the best interactive experience"
+
+    Interactive mode uses your `$EDITOR` or `$VISUAL` environment variable when opening multiline or long values for editing. If neither is set it falls back to `vi`. Set one in your shell profile to use your preferred editor.
+
+##### Resolution file format
+
+`--resolutions` accepts a JSON array. Each element must include `path` and `strategy`, and optionally `value`:
+
+~~~json
+[
+  {
+    "path": ["topics", "My Topic", "content"],
+    "strategy": "theirs"
+  },
+  {
+    "path": ["agent_settings", "rules", "value"],
+    "strategy": "theirs",
+    "value": "Custom resolved content here"
+  }
+]
+~~~
+
+| Field | Description |
+|---|---|
+| `path` | List of strings identifying the conflicted field |
+| `strategy` | Resolution strategy: `"ours"` (keep main), `"theirs"` (keep branch), or `"base"` (revert to original) |
+| `value` | Optional custom value. Only used with `"theirs"` strategy. |
+
+##### After a successful merge
+
+After a successful merge the CLI automatically switches to `main`. Run `poly pull` if you need to refresh your local state.
 
 #### `poly branch delete`
 
@@ -368,6 +421,7 @@ poly branch switch my-feature --json
 poly branch current --json
 poly branch delete --json
 poly branch delete my-feature --json
+poly branch merge 'Merge message' --json
 poly format --json
 poly init --region us-1 --account_id 123 --project_id my_project --json
 poly chat --json -m 'Hello'
@@ -379,6 +433,10 @@ When `--json` is used:
 - stdout contains exactly one JSON object
 - the process exits with code `0` on success and non-zero on failure
 - human-readable console messages are suppressed
+
+!!! info "`--interactive` and `--json` cannot be used together"
+
+    `poly branch merge --interactive` requires a terminal for its conflict-resolution prompts and is incompatible with `--json`.
 
 ### JSON output shapes
 
@@ -397,11 +455,14 @@ The exact fields vary by command. Common fields include:
 | `poly branch switch --json` | `success`, `switched_to`, `dry_run` |
 | `poly branch current --json` | `current_branch` |
 | `poly branch delete --json` | `success`, `deleted` |
+| `poly branch merge --json` | `success`; on conflict: `conflicts`, `errors` |
 | `poly format --json` | `success`, `check_only`, `format_errors`, `affected`, `ty_ran`, `ty_returncode`, `ty_timed_out` |
 | `poly init --json` | `success`, `root_path` |
 | `poly chat --json` | `conversations` (array); optional `push` (when `--push` is used) |
 
 For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
+
+For `poly branch merge --json`, a successful merge returns `{ "success": true }`. When conflicts or errors are present, the response includes `"conflicts"` and `"errors"` arrays containing the raw conflict and error objects from the platform.
 
 Error responses always include `{ "success": false, "error": "...", "traceback": "..." }`.
 
@@ -473,6 +534,7 @@ A typical CLI workflow looks like this:
 6. push with `poly push`
 7. optionally review with `poly review`
 8. test or chat with the agent using `poly chat`
+9. merge the branch with `poly branch merge '<message>'`
 
 !!! info "Run commands from the project folder"
 
