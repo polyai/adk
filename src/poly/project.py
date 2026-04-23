@@ -868,6 +868,7 @@ class AgentStudioProject:
                     original_content = ""
                     local_file_path = incoming_resource.get_path(self.root_path)
                 try:
+                    # Normalise the local resource to ensure formatting differences don't cause unnecessary merge conflicts
                     local_resource = resource_type.read_local_resource(
                         local_file_path,
                         resource_id=incoming_resource.resource_id,
@@ -895,6 +896,7 @@ class AgentStudioProject:
                         )
                     continue
                 except Exception:
+                    # If can't read file but file exists, use local version
                     local_content = resource_type.read_from_file(local_file_path)
 
                 incoming_content = incoming_resource.to_pretty(
