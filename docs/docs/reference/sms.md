@@ -11,6 +11,10 @@ SMS templates define reusable text messages that the agent can send during a con
 
 Templates support dynamic content through variables stored in conversation state.
 
+!!! warning "SMS templates are ADK-only"
+
+    The Agent Studio UI does not currently expose an editor for `config/sms_templates.yaml`. Define templates through the ADK and push them with `poly push`. Template references of the form `{{twilio_sms:template_name}}` only resolve inside ADK-managed files (`rules.txt`, topic actions, flow prompts) — pasting them into a UI-editable field does not work at runtime.
+
 ## Location
 
 SMS templates are defined in:
