@@ -2261,7 +2261,7 @@ class AgentStudioProject:
         if success:
             self.branch_id = branches[branch_name]
             _, projection = self.pull_project(
-                force=force, format=format, projection_json=projection_json, on_save=on_save
+                force=True, format=format, projection_json=projection_json, on_save=on_save
             )
         return success, projection
 
@@ -2600,7 +2600,7 @@ class AgentStudioProject:
     def merge_branch(
         self, message: str, conflict_resolutions: list[dict[str, Any]] = None
     ) -> tuple[bool, list[str], list[str]]:
-        """Merge a branch into the current branch in the project.
+        """Merge the current branch into main in the project.
 
         Args:
             message (str): The merge commit message.
@@ -2608,7 +2608,7 @@ class AgentStudioProject:
                 resolutions. Each resolution should have:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
-                - value: Optional custom value (only used with custom strategy)
+                - value: Optional custom value
 
         Returns:
             bool: True if the merge was successful, False otherwise
@@ -2627,6 +2627,15 @@ class AgentStudioProject:
                 f"Cannot merge branch with uncommitted changes, diffs: {list(diffs.keys())}"
             )
 
+        for resolution in conflict_resolutions or []:
+            if "path" not in resolution or "strategy" not in resolution:
+                raise ValueError(f"Resolution must include 'path' and 'strategy': {resolution}")
+            if resolution["strategy"] not in {"ours", "theirs", "base"}:
+                raise ValueError(
+                    f"Invalid conflict resolution strategy: {resolution['strategy']} for path {resolution['path']}. "
+                    f"Must be one of 'ours', 'theirs', or 'base'."
+                )
+
         success, conflicts, errors = self.api_handler.merge_branch(
             message=message, conflict_resolutions=conflict_resolutions
         )
@@ -2634,15 +2643,7 @@ class AgentStudioProject:
             self.switch_branch("main", force=True)
             return True, [], []
 
-        error_messages = []
-        conflict_messages = []
-        if conflicts:
-            conflict_messages = [conflict["path"] for conflict in conflicts]
-            logger.debug(f"Merge conflicts detected: conflicts={conflicts!r}")
-        if errors:
-            error_messages = [f"{error['path']}: {error['message']}" for error in errors]
-            logger.debug(f"Merge errors detected: errors={errors!r}")
-        return False, conflict_messages, error_messages
+        return False, conflicts, errors
 
     def delete_branch(self, branch_name: str) -> bool:
         """Delete a branch in the project.

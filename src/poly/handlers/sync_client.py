@@ -1163,7 +1163,6 @@ class SyncClientHandler:
 
         try:
             result = self.sdk.merge_branch(
-                expected_branch_last_known_sequence=self.sdk._last_known_sequence,
                 deployment_message=message,
                 conflict_resolutions=conflict_resolutions,
             )
@@ -1172,7 +1171,7 @@ class SyncClientHandler:
             return False, [], []
 
         if result.get("hasConflicts", False) or result.get("errors", []):
-            logger.error(
+            logger.info(
                 f"Failed to merge branch '{self.sdk.branch_id}' into 'main' due to {len(result.get('conflicts', []))} conflicts and {len(result.get('errors', []))} errors"
             )
             conflicts = result.get("conflicts", [])

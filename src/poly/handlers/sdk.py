@@ -236,7 +236,6 @@ class SourcererSDK:
 
     def merge_branch(
         self,
-        expected_branch_last_known_sequence: int,
         deployment_message: str = "",
         conflict_resolutions: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
@@ -247,7 +246,6 @@ class SourcererSDK:
         Once conflicts are resolved, call this method again with the conflict_resolutions parameter.
 
         Args:
-            expected_branch_last_known_sequence: The expected sequence number of the branch being merged
             deployment_message: Optional message describing the deployment (default: "")
             conflict_resolutions: Optional list of conflict resolutions. Each resolution should have:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
@@ -274,7 +272,7 @@ class SourcererSDK:
 
         Example:
             # Simple merge without conflicts
-            result = sdk.merge_branch(expected_branch_last_known_sequence=5)
+            result = sdk.merge_branch(deployment_message="Merge feature branch")
             if "hasConflicts" in result and result["hasConflicts"]:
                 print("Conflicts detected:", result["conflicts"])
             else:
@@ -292,14 +290,13 @@ class SourcererSDK:
                 }
             ]
             result = sdk.merge_branch(
-                expected_branch_last_known_sequence=5,
                 deployment_message="Merge feature branch",
                 conflict_resolutions=resolutions
             )
         """
         try:
             payload = {
-                "expectedBranchLastKnownSequence": expected_branch_last_known_sequence,
+                "expectedBranchLastKnownSequence": self.get_last_known_sequence() or 0,
                 "deploymentMessage": deployment_message,
             }
 
