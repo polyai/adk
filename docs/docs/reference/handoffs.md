@@ -11,6 +11,10 @@ Handoffs configure SIP call transfers for voice agents. They define how and wher
 
 Handoffs are used when an agent needs to escalate, transfer, or terminate a voice interaction in a controlled way.
 
+!!! warning "Handoffs are ADK-only"
+
+    The Agent Studio UI does not currently expose an editor for `config/handoffs.yaml`. Define handoffs through the ADK and push them with `poly push`. Template references of the form `{{ho:handoff_name}}` only resolve inside ADK-managed files (`rules.txt`, topic actions, flow prompts) — pasting them into a UI-editable field does not work at runtime.
+
 ## Location
 
 Handoffs are defined in:

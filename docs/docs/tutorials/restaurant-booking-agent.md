@@ -1,12 +1,12 @@
 ---
 title: Build a restaurant booking agent
-description: A complete walkthrough building a voice agent that takes table reservations — covering flows, entities, functions, topics, SMS, and testing.
+description: A complete walkthrough building a voice agent that takes table reservations — covering flows, entities, functions, and topics.
 ---
 
 # Build a restaurant booking agent
 
 <p class="lead">
-This tutorial builds a complete voice agent for a restaurant. By the end you will have a working agent that greets callers, collects a reservation, confirms the details, and sends an SMS confirmation.
+This tutorial builds a complete voice agent for a restaurant. By the end you will have a working agent that greets callers, collects a reservation, and confirms the details.
 </p>
 
 You will use the ADK to define the agent, iterate on it, and push it for testing. Merging and deployment still happen in Agent Studio.
@@ -17,20 +17,21 @@ The agent handles calls to **Maison**, a fictional restaurant. When a caller ask
 
 1. Enters a booking flow and collects the caller's name, party size, and preferred date and time
 2. Confirms the details back to the caller
-3. Stores the booking and sends an SMS confirmation
-4. Offers to transfer to the host team if the caller has any special requests
+3. Stores the booking on the conversation state
 
 ## What you will learn
 
 This tutorial covers:
 
-- initializing a project and pulling its configuration
+- creating an empty project in Agent Studio
+- initializing a local project and pulling its configuration
 - working on a branch
 - defining entities for structured data collection
 - building a multi-step flow with default steps and a function step
 - writing a start function and a booking function
 - triggering a flow from a topic
-- configuring an SMS template
+- tuning speech recognition with keyphrase boosting and transcript corrections
+- adjusting spoken output with pronunciation rules
 - previewing changes with `poly status` and `poly diff`
 - pushing and testing with `poly chat`
 
@@ -41,7 +42,12 @@ Before you start:
 - you have Python 3.14 or later installed
 - you have `uv` installed
 - you have installed the ADK: `pip install polyai-adk`
-- you have a PolyAI API key and access to an Agent Studio project
+- you have a PolyAI API key exported as `POLY_ADK_KEY`
+- **you have created an empty project in Agent Studio** — the ADK cannot create projects, it can only sync them. Open Agent Studio, create a new project, and make a note of its **account ID** and **project ID**. You will need both to initialize the local project.
+
+!!! tip "Finding your account ID and project ID"
+
+    Both IDs are visible in the Agent Studio project URL (e.g. `https://studio.poly.ai/<account_id>/<project_id>/...`) and on the project's settings page.
 
 Verify the CLI is available:
 
@@ -53,30 +59,28 @@ poly --version
 
 ### Initialize
 
-Create a directory and run `poly init` inside it:
+Create a directory and run `poly init` inside it, passing the account ID and project ID you noted above:
 
 ~~~bash
 mkdir maison && cd maison
-poly init
+poly init --region <region> --account_id <account_id> --project_id <project_id>
 ~~~
 
-`poly init` is interactive. It prompts you to select your region, account, and project in turn. Use the arrow keys to navigate, or start typing to filter the list.
+Replace `<region>` with the region your Agent Studio tenant lives in (see `poly init --help` for valid values), and `<account_id>` / `<project_id>` with the values from your empty project.
 
 ~~~text
-? Select Region  us-1
-? Select Account  acme-corp
-? Select Project  maison-reservations
-
-Initializing project acme-corp/maison-reservations...
-✓ Project initialized at /Users/yourname/maison/acme-corp/maison-reservations
+Initializing project <account_id>/<project_id>...
+✓ Project initialized at /Users/yourname/maison/<account_id>/<project_id>
 ~~~
+
+If you prefer to pick values interactively, run `poly init` with no flags — you will be prompted for each one in turn. You can navigate with the arrow keys or start typing to filter the list.
 
 !!! info "`poly init` creates a subdirectory"
 
     The project is created at `{cwd}/{account_id}/{project_id}`, not directly in your current directory. After init completes, change into the project directory before running any other commands:
 
     ~~~bash
-    cd acme-corp/maison-reservations
+    cd <account_id>/<project_id>
     ~~~
 
 `poly init` also pulls the current configuration from Agent Studio automatically. There is no need to run `poly pull` separately.
@@ -84,7 +88,7 @@ Initializing project acme-corp/maison-reservations...
 Your project directory now contains the initial configuration as YAML and Python files:
 
 ~~~text
-acme-corp/maison-reservations/
+<account_id>/<project_id>/
 ├── project.yaml
 ├── _gen/
 ├── agent_settings/
@@ -102,7 +106,7 @@ acme-corp/maison-reservations/
 
 The `_gen/` directory contains auto-generated platform code. Do not edit it — it is overwritten on every pull.
 
-Files like `config/entities.yaml`, `config/sms_templates.yaml`, `flows/`, and `topics/` are only created when you add those resources to the project. You will create them in this tutorial.
+Files like `config/entities.yaml`, `flows/`, and `topics/` are only created when you add those resources to the project. You will create them in this tutorial.
 
 ### Create a working branch
 
@@ -173,12 +177,10 @@ Open `agent_settings/rules.txt`. Rules give the agent standing instructions that
 You are the reservations agent for Maison, an upscale French restaurant.
 Always be warm and welcoming.
 When a caller wants to make a reservation, use {{fn:start_booking_flow}} to begin the booking process.
-If a caller has special requests or accessibility needs, offer to transfer them to the host team using {{ho:host_team}}.
 Never tell the caller their reservation is confirmed until the booking flow has completed.
-After a booking is confirmed, offer to send an SMS confirmation using {{twilio_sms:booking_confirmation}}.
 ~~~
 
-`{{fn:...}}` references a global function you will define later. `{{ho:...}}` references a handoff. `{{twilio_sms:...}}` references an SMS template. The model uses these references to understand when to call them.
+`{{fn:start_booking_flow}}` references a global function you will define later. The model uses these references to understand when to call them.
 
 !!! warning "`{{fn:...}}` only works for global functions"
 
@@ -351,18 +353,11 @@ def confirm_booking(conv: Conversation, flow: Flow):
     time = conv.entities.reservation_time.value if conv.entities.reservation_time else "?"
 
     # Store the confirmed details in conversation state
-    conv.state.booking_name = name
-    conv.state.booking_size = str(size)
-    conv.state.booking_date = str(date)
-    conv.state.booking_time = str(time)
     conv.state.booking_confirmed = True
 
     # Exit the flow and return a context string for the model
     conv.exit_flow()
-    return (
-        f"Booking confirmed: table for {size} under {name} on {date} at {time}. "
-        "Offer to send the caller an SMS confirmation."
-    )
+    return f"Booking confirmed: table for {size} under {name} on {date} at {time}."
 ~~~
 
 After this function runs, the model receives the returned context string and uses it to continue the conversation.
@@ -419,9 +414,75 @@ actions: Use {{fn:start_booking_flow}} to begin collecting the reservation detai
 
 The model uses `content` and `example_queries` to understand when this topic applies, and `actions` to know what to do.
 
-## Part 8 — Add an SMS template
+## Part 8 — Tune speech recognition
 
-When the booking is confirmed, the agent will offer to send an SMS with the details. Create `config/sms_templates.yaml`:
+Voice agents listen on a noisy channel, and domain-specific vocabulary is usually the first thing ASR gets wrong. The ADK exposes two speech-recognition resources that do not require any code: **keyphrase boosting** and **transcript corrections**. Both live under `voice/speech_recognition/`.
+
+### Keyphrase boosting
+
+Create `voice/speech_recognition/keyphrase_boosting.yaml`:
+
+~~~yaml
+keyphrases:
+  - keyphrase: Maison
+    level: maximum
+  - keyphrase: reservation
+    level: boosted
+  - keyphrase: party of
+    level: boosted
+~~~
+
+The recognizer biases toward these phrases when it is uncertain. Boost the brand name at `maximum` so the agent never mis-hears it, and apply lighter boosts to the phrases that disambiguate booking intent.
+
+### Transcript corrections
+
+Spoken times and numbers often come through in forms that are hard to parse. Create `voice/speech_recognition/transcript_corrections.yaml`:
+
+~~~yaml
+corrections:
+  - name: Time normalization
+    description: Collapse common spoken time forms
+    regular_expressions:
+      - regular_expression: half past (\d{1,2})
+        replacement: \1:30
+        replacement_type: partial
+      - regular_expression: quarter past (\d{1,2})
+        replacement: \1:15
+        replacement_type: partial
+      - regular_expression: quarter to (\d{1,2})
+        replacement: \1:45
+        replacement_type: partial
+~~~
+
+These rules are applied after the recognizer returns text but before the model sees it. They only touch the transcript — the caller's audio is unaffected.
+
+See the [speech recognition reference](../reference/speech_recognition.md) for the full field list, interaction styles, and barge-in settings.
+
+## Part 9 — Adjust how the agent speaks
+
+Response control sits on the other side of the conversation: it shapes what the agent says before TTS. For a French-brand restaurant, the most common issue is pronunciation. Create `voice/response_control/pronunciations.yaml`:
+
+~~~yaml
+pronunciations:
+  - regex: "\\bMaison\\b"
+    replacement: May-zon
+    case_sensitive: false
+    description: Ensure the restaurant name is spoken in the intended French style
+~~~
+
+You can add entries for any word or phrase the TTS mispronounces. See the [response control reference](../reference/response_control.md) for the full field list, including phrase filtering.
+
+## Part 10 — (Optional) Send an SMS confirmation
+
+SMS templates are fully supported by the ADK, but are not editable in the Agent Studio UI and template references of the form `{{twilio_sms:...}}` do not resolve inside UI-editable fields. To keep SMS working reliably, trigger it from code instead of from a prompt reference — that keeps every moving part inside files the ADK owns.
+
+!!! info "Skip this part if you are only testing via chat"
+
+    `conv.send_sms_template` needs `conv.caller_number`, which is only populated on the voice channel. In `poly chat`, the template won't actually be dispatched — but the code path is wired the same way and will fire the moment a real call comes in.
+
+### Define the template
+
+Create `config/sms_templates.yaml`:
 
 ~~~yaml
 sms_templates:
@@ -436,23 +497,46 @@ sms_templates:
       live: "+15551234567"
 ~~~
 
-The `{{vrbl:...}}` placeholders pull from `conv.state` values set in the `confirm_booking` function step.
+The `{{vrbl:...}}` placeholders pull from `conv.state` values — so the function step has to set them before sending.
 
-## Part 9 — Add a handoff
+### Send it from the function step
 
-If a caller has special requests, the agent should be able to transfer them to the host team. Open `config/handoffs.yaml` and add the following entry (keeping any existing handoffs):
+Replace the body of `flows/booking_flow/function_steps/confirm_booking.py` with:
 
-~~~yaml
-handoffs:
-  - name: host_team
-    description: Transfer to the Maison host team for special requests and accessibility needs
-    is_default: false
-    sip_config:
-      method: refer
-      phone_number: "+15559876543"
+~~~python
+from _gen import *  # <AUTO GENERATED>
+
+
+def confirm_booking(conv: Conversation, flow: Flow):
+    """Confirm the reservation, store details on state, and send an SMS."""
+    name = conv.entities.customer_name.value if conv.entities.customer_name else "Guest"
+    size = conv.entities.party_size.value if conv.entities.party_size else "?"
+    date = conv.entities.reservation_date.value if conv.entities.reservation_date else "?"
+    time = conv.entities.reservation_time.value if conv.entities.reservation_time else "?"
+
+    # Populate the variables the SMS template consumes
+    conv.state.booking_name = name
+    conv.state.booking_size = str(size)
+    conv.state.booking_date = str(date)
+    conv.state.booking_time = str(time)
+    conv.state.booking_confirmed = True
+
+    # Send the SMS if we have a caller number (voice channel only)
+    if conv.caller_number:
+        conv.send_sms_template(
+            to_number=conv.caller_number,
+            template="booking_confirmation",
+        )
+
+    conv.exit_flow()
+    return f"Booking confirmed: table for {size} under {name} on {date} at {time}."
 ~~~
 
-## Part 10 — Review your changes
+Because the decision to send happens in Python, the model doesn't need to resolve `{{twilio_sms:...}}` and the UI gap for SMS templates stops mattering for this tutorial.
+
+See the [SMS templates reference](../reference/sms.md) for the full field list, environment-specific sender numbers, and the `conv.send_sms` helper for free-form messages.
+
+## Part 11 — Review your changes
 
 Before pushing, check what has changed:
 
@@ -462,9 +546,9 @@ poly status
 
 ~~~text
 ╭─────────────── Project Status ────────────────╮
-│  Region          us-1                          │
-│  Account ID      acme-corp                     │
-│  Project ID      maison-reservations           │
+│  Region          <region>                      │
+│  Account ID      <account_id>                  │
+│  Project ID      <project_id>                  │
 │  Last Pulled     2026-04-21T09:15:00           │
 │  Current Branch  booking-flow                  │
 ╰───────────────────────────────────────────────╯
@@ -473,21 +557,19 @@ poly status
 ~~~text
 
 New files:
-  /Users/yourname/maison/acme-corp/maison-reservations/config/entities.yaml
-  /Users/yourname/maison/acme-corp/maison-reservations/config/sms_templates.yaml
-  /Users/yourname/maison/acme-corp/maison-reservations/flows/booking_flow/flow_config.yaml
-  /Users/yourname/maison/acme-corp/maison-reservations/flows/booking_flow/steps/collect_name.yaml
-  /Users/yourname/maison/acme-corp/maison-reservations/flows/booking_flow/steps/collect_party_size.yaml
-  /Users/yourname/maison/acme-corp/maison-reservations/flows/booking_flow/steps/collect_date.yaml
-  /Users/yourname/maison/acme-corp/maison-reservations/flows/booking_flow/function_steps/confirm_booking.py
-  /Users/yourname/maison/acme-corp/maison-reservations/functions/start_booking_flow.py
-  /Users/yourname/maison/acme-corp/maison-reservations/functions/start_function.py
-  /Users/yourname/maison/acme-corp/maison-reservations/topics/Make a Reservation.yaml
-  /Users/yourname/maison/acme-corp/maison-reservations/variables/booking_confirmed
-  /Users/yourname/maison/acme-corp/maison-reservations/variables/booking_date
-  /Users/yourname/maison/acme-corp/maison-reservations/variables/booking_name
-  /Users/yourname/maison/acme-corp/maison-reservations/variables/booking_size
-  /Users/yourname/maison/acme-corp/maison-reservations/variables/booking_time
+  /Users/yourname/maison/<account_id>/<project_id>/config/entities.yaml
+  /Users/yourname/maison/<account_id>/<project_id>/flows/booking_flow/flow_config.yaml
+  /Users/yourname/maison/<account_id>/<project_id>/flows/booking_flow/steps/collect_name.yaml
+  /Users/yourname/maison/<account_id>/<project_id>/flows/booking_flow/steps/collect_party_size.yaml
+  /Users/yourname/maison/<account_id>/<project_id>/flows/booking_flow/steps/collect_date.yaml
+  /Users/yourname/maison/<account_id>/<project_id>/flows/booking_flow/function_steps/confirm_booking.py
+  /Users/yourname/maison/<account_id>/<project_id>/functions/start_booking_flow.py
+  /Users/yourname/maison/<account_id>/<project_id>/functions/start_function.py
+  /Users/yourname/maison/<account_id>/<project_id>/topics/Make a Reservation.yaml
+  /Users/yourname/maison/<account_id>/<project_id>/voice/speech_recognition/keyphrase_boosting.yaml
+  /Users/yourname/maison/<account_id>/<project_id>/voice/speech_recognition/transcript_corrections.yaml
+  /Users/yourname/maison/<account_id>/<project_id>/voice/response_control/pronunciations.yaml
+  /Users/yourname/maison/<account_id>/<project_id>/variables/booking_confirmed
 ~~~
 
 !!! info "Variables in `poly status`"
@@ -502,7 +584,7 @@ poly diff
 
 This shows a unified diff of all local changes against the remote state, useful for reviewing before you push and for producing a diff for a code review.
 
-## Part 11 — Push to Agent Studio
+## Part 12 — Push to Agent Studio
 
 Push the changes to your branch in Agent Studio:
 
@@ -511,13 +593,13 @@ poly push
 ~~~
 
 ~~~text
-Pushing local changes for acme-corp/maison-reservations...
-Pushed acme-corp/maison-reservations to Agent Studio.
+Pushing local changes for <account_id>/<project_id>...
+Pushed <account_id>/<project_id> to Agent Studio.
 ~~~
 
 The agent is now deployed to the `booking-flow` branch. Sandbox remains on `main` and is unaffected.
 
-## Part 12 — Merge and test
+## Part 13 — Merge and test
 
 `poly chat` connects to the **main branch** of your sandbox — not a feature branch. To test the booking flow, merge `booking-flow` to `main` in the Agent Studio UI first.
 
@@ -532,7 +614,7 @@ poly chat --environment sandbox
 ~~~
 
 ~~~text
-Starting chat for acme-corp/maison-reservations (sandbox)...
+Starting chat for <account_id>/<project_id> (sandbox)...
 Type your message. Press Ctrl+C to exit.
 
 Agent: Welcome to Maison. How can I help you today?
@@ -555,11 +637,7 @@ Agent: Wonderful. Let me confirm that — a table for 2 under Sarah Chen this Sa
 
 You: Yes, that's perfect
 
-Agent: Your reservation is confirmed. Would you like me to send you an SMS confirmation?
-
-You: Please
-
-Agent: Done — you'll receive a confirmation shortly. We look forward to welcoming you to Maison on Saturday. Is there anything else I can help you with?
+Agent: Your reservation is confirmed. We look forward to welcoming you to Maison on Saturday. Is there anything else I can help you with?
 ~~~
 
 !!! tip "Useful chat flags"
@@ -572,7 +650,7 @@ Agent: Done — you'll receive a confirmation shortly. We look forward to welcom
 
     If the remote state has diverged from your local copy, `poly chat --push` may write merge-conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) directly into your YAML files. If this happens, open the affected file, resolve the conflict by hand, and push again before continuing.
 
-## Part 13 — After the merge
+## Part 14 — After the merge
 
 After merging in Agent Studio, switch back to `main` locally:
 
@@ -598,6 +676,8 @@ This tutorial covered a single flow with four steps. From here you can extend th
 **External API calls**: Replace the stub booking logic in `confirm_booking.py` with a real HTTP call to your reservation system. Function steps are the right place for this — they run deterministically and can store results in `conv.state` for the model to reference.
 
 **Richer error paths**: Add an explicit error step to the flow for when the booking cannot be completed. Route to it from `confirm_booking.py` using `flow.goto_step("Error")` and return a context string explaining what happened.
+
+**Call handoffs**: Define SIP transfer destinations in `config/handoffs.yaml` and trigger them from code with `conv.call_handoff(...)`. Handoffs are ADK-only — they do not have a matching editor in the Agent Studio UI — so, like SMS, the most reliable pattern is to call them from a function or function step rather than relying on a `{{ho:...}}` placeholder. See the [handoffs reference](../reference/handoffs.md).
 
 ## Related pages
 
@@ -631,12 +711,19 @@ This tutorial covered a single flow with four steps. From here you can extend th
     How topics connect caller intent to agent actions.
     [Open topics](../reference/topics.md)
 
--   **SMS templates**
+-   **Speech recognition**
 
     ---
 
-    Defining reusable SMS messages and populating them with state variables.
-    [Open SMS templates](../reference/sms.md)
+    Keyphrase boosting, transcript corrections, and ASR settings.
+    [Open speech recognition](../reference/speech_recognition.md)
+
+-   **Response control**
+
+    ---
+
+    Pronunciations and phrase filtering for spoken output.
+    [Open response control](../reference/response_control.md)
 
 -   **Variants**
 
