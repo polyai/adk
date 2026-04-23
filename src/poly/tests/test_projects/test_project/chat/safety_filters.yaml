@@ -1,0 +1,14 @@
+enabled: true
+categories:
+  violence:
+    enabled: true
+    level: medium
+  hate:
+    enabled: true
+    level: medium
+  sexual:
+    enabled: true
+    level: medium
+  self_harm:
+    enabled: true
+    level: medium
