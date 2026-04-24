@@ -18,13 +18,10 @@ from google.protobuf.message import Message
 
 import poly.resources.resource_utils as resource_utils
 import poly.utils as utils
-import requests
 
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
-from poly.handlers.platform_api import PlatformAPIHandler
-from poly.handlers.sdk import SourcererAPIError
 from poly.resources import (
     ApiIntegration,
     AsrSettings,
@@ -360,61 +357,60 @@ class AgentStudioProject:
         account_path = os.path.join(base_path, account_id)
         project_path = os.path.join(account_path, project_id)
 
+        project = cls(
+            region=region,
+            account_id=account_id,
+            project_id=project_id,
+            root_path=project_path,
+            resources={},
+            last_updated=datetime.now(),
+            branch_id="main",
+            project_name=project_name,
+        )
+
         try:
-            project = cls(
-                region=region,
-                account_id=account_id,
-                project_id=project_id,
-                root_path=project_path,
-                resources={},
-                last_updated=datetime.now(),
-                branch_id="main",
-                project_name=project_name,
-            )
             project.resources, projection = project.api_handler.pull_resources(
                 projection_json=projection_json
             )
-            project._check_no_duplicate_resource_paths(project.resources)
-
-            resource_mappings: list[ResourceMapping] = project._make_resource_mappings(
-                project.resources
-            )
-
-            all_resources = project.all_resources
-            total = len(all_resources)
-
-            MultiResourceYamlResource._file_cache.clear()
-
-            for i, resource in enumerate(all_resources, 1):
-                if on_save:
-                    on_save(i, total)
-                is_multi = isinstance(resource, MultiResourceYamlResource)
-                resource.save(
-                    project_path,
-                    resource_mappings=resource_mappings,
-                    resource_name=resource.name,
-                    format=format,
-                    save_to_cache=is_multi,
-                )
-
-            MultiResourceYamlResource.write_cache_to_file()
-            MultiResourceYamlResource._file_cache.clear()
-
-            project.save_config(write_project_yaml=True)
-
-            utils.export_decorators(DECORATORS, project_path)
-            utils.save_imports(project_path)
-
-            return project, projection
-
-        except (requests.HTTPError, SourcererAPIError) as e:
-            # Clean up any partially created directories
+        except ValueError:
             if os.path.exists(project_path):
                 shutil.rmtree(project_path)
             if os.path.exists(account_path) and not os.listdir(account_path):
                 shutil.rmtree(account_path)
+            raise
 
-            PlatformAPIHandler.translate_http_error(e, project_id, account_id)
+        project._check_no_duplicate_resource_paths(project.resources)
+
+        resource_mappings: list[ResourceMapping] = project._make_resource_mappings(
+            project.resources
+        )
+
+        all_resources = project.all_resources
+        total = len(all_resources)
+
+        MultiResourceYamlResource._file_cache.clear()
+
+        for i, resource in enumerate(all_resources, 1):
+            if on_save:
+                on_save(i, total)
+            is_multi = isinstance(resource, MultiResourceYamlResource)
+            resource.save(
+                project_path,
+                resource_mappings=resource_mappings,
+                resource_name=resource.name,
+                format=format,
+                save_to_cache=is_multi,
+            )
+
+        MultiResourceYamlResource.write_cache_to_file()
+        MultiResourceYamlResource._file_cache.clear()
+
+        project.save_config(write_project_yaml=True)
+
+        utils.export_decorators(DECORATORS, project_path)
+        utils.save_imports(project_path)
+
+        return project, projection
 
     def save_config(self, write_project_yaml: bool = False) -> None:
         """Save the project configuration to a file

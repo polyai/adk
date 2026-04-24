@@ -4,9 +4,11 @@ Copyright PolyAI Limited"""
 
 from typing import Any, Optional
 
+import requests
 from google.protobuf.message import Message
 
 from poly.handlers.platform_api import PlatformAPIHandler
+from poly.handlers.sdk import SourcererAPIError
 from poly.handlers.sync_client import SyncClientHandler
 from poly.resources import BaseResource, Resource
 
@@ -142,7 +144,10 @@ class AgentStudioInterface:
             return SyncClientHandler.load_resources_from_projection(
                 projection_json
             ), projection_json
-        return self.sync_client.pull_resources()
+        try:
+            return self.sync_client.pull_resources()
+        except (requests.HTTPError, SourcererAPIError) as e:
+            PlatformAPIHandler.translate_http_error(e, self.project_id, self.account_id)
 
     def push_resources(
         self,

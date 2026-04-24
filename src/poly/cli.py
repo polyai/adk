@@ -1344,29 +1344,22 @@ class AgentStudioCLI:
         )
         on_save = None
 
-        try:
-            with ctx as status:
-                if status:
+        with ctx as status:
+            if status:
 
-                    def on_save(current: int, total: int) -> None:
-                        status.update(f"[info]Saving resources ({current}/{total})...[/info]")
+                def on_save(current: int, total: int) -> None:
+                    status.update(f"[info]Saving resources ({current}/{total})...[/info]")
 
-                project, projection = AgentStudioProject.init_project(
-                    base_path=base_path,
-                    region=region,
-                    account_id=account_id,
-                    project_id=project_id,
-                    project_name=project_name,
-                    format=format,
-                    projection_json=projection_json,
-                    on_save=on_save,
-                )
-        except ValueError as e:
-            if output_json:
-                json_print({"success": False, "error": str(e)})
-            else:
-                error(str(e))
-            sys.exit(1)
+            project, projection = AgentStudioProject.init_project(
+                base_path=base_path,
+                region=region,
+                account_id=account_id,
+                project_id=project_id,
+                project_name=project_name,
+                format=format,
+                projection_json=projection_json,
+                on_save=on_save,
+            )
 
         if not project:
             if output_json:
