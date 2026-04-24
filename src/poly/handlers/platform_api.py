@@ -274,6 +274,53 @@ class PlatformAPIHandler:
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
     @staticmethod
+    def extract_error_code(e: Exception) -> ty.Optional[str]:
+        """Extract the error_code field from an API error response body.
+
+        Args:
+            e: The exception to inspect
+
+        Returns:
+            str | None: The error_code value, or None if not present
+        """
+        response = getattr(e, "response", None)
+        if response is None and e.__cause__ is not None:
+            response = getattr(e.__cause__, "response", None)
+        if response is not None:
+            try:
+                return response.json().get("error_code")
+            except (json.JSONDecodeError, ValueError, AttributeError):
+                pass
+        return None
+
+    @staticmethod
+    def translate_http_error(e: Exception, project_id: str, account_id: str) -> None:
+        """Translate an API HTTP error into a user-facing ValueError.
+
+        Extracts the error_code from the response body and raises a ValueError
+        with a descriptive message. Always raises.
+
+        Args:
+            e: The HTTPError or SourcererAPIError to translate
+            project_id: The project ID, used to build the error message
+            account_id: The account ID, used to build the error message
+
+        Raises:
+            ValueError: Always raised with a user-facing message
+        """
+        error_code = PlatformAPIHandler.extract_error_code(e)
+
+        if error_code == "FORBIDDEN":
+            raise ValueError(
+                f"Forbidden: you do not have permission to access "
+                f"project '{project_id}' in account '{account_id}'."
+            ) from e
+        elif error_code == "DEPLOYMENT_NOT_FOUND":
+            raise ValueError(f"Project '{project_id}' not found in account '{account_id}'.") from e
+        else:
+            raise ValueError(f"API error: {e}") from e
+
+    @staticmethod
     def end_chat(
         region: str,
         account_id: str,

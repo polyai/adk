@@ -23,6 +23,7 @@ import requests
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
+from poly.handlers.platform_api import PlatformAPIHandler
 from poly.handlers.sdk import SourcererAPIError
 from poly.resources import (
     ApiIntegration,
@@ -413,33 +414,7 @@ class AgentStudioProject:
             if os.path.exists(account_path) and not os.listdir(account_path):
                 shutil.rmtree(account_path)
 
-            # Extract error_code from the response body
-            error_code = cls._extract_error_code(e)
-
-            if error_code == "FORBIDDEN":
-                raise ValueError(
-                    f"Forbidden: you do not have permission to access "
-                    f"project '{project_id}' in account '{account_id}'."
-                ) from e
-            elif error_code == "DEPLOYMENT_NOT_FOUND":
-                raise ValueError(
-                    f"Project '{project_id}' not found in account '{account_id}'."
-                ) from e
-            else:
-                raise ValueError(f"API error: {e}") from e
-
-    @staticmethod
-    def _extract_error_code(e: Exception) -> Optional[str]:
-        """Extract the error_code from an API error response."""
-        response = getattr(e, "response", None)
-        if response is None and e.__cause__ is not None:
-            response = getattr(e.__cause__, "response", None)
-        if response is not None:
-            try:
-                return response.json().get("error_code")
-            except (json.JSONDecodeError, ValueError, AttributeError):
-                pass
-        return None
+            PlatformAPIHandler.translate_http_error(e, project_id, account_id)
 
     def save_config(self, write_project_yaml: bool = False) -> None:
         """Save the project configuration to a file
