@@ -324,26 +324,6 @@ class PlatformAPIHandler:
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
     @staticmethod
-    def extract_error_code(e: Exception) -> ty.Optional[str]:
-        """Extract the error_code field from an API error response body.
-
-        Args:
-            e: The exception to inspect
-
-        Returns:
-            str | None: The error_code value, or None if not present
-        """
-        response = getattr(e, "response", None)
-        if response is None and e.__cause__ is not None:
-            response = getattr(e.__cause__, "response", None)
-        if response is not None:
-            try:
-                return response.json().get("error_code")
-            except (json.JSONDecodeError, ValueError, AttributeError):
-                pass
-        return None
-
-    @staticmethod
     def end_chat(
         region: str,
         account_id: str,
