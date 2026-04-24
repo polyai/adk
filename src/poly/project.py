@@ -59,12 +59,17 @@ from poly.resources import (
 )
 from poly.resources.resource import _parse_multi_resource_path
 from poly.utils import compute_variable_references
+from poly.migration_utils import (
+    run_migrations,
+    get_all_migration_flags,
+    MigrationFlag,
+    load_migration_flags,
+)
 
 logger = logging.getLogger(__name__)
 
 PROJECT_CONFIG_FILE = "project.yaml"
 STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
-_LEGACY_STATUS_FILE = ".agent_studio_config"
 
 
 # New resources to be added here
@@ -147,6 +152,7 @@ class AgentStudioProject:
     project_name: str = None
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
+    _migration_flags: set[MigrationFlag] = None
 
     # Store resources that were not loaded from the status file
     # So they aren't considered locally deleted when pushing/pulling
@@ -245,6 +251,9 @@ class AgentStudioProject:
         else:
             last_updated = datetime.now()
 
+        migration_flags = load_migration_flags(status_dict.get("migration_flags", []))
+        migration_flags = run_migrations(root_path, migration_flags)
+
         return cls(
             region=config_dict.get("region", ""),
             account_id=config_dict.get("account_id", ""),
@@ -256,6 +265,7 @@ class AgentStudioProject:
             branch_id=status_dict.get("branch_id", "main"),
             project_name=config_dict.get("project_name") or status_dict.get("project_name"),
             _not_loaded_resources=not_loaded_resources,
+            _migration_flags=migration_flags,
         )
 
     def to_dict(self) -> dict:
@@ -274,6 +284,9 @@ class AgentStudioProject:
             "file_structure_info": self.file_structure_info,
             "branch_id": self.branch_id,
             "project_name": self.project_name,
+            "migration_flags": [flag.value for flag in self._migration_flags]
+            if self._migration_flags
+            else [],
         }
 
     @classmethod
@@ -282,6 +295,9 @@ class AgentStudioProject:
         resources, not_loaded_resources = cls._load_resources_from_status_dict(data)
 
         file_structure_info = cls.compute_file_structure_info(resources)
+
+        migration_flags = load_migration_flags(data.get("migration_flags", []))
+        migration_flags = run_migrations(root_path, migration_flags)
 
         return cls(
             region=data.get("region", ""),
@@ -293,6 +309,7 @@ class AgentStudioProject:
             file_structure_info=file_structure_info,
             branch_id=data.get("branch_id", "main"),
             project_name=data.get("project_name"),
+            _migration_flags=migration_flags,
             _not_loaded_resources=not_loaded_resources,
         )
 
@@ -366,6 +383,7 @@ class AgentStudioProject:
             last_updated=datetime.now(),
             branch_id="main",
             project_name=project_name,
+            _migration_flags=get_all_migration_flags(),
         )
 
         try:
@@ -2149,7 +2167,10 @@ class AgentStudioProject:
                         resource_name = flow_name
 
                     # Resource name in file path is cleaned, so we need to get the original name
-                    if issubclass(resource_type, MultiResourceYamlResource):
+                    if (
+                        issubclass(resource_type, MultiResourceYamlResource)
+                        or resource_type == Topic
+                    ):
                         resource = self.read_local_resource(
                             ResourceMapping(
                                 resource_id="temp_id",

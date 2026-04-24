@@ -12,9 +12,7 @@ import os
 import re
 from typing import Callable, Optional
 
-from poly.resources.flows import FunctionStep
-from poly.resources.function import Function
-from poly.resources.resource import Resource, ResourceMapping
+from poly.resources import Resource, ResourceMapping, Function, FunctionStep
 
 logger = logging.getLogger(__name__)
 

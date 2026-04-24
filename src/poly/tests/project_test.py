@@ -397,7 +397,7 @@ class FindNewKeptDeletedTest(unittest.TestCase):
         self.assertEqual(new_mapping.resource_name, "Topic 1")
         self.assertEqual(
             new_mapping.file_path,
-            os.path.join(TEST_DIR, "topics", "Topic 1.yaml"),
+            os.path.join(TEST_DIR, "topics", "topic_1.yaml"),
         )
         self.assertEqual(new_mapping.flow_name, None)
         self.assertEqual(new_mapping.resource_prefix, None)
@@ -502,7 +502,7 @@ class ProjectStatusTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         files_with_conflicts, modified_files, new_files, deleted_files = project.project_status()
         self.assertEqual(files_with_conflicts, [])
-        self.assertEqual(new_files, [os.path.join(TEST_DIR, "topics", "Topic 1.yaml")])
+        self.assertEqual(new_files, [os.path.join(TEST_DIR, "topics", "topic_1.yaml")])
         self.assertEqual(modified_files, [])
         self.assertEqual(deleted_files, [])
 
@@ -590,7 +590,7 @@ class ProjectStatusTest(unittest.TestCase):
             modified_files,
             [os.path.join(TEST_DIR, "flows", "test_flow", "steps", "start_step.yaml")],
         )
-        self.assertEqual(new_files, [os.path.join(TEST_DIR, "topics", "Topic 1.yaml")])
+        self.assertEqual(new_files, [os.path.join(TEST_DIR, "topics", "topic_1.yaml")])
         self.assertEqual(deleted_files, [os.path.join(TEST_DIR, "functions", "extra_function.py")])
 
 
@@ -609,7 +609,7 @@ class GetDiffsTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         diffs = project.get_diffs(all_files=True)
 
-        topic_path = "topics/Topic 1.yaml"
+        topic_path = "topics/topic_1.yaml"
         self.assertIn(topic_path, diffs)
 
         diff = diffs[topic_path]
@@ -678,7 +678,7 @@ class GetDiffsTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         diffs = project.get_diffs(all_files=True)
 
-        topic_path = "topics/Topic 1.yaml"
+        topic_path = "topics/topic_1.yaml"
         func_path = os.path.join(TEST_DIR, "functions", "extra_function.py")
         self.assertIn(topic_path, diffs)
         self.assertIn(func_path, diffs)
@@ -708,11 +708,11 @@ class GetDiffsTest(unittest.TestCase):
             "function_type": "global",
         }
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
-        requested_file = os.path.join(TEST_DIR, "topics", "Topic 1.yaml")
+        requested_file = os.path.join(TEST_DIR, "topics", "topic_1.yaml")
         diffs = project.get_diffs(files=[requested_file])
 
         # Topic diff
-        topic_path = "topics/Topic 1.yaml"
+        topic_path = "topics/topic_1.yaml"
         self.assertIn(topic_path, diffs)
         diff = diffs[topic_path]
         self.assertIn("--- original", diff)
@@ -2100,7 +2100,7 @@ class ValidateProjectTest(unittest.TestCase):
         with mock_read_from_file(
             {
                 os.path.join(
-                    TEST_DIR, "topics", "Topic 1.yaml"
+                    TEST_DIR, "topics", "topic_1.yaml"
                 ): 'name: Topic 1\ncontent: Topic 1 content\nexample_queries:\n- Topic 1 example query\nenabled: true\nactions: "{{fn:FUNCTION-missing_function}}"\n',
                 os.path.join(
                     TEST_DIR, "flows", "test_flow", "flow_config.yaml"
