@@ -406,7 +406,7 @@ class SyncClientHandler:
                     resource_id="voice_disclaimer",
                     name="voice_disclaimer",
                     message=voice_disclaimer.get("message", ""),
-                    enabled=voice_disclaimer.get("enabled", False),
+                    enabled=voice_disclaimer.get("isEnabled", False),
                     language_code=voice_disclaimer.get("languageCode", "en-GB"),
                 )
             }
