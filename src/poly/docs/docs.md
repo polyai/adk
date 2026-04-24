@@ -15,7 +15,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │   ├── personality.yaml
 │   ├── role.yaml
 │   ├── rules.txt
-│   ├── safety_filters.yaml             # Optional - content moderation
+│   ├── safety_filters.yaml             # Optional
 │   └── experimental_config.json        # Optional
 ├── config/                             # Configuration
 │   ├── api_integrations.yaml           # Optional
