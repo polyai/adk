@@ -394,7 +394,7 @@ class AgentStudioCLI:
             "diff",
             parents=[verbose_parent, json_parent],
             help="Show the changes made to the project.",
-            description="Show the changes made to the project.\n\nExamples:\n  poly diff\n  poly diff sandbox\n  poly diff --before hash1 --after hash2\n  poly diff --files file1.yaml",
+            description="Show the changes made to the project.\n\n<hash> can be a branch name, version hash, environment name (e.g. sandbox, live), or 'local'.\n\nExamples:\n  poly diff\n  poly diff --before <hash>\n  poly diff <hash>\n  poly diff --before <hash> --after <hash>\n  poly diff --files file1.yaml",
             formatter_class=RawTextHelpFormatter,
         )
         diff_parser.add_argument(
@@ -410,7 +410,7 @@ class AgentStudioCLI:
             nargs="?",
             default=None,
             type=str,
-            help="Hash of the version to compare against. If not specified, it will be inferred from the --before and --after arguments.",
+            help="Shows what changed in this version compared to the previous one.",
         )
         diff_parser.add_argument(
             "--files",
@@ -420,12 +420,12 @@ class AgentStudioCLI:
         diff_parser.add_argument(
             "--before",
             type=str,
-            help="Name of the original branch or version to compare with. If specified without --after, it will be compared against the current local project (before vs local).",
+            help="Branch or version to use as the base. If specified without --after, compares against the current local project (before vs local).",
         )
         diff_parser.add_argument(
             "--after",
             type=str,
-            help="Name of the branch or version to compare against. If specified without --before, it will be compared against the previous version",
+            help="Branch or version to use as the target. If specified without --before, compares against the previous version (after vs after^1).",
         )
 
         # REVIEW
@@ -442,10 +442,10 @@ class AgentStudioCLI:
                 "Examples:\n"
                 "  poly review create\n"
                 "  poly review create --path /path/to/project\n"
-                "  poly review create version-hash-1\n"
-                "  poly review create --before main --after feature-branch\n"
-                "  poly review create --before sandbox --after live\n"
-                "  poly review create --before version-hash-1 --after version-hash-2\n"
+                "  poly review create <hash>\n"
+                "  poly review create --before <hash> --after <hash>\n"
+                "  poly review create --before <hash> --after <hash>\n"
+                "  poly review create --before <hash> --after <hash>\n"
                 "  poly review list\n"
                 "  poly review list --json\n"
                 "  poly review delete\n"
@@ -466,23 +466,25 @@ class AgentStudioCLI:
             "create",
             parents=[verbose_parent, json_parent],
             help="Create a review gist for the current changes.",
+            description="Create a review gist for the current changes.\n\n<hash> can be a branch name, version hash, environment name (e.g. sandbox, live), or 'local'.\n\nExamples:\n  poly review create\n  poly review create --before main\n  poly review create <hash>\n  poly review create --before hash1 --after hash2\n  poly review create --files file1.yaml",
+            formatter_class=RawTextHelpFormatter,
         )
         review_create_parser.add_argument(
             "hash",
             nargs="?",
             default=None,
             type=str,
-            help="Hash of the version to compare against. If not specified, it will be inferred from the --before and --after arguments.",
+            help="Shows what changed in this version compared to the previous one.",
         )
         review_create_parser.add_argument(
             "--before",
             type=str,
-            help="Name of the original branch or version to compare with.",
+            help="Branch or version to use as the base. If specified without --after, compares against the current local project (before vs local).",
         )
         review_create_parser.add_argument(
             "--after",
             type=str,
-            help="Name of the branch or version to compare with.",
+            help="Branch or version to use as the target. If specified without --before, compares against the previous version (after vs after^1).",
         )
         review_create_parser.add_argument(
             "--files",

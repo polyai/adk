@@ -1,6 +1,6 @@
 ---
 name: poly-adk
-description: How to use the poly CLI to manage PolyAI voice agents — commands, resource formats, and workflows. Use when building features or editing agent config.
+description: Use the poly CLI to manage PolyAI voice agents — provides context on commands, resource formats, and workflows. Use when building features or editing agent config.
 allowed-tools: Read Grep Glob Bash
 ---
 
@@ -73,23 +73,86 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 | `poly chat` | Interactive chat session with the agent (`-e sandbox/live`, `--channel voice/webchat`, `--metadata`) |
 | `poly docs` | Output resource documentation (`poly docs flows functions`, or `--all`) |
 
-Use `poly -h` and `poly {command} -h` for detailed flags.
+## Init and pull project
 
-## CLI Workflow
+To start a new project: `poly init` (interactive, or pass `--region`, `--account_id`, `--project_id`).
 
-1. Initialise: `poly init` (agent must exist on Agent Studio first)
-2. Pull latest: `poly pull` (`--force` to overwrite local changes)
-3. Create branch: `poly branch create {name}` (must be on `main`)
-4. Edit files locally, track with `poly status` and `poly diff`
-5. Validate: `poly validate`
-6. Push: `poly push`
-7. Test: `poly chat`
-8. Review: `poly review create` (generates a GitHub Gist diff)
-9. Merge on Agent Studio UI
+To pull the latest config from Agent Studio: `poly pull`. Use `-f` to force overwrite local changes.
 
-Switch branches with `poly branch switch {name}`. Pull remote branch changes with `poly pull` (3-way merge, shows conflict markers if needed).
+Switch branches with `poly branch switch {name}`, then `poly pull` to get that branch's latest.
 
-Commands must be run from within the project folder, or use `--path` to specify location.
+Commands must be run from within the project folder, or use `--path`. Always pass `--json` for machine-readable output. Use `-h` for flag details.
+
+## Branch management
+
+Always create branches from `main`. Use descriptive names (e.g. `add-booking-flow`, `update-hours-topic`).
+
+```
+poly branch list --json
+poly branch current --json
+poly branch create {name} --json   # must be on main
+poly branch switch {name} --json
+poly branch delete {name} --json
+```
+
+## Making edits
+
+Before writing any resource, run `poly docs {resource_type}` to get the exact format, required fields, and examples.
+
+Track and inspect changes as you go:
+```
+poly status --json       # list changed files
+poly diff --json         # show full diff
+poly validate --json     # validate locally before pushing
+```
+
+## Pushing changes
+
+```
+poly push --json                   # push local changes (pulls and merges first)
+poly push --dry-run --json         # preview what would be pushed
+poly push -f --json                # force overwrite remote
+```
+
+If `success` is false and `files_with_conflicts` is non-empty, resolve the conflict markers in the affected files and push again.
+
+## Testing changes
+
+Start a session and send the first message — the session stays open when using `--json`:
+```
+poly chat --json -m "first message"
+```
+
+Continue turn by turn using the `conversation_id` from the response:
+```
+poly chat --json --conv-id {conversation_id} -m "next message"
+```
+
+To explicitly end the session, use: "/exit"
+```
+poly chat --json --conv-id {conversation_id} -m "/exit"
+```
+
+`/exit` closes the session.
+
+Use flags to inspect what the agent is doing each turn:
+```
+--flows       show active flow and step
+--functions   show function/tool calls
+--metadata    show flows, functions, and state (all of the above)
+```
+
+Test against other environments with `-e sandbox` or `-e live`.
+
+## Merging
+
+Before merging, always show the user the full diff and ask them to confirm:
+```
+poly diff --before main --after {branch_name} --json
+poly branch merge {name} --json
+```
+
+Use `poly review create --before main --after {branch_name}` to generate a shareable diff review page if the user wants to review in the browser.
 
 ## Resource Reference Syntax
 
@@ -107,24 +170,6 @@ These placeholders are used in prompts, rules, topics, and other text fields:
 
 ## Resource Documentation
 
-Before writing or editing any resource, read its documentation using `poly docs {resource_type}` or by reading the doc file directly from `src/poly/docs/`:
+Run `poly docs {resource_type}` (e.g. `poly docs functions flows topics`) or `poly docs --all` to get the exact YAML/Python format, required fields, validation rules, and examples. **Always consult the docs before writing or editing a resource.**
 
-| Resource | Doc file | Summary |
-|----------|----------|---------|
-| Functions | `src/poly/docs/functions.md` | Global and flow functions, `@func_description`/`@func_parameter` decorators, state, metrics |
-| Flows | `src/poly/docs/flows.md` | Multistep processes with steps, conditions, transition functions |
-| Topics | `src/poly/docs/topics.md` | Knowledge base for RAG |
-| Entities | `src/poly/docs/entities.md` | Structured data collection (numeric, enum, date, phone, etc.) |
-| Agent Settings | `src/poly/docs/agent_settings.md` | Personality, role, rules |
-| Handoffs | `src/poly/docs/handoffs.md` | SIP call transfers |
-| SMS Templates | `src/poly/docs/sms.md` | Text message templates |
-| Variants | `src/poly/docs/variants.md` | Per-variant configuration (attributes) |
-| API Integrations | `src/poly/docs/api_integrations.md` | External HTTP API definitions |
-| Variables | `src/poly/docs/variables.md` | State variables referenced in code |
-| Voice Settings | `src/poly/docs/voice_settings.md` | Voice greeting, disclaimer, style prompt |
-| Chat Settings | `src/poly/docs/chat_settings.md` | Chat greeting, style prompt |
-| Speech Recognition | `src/poly/docs/speech_recognition.md` | ASR settings, keyphrase boosting, transcript corrections |
-| Response Control | `src/poly/docs/response_control.md` | Pronunciations, phrase filters |
-| Experimental Config | `src/poly/docs/experimental_config.md` | Feature flags |
-
-**Always read the relevant doc file before creating or modifying a resource.** The docs contain the exact YAML/Python format, required fields, validation rules, and examples.
+Available resource types: `functions`, `flows`, `topics`, `entities`, `agent_settings`, `handoffs`, `sms`, `variants`, `api_integrations`, `variables`, `voice_settings`, `chat_settings`, `speech_recognition`, `response_control`, `experimental_config`.

@@ -8,6 +8,10 @@ Flows choreograph multi-step processes. The LLM only sees the current step's pro
 - **Via return**: `return {"transition": {"goto_flow": "Flow Name", "goto_step": "Step Name"}}`.
 - **Within a flow**: `flow.goto_step("Step Name")` in flow functions only.
 
+To make a flow reachable from general conversation, create a topic as its entry point:
+  topics/new_flow.yaml       → actions: "Call {{fn:start_my_flow}}"
+  functions/start_new_flow.py → conv.goto_flow("New Flow")
+
 ## File structure
 ```
 flows/

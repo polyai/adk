@@ -66,7 +66,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 | `poly validate` | Validate project configuration locally |
 | `poly review` | Diff review page: `create` (local vs remote, version hash, or `--before`/`--after`), `list`, `delete` |
 | `poly deployments` | Manage deployments (`list`, with `--env`, `--limit`, `--offset`, `--hash`, `--details`) |
-| `poly chat` | Interactive chat session with the agent (`--environment`, `--channel`, `--functions`, `--flows`, `--state`) |
+| `poly chat` | Interactive chat session with the agent (`--environment`, `--channel`, `--functions`, `--flows`, `--state`). Use `-m` to pass turns non-interactively (e.g. `poly chat --flows --functions -m "hello" -m "I'd like to book"`). |
 | `poly docs` | Output resource documentation (`poly docs flows functions topics`, or `--all` for everything) |
 
 Use `poly -h` and `poly {command} -h` for more detailed information
@@ -82,7 +82,8 @@ The standard CLI workflow is the following:
 6. Push changes with `poly push`
 7. Test and chat with your agent using `poly chat`
 8. (Optional) Once ready, use `poly review` and compare your changes to `main`/`sandbox` to generate a GitHub Gist to share with a reviewer. A GitHub environment token is required for this step.
-9. Merge your changes on Agent Studio by navigating to your branch and pressing "merge"
+9. Merge: `poly branch merge "your commit message"`
+10. Verify the deployment landed: `poly deployments list` (shows timestamp, hash, and message)
 
 If work is done to your branch on the Agent Studio UI that you wish to pull into your local version, you can use `poly pull`. This will merge those changes with yours and show merge markers if a merge conflict occurs.
 
@@ -104,20 +105,29 @@ These placeholders can be used in prompts, rules, topics, and other text fields 
 
 ## Documentation
 
-Resource-specific documentation is available via `poly docs {resource} [resource ...]` or `poly docs --all`. Docs can also be read directly from `src/poly/docs/`:
+Resource-specific documentation is available via `poly docs {resource_type}`, e.g. `poly docs flows`. Pass multiple types together or use `--all` for everything:
 
-- [Agent Settings](agent_settings.md) - personality, role, rules
-- [Voice Settings](voice_settings.md) - voice greeting, disclaimer, style prompt
-- [Chat Settings](chat_settings.md) - chat greeting, style prompt
-- [Flows](flows.md) - multistep processes with steps, functions, conditions
-- [Functions](functions.md) - global and flow functions, decorators, state, metrics
-- [Topics](topics.md) - knowledge base for RAG
-- [API Integrations](api_integrations.md) — external HTTP API definitions
-- [Entities](entities.md) - structured data collection
-- [Handoffs](handoffs.md) - SIP call transfers
-- [Variants](variants.md) - per-variant configuration
-- [SMS Templates](sms.md) - text message templates
-- [Variables](variables.md) - state variables referenced in code
-- [Speech Recognition](speech_recognition.md) - ASR settings, keyphrase boosting, transcript corrections
-- [Response Control](response_control.md) - pronunciations, phrase filters
-- [Experimental Config](experimental_config.md) - feature flags
+```
+poly docs flows functions topics
+poly docs --all
+```
+
+Available resource types:
+
+| Resource type | Description |
+|---|---|
+| `agent_settings` | Personality, role, rules |
+| `voice_settings` | Voice greeting, disclaimer, style prompt |
+| `chat_settings` | Chat greeting, style prompt |
+| `flows` | Multistep processes with steps, functions, conditions |
+| `functions` | Global and flow functions, decorators, state, metrics |
+| `topics` | Knowledge base for RAG |
+| `api_integrations` | External HTTP API definitions |
+| `entities` | Structured data collection |
+| `handoffs` | SIP call transfers |
+| `variants` | Per-variant configuration |
+| `sms` | SMS text message templates |
+| `variables` | State variables referenced in code |
+| `speech_recognition` | ASR settings, keyphrase boosting, transcript corrections |
+| `response_control` | Pronunciations, phrase filters |
+| `experimental_config` | Feature flags |
