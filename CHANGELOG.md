@@ -1,6 +1,84 @@
 # CHANGELOG
 
 
+## v0.12.1 (2026-04-24)
+
+### Bug Fixes
+
+- Read disclaimer enabled correctly ([#104](https://github.com/polyai/adk/pull/104),
+  [`e141fa8`](https://github.com/polyai/adk/commit/e141fa8165149e4a8ac2399438b9ccbf653065d0))
+
+## Summary
+
+Fixes the voice disclaimer `enabled` field always reading as `False` due to a wrong key name when
+  parsing the API projection response.
+
+## Motivation
+
+The Agent Studio API returns voice disclaimer data with camelCase keys (`isEnabled`,
+  `languageCode`), but the code was reading `enabled` instead of `isEnabled`. This caused the
+  disclaimer to always be treated as disabled regardless of its actual state on the platform.
+
+Closes #<!-- issue number -->
+
+## Changes
+
+- Fix key name mismatch in `_read_agent_settings_from_projection`: read `isEnabled` instead of
+  `enabled` for voice disclaimer
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+### Documentation
+
+- Feat: Add branch merge command with interactive conflict resolution
+  ([#103](https://github.com/polyai/adk/pull/103),
+  [`d1f5ca5`](https://github.com/polyai/adk/commit/d1f5ca558fcd51800a8f4be14fe00f9f3011afa2))
+
+## Summary
+
+This PR relates to https://github.com/polyai/adk/pull/89
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+
 ## v0.12.0 (2026-04-23)
 
 ### Documentation
