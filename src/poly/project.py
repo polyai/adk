@@ -886,7 +886,17 @@ class AgentStudioProject:
                     original_content = ""
                     local_file_path = incoming_resource.get_path(self.root_path)
                 try:
-                    local_content = resource_type.read_from_file(local_file_path)
+                    # Normalise the local resource to ensure formatting differences don't cause unnecessary merge conflicts
+                    local_resource = resource_type.read_local_resource(
+                        local_file_path,
+                        resource_id=incoming_resource.resource_id,
+                        resource_name=incoming_resource.name,
+                        resource_mappings=incoming_resource_mappings,
+                    )
+                    local_content = local_resource.to_pretty(
+                        resource_name=incoming_resource.name,
+                        resource_mappings=incoming_resource_mappings,
+                    )
                 except FileNotFoundError:
                     # If local file doesn't exist:
                     # If no original content, save the incoming content
@@ -903,6 +913,9 @@ class AgentStudioProject:
                             format=format,
                         )
                     continue
+                except Exception:
+                    # If can't read file but file exists, use local version
+                    local_content = resource_type.read_from_file(local_file_path)
 
                 incoming_content = incoming_resource.to_pretty(
                     resource_name=incoming_resource.name,
