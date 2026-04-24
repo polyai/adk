@@ -53,12 +53,13 @@ class Topic(YamlResource):
     @cached_property
     def file_path(self) -> str:
         """Get the file path for the topic."""
-        file_name = f"{self.name}.yaml"
+        file_name = f"{utils.clean_name(self.name)}.yaml"
         return os.path.join("topics", file_name)
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
         return {
+            "name": self.name,
             "enabled": self.enabled,
             "actions": self.actions,
             "content": self.content,
@@ -78,6 +79,34 @@ class Topic(YamlResource):
             example_queries=yaml_dict.get("example_queries", []),
             enabled=yaml_dict.get("enabled", True),
         )
+
+    @classmethod
+    def read_local_resource(
+        cls, file_path: str, resource_id: str, resource_name: str, **kwargs
+    ) -> "Topic":
+        """Read a local YAML resource from the given file path."""
+        content = cls.read_to_raw(file_path, resource_name=resource_name, **kwargs)
+        try:
+            yaml_dict = utils.load_yaml(content) or {}
+        except Exception as e:
+            raise ValueError(f"Error loading YAML file: {file_path}") from e
+
+        file_name = os.path.splitext(os.path.basename(file_path))[0]
+        yaml_name = yaml_dict.get("name")
+
+        if yaml_name:
+            # New format: name is in the YAML, validate against filename
+            if file_name != utils.clean_name(yaml_name):
+                raise ValueError(
+                    f"Topic name '{yaml_name}' in file {file_name}.yaml does not match "
+                    f"expected filename: {utils.clean_name(yaml_name)}.yaml"
+                )
+            name = yaml_name
+        else:
+            # Legacy format: name comes from filename
+            name = resource_name
+
+        return cls.from_yaml_dict(yaml_dict, resource_id=resource_id, name=name, **kwargs)
 
     @classmethod
     def to_pretty_dict(

@@ -1084,6 +1084,9 @@
       }
     }
   },
-  "file_structure_info": {}
+  "file_structure_info": {},
+  "migration_flags": [
+    "migrated_legacy_topic_files"
+  ]
 }
 

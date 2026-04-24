@@ -871,7 +871,8 @@ TEST_TOPIC = Topic(
     enabled=True,
 )
 
-TEST_TOPIC_RAW = """enabled: true
+TEST_TOPIC_RAW = """name: test_topic
+enabled: true
 actions: Run function {{fn:test_id}}
 content: Test content
 example_queries:
@@ -879,7 +880,8 @@ example_queries:
 - Who wrote '1984'?
 """
 
-TEST_TOPIC_PRETTY = """enabled: true
+TEST_TOPIC_PRETTY = """name: test_topic
+enabled: true
 actions: Run function {{fn:test_function}}
 content: Test content
 example_queries:
