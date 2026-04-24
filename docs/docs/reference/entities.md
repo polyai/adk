@@ -169,4 +169,11 @@ entities:
     Compare collected entities with state variables used elsewhere in the project.
     [Open variables](./variables.md)
 
+-   **Conversation object reference (platform)**
+
+    ---
+
+    Full reference for `conv.entities` — accessing collected values, checking presence, and entity object shape.
+    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object){ target="_blank" rel="noopener" }
+
 </div>

@@ -16,6 +16,7 @@ import webbrowser
 from argparse import SUPPRESS, ArgumentParser, RawTextHelpFormatter
 from contextlib import nullcontext
 from importlib.metadata import version as get_package_version
+from collections import Counter
 from typing import Any, Optional
 
 import argcomplete
@@ -38,6 +39,10 @@ from poly.output.console import (
     set_verbose,
     success,
     warning,
+    edit_in_editor,
+    output_merge_conflict_table,
+    print_merge_conflict_interactive_header,
+    print_deployments,
 )
 from poly.output.json_output import json_print, commands_to_dicts
 from poly.handlers.github_api_handler import GitHubAPIHandler
@@ -45,7 +50,8 @@ from poly.handlers.interface import (
     REGIONS,
     AgentStudioInterface,
 )
-from poly.resources import resource_utils
+from poly.utils import merge_strings
+from poly.resources.resource_utils import contains_merge_conflict
 from poly.project import (
     PROJECT_CONFIG_FILE,
     STATUS_FILE,
@@ -54,7 +60,48 @@ from poly.project import (
 
 logger = logging.getLogger(__name__)
 
+# Single-line values longer than this are treated like multiline (no terminal dump; editor for edit).
+_BRANCH_MERGE_LONG_LINE_THRESHOLD = 800
+
 DOCUMENT_CHOICES = AgentStudioProject.discover_docs()
+
+
+def _branch_merge_conflict_file_key(path: list[str]) -> str:
+    """Group field-level API conflicts by parent path (resource-ish key)."""
+    if not path:
+        return ""
+    if len(path) <= 1:
+        return os.sep.join(path)
+    return os.sep.join(path[:-1])
+
+
+def enrich_branch_merge_conflicts(conflicts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Add visual_path, merged_value, can_auto_merge, file_key, conflicts_in_resource for branch merge UI."""
+    user = [
+        c for c in conflicts if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
+    ]
+    counts: Counter[str] = Counter(_branch_merge_conflict_file_key(c["path"]) for c in user)
+    out: list[dict[str, Any]] = []
+    for c in conflicts:
+        row = dict(c)
+        path = row.get("path")
+        if not path or path[-1] in {"updatedAt", "createdAt"}:
+            out.append(row)
+            continue
+        merged = merge_strings(row["baseValue"], row["theirsValue"], row["oursValue"])
+        fk = _branch_merge_conflict_file_key(path)
+        row["visual_path"] = os.sep.join(path)
+        row["merged_value"] = merged
+        row["can_auto_merge"] = not contains_merge_conflict(merged)
+        row["file_key"] = fk
+        row["conflicts_in_resource"] = counts[fk]
+        out.append(row)
+    return out
+
+
+def _auto_merge_resolution(path: list[str], merged_value: str) -> dict[str, Any]:
+    """API payload shape for accepting the locally computed clean merge."""
+    return {"path": path, "value": merged_value, "strategy": "theirs"}
 
 
 def _format_gist_choice(g: dict) -> str:
@@ -120,6 +167,13 @@ class AgentStudioCLI:
             help="Print a single JSON object on stdout (machine-readable).",
         )
 
+        debug_parent = ArgumentParser(add_help=False)
+        debug_parent.add_argument(
+            "--debug",
+            action="store_true",
+            help="Display debug logs.",
+        )
+
         subparsers = parser.add_subparsers(dest="command", required=True)
 
         # DOCS
@@ -154,7 +208,7 @@ class AgentStudioCLI:
         # INIT
         init_parser = subparsers.add_parser(
             "init",
-            parents=[verbose_parent, json_parent],
+            parents=[verbose_parent, json_parent, debug_parent],
             help="Initialize a new Agent Studio project.",
             description="Initialize a new Agent Studio project.\n\nExamples:\n  poly init --region eu-west-1 --account_id 123 --project_id my_project\n  poly init  # (interactive selection)",
             formatter_class=RawTextHelpFormatter,
@@ -199,12 +253,11 @@ class AgentStudioCLI:
             help=SUPPRESS,
             default=False,
         )
-        init_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
 
         # PULL
         pull_parser = subparsers.add_parser(
             "pull",
-            parents=[verbose_parent, json_parent],
+            parents=[verbose_parent, json_parent, debug_parent],
             help="Pull the latest project configuration from Agent Studio.",
             description="Pull the latest project configuration from Agent Studio.\n\nExamples:\n  poly pull --path /path/to/project\n  poly pull -f  # force overwrite local changes",
             formatter_class=RawTextHelpFormatter,
@@ -240,12 +293,11 @@ class AgentStudioCLI:
             help=SUPPRESS,
             default=False,
         )
-        pull_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
 
         # PUSH
         push_parser = subparsers.add_parser(
             "push",
-            parents=[verbose_parent, json_parent],
+            parents=[verbose_parent, json_parent, debug_parent],
             help="Push the project configuration to Agent Studio.",
             description="Push the project configuration to Agent Studio.\n\nExamples:\n  poly push --path /path/to/project\n  poly push --skip-validation --dry-run",
             formatter_class=RawTextHelpFormatter,
@@ -278,7 +330,6 @@ class AgentStudioCLI:
             help="Format resources before pushing.",
             default=False,
         )
-        push_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
         push_parser.add_argument(
             "--from-projection",
             type=str,
@@ -321,7 +372,7 @@ class AgentStudioCLI:
             "revert",
             parents=[verbose_parent, json_parent],
             help="Revert changes in the project.",
-            description="Revert changes in the project.\n\nExamples:\n  poly revert --all\n  poly revert file1.yaml file2.yaml",
+            description="Revert changes in the project.\n\nExamples:\n  poly revert\n  poly revert file1.yaml file2.yaml",
             formatter_class=RawTextHelpFormatter,
         )
         revert_parser.add_argument(
@@ -333,15 +384,9 @@ class AgentStudioCLI:
             """,
         )
         revert_parser.add_argument(
-            "--all",
-            "-a",
-            action="store_true",
-            help="Revert all changes in the project.",
-        )
-        revert_parser.add_argument(
             "files",
             nargs="*",
-            help="List of files to revert.",
+            help="List of files to revert. If not specified, it will revert all changes.",
         )
 
         # DIFF
@@ -349,7 +394,7 @@ class AgentStudioCLI:
             "diff",
             parents=[verbose_parent, json_parent],
             help="Show the changes made to the project.",
-            description="Show the changes made to the project.\n\nExamples:\n  poly diff\n  poly diff file1.yaml",
+            description="Show the changes made to the project.\n\nExamples:\n  poly diff\n  poly diff sandbox\n  poly diff --before hash1 --after hash2\n  poly diff --files file1.yaml",
             formatter_class=RawTextHelpFormatter,
         )
         diff_parser.add_argument(
@@ -361,9 +406,26 @@ class AgentStudioCLI:
             """,
         )
         diff_parser.add_argument(
-            "files",
+            "hash",
+            nargs="?",
+            default=None,
+            type=str,
+            help="Hash of the version to compare against. If not specified, it will be inferred from the --before and --after arguments.",
+        )
+        diff_parser.add_argument(
+            "--files",
             nargs="*",
             help=("List of files to show changes for. If not specified, shows all changes."),
+        )
+        diff_parser.add_argument(
+            "--before",
+            type=str,
+            help="Name of the original branch or version to compare with. If specified without --after, it will be compared against the current local project (before vs local).",
+        )
+        diff_parser.add_argument(
+            "--after",
+            type=str,
+            help="Name of the branch or version to compare against. If specified without --before, it will be compared against the previous version",
         )
 
         # REVIEW
@@ -378,10 +440,12 @@ class AgentStudioCLI:
                 "If you provide --before and --after, it compares those versions or "
                 "branches directly.\n\n"
                 "Examples:\n"
-                "  poly review --path /path/to/project\n"
-                "  poly review --path /path/to/project --before main --after feature-branch\n"
-                "  poly review --path /path/to/project --before sandbox --after live\n"
-                "  poly review --path /path/to/project --before version-hash-1 --after version-hash-2\n"
+                "  poly review create\n"
+                "  poly review create --path /path/to/project\n"
+                "  poly review create version-hash-1\n"
+                "  poly review create --before main --after feature-branch\n"
+                "  poly review create --before sandbox --after live\n"
+                "  poly review create --before version-hash-1 --after version-hash-2\n"
                 "  poly review list\n"
                 "  poly review list --json\n"
                 "  poly review delete\n"
@@ -395,19 +459,37 @@ class AgentStudioCLI:
             default=os.getcwd(),
             help="Base path to the project. Defaults to current working directory.",
         )
-        review_parser.add_argument(
+
+        review_subparsers = review_parser.add_subparsers(dest="review_subcommand")
+
+        review_create_parser = review_subparsers.add_parser(
+            "create",
+            parents=[verbose_parent, json_parent],
+            help="Create a review gist for the current changes.",
+        )
+        review_create_parser.add_argument(
+            "hash",
+            nargs="?",
+            default=None,
+            type=str,
+            help="Hash of the version to compare against. If not specified, it will be inferred from the --before and --after arguments.",
+        )
+        review_create_parser.add_argument(
             "--before",
             type=str,
-            help="Name of the original branch or version to compare against.",
+            help="Name of the original branch or version to compare with.",
         )
-        review_parser.add_argument(
+        review_create_parser.add_argument(
             "--after",
             type=str,
             help="Name of the branch or version to compare with.",
         )
-        review_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
-        review_parser.set_defaults(review_subcommand=None)
-        review_subparsers = review_parser.add_subparsers(dest="review_subcommand")
+        review_create_parser.add_argument(
+            "--files",
+            nargs="*",
+            help=("List of files to show changes for. If not specified, shows all changes."),
+        )
+        review_create_parser.set_defaults(review_subcommand="create")
 
         review_list_parser = review_subparsers.add_parser(
             "list",
@@ -441,7 +523,7 @@ class AgentStudioCLI:
 
         branches_parser = subparsers.add_parser(
             "branch",
-            parents=[verbose_parent],
+            parents=[],
             help="Manage branches in the Agent Studio project.",
             description=(
                 "Manage branches in the Agent Studio project.\n\n"
@@ -449,6 +531,7 @@ class AgentStudioCLI:
                 "  poly branch list\n"
                 "  poly branch create new-branch\n"
                 "  poly branch switch existing-branch\n"
+                "  poly branch merge 'Merge branch'"
                 "  poly branch current\n"
                 "  poly branch delete\n"
             ),
@@ -458,14 +541,14 @@ class AgentStudioCLI:
 
         branch_list_parser = branch_subparsers.add_parser(
             "list",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
             help="List all branches in the project.",
         )
         branch_list_parser.set_defaults(branch_subcommand="list")
 
         branch_create_parser = branch_subparsers.add_parser(
             "create",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
             help="Create a new branch.",
         )
         branch_create_parser.add_argument(
@@ -490,14 +573,11 @@ class AgentStudioCLI:
 
         branch_switch_parser = branch_subparsers.add_parser(
             "switch",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
             help="Switch to a different branch.",
         )
         branch_switch_parser.add_argument(
             "branch_name", nargs="?", help="Name of the branch to switch to."
-        )
-        branch_switch_parser.add_argument(
-            "--debug", action="store_true", help="Display debug logs."
         )
         branch_switch_parser.add_argument(
             "--format",
@@ -527,14 +607,14 @@ class AgentStudioCLI:
 
         branch_current_parser = branch_subparsers.add_parser(
             "current",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
             help="Show the current branch.",
         )
         branch_current_parser.set_defaults(branch_subcommand="current")
 
         branch_delete_parser = branch_subparsers.add_parser(
             "delete",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
             help="Interactively select and delete a branch.",
         )
         branch_delete_parser.add_argument(
@@ -544,6 +624,37 @@ class AgentStudioCLI:
             help="Name of the branch to delete directly, skipping the interactive prompt.",
         ).completer = cls._branch_name_completer
         branch_delete_parser.set_defaults(branch_subcommand="delete")
+
+        branch_merge_parser = branch_subparsers.add_parser(
+            "merge",
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
+            help="Merge branch into main",
+        )
+        branch_merge_parser.add_argument(
+            "message",
+            nargs="?",
+            default=None,
+            help="Message for the merge.",
+        )
+        branch_merge_parser.add_argument(
+            "--interactive",
+            "-i",
+            action="store_true",
+            help="Enable interactive mode for resolving any merge conflicts. Set $EDITOR or $VISUAL to your preferred editor for editing merge conflict values if needed.",
+        )
+        branch_merge_parser.add_argument(
+            "--resolutions",
+            type=str,
+            default=None,
+            help=(
+                "Conflict resolutions as a JSON file path, inline JSON string, or '-' for stdin. "
+                "JSON should be an array of objects, each representing a conflict resolution:\n"
+                '- path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])\n'
+                '- strategy: Resolution strategy - "ours", "theirs", or "base"\n'
+                '- value: Optional custom value (use "theirs" strategy)'
+            ),
+        )
+        branch_merge_parser.set_defaults(branch_subcommand="merge")
 
         # FORMAT
         format_parser = subparsers.add_parser(
@@ -568,7 +679,7 @@ class AgentStudioCLI:
             help="Base path to run format/lint. Defaults to current working directory.",
         )
         format_parser.add_argument(
-            "files",
+            "--files",
             nargs="*",
             help="Specific files/dirs to format. If not specified, runs on the whole --path tree.",
         )
@@ -601,7 +712,7 @@ class AgentStudioCLI:
         # CHAT
         chat_parser = subparsers.add_parser(
             "chat",
-            parents=[verbose_parent],
+            parents=[verbose_parent, debug_parent, json_parent],
             help="Start an interactive chat session with the agent.",
             description=(
                 "Start an interactive chat session with the agent.\n\n"
@@ -609,6 +720,19 @@ class AgentStudioCLI:
                 "  poly chat\n"
                 "  poly chat --environment live\n"
                 "  poly chat --path /path/to/project -e sandbox\n"
+                "\n"
+                "Non-interactive (scripted) mode:\n"
+                "  poly chat -m 'Hello' -m 'What can you help with?'\n"
+                "  poly chat --input-file ./script.txt\n"
+                "  echo -e 'Hello\\nGoodbye' | poly chat --input-file -\n"
+                "\n"
+                "Resume an existing conversation:\n"
+                "  poly chat --conv-id <conversation_id>\n"
+                "  poly chat --conv-id <conversation_id> -m 'Follow-up message'\n"
+                "\n"
+                "Machine-readable output (emits a single JSON object when done):\n"
+                "  poly chat --json -m 'Hello'\n"
+                "  poly chat --json --input-file ./script.txt\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -633,13 +757,27 @@ class AgentStudioCLI:
             help="Name of variant to use for the chat session.",
         )
         chat_parser.add_argument(
+            "--lang",
+            type=str,
+            help="Language tag for both input and output messages (e.g. en-US, fr-FR). If not specified use default for project",
+        )
+        chat_parser.add_argument(
+            "--input-lang",
+            type=str,
+            help="Language tag for input messages (e.g. en-US, fr-FR). If not specified use default for project",
+        )
+        chat_parser.add_argument(
+            "--output-lang",
+            type=str,
+            help="Language tag for output messages (e.g. en-US, fr-FR). If not specified use default for project",
+        )
+        chat_parser.add_argument(
             "--channel",
             type=str,
             default="voice",
             choices=["voice", "webchat"],
             help="Channel to chat against. Defaults to voice.",
         )
-        chat_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
         chat_parser.add_argument(
             "--functions",
             action="store_true",
@@ -664,8 +802,36 @@ class AgentStudioCLI:
             default=False,
             help="Show all metadata (functions, flows, and state). Equivalent to --functions --flows --state.",
         )
+        chat_parser.add_argument(
+            "--push",
+            action="store_true",
+            default=False,
+            help="Push the project before starting the chat session.",
+        )
+        chat_parser.add_argument(
+            "--message",
+            "-m",
+            action="append",
+            dest="messages",
+            metavar="MSG",
+            help="Send a message non-interactively (repeatable).",
+        )
+        chat_parser.add_argument(
+            "--input-file",
+            type=str,
+            default=None,
+            metavar="FILE",
+            help="Read messages line-by-line from a file (- for stdin).",
+        )
+        chat_parser.add_argument(
+            "--conversation-id",
+            "--conv-id",
+            type=str,
+            default=None,
+            help="Reuse an existing conversation ID instead of starting a new conversation.",
+        )
 
-        # completion
+        # COMPLETION
         completion_parser = subparsers.add_parser(
             "completion",
             formatter_class=RawTextHelpFormatter,
@@ -685,6 +851,73 @@ class AgentStudioCLI:
             "shell",
             choices=["bash", "zsh", "fish"],
             help="Shell type to generate completions for.",
+        )
+
+        # DEPLOYMENTS
+        deployments_path_parent = ArgumentParser(add_help=False)
+        deployments_path_parent.add_argument(
+            "--path",
+            type=str,
+            default=os.getcwd(),
+            help="Base path to the project. Defaults to current working directory.",
+        )
+
+        deployments_parser = subparsers.add_parser(
+            "deployments",
+            parents=[verbose_parent],
+            help="Manage deployments for the project.",
+            description=(
+                "Manage deployments for the project.\n\nExamples:\n  poly deployments list\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+
+        deployments_subparsers = deployments_parser.add_subparsers(
+            dest="deployments_subcommand", required=True
+        )
+
+        deployment_list_parser = deployments_subparsers.add_parser(
+            "list",
+            parents=[deployments_path_parent, json_parent],
+            help="List deployments for the project.",
+            description=(
+                "List deployments for the project.\n\n"
+                "Examples:\n"
+                "  poly deployments list\n"
+                "  poly deployments list --env live\n"
+                "  poly deployments list --details\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        deployment_list_parser.add_argument(
+            "--env",
+            "-e",
+            type=str,
+            default="sandbox",
+            choices=["sandbox", "pre-release", "live"],
+            help="Environment to list deployments for. Defaults to sandbox.",
+        )
+        deployment_list_parser.add_argument(
+            "--limit",
+            type=int,
+            default=10,
+            help="Number of versions to show. Defaults to 10.",
+        )
+        deployment_list_parser.add_argument(
+            "--offset",
+            type=int,
+            default=0,
+            help="Number of versions to skip. Defaults to 0.",
+        )
+        deployment_list_parser.add_argument(
+            "--hash",
+            type=str,
+            help="Hash of the version to start from.",
+        )
+        deployment_list_parser.add_argument(
+            "--details",
+            action="store_true",
+            help="Output each deployment with detailed information.",
         )
 
         return parser
@@ -737,26 +970,69 @@ class AgentStudioCLI:
                 cls.status(args.path, args.json)
 
             elif args.command == "revert":
-                cls.revert(args.path, args.all, args.files, output_json=args.json)
+                cls.revert(args.path, args.files, output_json=args.json)
 
             elif args.command == "diff":
-                cls.diff(args.path, args.files, args.json)
+                cls.diff(args.path, args.files, args.hash, args.before, args.after, args.json)
+
+            elif args.command == "chat":
+                show_all = args.metadata
+                input_messages = None
+                input_lang = args.input_lang or args.lang
+                output_lang = args.output_lang or args.lang
+                if args.input_file:
+                    try:
+                        if args.input_file == "-":
+                            with nullcontext(sys.stdin) as f:
+                                src = f.read()
+                        else:
+                            with open(args.input_file, "r", encoding="utf-8") as f:
+                                src = f.read()
+                    except FileNotFoundError:
+                        if args.json:
+                            json_print(
+                                {
+                                    "success": False,
+                                    "error": f"Input file not found: {args.input_file}",
+                                }
+                            )
+                        else:
+                            error(f"Input file not found: {args.input_file}")
+                        sys.exit(1)
+                    with src:
+                        input_messages = [line.rstrip("\r\n") for line in src]
+                elif args.messages:
+                    input_messages = args.messages
+                cls.chat(
+                    args.path,
+                    args.environment,
+                    args.variant,
+                    args.channel,
+                    input_lang=input_lang,
+                    output_lang=output_lang,
+                    show_functions=show_all or args.functions,
+                    show_flow=show_all or args.flows,
+                    show_state=show_all or args.state,
+                    push_before_chat=args.push,
+                    input_messages=input_messages,
+                    conversation_id=args.conversation_id,
+                    output_json=args.json,
+                )
 
             elif args.command == "review":
                 if args.review_subcommand == "delete":
                     cls.delete_gists(gist_id=args.id, output_json=args.json)
                 elif args.review_subcommand == "list":
                     cls.list_gists(output_json=args.json)
-                else:
-                    if args.before and args.after:
-                        cls.review(
-                            base_path=args.path,
-                            before_name=args.before,
-                            after_name=args.after,
-                            output_json=args.json,
-                        )
-                    else:
-                        cls.review(args.path, output_json=args.json)
+                elif args.review_subcommand == "create":
+                    cls.review(
+                        base_path=args.path,
+                        files=args.files,
+                        version_hash=args.hash,
+                        before=args.before,
+                        after=args.after,
+                        output_json=args.json,
+                    )
 
             elif args.command == "branch":
                 if args.branch_subcommand == "list":
@@ -788,6 +1064,11 @@ class AgentStudioCLI:
                 elif args.branch_subcommand == "delete":
                     cls.branch_delete(args.path, args.branch_name, args.json)
 
+                elif args.branch_subcommand == "merge":
+                    cls.branch_merge(
+                        args.path, args.message, args.json, args.interactive, args.resolutions
+                    )
+
             elif args.command == "format":
                 cls.format(
                     args.path,
@@ -807,20 +1088,20 @@ class AgentStudioCLI:
                     output=getattr(args, "output", None),
                 )
 
-            elif args.command == "chat":
-                show_all = args.metadata
-                cls.chat(
-                    args.path,
-                    args.environment,
-                    args.variant,
-                    args.channel,
-                    show_functions=show_all or args.functions,
-                    show_flow=show_all or args.flows,
-                    show_state=show_all or args.state,
-                )
-
             elif args.command == "completion":
                 cls.print_completion(args.shell)
+
+            elif args.command == "deployments":
+                if args.deployments_subcommand == "list":
+                    cls.deployments_list(
+                        args.path,
+                        args.env,
+                        args.limit,
+                        args.offset,
+                        args.hash,
+                        args.json,
+                        args.details,
+                    )
 
         except Exception as e:
             if hasattr(args, "json") and args.json:
@@ -971,33 +1252,54 @@ class AgentStudioCLI:
         if not output_json:
             info("Initialising project...")
 
-        if not region:
-            regions = REGIONS
-            region_menu = questionary.select("Select Region", choices=regions).ask()
-            region = region_menu
-
         api_handler = AgentStudioInterface()
 
-        if not account_id:
-            accounts = api_handler.get_accounts(region)
-            account_menu = questionary.select(
-                "Select Account",
-                choices=list(accounts.keys()),
-                use_search_filter=True,
-                use_jk_keys=False,
-            ).ask()
-            if not account_menu:
+        if not region:
+            with console.status("[info]Fetching available regions...[/info]"):
+                regions = api_handler.get_accessible_regions()
+            if not regions:
                 if output_json:
                     json_print(
                         {
                             "success": False,
-                            "error": "No account selected.",
+                            "error": "No accessible regions found for your API key.",
                         }
                     )
-                    sys.exit(1)
-                warning("No account selected. Exiting.")
-                return
-            account_id = accounts[account_menu]
+                else:
+                    error("No accessible regions found for your API key.")
+                sys.exit(1)
+            if len(regions) == 1:
+                region = regions[0]
+                if not output_json:
+                    info(f"Auto-selected region [bold]{region}[/bold].")
+            else:
+                region = questionary.select("Select Region", choices=regions).ask()
+
+        if not account_id:
+            accounts = api_handler.get_accounts(region)
+            if len(accounts) == 1:
+                account_name, account_id = next(iter(accounts.items()))
+                if not output_json:
+                    info(f"Auto-selected account [bold]{account_name}[/bold].")
+            else:
+                account_menu = questionary.select(
+                    "Select Account",
+                    choices=list(accounts.keys()),
+                    use_search_filter=True,
+                    use_jk_keys=False,
+                ).ask()
+                if not account_menu:
+                    if output_json:
+                        json_print(
+                            {
+                                "success": False,
+                                "error": "No account selected.",
+                            }
+                        )
+                        sys.exit(1)
+                    warning("No account selected. Exiting.")
+                    return
+                account_id = accounts[account_menu]
 
         if not project_id:
             projects = api_handler.get_projects(region, account_id)
@@ -1248,38 +1550,24 @@ class AgentStudioCLI:
     def revert(
         cls,
         base_path: str,
-        all_files: bool = False,
         files: list[str] = None,
         output_json: bool = False,
     ) -> None:
         """Revert changes in the project."""
-        if not all_files and not files:
-            if output_json:
-                json_print(
-                    {
-                        "success": False,
-                        "error": "No files specified to revert. Use --all or list files.",
-                    }
-                )
-                sys.exit(1)
-            error("No files specified to revert. Use [bold]--all[/bold] to revert all changes.")
-            return
-
         project = cls._load_project(base_path, output_json=output_json)
 
         # If relative paths are provided, convert them to absolute paths
         files = [os.path.abspath(os.path.join(os.getcwd(), file)) for file in files or []]
 
-        files_reverted = project.revert_changes(all_files=all_files, files=files)
+        files_reverted = project.revert_changes(files=files)
         if output_json:
             json_print(
                 {
-                    "success": bool(files_reverted),
+                    "success": True,
                     "files_reverted": files_reverted,
                 }
             )
             return
-
         if not files_reverted:
             plain("[muted]No changes to revert.[/muted]")
             return
@@ -1287,35 +1575,98 @@ class AgentStudioCLI:
         success("Changes reverted successfully.")
 
     @classmethod
-    def _diff(
-        cls, base_path: str, files: list[str] = None, output_json: bool = False
-    ) -> dict[str, str]:
-        """Compute local diffs; may print a human hint when there are no changes."""
+    def _compute_diff(
+        cls,
+        base_path: str,
+        files: list[str] = None,
+        before: str = None,
+        after: str = None,
+        output_json: bool = False,
+    ) -> Optional[dict[str, str]]:
+        """Compute the diffs between the project and the given versions or branches.
 
+        If before and after are not specified, it will compute the diffs between the project and the remote version.
+        If before and after are specified, it will compute the diffs between the two remote versions.
+        If only after is specified, it will compare between after and the previous version.
+        """
         project = cls._load_project(base_path, output_json=output_json)
-
         files = [os.path.abspath(os.path.join(os.getcwd(), file)) for file in files or []]
+        if not (before or after):
+            return project.get_diffs(all_files=not files, files=files)
 
-        diffs = project.get_diffs(all_files=not files, files=files) or {}
+        if not before:
+            client_env = "sandbox"
+            if after in {"pre-release", "live"}:
+                client_env = after
+            versions, deployment_hashes = project.get_deployments(client_env=client_env)
+            if after in deployment_hashes:
+                after = deployment_hashes[after]
+            if not versions:
+                error("No versions found.")
+                return
+            version_idx = next(
+                (
+                    i
+                    for i, v in enumerate(versions)
+                    if (v.get("version_hash") or "")[:9] == after[:9]
+                ),
+                None,
+            )
+            if version_idx is None:
+                error(f"Version hash '{after}' not found.")
+                return None
+            if version_idx == len(versions) - 1:
+                error("No previous version found.")
+                return None
+            previous_version_idx = version_idx + 1
+            before = (versions[previous_version_idx].get("version_hash") or "")[:9]
 
-        if not diffs and not output_json:
-            plain("[muted]No changes detected.[/muted]")
+        if not after:
+            after = "local"
 
-        return diffs
+        return project.diff_remote_named_versions(before_name=before, after_name=after)
 
     @classmethod
-    def diff(cls, base_path: str, files: list[str] = None, output_json: bool = False) -> None:
-        """Show the changes made to the project."""
-        diffs = cls._diff(base_path, files, output_json=output_json)
+    def diff(
+        cls,
+        base_path: str,
+        files: list[str] = None,
+        version_hash: str = None,
+        before: str = None,
+        after: str = None,
+        output_json: bool = False,
+    ) -> None:
+        """Show diffs for the project.
+
+        With no arguments, shows local changes against the remote version.
+        Pass a version hash to compare that version against its predecessor.
+        Use --before / --after to compare any two named versions or branches.
+        """
+        if version_hash and (before or after):
+            error("Cannot specify both hash and before/after versions.")
+            return
+
+        if version_hash:
+            after = version_hash
+
+        diffs = cls._compute_diff(base_path, files, before, after, output_json=output_json)
+
+        if not diffs:
+            if output_json and diffs is not None:
+                json_print({"success": False, "message": "No changes detected"})
+            elif output_json:
+                json_print({"success": False, "message": "Failed to compute diffs."})
+            else:
+                plain("[muted]No changes detected.[/muted]")
+            return
+
         if output_json:
             json_print(
                 {
+                    "success": True,
                     "diffs": diffs,
                 }
             )
-            return
-
-        if not diffs:
             return
 
         for file_path, diff_text in diffs.items():
@@ -1323,28 +1674,62 @@ class AgentStudioCLI:
             print_diff(diff_text)
 
     @classmethod
-    def _review(
+    def review(
         cls,
         base_path: str,
-        before_name: str = None,
-        after_name: str = None,
-    ) -> dict:
-        """Review the changes made to the project.
+        files: list[str] = None,
+        version_hash: str = None,
+        before: str = None,
+        after: str = None,
+        output_json: bool = False,
+    ) -> None:
+        """Create a GitHub gist for reviewing changes, similar to a pull request.
+
+        With no arguments, reviews local changes against the remote version.
+        Pass a version hash to review that version against its predecessor.
+        Use --before / --after to compare any two named versions or branches.
+
         Args:
-            base_path: Base path for the project (used to read project config)
-            before_name: Optional name of base branch (for comparing two remote branches)
-            after_name: Optional name of compare branch (for comparing two remote branches)
+            base_path: Base path for the project (used to read project config).
+            files: Files to include in the review. If not specified, includes all changes.
+            version_hash: Version hash to compare against its predecessor.
+            before: Base version or branch name for comparison.
+            after: Target version or branch name for comparison.
+            output_json: If True, print result as JSON instead of rich text.
         """
-        if before_name and after_name:
-            # Compare two remote versions/branches/environments
-            project = cls._load_project(base_path)
-            diffs = project.diff_remote_named_versions(before_name, after_name) or {}
+        project_name = "/".join(os.path.abspath(base_path).split(os.sep)[-2:])
+        if version_hash and (before or after):
+            error("Cannot specify both hash and before/after versions.")
+            return
+
+        if version_hash:
+            after = version_hash
+            description = f"Poly ADK: {project_name}: {version_hash}"
+
+        elif not (before or after):
+            description = f"Poly ADK: {project_name}: local → remote"
+
+        elif before and after:
+            description = f"Poly ADK: {project_name}: {before} → {after}"
+
+        elif after:
+            description = f"Poly ADK: {project_name}: {after}"
+
         else:
-            # Compare local vs remote (existing behavior)
-            diffs = cls._diff(base_path)
+            description = f"Poly ADK: {project_name}: {before} → local"
+
+        diffs = cls._compute_diff(
+            base_path, files=files, before=before, after=after, output_json=output_json
+        )
 
         if not diffs:
-            return {}
+            if output_json and diffs is not None:
+                json_print({"success": False, "message": "No changes to review."})
+            elif output_json:
+                json_print({"success": False, "message": "Failed to compute diffs."})
+            else:
+                plain("[muted]No changes detected.[/muted]")
+            return
 
         body = {}
         for file_path, diff in diffs.items():
@@ -1353,40 +1738,6 @@ class AgentStudioCLI:
             # Use the file_path as-is (it's already relative or a file path)
             safe_name = file_path.replace(os.sep, "_")
             body[f"{safe_name}.diff"] = {"content": diff}
-
-        return body
-
-    @classmethod
-    def review(
-        cls,
-        base_path: str,
-        before_name: str = None,
-        after_name: str = None,
-        output_json: bool = False,
-    ) -> None:
-        """Show the changes made to the project in a Pull Request format.
-        Args:
-            base_path: Base path for the project (used to read project config)
-            before_name: Optional name of base branch (for comparing two remote branches)
-            after_name: Optional name of compare branch (for comparing two remote branches)
-            output_json: If True, print result as a JSON object instead of rich text
-        """
-        project_name = "/".join(os.path.abspath(base_path).split(os.sep)[-2:])
-        if before_name and after_name:
-            body = cls._review(
-                base_path=base_path,
-                before_name=before_name,
-                after_name=after_name,
-            )
-            description = f"Poly ADK: {project_name}: {before_name} → {after_name}"
-        else:
-            body = cls._review(base_path)
-            description = f"Poly ADK: {project_name}: local → remote"
-
-        if not body:
-            if output_json:
-                json_print({"success": False, "message": "No changes to review."})
-            return
 
         try:
             url = GitHubAPIHandler.create_gist(
@@ -1853,6 +2204,290 @@ class AgentStudioCLI:
             if deleted_count:
                 success(f"Deleted {deleted_count} branch(es).")
 
+    @staticmethod
+    def _merge_interactively(
+        conflicts: list[dict[str, Any]],
+        existing_resolutions: dict[str, dict[str, Any]],
+        branch_display_name: str = "",
+    ) -> list[dict[str, Any]]:
+        """Resolve merge conflicts with questionary; expects API conflicts optionally enriched."""
+        resolutions: list[dict[str, Any]] = []
+        index_in_resource: dict[str, int] = {}
+        branch_label = branch_display_name or "current branch"
+
+        def _is_heavy_content(c: dict[str, Any]) -> bool:
+            for key in ("baseValue", "theirsValue", "oursValue"):
+                v = c.get(key, "")
+                if not isinstance(v, str):
+                    return True
+                if "\n" in v:
+                    return True
+                if len(v) > _BRANCH_MERGE_LONG_LINE_THRESHOLD:
+                    return True
+            return False
+
+        for conflict in conflicts:
+            if conflict["path"][-1] in {"updatedAt", "createdAt"}:
+                resolutions.append({"path": conflict["path"], "strategy": "theirs"})
+                continue
+
+            path = conflict["path"]
+            clean_path = conflict.get("visual_path") or os.sep.join(path)
+            merged_version = conflict.get("merged_value")
+            existing_resolution = existing_resolutions.get(clean_path)
+            if merged_version is None:
+                merged_version = merge_strings(
+                    conflict["baseValue"], conflict["theirsValue"], conflict["oursValue"]
+                )
+            auto_merged = conflict.get("can_auto_merge")
+            if auto_merged is None:
+                auto_merged = not contains_merge_conflict(merged_version)
+
+            fk = conflict.get("file_key") or _branch_merge_conflict_file_key(path)
+            index_in_resource[fk] = index_in_resource.get(fk, 0) + 1
+            idx = index_in_resource[fk]
+            total = int(conflict.get("conflicts_in_resource") or 1)
+            heavy = _is_heavy_content(conflict)
+            print_merge_conflict_interactive_header(
+                field_path=clean_path,
+                resource_key=fk,
+                conflict_index=idx,
+                conflict_total=total,
+                auto_mergeable=auto_merged,
+                heavy=heavy,
+                base_value=str(conflict.get("baseValue", "")),
+                branch_label=branch_label,
+                branch_value=str(conflict.get("theirsValue", "")),
+                main_value=str(conflict.get("oursValue", "")),
+                existing_resolution=existing_resolution,
+            )
+
+            choices: list[dict[str, str]] = []
+            if existing_resolution:
+                er_strategy = existing_resolution.get("strategy", "")
+                er_value = existing_resolution.get("value")
+                if er_value is not None:
+                    er_label = (
+                        er_value if isinstance(er_value, str) and "\n" not in er_value else "value"
+                    )
+                else:
+                    er_label = er_strategy
+                choices.append({"name": f"Use resolution: {er_label}", "value": "existing"})
+            if auto_merged:
+                choices.append({"name": "Accept auto-merge", "value": "merged"})
+            choices.extend(
+                [
+                    {"name": "Use main", "value": "ours"},
+                    {"name": f"Use branch — {branch_label}", "value": "theirs"},
+                    {"name": "Use original (base)", "value": "base"},
+                    {"name": "Edit in editor", "value": "edit"},
+                ]
+            )
+
+            extension = ".py" if path[-1] == "code" else ".txt"
+
+            while True:
+                answer = questionary.select("Select resolution", choices=choices).ask()
+                if answer is None:
+                    return []
+                if answer == "existing":
+                    resolutions.append(existing_resolution)
+                    break
+                if answer == "merged":
+                    resolutions.append(_auto_merge_resolution(path, merged_version))
+                    break
+                if answer == "edit":
+                    try:
+                        if heavy:
+                            edited = edit_in_editor(
+                                merged_version, extension=extension, filename=fk
+                            )
+                        else:
+                            edited_q = questionary.text(
+                                "Custom resolution",
+                                default=str(conflict.get("theirsValue", "")),
+                                multiline=True,
+                            ).ask()
+                            if edited_q is None:
+                                return []
+                            edited = edited_q
+                    except FileNotFoundError:
+                        warning(
+                            "Could not open the configured editor. Check your $EDITOR or "
+                            "$VISUAL setting, then try Edit again."
+                        )
+                        continue
+                    except subprocess.CalledProcessError:
+                        warning(
+                            "The editor exited with an error. Fix the issue and try Edit "
+                            "again, or choose another resolution."
+                        )
+                        continue
+                    except ValueError:
+                        warning(
+                            "Editor closed without saving; choose another option or try Edit again."
+                        )
+                        continue
+
+                    if contains_merge_conflict(edited):
+                        warning(
+                            "Edited version still contains merge conflict markers. "
+                            "Resolve them before continuing."
+                        )
+                        continue
+
+                    resolutions.append({"path": path, "value": edited, "strategy": "theirs"})
+                    break
+
+                resolutions.append({"path": path, "strategy": answer})
+                break
+
+        return resolutions
+
+    @classmethod
+    def branch_merge(
+        cls,
+        base_path: str,
+        message: str = None,
+        output_json: bool = False,
+        interactive: bool = False,
+        resolutions_file: str = None,
+    ):
+        """Merge the current branch into main, with optional conflict resolutions."""
+        if message is None or (isinstance(message, str) and not message.strip()):
+            if output_json:
+                json_print({"success": False, "error": "Merge message is required."})
+            else:
+                error("Merge message is required.")
+            sys.exit(1)
+
+        if interactive and output_json:
+            json_print(
+                {
+                    "success": False,
+                    "error": "--interactive and --json cannot be used together.",
+                }
+            )
+            sys.exit(1)
+
+        file_resolutions: list[dict[str, Any]] | None = None
+        if resolutions_file:
+            try:
+                if resolutions_file == "-":
+                    file_resolutions = json.load(sys.stdin)
+                elif resolutions_file.lstrip().startswith("["):
+                    file_resolutions = json.loads(resolutions_file)
+                else:
+                    with open(resolutions_file, encoding="utf-8") as f:
+                        file_resolutions = json.load(f)
+                if not isinstance(file_resolutions, list):
+                    raise ValueError("Resolutions must be a JSON array.")
+            except (OSError, json.JSONDecodeError, ValueError) as exc:
+                if output_json:
+                    json_print({"success": False, "error": f"Failed to parse resolutions: {exc}"})
+                else:
+                    error(f"Failed to parse resolutions: {exc}")
+                sys.exit(1)
+
+        project = cls._load_project(base_path, output_json=output_json)
+
+        branch_name = project.get_current_branch()
+        ctx = console.status("[info]Merging branch...[/info]") if not output_json else nullcontext()
+        with ctx:
+            merge_success, conflicts, errors = project.merge_branch(
+                message=message, conflict_resolutions=file_resolutions
+            )
+
+        if output_json:
+            output = {"success": merge_success}
+            if conflicts or errors:
+                output["conflicts"] = conflicts
+                output["errors"] = errors
+            json_print(output)
+            if not merge_success:
+                sys.exit(1)
+            return
+
+        if merge_success:
+            success(f"Branch '{branch_name}' merged successfully.")
+            info('Switched to "main" branch after merge.')
+            return
+
+        # Failed branch merge
+        error(f"Failed to merge branch '{branch_name}'.")
+        if errors:
+            plain("\n[red]Errors:[/red]")
+            for err in errors:
+                error(f"- {err['path']}: {err['message']}")
+
+        enriched = enrich_branch_merge_conflicts(conflicts) if conflicts else []
+        display_conflict = [
+            c for c in enriched if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
+        ]
+        if display_conflict:
+            output_merge_conflict_table(
+                display_conflict, show_type=True, resolutions=file_resolutions
+            )
+
+        if errors:
+            sys.exit(1)
+
+        if not interactive:
+            plain(
+                "Merge conflicts detected. To resolve:\n"
+                "- Use 'poly branch merge -i <message>' to resolve conflicts interactively\n"
+                "- Use 'poly branch merge --resolutions <file.json> <message>' to provide pre-defined resolutions\n"
+                "- Merge manually on Agent Studio"
+            )
+            sys.exit(1)
+
+        existing_resolutions = {
+            os.sep.join(r["path"]): r for r in (file_resolutions or []) if "path" in r
+        }
+        while True:
+            resolutions = cls._merge_interactively(enriched, existing_resolutions, branch_name)
+            if not resolutions:
+                warning("No resolutions provided. Exiting.")
+                sys.exit(1)
+            ctx2 = (
+                console.status("[info]Merging branch...[/info]")
+                if not output_json
+                else nullcontext()
+            )
+            with ctx2:
+                merge_success, conflicts, errors = project.merge_branch(
+                    message=message, conflict_resolutions=resolutions
+                )
+            if merge_success:
+                success(f"Branch '{branch_name}' merged successfully.")
+                info('Switched to "main" branch after merge.')
+                break
+            if errors:
+                error(f"Failed to merge branch '{branch_name}' after conflict resolution.")
+                plain("\n[red]Errors:[/red]")
+                for err in errors:
+                    error(f"- {err['path']}: {err['message']}")
+                sys.exit(1)
+            if not conflicts:
+                error(
+                    f"Failed to merge branch '{branch_name}' after conflict resolution "
+                    "(no conflicts or errors returned)."
+                )
+                sys.exit(1)
+            warning("Merge still blocked; resolve the remaining conflicts below.")
+            enriched = enrich_branch_merge_conflicts(conflicts)
+            display_conflict = [
+                c
+                for c in enriched
+                if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
+            ]
+            if display_conflict:
+                output_merge_conflict_table(
+                    display_conflict,
+                    show_type=True,
+                    panel_title="Remaining merge conflicts",
+                )
+
     @classmethod
     def format(
         cls,
@@ -1995,12 +2630,55 @@ class AgentStudioCLI:
         environment: str = None,
         variant: str = None,
         channel: str = None,
+        input_lang: str = None,
+        push_before_chat: bool = False,
+        output_lang: str = None,
         show_functions: bool = False,
         show_flow: bool = False,
         show_state: bool = False,
+        output_json: bool = False,
+        input_messages: Optional[list[str]] = None,
+        conversation_id: Optional[str] = None,
     ) -> None:
         """Start an interactive chat session with the agent."""
         project = cls._load_project(base_path)
+
+        json_output = {}
+
+        if push_before_chat:
+            if not output_json:
+                info("Pushing project before starting chat session...")
+            push_success, output, _ = project.push_project(
+                force=False,
+                skip_validation=False,
+                dry_run=False,
+                format=False,
+                email=None,
+            )
+            if output == "No changes detected":
+                push_success = True  # Not an error if there are no changes to push
+
+            if push_success:
+                if not output_json:
+                    success("Project pushed successfully.")
+                else:
+                    json_output["push"] = {"success": True, "message": output}
+
+            if not push_success:
+                if output_json:
+                    json_output["push"] = {
+                        "success": False,
+                        "message": "Failed to push project before chat session.",
+                        "error": output,
+                    }
+                    json_print(json_output)
+                else:
+                    error(
+                        f"Failed to push {project.account_id}/{project.project_id} to Agent Studio."
+                    )
+                    plain(output)
+                sys.exit(1)
+
         branch_id = project.branch_id
         branch_label = None
 
@@ -2023,56 +2701,95 @@ class AgentStudioCLI:
             label += f" ({environment})"
         if variant:
             label += f" variant=[bold]{variant}[/bold]"
-        info(f"Starting chat for {label}...")
+        if not output_json:
+            info(f"Starting chat for {label}...")
 
+        conversations: list[dict] = []
         while True:
-            if environment == "draft":
-                info("Preparing branch deployment...")
-            try:
-                response = project.create_chat_session(
-                    environment,
-                    channel,
-                    variant,
+            if conversation_id:
+                if not output_json:
+                    info(f"Resuming chat session (conversation: {conversation_id})...")
+                response = None
+            else:
+                if environment == "draft" and not output_json:
+                    info("Preparing branch deployment...")
+                try:
+                    response = project.create_chat_session(
+                        environment,
+                        channel,
+                        variant,
+                        input_lang,
+                        output_lang,
+                    )
+                except (requests.HTTPError, ValueError) as e:
+                    if output_json:
+                        json_output["success"] = False
+                        json_output["error"] = str(e)
+                        json_print(json_output)
+                    else:
+                        error(f"Failed to create chat session: {e}")
+                    return
+
+                conversation_id = response.get("conversation_id")
+                if not conversation_id:
+                    if output_json:
+                        json_output["success"] = False
+                        json_output["error"] = "No conversation_id in response"
+                        json_output["response"] = response
+                        json_print(json_output)
+                    else:
+                        error(f"Unexpected response when creating chat: {response}")
+                    return
+
+                url = project.get_conversation_url(conversation_id)
+                greeting = response.get("response", "")
+                if not output_json:
+                    success(
+                        f"Chat session started (conversation: [link={url}]{conversation_id}[/link])"
+                    )
+                    print_turn_metadata(response, show_functions, show_flow, show_state)
+                    if greeting:
+                        plain(f"\n[bold]Agent:[/bold] {greeting}")
+
+                if response.get("conversation_ended"):
+                    if not output_json:
+                        plain("[muted]Conversation ended by agent.[/muted]")
+                    return
+
+            if not output_json:
+                plain(
+                    "[muted]Type your messages below. "
+                    "Press Ctrl+C or type '/exit' to quit. "
+                    "Type '/restart' to begin a new chat.[/muted]"
                 )
-            except (requests.HTTPError, ValueError) as e:
-                error(f"Failed to create chat session: {e}")
-                return
 
-            conversation_id = response.get("conversation_id")
-            if not conversation_id:
-                error(f"Unexpected response when creating chat: {response}")
-                return
-
-            url = project.get_conversation_url(conversation_id)
-            success(f"Chat session started (conversation: [link={url}]{conversation_id}[/link])")
-            print_turn_metadata(response, show_functions, show_flow, show_state)
-            greeting = response.get("response", "")
-            if greeting:
-                plain(f"\n[bold]Agent:[/bold] {greeting}")
-
-            if response.get("conversation_ended"):
-                plain("[muted]Conversation ended by agent.[/muted]")
-                return
-
-            plain(
-                "[muted]Type your messages below. "
-                "Press Ctrl+C or type '/exit' to quit. "
-                "Type '/restart' to begin a new chat.[/muted]"
-            )
-
-            restart = cls._run_chat_loop(
+            restart, conversation = cls._run_chat_loop(
                 project,
                 conversation_id,
                 environment,
+                input_lang=input_lang,
+                output_lang=output_lang,
                 show_functions=show_functions,
                 show_flow=show_flow,
                 show_state=show_state,
+                input_messages=input_messages,
+                output_json=output_json,
+                initial_response=response,
             )
 
-            if not restart:
-                return
+            if output_json:
+                conversations.append(conversation)
 
-            info("Restarting chat session...")
+            if not restart:
+                if output_json:
+                    json_output["conversations"] = conversations
+                    json_print(json_output)
+                return
+            if not output_json:
+                info("Restarting chat session...")
+
+            # Create a new chat session in the next loop iteration
+            conversation_id = None
 
     @classmethod
     def _run_chat_loop(
@@ -2080,26 +2797,54 @@ class AgentStudioCLI:
         project: AgentStudioProject,
         conversation_id: str,
         environment: str,
+        input_lang: str = None,
+        output_lang: str = None,
         show_functions: bool = False,
         show_flow: bool = False,
         show_state: bool = False,
-    ) -> bool:
+        input_messages: Optional[list[str]] = None,
+        output_json: bool = False,
+        initial_response: Optional[dict] = None,
+    ) -> tuple[bool, dict]:
         """Run the interactive message loop.
 
         Returns:
-            True if the user requested a restart, False otherwise.
+            A tuple of (restart, conversation) where restart is True if the user
+            requested a new session, and conversation is a dict with conversation_id,
+            url, and turns (populated when output_json=True).
         """
         conversation_ended = False
         restart = False
+        url = project.get_conversation_url(conversation_id)
+        turns: list[dict] = (
+            [
+                {
+                    "input": None,
+                    **cls._process_json_chat_reply(
+                        initial_response, show_functions, show_flow, show_state
+                    ),
+                }
+            ]
+            if output_json and initial_response is not None
+            else []
+        )
         try:
             while True:
-                try:
-                    user_input = input("\nYou: ").strip()
-                except (KeyboardInterrupt, EOFError):
-                    plain("")
-                    break
+                if input_messages is not None:
+                    if not input_messages:
+                        break
+                    user_input = input_messages.pop(0).strip()
+                    if not output_json:
+                        plain(f"\n[muted]You:[/muted] {user_input}")
+                else:
+                    try:
+                        user_input = input("\nYou: ").strip()
+                    except (KeyboardInterrupt, EOFError):
+                        if not output_json:
+                            plain("")
+                        break
 
-                if not user_input:
+                if user_input is None:
                     continue
                 if user_input.lower() == "/exit":
                     break
@@ -2109,33 +2854,112 @@ class AgentStudioCLI:
 
                 try:
                     reply = project.send_message(
-                        conversation_id,
-                        user_input,
-                        environment,
+                        conversation_id, user_input, environment, input_lang, output_lang
                     )
                 except requests.HTTPError as e:
-                    error(f"Failed to send message: {e}")
+                    if output_json:
+                        turns.append({"input": user_input, "error": str(e)})
+                    else:
+                        error(f"Failed to send message: {e}")
                     continue
 
-                print_turn_metadata(reply, show_functions, show_flow, show_state)
-                agent_text = reply.get("response") or json.dumps(reply, indent=2)
-                plain(f"\n[bold]Agent:[/bold] {agent_text}")
+                if output_json:
+                    # Filter reply for relevant fields to avoid dumping large state
+                    processed_reply = cls._process_json_chat_reply(
+                        reply, show_functions, show_flow, show_state
+                    )
+                    turns.append({"input": user_input, **processed_reply})
+                else:
+                    print_turn_metadata(reply, show_functions, show_flow, show_state)
+                    agent_text = reply.get("response") or json.dumps(reply, indent=2)
+                    plain(f"\n[bold]Agent:[/bold] {agent_text}")
 
                 if reply.get("conversation_ended"):
                     conversation_ended = True
-                    plain("[muted]Conversation ended by agent.[/muted]")
+                    if not output_json:
+                        plain("[muted]Conversation ended by agent.[/muted]")
                     break
         finally:
             if not conversation_ended:
                 try:
                     project.end_chat(conversation_id, environment)
-                    info(f"Chat session ended (conversation: {conversation_id})")
-                    url = project.get_conversation_url(conversation_id)
-                    plain(f"[info]Call Link:[/info] [link={url}]{url}[/link]")
+                    if not output_json:
+                        info(f"Chat session ended (conversation: {conversation_id})")
+                        plain(f"[info]Call Link:[/info] [link={url}]{url}[/link]")
                 except requests.HTTPError:
-                    warning("Failed to end chat session on server.")
+                    if not output_json:
+                        warning("Failed to end chat session on server.")
 
-        return restart
+        if input_messages and not restart:
+            # If the conversation ended, but there is still a restart queued in input messages
+            # Pop the remaining messages until we get to a restart
+            while input_messages:
+                msg = input_messages.pop(0).strip()
+                if msg.lower() == "/restart":
+                    restart = True
+                    break
+
+        return restart, {"conversation_id": conversation_id, "url": url, "turns": turns}
+
+    @staticmethod
+    def _process_json_chat_reply(
+        reply: dict, show_functions: bool, show_flow: bool, show_state: bool
+    ) -> dict:
+        """Process the raw reply from the chat API to extract relevant information based on the flags."""
+        processed_json = dict(
+            response=reply.get("response"),
+            conversation_ended=reply.get("conversation_ended", False),
+        )
+        turn_metadata = reply.get("metadata") or {}
+        if show_functions:
+            function_replies = []
+            for function_event in turn_metadata.get("function_events") or []:
+                function_reply = {
+                    "name": function_event.get("name"),
+                    "arguments": function_event.get("arguments"),
+                    "utterance": function_event.get("utterance"),
+                    "hangup": function_event.get("hangup"),
+                    "handoff": function_event.get("handoff"),
+                    "error": function_event.get("error"),
+                    "logs": function_event.get("logs"),
+                    "transition": function_event.get("transition"),
+                }
+                filtered_function_reply = {k: v for k, v in function_reply.items() if v is not None}
+                function_replies.append(filtered_function_reply)
+
+            processed_json["function_events"] = function_replies
+
+        if show_flow:
+            flow_reply = {}
+            in_flow = turn_metadata.get("in_flow")
+            in_step = turn_metadata.get("in_step")
+            if in_flow:
+                flow_reply["in_flow"] = in_flow
+            if in_step:
+                flow_reply["in_step"] = in_step
+            if flow_reply:
+                processed_json["flow"] = flow_reply
+
+        if show_state:
+            state_reply = []
+            for function_event in turn_metadata.get("function_events") or []:
+                sc = function_event.get("state_changes") or {}
+                added = sc.get("added", {})
+                updated = sc.get("updated", {})
+                removed = sc.get("removed", [])
+                if added or updated or removed:
+                    event_state_reply = {}
+                    if added:
+                        event_state_reply["added"] = added
+                    if updated:
+                        event_state_reply["updated"] = updated
+                    if removed:
+                        event_state_reply["removed"] = removed
+                    state_reply.append(event_state_reply)
+            if state_reply:
+                processed_json["state_changes"] = state_reply
+
+        return processed_json
 
     @classmethod
     def validate_project(cls, base_path: str, output_json: bool = False) -> None:
@@ -2186,6 +3010,64 @@ class AgentStudioCLI:
             success(f"Documentation written to {output_path}")
         else:
             plain(content)
+
+    @classmethod
+    def deployments_list(
+        cls,
+        base_path: str,
+        environment: str = "sandbox",
+        limit: int = 10,
+        offset: int = 0,
+        version_hash: str = None,
+        output_json: bool = False,
+        details: bool = False,
+    ) -> None:
+        """List deployment history for the project.
+
+        By default shows the 10 most recent deployments for the sandbox environment.
+        Pass version_hash to start the listing from a specific version. Use details for
+        full per-deployment metadata.
+
+        Args:
+            base_path: Base path for the project.
+            environment: Environment to query — sandbox, pre-release, or live.
+            limit: Maximum number of versions to show.
+            offset: Number of versions to skip before showing results.
+            version_hash: Start listing from this version hash (overrides offset).
+            output_json: If True, print result as JSON instead of rich text.
+            details: If True, print full metadata for each deployment.
+        """
+        project = cls._load_project(base_path)
+        versions, active_deployment_hashes = project.get_deployments(client_env=environment)
+
+        if not versions:
+            error("No versions found.")
+            return
+
+        if version_hash:
+            version_hash = version_hash[:9]
+            version_idx = next(
+                (
+                    i
+                    for i, v in enumerate(versions)
+                    if (v.get("version_hash") or "")[:9] == version_hash
+                ),
+                None,
+            )
+            if version_idx is None:
+                error(f"Version hash '{version_hash}' not found.")
+                return
+            offset = version_idx
+
+        versions = versions[offset : offset + limit]
+        if output_json:
+            json_output = {
+                "versions": versions,
+                "active_deployment_hashes": active_deployment_hashes,
+            }
+            json_print(json_output)
+        else:
+            print_deployments(versions, active_deployment_hashes, details=details)
 
 
 def main():

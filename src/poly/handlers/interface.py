@@ -14,6 +14,7 @@ REGIONS = [
     "us-1",
     "euw-1",
     "uk-1",
+    "studio",
     "staging",
     "dev",
 ]
@@ -48,6 +49,15 @@ class AgentStudioInterface:
             self.sync_client = SyncClientHandler(region, account_id, project_id, branch_id)
 
     @staticmethod
+    def get_accessible_regions() -> list[str]:
+        """Get the regions accessible to the current API key.
+
+        Returns:
+            list[str]: Region names the user has access to.
+        """
+        return PlatformAPIHandler.get_accessible_regions(REGIONS)
+
+    @staticmethod
     def get_accounts(region: str) -> dict[str, str]:
         """Get the accounts for a given region.
 
@@ -73,16 +83,20 @@ class AgentStudioInterface:
         return PlatformAPIHandler.get_projects(region, account_id)
 
     @staticmethod
-    def get_deployments(region: str, account_id: str, project_id: str) -> dict[str, str]:
-        """Get the deployments for a given project.
+    def get_deployments(
+        region: str, account_id: str, project_id: str, client_env: str = "sandbox"
+    ) -> list[dict[str, Any]]:
+        """Get the deployments for a given project and client environment.
         Args:
             region (str): The region name
             account_id (str): The account ID
             project_id (str): The project ID
+            client_env (str): The client environment (sandbox, pre-release, live)
+                defaults to sandbox
         Returns:
-            dict[str, str]: A dictionary mapping deployment versions to deployment IDs
+            list[dict[str, Any]]: A list of deployment records from the API
         """
-        return PlatformAPIHandler.get_deployments(region, account_id, project_id)
+        return PlatformAPIHandler.get_deployments(region, account_id, project_id, client_env)
 
     @staticmethod
     def get_active_deployments(
@@ -287,6 +301,8 @@ class AgentStudioInterface:
         environment: str = "sandbox",
         variant_id: Optional[str] = None,
         channel: str = "chat.polyai",
+        input_lang: Optional[str] = None,
+        output_lang: Optional[str] = None,
     ) -> dict:
         """Create a new chat conversation.
 
@@ -302,7 +318,14 @@ class AgentStudioInterface:
             dict: The API response containing the conversation ID and initial greeting
         """
         return PlatformAPIHandler.create_chat(
-            region, account_id, project_id, environment, variant_id, channel
+            region,
+            account_id,
+            project_id,
+            environment,
+            variant_id,
+            channel,
+            input_lang=input_lang,
+            output_lang=output_lang,
         )
 
     @staticmethod
@@ -313,6 +336,8 @@ class AgentStudioInterface:
         conversation_id: str,
         text: str,
         environment: str = "sandbox",
+        input_lang: str = None,
+        output_lang: str = None,
     ) -> dict:
         """Send a message to an existing chat conversation.
 
@@ -328,7 +353,14 @@ class AgentStudioInterface:
             dict: The API response containing the assistant's reply
         """
         return PlatformAPIHandler.send_chat_message(
-            region, account_id, project_id, conversation_id, text, environment
+            region,
+            account_id,
+            project_id,
+            conversation_id,
+            text,
+            environment,
+            input_lang=input_lang,
+            output_lang=output_lang,
         )
 
     def get_branch_chat_info(self, branch_id: str) -> dict:
@@ -355,6 +387,8 @@ class AgentStudioInterface:
         lambda_deployment_version: str,
         channel: str = "chat.polyai",
         variant_id: Optional[str] = None,
+        input_lang: str = None,
+        output_lang: str = None,
     ) -> dict:
         """Create a new chat conversation against a branch deployment.
 
@@ -378,6 +412,8 @@ class AgentStudioInterface:
             lambda_deployment_version,
             channel,
             variant_id,
+            input_lang=input_lang,
+            output_lang=output_lang,
         )
 
     @staticmethod
@@ -387,6 +423,8 @@ class AgentStudioInterface:
         project_id: str,
         conversation_id: str,
         text: str,
+        input_lang: str = None,
+        output_lang: str = None,
     ) -> dict:
         """Send a message to an existing draft chat conversation.
 
@@ -406,6 +444,8 @@ class AgentStudioInterface:
             project_id,
             conversation_id,
             text,
+            input_lang=input_lang,
+            output_lang=output_lang,
         )
 
     @staticmethod

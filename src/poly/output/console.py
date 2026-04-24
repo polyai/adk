@@ -6,12 +6,18 @@ Copyright PolyAI Limited
 """
 
 import json
+import os
 import sys
+from datetime import datetime
+from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from rich.console import Console
+from rich import box
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
+from rich.text import Text
 from rich.theme import Theme
 
 # Global verbose flag — set by CLI before commands run
@@ -65,7 +71,7 @@ def plain(message: str) -> None:
     console.print(message)
 
 
-# ── Structured output ────────────────────────────────────────────────
+# ── Structured output ─────────────────────────────────────────────────
 
 
 def print_status(
@@ -226,6 +232,272 @@ def print_turn_metadata(
                 padding=(0, 1),
             )
         )
+
+
+# ── Merge ─────────────────────────────────────────────────────────────
+
+
+def _merge_preview_cell(value: str) -> str:
+    """Format a side value for display; empty string shows a dim placeholder."""
+    if value == "":
+        return "[dim italic](empty)[/dim italic]"
+    return value
+
+
+def print_merge_conflict_interactive_header(
+    *,
+    field_path: str,
+    resource_key: str,
+    conflict_index: int,
+    conflict_total: int,
+    auto_mergeable: bool,
+    heavy: bool,
+    base_value: str,
+    branch_label: str,
+    branch_value: str,
+    main_value: str,
+    existing_resolution: dict[str, Any] | None = None,
+) -> None:
+    """Rich panel for one interactive merge conflict (metadata + optional three-way preview)."""
+    rows = Table(show_header=False, box=None, pad_edge=False, padding=(0, 1))
+    rows.add_column(
+        "Label", style="dim", justify="right", min_width=16, overflow="fold", no_wrap=False
+    )
+    rows.add_column("Value", overflow="fold")
+
+    rows.add_row("Field", Text(field_path, style="bright_cyan"))
+    # Only show resource when several fields conflict under the same parent (avoids repeating the path).
+    if conflict_total > 1:
+        rows.add_row(
+            "Resource",
+            Text.assemble(
+                (resource_key, "default"),
+                ("  ·  ", "dim"),
+                (f"conflict {conflict_index} of {conflict_total} here", "muted"),
+            ),
+        )
+    status_markup = (
+        "[success]Auto-mergeable[/success]"
+        if auto_mergeable
+        else "[warning]Needs decision[/warning]"
+    )
+    rows.add_row("Status", status_markup)
+
+    if existing_resolution:
+        strategy = existing_resolution.get("strategy", "")
+        value = existing_resolution.get("value")
+        if value is not None:
+            display = value if isinstance(value, str) and "\n" not in value else "value"
+        else:
+            display = strategy
+        rows.add_row("Resolution", Text(display, style="bright_green"))
+
+    body: Table | Group
+    if heavy:
+        note = Text(
+            "Multiline or long values — choose a side, accept auto-merge, or use Edit to open your editor.",
+            style="dim",
+        )
+        body = Group(rows, Text(""), note)
+    else:
+        rows.add_row("", "")
+        # Same order as the CLI resolution menu: main, branch, original (then edit only in the menu).
+        rows.add_row("Main", _merge_preview_cell(str(main_value)))
+        rows.add_row(f"Branch ({branch_label})", _merge_preview_cell(str(branch_value)))
+        rows.add_row("Original (base)", _merge_preview_cell(str(base_value)))
+        body = rows
+
+    console.print()
+    console.print(
+        Panel(
+            body,
+            title="[bold]Resolve conflict[/bold]",
+            title_align="left",
+            border_style="bright_blue",
+            padding=(0, 1),
+        )
+    )
+
+
+def output_merge_conflict_table(
+    conflicts: list[dict],
+    show_type: bool,
+    resolutions: list[dict[str, str]] | None = None,
+    panel_title: str = "Merge conflicts",
+) -> None:
+    """Print merge conflicts in a bordered table (optionally inside a titled panel).
+
+    When ``show_type`` is True, expect enriched rows from ``enrich_branch_merge_conflicts``.
+    """
+    table = Table(
+        show_header=True,
+        header_style="bold dim",
+        box=box.ROUNDED,
+        border_style="yellow",
+        padding=(0, 1),
+        expand=True,
+    )
+    table.add_column("Conflict", style="bright_cyan", overflow="fold", no_wrap=False, min_width=20)
+    if show_type:
+        table.add_column("Status", width=18, no_wrap=True)
+        table.add_column("In resource", justify="right", width=14)
+
+    current_resolution_paths = (
+        {os.sep.join(r["path"]) for r in resolutions} if resolutions else set()
+    )
+
+    for conflict in conflicts:
+        visual = conflict.get("visual_path")
+        if not visual and conflict.get("path"):
+            visual = os.sep.join(conflict["path"])
+        if show_type:
+            if conflict.get("visual_path") in current_resolution_paths:
+                status_cell = "[success]Resolution given[/success]"
+            else:
+                auto = conflict.get("can_auto_merge")
+                status_cell = (
+                    "[success]Auto-mergeable[/success]"
+                    if auto
+                    else "[warning]Needs decision[/warning]"
+                )
+            n = int(conflict.get("conflicts_in_resource") or 1)
+            in_res = f"{n} conflict" + ("" if n == 1 else "s")
+            table.add_row(visual, status_cell, in_res)
+        else:
+            table.add_row(visual)
+
+    wrapped = Panel(
+        table,
+        title=f"[bold]{panel_title}[/bold]",
+        title_align="left",
+        border_style="bright_yellow",
+        padding=(0, 1),
+    )
+    console.print()
+    console.print(wrapped)
+
+
+def edit_in_editor(initial_content: str, extension: str = ".txt", filename: str = "edit") -> str:
+    """Open the user's editor with initial content and return the edited result.
+
+    Uses $VISUAL, $EDITOR, or falls back to ``vi``.
+    """
+    import shlex
+    import subprocess
+    import tempfile
+
+    editor = os.environ.get("VISUAL") or os.environ.get("EDITOR") or "vi"
+
+    safe_name = filename.replace(os.sep, "_").replace("/", "_")
+    with tempfile.NamedTemporaryFile(
+        prefix=f"{safe_name}_", suffix=extension, mode="w", delete=False, encoding="utf-8"
+    ) as tmp:
+        tmp.write(initial_content)
+        tmp_path = tmp.name
+
+    try:
+        subprocess.run([*shlex.split(editor), tmp_path], check=True)
+        with open(tmp_path, encoding="utf-8") as f:
+            edited = f.read()
+    finally:
+        os.unlink(tmp_path)
+
+    if edited == initial_content:
+        raise ValueError("No changes were made.")
+    return edited
+
+
+# ── DEPLOYMENTS ───────────────────────────────────────────────────────
+
+
+def _format_deployment_timestamp(created_at: str) -> str:
+    """Format a deployment timestamp into a compact string."""
+    if not created_at:
+        return "-"
+    try:
+        tz_str = created_at.split()[-1]  # "GMT"
+        dt = datetime.strptime(created_at, "%a, %d %b %Y %H:%M:%S %Z")
+        try:
+            dt = dt.replace(tzinfo=ZoneInfo(tz_str))
+        except ZoneInfoNotFoundError:
+            dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+        dt = dt.astimezone()
+        return dt.strftime("%d %b %y %H:%M %Z")
+    except (TypeError, ValueError):
+        return "-"
+
+
+def print_deployments(
+    versions: list[dict[str, Any]], active_deployment_hashes: dict[str, str], details: bool = False
+) -> None:
+    """Print deployments for the project.
+
+    Args:
+        versions: A list of deployment versions.
+        active_deployment_hashes: A dictionary mapping deployment types to active version hashes.
+        details: Whether to print detailed information for each deployment.
+    """
+    table = None
+    if not details:
+        table = Table(
+            box=None,
+            show_header=False,
+            header_style="bold",
+            padding=(0, 1),
+        )
+        table.add_column("Type", style="cyan", no_wrap=True)
+        table.add_column("Hash", style="bold yellow", no_wrap=True, max_width=11)
+        table.add_column("When", no_wrap=True)
+        table.add_column("By", overflow="ellipsis", no_wrap=True)
+        table.add_column("Message", overflow="fold")
+        table.add_column("Active", overflow="fold")
+    for version in versions:
+        meta = version.get("deployment_metadata", {})
+        deployment_message = meta.get("deployment_message") or "-"
+        deployment_type = meta.get("deployment_type")
+        created_at = version.get("created_at", "")
+        created_by = version.get("created_by", "")
+        version_hash = version.get("version_hash")
+
+        badges = []
+        if active_deployment_hashes.get("sandbox") == version_hash:
+            badges.append("[bold bright blue]sandbox[/bold bright blue]")
+        if active_deployment_hashes.get("pre-release") == version_hash:
+            badges.append("[bold yellow]pre-release[/bold yellow]")
+        if active_deployment_hashes.get("live") == version_hash:
+            badges.append("[bold green]live[/bold green]")
+
+        badges_str = " ".join(badges) if badges else ""
+        if not details:
+            date_compact = _format_deployment_timestamp(created_at)
+            table.add_row(
+                str(deployment_type or "—"),
+                (version_hash or "")[:9],
+                date_compact,
+                str(created_by or "—"),
+                deployment_message,
+                badges_str,
+            )
+        else:
+            deployment_id = version.get("id")
+            client_env = version.get("client_env")
+            artifact_version = version.get("artifact_version")
+            lambda_deployment_version = version.get("function_deployment_version")
+            console.print(
+                f"([cyan]{deployment_type}[/cyan]) [bold][yellow]{version_hash}[/yellow][/bold] {badges_str}"
+            )
+            console.print(f"Date: {created_at}")
+            console.print(f"By: {created_by}")
+            console.print(f"Deployment ID: {deployment_id}")
+            console.print(f"Artifact Version: {artifact_version}")
+            console.print(f"Lambda Deployment Version: {lambda_deployment_version}")
+            console.print(f"Client Environment: {client_env}")
+            console.print(f"Message: {deployment_message}")
+            console.print()
+
+    if table:
+        console.print(table)
+        return
 
 
 # ── Error handling ───────────────────────────────────────────────────

@@ -9,9 +9,9 @@ import logging
 import os
 import shutil
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, fields
 from datetime import datetime
-from collections.abc import Callable
 from typing import Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
@@ -1690,17 +1690,17 @@ class AgentStudioProject:
 
         return files_with_conflicts, modified_files, new_files, deleted_files
 
-    def revert_changes(self, all_files: bool = False, files: list[str] = None) -> list[str]:
+    def revert_changes(self, files: list[str] = None) -> list[str]:
         """Revert changes in the project.
 
         Args:
-            all_files (bool): If True, revert all changes.
-            files (list[str]): List of specific files to revert.
+            files (list[str]): List of specific files to revert. If None, revert all changes.
         """
         reverted_files = []
         resource_mappings = self._make_resource_mappings(self.resources)
+        all_files = not files
         for resource in self.all_resources:
-            if not all_files and files and resource.get_path(self.root_path) not in files:
+            if not all_files and resource.get_path(self.root_path) not in files:
                 continue
 
             resource.save(self.root_path, resource_mappings=resource_mappings)
@@ -1789,12 +1789,47 @@ class AgentStudioProject:
 
         return diffs
 
+    def get_deployments(
+        self, client_env: str = "sandbox"
+    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        """Get the deployments for the project.
+        Args:
+            client_env (str): The client environment (sandbox, pre-release, live)
+                defaults to sandbox
+        Returns:
+            tuple[list[dict[str, Any]], dict[str, str]]: A tuple containing:
+                - list[dict[str, Any]]: A list of deployment information
+                - dict[str, str]: A dictionary mapping environment names to deployment hashes
+        """
+        env_names = {"sandbox", "pre-release", "live"}
+        if client_env not in env_names:
+            raise ValueError(f"Invalid client environment: {client_env}")
+
+        active_deployments = self.api_handler.get_active_deployments(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+        )
+        active_deployment_hashes = {
+            env: deployment.get("version") for env, deployment in active_deployments.items()
+        }
+
+        deployments = self.api_handler.get_deployments(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            client_env=client_env,
+        )
+
+        return deployments, active_deployment_hashes
+
     def get_remote_resources_by_name(self, name: str) -> ResourceMap:
         """Resolve and fetch a remote project state by name.
         Supports:
         - **Environments**: sandbox / pre-release / live (active deployments)
         - **Branches**: branch names (event sourcing projects only)
         - **Deployment versions**: version hash prefix (first 9 chars)
+        - **Local**: "local" for local resources
         """
         env_names = {"sandbox", "pre-release", "live"}
 
@@ -1826,17 +1861,32 @@ class AgentStudioProject:
         # 3) Deployment version hash prefix -> deployment resources
         version_hash = (name or "")[:9].lower()
         if version_hash:
-            deployments = self.api_handler.get_deployments(
-                region=self.region,
-                account_id=self.account_id,
-                project_id=self.project_id,
+            deployments, _ = self.get_deployments()
+            deployment = next(
+                (d for d in deployments if (d.get("version_hash") or "")[:9] == version_hash), {}
             )
-            deployment_id = deployments.get(version_hash)
+            deployment_id = deployment.get("id")
             if deployment_id:
                 logger.info(
                     f"Pulling resources from deployment '{deployment_id}' (version {version_hash})..."
                 )
                 return self.api_handler.pull_deployment_resources(deployment_id)
+
+        # 4) Local resources -> local resources
+        if name == "local":
+            new_resources_mappings, kept_resources_mappings, _ = self.find_new_kept_deleted(
+                self.discover_local_resources()
+            )
+            local_resources_mappings = new_resources_mappings + kept_resources_mappings
+            resources: ResourceMap = {}
+            for resource_mapping in local_resources_mappings:
+                resource = self.read_local_resource(
+                    resource=resource_mapping, resource_mappings=local_resources_mappings
+                )
+                resources.setdefault(resource_mapping.resource_type, {})[
+                    resource_mapping.resource_id
+                ] = resource
+            return resources
 
         logger.error(f"Name '{name}' not found in environments, branches, or deployments.")
         return {}
@@ -2237,7 +2287,7 @@ class AgentStudioProject:
         if success:
             self.branch_id = branches[branch_name]
             _, projection = self.pull_project(
-                force=force, format=format, projection_json=projection_json, on_save=on_save
+                force=True, format=format, projection_json=projection_json, on_save=on_save
             )
         return success, projection
 
@@ -2283,6 +2333,8 @@ class AgentStudioProject:
         environment: str,
         channel: str,
         variant: Optional[str],
+        input_lang: Optional[str] = None,
+        output_lang: Optional[str] = None,
     ) -> dict:
         """Create a chat session (standard or draft).
 
@@ -2293,6 +2345,8 @@ class AgentStudioProject:
             environment (str): The environment to create the chat session in: draft, sandbox, pre-release or live.
             channel (str): The channel to create the chat session in: chat.polyai or webchat.polyai.
             variant (ty.Optional[str]): The variant ID to create the chat session in.
+            input_lang (str): Optional. The language code for the input messages, e.g. "en-GB" or "fr-FR".
+            output_lang (str): Optional. The language code for the agent's responses, e.g. "en-GB" or "fr-FR".
 
         Returns:
             dict: API response with conversation_id and initial greeting.
@@ -2317,6 +2371,8 @@ class AgentStudioProject:
                 lambda_deployment_version=lambda_deployment_version,
                 channel=channel,
                 variant_id=variant,
+                input_lang=input_lang,
+                output_lang=output_lang,
             )
 
         return AgentStudioInterface.create_chat(
@@ -2326,6 +2382,8 @@ class AgentStudioProject:
             environment=environment,
             variant_id=variant,
             channel=channel,
+            input_lang=input_lang,
+            output_lang=output_lang,
         )
 
     def send_message(
@@ -2333,6 +2391,8 @@ class AgentStudioProject:
         conversation_id: str,
         text: str,
         environment: str,
+        input_lang: str = None,
+        output_lang: str = None,
     ) -> dict:
         """Send a message to an active chat conversation.
 
@@ -2340,6 +2400,8 @@ class AgentStudioProject:
             conversation_id (str): The ID of the conversation to send the message to.
             text (str): The user message text to send.
             environment (str): The environment of the conversation: draft, sandbox, pre-release or live.
+            input_lang (str): Optional. The language code of the input message, e.g. "en-GB" or "fr-FR".
+            output_lang (str): Optional. The language code for the agent's response, e.g. "en-GB" or "fr-FR".
 
         Returns:
             dict: API response with the agent's reply.
@@ -2354,6 +2416,8 @@ class AgentStudioProject:
                 project_id=self.project_id,
                 conversation_id=conversation_id,
                 text=text,
+                input_lang=input_lang,
+                output_lang=output_lang,
             )
         return AgentStudioInterface.send_chat_message(
             region=self.region,
@@ -2362,6 +2426,8 @@ class AgentStudioProject:
             conversation_id=conversation_id,
             text=text,
             environment=environment,
+            input_lang=input_lang,
+            output_lang=output_lang,
         )
 
     def end_chat(
@@ -2560,7 +2626,7 @@ class AgentStudioProject:
     def merge_branch(
         self, message: str, conflict_resolutions: list[dict[str, Any]] = None
     ) -> tuple[bool, list[str], list[str]]:
-        """Merge a branch into the current branch in the project.
+        """Merge the current branch into main in the project.
 
         Args:
             message (str): The merge commit message.
@@ -2568,7 +2634,7 @@ class AgentStudioProject:
                 resolutions. Each resolution should have:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
-                - value: Optional custom value (only used with custom strategy)
+                - value: Optional custom value
 
         Returns:
             bool: True if the merge was successful, False otherwise
@@ -2587,6 +2653,15 @@ class AgentStudioProject:
                 f"Cannot merge branch with uncommitted changes, diffs: {list(diffs.keys())}"
             )
 
+        for resolution in conflict_resolutions or []:
+            if "path" not in resolution or "strategy" not in resolution:
+                raise ValueError(f"Resolution must include 'path' and 'strategy': {resolution}")
+            if resolution["strategy"] not in {"ours", "theirs", "base"}:
+                raise ValueError(
+                    f"Invalid conflict resolution strategy: {resolution['strategy']} for path {resolution['path']}. "
+                    f"Must be one of 'ours', 'theirs', or 'base'."
+                )
+
         success, conflicts, errors = self.api_handler.merge_branch(
             message=message, conflict_resolutions=conflict_resolutions
         )
@@ -2594,15 +2669,7 @@ class AgentStudioProject:
             self.switch_branch("main", force=True)
             return True, [], []
 
-        error_messages = []
-        conflict_messages = []
-        if conflicts:
-            conflict_messages = [conflict["path"] for conflict in conflicts]
-            logger.debug(f"Merge conflicts detected: conflicts={conflicts!r}")
-        if errors:
-            error_messages = [f"{error['path']}: {error['message']}" for error in errors]
-            logger.debug(f"Merge errors detected: errors={errors!r}")
-        return False, conflict_messages, error_messages
+        return False, conflicts, errors
 
     def delete_branch(self, branch_name: str) -> bool:
         """Delete a branch in the project.

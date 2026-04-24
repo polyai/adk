@@ -3,7 +3,7 @@ title: Build an agent with the ADK
 description: Follow the end-to-end workflow for going from a blank Agent Studio project to a production-ready voice agent with the PolyAI ADK.
 ---
 
-This guide walks through how to go from a blank slate to a production-ready voice agent using **Agent Studio**, the **PolyAI ADK**, and optionally a coding tool such as **Claude Code**.
+This guide walks through how to go from a blank slate to a production-ready voice agent using **Agent Studio**, the **PolyAI ADK**, and — optionally — the **PolyAI ADK extension** for **VS Code** or **Cursor**, or a coding agent such as **Claude Code**.
 
 There are two common ways to build with the ADK:
 
@@ -68,7 +68,7 @@ When an Agent Studio project is linked locally, it follows this general structur
 │   └── response_control/
 │       ├── pronunciations.yaml
 │       └── phrase_filtering.yaml
-├── chat/
+├── chat/                               # Optional - chat channel settings
 │   └── configuration.yaml
 ├── flows/
 │   └── {flow_name}/
@@ -85,6 +85,8 @@ When an Agent Studio project is linked locally, it follows this general structur
 │   └── {function_name}.py
 ├── topics/
 │   └── {topic_name}.yaml
+├── variables/                          # Virtual — no files on disk
+│   └── {variable_name}
 └── project.yaml
 ~~~
 
@@ -94,7 +96,9 @@ This structure mirrors the parts of the agent that Agent Studio understands: set
 
 The CLI workflow is the manual developer path. You use the ADK directly, edit the project locally, and push changes back to Agent Studio.
 
-### Step 1 - Initialise your project
+You can run this workflow in whichever editing surface you prefer: a plain terminal, or **VS Code** / **Cursor** with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) for resource-aware navigation and validation. Both count as the CLI workflow — the difference is only the editing surface.
+
+### Step 1 - Initialize your project
 
 Link a local folder to an existing Agent Studio project. The agent must already exist in Agent Studio.
 
@@ -103,30 +107,28 @@ poly init
 poly init --region <region> --account_id <account_id> --project_id <project_id>
 ~~~
 
-This creates the local project structure and writes the metadata needed to connect the folder to Agent Studio.
+This creates the project directory at `{account_id}/{project_id}` inside your current working directory, pulls the current configuration, and writes the metadata needed to connect the folder to Agent Studio. Change into the project directory before running any further commands.
 
-### Step 2 - Pull remote config and set up the environment
+### Step 2 - Set up the environment
 
-Pull the current configuration into your local project.
+Configure any API keys or environment variables needed for the project. Use `poly pull` at any time to refresh the local project with the latest remote configuration.
 
 ~~~bash
 poly pull
 poly pull -f
 ~~~
 
-At this point, configure any API keys or environment variables needed for the project.
-
 !!! note "Run commands from the project folder"
 
     All CLI commands should be run from within the local project folder, unless you explicitly use the relevant path flag.
 
-### Step 3 - Run the agent locally
+### Step 3 - Chat with the agent
 
 Start an interactive chat session to confirm the connection works and inspect runtime behavior.
 
-!!! warning "Chat runs against main on Sandbox"
+!!! info "`poly chat` runs against Agent Studio, not your local files"
 
-    `poly chat` connects to the **main branch** of your Sandbox environment in Agent Studio — not your local files, and not your current feature branch. At this stage it is useful for confirming the connection works. To chat against your own changes, push and merge your branch in Agent Studio first.
+    The ADK has no local runtime — `poly chat` talks to the agent running in Agent Studio. At this stage you are on `main`, so the session connects to your sandbox. To chat against a feature branch, push it first with `poly push` and then run `poly chat` (or use `poly chat --push` to do both in one step).
 
 ~~~bash
 poly chat
@@ -143,11 +145,29 @@ poly docs --all
 poly docs flows functions topics
 ~~~
 
-Resource-specific documentation is available for agent settings, voice settings, chat settings, flows, functions, topics, entities, handoffs, variants, SMS templates, variables, speech recognition, response control, and experimental config.
+Resource-specific documentation is available in the reference section:
+[agent settings](../reference/agent_settings.md),
+[voice settings](../reference/voice_settings.md),
+[chat settings](../reference/chat_settings.md),
+[flows](../reference/flows.md),
+[functions](../reference/functions.md),
+[topics](../reference/topics.md),
+[entities](../reference/entities.md),
+[handoffs](../reference/handoffs.md),
+[variants](../reference/variants.md),
+[SMS templates](../reference/sms.md),
+[variables](../reference/variables.md),
+[speech recognition](../reference/speech_recognition.md),
+[response control](../reference/response_control.md), and
+[experimental config](../reference/experimental_config.md).
 
-### Step 5 - Customise the agent
+### Step 5 - Customize the agent
 
 This is the core build phase. Create a branch, edit resources locally, track changes, and push them back.
+
+!!! tip "Read the anti-patterns page first"
+
+    Before editing, review the [common anti-patterns](../concepts/anti-patterns.md) to avoid flow control bugs, logging noise, and prompt logic mistakes that are easy to introduce but hard to debug.
 
 #### Branching
 
@@ -160,7 +180,7 @@ poly branch list
 
 #### Functions
 
-Create or modify backend functions the agent calls at runtime.
+Create or modify backend functions the agent calls at runtime. See the [functions reference](../reference/functions.md) for the full API.
 
 Typical locations include:
 
@@ -171,31 +191,31 @@ Typical locations include:
 
 #### Topics
 
-Add or edit knowledge-base topics used for retrieval.
+Add or edit [knowledge-base topics](../reference/topics.md) used for retrieval.
 
 #### Agent settings
 
-Update the personality, role, and rules that define the agent’s global behavior.
+Update the [personality, role, and rules](../reference/agent_settings.md) that define the agent’s global behavior.
 
 #### Flows
 
-Build conversation flows, including prompts, step transitions, entities, and function steps.
+Build [conversation flows](../reference/flows.md), including prompts, step transitions, [entities](../reference/entities.md), and function steps.
 
 #### Channel-specific settings
 
-Adjust greeting messages, disclaimers, and style prompts for voice and chat.
+Adjust greeting messages, disclaimers, and style prompts for [voice](../reference/voice_settings.md) and [chat](../reference/chat_settings.md).
 
 #### Handoffs, SMS, and variants
 
-Define escalation paths, SMS templates, and per-variant configuration.
+Define [escalation paths](../reference/handoffs.md), [SMS templates](../reference/sms.md), and [per-variant configuration](../reference/variants.md).
 
 #### ASR and response control
 
-Tune speech recognition and control TTS behavior.
+Tune [speech recognition](../reference/speech_recognition.md) and control [TTS behavior](../reference/response_control.md).
 
 #### Experimental config
 
-Enable or tune experimental features where needed.
+Enable or tune [experimental features](../reference/experimental_config.md) where needed.
 
 ### Step 6 - Track and validate changes
 
@@ -204,12 +224,43 @@ Inspect the local changes before pushing.
 ~~~bash
 poly status
 poly diff
-poly diff <file>
+poly diff --files <file>
 poly validate
 poly format
-poly revert --all
+poly revert
 poly revert <file>
 ~~~
+
+!!! warning "`poly format` may crash on projects with YAML sub-resources"
+
+    Running `poly format` on a project that contains YAML-defined sub-resources (such as `config/handoffs.yaml` or `voice/configuration.yaml`) can produce errors like:
+
+    ~~~text
+    [Errno 20] Not a directory: '.../config/handoffs.yaml/handoffs/Default_handoff'
+    ~~~
+
+    This is a known bug in how the formatter resolves paths inside YAML files. Use `--files` to format specific Python files instead:
+
+    ~~~bash
+    poly format --files functions/my_function.py
+    ~~~
+
+!!! warning "`poly validate` may fail on platform-generated functions"
+
+    Projects built via Quick Agent Setup often include server-generated functions such as `handoff.py` or `hangup.py` whose signatures do not declare a `conv: Conversation` parameter. The ADK's local validator will reject these, blocking `poly push`.
+
+    The cleanest fix is to add `conv: Conversation` to the function signature yourself:
+
+    ~~~python
+    def handoff(conv: Conversation):
+        ...
+    ~~~
+
+    Alternatively, skip local validation and let the platform validate the push instead:
+
+    ~~~bash
+    poly push --skip-validation
+    ~~~
 
 ### Step 7 - Push changes
 
@@ -224,11 +275,11 @@ poly push --skip-validation
 
 ### Step 8 - Test against sandbox
 
-Once your branch is merged in Agent Studio, test the agent by chatting with it against the Sandbox environment.
+Once your branch is merged in Agent Studio, test the agent by chatting with it against the sandbox environment.
 
 !!! warning "Merge before chatting"
 
-    `poly chat` connects to the **main branch** of your Sandbox — not your feature branch. Push your changes with `poly push`, merge the branch in Agent Studio, then run `poly chat`.
+    `poly chat` connects to the **main branch** of your sandbox — not your feature branch. Push your changes with `poly push`, merge the branch in Agent Studio, then run `poly chat`.
 
 ~~~bash
 poly chat --environment sandbox
@@ -240,8 +291,8 @@ poly chat --environment sandbox --functions --flows
 Review, refine, and test again. You can also use the review command to share diffs with teammates.
 
 ~~~bash
-poly review
-poly review --before main --after my-feature
+poly review create
+poly review create --before main --after my-feature
 ~~~
 
 Make test calls, inspect transcripts, refine prompts, flows, and functions, and then re-push.
@@ -250,13 +301,16 @@ Make test calls, inspect transcripts, refine prompts, flows, and functions, and 
 
 Once the changes are pushed and validated, merge the branch in Agent Studio and deploy the project.
 
+!!! note "Merging requires the Agent Studio web UI"
+    There is no `poly merge` command. To merge a branch, open the project in Agent Studio, switch to the branch, and merge it through the interface. After merging, run `poly chat --environment sandbox` to test.
+
 ### Step 11 - Monitor performance
 
 Use Agent Studio analytics to monitor containment, CSAT, handle time, and flagged transcripts. Pull changes back locally as needed and continue iterating.
 
 ## Workflow 2 - AI-agent workflow
 
-The AI-agent workflow uses a coding tool such as **Claude Code** to run the same development loop on your behalf.
+The AI-agent workflow uses a coding agent — such as **Claude Code**, or an in-editor agent in **VS Code** or **Cursor** paired with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) — to run the same development loop on your behalf.
 
 <div class="grid cards" markdown>
 
@@ -336,6 +390,11 @@ poly pull
 
 The ADK acts as the bridge between your local environment and Agent Studio. It lets the coding tool read from and write back to the project.
 
+!!! tip "Run `poly docs --all` before generating any files"
+    Immediately after pulling, run `poly docs --all` to produce a complete resource reference. Without it, a coding agent has no schema context for resource structure and field names, and will hallucinate them. This should be the first thing the coding tool does after `poly pull`.
+
+    Note that `poly docs --all` documents the ADK's resource layer (topics, flows, entities, variants, and so on) but does not cover every runtime `Conversation` method. In particular, `conv.send_sms_template`, `conv.send_sms`, and `conv.caller_number` are not present in the output. For the full runtime API, direct the coding agent to the [conv object reference](https://docs.poly.ai/tools/classes/conv-object){ target="_blank" rel="noopener" } on the platform docs.
+
 ### Step 4 - Give the coding tool its context
 
 Provide the coding tool with the information you gathered earlier.
@@ -365,7 +424,7 @@ This produces the assets the agent needs, including:
 
     ---
 
-    Dialogue logic and routing for the agent.
+    Dialog logic and routing for the agent.
 
 -   **Callable functions**
 
@@ -419,7 +478,7 @@ Check that the key parts of the agent look correct:
 
 Once everything looks right:
 
-1. merge the branch into the main project
+1. merge the branch into the main project through the Agent Studio web UI — there is no `poly merge` command
 2. deploy the project
 
 At that point, the agent is live.
@@ -428,7 +487,7 @@ At that point, the agent is live.
 
 | Command | Description |
 |---|---|
-| **poly init** | Initialise a new project locally |
+| **poly init** | Initialize a new project locally |
 | **poly pull** | Pull remote config into the local project |
 | **poly push** | Push local changes to Agent Studio |
 | **poly status** | List changed files |

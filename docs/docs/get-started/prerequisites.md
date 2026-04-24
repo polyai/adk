@@ -3,17 +3,15 @@ title: Prerequisites
 description: Understand the access requirements and local tools needed before using the PolyAI ADK.
 ---
 
+If you haven't already, start with the [Getting started](./get-started.md) page for an overview of what the ADK is and how to sign up for Agent Studio. If you run into any issues generating your API key, contact [developers@poly-ai.com](mailto:developers@poly-ai.com).
+
 Before using the **PolyAI ADK**, you need the correct **platform access** and the required **local tools**.
-
-Access is provided by your PolyAI contact:
-
-- `developers@poly-ai.com`
 
 ## Generate API key
 
-Log in to Agent Studio and open your workspace. In the **Data Access** tab (next to the **Users** tab), click **+ API Key** in the top right to generate a key.
+Log in to Agent Studio and open your workspace. In the **API Keys** tab (next to the **Users** tab), click **+ API key** in the top right to generate a key.
 
-![Generating an API key in Agent Studio — Data Access tab with the + API Key button highlighted](../assets/api-key-data-access.png)
+![Generating an API key in Agent Studio — API Keys tab with the + API key button highlighted](../assets/api-key-data-access.png)
 
 Then set it as an environment variable:
 
@@ -25,16 +23,9 @@ The `POLY_ADK_KEY` environment variable must be set before running any `poly` co
 
 Once the ADK is installed and your API key is set, you can use the `poly` command to interact with Agent Studio projects locally.
 
-## Local requirements
+!!! warning "API keys are workspace-scoped"
+    An API key grants access to one specific Agent Studio workspace. When you run `poly init`, it lists all projects visible to that key. If you see many projects that do not look like yours, you are likely using a key scoped to the wrong workspace — for example, an organization-wide key rather than one scoped to your personal workspace. Contact your PolyAI contact to confirm you have a key for the correct workspace.
 
-Install the following tools before continuing:
-Before continuing, confirm:
-
-- You have access to an **Agent Studio workspace**
-- You have obtained an **API key** 
-- `uv` is installed
-- `git` is available locally
-  
 ## Local requirements
 
 Install the following tools before continuing:
@@ -64,10 +55,10 @@ See the [uv installation guide](https://docs.astral.sh/uv/getting-started/instal
 
 Before continuing, confirm:
 
-- [ ] You have access to an **Agent Studio workspace**
-- [ ] You have obtained an **API key** from your PolyAI contact
-- [ ] `uv` is installed
-- [ ] `git` is available locally
+- You have access to an **Agent Studio workspace**
+- You have generated an **API key** in Agent Studio
+- `uv` is installed
+- `git` is available locally
 
 ## Next step
 

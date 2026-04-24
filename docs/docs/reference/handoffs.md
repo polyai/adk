@@ -11,6 +11,10 @@ Handoffs configure SIP call transfers for voice agents. They define how and wher
 
 Handoffs are used when an agent needs to escalate, transfer, or terminate a voice interaction in a controlled way.
 
+!!! warning "Handoffs are ADK-only"
+
+    The Agent Studio UI does not currently expose an editor for `config/handoffs.yaml`. Define handoffs through the ADK and push them with `poly push`. Template references of the form `{{ho:handoff_name}}` only resolve inside ADK-managed files (`rules.txt`, topic actions, flow prompts) — pasting them into a UI-editable field does not work at runtime.
+
 ## Location
 
 Handoffs are defined in:
@@ -121,6 +125,10 @@ For example:
 Use {{fn:transfer_call}} when the user needs to be transferred to a specialist.
 ~~~
 
+## Round-trip behavior
+
+After a push and pull, `sip_headers: []` may be added to handoff entries that did not originally define it. This is injected by the platform and does not affect runtime behavior — the empty list is equivalent to no SIP headers. Expect this field to appear on round-trip if you did not include it yourself.
+
 ## Best practices
 
 - use clear, descriptive handoff names
@@ -150,5 +158,12 @@ Use {{fn:transfer_call}} when the user needs to be transferred to a specialist.
 
     Learn how handoffs are referenced in rules.
     [Open agent settings](./agent_settings.md)
+
+-   **Conversation object reference (platform)**
+
+    ---
+
+    Full reference for `conv.call_handoff` — destination, reason, utterance, and SIP header overrides.
+    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object){ target="_blank" rel="noopener" }
 
 </div>

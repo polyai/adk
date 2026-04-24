@@ -21,6 +21,8 @@ Each topic is stored as its own YAML file:
 topics/{Topic Name}.yaml
 ~~~
 
+Topic filenames may contain spaces — `topics/Make a Reservation.yaml` is valid. This differs from flow directories, which must be lowercase snake_case. The topic file name does not affect the topic's behavior or how it is referenced.
+
 ## What a topic contains
 
 Each topic has four main fields:
@@ -126,7 +128,6 @@ This is the only place inside a topic where you should use references and behavi
 | Syntax | Meaning |
 |---|---|
 | `{{fn:function_name}}` | Call a global function |
-| `{{fn:function_name}}('arg')` | Call a global function with an argument |
 | `{{attr:attribute_name}}` | Read a variant attribute |
 | `{{twilio_sms:template_name}}` | Reference an SMS template |
 | `{{ho:handoff_name}}` | Reference a handoff |
@@ -166,7 +167,7 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
 !!! tip “Tell, don't script”
 
 
-    Prefer instructions like “Tell the user that ...” over hard-coded dialogue such as `Say: '...'`. This lets the agent vary phrasing naturally, especially across languages.
+    Prefer instructions like “Tell the user that ...” over hard-coded dialog such as `Say: '...'`. This lets the agent vary phrasing naturally, especially across languages.
 
 ## Related pages
 
@@ -179,11 +180,25 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
     Learn how global functions referenced in topic actions are defined.
     [Open functions](./functions.md)
 
+-   **Flows**
+
+    ---
+
+    See how topics hand off to structured processes using `conv.goto_flow`.
+    [Open flows](./flows.md)
+
 -   **Variants**
 
     ---
 
     See how variant attributes can be referenced from topic actions.
     [Open variants](./variants.md)
+
+-   **Managed Topics (platform)**
+
+    ---
+
+    How topics are retrieved, ranked, and injected — RAG mechanics, topic types, and retrieval tuning.
+    [Open Managed Topics overview](https://docs.poly.ai/managed-topics/introduction){ target="_blank" rel="noopener" }
 
 </div>

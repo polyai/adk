@@ -32,6 +32,8 @@ poly push --help
 
 Initialize a new Agent Studio project locally.
 
+`poly init` creates the project directory at `{base_path}/{account_id}/{project_id}` and immediately pulls the current configuration from Agent Studio. After it completes, change into the project directory before running any other commands.
+
 Examples:
 
 ~~~bash
@@ -72,6 +74,14 @@ poly push --format
 ~~~
 
 When pushing creates a new branch (for example, when pushing to Agent Studio for the first time on a branch), the CLI displays a message with the new branch name.
+
+!!! info "Call Link URL in chat output may be malformed"
+
+    Each chat session prints a Call Link URL for viewing the conversation in Agent Studio. On some deployments this URL has a doubled hostname (for example, `https://studio.studio.poly.ai/…`), which produces a 404. The conversation is still recorded — open Agent Studio directly and navigate to the conversation from there.
+
+!!! info "`poly push` reports an error message when there is nothing to push"
+
+    If there are no local changes, `poly push` prints `Error: Failed to push` and `No changes detected`. The exit code is 0, so CI scripts that check return codes are not affected. The message is misleading but the command has not actually failed.
 
 When using JSON output (`--json`), the response includes `new_branch_name` and `new_branch_id` fields if a new branch was created.
 
@@ -119,9 +129,62 @@ poly branch create my-hotfix --env live
 poly branch create my-hotfix --env live --force
 poly branch switch my-feature
 poly branch switch my-feature --force
+poly branch merge 'Merge feature branch'
+poly branch merge 'Merge feature branch' --interactive
 poly branch delete
 poly branch delete my-feature
 ~~~
+
+#### `poly branch merge`
+
+Merge the current branch into main via the CLI. A merge message is required.
+
+~~~bash
+poly branch merge 'Merge message'
+poly branch merge 'Merge message' --interactive
+poly branch merge 'Merge message' --resolutions resolutions.json
+~~~
+
+If the merge has no conflicts, the branch is merged immediately and the CLI switches to `main`.
+
+If there are conflicts, the command displays a conflict table showing each conflicting field and whether it can be auto-merged, then exits with a non-zero code. You can resolve conflicts using:
+
+- **`--interactive` / `-i`** — opens an interactive prompt for each conflict. For each one you can accept the auto-merge, pick main, pick branch, pick base, or open the value in your `$EDITOR` or `$VISUAL`. After resolving all conflicts the merge is re-attempted.
+- **`--resolutions <file>`** — supply pre-defined resolutions as a JSON file path, inline JSON string, or `-` for stdin. Resolutions that cover all conflicts allow the merge to proceed non-interactively.
+
+Both flags can be combined: `--resolutions` seeds the interactive session with your pre-defined choices while `--interactive` handles any remaining conflicts.
+
+!!! tip "Set `$EDITOR` or `$VISUAL` for the best interactive experience"
+
+    Interactive mode uses your `$EDITOR` or `$VISUAL` environment variable when opening multiline or long values for editing. If neither is set it falls back to `vi`. Set one in your shell profile to use your preferred editor.
+
+##### Resolution file format
+
+`--resolutions` accepts a JSON array. Each element must include `path` and `strategy`, and optionally `value`:
+
+~~~json
+[
+  {
+    "path": ["topics", "My Topic", "content"],
+    "strategy": "theirs"
+  },
+  {
+    "path": ["agent_settings", "rules", "value"],
+    "strategy": "theirs",
+    "value": "Custom resolved content here"
+  }
+]
+~~~
+
+| Field | Description |
+|---|---|
+| `path` | List of strings identifying the conflicted field |
+| `strategy` | Resolution strategy: `"ours"` (keep main), `"theirs"` (keep branch), or `"base"` (revert to original) |
+| `value` | Optional custom value. Only used with `"theirs"` strategy. |
+
+##### After a successful merge
+
+After a successful merge the CLI automatically switches to `main`. Run `poly pull` if you need to refresh your local state.
 
 #### `poly branch delete`
 
@@ -134,6 +197,12 @@ Interactively select and delete one or more branches. The `main` branch cannot b
 poly branch delete
 poly branch delete my-feature
 ~~~
+
+!!! warning "`poly branch delete` requires a TTY and may fail with a 404"
+
+    `poly branch delete` opens an interactive confirmation prompt and must be run in a terminal. In non-interactive environments (scripts, CI), it throws `[Errno 22] Invalid argument`.
+
+    On some projects, the delete command hits the same platform endpoint as branch chat and returns a 404 after the confirmation. If this happens, delete the branch through the Agent Studio UI instead.
 
 #### `poly branch create`
 
@@ -155,6 +224,10 @@ When `--env live` or `--env pre-release` is specified:
 !!! warning "Use `--env live` with caution"
 
     Branching from a live deployment snapshot will overwrite your local project with the live state. Merging this branch back to main may roll back changes that were introduced after the snapshot was taken.
+
+!!! info "Only one active branch is allowed at a time"
+
+    Agent Studio supports one non-main branch per project. Attempting to create a second branch while one already exists returns an error. Merge or delete the existing branch in Agent Studio before creating a new one.
 
 ### `poly format`
 
@@ -197,7 +270,6 @@ Interactively select a review gist and open it in the browser.
 poly review list
 poly review list --json
 ~~~
-<<<<<<< docs/auto-update-e9dd3b9
 
 #### `poly review delete`
 
@@ -211,22 +283,7 @@ poly review delete --json
 
 ### `poly chat`
 
-=======
-
-#### `poly review delete`
-
-Interactively select and delete review gists. Use `--id` to delete a specific gist directly without an interactive prompt.
-
-~~~bash
-poly review delete
-poly review delete --id GIST_ID
-poly review delete --json
-~~~
-
-### `poly chat`
-
->>>>>>> main
-Start an interactive chat session with your agent.
+Start an interactive chat session with your agent, or run scripted/automated conversations.
 
 Examples:
 
@@ -235,7 +292,82 @@ poly chat
 poly chat --environment live
 poly chat --channel webchat
 poly chat --metadata
+poly chat --lang fr-FR
+poly chat --input-lang en-US --output-lang fr-FR
 ~~~
+
+#### Non-interactive (scripted) mode
+
+Supply messages directly on the command line or from a file to run `poly chat` without a human at the terminal. This is useful for automated testing pipelines and CI scripts.
+
+**Inline messages** — use `-m`/`--message` (repeatable):
+
+~~~bash
+poly chat -m 'Hello' -m 'What can you help with?'
+~~~
+
+**File-based input** — use `--input-file`:
+
+~~~bash
+poly chat --input-file ./script.txt
+echo -e 'Hello\nGoodbye' | poly chat --input-file -
+~~~
+
+Each line of the file is sent as a separate message. Use `-` to read from stdin.
+
+If the file path does not exist, `poly chat` exits with an error.
+
+#### Resuming an existing conversation
+
+Use `--conversation-id` (or `--conv-id`) to resume an existing conversation by its ID instead of creating a new session:
+
+~~~bash
+poly chat --conv-id <conversation_id>
+poly chat --conv-id <conversation_id> -m 'Follow-up message'
+~~~
+
+#### Pushing before chatting
+
+Use `--push` to push the local project to Agent Studio before starting the chat session. This ensures local changes are live before testing without requiring a separate `poly push` step:
+
+~~~bash
+poly chat --push
+poly chat --push -m 'Hello'
+~~~
+
+If the push fails, the command exits without starting the chat session.
+
+#### Language flags
+
+Use language flags to specify the expected input and output language when chatting against multilingual agents. If not specified, the project default is used.
+
+| Flag | Description |
+|---|---|
+| `--lang` | Sets both input and output language (e.g. `en-US`, `fr-FR`). |
+| `--input-lang` | Sets the input language (ASR) only. Overrides `--lang` for input. |
+| `--output-lang` | Sets the output language (TTS) only. Overrides `--lang` for output. |
+
+`--input-lang` and `--output-lang` take precedence over `--lang` when both are supplied.
+
+#### `poly chat` flags summary
+
+| Flag | Description |
+|---|---|
+| `--push` | Push the project before starting the chat session. |
+| `-m`, `--message MSG` | Send a message non-interactively (repeatable). |
+| `--input-file FILE` | Read messages line-by-line from a file (`-` for stdin). |
+| `--conversation-id`, `--conv-id` | Resume an existing conversation by ID. |
+| `--json` | Emit a single JSON object when the session ends (see below). |
+| `--environment` | Target environment. Choices: `branch`, `sandbox`, `pre-release`, `live`. Defaults to `branch`. `branch` chats against the last **pushed** state of your current branch (not local uncommitted changes); on main it falls back to `sandbox`. Use `--push` to push local changes before chatting. |
+| `--channel` | Channel to use (e.g. `webchat`, `voice`). |
+| `--lang` | Set both input and output language. |
+| `--input-lang` | Set input language only. |
+| `--output-lang` | Set output language only. |
+| `--variant` | Name of the variant to use for the chat session. |
+| `--functions` | Show function events in output. |
+| `--flows` | Show flow metadata in output. |
+| `--state` | Show state changes in output. |
+| `--metadata` | Show all metadata (equivalent to `--functions --flows --state`). |
 
 ### `poly docs`
 
@@ -250,6 +382,27 @@ poly docs --all --output rules.md
 ~~~
 
 Use `--output` to write the documentation to a local file. This is useful when working with AI coding tools — pass the output file as context to give the agent accurate knowledge of ADK resource types and conventions.
+
+### `poly deployments`
+
+List deployments for the project.
+
+Examples:
+
+~~~bash
+poly deployments list
+poly deployments list --env live
+poly deployments list --details
+~~~
+
+| Flag | Description |
+|---|---|
+| `--env` | Environment to list deployments for. Choices: `sandbox`, `pre-release`, `live`. Defaults to `sandbox`. |
+| `--details` | Show additional deployment details. |
+
+!!! tip "Use `--details` for readable output"
+
+    The default tabular view may wrap long URLs across multiple rows, making it unreadable in narrow terminals. `--details` produces a vertical layout that is easier to read.
 
 ## Machine-readable JSON output
 
@@ -268,8 +421,11 @@ poly branch switch my-feature --json
 poly branch current --json
 poly branch delete --json
 poly branch delete my-feature --json
+poly branch merge 'Merge message' --json
 poly format --json
 poly init --region us-1 --account_id 123 --project_id my_project --json
+poly chat --json -m 'Hello'
+poly chat --json --input-file ./script.txt
 ~~~
 
 When `--json` is used:
@@ -277,6 +433,10 @@ When `--json` is used:
 - stdout contains exactly one JSON object
 - the process exits with code `0` on success and non-zero on failure
 - human-readable console messages are suppressed
+
+!!! info "`--interactive` and `--json` cannot be used together"
+
+    `poly branch merge --interactive` requires a terminal for its conflict-resolution prompts and is incompatible with `--json`.
 
 ### JSON output shapes
 
@@ -295,16 +455,44 @@ The exact fields vary by command. Common fields include:
 | `poly branch switch --json` | `success`, `switched_to`, `dry_run` |
 | `poly branch current --json` | `current_branch` |
 | `poly branch delete --json` | `success`, `deleted` |
+| `poly branch merge --json` | `success`; on conflict: `conflicts`, `errors` |
 | `poly format --json` | `success`, `check_only`, `format_errors`, `affected`, `ty_ran`, `ty_returncode`, `ty_timed_out` |
 | `poly init --json` | `success`, `root_path` |
+| `poly chat --json` | `conversations` (array); optional `push` (when `--push` is used) |
 
 For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
+
+For `poly branch merge --json`, a successful merge returns `{ "success": true }`. When conflicts or errors are present, the response includes `"conflicts"` and `"errors"` arrays containing the raw conflict and error objects from the platform.
 
 Error responses always include `{ "success": false, "error": "...", "traceback": "..." }`.
 
 !!! info "`init` with `--json` requires explicit flags"
 
     When using `poly init --json`, you must supply `--region`, `--account_id`, and `--project_id` explicitly. Interactive prompts are not supported in JSON mode.
+
+#### `poly chat --json` output shape
+
+When `--json` is used with `poly chat`, the command emits a single JSON object when the session ends:
+
+~~~json
+{
+  "conversations": [
+    {
+      "conversation_id": "conv-123",
+      "url": "https://...",
+      "turns": [
+        { "input": null, "response": "Hello! How can I help?", "conversation_ended": false },
+        { "input": "What are your hours?", "response": "We are open 9am–5pm.", "conversation_ended": false }
+      ]
+    }
+  ]
+}
+~~~
+
+- `conversations` is an array because `/restart` in scripted input produces multiple entries.
+- `turns[0]` is always the agent greeting, with `"input": null`.
+- If `--push` is also supplied, the output includes a `push` key: `{ "push": { "success": true, "message": "..." } }`.
+- If `--functions`, `--flows`, or `--state` are also set, the relevant metadata fields are included in each turn.
 
 ### `poly push --output-json-commands`
 
@@ -346,6 +534,7 @@ A typical CLI workflow looks like this:
 6. push with `poly push`
 7. optionally review with `poly review`
 8. test or chat with the agent using `poly chat`
+9. merge the branch with `poly branch merge '<message>'`
 
 !!! info "Run commands from the project folder"
 
