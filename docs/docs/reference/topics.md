@@ -18,25 +18,33 @@ Topics live in the `topics/` directory.
 Each topic is stored as its own YAML file:
 
 ~~~text
-topics/{Topic Name}.yaml
+topics/{topic_name}.yaml
 ~~~
 
-Topic filenames may contain spaces — `topics/Make a Reservation.yaml` is valid. This differs from flow directories, which must be lowercase snake_case. The topic file name does not affect the topic's behavior or how it is referenced.
+File names are cleaned to lowercase snake_case. For example, a topic named `"Opening Hours & Locations"` is stored as `topics/opening_hours_locations.yaml`. The topic's display name is stored inside the YAML in the `name` field.
 
 ## What a topic contains
 
-Each topic has four main fields:
+Each topic has five fields:
 
 | Field | Description |
 |---|---|
+| `name` | The display name of the topic. This is the canonical name — the filename is derived from it (cleaned to lowercase snake_case). |
 | `enabled` | Whether the topic is active. Default: `true`. |
 | `example_queries` | Example user inputs that should retrieve the topic. |
 | `content` | Factual information retrieved by RAG. |
 | `actions` | Behavioral instructions the agent should follow when the topic is matched. |
 
+## Naming and filenames
+
+- The `name` field in the YAML is the canonical topic name and can contain spaces, punctuation, and mixed case (e.g. `"Opening Hours & Locations"`).
+- The filename is cleaned to lowercase snake_case (e.g. `opening_hours_locations.yaml`).
+- The filename must match the cleaned version of `name` — a mismatch raises a validation error on `pull` or `push`.
+
 ## Example
 
 ~~~yaml
+name: Opening Hours & Locations
 enabled: true
 example_queries:
   - What are your opening hours?
@@ -103,7 +111,7 @@ This is the material that gets retrieved via RAG and made available to the agent
 
 - keep it factual
 - do not put function calls in content
-- do not use `$variable` or resource references in content
+- do not use variable references in content
 - use multi-line YAML (`|-`) for longer content
 
 ### Do not use these in content
@@ -147,7 +155,7 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
 ### Prefer
 
 - structured conditional sections
-- plain instructions like “Tell the user that...”
+- plain instructions like "Tell the user that..."
 - clear points where a function should be called
 
 ### Avoid
@@ -164,10 +172,20 @@ Use markdown headers like `##` and `###` to break up branches or conditions.
 - prefer structured `##` branches in actions
 - disable topics with `enabled: false` during development instead of deleting them
 
-!!! tip “Tell, don't script”
+!!! tip "Tell, don't script"
 
 
-    Prefer instructions like “Tell the user that ...” over hard-coded dialog such as `Say: '...'`. This lets the agent vary phrasing naturally, especially across languages.
+    Prefer instructions like "Tell the user that ..." over hard-coded dialog such as `Say: '...'`. This lets the agent vary phrasing naturally, especially across languages.
+
+## Migration from older projects
+
+Older projects stored topic files using the topic name directly as the filename (e.g. `topics/Topic Name.yaml`). When you open an older project with a current version of the ADK, topic files are automatically migrated to the new format:
+
+- files are renamed to their cleaned lowercase snake_case equivalent
+- the `name` key is injected into the YAML content
+- nested directories created by topic names containing `/` are flattened
+
+This migration happens automatically on `poly pull` or when loading the project locally. No manual action is required.
 
 ## Related pages
 
