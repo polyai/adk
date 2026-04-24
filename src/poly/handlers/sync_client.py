@@ -21,7 +21,6 @@ from poly.resources import (
     ChatGreeting,
     ChatSafetyFilters,
     ChatStylePrompt,
-    parse_categories_from_azure_config,
     Condition,
     DTMFConfig,
     Entity,
@@ -34,13 +33,14 @@ from poly.resources import (
     FunctionParameters,
     FunctionStep,
     FunctionType,
+    GeneralSafetyFilters,
     Handoff,
     KeyphraseBoosting,
     PhraseFilter,
     Pronunciation,
     RegularExpressionRule,
     Resource,
-    GeneralSafetyFilters,
+    SafetyFilterCategory,
     SettingsPersonality,
     SettingsRole,
     SettingsRules,
@@ -210,6 +210,28 @@ class SyncClientHandler:
             )
 
         return topics
+
+    @staticmethod
+    def _parse_safety_filter_config(sf_config: dict) -> dict:
+        """Parse category data from a camelCase azure projection dict."""
+        category_mapping = {
+            "violence": "violence",
+            "hate": "hate",
+            "sexual": "sexual",
+            "self_harm": "selfHarm",
+        }
+        parsed = {}
+        for cat, proj_key in category_mapping.items():
+            category_data = sf_config.get(proj_key, {})
+            # Error raising to move to validation step:
+            # VALIDATE: No missing safety filter categories i.e. violence, sexual etc.
+            # VALIDATE: Correct type (dict) for safety filter category.
+            # VALIDATE: No missing field for safety filter category i.e. missing precision/isActive in 'violence'.
+            parsed[cat] = SafetyFilterCategory(
+                enabled=category_data.get("isActive", False),
+                precision=category_data.get("precision", "medium"),
+            )
+        return parsed
 
     @staticmethod
     def _parse_latency_control(latency_control_data: dict) -> FunctionLatencyControl:
@@ -405,14 +427,14 @@ class SyncClientHandler:
                 )
             }
         if voice_safety_filters := voice_config.get("safetyFilters", None):
-            azure = voice_safety_filters.get("azureConfig", {})
+            sf_config = voice_safety_filters.get("azureConfig", {})
             settings[VoiceSafetyFilters] = {
                 "voice_safety_filters": VoiceSafetyFilters(
                     resource_id="voice_safety_filters",
                     name="voice_safety_filters",
                     enabled=not voice_safety_filters.get("disabled", False),
                     filter_type=voice_safety_filters.get("type", "azure"),
-                    categories=parse_categories_from_azure_config(azure),
+                    categories=SyncClientHandler._parse_safety_filter_config(sf_config),
                 )
             }
         if voice_disclaimer := voice_settings.get("disclaimer", None):
@@ -449,14 +471,14 @@ class SyncClientHandler:
                 )
             }
         if chat_safety_filters := chat_config.get("safetyFilters", None):
-            azure = chat_safety_filters.get("azureConfig", {})
+            sf_config = chat_safety_filters.get("azureConfig", {})
             settings[ChatSafetyFilters] = {
                 "chat_safety_filters": ChatSafetyFilters(
                     resource_id="chat_safety_filters",
                     name="chat_safety_filters",
                     enabled=not chat_safety_filters.get("disabled", False),
                     filter_type=chat_safety_filters.get("type", "azure"),
-                    categories=parse_categories_from_azure_config(azure),
+                    categories=SyncClientHandler._parse_safety_filter_config(sf_config),
                 )
             }
 
@@ -852,14 +874,14 @@ class SyncClientHandler:
         data = projection.get("contentFilterSettings", {})
         if not data:
             return {}
-        azure = data.get("azureConfig", {})
+        sf_config = data.get("azureConfig", {})
         return {
             "safety_filters": GeneralSafetyFilters(
                 resource_id="safety_filters",
                 name="safety_filters",
                 enabled=not data.get("disabled", False),
                 filter_type=data.get("type", "azure"),
-                categories=parse_categories_from_azure_config(azure),
+                categories=SyncClientHandler._parse_safety_filter_config(sf_config),
             )
         }
 

@@ -29,7 +29,7 @@ _FILTER_TYPE = "azure"
 
 
 @dataclass
-class _SafetyFilterCategory:
+class SafetyFilterCategory:
     enabled: bool
     precision: str
 
@@ -38,7 +38,7 @@ class _SafetyFilterCategory:
         return {"enabled": self.enabled, "precision": self.precision}
 
     @classmethod
-    def from_dict(cls, data: dict) -> "_SafetyFilterCategory":
+    def from_dict(cls, data: dict) -> "SafetyFilterCategory":
         """Construct from a dict using internal (backend) field names."""
         for required in ("enabled", "precision"):
             if required not in data:
@@ -58,7 +58,7 @@ class _SafetyFilterCategory:
         )
 
 
-def _category_to_yaml_dict(category: _SafetyFilterCategory) -> dict:
+def _category_to_yaml_dict(category: SafetyFilterCategory) -> dict:
     """Translate an internal category to YAML/UI vocab (level: lenient/medium/strict)."""
     return {
         "enabled": category.enabled,
@@ -90,10 +90,10 @@ def _parse_categories(raw: dict) -> dict:
                 f"All of {', '.join(_AZURE_CATEGORY_KEYS.keys())} must be provided."
             )
         category = raw[cat]
-        if isinstance(category, _SafetyFilterCategory):
+        if isinstance(category, SafetyFilterCategory):
             parsed[cat] = category
         elif isinstance(category, dict):
-            parsed[cat] = _SafetyFilterCategory.from_dict(category)
+            parsed[cat] = SafetyFilterCategory.from_dict(category)
         else:
             raise ValueError(
                 f"Safety filter category '{cat}' must be a dict, got {type(category).__name__}."
@@ -120,33 +120,6 @@ def _build_update_content_filter_proto(
     )
 
 
-def parse_categories_from_azure_config(azure_config: dict) -> dict:
-    """Parse category data from a camelCase azure projection dict."""
-    parsed = {}
-    for cat, proj_key in _AZURE_CATEGORY_KEYS.items():
-        if proj_key not in azure_config:
-            raise ValueError(
-                f"Missing required safety filter category '{proj_key}' in azure config."
-            )
-        category_data = azure_config[proj_key]
-        if not isinstance(category_data, dict):
-            raise ValueError(
-                f"Safety filter category '{proj_key}' must be a dict, got "
-                f"{type(category_data).__name__}."
-            )
-        for required in ("isActive", "precision"):
-            if required not in category_data:
-                raise ValueError(
-                    f"Missing required field '{required}' for safety filter category "
-                    f"'{proj_key}' in azure config."
-                )
-        parsed[cat] = _SafetyFilterCategory(
-            enabled=category_data["isActive"],
-            precision=category_data["precision"],
-        )
-    return parsed
-
-
 @dataclass
 class _BaseSafetyFilters(YamlResource):
     """Shared logic for project-level and channel-level safety filters."""
@@ -156,7 +129,7 @@ class _BaseSafetyFilters(YamlResource):
     categories: Optional[dict] = None
 
     def __post_init__(self) -> None:
-        """Parse raw category dicts into _SafetyFilterCategory objects."""
+        """Parse raw category dicts into SafetyFilterCategory objects."""
         if self.categories is None:
             return
         self.categories = _parse_categories(self.categories)
