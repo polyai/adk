@@ -1,6 +1,64 @@
 # CHANGELOG
 
 
+## v0.14.0 (2026-04-24)
+
+### Features
+
+- Store project name on init and clean up on API errors
+  ([#66](https://github.com/polyai/adk/pull/66),
+  [`5d5ee5f`](https://github.com/polyai/adk/commit/5d5ee5fe0ba4fc1790f9e91ac37e9a1dd7471658))
+
+## Summary
+
+- Stores the human-readable project name in `project.yaml` on init, - Cleans up partially created
+  directories when the API returns an error (e.g. 403 Forbidden, 404 not found).
+
+## Motivation - Project name was discarded during init — now persisted for downstream use. - When
+  initialising with an invalid or inaccessible project/account ID, empty directories were left
+  behind.
+
+## Changes
+
+- Added `project_name` field to `AgentStudioProject` dataclass, persisted in `project.yaml` and
+  status file - On interactive init, the selected project name is captured; on non-interactive init
+  (`--project_id`), the name is resolved via `get_projects()` reverse lookup - Wrapped
+  `init_project` call in error handling that cleans up `account_id/project_id` directories on
+  `HTTPError` or `SourcererAPIError` - Friendly error messages for `FORBIDDEN` and
+  `DEPLOYMENT_NOT_FOUND` error codes
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+```yaml project_id: test-bot
+
+account_id: oliver-eisenberg-ws
+
+region: us-1
+
+project_name: New Project ```
+
+```bash ❯ poly init --account_id oliver-eisenberg-ws --project_id non_existant --region us-1 --json
+  { "success": false, "error": "Project 'non_existant' not found in account 'oliver-eisenberg-ws'."
+  } ❯ ls oliver-eisenberg-ws las-dev-usp ```
+
+```bash ❯ poly init --account_id fake-ws --project_id non_existant --region us-1 Initialising
+  project... Initializing project fake-ws/non_existant... Error: Forbidden: you do not have
+  permission to access project 'non_existant' in account 'fake-ws'. ```
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Sonnet 4.6 <noreply@anthropic.com>
+
+
 ## v0.13.1 (2026-04-24)
 
 ### Bug Fixes
