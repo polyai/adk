@@ -2330,6 +2330,46 @@ class PullProjectTest(unittest.TestCase):
         self.assertIn("Modified locally", saved_content)
         self.assertIn("Modified remotely", saved_content)
 
+    def test_pull_project_local_formatting_difference_no_false_conflict(self):
+        """Cosmetic formatting differences in the local file should not cause merge conflicts.
+
+        The local file has the same semantic content as the original but with trailing
+        whitespace in the description.  The normalisation step (read_local_resource +
+        to_pretty) should produce the same string as the canonical original, so when
+        the remote modifies the description the merge should apply cleanly.
+        """
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        original_resources = deepcopy(project.resources)
+
+        # Remote modifies the description
+        incoming_resources = deepcopy(original_resources)
+        flow_config_id = "FLOW_CONFIG-test_flow"
+        modified_flow_config = deepcopy(incoming_resources[FlowConfig][flow_config_id])
+        modified_flow_config.description = "Modified remotely"
+        incoming_resources[FlowConfig][flow_config_id] = modified_flow_config
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+
+        flow_config_path = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
+        # Local file: same semantic content as original but with trailing whitespace
+        local_with_cosmetic_diff = (
+            "name: test_flow\n"
+            "description: Test flow with advanced step as start   \n"
+            "start_step: start_step\n"
+        )
+
+        with mock_read_from_file({flow_config_path: local_with_cosmetic_diff}):
+            files_with_conflicts, _ = project.pull_project(force=False)
+
+        self.assertEqual(files_with_conflicts, [])
+        flow_config_calls = [
+            call
+            for call in self.mock_save_to_file.call_args_list
+            if len(call[0]) >= 2 and call[0][1] == flow_config_path
+        ]
+        saved_content = flow_config_calls[-1][0][0] if flow_config_calls else ""
+        self.assertNotIn("<<<<<<<", saved_content)
+        self.assertIn("Modified remotely", saved_content)
+
     def test_pull_project_modify_no_conflict(self):
         """Test pulling when a resource is modified both locally and remotely without conflicts"""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
