@@ -2816,6 +2816,7 @@ class AgentStudioCLI:
             if output_json and initial_response is not None
             else []
         )
+        end_call = False
         try:
             while True:
                 if input_messages is not None:
@@ -2835,9 +2836,11 @@ class AgentStudioCLI:
                 if user_input is None:
                     continue
                 if user_input.lower() == "/exit":
+                    end_call = True
                     break
                 if user_input.lower() == "/restart":
                     restart = True
+                    end_call = True
                     break
 
                 try:
@@ -2868,7 +2871,7 @@ class AgentStudioCLI:
                         plain("[muted]Conversation ended by agent.[/muted]")
                     break
         finally:
-            if not conversation_ended:
+            if end_call or (not conversation_ended and not output_json):
                 try:
                     project.end_chat(conversation_id, environment)
                     if not output_json:
