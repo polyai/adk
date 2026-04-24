@@ -149,7 +149,7 @@ class AgentStudioProject:
     resources: ResourceMap
     last_updated: datetime
     branch_id: str = None
-    project_name: str = None
+    project_name: Optional[str] = None
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
