@@ -1,6 +1,54 @@
 # CHANGELOG
 
 
+## v0.13.0 (2026-04-24)
+
+### Features
+
+- Clean KB topic names ([#94](https://github.com/polyai/adk/pull/94),
+  [`19c3650`](https://github.com/polyai/adk/commit/19c36506fce6219f63728ccd5e5259bdd592251b))
+
+## Summary Topic filenames now use `clean_name()` (e.g. `topics/topic_1.yaml`) with the real name
+  stored inside the YAML, matching the flow step pattern. This prevents topics with `/` in their
+  name from being created as nested directories. Existing projects are auto-migrated on load.
+
+## Motivation
+
+Topic names containing `/` (e.g. `"Billing/Refunds"`) were being used directly as filenames, causing
+  `os.path.join("topics", "Billing/Refunds.yaml")` to create nested folder structures instead of a
+  single file.
+
+## Changes
+
+- **`topic.py`**: `file_path` uses `clean_name()`, `to_yaml_dict()` includes `name` field, new
+  `read_local_resource()` override reads name from YAML and validates it matches the filename (with
+  legacy fallback for old-format files) - **`project.py`**: Added `Topic` to the
+  `find_new_kept_deleted` block that reads resource names from YAML content for newly discovered
+  files; added `_migration_flags` field to track applied migrations, persisted via
+  `to_dict`/`from_dict`/`from_status_dict`; fresh pulls start with all flags set (no migration
+  needed) - **`migration_utils.py`** (new): Migration framework with `MigrationFlag` enum,
+  `run_migrations()` dispatcher, and `migrate_legacy_topic_files()` — renames old `Topic Name.yaml`
+  files to `topic_name.yaml` and injects the `name` key into the YAML content -
+  **`migration_test.py`** (new): Tests for the legacy topic file migration — rename, skip
+  already-migrated, in-place update for clean names, mixed files - **Test fixtures**: Renamed topic
+  fixtures to clean names, added `name` field, updated all path assertions
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Copilot Autofix powered by AI <175728472+Copilot@users.noreply.github.com>
+
+
 ## v0.12.1 (2026-04-24)
 
 ### Bug Fixes
