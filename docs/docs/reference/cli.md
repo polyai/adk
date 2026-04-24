@@ -326,6 +326,23 @@ poly chat --conv-id <conversation_id>
 poly chat --conv-id <conversation_id> -m 'Follow-up message'
 ~~~
 
+#### Programmatic turn-by-turn conversations
+
+Combine `--json` with `--conv-id` and `-m` for programmatic turn-by-turn conversations. In `--json` mode, the session is **not** terminated after each turn — `end_chat` is only called when you explicitly use `/exit` or `/restart`. This means the same conversation ID remains valid across multiple invocations:
+
+~~~bash
+# Turn 1 — capture the conversation ID from the response
+poly chat --json -m 'Hello'
+
+# Turn 2 — resume the same session
+poly chat --json --conv-id <conversation_id> -m 'What are your hours?'
+
+# Turn 3 — continue
+poly chat --json --conv-id <conversation_id> -m 'Thanks, goodbye'
+~~~
+
+This is the recommended pattern for scripted pipelines that need to carry context across multiple separate invocations.
+
 #### Pushing before chatting
 
 Use `--push` to push the local project to Agent Studio before starting the chat session. This ensures local changes are live before testing without requiring a separate `poly push` step:
@@ -357,7 +374,7 @@ Use language flags to specify the expected input and output language when chatti
 | `-m`, `--message MSG` | Send a message non-interactively (repeatable). |
 | `--input-file FILE` | Read messages line-by-line from a file (`-` for stdin). |
 | `--conversation-id`, `--conv-id` | Resume an existing conversation by ID. |
-| `--json` | Emit a single JSON object when the session ends (see below). |
+| `--json` | Emit a single JSON object when the session ends (see below). In `--json` mode the session is not terminated after input is exhausted — use this with `--conv-id` for multi-turn scripted conversations. |
 | `--environment` | Target environment. Choices: `branch`, `sandbox`, `pre-release`, `live`. Defaults to `branch`. `branch` chats against the last **pushed** state of your current branch (not local uncommitted changes); on main it falls back to `sandbox`. Use `--push` to push local changes before chatting. |
 | `--channel` | Channel to use (e.g. `webchat`, `voice`). |
 | `--lang` | Set both input and output language. |
@@ -493,6 +510,10 @@ When `--json` is used with `poly chat`, the command emits a single JSON object w
 - `turns[0]` is always the agent greeting, with `"input": null`.
 - If `--push` is also supplied, the output includes a `push` key: `{ "push": { "success": true, "message": "..." } }`.
 - If `--functions`, `--flows`, or `--state` are also set, the relevant metadata fields are included in each turn.
+
+!!! info "`--json` mode does not end the session after each turn"
+
+    In `--json` mode, `end_chat` is only called when `/exit` or `/restart` is used — not when input is simply exhausted. This means a conversation started with `--json` remains resumable via `--conv-id` in a subsequent invocation. In interactive (non-`--json`) mode, the session is ended normally when the conversation finishes.
 
 ### `poly push --output-json-commands`
 
