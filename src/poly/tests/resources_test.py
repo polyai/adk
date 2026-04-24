@@ -861,6 +861,99 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         self.assertIn("booking_ref", str(ctx.exception))
         self.assertIn("unsupported type annotation", str(ctx.exception))
 
+    # ------------------------------------------------------------------
+    # Orphaned @func_parameter scrubbing tests
+    # ------------------------------------------------------------------
+
+    def test_orphaned_func_parameter_decorator_is_scrubbed(self):
+        """A @func_parameter whose name is absent from the signature is silently removed."""
+        # Simulates a function where 'send_sms' was removed from the signature
+        # but its decorator was left behind (the bug described in the Slack thread).
+        code = """\
+@func_description('Exit the SST stop flow')
+@func_parameter('send_sms', 'Whether to send an SMS')
+def exit_sst_stop(conv: Conversation):
+    pass
+"""
+        cleaned_code, params, desc, lc = Function._extract_decorators(
+            code, "exit_sst_stop", []
+        )
+
+        # The orphaned decorator must be stripped from the code
+        self.assertNotIn("func_parameter", cleaned_code)
+        # No parameter should be extracted (it was orphaned)
+        self.assertEqual(params, [])
+        # The valid description decorator should still be extracted
+        self.assertEqual(desc, "Exit the SST stop flow")
+
+    def test_orphaned_func_parameter_does_not_block_valid_parameters(self):
+        """A stale decorator for a missing param is scrubbed; valid ones are kept."""
+        code = """\
+@func_description('My function')
+@func_parameter('stale_param', 'This param was removed')
+@func_parameter('active_param', 'This param still exists')
+def my_func(conv: Conversation, active_param: str):
+    pass
+"""
+        cleaned_code, params, desc, lc = Function._extract_decorators(
+            code, "my_func", []
+        )
+
+        # The stale decorator must be stripped
+        self.assertNotIn("stale_param", cleaned_code)
+        # The valid parameter must be extracted correctly
+        self.assertEqual(len(params), 1)
+        self.assertEqual(params[0].name, "active_param")
+        self.assertEqual(params[0].description, "This param still exists")
+        self.assertEqual(params[0].type, "string")
+
+    def test_orphaned_func_parameter_logged_as_warning(self):
+        """Scrubbing an orphaned decorator emits a warning log."""
+        import logging
+
+        code = """\
+@func_parameter('gone_param', 'No longer in signature')
+def my_func(conv: Conversation):
+    pass
+"""
+        with self.assertLogs("poly.resources.function", level=logging.WARNING) as log_ctx:
+            Function._extract_decorators(code, "my_func", [])
+
+        self.assertTrue(
+            any("gone_param" in msg and "orphaned" in msg for msg in log_ctx.output),
+            f"Expected orphaned-param warning in logs, got: {log_ctx.output}",
+        )
+
+    def test_read_local_resource_scrubs_orphaned_decorator(self):
+        """read_local_resource does not raise when a @func_parameter is orphaned."""
+        # This mirrors the real-world bug: exit_sst_stop had @func_parameter('send_sms', ...)
+        # but 'send_sms' was not in its signature, causing a hard validation error.
+        test_file_content = """\
+from _gen import *  # <AUTO GENERATED>
+
+@func_description('Stop the SST flow')
+@func_parameter('send_sms', 'Whether to send an SMS on exit')
+def exit_sst_stop(conv: Conversation):
+    return conv.end()
+"""
+        with mock_read_from_file(test_file_content):
+            result = Function.read_local_resource(
+                file_path="functions/exit_sst_stop.py",
+                resource_id="fn-abc",
+                resource_name="exit_sst_stop",
+                resource_mappings=[],
+                known_parameters=[],
+                known_latency_control=FunctionLatencyControl(),
+            )
+
+        # The orphaned decorator is gone from the stored code
+        self.assertNotIn("send_sms", result.code)
+        self.assertNotIn("func_parameter", result.code)
+        # No parameters extracted
+        self.assertEqual(result.parameters, [])
+        # Description still extracted correctly
+        self.assertEqual(result.description, "Stop the SST flow")
+
 
 TEST_TOPIC = Topic(
     resource_id="123",
