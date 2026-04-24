@@ -584,7 +584,17 @@ class Function(Resource):
                 if decorator_name == "func_parameter" and len(decorator.args) == 2:
                     name, desc = (arg.value for arg in decorator.args)
                     matched_arg = next((arg for arg in target.args.args if arg.arg == name), None)
-                    if matched_arg is None or matched_arg.annotation is None:
+                    if matched_arg is None:
+                        # Parameter named in the decorator is not present in the function
+                        # signature — it was likely removed. Scrub the orphaned decorator.
+                        logger.warning(
+                            f"Scrubbing orphaned @func_parameter({name!r}, ...) decorator from "
+                            f"function {function_name!r}: parameter {name!r} is not in the "
+                            f"function signature."
+                        )
+                        removable_lines.update(range(decorator.lineno - 1, decorator.end_lineno))
+                        continue
+                    if matched_arg.annotation is None:
                         raise ValueError(
                             f"Parameter {name!r} has no type annotation. "
                             f"Supported types: str, int, float, bool."
