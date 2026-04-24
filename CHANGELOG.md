@@ -1,6 +1,74 @@
 # CHANGELOG
 
 
+## v0.13.1 (2026-04-24)
+
+### Bug Fixes
+
+- Normalise local content on pull ([#102](https://github.com/polyai/adk/pull/102),
+  [`43dcd5d`](https://github.com/polyai/adk/commit/43dcd5d5839803e0be10e2d7619a5e7b21d95407))
+
+## Summary
+
+Fixes issue where YAML formatting could cause irrelevant merge conflicts
+
+## Motivation
+
+When pulling, local YAML files could trigger conflicts purely due to formatting discrepancies
+
+## Changes
+
+- **`project.py`** — normalise the local resource through `read_local_resource` + `to_pretty` before
+  feeding it into the three-way merge, so local and incoming content use the same canonical
+  serialisation; falls back to raw file content if the resource can't be parsed - **`flows.py`** —
+  strip whitespace from the parsed `prompt` field. As this is stripped on the platform.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+- Only end call on explicit end events or in interactive mode
+  ([#105](https://github.com/polyai/adk/pull/105),
+  [`332d404`](https://github.com/polyai/adk/commit/332d404093573fffbe8f977b79f6086d9b093d89))
+
+## Summary
+
+Fixes `end_chat` being called after every turn in `--json` mode, which was terminating the
+  conversation and breaking `--conv-id` resumption.
+
+## Motivation
+
+`poly chat --json --conv-id <id> -m "..."` is the pattern for programmatic turn-by-turn
+  conversations. The previous condition (`if not conversation_ended`) fired even in JSON mode when
+  input was exhausted, killing the session after each turn.
+
+Closes #<!-- issue number -->
+
+## Changes
+
+- Added `end_call` flag, set only on `/exit` or `/restart` - `finally` now uses `if end_call or (not
+  conversation_ended and not output_json)` — `end_chat` skipped in JSON mode unless explicitly
+  triggered
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.13.0 (2026-04-24)
 
 ### Features
