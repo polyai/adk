@@ -18,6 +18,7 @@ from poly.handlers.protobuf.content_filter_settings_pb2 import (
 from poly.resources.resource import ResourceMapping, YamlResource
 
 PRECISION_MAPPING = {"LOOSE": "lenient", "MEDIUM": "medium", "STRICT": "strict"}
+PRECISION_MAPPING_INVERSE = {v: k for k, v in PRECISION_MAPPING.items()}
 _AZURE_CATEGORY_KEYS = {
     "violence": "violence",
     "hate": "hate",
@@ -74,11 +75,10 @@ def _category_from_yaml_dict(data: dict, cat_name: str) -> dict:
                 f"Missing required field '{required}' for safety filter category '{cat_name}'."
             )
     level = data["level"]
-    matches = [k for k, v in PRECISION_MAPPING.items() if v == level]
-    if not matches:
-        valid_levels = ", ".join(sorted(PRECISION_MAPPING.values()))
+    if level not in PRECISION_MAPPING_INVERSE:
+        valid_levels = ", ".join(sorted(PRECISION_MAPPING_INVERSE.keys()))
         raise ValueError(f"Invalid level '{level}'. Must be one of: {valid_levels}")
-    return {"enabled": data["enabled"], "precision": matches[0]}
+    return {"enabled": data["enabled"], "precision": PRECISION_MAPPING_INVERSE[level]}
 
 
 def _parse_categories(raw: dict) -> dict:
