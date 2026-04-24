@@ -19,6 +19,7 @@ from poly.resources import (
     AsrSettings,
     BaseResource,
     ChatGreeting,
+    ChatSafetyFilters,
     ChatStylePrompt,
     Condition,
     DTMFConfig,
@@ -32,12 +33,14 @@ from poly.resources import (
     FunctionParameters,
     FunctionStep,
     FunctionType,
+    GeneralSafetyFilters,
     Handoff,
     KeyphraseBoosting,
     PhraseFilter,
     Pronunciation,
     RegularExpressionRule,
     Resource,
+    SafetyFilterCategory,
     SettingsPersonality,
     SettingsRole,
     SettingsRules,
@@ -49,6 +52,7 @@ from poly.resources import (
     VariantAttribute,
     VoiceDisclaimerMessage,
     VoiceGreeting,
+    VoiceSafetyFilters,
     VoiceStylePrompt,
 )
 
@@ -142,6 +146,7 @@ class SyncClientHandler:
             KeyphraseBoosting: cls._read_keyphrase_boosting_from_projection(projection),
             TranscriptCorrection: cls._read_transcript_corrections_from_projection(projection),
             **cls._read_asr_settings_from_projection(projection),
+            GeneralSafetyFilters: cls._read_safety_filters_from_projection(projection),
             ApiIntegration: cls._read_api_integrations_from_projection(projection),
         }  # ty:ignore[invalid-return-type]
 
@@ -206,6 +211,24 @@ class SyncClientHandler:
             )
 
         return topics
+
+    @staticmethod
+    def _parse_safety_filter_config(sf_config: dict) -> dict:
+        """Parse category data from a camelCase azure projection dict."""
+        category_mapping = {
+            "violence": "violence",
+            "hate": "hate",
+            "sexual": "sexual",
+            "self_harm": "selfHarm",
+        }
+        parsed = {}
+        for cat, proj_key in category_mapping.items():
+            category_data = sf_config.get(proj_key, {})
+            parsed[cat] = SafetyFilterCategory(
+                enabled=category_data.get("isActive", False),
+                precision=category_data.get("precision", "MEDIUM"),
+            )
+        return parsed
 
     @staticmethod
     def _parse_latency_control(latency_control_data: dict) -> FunctionLatencyControl:
@@ -400,6 +423,17 @@ class SyncClientHandler:
                     prompt=voice_style_prompt.get("prompt", ""),
                 )
             }
+        if voice_safety_filters := voice_config.get("safetyFilters", None):
+            sf_config = voice_safety_filters.get("azureConfig", {})
+            settings[VoiceSafetyFilters] = {
+                "voice_safety_filters": VoiceSafetyFilters(
+                    resource_id="voice_safety_filters",
+                    name="voice_safety_filters",
+                    enabled=not voice_safety_filters.get("disabled", False),
+                    filter_type=voice_safety_filters.get("type", "azure"),
+                    categories=SyncClientHandler._parse_safety_filter_config(sf_config),
+                )
+            }
         if voice_disclaimer := voice_settings.get("disclaimer", None):
             settings[VoiceDisclaimerMessage] = {
                 "voice_disclaimer": VoiceDisclaimerMessage(
@@ -431,6 +465,17 @@ class SyncClientHandler:
                     resource_id="chat_style_prompt",
                     name="chat_style_prompt",
                     prompt=chat_style_prompt.get("prompt", ""),
+                )
+            }
+        if chat_safety_filters := chat_config.get("safetyFilters", None):
+            sf_config = chat_safety_filters.get("azureConfig", {})
+            settings[ChatSafetyFilters] = {
+                "chat_safety_filters": ChatSafetyFilters(
+                    resource_id="chat_safety_filters",
+                    name="chat_safety_filters",
+                    enabled=not chat_safety_filters.get("disabled", False),
+                    filter_type=chat_safety_filters.get("type", "azure"),
+                    categories=SyncClientHandler._parse_safety_filter_config(sf_config),
                 )
             }
 
@@ -819,6 +864,22 @@ class SyncClientHandler:
                     interaction_style=interaction_style,
                 )
             }
+        }
+
+    @staticmethod
+    def _read_safety_filters_from_projection(projection: dict) -> dict[str, GeneralSafetyFilters]:
+        data = projection.get("contentFilterSettings", {})
+        if not data:
+            return {}
+        sf_config = data.get("azureConfig", {})
+        return {
+            "safety_filters": GeneralSafetyFilters(
+                resource_id="safety_filters",
+                name="safety_filters",
+                enabled=not data.get("disabled", False),
+                filter_type=data.get("type", "azure"),
+                categories=SyncClientHandler._parse_safety_filter_config(sf_config),
+            )
         }
 
     @staticmethod

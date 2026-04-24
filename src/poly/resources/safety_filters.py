@@ -1,0 +1,277 @@
+"""Handling and managing Agent Studio Safety Filter settings.
+
+Copyright PolyAI Limited
+"""
+
+import os
+from dataclasses import dataclass
+from typing import ClassVar, Optional
+
+from google.protobuf.message import Message
+
+from poly.handlers.protobuf.channels_pb2 import Channel_UpdateSafetyFilters, ChannelType
+from poly.handlers.protobuf.content_filter_settings_pb2 import (
+    AzureContentFilter,
+    AzureContentFilterCategory,
+    ContentFilterSettings_UpdateContentFilterSettings,
+)
+from poly.resources.resource import ResourceMapping, YamlResource
+
+PRECISION_MAPPING = {"LOOSE": "lenient", "MEDIUM": "medium", "STRICT": "strict"}
+PRECISION_MAPPING_INVERSE = {v: k for k, v in PRECISION_MAPPING.items()}
+_AZURE_CATEGORY_KEYS = {
+    "violence": "violence",
+    "hate": "hate",
+    "sexual": "sexual",
+    "self_harm": "selfHarm",
+}
+# Const to auto-populate type for YAML roundtrip.
+_FILTER_TYPE = "azure"
+
+
+@dataclass
+class SafetyFilterCategory:
+    enabled: Optional[bool] = None
+    precision: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        """Serialize using internal (backend) field names."""
+        return {"enabled": self.enabled, "precision": self.precision}
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "SafetyFilterCategory":
+        """Construct from a dict using internal (backend) field names.
+
+        Missing or invalid values are stored as-is; validation is deferred
+        to ``_BaseSafetyFilters.validate()``.
+        """
+        return cls(enabled=data.get("enabled"), precision=data.get("precision"))
+
+    def to_proto(self) -> AzureContentFilterCategory:
+        return AzureContentFilterCategory(
+            is_active=self.enabled,
+            precision=self.precision,
+        )
+
+
+def _category_to_yaml_dict(category: SafetyFilterCategory) -> dict:
+    """Translate an internal category to YAML/UI vocab (level: lenient/medium/strict)."""
+    return {
+        "enabled": category.enabled,
+        "level": PRECISION_MAPPING[category.precision],
+    }
+
+
+def _category_from_yaml_dict(data: dict) -> dict:
+    """Translate a YAML/UI-vocab category dict to internal-vocab dict.
+
+    Missing or unrecognized values are passed through as None.
+    """
+    level = data.get("level")
+    precision = PRECISION_MAPPING_INVERSE.get(level) if level is not None else None
+    return {"enabled": data.get("enabled"), "precision": precision}
+
+
+def _parse_categories(raw: dict) -> dict:
+    """Parse raw category dicts into SafetyFilterCategory objects.
+
+    Missing categories are stored as None.
+    """
+    parsed = {}
+    for cat in _AZURE_CATEGORY_KEYS.keys():
+        if cat not in raw:
+            parsed[cat] = None
+            continue
+        category = raw[cat]
+        if isinstance(category, SafetyFilterCategory):
+            parsed[cat] = category
+        elif isinstance(category, dict):
+            parsed[cat] = SafetyFilterCategory.from_dict(category)
+        else:
+            parsed[cat] = None
+    return parsed
+
+
+def _build_azure_config(categories: dict) -> AzureContentFilter:
+    return AzureContentFilter(
+        violence=categories["violence"].to_proto(),
+        hate=categories["hate"].to_proto(),
+        sexual=categories["sexual"].to_proto(),
+        self_harm=categories["self_harm"].to_proto(),
+    )
+
+
+def _build_update_content_filter_proto(
+    enabled: bool, filter_type: str, categories: dict
+) -> ContentFilterSettings_UpdateContentFilterSettings:
+    return ContentFilterSettings_UpdateContentFilterSettings(
+        type=filter_type,
+        azure_config=_build_azure_config(categories),
+        disabled=not enabled,
+    )
+
+
+@dataclass
+class _BaseSafetyFilters(YamlResource):
+    """Shared logic for project-level and channel-level safety filters."""
+
+    enabled: bool = True
+    filter_type: str = _FILTER_TYPE
+    categories: Optional[dict] = None
+
+    def __post_init__(self) -> None:
+        """Parse raw category dicts into SafetyFilterCategory objects."""
+        if self.categories is None:
+            return
+        self.categories = _parse_categories(self.categories)
+
+    def to_yaml_dict(self) -> dict:
+        # Type:azure is not displayed in YAML.
+        return {
+            "enabled": self.enabled,
+            "categories": {
+                cat: _category_to_yaml_dict(self.categories[cat])
+                for cat in _AZURE_CATEGORY_KEYS.keys()
+            },
+        }
+
+    @classmethod
+    def from_yaml_dict(
+        cls, yaml_dict: dict, resource_id: str, name: str, **kwargs
+    ) -> "_BaseSafetyFilters":
+        raw_categories = yaml_dict.get("categories", {})
+        translated = {
+            cat_name: _category_from_yaml_dict(cat_data) if isinstance(cat_data, dict) else {}
+            for cat_name, cat_data in raw_categories.items()
+        }
+        return cls(
+            resource_id=resource_id,
+            name=name,
+            enabled=yaml_dict.get("enabled", True),
+            filter_type=_FILTER_TYPE,  # Populated from default const.
+            categories=translated,
+        )
+
+    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+        if self.categories is None:
+            raise ValueError("Safety filter config is missing 'categories'.")
+
+        for cat in _AZURE_CATEGORY_KEYS:
+            if cat not in self.categories or self.categories[cat] is None:
+                raise ValueError(
+                    f"Missing required safety filter category '{cat}'. "
+                    f"All of {', '.join(_AZURE_CATEGORY_KEYS.keys())} must be provided."
+                )
+
+        for cat_name, cat in self.categories.items():
+            if cat.enabled is None:
+                raise ValueError(
+                    f"Missing required field 'enabled' for safety filter category '{cat_name}'."
+                )
+            if cat.precision is None:
+                raise ValueError(
+                    f"Missing required field 'level' for safety filter category '{cat_name}'."
+                )
+            if cat.precision not in PRECISION_MAPPING:
+                valid_levels = sorted(PRECISION_MAPPING.values())
+                raise ValueError(
+                    f"Invalid level set '{cat.precision}' for category '{cat_name}'. "
+                    f"Must be one of: {', '.join(valid_levels)}"
+                )
+
+    def build_create_proto(self) -> Message:
+        raise NotImplementedError("Create operation not supported for safety filters.")
+
+    def build_delete_proto(self) -> Message:
+        raise NotImplementedError("Delete operation not supported for safety filters.")
+
+
+@dataclass
+class GeneralSafetyFilters(_BaseSafetyFilters):
+    """Resource class for managing general (project-level) safety filter settings."""
+
+    @property
+    def file_path(self) -> str:
+        return os.path.join("agent_settings", "safety_filters.yaml")
+
+    @property
+    def command_type(self) -> str:
+        return "content_filter_settings"
+
+    @property
+    def update_command_type(self) -> str:
+        return "update_content_filter_settings"
+
+    def build_update_proto(self) -> ContentFilterSettings_UpdateContentFilterSettings:
+        return _build_update_content_filter_proto(self.enabled, self.filter_type, self.categories)
+
+    @staticmethod
+    def discover_resources(base_path: str) -> list[str]:
+        file_path = os.path.join(base_path, "agent_settings", "safety_filters.yaml")
+        if not os.path.exists(file_path):
+            return []
+        return [file_path]
+
+
+@dataclass
+class ChannelSafetyFilters(_BaseSafetyFilters):
+    """Base class for channel-level safety filter settings. Subclass for voice/chat."""
+
+    channel_type: ClassVar[ChannelType] = ChannelType.VOICE
+    channel_subpath: ClassVar[str] = "voice"
+
+    @property
+    def file_path(self) -> str:
+        """Get the file path for the channel safety filters resource."""
+        return os.path.join(self.channel_subpath, "safety_filters.yaml")
+
+    @property
+    def command_type(self) -> str:
+        """Get the command type for the resource."""
+        return f"{self.channel_subpath}_safety_filters"
+
+    @property
+    def update_command_type(self) -> str:
+        """Get the command type for updating the resource."""
+        return "channel_update_safety_filters"
+
+    def build_update_proto(self) -> Channel_UpdateSafetyFilters:
+        """Create a proto for updating the resource."""
+        return Channel_UpdateSafetyFilters(
+            channel_type=self.channel_type,
+            safety_filters=_build_update_content_filter_proto(
+                self.enabled, self.filter_type, self.categories
+            ),
+        )
+
+    def build_create_proto(self) -> Message:
+        """Create a proto for creating the resource."""
+        raise NotImplementedError("Create operation not supported for channel safety filters.")
+
+    def build_delete_proto(self) -> Message:
+        """Create a proto for deleting the resource."""
+        raise NotImplementedError("Delete operation not supported for channel safety filters.")
+
+    @classmethod
+    def discover_resources(cls, base_path: str) -> list[str]:
+        """Discover resources of this type in the given base path."""
+        file_path = os.path.join(base_path, cls.channel_subpath, "safety_filters.yaml")
+        if not os.path.exists(file_path):
+            return []
+        return [file_path]
+
+
+@dataclass
+class VoiceSafetyFilters(ChannelSafetyFilters):
+    """Voice channel safety filter settings."""
+
+    channel_type: ClassVar[ChannelType] = ChannelType.VOICE
+    channel_subpath: ClassVar[str] = "voice"
+
+
+@dataclass
+class ChatSafetyFilters(ChannelSafetyFilters):
+    """Chat (web chat) channel safety filter settings."""
+
+    channel_type: ClassVar[ChannelType] = ChannelType.WEB_CHAT
+    channel_subpath: ClassVar[str] = "chat"
