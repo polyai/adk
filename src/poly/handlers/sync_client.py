@@ -223,13 +223,9 @@ class SyncClientHandler:
         parsed = {}
         for cat, proj_key in category_mapping.items():
             category_data = sf_config.get(proj_key, {})
-            # Error raising to move to validation step:
-            # VALIDATE: No missing safety filter categories i.e. violence, sexual etc.
-            # VALIDATE: Correct type (dict) for safety filter category.
-            # VALIDATE: No missing field for safety filter category i.e. missing precision/isActive in 'violence'.
             parsed[cat] = SafetyFilterCategory(
                 enabled=category_data.get("isActive", False),
-                precision=category_data.get("precision", "medium"),
+                precision=category_data.get("precision", "MEDIUM"),
             )
         return parsed
 

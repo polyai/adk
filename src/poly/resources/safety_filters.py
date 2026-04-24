@@ -31,8 +31,8 @@ _FILTER_TYPE = "azure"
 
 @dataclass
 class SafetyFilterCategory:
-    enabled: bool
-    precision: str
+    enabled: Optional[bool] = None
+    precision: Optional[str] = None
 
     def to_dict(self) -> dict:
         """Serialize using internal (backend) field names."""
@@ -40,17 +40,12 @@ class SafetyFilterCategory:
 
     @classmethod
     def from_dict(cls, data: dict) -> "SafetyFilterCategory":
-        """Construct from a dict using internal (backend) field names."""
-        for required in ("enabled", "precision"):
-            if required not in data:
-                raise ValueError(
-                    f"Missing required field '{required}' in safety filter category config."
-                )
-        precision = data["precision"]
-        if precision not in PRECISION_MAPPING:
-            valid_precisions = ", ".join(sorted(PRECISION_MAPPING.keys()))
-            raise ValueError(f"Invalid precision '{precision}'. Must be one of: {valid_precisions}")
-        return cls(enabled=data["enabled"], precision=precision)
+        """Construct from a dict using internal (backend) field names.
+
+        Missing or invalid values are stored as-is; validation is deferred
+        to ``_BaseSafetyFilters.validate()``.
+        """
+        return cls(enabled=data.get("enabled"), precision=data.get("precision"))
 
     def to_proto(self) -> AzureContentFilterCategory:
         return AzureContentFilterCategory(
@@ -67,37 +62,33 @@ def _category_to_yaml_dict(category: SafetyFilterCategory) -> dict:
     }
 
 
-def _category_from_yaml_dict(data: dict, cat_name: str) -> dict:
-    """Translate a YAML/UI-vocab category dict to internal-vocab dict."""
-    for required in ("enabled", "level"):
-        if required not in data:
-            raise ValueError(
-                f"Missing required field '{required}' for safety filter category '{cat_name}'."
-            )
-    level = data["level"]
-    if level not in PRECISION_MAPPING_INVERSE:
-        valid_levels = ", ".join(sorted(PRECISION_MAPPING_INVERSE.keys()))
-        raise ValueError(f"Invalid level '{level}'. Must be one of: {valid_levels}")
-    return {"enabled": data["enabled"], "precision": PRECISION_MAPPING_INVERSE[level]}
+def _category_from_yaml_dict(data: dict) -> dict:
+    """Translate a YAML/UI-vocab category dict to internal-vocab dict.
+
+    Missing or unrecognized values are passed through as None.
+    """
+    level = data.get("level")
+    precision = PRECISION_MAPPING_INVERSE.get(level) if level is not None else None
+    return {"enabled": data.get("enabled"), "precision": precision}
 
 
 def _parse_categories(raw: dict) -> dict:
+    """Parse raw category dicts into SafetyFilterCategory objects.
+
+    Missing categories are stored as None.
+    """
     parsed = {}
     for cat in _AZURE_CATEGORY_KEYS.keys():
         if cat not in raw:
-            raise ValueError(
-                f"Missing required safety filter category '{cat}'. "
-                f"All of {', '.join(_AZURE_CATEGORY_KEYS.keys())} must be provided."
-            )
+            parsed[cat] = None
+            continue
         category = raw[cat]
         if isinstance(category, SafetyFilterCategory):
             parsed[cat] = category
         elif isinstance(category, dict):
             parsed[cat] = SafetyFilterCategory.from_dict(category)
         else:
-            raise ValueError(
-                f"Safety filter category '{cat}' must be a dict, got {type(category).__name__}."
-            )
+            parsed[cat] = None
     return parsed
 
 
@@ -148,32 +139,44 @@ class _BaseSafetyFilters(YamlResource):
     def from_yaml_dict(
         cls, yaml_dict: dict, resource_id: str, name: str, **kwargs
     ) -> "_BaseSafetyFilters":
-        for required in ("enabled", "categories"):
-            if required not in yaml_dict:
-                raise ValueError(
-                    f"Missing required field '{required}' in safety filter config: {yaml_dict}."
-                )
-        raw_categories = yaml_dict["categories"]
+        raw_categories = yaml_dict.get("categories", {})
         translated = {
-            cat_name: _category_from_yaml_dict(cat_data, cat_name)
+            cat_name: _category_from_yaml_dict(cat_data) if isinstance(cat_data, dict) else {}
             for cat_name, cat_data in raw_categories.items()
         }
         return cls(
             resource_id=resource_id,
             name=name,
-            enabled=yaml_dict["enabled"],
+            enabled=yaml_dict.get("enabled", True),
             filter_type=_FILTER_TYPE,  # Populated from default const.
             categories=translated,
         )
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
-        valid_precisions = PRECISION_MAPPING.keys()  # LOOSE, MEDIUM, STRICT
-        valid_levels = PRECISION_MAPPING.values()  # lenient, medium, strict (for error message)
+        if self.categories is None:
+            raise ValueError("Safety filter config is missing 'categories'.")
+
+        for cat in _AZURE_CATEGORY_KEYS:
+            if cat not in self.categories or self.categories[cat] is None:
+                raise ValueError(
+                    f"Missing required safety filter category '{cat}'. "
+                    f"All of {', '.join(_AZURE_CATEGORY_KEYS.keys())} must be provided."
+                )
+
         for cat_name, cat in self.categories.items():
-            if cat.precision not in valid_precisions:
+            if cat.enabled is None:
+                raise ValueError(
+                    f"Missing required field 'enabled' for safety filter category '{cat_name}'."
+                )
+            if cat.precision is None:
+                raise ValueError(
+                    f"Missing required field 'level' for safety filter category '{cat_name}'."
+                )
+            if cat.precision not in PRECISION_MAPPING:
+                valid_levels = sorted(PRECISION_MAPPING.values())
                 raise ValueError(
                     f"Invalid level set '{cat.precision}' for category '{cat_name}'. "
-                    f"Must be one of: {', '.join(sorted(valid_levels))}"
+                    f"Must be one of: {', '.join(valid_levels)}"
                 )
 
     def build_create_proto(self) -> Message:

@@ -6068,14 +6068,15 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertEqual(d["categories"]["sexual"]["level"], "lenient")
         self.assertNotIn("precision", d["categories"]["sexual"])
 
-    def test_from_yaml_dict_missing_top_level_fields_raises(self):
-        """Missing top-level YAML fields raise ValueError."""
+    def test_from_yaml_dict_missing_top_level_fields_deferred_to_validate(self):
+        """Missing top-level YAML fields are caught by validate(), not from_yaml_dict."""
+        sf = GeneralSafetyFilters.from_yaml_dict({}, resource_id="sf-1", name="safety_filters")
         with self.assertRaises(ValueError) as cm:
-            GeneralSafetyFilters.from_yaml_dict({}, resource_id="sf-1", name="safety_filters")
-        self.assertIn("Missing required field", str(cm.exception))
+            sf.validate()
+        self.assertIn("Missing required safety filter category", str(cm.exception))
 
-    def test_from_yaml_dict_missing_category_raises(self):
-        """Missing a required category raises ValueError."""
+    def test_from_yaml_dict_missing_category_deferred_to_validate(self):
+        """Missing a required category is caught by validate(), not from_yaml_dict."""
         yaml_dict = {
             "enabled": True,
             "type": "azure",
@@ -6086,14 +6087,15 @@ class SafetyFiltersTests(unittest.TestCase):
                 # self_harm missing
             },
         }
+        sf = GeneralSafetyFilters.from_yaml_dict(
+            yaml_dict, resource_id="sf-1", name="safety_filters"
+        )
         with self.assertRaises(ValueError) as cm:
-            GeneralSafetyFilters.from_yaml_dict(
-                yaml_dict, resource_id="sf-1", name="safety_filters"
-            )
+            sf.validate()
         self.assertIn("self_harm", str(cm.exception))
 
-    def test_from_yaml_dict_missing_category_field_raises(self):
-        """Missing a required field inside a category raises ValueError."""
+    def test_from_yaml_dict_missing_category_field_deferred_to_validate(self):
+        """Missing a required field inside a category is caught by validate()."""
         yaml_dict = {
             "enabled": True,
             "type": "azure",
@@ -6104,35 +6106,55 @@ class SafetyFiltersTests(unittest.TestCase):
                 "self_harm": {"enabled": True, "level": "strict"},
             },
         }
+        sf = GeneralSafetyFilters.from_yaml_dict(
+            yaml_dict, resource_id="sf-1", name="safety_filters"
+        )
         with self.assertRaises(ValueError) as cm:
-            GeneralSafetyFilters.from_yaml_dict(
-                yaml_dict, resource_id="sf-1", name="safety_filters"
-            )
+            sf.validate()
         self.assertIn("enabled", str(cm.exception))
 
-    def test_parse_safety_filter_config_missing_category_raises(self):
-        """Missing a required azure category raises ValueError."""
+    def test_from_yaml_dict_non_dict_category_deferred_to_validate(self):
+        """A non-dict category value (e.g. bare string) is caught by validate()."""
+        yaml_dict = {
+            "enabled": True,
+            "categories": {
+                "violence": "strict",  # wrong type — should be a mapping
+                "hate": {"enabled": False, "level": "medium"},
+                "sexual": {"enabled": False, "level": "lenient"},
+                "self_harm": {"enabled": True, "level": "strict"},
+            },
+        }
+        sf = GeneralSafetyFilters.from_yaml_dict(
+            yaml_dict, resource_id="sf-1", name="safety_filters"
+        )
+        with self.assertRaises(ValueError) as cm:
+            sf.validate()
+        self.assertIn("violence", str(cm.exception))
+
+    def test_parse_safety_filter_config_missing_category_uses_defaults(self):
+        """Missing an azure category gets default values (deferred to validate)."""
         azure = {
             "violence": {"isActive": True, "precision": "STRICT"},
             "hate": {"isActive": False, "precision": "MEDIUM"},
             "sexual": {"isActive": False, "precision": "LOOSE"},
             # selfHarm missing
         }
-        with self.assertRaises(ValueError) as cm:
-            SyncClientHandler._parse_safety_filter_config(azure)
-        self.assertIn("selfHarm", str(cm.exception))
+        result = SyncClientHandler._parse_safety_filter_config(azure)
+        self.assertIn("self_harm", result)
+        self.assertFalse(result["self_harm"].enabled)
+        self.assertEqual(result["self_harm"].precision, "MEDIUM")
 
-    def test_parse_safety_filter_config_missing_field_raises(self):
-        """Missing a required field inside an azure category raises ValueError."""
+    def test_parse_safety_filter_config_missing_field_uses_defaults(self):
+        """Missing a field inside an azure category gets default value."""
         azure = {
             "violence": {"precision": "STRICT"},  # isActive missing
             "hate": {"isActive": False, "precision": "MEDIUM"},
             "sexual": {"isActive": False, "precision": "LOOSE"},
             "selfHarm": {"isActive": True, "precision": "STRICT"},
         }
-        with self.assertRaises(ValueError) as cm:
-            SyncClientHandler._parse_safety_filter_config(azure)
-        self.assertIn("isActive", str(cm.exception))
+        result = SyncClientHandler._parse_safety_filter_config(azure)
+        self.assertFalse(result["violence"].enabled)
+        self.assertEqual(result["violence"].precision, "STRICT")
 
     def _make_yaml_categories(self) -> dict:
         """Return a YAML-shaped categories dict with all four keys populated."""
@@ -6212,46 +6234,58 @@ class SafetyFiltersTests(unittest.TestCase):
         defaults.update(kwargs)
         return ChatSafetyFilters(**defaults)
 
-    def test_from_yaml_dict_missing_any_category_key_raises(self):
-        """Missing any single category key in YAML raises ValueError naming that key."""
+    def test_from_yaml_dict_missing_any_category_key_deferred_to_validate(self):
+        """Missing any single category key in YAML is caught by validate()."""
         for missing in ("violence", "hate", "sexual", "self_harm"):
             with self.subTest(missing=missing):
                 categories = self._make_yaml_categories()
                 del categories[missing]
                 yaml_dict = {"enabled": True, "categories": categories}
+                sf = GeneralSafetyFilters.from_yaml_dict(
+                    yaml_dict, resource_id="sf-1", name="safety_filters"
+                )
                 with self.assertRaises(ValueError) as cm:
-                    GeneralSafetyFilters.from_yaml_dict(
-                        yaml_dict, resource_id="sf-1", name="safety_filters"
-                    )
+                    sf.validate()
                 self.assertIn(missing, str(cm.exception))
 
-    def test_from_yaml_dict_empty_categories_raises(self):
-        """An empty `categories` dict in YAML raises ValueError for the first missing key."""
+    def test_from_yaml_dict_empty_categories_deferred_to_validate(self):
+        """An empty `categories` dict in YAML is caught by validate()."""
         yaml_dict = {"enabled": True, "type": "azure", "categories": {}}
+        sf = GeneralSafetyFilters.from_yaml_dict(
+            yaml_dict, resource_id="sf-1", name="safety_filters"
+        )
         with self.assertRaises(ValueError) as cm:
-            GeneralSafetyFilters.from_yaml_dict(
-                yaml_dict, resource_id="sf-1", name="safety_filters"
-            )
+            sf.validate()
         self.assertIn("violence", str(cm.exception))
 
-    def test_parse_safety_filter_config_missing_any_key_raises(self):
-        """Missing any single Azure category key raises ValueError naming that key."""
+    def test_parse_safety_filter_config_missing_any_key_uses_defaults(self):
+        """Missing any single Azure category key gets default values."""
+        cat_to_internal = {
+            "violence": "violence",
+            "hate": "hate",
+            "sexual": "sexual",
+            "selfHarm": "self_harm",
+        }
         for missing in ("violence", "hate", "sexual", "selfHarm"):
             with self.subTest(missing=missing):
                 azure = self._make_azure_categories()
                 del azure[missing]
-                with self.assertRaises(ValueError) as cm:
-                    SyncClientHandler._parse_safety_filter_config(azure)
-                self.assertIn(missing, str(cm.exception))
+                result = SyncClientHandler._parse_safety_filter_config(azure)
+                internal_key = cat_to_internal[missing]
+                self.assertIn(internal_key, result)
+                self.assertFalse(result[internal_key].enabled)
+                self.assertEqual(result[internal_key].precision, "MEDIUM")
 
-    def test_parse_safety_filter_config_empty_raises(self):
-        """An empty Azure config raises ValueError for the first missing category."""
-        with self.assertRaises(ValueError) as cm:
-            SyncClientHandler._parse_safety_filter_config({})
-        self.assertIn("violence", str(cm.exception))
+    def test_parse_safety_filter_config_empty_uses_defaults(self):
+        """An empty Azure config populates all categories with defaults."""
+        result = SyncClientHandler._parse_safety_filter_config({})
+        for cat in ("violence", "hate", "sexual", "self_harm"):
+            self.assertIn(cat, result)
+            self.assertFalse(result[cat].enabled)
+            self.assertEqual(result[cat].precision, "MEDIUM")
 
-    def test_constructor_missing_any_category_key_raises(self):
-        """Constructing GeneralSafetyFilters with an incomplete categories dict raises.
+    def test_constructor_missing_any_category_key_deferred_to_validate(self):
+        """Constructing with an incomplete categories dict defers error to validate().
 
         This is the path exercised by the project status-file cache read-back
         (see project._load_resources_from_status_dict), which passes a raw
@@ -6261,22 +6295,24 @@ class SafetyFiltersTests(unittest.TestCase):
             with self.subTest(missing=missing):
                 categories = self._make_internal_categories()
                 del categories[missing]
+                sf = GeneralSafetyFilters(
+                    resource_id="sf-1",
+                    name="safety_filters",
+                    categories=categories,
+                )
                 with self.assertRaises(ValueError) as cm:
-                    GeneralSafetyFilters(
-                        resource_id="sf-1",
-                        name="safety_filters",
-                        categories=categories,
-                    )
+                    sf.validate()
                 self.assertIn(missing, str(cm.exception))
 
-    def test_constructor_empty_categories_raises(self):
-        """Constructing with an empty categories dict raises for the first missing key."""
+    def test_constructor_empty_categories_deferred_to_validate(self):
+        """Constructing with an empty categories dict defers error to validate()."""
+        sf = GeneralSafetyFilters(
+            resource_id="sf-1",
+            name="safety_filters",
+            categories={},
+        )
         with self.assertRaises(ValueError) as cm:
-            GeneralSafetyFilters(
-                resource_id="sf-1",
-                name="safety_filters",
-                categories={},
-            )
+            sf.validate()
         self.assertIn("violence", str(cm.exception))
 
     def test_safety_filter_category_dict_roundtrip_uses_internal_vocab(self):
@@ -6296,11 +6332,10 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertEqual(cat2.enabled, cat.enabled)
         self.assertEqual(cat2.precision, cat.precision)
 
-    def test_safety_filter_category_from_dict_missing_precision_raises(self):
-        """SafetyFilterCategory.from_dict raises when 'precision' is missing."""
-        with self.assertRaises(ValueError) as cm:
-            SafetyFilterCategory.from_dict({"enabled": True})
-        self.assertIn("precision", str(cm.exception))
+    def test_safety_filter_category_from_dict_missing_precision_stores_none(self):
+        """SafetyFilterCategory.from_dict stores None when 'precision' is missing."""
+        cat = SafetyFilterCategory.from_dict({"enabled": True})
+        self.assertIsNone(cat.precision)
 
     def test_safety_filter_category_from_dict_invalid_precision_does_not_raise(self):
         """SafetyFilterCategory.from_dict accepts an invalid precision (deferred to validate)."""
