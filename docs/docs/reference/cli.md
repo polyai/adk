@@ -34,6 +34,15 @@ Initialize a new Agent Studio project locally.
 
 `poly init` creates the project directory at `{base_path}/{account_id}/{project_id}` and immediately pulls the current configuration from Agent Studio. After it completes, change into the project directory before running any other commands.
 
+The human-readable project name is stored in `project.yaml` alongside the `project_id`, `account_id`, and `region`:
+
+~~~yaml
+project_id: my-project
+account_id: my-workspace
+region: us-1
+project_name: My Project
+~~~
+
 Examples:
 
 ~~~bash
@@ -42,6 +51,17 @@ poly init --region us-1 --account_id 123 --project_id my_project
 poly init --base-path /path/to/projects
 poly init --format
 ~~~
+
+#### Error handling
+
+If the account or project ID is invalid or inaccessible, `poly init` returns a descriptive error and cleans up any partially created directories so no empty folders are left behind.
+
+| Situation | Error message |
+|---|---|
+| Project not found | `Project '<project_id>' not found in account '<account_id>'.` |
+| Permission denied | `Forbidden: you do not have permission to access project '<project_id>' in account '<account_id>'.` |
+
+When using `--json`, the response includes `{ "success": false, "error": "..." }` with the same message.
 
 ### `poly pull`
 
