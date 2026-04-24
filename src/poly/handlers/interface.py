@@ -2,7 +2,7 @@
 
 Copyright PolyAI Limited"""
 
-from typing import Any, Optional
+from typing import Any, NoReturn, Optional
 
 import requests
 from google.protobuf.message import Message
@@ -29,6 +29,32 @@ class AgentStudioInterface:
     account_id: Optional[str] = None
     project_id: Optional[str] = None
     sync_client: Optional[SyncClientHandler] = None
+
+    def _handle_api_error(self, e: Exception) -> NoReturn:
+        """Translate an API HTTP error into a user-facing ValueError.
+
+        Extracts the error_code from the response body and raises a ValueError
+        with a descriptive message. Always raises.
+
+        Args:
+            e: The HTTPError or SourcererAPIError to translate
+
+        Raises:
+            ValueError: Always raised with a user-facing message
+        """
+        error_code = PlatformAPIHandler.extract_error_code(e)
+
+        if error_code == "FORBIDDEN":
+            raise ValueError(
+                f"Forbidden: you do not have permission to access "
+                f"project '{self.project_id}' in account '{self.account_id}'."
+            ) from e
+        elif error_code == "DEPLOYMENT_NOT_FOUND":
+            raise ValueError(
+                f"Project '{self.project_id}' not found in account '{self.account_id}'."
+            ) from e
+        else:
+            raise ValueError(f"API error: {e}") from e
 
     @property
     def branch_id(self) -> Optional[str]:
@@ -124,7 +150,10 @@ class AgentStudioInterface:
             dict[type[Resource], dict[str, Resource]]: A dictionary mapping resource types to
                 their resources
         """
-        return self.sync_client.pull_deployment_resources(deployment_id)
+        try:
+            return self.sync_client.pull_deployment_resources(deployment_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
 
     def pull_resources(
         self, projection_json: Optional[dict[str, Any]] = None
@@ -147,7 +176,7 @@ class AgentStudioInterface:
         try:
             return self.sync_client.pull_resources()
         except (requests.HTTPError, SourcererAPIError) as e:
-            PlatformAPIHandler.translate_http_error(e, self.project_id, self.account_id)
+            self._handle_api_error(e)
 
     def push_resources(
         self,
@@ -208,12 +237,15 @@ class AgentStudioInterface:
         Returns:
             list[Message]: A list of queued Command protobuf messages.
         """
-        return self.sync_client.queue_resources(
-            deleted_resources=deleted_resources,
-            new_resources=new_resources,
-            updated_resources=updated_resources,
-            email=email,
-        )
+        try:
+            return self.sync_client.queue_resources(
+                deleted_resources=deleted_resources,
+                new_resources=new_resources,
+                updated_resources=updated_resources,
+                email=email,
+            )
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
 
     def send_queued_commands(self) -> bool:
         """Send all queued commands as a batch and clear the queue.
@@ -221,11 +253,17 @@ class AgentStudioInterface:
         Returns:
             bool: True if the commands were sent successfully, False otherwise
         """
-        return self.sync_client.send_queued_commands()
+        try:
+            return self.sync_client.send_queued_commands()
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
 
     def clear_command_queue(self) -> None:
         """Clear all queued commands without sending."""
-        self.sync_client.clear_command_queue()
+        try:
+            self.sync_client.clear_command_queue()
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
 
     def get_queued_commands(self) -> list[Message]:
         """Get all queued commands.
@@ -233,7 +271,10 @@ class AgentStudioInterface:
         Returns:
             list[Message]: A list of queued Command protobuf messages.
         """
-        return self.sync_client.get_queued_commands()
+        try:
+            return self.sync_client.get_queued_commands()
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
 
     def get_branches(self) -> dict[str, str]:
         """Get a list of branches.
@@ -244,7 +285,10 @@ class AgentStudioInterface:
         Returns:
             dict[str, str]: A dictionary mapping branch names to branch IDs
         """
-        return self.sync_client.get_branches()
+        try:
+            return self.sync_client.get_branches()
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
 
     def create_branch(self, branch_name: Optional[str] = None) -> str:
         """Create a new branch in the project.
@@ -255,7 +299,10 @@ class AgentStudioInterface:
         Returns:
             str: The ID of the newly created branch
         """
-        return self.sync_client.create_branch(branch_name)
+        try:
+            return self.sync_client.create_branch(branch_name)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
 
     def switch_branch(self, branch_id: str) -> bool:
         """Switch to a different branch in the project.
@@ -266,7 +313,10 @@ class AgentStudioInterface:
         Returns:
             bool: True if the branch was switched successfully, False otherwise
         """
-        return self.sync_client.switch_branch(branch_id)
+        try:
+            return self.sync_client.switch_branch(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
 
     def merge_branch(
         self, message: str, conflict_resolutions: Optional[list[dict[str, Any]]] = None
@@ -285,7 +335,10 @@ class AgentStudioInterface:
             list[dict[str, str]]: A list of conflict information if the merge failed, empty list if successful
             list[dict[str, str]]: A list of error information if the merge failed, empty list if successful
         """
-        return self.sync_client.merge_branch(message, conflict_resolutions)
+        try:
+            return self.sync_client.merge_branch(message, conflict_resolutions)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
 
     def delete_branch(self, branch_id: str) -> bool:
         """Delete a branch in the project.
