@@ -5,6 +5,10 @@
   "author": {
     "name": "PolyAI"
   },
+  "owner": {
+    "name": "PolyAI",
+    "email": "developers@poly-ai.com"
+  },
   "repository": "https://github.com/polyai/adk",
   "license": "MIT",
   "keywords": ["polyai", "adk", "voice-agent", "agent-studio"]

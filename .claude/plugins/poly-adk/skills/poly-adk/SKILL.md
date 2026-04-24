@@ -10,6 +10,118 @@ Poly-ADK is a CLI tool for managing PolyAI Agent Studio projects locally. It pro
 
 Each project defines an AI voice or webchat agent. Resources in the project (flows, functions, topics, etc.) control the agent's runtime behavior.
 
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `poly init` | Initialize a new project (interactive or with `--region`, `--account_id`, `--project_id`) |
+| `poly pull` | Pull remote config into local project (`-f` to force overwrite) |
+| `poly push` | Push local changes to Agent Studio (`-f` to force, `--dry-run` to preview, `--skip-validation`) |
+| `poly status` | List changed files |
+| `poly diff` | Show diffs (optionally for specific files, deployment hashes, or between versions with `--before`/`--after`) |
+| `poly revert` | Revert local changes (all by default, or specific files) |
+| `poly branch` | Branch management: `list`, `create`, `switch`, `current`, `delete`, `merge` |
+| `poly format` | Format resource files (ruff for Python, ruamel.yaml for YAML/JSON) |
+| `poly validate` | Validate project configuration locally |
+| `poly review` | Diff review page: `create`, `list`, `delete` |
+| `poly deployments list` | List deployments with versions and active environments |
+| `poly chat` | Interactive chat session with the agent (`-e sandbox/live`, `--channel voice/webchat`, `--metadata`) |
+| `poly docs` | Output resource documentation (`poly docs flows functions`, or `--all`) |
+
+
+# Workflow Guide
+
+Prerequisites:
+- Python 3.14 installed locally
+- Poly CLI installed (`pip install poly-adk`)
+- Access to a PolyAI Agent Studio account and project
+- API Key with permissions to manage the project set to environment variable `POLY_ADK_KEY`
+
+## Init and pull project
+
+To load a new project, run `poly init` and follow the prompts, or pass `--region`, `--account_id`, and `--project_id` directly. This creates a local folder with the project config.
+
+To pull the latest config from Agent Studio: `poly pull`. Use `-f` to force overwrite local changes.
+
+Switch branches with `poly branch switch {name}`. This also pulls the latest config for that branch.
+
+Commands must be run from within the project folder, or use `--path`. Always pass `--json` for machine-readable output. Use `-h` for flag details.
+
+## Branch management
+
+Always create branches from `main`. Use descriptive names (e.g. `add-booking-flow`, `update-hours-topic`).
+
+```
+poly branch list --json
+poly branch current --json
+poly branch create {name} --json   # must be on main
+poly branch switch {name} --json
+poly branch delete {name} --json
+```
+
+## Making edits
+
+Before writing any resource, run `poly docs {resource_type}` to get the exact format, required fields, and examples.
+
+Track and inspect changes as you go:
+```
+poly status --json       # list changed files
+poly diff --json         # show full diff
+poly validate --json     # validate locally before pushing
+```
+
+## Pushing changes
+
+```
+poly push --json                   # push local changes (pulls and merges first)
+poly push --dry-run --json         # preview what would be pushed
+poly push -f --json                # force overwrite remote
+```
+
+If `success` is false and `files_with_conflicts` is non-empty, resolve the conflict markers in the affected files and push again.
+
+## Testing changes
+
+To verify changes, use the `poly chat` command. This starts a chat with your current branch's remote config, always push before testing.
+
+Start a session and send the first message — the session stays open when using `--json`:
+```
+poly chat --json -m "first message"
+```
+
+Continue turn by turn using the `conversation_id` from the response:
+```
+poly chat --json --conv-id {conversation_id} -m "next message"
+```
+
+To explicitly end the session, use: "/exit"
+```
+poly chat --json --conv-id {conversation_id} -m "/exit"
+```
+
+`/exit` closes the session.
+
+Use flags to inspect what the agent is doing each turn:
+```
+--flows       show active flow and step
+--functions   show function/tool calls
+--metadata    show flows, functions, and state (all of the above)
+```
+
+Test against other environments with `-e pre-release` or `-e live`.
+
+## Merging
+
+Before merging, always show the user the full diff and ask them to confirm:
+```
+poly diff --before main --after {branch_name} --json
+poly branch merge {name} --json
+```
+
+Use `poly review create --before main --after {branch_name}` to generate a shareable diff review page if the user wants to review in the browser.
+
+# Quick Reference
+
 ## Project Structure
 
 ```
@@ -55,106 +167,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 └── project.yaml                        # Project metadata (region, account_id, project_id)
 ```
 
-## CLI Commands
-
-| Command | Description |
-|---------|-------------|
-| `poly init` | Initialize a new project (interactive or with `--region`, `--account_id`, `--project_id`) |
-| `poly pull` | Pull remote config into local project (`-f` to force overwrite) |
-| `poly push` | Push local changes to Agent Studio (`-f` to force, `--dry-run` to preview, `--skip-validation`) |
-| `poly status` | List changed files |
-| `poly diff` | Show diffs (optionally for specific files, deployment hashes, or between versions with `--before`/`--after`) |
-| `poly revert` | Revert local changes (all by default, or specific files) |
-| `poly branch` | Branch management: `list`, `create`, `switch`, `current`, `delete`, `merge` |
-| `poly format` | Format resource files (ruff for Python, ruamel.yaml for YAML/JSON) |
-| `poly validate` | Validate project configuration locally |
-| `poly review` | Diff review page: `create`, `list`, `delete` |
-| `poly deployments list` | List deployments with versions and active environments |
-| `poly chat` | Interactive chat session with the agent (`-e sandbox/live`, `--channel voice/webchat`, `--metadata`) |
-| `poly docs` | Output resource documentation (`poly docs flows functions`, or `--all`) |
-
-## Init and pull project
-
-To start a new project: `poly init` (interactive, or pass `--region`, `--account_id`, `--project_id`).
-
-To pull the latest config from Agent Studio: `poly pull`. Use `-f` to force overwrite local changes.
-
-Switch branches with `poly branch switch {name}`, then `poly pull` to get that branch's latest.
-
-Commands must be run from within the project folder, or use `--path`. Always pass `--json` for machine-readable output. Use `-h` for flag details.
-
-## Branch management
-
-Always create branches from `main`. Use descriptive names (e.g. `add-booking-flow`, `update-hours-topic`).
-
-```
-poly branch list --json
-poly branch current --json
-poly branch create {name} --json   # must be on main
-poly branch switch {name} --json
-poly branch delete {name} --json
-```
-
-## Making edits
-
-Before writing any resource, run `poly docs {resource_type}` to get the exact format, required fields, and examples.
-
-Track and inspect changes as you go:
-```
-poly status --json       # list changed files
-poly diff --json         # show full diff
-poly validate --json     # validate locally before pushing
-```
-
-## Pushing changes
-
-```
-poly push --json                   # push local changes (pulls and merges first)
-poly push --dry-run --json         # preview what would be pushed
-poly push -f --json                # force overwrite remote
-```
-
-If `success` is false and `files_with_conflicts` is non-empty, resolve the conflict markers in the affected files and push again.
-
-## Testing changes
-
-Start a session and send the first message — the session stays open when using `--json`:
-```
-poly chat --json -m "first message"
-```
-
-Continue turn by turn using the `conversation_id` from the response:
-```
-poly chat --json --conv-id {conversation_id} -m "next message"
-```
-
-To explicitly end the session, use: "/exit"
-```
-poly chat --json --conv-id {conversation_id} -m "/exit"
-```
-
-`/exit` closes the session.
-
-Use flags to inspect what the agent is doing each turn:
-```
---flows       show active flow and step
---functions   show function/tool calls
---metadata    show flows, functions, and state (all of the above)
-```
-
-Test against other environments with `-e sandbox` or `-e live`.
-
-## Merging
-
-Before merging, always show the user the full diff and ask them to confirm:
-```
-poly diff --before main --after {branch_name} --json
-poly branch merge {name} --json
-```
-
-Use `poly review create --before main --after {branch_name}` to generate a shareable diff review page if the user wants to review in the browser.
-
-## Resource Reference Syntax
+## Placeholders and Syntax
 
 These placeholders are used in prompts, rules, topics, and other text fields:
 
@@ -172,4 +185,4 @@ These placeholders are used in prompts, rules, topics, and other text fields:
 
 Run `poly docs {resource_type}` (e.g. `poly docs functions flows topics`) or `poly docs --all` to get the exact YAML/Python format, required fields, validation rules, and examples. **Always consult the docs before writing or editing a resource.**
 
-Available resource types: `functions`, `flows`, `topics`, `entities`, `agent_settings`, `handoffs`, `sms`, `variants`, `api_integrations`, `variables`, `voice_settings`, `chat_settings`, `speech_recognition`, `response_control`, `experimental_config`.
+Use only `poly docs` to get more basic information and list of all available resource docs.
