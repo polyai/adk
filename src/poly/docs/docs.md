@@ -15,6 +15,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │   ├── personality.yaml
 │   ├── role.yaml
 │   ├── rules.txt
+│   ├── safety_filters.yaml             # Optional - content moderation
 │   └── experimental_config.json        # Optional
 ├── config/                             # Configuration
 │   ├── api_integrations.yaml           # Optional
@@ -24,6 +25,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │   └── variant_attributes.yaml         # Optional
 ├── voice/                              # Voice channel settings
 │   ├── configuration.yaml              # Greeting, disclaimer, style prompt
+│   ├── safety_filters.yaml             # Optional - content moderation overrides
 │   ├── speech_recognition/
 │   │   ├── asr_settings.yaml           # Barge-in, interaction style
 │   │   ├── keyphrase_boosting.yaml     # Optional
@@ -32,7 +34,8 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │       ├── pronunciations.yaml         # Optional - TTS rules
 │       └── phrase_filtering.yaml       # Optional - stop keywords
 ├── chat/                               # Chat channel settings
-│   └── configuration.yaml              # Greeting, style prompt
+│   ├── configuration.yaml              # Greeting, style prompt
+│   └── safety_filters.yaml             # Optional - content moderation overrides
 ├── flows/                              # Optional - flow definitions
 │   └── {flow_name}/
 │       ├── flow_config.yaml
@@ -120,4 +123,5 @@ Resource-specific documentation is available via `poly docs {resource} [resource
 - [Variables](variables.md) - state variables referenced in code
 - [Speech Recognition](speech_recognition.md) - ASR settings, keyphrase boosting, transcript corrections
 - [Response Control](response_control.md) - pronunciations, phrase filters
+- [Safety Filters](safety_filters.md) - content moderation settings (violence, hate, sexual, self-harm)
 - [Experimental Config](experimental_config.md) - feature flags
