@@ -349,10 +349,7 @@ class AgentStudioInterface:
         Returns:
             bool: True if the branch was deleted successfully, False otherwise
         """
-        try:
-            return self.sync_client.delete_branch(branch_id)
-        except (requests.HTTPError, SourcererAPIError) as e:
-            self._handle_api_error(e)
+        return self.sync_client.delete_branch(branch_id)
 
     @staticmethod
     def create_chat(
@@ -437,10 +434,7 @@ class AgentStudioInterface:
         Returns:
             dict with 'artifactVersion', 'lambdaDeploymentVersion', etc.
         """
-        try:
-            return self.sync_client.get_branch_chat_info(branch_id)
-        except (requests.HTTPError, SourcererAPIError) as e:
-            self._handle_api_error(e)
+        return self.sync_client.get_branch_chat_info(branch_id)
 
     @staticmethod
     def create_draft_chat(
