@@ -50,7 +50,7 @@ from poly.resources.safety_filters import (
     ChatSafetyFilters,
     GeneralSafetyFilters,
     VoiceSafetyFilters,
-    parse_categories_from_azure_config,
+    SafetyFilterCategory,
 )
 from poly.resources.pronunciation import Pronunciation
 from poly.resources.resource import (

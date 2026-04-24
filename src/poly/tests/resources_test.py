@@ -28,8 +28,7 @@ from poly.resources.safety_filters import (
     ChatSafetyFilters,
     GeneralSafetyFilters,
     VoiceSafetyFilters,
-    _SafetyFilterCategory,
-    parse_categories_from_azure_config,
+    SafetyFilterCategory,
 )
 from poly.resources.channel_settings import (
     ChatGreeting,
@@ -6111,7 +6110,7 @@ class SafetyFiltersTests(unittest.TestCase):
             )
         self.assertIn("enabled", str(cm.exception))
 
-    def test_parse_categories_from_azure_config_missing_category_raises(self):
+    def test_parse_safety_filter_config_missing_category_raises(self):
         """Missing a required azure category raises ValueError."""
         azure = {
             "violence": {"isActive": True, "precision": "STRICT"},
@@ -6120,10 +6119,10 @@ class SafetyFiltersTests(unittest.TestCase):
             # selfHarm missing
         }
         with self.assertRaises(ValueError) as cm:
-            parse_categories_from_azure_config(azure)
+            SyncClientHandler._parse_safety_filter_config(azure)
         self.assertIn("selfHarm", str(cm.exception))
 
-    def test_parse_categories_from_azure_config_missing_field_raises(self):
+    def test_parse_safety_filter_config_missing_field_raises(self):
         """Missing a required field inside an azure category raises ValueError."""
         azure = {
             "violence": {"precision": "STRICT"},  # isActive missing
@@ -6132,7 +6131,7 @@ class SafetyFiltersTests(unittest.TestCase):
             "selfHarm": {"isActive": True, "precision": "STRICT"},
         }
         with self.assertRaises(ValueError) as cm:
-            parse_categories_from_azure_config(azure)
+            SyncClientHandler._parse_safety_filter_config(azure)
         self.assertIn("isActive", str(cm.exception))
 
     def _make_yaml_categories(self) -> dict:
@@ -6170,10 +6169,10 @@ class SafetyFiltersTests(unittest.TestCase):
             enabled=True,
             filter_type="azure",
             categories={
-                "violence": _SafetyFilterCategory(enabled=True, precision="STRICT"),
-                "hate": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
-                "sexual": _SafetyFilterCategory(enabled=False, precision="LOOSE"),
-                "self_harm": _SafetyFilterCategory(enabled=True, precision="STRICT"),
+                "violence": SafetyFilterCategory(enabled=True, precision="STRICT"),
+                "hate": SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "sexual": SafetyFilterCategory(enabled=False, precision="LOOSE"),
+                "self_harm": SafetyFilterCategory(enabled=True, precision="STRICT"),
             },
         )
         defaults.update(kwargs)
@@ -6187,10 +6186,10 @@ class SafetyFiltersTests(unittest.TestCase):
             enabled=True,
             filter_type="azure",
             categories={
-                "violence": _SafetyFilterCategory(enabled=True, precision="STRICT"),
-                "hate": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
-                "sexual": _SafetyFilterCategory(enabled=False, precision="LOOSE"),
-                "self_harm": _SafetyFilterCategory(enabled=True, precision="STRICT"),
+                "violence": SafetyFilterCategory(enabled=True, precision="STRICT"),
+                "hate": SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "sexual": SafetyFilterCategory(enabled=False, precision="LOOSE"),
+                "self_harm": SafetyFilterCategory(enabled=True, precision="STRICT"),
             },
         )
         defaults.update(kwargs)
@@ -6204,10 +6203,10 @@ class SafetyFiltersTests(unittest.TestCase):
             enabled=True,
             filter_type="azure",
             categories={
-                "violence": _SafetyFilterCategory(enabled=True, precision="STRICT"),
-                "hate": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
-                "sexual": _SafetyFilterCategory(enabled=False, precision="LOOSE"),
-                "self_harm": _SafetyFilterCategory(enabled=True, precision="STRICT"),
+                "violence": SafetyFilterCategory(enabled=True, precision="STRICT"),
+                "hate": SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "sexual": SafetyFilterCategory(enabled=False, precision="LOOSE"),
+                "self_harm": SafetyFilterCategory(enabled=True, precision="STRICT"),
             },
         )
         defaults.update(kwargs)
@@ -6235,20 +6234,20 @@ class SafetyFiltersTests(unittest.TestCase):
             )
         self.assertIn("violence", str(cm.exception))
 
-    def test_parse_categories_from_azure_config_missing_any_key_raises(self):
+    def test_parse_safety_filter_config_missing_any_key_raises(self):
         """Missing any single Azure category key raises ValueError naming that key."""
         for missing in ("violence", "hate", "sexual", "selfHarm"):
             with self.subTest(missing=missing):
                 azure = self._make_azure_categories()
                 del azure[missing]
                 with self.assertRaises(ValueError) as cm:
-                    parse_categories_from_azure_config(azure)
+                    SyncClientHandler._parse_safety_filter_config(azure)
                 self.assertIn(missing, str(cm.exception))
 
-    def test_parse_categories_from_azure_config_empty_raises(self):
+    def test_parse_safety_filter_config_empty_raises(self):
         """An empty Azure config raises ValueError for the first missing category."""
         with self.assertRaises(ValueError) as cm:
-            parse_categories_from_azure_config({})
+            SyncClientHandler._parse_safety_filter_config({})
         self.assertIn("violence", str(cm.exception))
 
     def test_constructor_missing_any_category_key_raises(self):
@@ -6281,33 +6280,32 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertIn("violence", str(cm.exception))
 
     def test_safety_filter_category_dict_roundtrip_uses_internal_vocab(self):
-        """_SafetyFilterCategory.to_dict -> from_dict roundtrips using backend vocab.
+        """SafetyFilterCategory.to_dict -> from_dict roundtrips using backend vocab.
 
         This is the path exercised by the project status-file cache (resource_to_dict),
         which serializes dataclasses by their field names. The category dict must
         therefore speak internal (enabled/precision) vocab, not UI (enabled/level).
         """
-        cat = _SafetyFilterCategory(enabled=True, precision="STRICT")
+        cat = SafetyFilterCategory(enabled=True, precision="STRICT")
         d = cat.to_dict()
 
         self.assertEqual(d, {"enabled": True, "precision": "STRICT"})
         self.assertNotIn("level", d)
 
-        cat2 = _SafetyFilterCategory.from_dict(d)
+        cat2 = SafetyFilterCategory.from_dict(d)
         self.assertEqual(cat2.enabled, cat.enabled)
         self.assertEqual(cat2.precision, cat.precision)
 
     def test_safety_filter_category_from_dict_missing_precision_raises(self):
-        """_SafetyFilterCategory.from_dict raises when 'precision' is missing."""
+        """SafetyFilterCategory.from_dict raises when 'precision' is missing."""
         with self.assertRaises(ValueError) as cm:
-            _SafetyFilterCategory.from_dict({"enabled": True})
+            SafetyFilterCategory.from_dict({"enabled": True})
         self.assertIn("precision", str(cm.exception))
 
-    def test_safety_filter_category_from_dict_invalid_precision_raises(self):
-        """_SafetyFilterCategory.from_dict raises when 'precision' is not a backend token."""
-        with self.assertRaises(ValueError) as cm:
-            _SafetyFilterCategory.from_dict({"enabled": True, "precision": "medium"})
-        self.assertIn("Invalid precision", str(cm.exception))
+    def test_safety_filter_category_from_dict_invalid_precision_does_not_raise(self):
+        """SafetyFilterCategory.from_dict accepts an invalid precision (deferred to validate)."""
+        cat = SafetyFilterCategory.from_dict({"enabled": True, "precision": "medium"})
+        self.assertEqual(cat.precision, "medium")
 
     def test_read_local_resource(self):
         """read_local_resource parses safety_filters from YAML correctly."""
@@ -6366,10 +6364,10 @@ categories:
             enabled=False,
             filter_type="azure",
             categories={
-                "violence": _SafetyFilterCategory(enabled=True, precision="STRICT"),
-                "hate": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
-                "sexual": _SafetyFilterCategory(enabled=False, precision="LOOSE"),
-                "self_harm": _SafetyFilterCategory(enabled=True, precision="MEDIUM"),
+                "violence": SafetyFilterCategory(enabled=True, precision="STRICT"),
+                "hate": SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "sexual": SafetyFilterCategory(enabled=False, precision="LOOSE"),
+                "self_harm": SafetyFilterCategory(enabled=True, precision="MEDIUM"),
             },
         )
         proto = sf.build_update_proto()
@@ -6391,10 +6389,10 @@ categories:
             enabled=True,
             filter_type="azure",
             categories={
-                "violence": _SafetyFilterCategory(enabled=True, precision="MEDIUM"),
-                "hate": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
-                "sexual": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
-                "self_harm": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "violence": SafetyFilterCategory(enabled=True, precision="MEDIUM"),
+                "hate": SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "sexual": SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "self_harm": SafetyFilterCategory(enabled=False, precision="MEDIUM"),
             },
         )
         proto = vsf.build_update_proto()
@@ -6479,10 +6477,10 @@ categories:
             resource_id="sf-1",
             name="safety_filters",
             categories={
-                "violence": _SafetyFilterCategory(enabled=True, precision="INVALID"),
-                "hate": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
-                "sexual": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
-                "self_harm": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "violence": SafetyFilterCategory(enabled=True, precision="INVALID"),
+                "hate": SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "sexual": SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "self_harm": SafetyFilterCategory(enabled=False, precision="MEDIUM"),
             },
         )
         with self.assertRaises(ValueError) as cm:
@@ -6497,7 +6495,7 @@ categories:
                 resource_id="sf-1",
                 name="safety_filters",
                 categories={
-                    cat: _SafetyFilterCategory(enabled=False, precision=precision)
+                    cat: SafetyFilterCategory(enabled=False, precision=precision)
                     for cat in ("violence", "hate", "sexual", "self_harm")
                 },
             )
@@ -6527,10 +6525,10 @@ categories:
             enabled=True,
             filter_type="azure",
             categories={
-                "violence": _SafetyFilterCategory(enabled=True, precision="MEDIUM"),
-                "hate": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
-                "sexual": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
-                "self_harm": _SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "violence": SafetyFilterCategory(enabled=True, precision="MEDIUM"),
+                "hate": SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "sexual": SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "self_harm": SafetyFilterCategory(enabled=False, precision="MEDIUM"),
             },
         )
         proto = csf.build_update_proto()
@@ -6579,7 +6577,7 @@ categories:
         csf = ChatSafetyFilters(resource_id="csf", name="chat_safety_filters")
         self.assertEqual(csf.file_path, os.path.join("chat", "safety_filters.yaml"))
 
-    def test_parse_categories_from_azure_config_chat(self):
+    def test_parse_safety_filter_config_chat(self):
         """ChatSafetyFilters built from a content-filter projection has correct fields."""
         data = self._make_content_filter_projection()
         csf = ChatSafetyFilters(
@@ -6587,7 +6585,7 @@ categories:
             name="chat_safety_filters",
             enabled=not data.get("disabled", False),
             filter_type=data.get("type", "azure"),
-            categories=parse_categories_from_azure_config(data["azureConfig"]),
+            categories=SyncClientHandler._parse_safety_filter_config(data["azureConfig"]),
         )
 
         self.assertTrue(csf.enabled)
@@ -6598,7 +6596,7 @@ categories:
         self.assertTrue(csf.categories["self_harm"].enabled)
         self.assertEqual(csf.categories["self_harm"].precision, "STRICT")
 
-    def test_parse_categories_from_azure_config_disabled(self):
+    def test_parse_safety_filter_config_disabled(self):
         """ChatSafetyFilters built from a projection with disabled=True sets enabled=False."""
         data = {
             "disabled": True,
@@ -6615,7 +6613,7 @@ categories:
             name="chat_safety_filters",
             enabled=not data.get("disabled", False),
             filter_type=data.get("type", "azure"),
-            categories=parse_categories_from_azure_config(data["azureConfig"]),
+            categories=SyncClientHandler._parse_safety_filter_config(data["azureConfig"]),
         )
 
         self.assertFalse(csf.enabled)
