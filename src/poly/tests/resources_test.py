@@ -6041,12 +6041,19 @@ class SafetyFiltersTests(unittest.TestCase):
     """Tests for SafetyFilters resources (General, Voice, Chat)."""
 
     def test_from_yaml_dict_roundtrip(self):
-        """to_yaml_dict -> from_yaml_dict roundtrip preserves all fields."""
+        """to_yaml_dict -> from_yaml_dict roundtrip preserves all fields.
+
+        GeneralSafetyFilters does not expose enabled in YAML; it is derived
+        from the category-level enabled flags.
+        """
         sf = self._make_general_safety_filters()
         d = sf.to_yaml_dict()
         sf2 = GeneralSafetyFilters.from_yaml_dict(d, resource_id="sf-1", name="safety_filters")
 
-        self.assertEqual(sf2.enabled, sf.enabled)
+        # enabled is not in the YAML but is derived from categories
+        self.assertNotIn("enabled", d)
+        # violence and self_harm are enabled → global enabled becomes True
+        self.assertTrue(sf2.enabled)
         self.assertEqual(sf2.filter_type, sf.filter_type)
         for cat in ("violence", "hate", "sexual", "self_harm"):
             self.assertEqual(sf2.categories[cat].enabled, sf.categories[cat].enabled)
@@ -6069,16 +6076,19 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertNotIn("precision", d["categories"]["sexual"])
 
     def test_from_yaml_dict_missing_top_level_fields_deferred_to_validate(self):
-        """Missing top-level YAML fields are caught by validate(), not from_yaml_dict."""
+        """Missing categories is caught by validate(), not from_yaml_dict.
+
+        GeneralSafetyFilters no longer exposes enabled in YAML, so validate()
+        raises about missing category keys rather than a missing enabled field.
+        """
         sf = GeneralSafetyFilters.from_yaml_dict({}, resource_id="sf-1", name="safety_filters")
         with self.assertRaises(ValueError) as cm:
             sf.validate()
-        self.assertIn("enabled", str(cm.exception))
+        self.assertIn("violence", str(cm.exception))
 
     def test_from_yaml_dict_missing_category_deferred_to_validate(self):
         """Missing a required category is caught by validate(), not from_yaml_dict."""
         yaml_dict = {
-            "enabled": True,
             "type": "azure",
             "categories": {
                 "violence": {"enabled": True, "level": "strict"},
@@ -6097,7 +6107,6 @@ class SafetyFiltersTests(unittest.TestCase):
     def test_from_yaml_dict_missing_category_field_deferred_to_validate(self):
         """Missing a required field inside a category is caught by validate()."""
         yaml_dict = {
-            "enabled": True,
             "type": "azure",
             "categories": {
                 "violence": {"level": "strict"},  # enabled missing
@@ -6116,7 +6125,6 @@ class SafetyFiltersTests(unittest.TestCase):
     def test_from_yaml_dict_non_dict_category_deferred_to_validate(self):
         """A non-dict category value (e.g. bare string) is caught by validate()."""
         yaml_dict = {
-            "enabled": True,
             "categories": {
                 "violence": "strict",  # wrong type — should be a mapping
                 "hate": {"enabled": False, "level": "medium"},
@@ -6240,7 +6248,7 @@ class SafetyFiltersTests(unittest.TestCase):
             with self.subTest(missing=missing):
                 categories = self._make_yaml_categories()
                 del categories[missing]
-                yaml_dict = {"enabled": True, "categories": categories}
+                yaml_dict = {"categories": categories}
                 sf = GeneralSafetyFilters.from_yaml_dict(
                     yaml_dict, resource_id="sf-1", name="safety_filters"
                 )
@@ -6250,7 +6258,7 @@ class SafetyFiltersTests(unittest.TestCase):
 
     def test_from_yaml_dict_empty_categories_deferred_to_validate(self):
         """An empty `categories` dict in YAML is caught by validate()."""
-        yaml_dict = {"enabled": True, "type": "azure", "categories": {}}
+        yaml_dict = {"type": "azure", "categories": {}}
         sf = GeneralSafetyFilters.from_yaml_dict(
             yaml_dict, resource_id="sf-1", name="safety_filters"
         )
@@ -6331,7 +6339,8 @@ class SafetyFiltersTests(unittest.TestCase):
         """A None category entry in to_yaml_dict produces an empty dict.
 
         Covers the ``self.categories[cat] is not None`` guard in
-        ``_BaseSafetyFilters.to_yaml_dict``.
+        ``GeneralSafetyFilters.to_yaml_dict``.  enabled is not present in the
+        GeneralSafetyFilters YAML output.
         """
         sf = GeneralSafetyFilters(
             resource_id="sf-1",
@@ -6346,6 +6355,7 @@ class SafetyFiltersTests(unittest.TestCase):
         )
         d = sf.to_yaml_dict()
         self.assertEqual(d["categories"]["violence"], {})
+        self.assertNotIn("enabled", d)
 
     def test_safety_filter_category_from_dict_missing_precision_stores_none(self):
         """SafetyFilterCategory.from_dict stores None when 'precision' is missing."""
@@ -6358,9 +6368,12 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertEqual(cat.precision, "medium")
 
     def test_read_local_resource(self):
-        """read_local_resource parses safety_filters from YAML correctly."""
-        yaml_content = """enabled: true
-categories:
+        """read_local_resource parses safety_filters from YAML correctly.
+
+        GeneralSafetyFilters YAML no longer contains a top-level enabled field;
+        the flag is derived from the category-level enabled booleans.
+        """
+        yaml_content = """categories:
   violence:
     enabled: true
     level: strict
@@ -6406,29 +6419,6 @@ categories:
         self.assertFalse(result.categories["hate"].enabled)
         self.assertEqual(result.categories["sexual"].precision, "LOOSE")
 
-    def test_build_update_proto_general(self):
-        """GeneralSafetyFilters.build_update_proto returns correct protobuf message."""
-        sf = GeneralSafetyFilters(
-            resource_id="sf-1",
-            name="safety_filters",
-            enabled=False,
-            filter_type="azure",
-            categories={
-                "violence": SafetyFilterCategory(enabled=True, precision="STRICT"),
-                "hate": SafetyFilterCategory(enabled=False, precision="MEDIUM"),
-                "sexual": SafetyFilterCategory(enabled=False, precision="LOOSE"),
-                "self_harm": SafetyFilterCategory(enabled=True, precision="MEDIUM"),
-            },
-        )
-        proto = sf.build_update_proto()
-
-        self.assertTrue(proto.disabled)
-        self.assertEqual(proto.type, "azure")
-        self.assertTrue(proto.azure_config.violence.is_active)
-        self.assertEqual(proto.azure_config.violence.precision, "STRICT")
-        self.assertFalse(proto.azure_config.hate.is_active)
-        self.assertEqual(proto.azure_config.sexual.precision, "LOOSE")
-
     def test_build_update_proto_voice_channel(self):
         """VoiceSafetyFilters.build_update_proto wraps in Channel_UpdateSafetyFilters."""
         from poly.handlers.protobuf.channels_pb2 import VOICE
@@ -6466,10 +6456,9 @@ categories:
 
     def test_read_safety_filters_from_projection(self):
         """_read_safety_filters_from_projection parses a full projection correctly."""
-        projection = {"contentFilterSettings": self._make_content_filter_projection()}
-        result = SyncClientHandler._read_safety_filters_from_projection(projection)
-
-        self.assertIn("safety_filters", result)
+        result = SyncClientHandler._read_safety_filters_from_projection(
+            {"contentFilterSettings": self._make_content_filter_projection()}
+        )
         sf = result["safety_filters"]
         self.assertIsInstance(sf, GeneralSafetyFilters)
         self.assertTrue(sf.enabled)
@@ -6477,7 +6466,30 @@ categories:
         self.assertTrue(sf.categories["violence"].enabled)
         self.assertEqual(sf.categories["violence"].precision, "STRICT")
         self.assertFalse(sf.categories["hate"].enabled)
-        self.assertTrue(sf.categories["self_harm"].enabled)
+
+    def test_general_safety_filters_global_enabled_logic(self):
+        """GeneralSafetyFilters global enabled: always accept what the proto says;
+        only upgrade False to True when a category is active.
+        - disabled=False (global on), all categories off; remains True
+        - disabled=True (global off), one category on; upgraded to True
+        - disabled=True (global off), all categories off; remains False
+        """
+        def from_projection(disabled, is_active):
+            return SyncClientHandler._read_safety_filters_from_projection({
+                "contentFilterSettings": {
+                    "disabled": disabled, "type": "azure",
+                    "azureConfig": {
+                        "violence": {"isActive": is_active, "precision": "MEDIUM"},
+                        "hate": {"isActive": False, "precision": "MEDIUM"},
+                        "sexual": {"isActive": False, "precision": "MEDIUM"},
+                        "selfHarm": {"isActive": False, "precision": "MEDIUM"},
+                    },
+                }
+            })["safety_filters"]
+
+        self.assertTrue(from_projection(disabled=False, is_active=False).enabled)
+        self.assertTrue(from_projection(disabled=True, is_active=True).enabled)
+        self.assertFalse(from_projection(disabled=True, is_active=False).enabled)
 
     def test_read_safety_filters_from_projection_empty(self):
         """_read_safety_filters_from_projection returns {} when key absent."""
@@ -6689,7 +6701,6 @@ categories:
         for invalid_name in ("haet", "crime"):
             with self.subTest(invalid_name=invalid_name):
                 yaml_dict = {
-                    "enabled": True,
                     "categories": {
                         "violence": {"enabled": True, "level": "strict"},
                         invalid_name: {"enabled": False, "level": "medium"},
@@ -6707,56 +6718,102 @@ categories:
                 self.assertIn("Unrecognised", error)
                 self.assertIn("hate", error)  # accepted categories listed in error
 
-    def test_missing_top_level_enabled_raises_clear_error(self):
-        """validate() reports 'enabled' as missing when the key is absent from the YAML.
-        """
-        yaml_dict = {
-            "categories": {
-                "violence": {"enabled": True, "level": "strict"},
-                "hate": {"enabled": False, "level": "medium"},
-                "sexual": {"enabled": False, "level": "lenient"},
-                "self_harm": {"enabled": True, "level": "strict"},
-            },
-        }
-        sf = GeneralSafetyFilters.from_yaml_dict(
-            yaml_dict, resource_id="sf-1", name="safety_filters"
-        )
-        with self.assertRaises(ValueError) as cm:
-            sf.validate()
-        error = str(cm.exception)
-        self.assertIn("Missing", error)
-        self.assertIn("enabled", error)
+    def test_missing_top_level_enabled_error_channel_filters(self):
+        """validate() reports 'enabled' as missing when the key is absent from channel filter YAML.
 
-    def test_invalid_top_level_enabled_raises_clear_error(self):
-        """validate() catches non-bool values for the top-level 'enabled' field."""
-        for bad_value in ("ture", "yes", 1):
-            with self.subTest(bad_value=bad_value):
-                sf = GeneralSafetyFilters(
-                    resource_id="sf-1",
-                    name="safety_filters",
-                    enabled=bad_value,
-                    categories={
-                        cat: SafetyFilterCategory(enabled=True, precision="STRICT")
-                        for cat in ("violence", "hate", "sexual", "self_harm")
+        GeneralSafetyFilters no longer exposes enabled in YAML; this check applies
+        to VoiceSafetyFilters and ChatSafetyFilters.
+        """
+        for cls in (VoiceSafetyFilters, ChatSafetyFilters):
+            with self.subTest(cls=cls.__name__):
+                yaml_dict = {
+                    "categories": {
+                        "violence": {"enabled": True, "level": "strict"},
+                        "hate": {"enabled": False, "level": "medium"},
+                        "sexual": {"enabled": False, "level": "lenient"},
+                        "self_harm": {"enabled": True, "level": "strict"},
                     },
-                )
+                }
+                sf = cls.from_yaml_dict(yaml_dict, resource_id="sf-1", name="safety_filters")
                 with self.assertRaises(ValueError) as cm:
                     sf.validate()
                 error = str(cm.exception)
-                self.assertIn(str(bad_value), error)
+                self.assertIn("Missing", error)
                 self.assertIn("enabled", error)
 
+    def test_general_safety_filters_yaml_no_enabled_field_derived_from_categories(self):
+        """GeneralSafetyFilters YAML omits enabled; it is derived from category flags.
+        If any category is set to True, then so is global
+        to_yaml_dict roundtrip confirms enabled never appears in the file.
+        """
+        base = {"hate": {"enabled": False, "level": "medium"},
+                "sexual": {"enabled": False, "level": "lenient"},
+                "self_harm": {"enabled": False, "level": "strict"}}
+
+        sf_on = GeneralSafetyFilters.from_yaml_dict(
+            {"categories": {"violence": {"enabled": True, "level": "strict"}, **base}},
+            resource_id="sf-1", name="safety_filters",
+        )
+        sf_off = GeneralSafetyFilters.from_yaml_dict(
+            {"categories": {"violence": {"enabled": False, "level": "strict"}, **base}},
+            resource_id="sf-1", name="safety_filters",
+        )
+
+        self.assertTrue(sf_on.enabled)
+        self.assertFalse(sf_off.enabled)
+        self.assertNotIn("enabled", sf_on.to_yaml_dict())
+        self.assertNotIn("enabled", sf_off.to_yaml_dict())
+
+    def test_channel_safety_filters_yaml_enabled_ingested(self):
+        """VoiceSafetyFilters/ChatSafetyFilters read enabled directly from YAML."""
+        for cls in (VoiceSafetyFilters, ChatSafetyFilters):
+            with self.subTest(cls=cls.__name__):
+                for enabled_val in (True, False):
+                    sf = cls.from_yaml_dict(
+                        {"enabled": enabled_val, "categories": {
+                            cat: {"enabled": True, "level": "strict"}
+                            for cat in ("violence", "hate", "sexual", "self_harm")
+                        }},
+                        resource_id="sf-1", name="sf",
+                    )
+                    self.assertEqual(sf.enabled, enabled_val)
+                    self.assertIn("enabled", sf.to_yaml_dict())
+
+    def test_invalid_top_level_enabled_raises_clear_error_for_channel_filters(self):
+        """validate() catches non-bool values for the top-level enabled field in channel filters.
+
+        GeneralSafetyFilters skips this validation (enabled is internal-only);
+        VoiceSafetyFilters and ChatSafetyFilters still enforce it.
+        """
+        for cls in (VoiceSafetyFilters, ChatSafetyFilters):
+            for bad_value in ("ture", "yes", 1):
+                with self.subTest(cls=cls.__name__, bad_value=bad_value):
+                    sf = cls(
+                        resource_id="sf-1",
+                        name="safety_filters",
+                        enabled=bad_value,
+                        categories={
+                            cat: SafetyFilterCategory(enabled=True, precision="STRICT")
+                            for cat in ("violence", "hate", "sexual", "self_harm")
+                        },
+                    )
+                    with self.assertRaises(ValueError) as cm:
+                        sf.validate()
+                    error = str(cm.exception)
+                    self.assertIn(str(bad_value), error)
+                    self.assertIn("enabled", error)
+
     def test_string_none_in_enabled_raises_clear_error(self):
-        """validate() catches non-bool values for 'enabled' before protobuf raises TypeError.
+        """validate() catches non-bool values for category 'enabled' before protobuf raises TypeError.
 
         YAML parses unquoted None as a Python None (caught elsewhere), but the
         string 'None' is truthy and passes the 'is None' guard, reaching protobuf
-        which raises an unhelpful TypeError.
+        which raises an unhelpful TypeError.  The top-level enabled key is
+        ignored for GeneralSafetyFilters and omitted from the YAML.
         """
         for bad_value in ("None", "true", 1):
             with self.subTest(bad_value=bad_value):
                 yaml_dict = {
-                    "enabled": True,
                     "categories": {
                         "violence": {"enabled": True, "level": "strict"},
                         "hate": {"enabled": bad_value, "level": "medium"},
@@ -6782,7 +6839,6 @@ categories:
         an AttributeError pre-validation.
         """
         yaml_dict = {
-            "enabled": True,
             "categories": {
                 "violence": {"enabled": True, "level": "strict"},
                 # hate is missing
@@ -6804,7 +6860,6 @@ categories:
         validate() can surface the proper error message.
         """
         yaml_dict = {
-            "enabled": True,
             "categories": {
                 "violence": {"enabled": True, "level": "strict"},
                 "hate": {"enabled": False, "level": "full"},
@@ -6819,10 +6874,8 @@ categories:
         sf.compute_hash()
 
     def test_invalid_level_in_yaml_validate_raises_correct_error(self):
-        """validate() raises 'Invalid level set' for unrecognised YAML level.
-        """
+        """validate() raises 'Invalid level set' for unrecognised YAML level."""
         yaml_dict = {
-            "enabled": True,
             "categories": {
                 "violence": {"enabled": True, "level": "strict"},
                 "hate": {"enabled": False, "level": "full"},
