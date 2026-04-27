@@ -158,16 +158,17 @@ class _BaseSafetyFilters(YamlResource):
         return cls(
             resource_id=resource_id,
             name=name,
-            enabled=yaml_dict.get("enabled", True),
+            enabled=yaml_dict.get("enabled"),
             filter_type=_FILTER_TYPE,  # Populated from default const.
             categories=translated,
         )
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+        if self.enabled is None:
+            raise ValueError("Missing required field 'enabled'.")
         if not isinstance(self.enabled, bool):
             raise ValueError(
-                f"Invalid value '{self.enabled}' for top-level 'enabled'. "
-                f"Must be true or false (unquoted)."
+                f"Invalid value {self.enabled!r} for 'enabled'. Must be true or false (unquoted)."
             )
 
         if self.categories is None:
