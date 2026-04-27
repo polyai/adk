@@ -34,10 +34,6 @@ class SafetyFilterCategory:
     enabled: Optional[bool] = None
     precision: Optional[str] = None
 
-    def to_dict(self) -> dict:
-        """Serialize using internal (backend) field names."""
-        return {"enabled": self.enabled, "precision": self.precision}
-
     @classmethod
     def from_dict(cls, data: dict) -> "SafetyFilterCategory":
         """Construct from a dict using internal (backend) field names.
@@ -47,60 +43,32 @@ class SafetyFilterCategory:
         """
         return cls(enabled=data.get("enabled"), precision=data.get("precision"))
 
+    @classmethod
+    def from_yaml_dict(cls, data: dict) -> "SafetyFilterCategory":
+        """Construct from a YAML/UI-vocab dict (level: lenient/medium/strict).
+
+        Missing or unrecognized values are passed through as None.
+        """
+        level = data.get("level")
+        if level is None:
+            precision = None
+        else:
+            # Pass through level even if not recognized, to pick up in validate()
+            precision = PRECISION_MAPPING_INVERSE.get(level, level)
+        return cls(enabled=data.get("enabled"), precision=precision)
+
+    def to_yaml_dict(self) -> dict:
+        """Serialize using YAML/UI vocab (level: lenient/medium/strict)."""
+        return {
+            "enabled": self.enabled,
+            "level": PRECISION_MAPPING.get(self.precision, self.precision),
+        }
+
     def to_proto(self) -> AzureContentFilterCategory:
         return AzureContentFilterCategory(
             is_active=self.enabled,
             precision=self.precision,
         )
-
-
-def _category_to_yaml_dict(category: Optional[SafetyFilterCategory]) -> dict:
-    """Translate an internal category to YAML/UI vocab (level: lenient/medium/strict)."""
-    if category is None:
-        return {}
-    return {
-        "enabled": category.enabled,
-        "level": PRECISION_MAPPING.get(category.precision, category.precision),
-    }
-
-
-def _category_from_yaml_dict(data: dict) -> dict:
-    """Translate a YAML/UI-vocab category dict to internal-vocab dict.
-
-    Missing or unrecognized values are passed through as None.
-    """
-    level = data.get("level")
-    if level is None:
-        precision = None
-    else:
-        # Pass through level even if not recognized, to pick up in validate()
-        precision = PRECISION_MAPPING_INVERSE.get(level, level)
-    return {"enabled": data.get("enabled"), "precision": precision}
-
-
-def _parse_categories(raw: dict) -> dict:
-    """Parse raw category dicts into SafetyFilterCategory objects.
-
-    Recognised keys are parsed into SafetyFilterCategory objects; missing
-    recognised keys are stored as None.  Unrecognised keys are preserved as-is
-    so that validate() can report them rather than silently dropping them.
-    """
-    parsed = {}
-    for cat in _AZURE_CATEGORY_KEYS.keys():
-        if cat not in raw:
-            parsed[cat] = None
-            continue
-        category = raw[cat]
-        if isinstance(category, SafetyFilterCategory):
-            parsed[cat] = category
-        elif isinstance(category, dict):
-            parsed[cat] = SafetyFilterCategory.from_dict(category)
-        else:
-            parsed[cat] = None
-    for cat in raw:
-        if cat not in _AZURE_CATEGORY_KEYS:
-            parsed[cat] = raw[cat]
-    return parsed
 
 
 def _build_azure_config(categories: dict) -> AzureContentFilter:
@@ -130,18 +98,43 @@ class _BaseSafetyFilters(YamlResource):
     filter_type: str = _FILTER_TYPE
     categories: Optional[dict] = None
 
+    @staticmethod
+    def _parse_categories(raw: dict) -> dict:
+        """Parse raw category dicts into SafetyFilterCategory objects.
+
+        Recognised keys are parsed into SafetyFilterCategory objects; missing
+        recognised keys are stored as None.  Unrecognised keys are preserved as-is
+        so that validate() can report them rather than silently dropping them.
+        """
+        parsed = {}
+        for cat in _AZURE_CATEGORY_KEYS.keys():
+            if cat not in raw:
+                parsed[cat] = None
+                continue
+            category = raw[cat]
+            if isinstance(category, SafetyFilterCategory):
+                parsed[cat] = category
+            elif isinstance(category, dict):
+                parsed[cat] = SafetyFilterCategory.from_dict(category)
+            else:
+                parsed[cat] = None
+        for cat in raw:
+            if cat not in _AZURE_CATEGORY_KEYS:
+                parsed[cat] = raw[cat]
+        return parsed
+
     def __post_init__(self) -> None:
         """Parse raw category dicts into SafetyFilterCategory objects."""
         if self.categories is None:
             return
-        self.categories = _parse_categories(self.categories)
+        self.categories = self._parse_categories(self.categories)
 
     def to_yaml_dict(self) -> dict:
         # Type:azure is not displayed in YAML.
         return {
             "enabled": self.enabled,
             "categories": {
-                cat: _category_to_yaml_dict(self.categories[cat])
+                cat: self.categories[cat].to_yaml_dict() if self.categories[cat] is not None else {}
                 for cat in _AZURE_CATEGORY_KEYS.keys()
             },
         }
@@ -152,7 +145,9 @@ class _BaseSafetyFilters(YamlResource):
     ) -> "_BaseSafetyFilters":
         raw_categories = yaml_dict.get("categories", {})
         translated = {
-            cat_name: _category_from_yaml_dict(cat_data) if isinstance(cat_data, dict) else {}
+            cat_name: SafetyFilterCategory.from_yaml_dict(cat_data)
+            if isinstance(cat_data, dict)
+            else {}
             for cat_name, cat_data in raw_categories.items()
         }
         return cls(

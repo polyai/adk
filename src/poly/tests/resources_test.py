@@ -6315,22 +6315,37 @@ class SafetyFiltersTests(unittest.TestCase):
             sf.validate()
         self.assertIn("violence", str(cm.exception))
 
-    def test_safety_filter_category_dict_roundtrip_uses_internal_vocab(self):
-        """SafetyFilterCategory.to_dict -> from_dict roundtrips using backend vocab.
-
-        This is the path exercised by the project status-file cache (resource_to_dict),
-        which serializes dataclasses by their field names. The category dict must
-        therefore speak internal (enabled/precision) vocab, not UI (enabled/level).
-        """
+    def test_safety_filter_category_yaml_dict_roundtrip_uses_ui_vocab(self):
+        """SafetyFilterCategory.to_yaml_dict -> from_yaml_dict roundtrips using UI vocab."""
         cat = SafetyFilterCategory(enabled=True, precision="STRICT")
-        d = cat.to_dict()
+        d = cat.to_yaml_dict()
 
-        self.assertEqual(d, {"enabled": True, "precision": "STRICT"})
-        self.assertNotIn("level", d)
+        self.assertEqual(d, {"enabled": True, "level": "strict"})
+        self.assertNotIn("precision", d)
 
-        cat2 = SafetyFilterCategory.from_dict(d)
+        cat2 = SafetyFilterCategory.from_yaml_dict(d)
         self.assertEqual(cat2.enabled, cat.enabled)
         self.assertEqual(cat2.precision, cat.precision)
+
+    def test_safety_filter_category_to_yaml_dict_none_category_produces_empty_dict(self):
+        """A None category entry in to_yaml_dict produces an empty dict.
+
+        Covers the ``self.categories[cat] is not None`` guard in
+        ``_BaseSafetyFilters.to_yaml_dict``.
+        """
+        sf = GeneralSafetyFilters(
+            resource_id="sf-1",
+            name="safety_filters",
+            enabled=True,
+            categories={
+                "violence": None,
+                "hate": SafetyFilterCategory(enabled=False, precision="MEDIUM"),
+                "sexual": SafetyFilterCategory(enabled=False, precision="LOOSE"),
+                "self_harm": SafetyFilterCategory(enabled=True, precision="STRICT"),
+            },
+        )
+        d = sf.to_yaml_dict()
+        self.assertEqual(d["categories"]["violence"], {})
 
     def test_safety_filter_category_from_dict_missing_precision_stores_none(self):
         """SafetyFilterCategory.from_dict stores None when 'precision' is missing."""
