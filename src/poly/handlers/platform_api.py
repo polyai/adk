@@ -5,7 +5,6 @@ Copyright PolyAI Limited
 
 import json
 import logging
-import os
 import typing as ty
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -54,11 +53,10 @@ class PlatformAPIHandler:
 
     @staticmethod
     def _retrieve_api_key() -> str:
-        """Get API key from environment"""
-        try:
-            return os.getenv("POLY_ADK_KEY")
-        except Exception:
-            raise ValueError("POLY_ADK_KEY environment variable is required")
+        """Get API key from environment."""
+        from poly.utils import retrieve_api_key
+
+        return retrieve_api_key()
 
     @staticmethod
     def make_request(

@@ -103,11 +103,10 @@ class SourcererSDK:
             self.branch_id = self._initialize_branch()
 
     def _retrieve_api_key(self) -> str:
-        """Get API key from environment"""
-        try:
-            return os.getenv("POLY_ADK_KEY")
-        except Exception:
-            raise ValueError("POLY_ADK_KEY environment variable is required")
+        """Get API key from environment."""
+        from poly.utils import retrieve_api_key
+
+        return retrieve_api_key()
 
     def create_metadata(self):
         """Create metadata with the current user's email from JWT token

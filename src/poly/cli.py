@@ -50,7 +50,7 @@ from poly.handlers.interface import (
     REGIONS,
     AgentStudioInterface,
 )
-from poly.utils import merge_strings
+from poly.utils import merge_strings, retrieve_api_key
 from poly.resources.resource_utils import contains_merge_conflict
 from poly.project import (
     PROJECT_CONFIG_FILE,
@@ -1247,6 +1247,15 @@ class AgentStudioCLI:
                     "error": "init with --json requires --region, --account_id, and --project_id.",
                 }
             )
+            sys.exit(1)
+
+        try:
+            retrieve_api_key()
+        except ValueError as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(str(e))
             sys.exit(1)
 
         if not output_json:
