@@ -15,7 +15,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │   ├── personality.yaml
 │   ├── role.yaml
 │   ├── rules.txt
-│   ├── safety_filters.yaml             # Optional
+│   ├── safety_filters.yaml
 │   └── experimental_config.json        # Optional
 ├── config/                             # Configuration
 │   ├── api_integrations.yaml           # Optional
@@ -25,7 +25,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │   └── variant_attributes.yaml         # Optional
 ├── voice/                              # Voice channel settings
 │   ├── configuration.yaml              # Greeting, disclaimer, style prompt
-│   ├── safety_filters.yaml             # Optional - content moderation overrides
+│   ├── safety_filters.yaml             # Optional
 │   ├── speech_recognition/
 │   │   ├── asr_settings.yaml           # Barge-in, interaction style
 │   │   ├── keyphrase_boosting.yaml     # Optional
@@ -35,7 +35,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │       └── phrase_filtering.yaml       # Optional - stop keywords
 ├── chat/                               # Chat channel settings
 │   ├── configuration.yaml              # Greeting, style prompt
-│   └── safety_filters.yaml             # Optional - content moderation overrides
+│   └── safety_filters.yaml             # Optional
 ├── flows/                              # Optional - flow definitions
 │   └── {flow_name}/
 │       ├── flow_config.yaml
