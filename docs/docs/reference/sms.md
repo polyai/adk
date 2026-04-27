@@ -11,6 +11,10 @@ SMS templates define reusable text messages that the agent can send during a con
 
 Templates support dynamic content through variables stored in conversation state.
 
+!!! warning "SMS templates are ADK-only"
+
+    The Agent Studio UI does not currently expose an editor for `config/sms_templates.yaml`. Define templates through the ADK and push them with `poly push`. Template references of the form `{{twilio_sms:template_name}}` only resolve inside ADK-managed files (`rules.txt`, topic actions, flow prompts) — pasting them into a UI-editable field does not work at runtime.
+
 ## Location
 
 SMS templates are defined in:
@@ -136,5 +140,19 @@ conv.state.booking_ref = "ABC123"
 
     See how deterministic code can set variables and trigger SMS sending.
     [Open functions](./functions.md)
+
+-   **SMS setup (platform)**
+
+    ---
+
+    Configuring SMS channels, sender numbers, opt-out handling, and full template options.
+    [Open SMS setup](https://docs.poly.ai/sms/introduction){ target="_blank" rel="noopener" }
+
+-   **Conversation object reference (platform)**
+
+    ---
+
+    Full reference for `conv.send_sms_template`, `conv.send_sms`, and all other `conv` methods.
+    [Open conv object reference](https://docs.poly.ai/tools/classes/conv-object){ target="_blank" rel="noopener" }
 
 </div>

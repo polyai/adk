@@ -12,9 +12,7 @@ import os
 import re
 from typing import Callable, Optional
 
-from poly.resources.flows import FunctionStep
-from poly.resources.function import Function
-from poly.resources.resource import Resource, ResourceMapping
+from poly.resources import Resource, ResourceMapping, Function, FunctionStep
 
 logger = logging.getLogger(__name__)
 
@@ -156,8 +154,12 @@ def merge_strings(original: str, updated: str, incoming: str) -> str:
             _, _, _, a_start, a_end, b_start, b_end = region
             result.append("<<<<<<<\n")
             result.extend(a[a_start:a_end])
+            if result and not result[-1].endswith("\n"):
+                result[-1] += "\n"
             result.append("=======\n")
             result.extend(b[b_start:b_end])
+            if result and not result[-1].endswith("\n"):
+                result[-1] += "\n"
             result.append(">>>>>>>\n")
     return "".join(result)
 

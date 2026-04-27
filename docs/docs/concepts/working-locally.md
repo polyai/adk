@@ -10,7 +10,7 @@ Your local filesystem becomes your primary editing surface. You can:
 - edit agent resources directly
 - review changes with Git-style workflows
 - validate changes before pushing
-- use [AI coding tools](../reference/tooling.md) such as **Cursor** or **Claude Code**
+- work in **VS Code** or **Cursor** with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor), or pair the ADK with [AI coding agents](../reference/tooling.md#claude-code) such as **Claude Code**
 - test and iterate before merging in Agent Studio
 
 <div class="grid cards" markdown>
@@ -107,7 +107,7 @@ The standard workflow is:
 7. push changes with `poly push`
 8. optionally generate a review gist with `poly review`
 9. merge the branch in Agent Studio
-10. test by chatting with the agent using `poly chat` — this connects to main on the Sandbox, so merge your branch first
+10. test by chatting with the agent using `poly chat` — by default this connects to your current branch's pushed state. Use `poly push` first, or `poly chat --push` to push and start the session in one step. On the main branch it falls back to Sandbox.
 
 !!! tip "Run commands from the project folder"
 

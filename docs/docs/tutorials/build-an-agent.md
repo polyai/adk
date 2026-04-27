@@ -3,7 +3,7 @@ title: Build an agent with the ADK
 description: Follow the end-to-end workflow for going from a blank Agent Studio project to a production-ready voice agent with the PolyAI ADK.
 ---
 
-This guide walks through how to go from a blank slate to a production-ready voice agent using **Agent Studio**, the **PolyAI ADK**, and optionally a coding tool such as **Claude Code**.
+This guide walks through how to go from a blank slate to a production-ready voice agent using **Agent Studio**, the **PolyAI ADK**, and — optionally — the **PolyAI ADK extension** for **VS Code** or **Cursor**, or a coding agent such as **Claude Code**.
 
 There are two common ways to build with the ADK:
 
@@ -85,6 +85,8 @@ When an Agent Studio project is linked locally, it follows this general structur
 │   └── {function_name}.py
 ├── topics/
 │   └── {topic_name}.yaml
+├── variables/                          # Virtual — no files on disk
+│   └── {variable_name}
 └── project.yaml
 ~~~
 
@@ -93,6 +95,8 @@ This structure mirrors the parts of the agent that Agent Studio understands: set
 ## Workflow 1 - CLI workflow
 
 The CLI workflow is the manual developer path. You use the ADK directly, edit the project locally, and push changes back to Agent Studio.
+
+You can run this workflow in whichever editing surface you prefer: a plain terminal, or **VS Code** / **Cursor** with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) for resource-aware navigation and validation. Both count as the CLI workflow — the difference is only the editing surface.
 
 ### Step 1 - Initialize your project
 
@@ -103,30 +107,28 @@ poly init
 poly init --region <region> --account_id <account_id> --project_id <project_id>
 ~~~
 
-This creates the local project structure and writes the metadata needed to connect the folder to Agent Studio.
+This creates the project directory at `{account_id}/{project_id}` inside your current working directory, pulls the current configuration, and writes the metadata needed to connect the folder to Agent Studio. Change into the project directory before running any further commands.
 
-### Step 2 - Pull remote config and set up the environment
+### Step 2 - Set up the environment
 
-Pull the current configuration into your local project.
+Configure any API keys or environment variables needed for the project. Use `poly pull` at any time to refresh the local project with the latest remote configuration.
 
 ~~~bash
 poly pull
 poly pull -f
 ~~~
 
-At this point, configure any API keys or environment variables needed for the project.
-
 !!! note "Run commands from the project folder"
 
     All CLI commands should be run from within the local project folder, unless you explicitly use the relevant path flag.
 
-### Step 3 - Run the agent locally
+### Step 3 - Chat with the agent
 
 Start an interactive chat session to confirm the connection works and inspect runtime behavior.
 
-!!! warning "Chat runs against main on Sandbox"
+!!! info "`poly chat` runs against Agent Studio, not your local files"
 
-    `poly chat` connects to the **main branch** of your Sandbox environment in Agent Studio — not your local files, and not your current feature branch. At this stage it is useful for confirming the connection works. To chat against your own changes, push and merge your branch in Agent Studio first.
+    The ADK has no local runtime — `poly chat` talks to the agent running in Agent Studio. At this stage you are on `main`, so the session connects to your sandbox. To chat against a feature branch, push it first with `poly push` and then run `poly chat` (or use `poly chat --push` to do both in one step).
 
 ~~~bash
 poly chat
@@ -193,7 +195,7 @@ Add or edit [knowledge-base topics](../reference/topics.md) used for retrieval.
 
 #### Agent settings
 
-Update the [personality, role, and rules](../reference/agent_settings.md) that define the agent's global behavior.
+Update the [personality, role, and rules](../reference/agent_settings.md) that define the agent’s global behavior.
 
 #### Flows
 
@@ -229,6 +231,37 @@ poly revert
 poly revert <file>
 ~~~
 
+!!! warning "`poly format` may crash on projects with YAML sub-resources"
+
+    Running `poly format` on a project that contains YAML-defined sub-resources (such as `config/handoffs.yaml` or `voice/configuration.yaml`) can produce errors like:
+
+    ~~~text
+    [Errno 20] Not a directory: '.../config/handoffs.yaml/handoffs/Default_handoff'
+    ~~~
+
+    This is a known bug in how the formatter resolves paths inside YAML files. Use `--files` to format specific Python files instead:
+
+    ~~~bash
+    poly format --files functions/my_function.py
+    ~~~
+
+!!! warning "`poly validate` may fail on platform-generated functions"
+
+    Projects built via Quick Agent Setup often include server-generated functions such as `handoff.py` or `hangup.py` whose signatures do not declare a `conv: Conversation` parameter. The ADK's local validator will reject these, blocking `poly push`.
+
+    The cleanest fix is to add `conv: Conversation` to the function signature yourself:
+
+    ~~~python
+    def handoff(conv: Conversation):
+        ...
+    ~~~
+
+    Alternatively, skip local validation and let the platform validate the push instead:
+
+    ~~~bash
+    poly push --skip-validation
+    ~~~
+
 ### Step 7 - Push changes
 
 Push the local changes back to Agent Studio.
@@ -242,11 +275,11 @@ poly push --skip-validation
 
 ### Step 8 - Test against sandbox
 
-Once your branch is merged in Agent Studio, test the agent by chatting with it against the Sandbox environment.
+Once your branch is merged in Agent Studio, test the agent by chatting with it against the sandbox environment.
 
 !!! warning "Merge before chatting"
 
-    `poly chat` connects to the **main branch** of your Sandbox — not your feature branch. Push your changes with `poly push`, merge the branch in Agent Studio, then run `poly chat`.
+    `poly chat` connects to the **main branch** of your sandbox — not your feature branch. Push your changes with `poly push`, merge the branch in Agent Studio, then run `poly chat`.
 
 ~~~bash
 poly chat --environment sandbox
@@ -277,7 +310,7 @@ Use Agent Studio analytics to monitor containment, CSAT, handle time, and flagge
 
 ## Workflow 2 - AI-agent workflow
 
-The AI-agent workflow uses a coding tool such as **Claude Code** to run the same development loop on your behalf.
+The AI-agent workflow uses a coding agent — such as **Claude Code**, or an in-editor agent in **VS Code** or **Cursor** paired with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) — to run the same development loop on your behalf.
 
 <div class="grid cards" markdown>
 
@@ -360,6 +393,8 @@ The ADK acts as the bridge between your local environment and Agent Studio. It l
 !!! tip "Run `poly docs --all` before generating any files"
     Immediately after pulling, run `poly docs --all` to produce a complete resource reference. Without it, a coding agent has no schema context for resource structure and field names, and will hallucinate them. This should be the first thing the coding tool does after `poly pull`.
 
+    Note that `poly docs --all` documents the ADK's resource layer (topics, flows, entities, variants, and so on) but does not cover every runtime `Conversation` method. In particular, `conv.send_sms_template`, `conv.send_sms`, and `conv.caller_number` are not present in the output. For the full runtime API, direct the coding agent to the [conv object reference](https://docs.poly.ai/tools/classes/conv-object){ target="_blank" rel="noopener" } on the platform docs.
+
 ### Step 4 - Give the coding tool its context
 
 Provide the coding tool with the information you gathered earlier.
@@ -367,7 +402,7 @@ Provide the coding tool with the information you gathered earlier.
 Include:
 
 - project-specific requirements
-- the URL to the business's public API documentation
+- the URL to the business’s public API documentation
 - relevant internal context
 - useful patterns or best practices from previous projects
 
@@ -456,13 +491,12 @@ At that point, the agent is live.
 | **poly pull** | Pull remote config into the local project |
 | **poly push** | Push local changes to Agent Studio |
 | **poly status** | List changed files |
-| **poly diff** | Show diffs (local vs remote, version hash, or `--before`/`--after`) |
-| **poly revert** | Revert local changes (all by default, or specific files) |
+| **poly diff** | Show diffs |
+| **poly revert** | Revert local changes |
 | **poly branch** | Branch management |
-| **poly format** | Format resource files (all or `--files` for specific files) |
+| **poly format** | Format resource files |
 | **poly validate** | Validate project configuration locally |
-| **poly review** | Diff review page: `create`, `list`, `delete` |
-| **poly deployments** | View deployment history (`list`, with `--env`, `--limit`, `--details`) |
+| **poly review** | Create a diff review page |
 | **poly chat** | Start an interactive session with the agent |
 | **poly docs** | Output resource documentation |
 

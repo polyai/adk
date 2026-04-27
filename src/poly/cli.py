@@ -16,6 +16,7 @@ import webbrowser
 from argparse import SUPPRESS, ArgumentParser, RawTextHelpFormatter
 from contextlib import nullcontext
 from importlib.metadata import version as get_package_version
+from collections import Counter
 from typing import Any, Optional
 
 import argcomplete
@@ -38,6 +39,9 @@ from poly.output.console import (
     set_verbose,
     success,
     warning,
+    edit_in_editor,
+    output_merge_conflict_table,
+    print_merge_conflict_interactive_header,
     print_deployments,
 )
 from poly.output.json_output import json_print, commands_to_dicts
@@ -46,7 +50,8 @@ from poly.handlers.interface import (
     REGIONS,
     AgentStudioInterface,
 )
-from poly.resources import resource_utils
+from poly.utils import merge_strings
+from poly.resources.resource_utils import contains_merge_conflict
 from poly.project import (
     PROJECT_CONFIG_FILE,
     STATUS_FILE,
@@ -55,7 +60,48 @@ from poly.project import (
 
 logger = logging.getLogger(__name__)
 
+# Single-line values longer than this are treated like multiline (no terminal dump; editor for edit).
+_BRANCH_MERGE_LONG_LINE_THRESHOLD = 800
+
 DOCUMENT_CHOICES = AgentStudioProject.discover_docs()
+
+
+def _branch_merge_conflict_file_key(path: list[str]) -> str:
+    """Group field-level API conflicts by parent path (resource-ish key)."""
+    if not path:
+        return ""
+    if len(path) <= 1:
+        return os.sep.join(path)
+    return os.sep.join(path[:-1])
+
+
+def enrich_branch_merge_conflicts(conflicts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Add visual_path, merged_value, can_auto_merge, file_key, conflicts_in_resource for branch merge UI."""
+    user = [
+        c for c in conflicts if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
+    ]
+    counts: Counter[str] = Counter(_branch_merge_conflict_file_key(c["path"]) for c in user)
+    out: list[dict[str, Any]] = []
+    for c in conflicts:
+        row = dict(c)
+        path = row.get("path")
+        if not path or path[-1] in {"updatedAt", "createdAt"}:
+            out.append(row)
+            continue
+        merged = merge_strings(row["baseValue"], row["theirsValue"], row["oursValue"])
+        fk = _branch_merge_conflict_file_key(path)
+        row["visual_path"] = os.sep.join(path)
+        row["merged_value"] = merged
+        row["can_auto_merge"] = not contains_merge_conflict(merged)
+        row["file_key"] = fk
+        row["conflicts_in_resource"] = counts[fk]
+        out.append(row)
+    return out
+
+
+def _auto_merge_resolution(path: list[str], merged_value: str) -> dict[str, Any]:
+    """API payload shape for accepting the locally computed clean merge."""
+    return {"path": path, "value": merged_value, "strategy": "theirs"}
 
 
 def _format_gist_choice(g: dict) -> str:
@@ -121,6 +167,13 @@ class AgentStudioCLI:
             help="Print a single JSON object on stdout (machine-readable).",
         )
 
+        debug_parent = ArgumentParser(add_help=False)
+        debug_parent.add_argument(
+            "--debug",
+            action="store_true",
+            help="Display debug logs.",
+        )
+
         subparsers = parser.add_subparsers(dest="command", required=True)
 
         # DOCS
@@ -155,7 +208,7 @@ class AgentStudioCLI:
         # INIT
         init_parser = subparsers.add_parser(
             "init",
-            parents=[verbose_parent, json_parent],
+            parents=[verbose_parent, json_parent, debug_parent],
             help="Initialize a new Agent Studio project.",
             description="Initialize a new Agent Studio project.\n\nExamples:\n  poly init --region eu-west-1 --account_id 123 --project_id my_project\n  poly init  # (interactive selection)",
             formatter_class=RawTextHelpFormatter,
@@ -200,12 +253,11 @@ class AgentStudioCLI:
             help=SUPPRESS,
             default=False,
         )
-        init_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
 
         # PULL
         pull_parser = subparsers.add_parser(
             "pull",
-            parents=[verbose_parent, json_parent],
+            parents=[verbose_parent, json_parent, debug_parent],
             help="Pull the latest project configuration from Agent Studio.",
             description="Pull the latest project configuration from Agent Studio.\n\nExamples:\n  poly pull --path /path/to/project\n  poly pull -f  # force overwrite local changes",
             formatter_class=RawTextHelpFormatter,
@@ -241,12 +293,11 @@ class AgentStudioCLI:
             help=SUPPRESS,
             default=False,
         )
-        pull_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
 
         # PUSH
         push_parser = subparsers.add_parser(
             "push",
-            parents=[verbose_parent, json_parent],
+            parents=[verbose_parent, json_parent, debug_parent],
             help="Push the project configuration to Agent Studio.",
             description="Push the project configuration to Agent Studio.\n\nExamples:\n  poly push --path /path/to/project\n  poly push --skip-validation --dry-run",
             formatter_class=RawTextHelpFormatter,
@@ -279,7 +330,6 @@ class AgentStudioCLI:
             help="Format resources before pushing.",
             default=False,
         )
-        push_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
         push_parser.add_argument(
             "--from-projection",
             type=str,
@@ -473,7 +523,7 @@ class AgentStudioCLI:
 
         branches_parser = subparsers.add_parser(
             "branch",
-            parents=[verbose_parent],
+            parents=[],
             help="Manage branches in the Agent Studio project.",
             description=(
                 "Manage branches in the Agent Studio project.\n\n"
@@ -481,6 +531,7 @@ class AgentStudioCLI:
                 "  poly branch list\n"
                 "  poly branch create new-branch\n"
                 "  poly branch switch existing-branch\n"
+                "  poly branch merge 'Merge branch'"
                 "  poly branch current\n"
                 "  poly branch delete\n"
             ),
@@ -490,14 +541,14 @@ class AgentStudioCLI:
 
         branch_list_parser = branch_subparsers.add_parser(
             "list",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
             help="List all branches in the project.",
         )
         branch_list_parser.set_defaults(branch_subcommand="list")
 
         branch_create_parser = branch_subparsers.add_parser(
             "create",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
             help="Create a new branch.",
         )
         branch_create_parser.add_argument(
@@ -522,14 +573,11 @@ class AgentStudioCLI:
 
         branch_switch_parser = branch_subparsers.add_parser(
             "switch",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
             help="Switch to a different branch.",
         )
         branch_switch_parser.add_argument(
             "branch_name", nargs="?", help="Name of the branch to switch to."
-        )
-        branch_switch_parser.add_argument(
-            "--debug", action="store_true", help="Display debug logs."
         )
         branch_switch_parser.add_argument(
             "--format",
@@ -559,14 +607,14 @@ class AgentStudioCLI:
 
         branch_current_parser = branch_subparsers.add_parser(
             "current",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
             help="Show the current branch.",
         )
         branch_current_parser.set_defaults(branch_subcommand="current")
 
         branch_delete_parser = branch_subparsers.add_parser(
             "delete",
-            parents=[branch_path_parent, json_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
             help="Interactively select and delete a branch.",
         )
         branch_delete_parser.add_argument(
@@ -576,6 +624,37 @@ class AgentStudioCLI:
             help="Name of the branch to delete directly, skipping the interactive prompt.",
         ).completer = cls._branch_name_completer
         branch_delete_parser.set_defaults(branch_subcommand="delete")
+
+        branch_merge_parser = branch_subparsers.add_parser(
+            "merge",
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
+            help="Merge branch into main",
+        )
+        branch_merge_parser.add_argument(
+            "message",
+            nargs="?",
+            default=None,
+            help="Message for the merge.",
+        )
+        branch_merge_parser.add_argument(
+            "--interactive",
+            "-i",
+            action="store_true",
+            help="Enable interactive mode for resolving any merge conflicts. Set $EDITOR or $VISUAL to your preferred editor for editing merge conflict values if needed.",
+        )
+        branch_merge_parser.add_argument(
+            "--resolutions",
+            type=str,
+            default=None,
+            help=(
+                "Conflict resolutions as a JSON file path, inline JSON string, or '-' for stdin. "
+                "JSON should be an array of objects, each representing a conflict resolution:\n"
+                '- path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])\n'
+                '- strategy: Resolution strategy - "ours", "theirs", or "base"\n'
+                '- value: Optional custom value (use "theirs" strategy)'
+            ),
+        )
+        branch_merge_parser.set_defaults(branch_subcommand="merge")
 
         # FORMAT
         format_parser = subparsers.add_parser(
@@ -633,7 +712,7 @@ class AgentStudioCLI:
         # CHAT
         chat_parser = subparsers.add_parser(
             "chat",
-            parents=[verbose_parent, json_parent],
+            parents=[verbose_parent, debug_parent, json_parent],
             help="Start an interactive chat session with the agent.",
             description=(
                 "Start an interactive chat session with the agent.\n\n"
@@ -699,7 +778,6 @@ class AgentStudioCLI:
             choices=["voice", "webchat"],
             help="Channel to chat against. Defaults to voice.",
         )
-        chat_parser.add_argument("--debug", action="store_true", help="Display debug logs.")
         chat_parser.add_argument(
             "--functions",
             action="store_true",
@@ -986,6 +1064,11 @@ class AgentStudioCLI:
                 elif args.branch_subcommand == "delete":
                     cls.branch_delete(args.path, args.branch_name, args.json)
 
+                elif args.branch_subcommand == "merge":
+                    cls.branch_merge(
+                        args.path, args.message, args.json, args.interactive, args.resolutions
+                    )
+
             elif args.command == "format":
                 cls.format(
                     args.path,
@@ -1169,33 +1252,54 @@ class AgentStudioCLI:
         if not output_json:
             info("Initialising project...")
 
-        if not region:
-            regions = REGIONS
-            region_menu = questionary.select("Select Region", choices=regions).ask()
-            region = region_menu
-
         api_handler = AgentStudioInterface()
 
-        if not account_id:
-            accounts = api_handler.get_accounts(region)
-            account_menu = questionary.select(
-                "Select Account",
-                choices=list(accounts.keys()),
-                use_search_filter=True,
-                use_jk_keys=False,
-            ).ask()
-            if not account_menu:
+        if not region:
+            with console.status("[info]Fetching available regions...[/info]"):
+                regions = api_handler.get_accessible_regions()
+            if not regions:
                 if output_json:
                     json_print(
                         {
                             "success": False,
-                            "error": "No account selected.",
+                            "error": "No accessible regions found for your API key.",
                         }
                     )
-                    sys.exit(1)
-                warning("No account selected. Exiting.")
-                return
-            account_id = accounts[account_menu]
+                else:
+                    error("No accessible regions found for your API key.")
+                sys.exit(1)
+            if len(regions) == 1:
+                region = regions[0]
+                if not output_json:
+                    info(f"Auto-selected region [bold]{region}[/bold].")
+            else:
+                region = questionary.select("Select Region", choices=regions).ask()
+
+        if not account_id:
+            accounts = api_handler.get_accounts(region)
+            if len(accounts) == 1:
+                account_name, account_id = next(iter(accounts.items()))
+                if not output_json:
+                    info(f"Auto-selected account [bold]{account_name}[/bold].")
+            else:
+                account_menu = questionary.select(
+                    "Select Account",
+                    choices=list(accounts.keys()),
+                    use_search_filter=True,
+                    use_jk_keys=False,
+                ).ask()
+                if not account_menu:
+                    if output_json:
+                        json_print(
+                            {
+                                "success": False,
+                                "error": "No account selected.",
+                            }
+                        )
+                        sys.exit(1)
+                    warning("No account selected. Exiting.")
+                    return
+                account_id = accounts[account_menu]
 
         if not project_id:
             projects = api_handler.get_projects(region, account_id)
@@ -1216,7 +1320,16 @@ class AgentStudioCLI:
                     sys.exit(1)
                 warning("No project selected. Exiting.")
                 return
+            project_name = project_menu
             project_id = projects[project_menu]
+        else:
+            # project_id was passed directly — look up the name
+            projects = api_handler.get_projects(region, account_id)
+            # Reverse lookup: find name for the given ID
+            project_name = next(
+                (name for name, pid in projects.items() if pid == project_id),
+                None,
+            )
 
         if not output_json:
             info(f"Initializing project [bold]{account_id}/{project_id}[/bold]...")
@@ -1242,6 +1355,7 @@ class AgentStudioCLI:
                 region=region,
                 account_id=account_id,
                 project_id=project_id,
+                project_name=project_name,
                 format=format,
                 projection_json=projection_json,
                 on_save=on_save,
@@ -1249,12 +1363,7 @@ class AgentStudioCLI:
 
         if not project:
             if output_json:
-                json_print(
-                    {
-                        "success": False,
-                        "error": "Failed to initialize the project.",
-                    }
-                )
+                json_print({"success": False, "error": "Failed to initialize the project."})
             else:
                 error("Failed to initialize the project.")
             sys.exit(1)
@@ -2088,6 +2197,290 @@ class AgentStudioCLI:
             if deleted_count:
                 success(f"Deleted {deleted_count} branch(es).")
 
+    @staticmethod
+    def _merge_interactively(
+        conflicts: list[dict[str, Any]],
+        existing_resolutions: dict[str, dict[str, Any]],
+        branch_display_name: str = "",
+    ) -> list[dict[str, Any]]:
+        """Resolve merge conflicts with questionary; expects API conflicts optionally enriched."""
+        resolutions: list[dict[str, Any]] = []
+        index_in_resource: dict[str, int] = {}
+        branch_label = branch_display_name or "current branch"
+
+        def _is_heavy_content(c: dict[str, Any]) -> bool:
+            for key in ("baseValue", "theirsValue", "oursValue"):
+                v = c.get(key, "")
+                if not isinstance(v, str):
+                    return True
+                if "\n" in v:
+                    return True
+                if len(v) > _BRANCH_MERGE_LONG_LINE_THRESHOLD:
+                    return True
+            return False
+
+        for conflict in conflicts:
+            if conflict["path"][-1] in {"updatedAt", "createdAt"}:
+                resolutions.append({"path": conflict["path"], "strategy": "theirs"})
+                continue
+
+            path = conflict["path"]
+            clean_path = conflict.get("visual_path") or os.sep.join(path)
+            merged_version = conflict.get("merged_value")
+            existing_resolution = existing_resolutions.get(clean_path)
+            if merged_version is None:
+                merged_version = merge_strings(
+                    conflict["baseValue"], conflict["theirsValue"], conflict["oursValue"]
+                )
+            auto_merged = conflict.get("can_auto_merge")
+            if auto_merged is None:
+                auto_merged = not contains_merge_conflict(merged_version)
+
+            fk = conflict.get("file_key") or _branch_merge_conflict_file_key(path)
+            index_in_resource[fk] = index_in_resource.get(fk, 0) + 1
+            idx = index_in_resource[fk]
+            total = int(conflict.get("conflicts_in_resource") or 1)
+            heavy = _is_heavy_content(conflict)
+            print_merge_conflict_interactive_header(
+                field_path=clean_path,
+                resource_key=fk,
+                conflict_index=idx,
+                conflict_total=total,
+                auto_mergeable=auto_merged,
+                heavy=heavy,
+                base_value=str(conflict.get("baseValue", "")),
+                branch_label=branch_label,
+                branch_value=str(conflict.get("theirsValue", "")),
+                main_value=str(conflict.get("oursValue", "")),
+                existing_resolution=existing_resolution,
+            )
+
+            choices: list[dict[str, str]] = []
+            if existing_resolution:
+                er_strategy = existing_resolution.get("strategy", "")
+                er_value = existing_resolution.get("value")
+                if er_value is not None:
+                    er_label = (
+                        er_value if isinstance(er_value, str) and "\n" not in er_value else "value"
+                    )
+                else:
+                    er_label = er_strategy
+                choices.append({"name": f"Use resolution: {er_label}", "value": "existing"})
+            if auto_merged:
+                choices.append({"name": "Accept auto-merge", "value": "merged"})
+            choices.extend(
+                [
+                    {"name": "Use main", "value": "ours"},
+                    {"name": f"Use branch — {branch_label}", "value": "theirs"},
+                    {"name": "Use original (base)", "value": "base"},
+                    {"name": "Edit in editor", "value": "edit"},
+                ]
+            )
+
+            extension = ".py" if path[-1] == "code" else ".txt"
+
+            while True:
+                answer = questionary.select("Select resolution", choices=choices).ask()
+                if answer is None:
+                    return []
+                if answer == "existing":
+                    resolutions.append(existing_resolution)
+                    break
+                if answer == "merged":
+                    resolutions.append(_auto_merge_resolution(path, merged_version))
+                    break
+                if answer == "edit":
+                    try:
+                        if heavy:
+                            edited = edit_in_editor(
+                                merged_version, extension=extension, filename=fk
+                            )
+                        else:
+                            edited_q = questionary.text(
+                                "Custom resolution",
+                                default=str(conflict.get("theirsValue", "")),
+                                multiline=True,
+                            ).ask()
+                            if edited_q is None:
+                                return []
+                            edited = edited_q
+                    except FileNotFoundError:
+                        warning(
+                            "Could not open the configured editor. Check your $EDITOR or "
+                            "$VISUAL setting, then try Edit again."
+                        )
+                        continue
+                    except subprocess.CalledProcessError:
+                        warning(
+                            "The editor exited with an error. Fix the issue and try Edit "
+                            "again, or choose another resolution."
+                        )
+                        continue
+                    except ValueError:
+                        warning(
+                            "Editor closed without saving; choose another option or try Edit again."
+                        )
+                        continue
+
+                    if contains_merge_conflict(edited):
+                        warning(
+                            "Edited version still contains merge conflict markers. "
+                            "Resolve them before continuing."
+                        )
+                        continue
+
+                    resolutions.append({"path": path, "value": edited, "strategy": "theirs"})
+                    break
+
+                resolutions.append({"path": path, "strategy": answer})
+                break
+
+        return resolutions
+
+    @classmethod
+    def branch_merge(
+        cls,
+        base_path: str,
+        message: str = None,
+        output_json: bool = False,
+        interactive: bool = False,
+        resolutions_file: str = None,
+    ):
+        """Merge the current branch into main, with optional conflict resolutions."""
+        if message is None or (isinstance(message, str) and not message.strip()):
+            if output_json:
+                json_print({"success": False, "error": "Merge message is required."})
+            else:
+                error("Merge message is required.")
+            sys.exit(1)
+
+        if interactive and output_json:
+            json_print(
+                {
+                    "success": False,
+                    "error": "--interactive and --json cannot be used together.",
+                }
+            )
+            sys.exit(1)
+
+        file_resolutions: list[dict[str, Any]] | None = None
+        if resolutions_file:
+            try:
+                if resolutions_file == "-":
+                    file_resolutions = json.load(sys.stdin)
+                elif resolutions_file.lstrip().startswith("["):
+                    file_resolutions = json.loads(resolutions_file)
+                else:
+                    with open(resolutions_file, encoding="utf-8") as f:
+                        file_resolutions = json.load(f)
+                if not isinstance(file_resolutions, list):
+                    raise ValueError("Resolutions must be a JSON array.")
+            except (OSError, json.JSONDecodeError, ValueError) as exc:
+                if output_json:
+                    json_print({"success": False, "error": f"Failed to parse resolutions: {exc}"})
+                else:
+                    error(f"Failed to parse resolutions: {exc}")
+                sys.exit(1)
+
+        project = cls._load_project(base_path, output_json=output_json)
+
+        branch_name = project.get_current_branch()
+        ctx = console.status("[info]Merging branch...[/info]") if not output_json else nullcontext()
+        with ctx:
+            merge_success, conflicts, errors = project.merge_branch(
+                message=message, conflict_resolutions=file_resolutions
+            )
+
+        if output_json:
+            output = {"success": merge_success}
+            if conflicts or errors:
+                output["conflicts"] = conflicts
+                output["errors"] = errors
+            json_print(output)
+            if not merge_success:
+                sys.exit(1)
+            return
+
+        if merge_success:
+            success(f"Branch '{branch_name}' merged successfully.")
+            info('Switched to "main" branch after merge.')
+            return
+
+        # Failed branch merge
+        error(f"Failed to merge branch '{branch_name}'.")
+        if errors:
+            plain("\n[red]Errors:[/red]")
+            for err in errors:
+                error(f"- {err['path']}: {err['message']}")
+
+        enriched = enrich_branch_merge_conflicts(conflicts) if conflicts else []
+        display_conflict = [
+            c for c in enriched if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
+        ]
+        if display_conflict:
+            output_merge_conflict_table(
+                display_conflict, show_type=True, resolutions=file_resolutions
+            )
+
+        if errors:
+            sys.exit(1)
+
+        if not interactive:
+            plain(
+                "Merge conflicts detected. To resolve:\n"
+                "- Use 'poly branch merge -i <message>' to resolve conflicts interactively\n"
+                "- Use 'poly branch merge --resolutions <file.json> <message>' to provide pre-defined resolutions\n"
+                "- Merge manually on Agent Studio"
+            )
+            sys.exit(1)
+
+        existing_resolutions = {
+            os.sep.join(r["path"]): r for r in (file_resolutions or []) if "path" in r
+        }
+        while True:
+            resolutions = cls._merge_interactively(enriched, existing_resolutions, branch_name)
+            if not resolutions:
+                warning("No resolutions provided. Exiting.")
+                sys.exit(1)
+            ctx2 = (
+                console.status("[info]Merging branch...[/info]")
+                if not output_json
+                else nullcontext()
+            )
+            with ctx2:
+                merge_success, conflicts, errors = project.merge_branch(
+                    message=message, conflict_resolutions=resolutions
+                )
+            if merge_success:
+                success(f"Branch '{branch_name}' merged successfully.")
+                info('Switched to "main" branch after merge.')
+                break
+            if errors:
+                error(f"Failed to merge branch '{branch_name}' after conflict resolution.")
+                plain("\n[red]Errors:[/red]")
+                for err in errors:
+                    error(f"- {err['path']}: {err['message']}")
+                sys.exit(1)
+            if not conflicts:
+                error(
+                    f"Failed to merge branch '{branch_name}' after conflict resolution "
+                    "(no conflicts or errors returned)."
+                )
+                sys.exit(1)
+            warning("Merge still blocked; resolve the remaining conflicts below.")
+            enriched = enrich_branch_merge_conflicts(conflicts)
+            display_conflict = [
+                c
+                for c in enriched
+                if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
+            ]
+            if display_conflict:
+                output_merge_conflict_table(
+                    display_conflict,
+                    show_type=True,
+                    panel_title="Remaining merge conflicts",
+                )
+
     @classmethod
     def format(
         cls,
@@ -2428,6 +2821,7 @@ class AgentStudioCLI:
             if output_json and initial_response is not None
             else []
         )
+        end_call = False
         try:
             while True:
                 if input_messages is not None:
@@ -2447,9 +2841,11 @@ class AgentStudioCLI:
                 if user_input is None:
                     continue
                 if user_input.lower() == "/exit":
+                    end_call = True
                     break
                 if user_input.lower() == "/restart":
                     restart = True
+                    end_call = True
                     break
 
                 try:
@@ -2480,7 +2876,7 @@ class AgentStudioCLI:
                         plain("[muted]Conversation ended by agent.[/muted]")
                     break
         finally:
-            if not conversation_ended:
+            if end_call or (not conversation_ended and not output_json):
                 try:
                     project.end_chat(conversation_id, environment)
                     if not output_json:

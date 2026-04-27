@@ -3,11 +3,9 @@ title: Prerequisites
 description: Understand the access requirements and local tools needed before using the PolyAI ADK.
 ---
 
+If you haven't already, start with the [Getting started](./get-started.md) page for an overview of what the ADK is and how to sign up for Agent Studio. If you run into any issues generating your API key, contact [developers@poly-ai.com](mailto:developers@poly-ai.com).
+
 Before using the **PolyAI ADK**, you need the correct **platform access** and the required **local tools**.
-
-Access is provided by your PolyAI contact:
-
-- `developers@poly-ai.com`
 
 ## Generate API key
 
@@ -26,7 +24,7 @@ The `POLY_ADK_KEY` environment variable must be set before running any `poly` co
 Once the ADK is installed and your API key is set, you can use the `poly` command to interact with Agent Studio projects locally.
 
 !!! warning "API keys are workspace-scoped"
-    An API key grants access to one specific Agent Studio workspace. When you run `poly init`, it lists all projects visible to that key. If you see many projects that do not look like yours, you are likely using a key scoped to the wrong workspace — for example, an organisation-wide key rather than one scoped to your personal workspace. Contact your PolyAI contact to confirm you have a key for the correct workspace.
+    An API key grants access to one specific Agent Studio workspace. When you run `poly init`, it lists all projects visible to that key. If you see many projects that do not look like yours, you are likely using a key scoped to the wrong workspace — for example, an organization-wide key rather than one scoped to your personal workspace. Contact your PolyAI contact to confirm you have a key for the correct workspace.
 
 ## Local requirements
 

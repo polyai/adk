@@ -13,22 +13,45 @@ The ADK is especially useful when paired with tools that help developers inspect
 
 ## Recommended tooling
 
+There are two well-supported paths for working with the ADK. They are not mutually exclusive — many developers use both.
+
+### PolyAI ADK extension for VS Code and Cursor
+
+The **PolyAI ADK extension** brings ADK-aware editing into **VS Code** and **Cursor**. It is the recommended path if you prefer an IDE-first workflow.
+
+The extension helps with:
+
+- navigating and editing flows, functions, topics, entities, and agent settings with resource-aware tooling
+- catching common mistakes while you edit, before you push
+- driving `poly` commands without leaving the editor
+- pairing with your IDE's built-in AI features (Cursor's agent, VS Code Copilot, etc.) to generate and update project files
+
+#### Install the extension
+
+The extension is published on **Open VSX**, so it works in both VS Code and Cursor.
+
+1. Open the Extensions view in VS Code or Cursor.
+2. Search for `PolyAI ADK` and install it, or install it directly from the [Open VSX listing](https://open-vsx.org/extension/PolyAI/adk-extension){ target="_blank" rel="noopener" }.
+3. Open a project that has been pulled down with `poly pull`.
+
+Once installed, the extension auto-detects local ADK projects and exposes resource-aware navigation, validation, and commands.
+
 ### Claude Code
 
-PolyAI recommends using **Claude Code** for development with the ADK.
+**Claude Code** is a good alternative when you want an agentic CLI workflow — useful for generating a project from a brief, applying patterns across many files, or running longer build tasks end-to-end.
 
 The repository includes a `.claude/` directory with project-specific instructions and examples.
 
 Claude Code is particularly useful for:
 
 - generating project resources from structured requirements
-- updating flows and functions
+- updating flows and functions at scale
 - applying patterns reused across previous projects
 - speeding up repetitive implementation work
 
 #### Loading ADK rules into Claude Code
 
-Before starting a session with Claude Code or another coding tool, generate a documentation file and pass it as context:
+Before starting a session with Claude Code or another external coding tool, generate a documentation file and pass it as context:
 
 ~~~bash
 poly docs --all --output rules.md
@@ -36,9 +59,9 @@ poly docs --all --output rules.md
 
 Reference `rules.md` in your session prompt. This gives the coding tool accurate knowledge of ADK resource types, constraints, and conventions.
 
-### VS Code extension
+!!! tip "Use both where useful"
 
-A **PolyAI ADK VS Code extension** is available in the VS Code Marketplace. Search for `PolyAI.adk-extension` or install it directly from the [marketplace listing](https://marketplace.visualstudio.com/items?itemName=PolyAI.adk-extension){ target="_blank" rel="noopener" }.
+    The IDE extension and Claude Code cover different modes of work. You can edit in VS Code or Cursor day-to-day and still reach for Claude Code when you want an agent to generate or refactor a large slice of the project on your behalf.
 
 ## Other local tools
 

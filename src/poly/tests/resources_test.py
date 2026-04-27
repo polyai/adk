@@ -878,7 +878,8 @@ TEST_TOPIC = Topic(
     enabled=True,
 )
 
-TEST_TOPIC_RAW = """enabled: true
+TEST_TOPIC_RAW = """name: test_topic
+enabled: true
 actions: Run function {{fn:test_id}}
 content: Test content
 example_queries:
@@ -886,7 +887,8 @@ example_queries:
 - Who wrote '1984'?
 """
 
-TEST_TOPIC_PRETTY = """enabled: true
+TEST_TOPIC_PRETTY = """name: test_topic
+enabled: true
 actions: Run function {{fn:test_function}}
 content: Test content
 example_queries:
@@ -2469,6 +2471,32 @@ class FlowStepTests(unittest.TestCase):
         )
         self.assertEqual(step.asr_biasing, ASRBiasing(flow_id="flow-123", step_id="step-1"))
         self.assertEqual(step.dtmf_config, DTMFConfig(flow_id="flow-123", step_id="step-1"))
+
+    def test_prompt_whitespace_is_stripped(self):
+        """Prompts with leading/trailing whitespace are stripped on read."""
+        yaml_dict = yaml.safe_load("step_type: advanced_step\nname: Test Step\nprompt: '  Hello  '\n")
+        step = FlowStep.from_yaml_dict(
+            yaml_dict,
+            resource_id="Test Flow_step-1",
+            file_name="test_step",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            resource_mappings=[],
+        )
+        self.assertEqual(step.prompt, "Hello")
+
+    def test_missing_prompt_defaults_to_empty_string(self):
+        """Steps without a prompt field default to an empty string rather than None."""
+        yaml_dict = yaml.safe_load("step_type: advanced_step\nname: Test Step\n")
+        step = FlowStep.from_yaml_dict(
+            yaml_dict,
+            resource_id="Test Flow_step-1",
+            file_name="test_step",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            resource_mappings=[],
+        )
+        self.assertEqual(step.prompt, "")
 
     def test_function_name_swapping(self):
         """Test the core function name swapping functionality."""

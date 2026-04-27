@@ -3,20 +3,20 @@ title: Walkthrough Video
 description: Watch a walkthrough of building a production-ready voice agent with the PolyAI ADK.
 ---
 
-This walkthrough shows how quickly a production-ready voice agent can be built using the **PolyAI ADK**.
+This walkthrough shows how to build a production-ready voice agent with the **PolyAI ADK**.
 
-It gives a practical look at the developer workflow and shows how the ADK fits into a coding-tool-assisted development process.
+It demonstrates the end-to-end developer workflow and shows how the ADK fits alongside the [PolyAI ADK extension for VS Code and Cursor](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor).
 
 ## Watch the video
 
 <div style="padding:64.98% 0 0 0; position:relative;">
   <iframe
-    src="https://player.vimeo.com/video/1173322390?badge=0&amp;autopause=0&amp;player_id=0&amp;app_id=58479"
+    src="https://player.vimeo.com/video/1185280299?badge=0&amp;autopause=0&amp;player_id=0&amp;app_id=58479"
     frameborder="0"
     allow="autoplay; fullscreen; picture-in-picture; clipboard-write; encrypted-media; web-share"
     referrerpolicy="strict-origin-when-cross-origin"
     style="position:absolute; top:0; left:0; width:100%; height:100%;"
-    title="Building a production-ready voice agent in less than 30 minutes with PolyAI ADK">
+    title="PolyAI ADK Walkthrough">
   </iframe>
 </div>
 
@@ -29,25 +29,13 @@ It gives a practical look at the developer workflow and shows how the ADK fits i
 
     ---
 
-    See how agent work can move from the browser into a local development environment.
-
--   **AI-assisted development**
-
-    ---
-
-    Watch the ADK used alongside tools such as Claude Code to accelerate implementation.
+    Watch the ADK used alongside the PolyAI ADK extension for VS Code or Cursor to accelerate implementation.
 
 -   **Fast iteration**
 
     ---
 
     Follow the flow from setup to a working agent in a short amount of time.
-
--   **Production mindset**
-
-    ---
-
-    See how the ADK supports building agents that are intended for real deployment, not just demos.
 
 </div>
 

@@ -397,7 +397,7 @@ class FindNewKeptDeletedTest(unittest.TestCase):
         self.assertEqual(new_mapping.resource_name, "Topic 1")
         self.assertEqual(
             new_mapping.file_path,
-            os.path.join(TEST_DIR, "topics", "Topic 1.yaml"),
+            os.path.join(TEST_DIR, "topics", "topic_1.yaml"),
         )
         self.assertEqual(new_mapping.flow_name, None)
         self.assertEqual(new_mapping.resource_prefix, None)
@@ -502,7 +502,7 @@ class ProjectStatusTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         files_with_conflicts, modified_files, new_files, deleted_files = project.project_status()
         self.assertEqual(files_with_conflicts, [])
-        self.assertEqual(new_files, [os.path.join(TEST_DIR, "topics", "Topic 1.yaml")])
+        self.assertEqual(new_files, [os.path.join(TEST_DIR, "topics", "topic_1.yaml")])
         self.assertEqual(modified_files, [])
         self.assertEqual(deleted_files, [])
 
@@ -590,7 +590,7 @@ class ProjectStatusTest(unittest.TestCase):
             modified_files,
             [os.path.join(TEST_DIR, "flows", "test_flow", "steps", "start_step.yaml")],
         )
-        self.assertEqual(new_files, [os.path.join(TEST_DIR, "topics", "Topic 1.yaml")])
+        self.assertEqual(new_files, [os.path.join(TEST_DIR, "topics", "topic_1.yaml")])
         self.assertEqual(deleted_files, [os.path.join(TEST_DIR, "functions", "extra_function.py")])
 
 
@@ -609,7 +609,7 @@ class GetDiffsTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         diffs = project.get_diffs(all_files=True)
 
-        topic_path = "topics/Topic 1.yaml"
+        topic_path = "topics/topic_1.yaml"
         self.assertIn(topic_path, diffs)
 
         diff = diffs[topic_path]
@@ -678,7 +678,7 @@ class GetDiffsTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         diffs = project.get_diffs(all_files=True)
 
-        topic_path = "topics/Topic 1.yaml"
+        topic_path = "topics/topic_1.yaml"
         func_path = os.path.join(TEST_DIR, "functions", "extra_function.py")
         self.assertIn(topic_path, diffs)
         self.assertIn(func_path, diffs)
@@ -708,11 +708,11 @@ class GetDiffsTest(unittest.TestCase):
             "function_type": "global",
         }
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
-        requested_file = os.path.join(TEST_DIR, "topics", "Topic 1.yaml")
+        requested_file = os.path.join(TEST_DIR, "topics", "topic_1.yaml")
         diffs = project.get_diffs(files=[requested_file])
 
         # Topic diff
-        topic_path = "topics/Topic 1.yaml"
+        topic_path = "topics/topic_1.yaml"
         self.assertIn(topic_path, diffs)
         diff = diffs[topic_path]
         self.assertIn("--- original", diff)
@@ -2100,7 +2100,7 @@ class ValidateProjectTest(unittest.TestCase):
         with mock_read_from_file(
             {
                 os.path.join(
-                    TEST_DIR, "topics", "Topic 1.yaml"
+                    TEST_DIR, "topics", "topic_1.yaml"
                 ): 'name: Topic 1\ncontent: Topic 1 content\nexample_queries:\n- Topic 1 example query\nenabled: true\nactions: "{{fn:FUNCTION-missing_function}}"\n',
                 os.path.join(
                     TEST_DIR, "flows", "test_flow", "flow_config.yaml"
@@ -2328,6 +2328,46 @@ class PullProjectTest(unittest.TestCase):
         self.assertIn(">>>>>>>", saved_content)
         # Verify both versions are in the conflict
         self.assertIn("Modified locally", saved_content)
+        self.assertIn("Modified remotely", saved_content)
+
+    def test_pull_project_local_formatting_difference_no_false_conflict(self):
+        """Cosmetic formatting differences in the local file should not cause merge conflicts.
+
+        The local file has the same semantic content as the original but with trailing
+        whitespace in the description.  The normalisation step (read_local_resource +
+        to_pretty) should produce the same string as the canonical original, so when
+        the remote modifies the description the merge should apply cleanly.
+        """
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        original_resources = deepcopy(project.resources)
+
+        # Remote modifies the description
+        incoming_resources = deepcopy(original_resources)
+        flow_config_id = "FLOW_CONFIG-test_flow"
+        modified_flow_config = deepcopy(incoming_resources[FlowConfig][flow_config_id])
+        modified_flow_config.description = "Modified remotely"
+        incoming_resources[FlowConfig][flow_config_id] = modified_flow_config
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+
+        flow_config_path = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
+        # Local file: same semantic content as original but with trailing whitespace
+        local_with_cosmetic_diff = (
+            "name: test_flow\n"
+            "description: Test flow with advanced step as start   \n"
+            "start_step: start_step\n"
+        )
+
+        with mock_read_from_file({flow_config_path: local_with_cosmetic_diff}):
+            files_with_conflicts, _ = project.pull_project(force=False)
+
+        self.assertEqual(files_with_conflicts, [])
+        flow_config_calls = [
+            call
+            for call in self.mock_save_to_file.call_args_list
+            if len(call[0]) >= 2 and call[0][1] == flow_config_path
+        ]
+        saved_content = flow_config_calls[-1][0][0] if flow_config_calls else ""
+        self.assertNotIn("<<<<<<<", saved_content)
         self.assertIn("Modified remotely", saved_content)
 
     def test_pull_project_modify_no_conflict(self):

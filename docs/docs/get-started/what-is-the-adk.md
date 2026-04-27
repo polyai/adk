@@ -15,20 +15,20 @@ It gives you a Git-like workflow for synchronizing project configuration between
 - Build and edit Agent Studio projects locally using standard tooling
 - Synchronize project configuration with Agent Studio using `poly push` and `poly pull`
 - Branch, validate, and review changes before deployment
-- Use [AI coding tools](../reference/tooling.md) such as **Claude Code** to generate and update project files
+- Edit and navigate projects in **VS Code** or **Cursor** with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor), or pair the ADK with [AI coding agents](../reference/tooling.md#claude-code) such as **Claude Code**
 - Collaborate across multiple developers on the same project
 
 ## Why it exists
 
-The ADK moves development work out of the browser and into your local environment.
+The ADK moves most build-and-edit work out of the browser and into your local environment. You still use Agent Studio to merge branches, deploy, and monitor the agent in production — but you no longer have to edit resources there by hand.
 
 Instead of editing everything directly inside Agent Studio, you pull a project locally, make changes using your normal tools, and push those changes back to the platform.
 
 This makes it straightforward to:
 
-- iterate quickly without browser round-trips
+- edit resources in your own editor, with the tooling you already use
 - collaborate across a team without overwriting each other's work
-- validate and test changes before pushing them live
+- validate and review changes before pushing them live
 - automate repetitive build work with coding tools
 
 ## Multi-developer workflows

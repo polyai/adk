@@ -32,6 +32,17 @@ poly push --help
 
 Initialize a new Agent Studio project locally.
 
+`poly init` creates the project directory at `{base_path}/{account_id}/{project_id}` and immediately pulls the current configuration from Agent Studio. After it completes, change into the project directory before running any other commands.
+
+The human-readable project name is stored in `project.yaml` alongside the `project_id`, `account_id`, and `region`:
+
+~~~yaml
+project_id: my-project
+account_id: my-workspace
+region: us-1
+project_name: My Project
+~~~
+
 Examples:
 
 ~~~bash
@@ -40,6 +51,17 @@ poly init --region us-1 --account_id 123 --project_id my_project
 poly init --base-path /path/to/projects
 poly init --format
 ~~~
+
+#### Error handling
+
+If the account or project ID is invalid or inaccessible, `poly init` returns a descriptive error and cleans up any partially created directories so no empty folders are left behind.
+
+| Situation | Error message |
+|---|---|
+| Project not found | `Project '<project_id>' not found in account '<account_id>'.` |
+| Permission denied | `Forbidden: you do not have permission to access project '<project_id>' in account '<account_id>'.` |
+
+When using `--json`, the response includes `{ "success": false, "error": "..." }` with the same message.
 
 ### `poly pull`
 
@@ -73,6 +95,14 @@ poly push --format
 
 When pushing creates a new branch (for example, when pushing to Agent Studio for the first time on a branch), the CLI displays a message with the new branch name.
 
+!!! info "Call Link URL in chat output may be malformed"
+
+    Each chat session prints a Call Link URL for viewing the conversation in Agent Studio. On some deployments this URL has a doubled hostname (for example, `https://studio.studio.poly.ai/…`), which produces a 404. The conversation is still recorded — open Agent Studio directly and navigate to the conversation from there.
+
+!!! info "`poly push` reports an error message when there is nothing to push"
+
+    If there are no local changes, `poly push` prints `Error: Failed to push` and `No changes detected`. The exit code is 0, so CI scripts that check return codes are not affected. The message is misleading but the command has not actually failed.
+
 When using JSON output (`--json`), the response includes `new_branch_name` and `new_branch_id` fields if a new branch was created.
 
 ### `poly status`
@@ -87,34 +117,21 @@ poly status
 
 Show differences between the local project and the remote version.
 
-With no arguments, shows local changes against the remote version. Pass a version hash to compare that version against its predecessor. Use `--before` and `--after` to compare any two named versions, environments, or branches.
-
 Examples:
 
 ~~~bash
 poly diff
-poly diff sandbox
-poly diff --before hash1 --after hash2
-poly diff --files file1.yaml
+poly diff file1.yaml
 ~~~
-
-#### `poly diff` flags
-
-| Flag | Description |
-|---|---|
-| `hash` | Optional positional. Hash of the version to compare against its predecessor. Cannot be combined with `--before`/`--after`. |
-| `--files` | List of files to show changes for. If not specified, shows all changes. |
-| `--before` | Name of the original branch, environment, or version hash to compare with. If specified without `--after`, compares against the current local project. |
-| `--after` | Name of the branch, environment, or version hash to compare against. If specified without `--before`, compares against the previous version. |
 
 ### `poly revert`
 
-Revert local changes. With no arguments, reverts all changes. Pass specific files to revert only those.
+Revert local changes.
 
 Examples:
 
 ~~~bash
-poly revert
+poly revert --all
 poly revert file1.yaml file2.yaml
 ~~~
 
@@ -132,9 +149,62 @@ poly branch create my-hotfix --env live
 poly branch create my-hotfix --env live --force
 poly branch switch my-feature
 poly branch switch my-feature --force
+poly branch merge 'Merge feature branch'
+poly branch merge 'Merge feature branch' --interactive
 poly branch delete
 poly branch delete my-feature
 ~~~
+
+#### `poly branch merge`
+
+Merge the current branch into main via the CLI. A merge message is required.
+
+~~~bash
+poly branch merge 'Merge message'
+poly branch merge 'Merge message' --interactive
+poly branch merge 'Merge message' --resolutions resolutions.json
+~~~
+
+If the merge has no conflicts, the branch is merged immediately and the CLI switches to `main`.
+
+If there are conflicts, the command displays a conflict table showing each conflicting field and whether it can be auto-merged, then exits with a non-zero code. You can resolve conflicts using:
+
+- **`--interactive` / `-i`** — opens an interactive prompt for each conflict. For each one you can accept the auto-merge, pick main, pick branch, pick base, or open the value in your `$EDITOR` or `$VISUAL`. After resolving all conflicts the merge is re-attempted.
+- **`--resolutions <file>`** — supply pre-defined resolutions as a JSON file path, inline JSON string, or `-` for stdin. Resolutions that cover all conflicts allow the merge to proceed non-interactively.
+
+Both flags can be combined: `--resolutions` seeds the interactive session with your pre-defined choices while `--interactive` handles any remaining conflicts.
+
+!!! tip "Set `$EDITOR` or `$VISUAL` for the best interactive experience"
+
+    Interactive mode uses your `$EDITOR` or `$VISUAL` environment variable when opening multiline or long values for editing. If neither is set it falls back to `vi`. Set one in your shell profile to use your preferred editor.
+
+##### Resolution file format
+
+`--resolutions` accepts a JSON array. Each element must include `path` and `strategy`, and optionally `value`:
+
+~~~json
+[
+  {
+    "path": ["topics", "My Topic", "content"],
+    "strategy": "theirs"
+  },
+  {
+    "path": ["agent_settings", "rules", "value"],
+    "strategy": "theirs",
+    "value": "Custom resolved content here"
+  }
+]
+~~~
+
+| Field | Description |
+|---|---|
+| `path` | List of strings identifying the conflicted field |
+| `strategy` | Resolution strategy: `"ours"` (keep main), `"theirs"` (keep branch), or `"base"` (revert to original) |
+| `value` | Optional custom value. Only used with `"theirs"` strategy. |
+
+##### After a successful merge
+
+After a successful merge the CLI automatically switches to `main`. Run `poly pull` if you need to refresh your local state.
 
 #### `poly branch delete`
 
@@ -147,6 +217,12 @@ Interactively select and delete one or more branches. The `main` branch cannot b
 poly branch delete
 poly branch delete my-feature
 ~~~
+
+!!! warning "`poly branch delete` requires a TTY and may fail with a 404"
+
+    `poly branch delete` opens an interactive confirmation prompt and must be run in a terminal. In non-interactive environments (scripts, CI), it throws `[Errno 22] Invalid argument`.
+
+    On some projects, the delete command hits the same platform endpoint as branch chat and returns a 404 after the confirmation. If this happens, delete the branch through the Agent Studio UI instead.
 
 #### `poly branch create`
 
@@ -169,6 +245,10 @@ When `--env live` or `--env pre-release` is specified:
 
     Branching from a live deployment snapshot will overwrite your local project with the live state. Merging this branch back to main may roll back changes that were introduced after the snapshot was taken.
 
+!!! info "Only one active branch is allowed at a time"
+
+    Agent Studio supports one non-main branch per project. Attempting to create a second branch while one already exists returns an error. Merge or delete the existing branch in Agent Studio before creating a new one.
+
 ### `poly format`
 
 Format project resources.
@@ -177,12 +257,8 @@ Examples:
 
 ~~~bash
 poly format
-poly format --files file1.py
+poly format file1.py
 ~~~
-
-| Flag | Description |
-|---|---|
-| `--files` | Specific files or directories to format. If not specified, runs on the whole project tree. |
 
 ### `poly validate`
 
@@ -194,31 +270,17 @@ poly validate
 
 ### `poly review`
 
-Create and manage GitHub Gist diff reviews of Agent Studio project changes.
+Create a GitHub Gist of Agent Studio project changes to share with others.
 
-#### `poly review create`
-
-Create a GitHub Gist for reviewing changes, similar to a pull request.
-
-With no arguments, creates a gist comparing local changes against the remote project. Pass a version hash to review that version against its predecessor. Use `--before` and `--after` to compare any two named versions, environments, or branches.
+Running `poly review` without a subcommand creates a new gist comparing local changes against the remote project. Use `--before` and `--after` to compare two remote branches or versions. Use `--debug` to enable DEBUG-level logging for troubleshooting.
 
 Examples:
 
 ~~~bash
-poly review create
-poly review create --path /path/to/project
-poly review create version-hash-1
-poly review create --before main --after feature-branch
-poly review create --before sandbox --after live
-poly review create --before version-hash-1 --after version-hash-2
+poly review
+poly review --before main --after feature-branch
+poly review --debug
 ~~~
-
-| Flag | Description |
-|---|---|
-| `hash` | Optional positional. Hash of the version to compare against its predecessor. Cannot be combined with `--before`/`--after`. |
-| `--before` | Name of the original branch, environment, or version hash to compare with. |
-| `--after` | Name of the branch, environment, or version hash to compare against. |
-| `--files` | List of files to include in the review. If not specified, includes all changes. |
 
 #### `poly review list`
 
@@ -238,32 +300,6 @@ poly review delete
 poly review delete --id GIST_ID
 poly review delete --json
 ~~~
-
-### `poly deployments`
-
-Manage deployment history for the project.
-
-#### `poly deployments list`
-
-List deployment history for the project. Shows the most recent deployments for the specified environment, with Rich console output including sandbox / pre-release / live badges to indicate currently active versions.
-
-Examples:
-
-~~~bash
-poly deployments list
-poly deployments list --env live
-poly deployments list --details
-poly deployments list --limit 20 --offset 10
-poly deployments list --hash abc123456
-~~~
-
-| Flag | Description |
-|---|---|
-| `--env`, `-e` | Environment to list deployments for. Choices: `sandbox`, `pre-release`, `live`. Defaults to `sandbox`. |
-| `--limit` | Maximum number of versions to show. Defaults to `10`. |
-| `--offset` | Number of versions to skip before showing results. Defaults to `0`. |
-| `--hash` | Start listing from this version hash (overrides `--offset`). |
-| `--details` | Print full metadata for each deployment instead of the compact table view. |
 
 ### `poly chat`
 
@@ -342,11 +378,12 @@ Use language flags to specify the expected input and output language when chatti
 | `--input-file FILE` | Read messages line-by-line from a file (`-` for stdin). |
 | `--conversation-id`, `--conv-id` | Resume an existing conversation by ID. |
 | `--json` | Emit a single JSON object when the session ends (see below). |
-| `--environment` | Target environment. Choices: `branch`, `sandbox`, `pre-release`, `live`. Defaults to `sandbox`. `branch` chats against the last **pushed** state of your current branch (not local uncommitted changes); on main it falls back to `sandbox`. Use `--push` to push local changes before chatting. |
+| `--environment` | Target environment. Choices: `branch`, `sandbox`, `pre-release`, `live`. Defaults to `branch`. `branch` chats against the last **pushed** state of your current branch (not local uncommitted changes); on main it falls back to `sandbox`. Use `--push` to push local changes before chatting. |
 | `--channel` | Channel to use (e.g. `webchat`, `voice`). |
 | `--lang` | Set both input and output language. |
 | `--input-lang` | Set input language only. |
 | `--output-lang` | Set output language only. |
+| `--variant` | Name of the variant to use for the chat session. |
 | `--functions` | Show function events in output. |
 | `--flows` | Show flow metadata in output. |
 | `--state` | Show state changes in output. |
@@ -366,6 +403,27 @@ poly docs --all --output rules.md
 
 Use `--output` to write the documentation to a local file. This is useful when working with AI coding tools — pass the output file as context to give the agent accurate knowledge of ADK resource types and conventions.
 
+### `poly deployments`
+
+List deployments for the project.
+
+Examples:
+
+~~~bash
+poly deployments list
+poly deployments list --env live
+poly deployments list --details
+~~~
+
+| Flag | Description |
+|---|---|
+| `--env` | Environment to list deployments for. Choices: `sandbox`, `pre-release`, `live`. Defaults to `sandbox`. |
+| `--details` | Show additional deployment details. |
+
+!!! tip "Use `--details` for readable output"
+
+    The default tabular view may wrap long URLs across multiple rows, making it unreadable in narrow terminals. `--details` produces a vertical layout that is easier to read.
+
 ## Machine-readable JSON output
 
 All core subcommands accept a `--json` flag that switches stdout to a single JSON object. This is designed for scripting, CI pipelines, and any integration that needs stable, parseable output rather than human-readable console text.
@@ -376,18 +434,18 @@ poly push --json
 poly pull --json
 poly validate --json
 poly diff --json
-poly revert --json
+poly revert --json --all
 poly branch list --json
 poly branch create my-feature --json
 poly branch switch my-feature --json
 poly branch current --json
 poly branch delete --json
 poly branch delete my-feature --json
+poly branch merge 'Merge message' --json
 poly format --json
 poly init --region us-1 --account_id 123 --project_id my_project --json
 poly chat --json -m 'Hello'
 poly chat --json --input-file ./script.txt
-poly deployments list --json
 ~~~
 
 When `--json` is used:
@@ -395,6 +453,10 @@ When `--json` is used:
 - stdout contains exactly one JSON object
 - the process exits with code `0` on success and non-zero on failure
 - human-readable console messages are suppressed
+
+!!! info "`--interactive` and `--json` cannot be used together"
+
+    `poly branch merge --interactive` requires a terminal for its conflict-resolution prompts and is incompatible with `--json`.
 
 ### JSON output shapes
 
@@ -406,19 +468,21 @@ The exact fields vary by command. Common fields include:
 | `poly push --json` | `success`, `message`, `dry_run` |
 | `poly pull --json` | `success`, `files_with_conflicts` |
 | `poly validate --json` | `valid`, `errors` |
-| `poly diff --json` | `success`, `diffs` |
+| `poly diff --json` | `diffs` |
 | `poly revert --json` | `success`, `files_reverted` |
 | `poly branch list --json` | `current_branch`, `branches` |
 | `poly branch create --json` | `success`, `new_branch_id`, `branch_name` |
 | `poly branch switch --json` | `success`, `switched_to`, `dry_run` |
 | `poly branch current --json` | `current_branch` |
 | `poly branch delete --json` | `success`, `deleted` |
+| `poly branch merge --json` | `success`; on conflict: `conflicts`, `errors` |
 | `poly format --json` | `success`, `check_only`, `format_errors`, `affected`, `ty_ran`, `ty_returncode`, `ty_timed_out` |
 | `poly init --json` | `success`, `root_path` |
 | `poly chat --json` | `conversations` (array); optional `push` (when `--push` is used) |
-| `poly deployments list --json` | `versions`, `active_deployment_hashes` |
 
 For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
+
+For `poly branch merge --json`, a successful merge returns `{ "success": true }`. When conflicts or errors are present, the response includes `"conflicts"` and `"errors"` arrays containing the raw conflict and error objects from the platform.
 
 Error responses always include `{ "success": false, "error": "...", "traceback": "..." }`.
 
@@ -488,8 +552,9 @@ A typical CLI workflow looks like this:
 4. inspect changes with `poly status` and `poly diff`
 5. validate with `poly validate`
 6. push with `poly push`
-7. optionally review with `poly review create`
+7. optionally review with `poly review`
 8. test or chat with the agent using `poly chat`
+9. merge the branch with `poly branch merge '<message>'`
 
 !!! info "Run commands from the project folder"
 

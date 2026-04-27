@@ -44,7 +44,7 @@ The ADK is designed to reduce those risks by combining local editing with valida
 
     ---
 
-    The CLI helps ensure that pushed changes remain valid for the project.
+    The CLI validates that pushed changes remain valid for the project.
 
 </div>
 

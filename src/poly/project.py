@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import os
+import shutil
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, fields
@@ -17,6 +18,7 @@ from google.protobuf.message import Message
 
 import poly.resources.resource_utils as resource_utils
 import poly.utils as utils
+
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
@@ -60,12 +62,17 @@ from poly.resources import (
 )
 from poly.resources.resource import _parse_multi_resource_path
 from poly.utils import compute_variable_references
+from poly.migration_utils import (
+    run_migrations,
+    get_all_migration_flags,
+    MigrationFlag,
+    load_migration_flags,
+)
 
 logger = logging.getLogger(__name__)
 
 PROJECT_CONFIG_FILE = "project.yaml"
 STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
-_LEGACY_STATUS_FILE = ".agent_studio_config"
 
 
 # New resources to be added here
@@ -148,8 +155,10 @@ class AgentStudioProject:
     resources: ResourceMap
     last_updated: datetime
     branch_id: str = None
+    project_name: Optional[str] = None
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
+    _migration_flags: set[MigrationFlag] = None
 
     # Store resources that were not loaded from the status file
     # So they aren't considered locally deleted when pushing/pulling
@@ -181,11 +190,14 @@ class AgentStudioProject:
 
     def build_project_config(self) -> dict:
         """Build the project configuration dictionary"""
-        return {
+        config = {
             "project_id": self.project_id,
             "account_id": self.account_id,
             "region": self.region,
         }
+        if self.project_name:
+            config["project_name"] = self.project_name
+        return config
 
     @classmethod
     def _load_resources_from_status_dict(
@@ -245,6 +257,9 @@ class AgentStudioProject:
         else:
             last_updated = datetime.now()
 
+        migration_flags = load_migration_flags(status_dict.get("migration_flags", []))
+        migration_flags = run_migrations(root_path, migration_flags)
+
         return cls(
             region=config_dict.get("region", ""),
             account_id=config_dict.get("account_id", ""),
@@ -254,7 +269,9 @@ class AgentStudioProject:
             last_updated=last_updated,
             file_structure_info={},
             branch_id=status_dict.get("branch_id", "main"),
+            project_name=config_dict.get("project_name") or status_dict.get("project_name"),
             _not_loaded_resources=not_loaded_resources,
+            _migration_flags=migration_flags,
         )
 
     def to_dict(self) -> dict:
@@ -272,6 +289,10 @@ class AgentStudioProject:
             "last_updated": (self.last_updated.isoformat() if self.last_updated else None),
             "file_structure_info": self.file_structure_info,
             "branch_id": self.branch_id,
+            "project_name": self.project_name,
+            "migration_flags": [flag.value for flag in self._migration_flags]
+            if self._migration_flags
+            else [],
         }
 
     @classmethod
@@ -280,6 +301,9 @@ class AgentStudioProject:
         resources, not_loaded_resources = cls._load_resources_from_status_dict(data)
 
         file_structure_info = cls.compute_file_structure_info(resources)
+
+        migration_flags = load_migration_flags(data.get("migration_flags", []))
+        migration_flags = run_migrations(root_path, migration_flags)
 
         return cls(
             region=data.get("region", ""),
@@ -290,6 +314,8 @@ class AgentStudioProject:
             last_updated=datetime.fromisoformat(data.get("last_updated", "1970-01-01T00:00:00")),
             file_structure_info=file_structure_info,
             branch_id=data.get("branch_id", "main"),
+            project_name=data.get("project_name"),
+            _migration_flags=migration_flags,
             _not_loaded_resources=not_loaded_resources,
         )
 
@@ -327,6 +353,7 @@ class AgentStudioProject:
         region: str,
         account_id: str,
         project_id: str,
+        project_name: str = None,
         format: bool = False,
         projection_json: Optional[dict[str, Any]] = None,
         on_save: Callable[[int, int], None] | None = None,
@@ -338,6 +365,7 @@ class AgentStudioProject:
             region (str): The region of the project
             account_id (str): The account ID of the project
             project_id (str): The project ID
+            project_name (str): The human-readable project name
             format (bool): If True, format resources after pulling
             projection_json (dict[str, Any]): A dictionary containing the projection
                 If provided, the projection will be used instead of fetching it from the API.
@@ -349,20 +377,32 @@ class AgentStudioProject:
             dict[str, Any]: The projection data
         """
 
-        base_path = os.path.join(base_path, account_id, project_id)
+        account_path = os.path.join(base_path, account_id)
+        project_path = os.path.join(account_path, project_id)
 
         project = cls(
             region=region,
             account_id=account_id,
             project_id=project_id,
-            root_path=base_path,
+            root_path=project_path,
             resources={},
             last_updated=datetime.now(),
             branch_id="main",
+            project_name=project_name,
+            _migration_flags=get_all_migration_flags(),
         )
-        project.resources, projection = project.api_handler.pull_resources(
-            projection_json=projection_json
-        )
+
+        try:
+            project.resources, projection = project.api_handler.pull_resources(
+                projection_json=projection_json
+            )
+        except ValueError:
+            if os.path.exists(project_path):
+                shutil.rmtree(project_path)
+            if os.path.exists(account_path) and not os.listdir(account_path):
+                shutil.rmtree(account_path)
+            raise
+
         project._check_no_duplicate_resource_paths(project.resources)
 
         resource_mappings: list[ResourceMapping] = project._make_resource_mappings(
@@ -379,7 +419,7 @@ class AgentStudioProject:
                 on_save(i, total)
             is_multi = isinstance(resource, MultiResourceYamlResource)
             resource.save(
-                base_path,
+                project_path,
                 resource_mappings=resource_mappings,
                 resource_name=resource.name,
                 format=format,
@@ -391,8 +431,8 @@ class AgentStudioProject:
 
         project.save_config(write_project_yaml=True)
 
-        utils.export_decorators(DECORATORS, base_path)
-        utils.save_imports(base_path)
+        utils.export_decorators(DECORATORS, project_path)
+        utils.save_imports(project_path)
 
         return project, projection
 
@@ -874,7 +914,17 @@ class AgentStudioProject:
                     original_content = ""
                     local_file_path = incoming_resource.get_path(self.root_path)
                 try:
-                    local_content = resource_type.read_from_file(local_file_path)
+                    # Normalise the local resource to ensure formatting differences don't cause unnecessary merge conflicts
+                    local_resource = resource_type.read_local_resource(
+                        local_file_path,
+                        resource_id=incoming_resource.resource_id,
+                        resource_name=incoming_resource.name,
+                        resource_mappings=incoming_resource_mappings,
+                    )
+                    local_content = local_resource.to_pretty(
+                        resource_name=incoming_resource.name,
+                        resource_mappings=incoming_resource_mappings,
+                    )
                 except FileNotFoundError:
                     # If local file doesn't exist:
                     # If no original content, save the incoming content
@@ -891,6 +941,9 @@ class AgentStudioProject:
                             format=format,
                         )
                     continue
+                except Exception:
+                    # If can't read file but file exists, use local version
+                    local_content = resource_type.read_from_file(local_file_path)
 
                 incoming_content = incoming_resource.to_pretty(
                     resource_name=incoming_resource.name,
@@ -2133,7 +2186,10 @@ class AgentStudioProject:
                         resource_name = flow_name
 
                     # Resource name in file path is cleaned, so we need to get the original name
-                    if issubclass(resource_type, MultiResourceYamlResource):
+                    if (
+                        issubclass(resource_type, MultiResourceYamlResource)
+                        or resource_type == Topic
+                    ):
                         resource = self.read_local_resource(
                             ResourceMapping(
                                 resource_id="temp_id",
@@ -2267,7 +2323,7 @@ class AgentStudioProject:
         if success:
             self.branch_id = branches[branch_name]
             _, projection = self.pull_project(
-                force=force, format=format, projection_json=projection_json, on_save=on_save
+                force=True, format=format, projection_json=projection_json, on_save=on_save
             )
         return success, projection
 
@@ -2606,7 +2662,7 @@ class AgentStudioProject:
     def merge_branch(
         self, message: str, conflict_resolutions: list[dict[str, Any]] = None
     ) -> tuple[bool, list[str], list[str]]:
-        """Merge a branch into the current branch in the project.
+        """Merge the current branch into main in the project.
 
         Args:
             message (str): The merge commit message.
@@ -2614,7 +2670,7 @@ class AgentStudioProject:
                 resolutions. Each resolution should have:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
-                - value: Optional custom value (only used with custom strategy)
+                - value: Optional custom value
 
         Returns:
             bool: True if the merge was successful, False otherwise
@@ -2633,6 +2689,15 @@ class AgentStudioProject:
                 f"Cannot merge branch with uncommitted changes, diffs: {list(diffs.keys())}"
             )
 
+        for resolution in conflict_resolutions or []:
+            if "path" not in resolution or "strategy" not in resolution:
+                raise ValueError(f"Resolution must include 'path' and 'strategy': {resolution}")
+            if resolution["strategy"] not in {"ours", "theirs", "base"}:
+                raise ValueError(
+                    f"Invalid conflict resolution strategy: {resolution['strategy']} for path {resolution['path']}. "
+                    f"Must be one of 'ours', 'theirs', or 'base'."
+                )
+
         success, conflicts, errors = self.api_handler.merge_branch(
             message=message, conflict_resolutions=conflict_resolutions
         )
@@ -2640,15 +2705,7 @@ class AgentStudioProject:
             self.switch_branch("main", force=True)
             return True, [], []
 
-        error_messages = []
-        conflict_messages = []
-        if conflicts:
-            conflict_messages = [conflict["path"] for conflict in conflicts]
-            logger.debug(f"Merge conflicts detected: conflicts={conflicts!r}")
-        if errors:
-            error_messages = [f"{error['path']}: {error['message']}" for error in errors]
-            logger.debug(f"Merge errors detected: errors={errors!r}")
-        return False, conflict_messages, error_messages
+        return False, conflicts, errors
 
     def delete_branch(self, branch_name: str) -> bool:
         """Delete a branch in the project.

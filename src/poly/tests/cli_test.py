@@ -509,6 +509,104 @@ class BranchDeleteTest(unittest.TestCase):
         self.assertIn("1 branch(es)", mock_success.call_args[0][0])
 
 
+class BranchMergeConflictHelpersTest(unittest.TestCase):
+    """Branch merge conflict enrichment, resolution payload, and conflict table layout."""
+
+    def test_branch_merge_conflict_file_key(self):
+        from poly.cli import _branch_merge_conflict_file_key
+
+        self.assertEqual(_branch_merge_conflict_file_key([]), "")
+        self.assertEqual(_branch_merge_conflict_file_key(["a"]), "a")
+        self.assertEqual(_branch_merge_conflict_file_key(["a", "b", "c"]), os.path.join("a", "b"))
+
+    def test_enrich_branch_merge_conflicts_counts_and_merged_value(self):
+        from poly.cli import enrich_branch_merge_conflicts
+
+        conflicts = [
+            {
+                "path": ["kb", "t1", "f1"],
+                "baseValue": "same",
+                "theirsValue": "same",
+                "oursValue": "same",
+            },
+            {
+                "path": ["kb", "t1", "f2"],
+                "baseValue": "x",
+                "theirsValue": "y",
+                "oursValue": "z",
+            },
+        ]
+        out = enrich_branch_merge_conflicts(conflicts)
+        fk = os.path.join("kb", "t1")
+        self.assertEqual(out[0]["visual_path"], os.path.join("kb", "t1", "f1"))
+        self.assertEqual(out[0]["file_key"], fk)
+        self.assertEqual(out[0]["conflicts_in_resource"], 2)
+        self.assertTrue(out[0]["can_auto_merge"])
+        self.assertEqual(out[0]["merged_value"], "same")
+        self.assertFalse(out[1]["can_auto_merge"])
+
+    def test_enrich_skips_timestamp_paths_without_merge_metadata(self):
+        from poly.cli import enrich_branch_merge_conflicts
+
+        conflicts = [
+            {
+                "path": ["x", "updatedAt"],
+                "baseValue": "",
+                "theirsValue": "",
+                "oursValue": "",
+            }
+        ]
+        out = enrich_branch_merge_conflicts(conflicts)
+        self.assertNotIn("merged_value", out[0])
+
+    def test_auto_merge_resolution_payload(self):
+        from poly.cli import _auto_merge_resolution
+
+        path = ["topics", "actions"]
+        r = _auto_merge_resolution(path, "line1\nline2\n")
+        self.assertEqual(r["path"], path)
+        self.assertEqual(r["value"], "line1\nline2\n")
+        self.assertEqual(r["strategy"], "theirs")
+
+    @patch("poly.output.console.console.print")
+    def test_output_merge_conflict_table_one_row_per_conflict_when_show_type(self, mock_print):
+        from rich.panel import Panel
+        from rich.table import Table
+
+        from poly.output.console import output_merge_conflict_table
+
+        conflicts = [
+            {
+                "visual_path": os.path.join("a", "b", "f1"),
+                "can_auto_merge": True,
+                "conflicts_in_resource": 2,
+                "path": ["a", "b", "f1"],
+            },
+            {
+                "visual_path": os.path.join("a", "b", "f2"),
+                "can_auto_merge": False,
+                "conflicts_in_resource": 2,
+                "path": ["a", "b", "f2"],
+            },
+        ]
+        output_merge_conflict_table(conflicts, show_type=True)
+        rendered = mock_print.call_args_list[-1][0][0]
+        table = rendered.renderable if isinstance(rendered, Panel) else rendered
+        self.assertIsInstance(table, Table)
+        self.assertEqual(len(table.rows), 2)
+
+    @patch("poly.output.console.console.print")
+    def test_output_merge_conflict_table_without_show_type_single_column(self, mock_print):
+        from rich.panel import Panel
+
+        from poly.output.console import output_merge_conflict_table
+
+        conflicts = [{"visual_path": "p1", "path": ["p1"]}]
+        output_merge_conflict_table(conflicts, show_type=False)
+        rendered = mock_print.call_args_list[-1][0][0]
+        table = rendered.renderable if isinstance(rendered, Panel) else rendered
+        self.assertEqual(len(table.columns), 1)
+        self.assertEqual(len(table.rows), 1)
 class ChatLoopTest(unittest.TestCase):
     """Tests for AgentStudioCLI._run_chat_loop.
 

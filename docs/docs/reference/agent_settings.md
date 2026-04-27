@@ -95,9 +95,9 @@ It supports:
 
 ~~~yaml
 adjectives:
-Polite: true
-Calm: true
-Kind: true
+  Polite: true
+  Calm: true
+  Kind: true
 custom: ""
 ~~~
 
