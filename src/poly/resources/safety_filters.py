@@ -94,7 +94,7 @@ def _build_update_content_filter_proto(
 class _BaseSafetyFilters(YamlResource):
     """Shared logic for project-level and channel-level safety filters."""
 
-    _managed_enabled: ClassVar[bool] = False
+    _hide_global_enable: ClassVar[bool] = False
 
     enabled: bool = True
     filter_type: str = _FILTER_TYPE
@@ -128,7 +128,12 @@ class _BaseSafetyFilters(YamlResource):
     def __post_init__(self) -> None:
         if self.categories is not None:
             self.categories = self._parse_categories(self.categories)
-        if self._managed_enabled and not self.enabled and self.categories:
+
+        # Necessary to match UI of General Filters:
+        # If enabled has not yet been set for a general filter,
+        # then check if any category filters are set to true
+        # and set global enabled to True.
+        if self._hide_global_enable and not self.enabled and self.categories:
             if any(
                 isinstance(c, SafetyFilterCategory) and c.enabled is True
                 for c in self.categories.values()
@@ -152,7 +157,7 @@ class _BaseSafetyFilters(YamlResource):
         }
 
         # If this flag as set as false, then 'enabled' is included in the YAML.
-        if not self._managed_enabled:
+        if not self._hide_global_enable:
             yaml_dict["enabled"] = self.enabled
         return yaml_dict
 
@@ -170,13 +175,13 @@ class _BaseSafetyFilters(YamlResource):
         return cls(
             resource_id=resource_id,
             name=name,
-            enabled=False if cls._managed_enabled else yaml_dict.get("enabled"),
+            enabled=False if cls._hide_global_enable else yaml_dict.get("enabled"),
             filter_type=_FILTER_TYPE,
             categories=translated,
         )
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
-        if not self._managed_enabled:
+        if not self._hide_global_enable:
             if self.enabled is None:
                 raise ValueError("Missing required field 'enabled'.")
             if not isinstance(self.enabled, bool):
@@ -233,7 +238,7 @@ class _BaseSafetyFilters(YamlResource):
 class GeneralSafetyFilters(_BaseSafetyFilters):
     """Resource class for managing general (project-level) safety filter settings."""
 
-    _managed_enabled: ClassVar[bool] = True  # enabled not in YAML; derived from categories
+    _hide_global_enable: ClassVar[bool] = True  # enabled derived from categories
 
     @property
     def file_path(self) -> str:
