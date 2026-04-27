@@ -54,11 +54,13 @@ class SafetyFilterCategory:
         )
 
 
-def _category_to_yaml_dict(category: SafetyFilterCategory) -> dict:
+def _category_to_yaml_dict(category: Optional[SafetyFilterCategory]) -> dict:
     """Translate an internal category to YAML/UI vocab (level: lenient/medium/strict)."""
+    if category is None:
+        return {}
     return {
         "enabled": category.enabled,
-        "level": PRECISION_MAPPING[category.precision],
+        "level": PRECISION_MAPPING.get(category.precision, category.precision),
     }
 
 
@@ -68,14 +70,20 @@ def _category_from_yaml_dict(data: dict) -> dict:
     Missing or unrecognized values are passed through as None.
     """
     level = data.get("level")
-    precision = PRECISION_MAPPING_INVERSE.get(level) if level is not None else None
+    if level is None:
+        precision = None
+    else:
+        # Pass through level even if not recognized, to pick up in validate()
+        precision = PRECISION_MAPPING_INVERSE.get(level, level)
     return {"enabled": data.get("enabled"), "precision": precision}
 
 
 def _parse_categories(raw: dict) -> dict:
     """Parse raw category dicts into SafetyFilterCategory objects.
 
-    Missing categories are stored as None.
+    Recognised keys are parsed into SafetyFilterCategory objects; missing
+    recognised keys are stored as None.  Unrecognised keys are preserved as-is
+    so that validate() can report them rather than silently dropping them.
     """
     parsed = {}
     for cat in _AZURE_CATEGORY_KEYS.keys():
@@ -89,6 +97,9 @@ def _parse_categories(raw: dict) -> dict:
             parsed[cat] = SafetyFilterCategory.from_dict(category)
         else:
             parsed[cat] = None
+    for cat in raw:
+        if cat not in _AZURE_CATEGORY_KEYS:
+            parsed[cat] = raw[cat]
     return parsed
 
 
@@ -156,17 +167,30 @@ class _BaseSafetyFilters(YamlResource):
         if self.categories is None:
             raise ValueError("Safety filter config is missing 'categories'.")
 
+        valid_keys = sorted(_AZURE_CATEGORY_KEYS.keys())
+        invalid_keys = sorted(k for k in self.categories if k not in _AZURE_CATEGORY_KEYS)
+        if invalid_keys:
+            raise ValueError(
+                f"Unrecognised safety filter categories: {', '.join(f'{k!r}' for k in invalid_keys)}. "
+                f"Accepted categories are: {', '.join(valid_keys)}"
+            )
+
         for cat in _AZURE_CATEGORY_KEYS:
             if cat not in self.categories or self.categories[cat] is None:
                 raise ValueError(
                     f"Missing required safety filter category '{cat}'. "
-                    f"All of {', '.join(_AZURE_CATEGORY_KEYS.keys())} must be provided."
+                    f"All of {', '.join(valid_keys)} must be provided."
                 )
 
         for cat_name, cat in self.categories.items():
             if cat.enabled is None:
                 raise ValueError(
                     f"Missing required field 'enabled' for safety filter category '{cat_name}'."
+                )
+            if not isinstance(cat.enabled, bool):
+                raise ValueError(
+                    f"Invalid value '{cat.enabled}' for 'enabled' in category '{cat_name}'. "
+                    f"Must be true or false."
                 )
             if cat.precision is None:
                 raise ValueError(

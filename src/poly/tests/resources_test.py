@@ -6668,6 +6668,124 @@ categories:
         self.assertEqual(d["categories"]["sexual"]["level"], "lenient")
         self.assertNotIn("precision", d["categories"]["sexual"])
 
+    def test_misnamed_category_in_yaml_raises_unrecognised_error(self):
+        """validate() reports unrecognised category names rather than silently dropping them.
+        """
+        for invalid_name in ("haet", "banana"):
+            with self.subTest(invalid_name=invalid_name):
+                yaml_dict = {
+                    "enabled": True,
+                    "categories": {
+                        "violence": {"enabled": True, "level": "strict"},
+                        invalid_name: {"enabled": False, "level": "medium"},
+                        "sexual": {"enabled": False, "level": "lenient"},
+                        "self_harm": {"enabled": True, "level": "strict"},
+                    },
+                }
+                sf = GeneralSafetyFilters.from_yaml_dict(
+                    yaml_dict, resource_id="sf-1", name="safety_filters"
+                )
+                with self.assertRaises(ValueError) as cm:
+                    sf.validate()
+                error = str(cm.exception)
+                self.assertIn(f"'{invalid_name}'", error)
+                self.assertIn("Unrecognised", error)
+                self.assertIn("hate", error)  # accepted categories listed in error
+
+    def test_string_none_in_enabled_raises_clear_error(self):
+        """validate() catches non-bool values for 'enabled' before protobuf raises TypeError.
+
+        YAML parses unquoted None as a Python None (caught elsewhere), but the
+        string 'None' is truthy and passes the 'is None' guard, reaching protobuf
+        which raises an unhelpful TypeError.
+        """
+        for bad_value in ("None", "true", 1):
+            with self.subTest(bad_value=bad_value):
+                yaml_dict = {
+                    "enabled": True,
+                    "categories": {
+                        "violence": {"enabled": True, "level": "strict"},
+                        "hate": {"enabled": bad_value, "level": "medium"},
+                        "sexual": {"enabled": False, "level": "lenient"},
+                        "self_harm": {"enabled": True, "level": "strict"},
+                    },
+                }
+                sf = GeneralSafetyFilters.from_yaml_dict(
+                    yaml_dict, resource_id="sf-1", name="safety_filters"
+                )
+                with self.assertRaises(ValueError) as cm:
+                    sf.validate()
+                error = str(cm.exception)
+                self.assertIn("hate", error)
+                self.assertIn("enabled", error)
+                self.assertIn(str(bad_value), error)
+
+    def test_missing_category_in_yaml_compute_hash_does_not_raise(self):
+        """compute_hash must not raise when a required category is absent from the YAML.
+
+        _parse_categories stores None for missing categories, and to_yaml_dict
+        iterates all four keys unconditionally, so a None entry previously caused
+        an AttributeError pre-validation.
+        """
+        yaml_dict = {
+            "enabled": True,
+            "categories": {
+                "violence": {"enabled": True, "level": "strict"},
+                # hate is missing
+                "sexual": {"enabled": False, "level": "lenient"},
+                "self_harm": {"enabled": True, "level": "strict"},
+            },
+        }
+        sf = GeneralSafetyFilters.from_yaml_dict(
+            yaml_dict, resource_id="sf-1", name="safety_filters"
+        )
+        sf.compute_hash()
+
+    def test_invalid_level_in_yaml_compute_hash_does_not_raise(self):
+        """compute_hash must not raise when a category has an unrecognised level.
+
+        The push flow calls compute_hash (via is_modified) before validate(), so
+        serialisation must tolerate invalid values rather than crashing with a
+        KeyError.  The unrecognised level is passed through as-is so that
+        validate() can surface the proper error message.
+        """
+        yaml_dict = {
+            "enabled": True,
+            "categories": {
+                "violence": {"enabled": True, "level": "strict"},
+                "hate": {"enabled": False, "level": "full"},
+                "sexual": {"enabled": False, "level": "lenient"},
+                "self_harm": {"enabled": True, "level": "strict"},
+            },
+        }
+        sf = GeneralSafetyFilters.from_yaml_dict(
+            yaml_dict, resource_id="sf-1", name="safety_filters"
+        )
+        # Must not raise — compute_hash is called pre-validation during push.
+        sf.compute_hash()
+
+    def test_invalid_level_in_yaml_validate_raises_correct_error(self):
+        """validate() raises 'Invalid level set' for unrecognised YAML level.
+        """
+        yaml_dict = {
+            "enabled": True,
+            "categories": {
+                "violence": {"enabled": True, "level": "strict"},
+                "hate": {"enabled": False, "level": "full"},
+                "sexual": {"enabled": False, "level": "lenient"},
+                "self_harm": {"enabled": True, "level": "strict"},
+            },
+        }
+        sf = GeneralSafetyFilters.from_yaml_dict(
+            yaml_dict, resource_id="sf-1", name="safety_filters"
+        )
+        with self.assertRaises(ValueError) as cm:
+            sf.validate()
+        error = str(cm.exception)
+        self.assertIn("Invalid level", error)
+        self.assertIn("full", error)
+        self.assertIn("hate", error)
+
 
 if __name__ == "__main__":
     unittest.main()
