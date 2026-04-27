@@ -445,6 +445,29 @@ class AgentStudioInterface:
             output_lang=output_lang,
         )
 
+    @staticmethod
+    def get_webrtc_config(region: str) -> dict:
+        """Get WebRTC configuration (signaling URL) for the given region.
+
+        Args:
+            region (str): The region name
+
+        Returns:
+            dict: Contains 'signalingUrl'.
+        """
+        return PlatformAPIHandler.get_webrtc_config(region)
+
+    def get_branch_deploy_info(self, branch_id: str) -> dict:
+        """Get deployment versions needed to start a draft call on a branch.
+
+        Args:
+            branch_id: The branch ID
+
+        Returns:
+            dict with 'artifactVersion', 'lambdaDeploymentVersion', etc.
+        """
+        return self.sync_client.get_branch_deploy_info(branch_id)
+
     def get_branch_chat_info(self, branch_id: str) -> dict:
         """Get deployment versions needed to start a draft chat on a branch.
 
