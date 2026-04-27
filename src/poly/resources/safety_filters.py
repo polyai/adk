@@ -94,6 +94,8 @@ def _build_update_content_filter_proto(
 class _BaseSafetyFilters(YamlResource):
     """Shared logic for project-level and channel-level safety filters."""
 
+    _managed_enabled: ClassVar[bool] = False
+
     enabled: bool = True
     filter_type: str = _FILTER_TYPE
     categories: Optional[dict] = None
@@ -124,20 +126,35 @@ class _BaseSafetyFilters(YamlResource):
         return parsed
 
     def __post_init__(self) -> None:
-        """Parse raw category dicts into SafetyFilterCategory objects."""
-        if self.categories is None:
-            return
-        self.categories = self._parse_categories(self.categories)
+        if self.categories is not None:
+            self.categories = self._parse_categories(self.categories)
+        if self._managed_enabled and not self.enabled and self.categories:
+            if any(
+                isinstance(c, SafetyFilterCategory) and c.enabled is True
+                for c in self.categories.values()
+            ):
+                self.enabled = True
 
     def to_yaml_dict(self) -> dict:
-        # Type:azure is not displayed in YAML.
-        return {
-            "enabled": self.enabled,
-            "categories": {
-                cat: self.categories[cat].to_yaml_dict() if self.categories[cat] is not None else {}
-                for cat in _AZURE_CATEGORY_KEYS.keys()
-            },
+        """Builds YAML dict of the filters; some fields are present/absent
+        Based on flag values.
+        """
+        categories_dict = {}
+        for cat in _AZURE_CATEGORY_KEYS.keys():
+            if self.categories[cat] is not None:
+                # Convert SafetyFilterCategory to its YAML dict representation.
+                categories_dict[cat] = self.categories[cat].to_yaml_dict()
+            else:
+                # Include the category with an empty dict if not present.
+                categories_dict[cat] = {}
+        yaml_dict = {
+            "categories": categories_dict,
         }
+
+        # If this flag as set as false, then 'enabled' is included in the YAML.
+        if not self._managed_enabled:
+            yaml_dict["enabled"] = self.enabled
+        return yaml_dict
 
     @classmethod
     def from_yaml_dict(
@@ -153,19 +170,19 @@ class _BaseSafetyFilters(YamlResource):
         return cls(
             resource_id=resource_id,
             name=name,
-            enabled=yaml_dict.get("enabled"),
-            filter_type=_FILTER_TYPE,  # Populated from default const.
+            enabled=False if cls._managed_enabled else yaml_dict.get("enabled"),
+            filter_type=_FILTER_TYPE,
             categories=translated,
         )
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
-        if self.enabled is None:
-            raise ValueError("Missing required field 'enabled'.")
-        if not isinstance(self.enabled, bool):
-            raise ValueError(
-                f"Invalid value {self.enabled!r} for 'enabled'. Must be true or false (unquoted)."
-            )
-
+        if not self._managed_enabled:
+            if self.enabled is None:
+                raise ValueError("Missing required field 'enabled'.")
+            if not isinstance(self.enabled, bool):
+                raise ValueError(
+                    f"Invalid value {self.enabled!r} for 'enabled'. Must be true or false (unquoted)."
+                )
         if self.categories is None:
             raise ValueError("Safety filter config is missing 'categories'.")
 
@@ -215,6 +232,8 @@ class _BaseSafetyFilters(YamlResource):
 @dataclass
 class GeneralSafetyFilters(_BaseSafetyFilters):
     """Resource class for managing general (project-level) safety filter settings."""
+
+    _managed_enabled: ClassVar[bool] = True  # enabled not in YAML; derived from categories
 
     @property
     def file_path(self) -> str:
