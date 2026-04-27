@@ -136,6 +136,10 @@ class PlatformAPIHandler:
             list[str]: Regions that returned at least one account, preserving
                 the original ordering.
         """
+        # Fail fast if the API key is not configured — don't let the
+        # per-region except swallow the ValueError.
+        PlatformAPIHandler._retrieve_api_key()
+
         accessible: set[str] = set()
 
         def _probe(region: str) -> str | None:
