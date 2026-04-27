@@ -133,6 +133,7 @@ class _BaseSafetyFilters(YamlResource):
         # If enabled has not yet been set for a general filter,
         # then check if any category filters are set to true
         # and set global enabled to True.
+        # Currently always set to true, so extra defensive here.
         if self._hide_global_enable and not self.enabled and self.categories:
             if any(
                 isinstance(c, SafetyFilterCategory) and c.enabled is True
@@ -156,9 +157,10 @@ class _BaseSafetyFilters(YamlResource):
             "categories": categories_dict,
         }
 
-        # If this flag as set as false, then 'enabled' is included in the YAML.
+        # If this flag is set as false, then 'enabled' is included in the YAML as the first entry.
         if not self._hide_global_enable:
-            yaml_dict["enabled"] = self.enabled
+            # Place enabled as the first key
+            yaml_dict = {"enabled": self.enabled, **yaml_dict}
         return yaml_dict
 
     @classmethod
