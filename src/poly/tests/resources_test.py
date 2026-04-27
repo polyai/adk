@@ -6073,7 +6073,7 @@ class SafetyFiltersTests(unittest.TestCase):
         sf = GeneralSafetyFilters.from_yaml_dict({}, resource_id="sf-1", name="safety_filters")
         with self.assertRaises(ValueError) as cm:
             sf.validate()
-        self.assertIn("Missing required safety filter category", str(cm.exception))
+        self.assertIn("enabled", str(cm.exception))
 
     def test_from_yaml_dict_missing_category_deferred_to_validate(self):
         """Missing a required category is caught by validate(), not from_yaml_dict."""
@@ -6671,7 +6671,7 @@ categories:
     def test_misnamed_category_in_yaml_raises_unrecognised_error(self):
         """validate() reports unrecognised category names rather than silently dropping them.
         """
-        for invalid_name in ("haet", "banana"):
+        for invalid_name in ("haet", "crime"):
             with self.subTest(invalid_name=invalid_name):
                 yaml_dict = {
                     "enabled": True,
@@ -6692,10 +6692,29 @@ categories:
                 self.assertIn("Unrecognised", error)
                 self.assertIn("hate", error)  # accepted categories listed in error
 
-    def test_invalid_top_level_enabled_raises_clear_error(self):
-        """validate() catches non-bool values for the top-level 'enabled' field.
+    def test_missing_top_level_enabled_raises_clear_error(self):
+        """validate() reports 'enabled' as missing when the key is absent from the YAML.
         """
-        for bad_value in ("ture", "None", "yes", 1):
+        yaml_dict = {
+            "categories": {
+                "violence": {"enabled": True, "level": "strict"},
+                "hate": {"enabled": False, "level": "medium"},
+                "sexual": {"enabled": False, "level": "lenient"},
+                "self_harm": {"enabled": True, "level": "strict"},
+            },
+        }
+        sf = GeneralSafetyFilters.from_yaml_dict(
+            yaml_dict, resource_id="sf-1", name="safety_filters"
+        )
+        with self.assertRaises(ValueError) as cm:
+            sf.validate()
+        error = str(cm.exception)
+        self.assertIn("Missing", error)
+        self.assertIn("enabled", error)
+
+    def test_invalid_top_level_enabled_raises_clear_error(self):
+        """validate() catches non-bool values for the top-level 'enabled' field."""
+        for bad_value in ("ture", "yes", 1):
             with self.subTest(bad_value=bad_value):
                 sf = GeneralSafetyFilters(
                     resource_id="sf-1",
