@@ -6692,6 +6692,26 @@ categories:
                 self.assertIn("Unrecognised", error)
                 self.assertIn("hate", error)  # accepted categories listed in error
 
+    def test_invalid_top_level_enabled_raises_clear_error(self):
+        """validate() catches non-bool values for the top-level 'enabled' field.
+        """
+        for bad_value in ("ture", "None", "yes", 1):
+            with self.subTest(bad_value=bad_value):
+                sf = GeneralSafetyFilters(
+                    resource_id="sf-1",
+                    name="safety_filters",
+                    enabled=bad_value,
+                    categories={
+                        cat: SafetyFilterCategory(enabled=True, precision="STRICT")
+                        for cat in ("violence", "hate", "sexual", "self_harm")
+                    },
+                )
+                with self.assertRaises(ValueError) as cm:
+                    sf.validate()
+                error = str(cm.exception)
+                self.assertIn(str(bad_value), error)
+                self.assertIn("enabled", error)
+
     def test_string_none_in_enabled_raises_clear_error(self):
         """validate() catches non-bool values for 'enabled' before protobuf raises TypeError.
 

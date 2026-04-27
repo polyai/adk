@@ -164,6 +164,12 @@ class _BaseSafetyFilters(YamlResource):
         )
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+        if not isinstance(self.enabled, bool):
+            raise ValueError(
+                f"Invalid value '{self.enabled}' for top-level 'enabled'. "
+                f"Must be true or false (unquoted)."
+            )
+
         if self.categories is None:
             raise ValueError("Safety filter config is missing 'categories'.")
 
