@@ -36,6 +36,27 @@ All three files share the same schema. Channel-level files override the project-
 | `self_harm` | Filters self-harm related content |
 
 ## Example
+
+General Settings are globally enabled with individual toggles per category
+
+```yaml
+categories:
+  violence:
+    enabled: true
+    level: medium
+  hate:
+    enabled: true
+    level: medium
+  sexual:
+    enabled: true
+    level: medium
+  self_harm:
+    enabled: true
+    level: medium
+```
+
+Per-Channel Settings include a global enabled toggle:
+
 ```yaml
 enabled: true
 categories:
