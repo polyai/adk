@@ -49,17 +49,18 @@ When an Agent Studio project is linked locally, it follows this general structur
 
 ~~~text
 <account>/<project>/
+├── _gen/                               # Generated stubs — do not edit
 ├── agent_settings/
 │   ├── personality.yaml
 │   ├── role.yaml
 │   ├── rules.txt
 │   ├── safety_filters.yaml             # Optional
-│   └── experimental_config.json
+│   └── experimental_config.json        # Optional
 ├── config/
-│   ├── entities.yaml
-│   ├── handoffs.yaml
-│   ├── sms_templates.yaml
-│   └── variant_attributes.yaml
+│   ├── entities.yaml                   # Optional
+│   ├── handoffs.yaml                   # Optional
+│   ├── sms_templates.yaml              # Optional
+│   └── variant_attributes.yaml         # Optional
 ├── voice/
 │   ├── configuration.yaml
 │   ├── safety_filters.yaml             # Optional

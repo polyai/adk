@@ -127,11 +127,11 @@ This is the only place inside a topic where you should use references and behavi
 
 | Syntax | Meaning |
 |---|---|
-| `{{fn:function_name}}` | Call a global function |
-| `{{attr:attribute_name}}` | Read a variant attribute |
-| `{{twilio_sms:template_name}}` | Reference an SMS template |
-| `{{ho:handoff_name}}` | Reference a handoff |
-| `$variable` | Reference a state variable |
+| `{{fn:function_name}}` | Call a [global function](./functions.md) |
+| `{{attr:attribute_name}}` | Read a [variant attribute](./variants.md) |
+| `{{twilio_sms:template_name}}` | Reference an [SMS template](./sms.md) |
+| `{{ho:handoff_name}}` | Reference a [handoff](./handoffs.md) |
+| `$variable` | Reference a [state variable](./variables.md) |
 
 ### Writing good actions
 

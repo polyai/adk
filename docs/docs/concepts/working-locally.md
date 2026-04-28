@@ -101,16 +101,16 @@ This means the local filesystem becomes your main editing surface, while Agent S
 
 The standard workflow is:
 
-1. initialize the local project with `poly init` if it is not already present
-2. pull the latest project configuration with `poly pull`
-3. create a branch with `poly branch create {name}`
+1. initialize the local project with [`poly init`](../reference/cli.md#poly-init) if it is not already present
+2. pull the latest project configuration with [`poly pull`](../reference/cli.md#poly-pull)
+3. create a branch with [`poly branch create {name}`](../reference/cli.md#poly-branch-create)
 4. edit files locally
-5. inspect changes with `poly diff` and `poly status`
-6. validate locally with `poly validate`
-7. push changes with `poly push`
-8. optionally generate a review gist with `poly review`
+5. inspect changes with [`poly diff`](../reference/cli.md#poly-diff) and [`poly status`](../reference/cli.md#poly-status)
+6. validate locally with [`poly validate`](../reference/cli.md#poly-validate)
+7. push changes with [`poly push`](../reference/cli.md#poly-push)
+8. optionally generate a review gist with [`poly review create`](../reference/cli.md#poly-review)
 9. merge the branch with [`poly branch merge`](../reference/branch_merge.md) or in Agent Studio
-10. test by chatting with the agent using `poly chat` — by default this connects to your current branch's pushed state. Use `poly push` first, or `poly chat --push` to push and start the session in one step. On the main branch it falls back to Sandbox.
+10. test by chatting with the agent using [`poly chat`](../reference/cli.md#poly-chat) — by default this connects to your current branch's pushed state. Use [`poly push`](../reference/cli.md#poly-push) first, or `poly chat --push` to push and start the session in one step. On the main branch it falls back to Sandbox.
 
 !!! tip "Run commands from the project folder"
 

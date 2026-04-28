@@ -95,6 +95,13 @@ poly push --format
 
 When pushing creates a new branch (for example, when pushing to Agent Studio for the first time on a branch), the CLI displays a message with the new branch name.
 
+| Flag | Description |
+|---|---|
+| `--dry-run` | Run all validation and diff steps without sending changes to Agent Studio. |
+| `--skip-validation` | Bypass local validation. Use sparingly — for example, when a platform-generated resource fails a strict ADK check but is known to be valid on the platform. |
+| `--force`, `-f` | Force the push even when the local project diverges from the remote in unexpected ways. |
+| `--format` | Run [`poly format`](#poly-format) over the project before pushing. |
+
 !!! info "Call Link URL in chat output may be malformed"
 
     Each chat session prints a Call Link URL for viewing the conversation in Agent Studio. On some deployments this URL has a doubled hostname (for example, `https://studio.studio.poly.ai/…`), which produces a 404. The conversation is still recorded — open Agent Studio directly and navigate to the conversation from there.
@@ -190,11 +197,11 @@ poly branch delete my-feature
 
 #### `poly branch create`
 
-Creates a new branch. By default the branch is sourced from sandbox main.
+Creates a new branch. By default the branch is sourced from the project's `main` branch (the sandbox environment).
 
 | Flag | Description |
 |---|---|
-| `--env`, `--environment` | Source the new branch from a deployment snapshot instead of sandbox main. Choices: `sandbox`, `pre-release`, `live`. |
+| `--env`, `--environment` | Source the new branch from a deployed environment snapshot instead of `main`. Choices: `sandbox`, `pre-release`, `live`. |
 | `--force`, `-f` | Force branch creation even if there are uncommitted local changes on main. |
 
 When `--env live` or `--env pre-release` is specified:
@@ -224,6 +231,20 @@ poly format
 poly format --check
 poly format --files src/functions/booking.py
 ~~~
+
+!!! warning "`poly format` may crash on projects with YAML sub-resources"
+
+    Running `poly format` over a project that contains YAML-defined sub-resources (for example `config/handoffs.yaml` or `voice/configuration.yaml`) can produce errors like:
+
+    ~~~text
+    [Errno 20] Not a directory: '.../config/handoffs.yaml/handoffs/Default_handoff'
+    ~~~
+
+    This is a known issue in how the formatter resolves paths inside YAML files. Until it's fixed, scope the run with `--files` and pass specific Python files:
+
+    ~~~bash
+    poly format --files functions/my_function.py
+    ~~~
 
 ### `poly validate`
 
@@ -536,11 +557,25 @@ A typical CLI workflow looks like this:
     See how the CLI fits into a real workflow.
     [Open the tutorial](../tutorials/build-an-agent.md)
 
+-   **Branch merging**
+
+    ---
+
+    Conflict resolution, `--interactive` flow, and `--resolutions` JSON for `poly branch merge`.
+    [Open branch merging](./branch_merge.md)
+
 -   **Testing**
 
     ---
 
     Learn how to run tests for the project.
     [Open testing](./testing.md)
+
+-   **Working locally**
+
+    ---
+
+    How the CLI fits into the daily edit/push/test loop.
+    [Open working locally](../concepts/working-locally.md)
 
 </div>

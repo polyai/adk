@@ -53,19 +53,19 @@ The ADK is designed to reduce those risks by combining local editing with valida
 A typical collaborative workflow looks like this:
 
 1. start from the `main` branch
-2. create a new branch with `poly branch create {name}`
-3. switch branches as needed with `poly branch switch {name}`
+2. create a new branch with [`poly branch create {name}`](../reference/cli.md#poly-branch-create)
+3. switch branches as needed with [`poly branch switch {name}`](../reference/cli.md#poly-branch)
 4. edit files locally
-5. inspect changes with `poly status` and `poly diff`
-6. validate the project with `poly validate`
-7. push changes with `poly push`
+5. inspect changes with [`poly status`](../reference/cli.md#poly-status) and [`poly diff`](../reference/cli.md#poly-diff)
+6. validate the project with [`poly validate`](../reference/cli.md#poly-validate)
+7. push changes with [`poly push`](../reference/cli.md#poly-push)
 8. review the branch in Agent Studio
 9. merge the branch with [`poly branch merge`](../reference/branch_merge.md) or through the Agent Studio UI when ready
 
 You can also use:
 
-- `poly branch list` to view available branches
-- `poly branch current` to check the active branch
+- [`poly branch list`](../reference/cli.md#poly-branch) to view available branches
+- [`poly branch current`](../reference/cli.md#poly-branch) to check the active branch
 
 ## Validation as a guardrail
 
@@ -84,7 +84,7 @@ Examples of what validation protects against include:
 
 ## Pulling and merge behavior
 
-If work is done to your branch in Agent Studio and you want to bring those changes into your local copy, you can run:
+If work is done to your branch in Agent Studio and you want to bring those changes into your local copy, you can run [`poly pull`](../reference/cli.md#poly-pull):
 
 ~~~bash
 poly pull
@@ -96,10 +96,10 @@ The local workflow is not isolated from Agent Studio UI work - both sides affect
 
 ## Review workflow
 
-When changes are ready for review, generate a review artifact:
+When changes are ready for review, generate a review artifact with [`poly review create`](../reference/cli.md#poly-review):
 
 ~~~bash
-poly review
+poly review create
 ~~~
 
 Use this to compare:
