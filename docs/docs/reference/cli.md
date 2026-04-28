@@ -160,7 +160,7 @@ poly branch delete my-feature
 
 #### `poly branch merge`
 
-Merge the current branch into main via the CLI. A merge message is required.
+Merge the current branch into `main` via the CLI. A merge message is required.
 
 ~~~bash
 poly branch merge 'Merge message'
@@ -168,46 +168,7 @@ poly branch merge 'Merge message' --interactive
 poly branch merge 'Merge message' --resolutions resolutions.json
 ~~~
 
-If the merge has no conflicts, the branch is merged immediately and the CLI switches to `main`.
-
-If there are conflicts, the command displays a conflict table showing each conflicting field and whether it can be auto-merged, then exits with a non-zero code. You can resolve conflicts using:
-
-- **`--interactive` / `-i`** — opens an interactive prompt for each conflict. For each one you can accept the auto-merge, pick main, pick branch, pick base, or open the value in your `$EDITOR` or `$VISUAL`. After resolving all conflicts the merge is re-attempted.
-- **`--resolutions <file>`** — supply pre-defined resolutions as a JSON file path, inline JSON string, or `-` for stdin. Resolutions that cover all conflicts allow the merge to proceed non-interactively.
-
-Both flags can be combined: `--resolutions` seeds the interactive session with your pre-defined choices while `--interactive` handles any remaining conflicts.
-
-!!! tip "Set `$EDITOR` or `$VISUAL` for the best interactive experience"
-
-    Interactive mode uses your `$EDITOR` or `$VISUAL` environment variable when opening multiline or long values for editing. If neither is set it falls back to `vi`. Set one in your shell profile to use your preferred editor.
-
-##### Resolution file format
-
-`--resolutions` accepts a JSON array. Each element must include `path` and `strategy`, and optionally `value`:
-
-~~~json
-[
-  {
-    "path": ["topics", "My Topic", "content"],
-    "strategy": "theirs"
-  },
-  {
-    "path": ["agent_settings", "rules", "value"],
-    "strategy": "theirs",
-    "value": "Custom resolved content here"
-  }
-]
-~~~
-
-| Field | Description |
-|---|---|
-| `path` | List of strings identifying the conflicted field |
-| `strategy` | Resolution strategy: `"ours"` (keep main), `"theirs"` (keep branch), or `"base"` (revert to original) |
-| `value` | Optional custom value. Only used with `"theirs"` strategy. |
-
-##### After a successful merge
-
-After a successful merge the CLI automatically switches to `main`. Run `poly pull` if you need to refresh your local state.
+For the full merge workflow — conflict tables, `--interactive` flow, the `--resolutions` JSON format, post-merge behavior, and troubleshooting — see the dedicated [Branch merging reference](./branch_merge.md).
 
 #### `poly branch delete`
 

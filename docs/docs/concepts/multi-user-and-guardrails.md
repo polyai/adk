@@ -60,7 +60,7 @@ A typical collaborative workflow looks like this:
 6. validate the project with `poly validate`
 7. push changes with `poly push`
 8. review the branch in Agent Studio
-9. merge the branch in Agent Studio when ready
+9. merge the branch with [`poly branch merge`](../reference/branch_merge.md) or through the Agent Studio UI when ready
 
 You can also use:
 
@@ -120,7 +120,7 @@ In practice, this means:
 
 - project resources must still conform to Agent Studio expectations
 - references between resources must remain valid
-- branch merges still happen in Agent Studio
+- branch merges happen either through the CLI ([`poly branch merge`](../reference/branch_merge.md)) or in Agent Studio
 - deployment still happens through Agent Studio
 
 !!! tip "Local flexibility, platform constraints"

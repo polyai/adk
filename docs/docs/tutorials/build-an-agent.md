@@ -310,7 +310,7 @@ Make test calls, inspect transcripts, refine prompts, flows, and functions, and 
 Once the changes are pushed and validated, merge the branch in Agent Studio and deploy the project.
 
 !!! note "Merging from the CLI or the Agent Studio web UI"
-    Merge from the CLI with `poly branch merge '<commit message>'`, which merges the current branch into `main` (use `--interactive` to resolve any conflicts in your `$EDITOR`). You can also merge through the Agent Studio web UI by switching to the branch and clicking **Merge**. After merging, run `poly chat --environment sandbox` to test.
+    Merge from the CLI with `poly branch merge '<commit message>'`, which merges the current branch into `main`. You can also merge through the Agent Studio web UI by switching to the branch and clicking **Merge**. After merging, run `poly chat --environment sandbox` to test. See the [Branch merging reference](../reference/branch_merge.md) for the full conflict-resolution flow.
 
 ### Step 11 - Monitor performance
 
@@ -486,7 +486,7 @@ Check that the key parts of the agent look correct:
 
 Once everything looks right:
 
-1. merge the branch into `main` — either with `poly branch merge '<commit message>'` from the CLI or through the Agent Studio web UI
+1. merge the branch into `main` — either with [`poly branch merge`](../reference/branch_merge.md) from the CLI or through the Agent Studio web UI
 2. deploy the project
 
 At that point, the agent is live.

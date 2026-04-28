@@ -31,7 +31,7 @@ Your local filesystem becomes your primary editing surface. You can:
 
     ---
 
-    Agent Studio remains the source of deployment, preview, and branch merging.
+    Agent Studio remains the source of deployment and preview. Branches can be merged with [`poly branch merge`](../reference/branch_merge.md) from the CLI or through the Agent Studio UI.
 
 -   **Developer tooling**
 
@@ -109,7 +109,7 @@ The standard workflow is:
 6. validate locally with `poly validate`
 7. push changes with `poly push`
 8. optionally generate a review gist with `poly review`
-9. merge the branch in Agent Studio
+9. merge the branch with [`poly branch merge`](../reference/branch_merge.md) or in Agent Studio
 10. test by chatting with the agent using `poly chat` — by default this connects to your current branch's pushed state. Use `poly push` first, or `poly chat --push` to push and start the session in one step. On the main branch it falls back to Sandbox.
 
 !!! tip "Run commands from the project folder"

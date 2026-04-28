@@ -605,7 +605,7 @@ By default, `poly chat` connects to your current branch's last pushed state. On 
 
 !!! note "Merging from the CLI or Agent Studio"
 
-    Merge from the CLI with `poly branch merge '<commit message>'` (run from the `booking-flow` branch), or open the project in Agent Studio, switch to the `booking-flow` branch, and merge through the web UI. Pass `--interactive` to `poly branch merge` to resolve any conflicts in your `$EDITOR`.
+    Merge from the CLI with `poly branch merge '<commit message>'` (run from the `booking-flow` branch), or open the project in Agent Studio, switch to the `booking-flow` branch, and merge through the web UI. See the [Branch merging reference](../reference/branch_merge.md) for the full conflict-resolution flow, including `--interactive` and `--resolutions`.
 
 After merging, run `poly chat` against the sandbox environment:
 

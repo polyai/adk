@@ -159,7 +159,7 @@ If you run `poly chat` while on a feature branch (before merging it in Agent Stu
 Error: 404 ... /branches/<id>/sequence
 ~~~
 
-This is a platform limitation — branch-level chat is not currently supported via the CLI. To test your changes, push them with `poly push`, merge the branch in the Agent Studio UI, then run:
+This is a platform limitation — branch-level chat is not currently supported via the CLI. To test your changes, push them with `poly push`, merge the branch with [`poly branch merge`](../reference/branch_merge.md) (or in the Agent Studio UI), then run:
 
 ~~~bash
 poly chat --environment sandbox

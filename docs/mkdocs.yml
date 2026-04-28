@@ -114,6 +114,7 @@ nav:
 
   - Reference:
       - CLI reference: reference/cli.md
+      - Branch merging: reference/branch_merge.md
       - Testing: reference/testing.md
       - Tooling: reference/tooling.md
 
