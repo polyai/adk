@@ -135,7 +135,7 @@ categories:
 - Each category must set both `enabled` (boolean) and `level`.
 - `level` must be one of `lenient`, `medium`, or `strict`.
 - Channel files must include the top-level `enabled` flag as a boolean.
-- Unrecognised category keys cause a validation error rather than being silently ignored.
+- Unrecognized category keys cause a validation error rather than being silently ignored.
 
 ## Best practices
 
