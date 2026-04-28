@@ -23,6 +23,16 @@ The `POLY_ADK_KEY` environment variable must be set before running any `poly` co
 
 Once the ADK is installed and your API key is set, you can use the `poly` command to interact with Agent Studio projects locally.
 
+!!! info "Optional: GitHub token for `poly review`"
+
+    [`poly review`](../reference/cli.md#poly-review) writes diffs to GitHub Gists, so it needs a personal access token with the `gist` scope. If you plan to use it, generate a token at <https://github.com/settings/tokens> (classic) and export it alongside your API key:
+
+    ~~~bash
+    export GITHUB_ACCESS_TOKEN=<your-github-token>
+    ~~~
+
+    Without this variable, `poly review create` exits with `GITHUB_ACCESS_TOKEN environment variable not set`.
+
 !!! warning "API keys are workspace-scoped"
     An API key grants access to one specific Agent Studio workspace. When you run `poly init`, it lists all projects visible to that key. If you see many projects that do not look like yours, you are likely using a key scoped to the wrong workspace — for example, an organization-wide key rather than one scoped to your personal workspace. Contact your PolyAI contact to confirm you have a key for the correct workspace.
 
