@@ -285,9 +285,9 @@ poly push --skip-validation
 
 Once your branch is merged in Agent Studio, test the agent by chatting with it against the sandbox environment.
 
-!!! warning "Merge before chatting"
+!!! note "Pushing before chatting"
 
-    `poly chat` connects to the **main branch** of your sandbox — not your feature branch. Push your changes with `poly push`, merge the branch in Agent Studio, then run `poly chat`.
+    By default, `poly chat` connects to your current branch's last pushed state — so push your latest changes first. On the `main` branch, `poly chat` falls back to the sandbox environment. To target a specific environment explicitly, pass `--environment sandbox`, `--environment pre-release`, or `--environment live`.
 
 ~~~bash
 poly chat --environment sandbox
@@ -309,8 +309,8 @@ Make test calls, inspect transcripts, refine prompts, flows, and functions, and 
 
 Once the changes are pushed and validated, merge the branch in Agent Studio and deploy the project.
 
-!!! note "Merging requires the Agent Studio web UI"
-    There is no `poly merge` command. To merge a branch, open the project in Agent Studio, switch to the branch, and merge it through the interface. After merging, run `poly chat --environment sandbox` to test.
+!!! note "Merging from the CLI or the Agent Studio web UI"
+    Merge from the CLI with `poly branch merge '<commit message>'`, which merges the current branch into `main` (use `--interactive` to resolve any conflicts in your `$EDITOR`). You can also merge through the Agent Studio web UI by switching to the branch and clicking **Merge**. After merging, run `poly chat --environment sandbox` to test.
 
 ### Step 11 - Monitor performance
 
@@ -486,7 +486,7 @@ Check that the key parts of the agent look correct:
 
 Once everything looks right:
 
-1. merge the branch into the main project through the Agent Studio web UI — there is no `poly merge` command
+1. merge the branch into `main` — either with `poly branch merge '<commit message>'` from the CLI or through the Agent Studio web UI
 2. deploy the project
 
 At that point, the agent is live.

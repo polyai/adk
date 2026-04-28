@@ -601,11 +601,11 @@ The agent is now deployed to the `booking-flow` branch. Sandbox remains on `main
 
 ## Part 13 — Merge and test
 
-`poly chat` connects to the **main branch** of your sandbox — not a feature branch. To test the booking flow, merge `booking-flow` to `main` in the Agent Studio UI first.
+By default, `poly chat` connects to your current branch's last pushed state. On `main` it falls back to the sandbox environment. To test `booking-flow` against sandbox alongside the rest of the project, merge it into `main` first.
 
-!!! note "Merging requires Agent Studio"
+!!! note "Merging from the CLI or Agent Studio"
 
-    There is no `poly merge` command. Open your project in Agent Studio, switch to the `booking-flow` branch, and merge it through the interface. Once merged, the changes are live in sandbox.
+    Merge from the CLI with `poly branch merge '<commit message>'` (run from the `booking-flow` branch), or open the project in Agent Studio, switch to the `booking-flow` branch, and merge through the web UI. Pass `--interactive` to `poly branch merge` to resolve any conflicts in your `$EDITOR`.
 
 After merging, run `poly chat` against the sandbox environment:
 
