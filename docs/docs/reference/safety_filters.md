@@ -6,8 +6,7 @@ description: Configure project-level and per-channel content safety filtering fo
 # Safety filters
 
 <p class="lead">
-Safety filters block harmful content from entering or leaving the conversation in real time, protecting both callers and your brand.
-</p>
+Safety filters block harmful content from entering or leaving the conversation in real time.
 
 They run on user input and on agent output, scoring each turn against four content categories and blocking it before it affects the conversation.
 
@@ -26,7 +25,7 @@ chat/
 └── safety_filters.yaml       # Chat channel override
 ~~~
 
-When a channel-level file is present it overrides the project-level defaults for that channel. If no channel file exists, the channel inherits the project-level configuration.
+A channel-level file will override the project-level defaults for that channel. If no channel file exists, the channel inherits the project-level configuration.
 
 ## What safety filters control
 
@@ -48,7 +47,7 @@ When a channel-level file is present it overrides the project-level defaults for
 
     ---
 
-    Independent control over violence, hate, sexual, and self-harm content.
+    Violence, hate, sexual, and self-harm content.
 
 -   **Sensitivity levels**
 
