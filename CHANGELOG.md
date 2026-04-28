@@ -1,6 +1,115 @@
 # CHANGELOG
 
 
+## v0.15.0 (2026-04-28)
+
+### Documentation
+
+- Store project name on init and clean up on API errors
+  ([#108](https://github.com/polyai/adk/pull/108),
+  [`3f1b1b3`](https://github.com/polyai/adk/commit/3f1b1b35a8f97154487f88e408d37ad1c5315eb5))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+### Features
+
+- Safety Filter support ([#79](https://github.com/polyai/adk/pull/79),
+  [`ed8ed04`](https://github.com/polyai/adk/commit/ed8ed045d22456dc79302a31e51d0ed2523dc27e))
+
+## Summary
+
+This PR implements safety filter support for ADK, across three areas (General, Voice, Chat). In
+  Agent Studio, Content Safety Filters can be applied separately to * General Configuration * Voice
+  Channel Settings * Chat Channel Settings
+
+This resource is implemented with a single shared base class `_BaseSafetyFilters` (itself extending
+  YamlResource) that holds all the shared logic and three concrete subclasses:
+
+- GeneralSafetyFilters - ChannelSafetyFilters - class to handle filters derived from specific
+  channels. - VoiceSafetyFilters and ChatSafetyFilters - inherits from ChannelSafetyFilters,
+  specifying their own channel-specific directories and projection paths.
+
+Category data is handled by the _SafetyFilterCategory dataclass (with to_dict, from_dict, to_proto)
+  and module-level helpers that translate between the three vocabularies: internal
+  (enabled/precision), YAML/UI (enabled/level), and Azure projection (isActive/precision in
+  camelCase keys).
+
+ADK format uses `.yaml` to represent as thus: ``` enabled: true
+
+categories: violence: enabled: true level: strict hate: enabled: true level: lenient sexual:
+  enabled: true level: medium self_harm: enabled: false level: medium ``` NB: Channel settings have
+  a global 'enabled' flag, while General settings do not.
+
+## Motivation
+
+Motivation is to improve parity with Agent Studio via UI.
+
+## Changes * Safety Filters Resource implemented including method to update protos. * Sync client
+  updated to read safety filters from projection data (General, Voice, Chat). * Tests written to
+  handle YAML round trip and other edge cases.
+
+## Test strategy
+
+Added unit tests, and conducted extensive testing with an AS project.
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+QA - Validation test cases
+
+incorrect category name: <img width="1232" height="40" alt="Screenshot 2026-04-27 at 13 16 35"
+  src="https://github.com/user-attachments/assets/17fa46ff-6986-431f-a183-23788f0f004f" /> wrong
+  values: <img width="1103" height="35" alt="Screenshot 2026-04-27 at 13 14 07"
+  src="https://github.com/user-attachments/assets/f8f55bad-1b2b-4f71-abf8-3d482bcad898" /> missing
+  field: <img width="943" height="38" alt="Screenshot 2026-04-27 at 13 15 14"
+  src="https://github.com/user-attachments/assets/3709f1f1-216b-4b93-8b8c-c9e58835fc4e" /> not
+  boolean for enabled: <img width="1033" height="37" alt="Screenshot 2026-04-27 at 13 15 50"
+  src="https://github.com/user-attachments/assets/7c38c0f1-5d1a-483f-bb34-f6c3932abd83" /> missing
+  top level enabled: <img width="649" height="37" alt="Screenshot 2026-04-27 at 13 17 10"
+  src="https://github.com/user-attachments/assets/bcc4fa62-78dc-424d-81e3-ff6b19144297" />
+
+
 ## v0.14.0 (2026-04-24)
 
 ### Features
