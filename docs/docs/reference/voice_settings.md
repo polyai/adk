@@ -133,7 +133,7 @@ disclaimer_messages:
 
 `voice/safety_filters.yaml` is an optional file that overrides the project-level safety filter settings for the voice channel. When present, it takes precedence over `agent_settings/safety_filters.yaml` for voice interactions.
 
-See the [Safety filters reference](./safety_filters.md) for the full schema, field descriptions, and examples.
+See the [Safety filters reference](./safety_filters.md) for the full schema, field descriptions, and examples. The equivalent UI lives in the [Voice configuration page on docs.poly.ai](https://docs.poly.ai/voice/voice-configuration#safety-filters){ target="_blank" rel="noopener" }.
 
 ### Example
 

@@ -97,7 +97,7 @@ style_prompt:
 
 `chat/safety_filters.yaml` is an optional file that overrides the project-level safety filter settings for the chat channel. When present, it takes precedence over `agent_settings/safety_filters.yaml` for chat interactions.
 
-See the [Safety filters reference](./safety_filters.md) for the full schema, field descriptions, and examples.
+See the [Safety filters reference](./safety_filters.md) for the full schema, field descriptions, and examples. The equivalent UI lives in the [Chat configuration page on docs.poly.ai](https://docs.poly.ai/webchat/chat-configuration#safety-filters){ target="_blank" rel="noopener" }.
 
 ### Example
 

@@ -143,6 +143,35 @@ categories:
 - Review filter outcomes periodically — the right level depends on caller demographics and use case, not just the deployment.
 - Treat the channel files as overrides, not duplicates: only commit a channel file when it actually differs from the project default.
 
+## On the Agent Studio platform
+
+The same settings can be configured in the Agent Studio UI. The platform docs cover the UI workflow and category descriptions in more depth:
+
+<div class="grid cards" markdown>
+
+-   **Project-level (General)**
+
+    ---
+
+    Defaults applied across every channel.
+    [Open General settings on docs.poly.ai](https://docs.poly.ai/settings/introduction){ target="_blank" rel="noopener" }
+
+-   **Voice channel**
+
+    ---
+
+    Per-channel overrides for voice.
+    [Open Voice configuration on docs.poly.ai](https://docs.poly.ai/voice/voice-configuration#safety-filters){ target="_blank" rel="noopener" }
+
+-   **Chat channel**
+
+    ---
+
+    Per-channel overrides for chat.
+    [Open Chat configuration on docs.poly.ai](https://docs.poly.ai/webchat/chat-configuration#safety-filters){ target="_blank" rel="noopener" }
+
+</div>
+
 ## Related references
 
 <div class="grid cards" markdown>
