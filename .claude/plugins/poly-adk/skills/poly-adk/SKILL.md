@@ -1,7 +1,7 @@
 ---
 name: poly-adk
-description: Use the poly CLI to manage PolyAI voice agents — provides context on commands, resource formats, and workflows. Use when building features or editing agent config.
-allowed-tools: Read Grep Glob Bash
+description: Use the Poly CLI to manage PolyAI voice agents — provides context on commands, resource formats, and workflows. Use when building features or editing agent config.
+allowed-tools: Read Grep Glob Bash Edit Write
 ---
 
 # Poly ADK
@@ -61,7 +61,8 @@ poly branch delete {name} --json
 
 ## Making edits
 
-Before writing any resource, run `poly docs {resource_type}` to get the exact format, required fields, and examples.
+Before making edits or plans, run `poly docs` to get basic information then `poly docs {resource_type}` (e.g. `poly docs functions flows topics`) or `poly docs --all` to get the exact YAML/Python format, required fields, validation rules, and examples.
+**Always consult the docs before writing or editing a resource.**
 
 Track and inspect changes as you go:
 ```
@@ -119,6 +120,12 @@ poly branch merge {name} --json
 ```
 
 Use `poly review create --before main --after {branch_name}` to generate a shareable diff review page if the user wants to review in the browser.
+
+## Guardrails
+- Do not edit generated stubs in `_gen/` - These give reference to runtime data structures but are immutable.
+- Never run `poly push -f` without checking the diff and confirming with the user.
+- Never merge a branch without showing the diff and confirming with the user.
+- Never delete a branch without confirming with the user.
 
 # Quick Reference
 
@@ -180,9 +187,3 @@ These placeholders are used in prompts, rules, topics, and other text fields:
 | `{{twilio_sms:template_name}}` | SMS template | Rules, topics (actions) |
 | `{{ho:handoff_name}}` | Handoff destination | Rules |
 | `{{vrbl:variable_name}}` | State variable | Prompts, topic actions, SMS templates |
-
-## Resource Documentation
-
-Run `poly docs {resource_type}` (e.g. `poly docs functions flows topics`) or `poly docs --all` to get the exact YAML/Python format, required fields, validation rules, and examples. **Always consult the docs before writing or editing a resource.**
-
-Use only `poly docs` to get more basic information and list of all available resource docs.
