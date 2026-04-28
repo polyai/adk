@@ -16,7 +16,9 @@ They are defined in <code>chat/configuration.yaml</code>.
 ## Location
 
 ~~~text
-chat/configuration.yaml
+chat/
+├── configuration.yaml
+└── safety_filters.yaml       # Optional
 ~~~
 
 ## What chat settings control
@@ -34,6 +36,12 @@ chat/configuration.yaml
     ---
 
     Channel-specific instructions that shape how the agent writes in chat.
+
+-   **Safety filters**
+
+    ---
+
+    Optional chat-channel content safety filter overrides.
 
 </div>
 
@@ -85,6 +93,31 @@ style_prompt:
 
     Use the style prompt for instructions that only apply to chat, such as formatting, brevity, or written tone. Use agent settings for broader identity and behavioral guidance.
 
+## Safety filters
+
+`chat/safety_filters.yaml` is an optional file that overrides the project-level safety filter settings for the chat channel. When present, it takes precedence over `agent_settings/safety_filters.yaml` for chat interactions.
+
+See the [Safety filters reference](./safety_filters.md) for the full schema, field descriptions, and examples.
+
+### Example
+
+~~~yaml
+enabled: true
+categories:
+  violence:
+    enabled: true
+    level: medium
+  hate:
+    enabled: true
+    level: medium
+  sexual:
+    enabled: true
+    level: medium
+  self_harm:
+    enabled: true
+    level: medium
+~~~
+
 ## Full example
 
 ~~~yaml
@@ -98,6 +131,13 @@ style_prompt:
 ## Related pages
 
 <div class="grid cards" markdown>
+
+-   **Safety filters**
+
+    ---
+
+    Configure content safety filtering at the project and channel level.
+    [Open safety filters](./safety_filters.md)
 
 -   **Agent settings**
 

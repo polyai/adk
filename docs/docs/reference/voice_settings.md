@@ -18,7 +18,9 @@ Voice settings control what the agent says at the start of a call and how it sho
 ## Location
 
 ~~~text
-voice/configuration.yaml
+voice/
+├── configuration.yaml
+└── safety_filters.yaml       # Optional
 ~~~
 
 ## What voice settings control
@@ -42,6 +44,12 @@ voice/configuration.yaml
     ---
 
     An optional message played before the greeting, such as a recording notice.
+
+-   **Safety filters**
+
+    ---
+
+    Optional voice-channel content safety filter overrides.
 
 </div>
 
@@ -121,6 +129,31 @@ disclaimer_messages:
   language_code: en-GB
 ~~~
 
+## Safety filters
+
+`voice/safety_filters.yaml` is an optional file that overrides the project-level safety filter settings for the voice channel. When present, it takes precedence over `agent_settings/safety_filters.yaml` for voice interactions.
+
+See the [Safety filters reference](./safety_filters.md) for the full schema, field descriptions, and examples.
+
+### Example
+
+~~~yaml
+enabled: true
+categories:
+  violence:
+    enabled: true
+    level: medium
+  hate:
+    enabled: true
+    level: medium
+  sexual:
+    enabled: true
+    level: medium
+  self_harm:
+    enabled: true
+    level: medium
+~~~
+
 ## Full example
 
 ~~~yaml
@@ -140,6 +173,13 @@ disclaimer_messages:
 ## Related voice resources
 
 <div class="grid cards" markdown>
+
+-   **Safety filters**
+
+    ---
+
+    Configure content safety filtering at the project and channel level.
+    [Open safety filters](./safety_filters.md)
 
 -   **Speech recognition**
 
