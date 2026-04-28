@@ -11,7 +11,7 @@ They live in <code>agent_settings/</code> and are made up of personality, role, 
 </p>
 
 !!! note "Personality and role are platform-provisioned — update only"
-    The personality and role resources are created automatically by the platform when a project is created. They always exist on any Agent Studio project and can be updated with `poly push`, but cannot be created from scratch via the ADK. If these files appear in a project directory without matching entries in `.agent_studio_config` — for example, after copying a directory from another project — the push will fail with a "Create operation not supported" error. Always start a new project with `poly init` and `poly pull` rather than copying an existing directory.
+    The personality and role resources are created automatically by the platform when a project is created. They always exist on any Agent Studio project and can be updated with `poly push`, but cannot be created from scratch via the ADK. If these files appear in a project directory without matching entries in `.agent_studio_config` — for example, after copying a directory from another project — the push will fail with a "Create operation not supported" error. Always start a new project with [`poly init`](./cli.md#poly-init) and [`poly pull`](./cli.md#poly-pull) rather than copying an existing directory.
 
 These settings shape how the agent presents itself and how it should behave across the conversation.
 
@@ -24,8 +24,8 @@ agent_settings/
 ├── personality.yaml
 ├── role.yaml
 ├── rules.txt
-├── safety_filters.yaml
-└── experimental_config.json
+├── safety_filters.yaml             # Optional
+└── experimental_config.json        # Optional
 ~~~
 
 ## What agent settings control
@@ -149,11 +149,11 @@ The rules file supports the following references:
 
 | Syntax | Meaning |
 |---|---|
-| `{{fn:function_name}}` | Global function |
-| `{{twilio_sms:template_name}}` | SMS template |
-| `{{ho:handoff_name}}` | Handoff destination |
-| `{{attr:attribute_name}}` | Variant attribute |
-| `{{vrbl:variable_name}}` | State variable |
+| `{{fn:function_name}}` | [Global function](./functions.md) |
+| `{{twilio_sms:template_name}}` | [SMS template](./sms.md) |
+| `{{ho:handoff_name}}` | [Handoff destination](./handoffs.md) |
+| `{{attr:attribute_name}}` | [Variant attribute](./variants.md) |
+| `{{vrbl:variable_name}}` | [State variable](./variables.md) |
 
 ### Example
 
