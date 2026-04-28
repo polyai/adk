@@ -3,8 +3,6 @@
 Copyright PolyAI Limited
 """
 
-import os
-
 import json
 import logging
 import typing as ty
@@ -13,9 +11,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
-logger = logging.getLogger(__name__)
+from poly.utils import retrieve_api_key
 
-_API_KEY_ENV_VAR = "POLY_ADK_KEY"
+logger = logging.getLogger(__name__)
 ACCOUNTS_URL = "/accounts"
 PROJECTS_URL = "/accounts/{account_id}/projects"
 DEPLOYMENTS_URL = "/accounts/{account_id}/projects/{project_id}/deployments"
@@ -55,17 +53,6 @@ class PlatformAPIHandler:
         raise ValueError(f"Unknown region: {region}")
 
     @staticmethod
-    def _retrieve_api_key() -> str:
-        """Get API key from environment or raise with a helpful message."""
-        api_key = os.getenv(_API_KEY_ENV_VAR)
-        if not api_key:
-            raise ValueError(
-                f"{_API_KEY_ENV_VAR} environment variable is not set. "
-                f"Export your API key with: export {_API_KEY_ENV_VAR}=<your-api-key>"
-            )
-        return api_key
-
-    @staticmethod
     def make_request(
         region: str,
         endpoint: str,
@@ -89,7 +76,7 @@ class PlatformAPIHandler:
         correlation_id = f"adk-{uuid.uuid4()}"
 
         headers = {
-            "X-API-KEY": PlatformAPIHandler._retrieve_api_key(),
+            "X-API-KEY": retrieve_api_key(),
             "X-PolyAI-Correlation-Id": correlation_id,
             "Content-Type": "application/json",
         }
@@ -144,7 +131,7 @@ class PlatformAPIHandler:
                 the original ordering.
         """
 
-        PlatformAPIHandler._retrieve_api_key()
+        retrieve_api_key()
 
         accessible: set[str] = set()
 
