@@ -121,7 +121,8 @@ Examples:
 
 ~~~bash
 poly diff
-poly diff file1.yaml
+poly diff --files file1.yaml
+poly diff --before main --after my-feature
 ~~~
 
 ### `poly revert`
@@ -131,9 +132,11 @@ Revert local changes.
 Examples:
 
 ~~~bash
-poly revert --all
+poly revert
 poly revert file1.yaml file2.yaml
 ~~~
+
+`poly revert` with no arguments reverts every change in the working tree; pass file paths to revert only those files.
 
 ### `poly branch`
 
@@ -257,7 +260,8 @@ Examples:
 
 ~~~bash
 poly format
-poly format file1.py
+poly format --check
+poly format --files src/functions/booking.py
 ~~~
 
 ### `poly validate`
@@ -272,14 +276,14 @@ poly validate
 
 Create a GitHub Gist of Agent Studio project changes to share with others.
 
-Running `poly review` without a subcommand creates a new gist comparing local changes against the remote project. Use `--before` and `--after` to compare two remote branches or versions. Use `--debug` to enable DEBUG-level logging for troubleshooting.
+`poly review` requires a subcommand: `create`, `list`, or `delete`. Use `poly review create` to compare your local changes against the remote project, or pass `--before` and `--after` to compare two remote branches or versions. Add `--verbose` for full error tracebacks while troubleshooting.
 
 Examples:
 
 ~~~bash
-poly review
-poly review --before main --after feature-branch
-poly review --debug
+poly review create
+poly review create --before main --after feature-branch
+poly review create --verbose
 ~~~
 
 #### `poly review list`
@@ -434,7 +438,7 @@ poly push --json
 poly pull --json
 poly validate --json
 poly diff --json
-poly revert --json --all
+poly revert --json
 poly branch list --json
 poly branch create my-feature --json
 poly branch switch my-feature --json
