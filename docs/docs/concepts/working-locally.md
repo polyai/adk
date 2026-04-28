@@ -56,6 +56,7 @@ A typical project structure looks like this:
 │   ├── personality.yaml
 │   ├── role.yaml
 │   ├── rules.txt
+│   ├── safety_filters.yaml             # Optional
 │   └── experimental_config.json        # Optional
 ├── config/                             # Configuration
 │   ├── entities.yaml                   # Optional
@@ -64,10 +65,12 @@ A typical project structure looks like this:
 │   └── variant_attributes.yaml         # Optional
 ├── voice/                              # Voice channel settings
 │   ├── configuration.yaml
+│   ├── safety_filters.yaml             # Optional
 │   ├── speech_recognition/
 │   └── response_control/
 ├── chat/                               # Chat channel settings
-│   └── configuration.yaml
+│   ├── configuration.yaml
+│   └── safety_filters.yaml             # Optional
 ├── flows/                              # Optional - flow definitions
 ├── functions/                          # Global functions
 ├── topics/                             # Knowledge base topics

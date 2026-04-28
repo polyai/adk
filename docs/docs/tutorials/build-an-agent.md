@@ -53,6 +53,7 @@ When an Agent Studio project is linked locally, it follows this general structur
 │   ├── personality.yaml
 │   ├── role.yaml
 │   ├── rules.txt
+│   ├── safety_filters.yaml             # Optional
 │   └── experimental_config.json
 ├── config/
 │   ├── entities.yaml
@@ -61,6 +62,7 @@ When an Agent Studio project is linked locally, it follows this general structur
 │   └── variant_attributes.yaml
 ├── voice/
 │   ├── configuration.yaml
+│   ├── safety_filters.yaml             # Optional
 │   ├── speech_recognition/
 │   │   ├── asr_settings.yaml
 │   │   ├── keyphrase_boosting.yaml
@@ -69,7 +71,8 @@ When an Agent Studio project is linked locally, it follows this general structur
 │       ├── pronunciations.yaml
 │       └── phrase_filtering.yaml
 ├── chat/                               # Optional - chat channel settings
-│   └── configuration.yaml
+│   ├── configuration.yaml
+│   └── safety_filters.yaml             # Optional
 ├── flows/
 │   └── {flow_name}/
 │       ├── flow_config.yaml
@@ -158,7 +161,8 @@ Resource-specific documentation is available in the reference section:
 [SMS templates](../reference/sms.md),
 [variables](../reference/variables.md),
 [speech recognition](../reference/speech_recognition.md),
-[response control](../reference/response_control.md), and
+[response control](../reference/response_control.md),
+[safety filters](../reference/safety_filters.md), and
 [experimental config](../reference/experimental_config.md).
 
 ### Step 5 - Customize the agent
@@ -195,7 +199,7 @@ Add or edit [knowledge-base topics](../reference/topics.md) used for retrieval.
 
 #### Agent settings
 
-Update the [personality, role, and rules](../reference/agent_settings.md) that define the agent’s global behavior.
+Update the [personality, role, and rules](../reference/agent_settings.md) that define the agent's global behavior.
 
 #### Flows
 
@@ -204,6 +208,10 @@ Build [conversation flows](../reference/flows.md), including prompts, step trans
 #### Channel-specific settings
 
 Adjust greeting messages, disclaimers, and style prompts for [voice](../reference/voice_settings.md) and [chat](../reference/chat_settings.md).
+
+#### Safety filters
+
+Configure [content safety filtering](../reference/safety_filters.md) at the project level and per channel.
 
 #### Handoffs, SMS, and variants
 
@@ -402,7 +410,7 @@ Provide the coding tool with the information you gathered earlier.
 Include:
 
 - project-specific requirements
-- the URL to the business’s public API documentation
+- the URL to the business's public API documentation
 - relevant internal context
 - useful patterns or best practices from previous projects
 

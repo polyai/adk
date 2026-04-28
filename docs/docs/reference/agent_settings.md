@@ -24,6 +24,7 @@ agent_settings/
 ├── personality.yaml
 ├── role.yaml
 ├── rules.txt
+├── safety_filters.yaml
 └── experimental_config.json
 ~~~
 
@@ -48,6 +49,12 @@ agent_settings/
     ---
 
     Provides plain-text instructions the agent should follow on every turn.
+
+-   **Safety filters**
+
+    ---
+
+    Project-level content safety filtering across four categories.
 
 -   **Experimental config**
 
@@ -196,6 +203,30 @@ That kind of logic belongs in flows and Python functions.
 - concise instructions that apply broadly
 - deterministic logic handled in code or flow transitions
 
+## Safety filters
+
+The `safety_filters.yaml` file configures project-level content safety filtering. It controls whether harmful content is filtered across all channels by default.
+
+See the [Safety filters reference](./safety_filters.md) for full field descriptions, schema, and examples. The equivalent UI lives on the [General settings page on docs.poly.ai](https://docs.poly.ai/settings/introduction){ target="_blank" rel="noopener" }.
+
+### Example
+
+~~~yaml
+categories:
+  violence:
+    enabled: true
+    level: medium
+  hate:
+    enabled: true
+    level: medium
+  sexual:
+    enabled: true
+    level: medium
+  self_harm:
+    enabled: true
+    level: medium
+~~~
+
 ## Best practices
 
 - keep rules concise and actionable
@@ -213,6 +244,13 @@ That kind of logic belongs in flows and Python functions.
 
     Learn how referenced global functions are defined and used.
     [Open functions](./functions.md)
+
+-   **Safety filters**
+
+    ---
+
+    Configure content safety filtering at the project and channel level.
+    [Open safety filters](./safety_filters.md)
 
 -   **Experimental config**
 
