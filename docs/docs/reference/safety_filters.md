@@ -7,6 +7,7 @@ description: Configure project-level and per-channel content safety filtering fo
 
 <p class="lead">
 Safety filters block harmful content from entering or leaving the conversation in real time.
+</p>
 
 They run on user input and on agent output, scoring each turn against four content categories and blocking it before it affects the conversation.
 
