@@ -81,9 +81,9 @@ All four categories must be configured. Each category has its own `enabled` flag
 
 | Level | Behavior |
 |---|---|
-| `lenient` | Blocks only the most severe content. Lowest false-positive rate. |
-| `medium` | Balanced filtering. Recommended default. |
-| `strict` | Blocks borderline content. Highest false-positive rate. |
+| `lenient` | Blocks only the most severe content. |
+| `medium` | Balanced filtering. |
+| `strict` | Blocks borderline content. |
 
 ## Project-level example
 
