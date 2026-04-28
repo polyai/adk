@@ -121,6 +121,7 @@ nav:
           - Agent settings: reference/agent_settings.md
           - Voice settings: reference/voice_settings.md
           - Chat settings: reference/chat_settings.md
+          - Safety filters: reference/safety_filters.md
           - Experimental config: reference/experimental_config.md
 
       - Project resources:
