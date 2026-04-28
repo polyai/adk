@@ -3,6 +3,8 @@
 Copyright PolyAI Limited
 """
 
+import os
+
 import json
 import logging
 import typing as ty
@@ -13,6 +15,7 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+_API_KEY_ENV_VAR = "POLY_ADK_KEY"
 ACCOUNTS_URL = "/accounts"
 PROJECTS_URL = "/accounts/{account_id}/projects"
 DEPLOYMENTS_URL = "/accounts/{account_id}/projects/{project_id}/deployments"
@@ -53,10 +56,14 @@ class PlatformAPIHandler:
 
     @staticmethod
     def _retrieve_api_key() -> str:
-        """Get API key from environment."""
-        from poly.utils import retrieve_api_key
-
-        return retrieve_api_key()
+        """Get API key from environment or raise with a helpful message."""
+        api_key = os.getenv(_API_KEY_ENV_VAR)
+        if not api_key:
+            raise ValueError(
+                f"{_API_KEY_ENV_VAR} environment variable is not set. "
+                f"Export your API key with: export {_API_KEY_ENV_VAR}=<your-api-key>"
+            )
+        return api_key
 
     @staticmethod
     def make_request(
@@ -136,8 +143,7 @@ class PlatformAPIHandler:
             list[str]: Regions that returned at least one account, preserving
                 the original ordering.
         """
-        # Fail fast if the API key is not configured — don't let the
-        # per-region except swallow the ValueError.
+
         PlatformAPIHandler._retrieve_api_key()
 
         accessible: set[str] = set()

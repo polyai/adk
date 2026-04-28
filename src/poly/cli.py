@@ -1249,15 +1249,6 @@ class AgentStudioCLI:
             )
             sys.exit(1)
 
-        try:
-            retrieve_api_key()
-        except ValueError as e:
-            if output_json:
-                json_print({"success": False, "error": str(e)})
-            else:
-                error(str(e))
-            sys.exit(1)
-
         if not output_json:
             info("Initialising project...")
 

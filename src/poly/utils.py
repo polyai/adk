@@ -18,20 +18,6 @@ logger = logging.getLogger(__name__)
 
 _TYPES_PACKAGE = "poly.types"
 
-_API_KEY_ENV_VAR = "POLY_ADK_KEY"
-
-
-def retrieve_api_key() -> str:
-    """Return the POLY_ADK_KEY value or raise with a helpful message."""
-    api_key = os.getenv(_API_KEY_ENV_VAR)
-    if not api_key:
-        raise ValueError(
-            f"{_API_KEY_ENV_VAR} environment variable is not set. "
-            f"Export your API key with: export {_API_KEY_ENV_VAR}=<your-api-key>"
-        )
-    return api_key
-
-
 # Matches cross-package imports e.g. "from runtime.foo import" or "from utils.foo import"
 _STUB_IMPORT_RE = re.compile(r"^from (?:runtime|utils)\.(\w+) import", re.MULTILINE)
 
