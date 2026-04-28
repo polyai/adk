@@ -260,6 +260,10 @@ Create a GitHub Gist of Agent Studio project changes to share with others.
 
 `poly review` requires a subcommand: `create`, `list`, or `delete`. Use `poly review create` to compare your local changes against the remote project, or pass `--before` and `--after` to compare two remote branches or versions. Add `--verbose` for full error tracebacks while troubleshooting.
 
+!!! info "Requires `GITHUB_ACCESS_TOKEN`"
+
+    `poly review` writes to GitHub Gists, so it needs a personal access token with the `gist` scope set as the `GITHUB_ACCESS_TOKEN` environment variable. Without it the command exits with `GITHUB_ACCESS_TOKEN environment variable not set`. Generate a token at <https://github.com/settings/tokens> (classic, `gist` scope) and add `export GITHUB_ACCESS_TOKEN=<token>` to your shell profile alongside `POLY_ADK_KEY`.
+
 Examples:
 
 ~~~bash
