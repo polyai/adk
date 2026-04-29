@@ -10,7 +10,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
 
     steps:
       - name: Checkout code
@@ -66,52 +65,13 @@ jobs:
             coverage-pr.json \
             "$BASE_REF" > coverage_comment.md
 
-      - name: Minimize previous coverage comments
-        uses: actions/github-script@v7
+      - name: Save PR number
+        run: echo "${{ github.event.number }}" > pr_number.txt
+
+      - name: Upload coverage artifacts
+        uses: actions/upload-artifact@v4
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const comments = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const botComments = comments.data.filter(comment =>
-              comment.user.login === 'github-actions[bot]' &&
-              comment.body.includes('<!-- coverage-report -->')
-            );
-
-            for (const comment of botComments) {
-              try {
-                await github.graphql(`
-                  mutation MinimizeComment($subjectId: ID!, $classifier: ReportedContentClassifiers!) {
-                    minimizeComment(input: {subjectId: $subjectId, classifier: $classifier}) {
-                      minimizedComment {
-                        isMinimized
-                      }
-                    }
-                  }
-                `, {
-                  subjectId: comment.node_id,
-                  classifier: 'OUTDATED'
-                });
-              } catch (error) {
-                console.log(`Could not minimize comment ${comment.id}: ${error.message}`);
-              }
-            }
-
-      - name: Post coverage comment
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            const body = fs.readFileSync('coverage_comment.md', 'utf8');
-
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body,
-            });
+          name: coverage-comment
+          path: |
+            coverage_comment.md
+            pr_number.txt

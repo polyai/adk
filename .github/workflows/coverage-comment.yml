@@ -1,0 +1,74 @@
+name: Post Coverage Comment
+
+on:
+  workflow_run:
+    workflows: ["Coverage Report"]
+    types:
+      - completed
+
+jobs:
+  comment:
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+
+    steps:
+      - name: Download coverage artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-comment
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Read PR number
+        id: pr
+        run: echo "number=$(cat pr_number.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Minimize previous coverage comments
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ steps.pr.outputs.number }},
+            });
+
+            const botComments = comments.data.filter(comment =>
+              comment.user.login === 'github-actions[bot]' &&
+              comment.body.includes('<!-- coverage-report -->')
+            );
+
+            for (const comment of botComments) {
+              try {
+                await github.graphql(`
+                  mutation MinimizeComment($subjectId: ID!, $classifier: ReportedContentClassifiers!) {
+                    minimizeComment(input: {subjectId: $subjectId, classifier: $classifier}) {
+                      minimizedComment {
+                        isMinimized
+                      }
+                    }
+                  }
+                `, {
+                  subjectId: comment.node_id,
+                  classifier: 'OUTDATED'
+                });
+              } catch (error) {
+                console.log(`Could not minimize comment ${comment.id}: ${error.message}`);
+              }
+            }
+
+      - name: Post coverage comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('coverage_comment.md', 'utf8');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ steps.pr.outputs.number }},
+              body,
+            });
