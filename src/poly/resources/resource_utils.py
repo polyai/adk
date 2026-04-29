@@ -31,6 +31,7 @@ _yaml_dumper = yaml.YAML()
 _yaml_dumper.default_flow_style = False
 _yaml_dumper.preserve_quotes = False
 _yaml_dumper.width = 80
+_yaml_dumper.indent(mapping=2, sequence=4, offset=2)
 
 _yaml_loader = yaml.YAML(typ="safe")
 _yaml_loader.preserve_quotes = False
@@ -72,6 +73,21 @@ def _serialize_value(value):
     return value
 
 
+def _needs_quoting(value: str) -> bool:
+    """Return True if a YAML scalar value needs quoting.
+
+    Uses ruamel's resolver to check if the value would round-trip as a plain scalar.
+    If not (e.g. starts with +, looks like a number, bool, null, or is empty),
+    it needs quoting — and we force double quotes.
+    """
+    if value == "":
+        return True
+    # If ruamel's resolver resolves the plain scalar to a non-string tag, it needs quoting
+    resolver = yaml.YAML().resolver
+    tag = resolver.resolve(yaml.ScalarNode, value, (True, False))
+    return tag != "tag:yaml.org,2002:str"
+
+
 def _key_needs_quoting(key: str) -> bool:
     """Return True if a YAML key should be quoted to avoid parse errors."""
     # & and * are YAML indicators (anchor, alias) that require quoting
@@ -104,6 +120,8 @@ def set_block_style_for_multiline_strings(data):
         for key, value in data.items():
             if isinstance(value, str) and "\n" in value:
                 data[key] = yaml.scalarstring.LiteralScalarString(value)
+            elif isinstance(value, str) and _needs_quoting(value):
+                data[key] = yaml.scalarstring.DoubleQuotedScalarString(value)
             else:
                 set_block_style_for_multiline_strings(value)
     elif isinstance(data, list):
@@ -526,11 +544,11 @@ def format_json_python(json_content: str) -> str:
         json_content: Raw JSON string.
 
     Returns:
-        Formatted JSON string (indent=2), or original on parse error.
+        Formatted JSON string (indent=2, sort_keys=True), or original on parse error.
     """
     try:
         data = json.loads(json_content)
-        return json.dumps(data, indent=2) + "\n"
+        return json.dumps(data, indent=2, sort_keys=True) + "\n"
     except Exception:
         return json_content
 
