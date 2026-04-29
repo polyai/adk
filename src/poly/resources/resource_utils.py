@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 _yaml_dumper = yaml.YAML()
 _yaml_dumper.default_flow_style = False
 _yaml_dumper.preserve_quotes = False
-_yaml_dumper.width = 100
+_yaml_dumper.width = 80
 
 _yaml_loader = yaml.YAML(typ="safe")
 _yaml_loader.preserve_quotes = False
