@@ -30,7 +30,7 @@ if TYPE_CHECKING:
 _yaml_dumper = yaml.YAML()
 _yaml_dumper.default_flow_style = False
 _yaml_dumper.preserve_quotes = False
-_yaml_dumper.width = 80
+_yaml_dumper.width = 100
 _yaml_dumper.indent(mapping=2, sequence=4, offset=2)
 
 _yaml_loader = yaml.YAML(typ="safe")
@@ -73,60 +73,47 @@ def _serialize_value(value):
     return value
 
 
-def _needs_quoting(value: str) -> bool:
-    """Return True if a YAML scalar value needs quoting.
+_yaml_resolver = yaml.YAML().resolver
 
-    Uses ruamel's resolver to check if the value would round-trip as a plain scalar.
-    If not (e.g. starts with +, looks like a number, bool, null, or is empty),
-    it needs quoting — and we force double quotes.
-    """
+
+def _value_needs_quoting(value: str) -> bool:
+    """Return True if a YAML scalar value needs double-quoting to round-trip correctly."""
     if value == "":
         return True
-    # If ruamel's resolver resolves the plain scalar to a non-string tag, it needs quoting
-    resolver = yaml.YAML().resolver
-    tag = resolver.resolve(yaml.ScalarNode, value, (True, False))
+    tag = _yaml_resolver.resolve(yaml.ScalarNode, value, (True, False))
     return tag != "tag:yaml.org,2002:str"
 
 
 def _key_needs_quoting(key: str) -> bool:
     """Return True if a YAML key should be quoted to avoid parse errors."""
-    # & and * are YAML indicators (anchor, alias) that require quoting
     return "&" in key or "*" in key
 
 
-def _quote_keys_for_yaml(data):
-    """Recursively quote dict keys that contain special YAML characters."""
+def _prepare_yaml_data(data):
+    """Recursively prepare data for YAML dumping in a single pass.
+
+    - Quote dict keys containing & or * (YAML anchor/alias indicators)
+    - Set block style (|) for multiline strings
+    - Force double quotes on ambiguous scalar values
+    """
     if isinstance(data, dict):
         result = {}
         for k, v in data.items():
-            if isinstance(k, str) and _key_needs_quoting(k):
-                new_key = yaml.scalarstring.DoubleQuotedScalarString(k)
+            new_key = (
+                yaml.scalarstring.DoubleQuotedScalarString(k)
+                if isinstance(k, str) and _key_needs_quoting(k)
+                else k
+            )
+            if isinstance(v, str) and "\n" in v:
+                result[new_key] = yaml.scalarstring.LiteralScalarString(v)
+            elif isinstance(v, str) and _value_needs_quoting(v):
+                result[new_key] = yaml.scalarstring.DoubleQuotedScalarString(v)
             else:
-                new_key = k
-            result[new_key] = _quote_keys_for_yaml(v)
+                result[new_key] = _prepare_yaml_data(v)
         return result
     elif isinstance(data, list):
-        return [_quote_keys_for_yaml(item) for item in data]
+        return [_prepare_yaml_data(item) for item in data]
     return data
-
-
-def set_block_style_for_multiline_strings(data):
-    """Recursively set block style for strings containing newlines in ruamel.yaml format.
-
-    Args:
-        data: Dictionary, list, or other data structure to process in-place.
-    """
-    if isinstance(data, dict):
-        for key, value in data.items():
-            if isinstance(value, str) and "\n" in value:
-                data[key] = yaml.scalarstring.LiteralScalarString(value)
-            elif isinstance(value, str) and _needs_quoting(value):
-                data[key] = yaml.scalarstring.DoubleQuotedScalarString(value)
-            else:
-                set_block_style_for_multiline_strings(value)
-    elif isinstance(data, list):
-        for item in data:
-            set_block_style_for_multiline_strings(item)
 
 
 def dump_yaml(data, stream=None):
@@ -139,8 +126,7 @@ def dump_yaml(data, stream=None):
     Returns:
         str: YAML string if stream is None, otherwise None.
     """
-    data = _quote_keys_for_yaml(data)
-    set_block_style_for_multiline_strings(data)
+    data = _prepare_yaml_data(data)
     if stream is None:
         stream = StringIO()
         _yaml_dumper.dump(data, stream)
@@ -507,19 +493,6 @@ def format_code_with_ruff(code: str, file_name: str) -> str:
 
 
 def format_yaml(yaml_content: str, file_name: str) -> str:
-    """Format YAML content using ruamel.yaml (no external tools like prettier).
-
-    Args:
-        yaml_content (str): The YAML content to format.
-        file_name (str): The name of the file (unused; for API compatibility).
-
-    Returns:
-        str: The formatted YAML content.
-    """
-    return format_yaml_python(yaml_content)
-
-
-def format_yaml_python(yaml_content: str) -> str:
     """Format YAML content using ruamel.yaml (no external tools).
 
     Args:
@@ -537,7 +510,7 @@ def format_yaml_python(yaml_content: str) -> str:
         return yaml_content
 
 
-def format_json_python(json_content: str) -> str:
+def format_json(json_content: str) -> str:
     """Format JSON content (no external tools).
 
     Args:

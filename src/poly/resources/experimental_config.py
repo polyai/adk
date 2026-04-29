@@ -31,7 +31,7 @@ class ExperimentalConfig(Resource):
     @staticmethod
     def format_resource(content: str, file_name: str = None, **kwargs) -> str:
         """Format the resource content using in-process JSON formatting."""
-        return utils.format_json_python(content)
+        return utils.format_json(content)
 
     @staticmethod
     def make_pretty(contents: str, **kwargs) -> str:
