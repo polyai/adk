@@ -2594,7 +2594,7 @@ class AgentStudioProject:
                 if check_only:
                     if formatted_content.strip() != content.strip():
                         affected.append(file_path)
-                else:
+                elif formatted_content.strip() != content.strip():
                     Resource.save_to_file(formatted_content, file_path)
                     affected.append(file_path)
             except Exception as e:  # noqa: BLE001
@@ -2610,7 +2610,7 @@ class AgentStudioProject:
                 if check_only:
                     if formatted_content.strip() != content.strip():
                         affected.append(resource_mapping.file_path)
-                else:
+                elif formatted_content.strip() != content.strip():
                     resource_mapping.resource_type.save_to_file(
                         formatted_content, resource_mapping.file_path
                     )
