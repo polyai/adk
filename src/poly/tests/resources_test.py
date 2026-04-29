@@ -883,8 +883,8 @@ enabled: true
 actions: Run function {{fn:test_id}}
 content: Test content
 example_queries:
-- What is the capital of France?
-- Who wrote '1984'?
+  - What is the capital of France?
+  - Who wrote '1984'?
 """
 
 TEST_TOPIC_PRETTY = """name: test_topic
@@ -892,8 +892,8 @@ enabled: true
 actions: Run function {{fn:test_function}}
 content: Test content
 example_queries:
-- What is the capital of France?
-- Who wrote '1984'?
+  - What is the capital of France?
+  - Who wrote '1984'?
 """
 
 
@@ -1656,7 +1656,7 @@ PERSONALITY_RAW = """adjectives:
   Polite: true
   Calm: true
   Kind: false
-custom: ''
+custom: ""
 """
 
 
@@ -1759,7 +1759,7 @@ TEST_ROLE = SettingsRole(
 
 ROLE_RAW = """value: Customer Service Representative
 additional_info: Handles customer inquiries and support requests
-custom: ''
+custom: ""
 """
 
 
@@ -2319,9 +2319,9 @@ asr_biasing:
   yes_no: false
   address: false
   custom_keywords:
-  - Hello
-  - Help
-  - Support
+    - Hello
+    - Help
+    - Support
 dtmf_config:
   is_enabled: false
   inter_digit_timeout: 0
@@ -2365,13 +2365,13 @@ TEST_NO_CODE_FLOW_STEP = FlowStep(
 FLOW_NO_CODE_STEP_RAW = """step_type: default_step
 name: Test Step
 conditions:
-- name: has_option
-  condition_type: step_condition
-  description: User selected option
-  child_step: step-2
-  required_entities: []
+  - name: has_option
+    condition_type: step_condition
+    description: User selected option
+    child_step: step-2
+    required_entities: []
 extracted_entities:
-- customer_name
+  - customer_name
 prompt: Hello, how can I help you?
 """
 
@@ -3786,9 +3786,9 @@ TEST_SMS_TEMPLATE_2 = SMSTemplate(
 SMS_TEMPLATES_RAW = """name: test_template_1
 text: This is a test template
 env_phone_numbers:
-  sandbox: ''
-  pre_release: ''
-  live: '+447700102347'
+  sandbox: ""
+  pre_release: ""
+  live: "+447700102347"
 """
 
 
