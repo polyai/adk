@@ -59,14 +59,14 @@ poly --version
 
 ### Initialize
 
-Create a directory and run `poly init` inside it, passing the account ID and project ID you noted above:
+Create a directory and run `poly init` inside it:
 
 ~~~bash
 mkdir maison && cd maison
-poly init --region <region> --account_id <account_id> --project_id <project_id>
+poly init
 ~~~
 
-Replace `<region>` with the region your Agent Studio tenant lives in (see `poly init --help` for valid values), and `<account_id>` / `<project_id>` with the values from your empty project.
+`poly init` walks you through interactive dropdowns for region, account, and project — pick the empty project you created earlier. Single options (one region, one account) are auto-selected. If you'd rather pass the IDs from the Agent Studio URL directly, use `poly init --region <region> --account_id <account_id> --project_id <project_id>`.
 
 ~~~text
 Initializing project <account_id>/<project_id>...

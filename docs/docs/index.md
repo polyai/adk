@@ -16,10 +16,10 @@ Three commands take you from an empty machine to a working local copy of your ag
 ~~~bash
 pip install polyai-adk
 export POLY_ADK_KEY=<your-api-key>
-poly init --account_id <account_id> --project_id <project_id>
+poly init
 ~~~
 
-See [Prerequisites](get-started/prerequisites.md) for how to generate an API key, and [Initialize your project](get-started/first-commands.md) for a short walkthrough of the third command.
+`poly init` walks you through interactive dropdowns to pick a region, account, and project — single options are auto-selected. See [Prerequisites](get-started/prerequisites.md) for how to generate an API key, and [Initialize your project](get-started/first-commands.md) for a short walkthrough of the third command.
 
 ## Start here
 

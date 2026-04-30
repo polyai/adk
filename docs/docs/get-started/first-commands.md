@@ -10,20 +10,33 @@ Once the ADK is installed and your API key is set, the very first thing to do is
 ## Create your local project with `poly init`
 
 ~~~bash
-poly init --account_id <account_id> --project_id <project_id>
+poly init
 ~~~
 
-`poly init` creates a subdirectory at `{account_id}/{project_id}` in your current directory and immediately pulls the project configuration down from Agent Studio. When it completes, `cd` into that folder — every other `poly` command runs from inside the project directory.
+Run `poly init` with no arguments. The CLI walks you through interactive dropdowns:
 
-!!! tip "Find your account ID and project ID"
+1. **Region** — auto-selected if your API key only has access to one.
+2. **Account** — auto-selected if there's only one in the region; otherwise pick from a searchable list.
+3. **Project** — pick from a searchable list of every project the API key can see.
 
-    Both IDs appear in the Agent Studio URL when your project is open:
+`poly init` then creates a subdirectory at `{account_id}/{project_id}` in your current directory and pulls the project configuration down from Agent Studio. When it completes, `cd` into that folder — every other `poly` command runs from inside the project directory.
+
+!!! tip "Skip the prompts if you already know the IDs"
+
+    For scripting or repeat runs, pass any combination of flags to skip the matching prompts:
+
+    ~~~bash
+    poly init --account_id <account_id> --project_id <project_id>
+    poly init --region <region> --account_id <account_id> --project_id <project_id>
+    ~~~
+
+    The IDs appear in the Agent Studio URL when your project is open:
 
     ~~~
     https://studio.poly.ai/<account_id>/<project_id>/...
     ~~~
 
-    If you do not have the IDs to hand, run `poly init` with no flags and the CLI prompts you to pick a workspace and project from the ones your API key can see.
+    `poly init --json` requires all three flags (no interactive prompts in JSON mode).
 
 If the project has already been initialized locally at a previous point, use `poly pull` to refresh it in place instead of running `poly init` again.
 

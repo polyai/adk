@@ -108,10 +108,16 @@ Link a local folder to an existing Agent Studio project. The agent must already 
 
 ~~~bash
 poly init
-poly init --region <region> --account_id <account_id> --project_id <project_id>
 ~~~
 
-This creates the project directory at `{account_id}/{project_id}` inside your current working directory, pulls the current configuration, and writes the metadata needed to connect the folder to Agent Studio. Change into the project directory before running any further commands.
+`poly init` walks you through interactive dropdowns for region, account, and project — single options are auto-selected. It creates the project directory at `{account_id}/{project_id}` inside your current working directory, pulls the current configuration, and writes the metadata needed to connect the folder to Agent Studio. Change into the project directory before running any further commands.
+
+For scripted runs you can pass any of the IDs directly to skip the matching prompt:
+
+~~~bash
+poly init --account_id <account_id> --project_id <project_id>
+poly init --region <region> --account_id <account_id> --project_id <project_id>
+~~~
 
 ### Step 2 - Set up the environment
 

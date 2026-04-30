@@ -71,14 +71,19 @@ To make it permanent, add the export line to your shell profile (`~/.zshrc` or `
 
 ### Step 6 — Pull the agent into the ADK
 
-Once the [ADK is installed](./installation.md), link your local folder to the project and pull its configuration down:
+Once the [ADK is installed](./installation.md), link your local folder to the project:
+
+```bash
+poly init
+```
+
+[`poly init`](../reference/cli.md#poly-init) walks you through interactive dropdowns to pick a region, account, and project — single options are auto-selected. It creates a subdirectory at `{account_id}/{project_id}` inside your current directory and pulls the current configuration down automatically. [`poly pull`](../reference/cli.md#poly-pull) can be used to refresh it at any time. Change into the project directory before running any further commands.
+
+If you already know the IDs (or want to script the call), pass them as flags to skip the prompts:
 
 ```bash
 poly init --account_id <account_id> --project_id <project_id>
-poly pull
 ```
-
-[`poly init`](../reference/cli.md#poly-init) creates a subdirectory at `{account_id}/{project_id}` inside your current directory, then pulls the current configuration automatically. [`poly pull`](../reference/cli.md#poly-pull) can be used to refresh it at any time. Change into the project directory before running any further commands.
 
 You now have a fully editable local copy of your agent.
 
@@ -110,13 +115,13 @@ If you already have an agent in Agent Studio — built in the browser editor, by
 
 1. Complete [Prerequisites](./prerequisites.md) to generate your API key and install local tools.
 2. Follow [Installation](./installation.md) to install the ADK.
-3. Find your `account_id` and `project_id` in the Agent Studio URL.
-4. Run:
+3. Run:
 
     ~~~bash
-    poly init --account_id <account_id> --project_id <project_id>
-    poly pull
+    poly init
     ~~~
+
+    `poly init` shows a searchable dropdown of every project visible to your API key — pick the one you want to work on. If you'd rather pass the IDs directly (they're in the Agent Studio URL), use `poly init --account_id <account_id> --project_id <project_id>`.
 
 Your local folder will mirror the project in Agent Studio and you can begin editing immediately.
 
