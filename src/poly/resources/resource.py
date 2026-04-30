@@ -384,7 +384,11 @@ def _parse_multi_resource_path(file_path: str) -> tuple[str, list[str]]:
             f"Invalid multi-resource path (expected segments after .yaml file): {file_path}"
         )
     # Preserve leading slash for absolute paths (parts[0] is '' for /foo/bar/...)
+    # On Windows, os.path.join('C:', 'foo') produces 'C:foo' (drive-relative),
+    # so append os.sep to bare drive letters.
     base_parts = parts[: yaml_idx + 1]
+    if base_parts[0].endswith(":"):
+        base_parts[0] += os.sep
     yaml_file_path = (
         os.path.join(*base_parts) if base_parts[0] else os.sep + os.path.join(*base_parts[1:])
     )
