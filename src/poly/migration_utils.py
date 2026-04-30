@@ -99,7 +99,8 @@ def migrate_legacy_topic_files(root_path: str) -> None:
             # Reconstruct the original topic name from the relative path
             # e.g. topics/Billing/Refunds.yaml -> "Billing/Refunds"
             rel_path = os.path.relpath(topic_path, topics_dir)
-            file_name = os.path.splitext(rel_path)[0]
+            # os.path.relpath uses os.sep, but topic names use forward slashes.
+            file_name = os.path.splitext(rel_path)[0].replace(os.sep, "/")
             clean_file_name = resource_utils.clean_name(file_name)
             clean_file_path = os.path.join(topics_dir, f"{clean_file_name}.yaml")
             if clean_file_path in topics:
