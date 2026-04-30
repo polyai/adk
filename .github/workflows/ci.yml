@@ -32,8 +32,11 @@ jobs:
         fi
         echo "PR title is valid: $PR_TITLE"
 
-  lint-and-test:
-    runs-on: ubuntu-latest
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     env:
       CI: true
     permissions:
@@ -55,36 +58,42 @@ jobs:
         python-version: "3.14"
 
     - name: Create virtual environment
-      run: |
-        uv venv
+      run: uv venv
 
     - name: Install dependencies
-      run: |
-        source .venv/bin/activate
-        uv pip install -e ".[dev]"
+      run: uv pip install -e ".[dev]"
 
     - name: Run tests
-      run: |
-        source .venv/bin/activate
-        uv run pytest src/poly/tests/ -v
+      run: uv run pytest src/poly/tests/ -v
 
     - name: Lint with ruff
-      run: |
-        source .venv/bin/activate
-        ruff check .
+      if: matrix.os == 'ubuntu-latest'
+      run: uv run ruff check .
 
     - name: Format check with ruff
-      run: |
-        source .venv/bin/activate
-        ruff format --check .
+      if: matrix.os == 'ubuntu-latest'
+      run: uv run ruff format --check .
 
     - name: Check license compliance
-      run: |
-        source .venv/bin/activate
-        uv run licensecheck --zero
+      if: matrix.os == 'ubuntu-latest'
+      run: uv run licensecheck --zero
 
     - name: Check licenses.json is up to date
+      if: matrix.os == 'ubuntu-latest'
       run: |
-        source .venv/bin/activate
         uv run pip-licenses
         git diff --exit-code licenses.json
+
+  lint-and-test:
+    name: lint-and-test
+    needs: [test]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+    - name: Verify all jobs passed
+      run: |
+        if [ "${{ needs.test.result }}" != "success" ]; then
+          echo "test failed: ${{ needs.test.result }}"
+          exit 1
+        fi
+        echo "All CI jobs passed"
