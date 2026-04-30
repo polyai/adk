@@ -878,7 +878,7 @@ class AgentStudioCLI:
 
         deployment_list_parser = deployments_subparsers.add_parser(
             "list",
-            parents=[deployments_path_parent, json_parent],
+            parents=[deployments_path_parent, json_parent, verbose_parent],
             help="List deployments for the project.",
             description=(
                 "List deployments for the project.\n\n"
@@ -922,7 +922,7 @@ class AgentStudioCLI:
 
         deployment_promote_parser = deployments_subparsers.add_parser(
             "promote",
-            parents=[deployments_path_parent, json_parent],
+            parents=[deployments_path_parent, json_parent, verbose_parent],
             help="Promote a deployment to the next environment.",
             description=(
                 "Promote a deployment to the next environment.\n\nExamples:\n  poly deployments promote --from <deployment_id> --to <target_env>\n"
@@ -3198,9 +3198,13 @@ class AgentStudioCLI:
         else:
             deployment_hash = from_deployment
 
-        deployment_version = next(
-            (v for v in versions if v.get("version_hash", "")[:9] == deployment_hash[:9]),
-            None,
+        deployment_version, deployment_index = next(
+            (
+                (v, i)
+                for i, v in enumerate(versions)
+                if v.get("version_hash", "")[:9] == deployment_hash[:9]
+            ),
+            (None, None),
         )
 
         if not deployment_version:
@@ -3213,22 +3217,48 @@ class AgentStudioCLI:
 
         deployment_metadata = deployment_version.get("deployment_metadata", {})
         deployment_message = deployment_metadata.get("deployment_message")
-        if not output_json and not force:
-            confirm_msg = (
-                f"Promoting deployment '{(deployment_version.get('version_hash') or '')[:9]}: "
-                f"{deployment_message or '-'}' to [info]{to_env}[/info]?"
+
+        # Compute changes between this deployment and the currently active deployment in the target environment
+        previous_deployment = active_deployment_hashes.get(to_env)
+        previous_version, previous_index = next(
+            (
+                (v, i)
+                for i, v in enumerate(versions)
+                if v.get("version_hash", "") == previous_deployment
+            ),
+            (None, None),
+        )
+
+        changes = []
+        if previous_version and previous_index > deployment_index:
+            changes = versions[deployment_index:previous_index]
+
+        if not output_json:
+            plain(
+                f"Promoting hash [bold]{deployment_version.get('version_hash', '')[:9]}[/bold] to [info]{to_env}[/info]"
             )
-            console.print(f"{confirm_msg}")
-            if not questionary.confirm("Confirm?", default=False, auto_enter=False).ask():
+            if not changes:
+                plain(f"Rolling back to an earlier version: {deployment_message or '-'}")
+            else:
+                plain(f"Changes included:")
+                print_deployments(changes, {})
+
+        if not output_json and not force:
+            if not questionary.confirm(
+                "Confirm Deployment?", default=False, auto_enter=False
+            ).ask():
                 warning("Aborted.")
                 sys.exit(0)
+
+            if not message:
+                message = questionary.text("Deployment message (default: merge message):").ask()
 
         try:
             project.promote_deployment(
                 deployment_version.get("id"), to_env, message=message or deployment_message or ""
             )
             if output_json:
-                json_print({"success": True})
+                json_print({"success": True, "changes_deployed": changes})
             else:
                 success(f"Deployment {from_deployment} promoted to {to_env}.")
         except Exception as e:
