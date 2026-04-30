@@ -2607,12 +2607,12 @@ class PullProjectTest(unittest.TestCase):
         # dump_yaml format produced by MultiResourceYamlResource.save(save_to_cache=True)
         original_kp_content = (
             "keyphrases:\n"
-            "  - keyphrase: PolyAI\n"
-            "    level: maximum\n"
-            "  - keyphrase: reservation\n"
-            "    level: boosted\n"
-            "  - keyphrase: check-in\n"
-            "    level: default\n"
+            "- keyphrase: PolyAI\n"
+            "  level: maximum\n"
+            "- keyphrase: reservation\n"
+            "  level: boosted\n"
+            "- keyphrase: check-in\n"
+            "  level: default\n"
         )
 
         MultiResourceYamlResource._file_cache.clear()
@@ -2653,22 +2653,22 @@ class PullProjectTest(unittest.TestCase):
         )
         original_kp_content = (
             "keyphrases:\n"
-            "  - keyphrase: PolyAI\n"
-            "    level: maximum\n"
-            "  - keyphrase: reservation\n"
-            "    level: boosted\n"
-            "  - keyphrase: check-in\n"
-            "    level: default\n"
+            "- keyphrase: PolyAI\n"
+            "  level: maximum\n"
+            "- keyphrase: reservation\n"
+            "  level: boosted\n"
+            "- keyphrase: check-in\n"
+            "  level: default\n"
         )
         # Local: reservation level boosted → default (independent change)
         local_kp_content = (
             "keyphrases:\n"
-            "  - keyphrase: PolyAI\n"
-            "    level: maximum\n"
-            "  - keyphrase: reservation\n"
-            "    level: default\n"
-            "  - keyphrase: check-in\n"
-            "    level: default\n"
+            "- keyphrase: PolyAI\n"
+            "  level: maximum\n"
+            "- keyphrase: reservation\n"
+            "  level: default\n"
+            "- keyphrase: check-in\n"
+            "  level: default\n"
         )
 
         MultiResourceYamlResource._file_cache.clear()
@@ -2712,12 +2712,12 @@ class PullProjectTest(unittest.TestCase):
         )
         original_kp_content = (
             "keyphrases:\n"
-            "  - keyphrase: PolyAI\n"
-            "    level: maximum\n"
-            "  - keyphrase: reservation\n"
-            "    level: boosted\n"
-            "  - keyphrase: check-in\n"
-            "    level: default\n"
+            "- keyphrase: PolyAI\n"
+            "  level: maximum\n"
+            "- keyphrase: reservation\n"
+            "  level: boosted\n"
+            "- keyphrase: check-in\n"
+            "  level: default\n"
         )
         # Local: PolyAI level maximum → default (conflicts with remote "boosted")
         local_kp_content = (

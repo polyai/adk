@@ -31,7 +31,6 @@ _yaml_dumper = yaml.YAML()
 _yaml_dumper.default_flow_style = False
 _yaml_dumper.preserve_quotes = False
 _yaml_dumper.width = 100
-_yaml_dumper.indent(mapping=2, sequence=4, offset=2)
 
 _yaml_loader = yaml.YAML(typ="safe")
 _yaml_loader.preserve_quotes = False
@@ -76,14 +75,6 @@ def _serialize_value(value):
 _yaml_resolver = yaml.YAML().resolver
 
 
-def _value_needs_quoting(value: str) -> bool:
-    """Return True if a YAML scalar value needs double-quoting to round-trip correctly."""
-    if value == "":
-        return True
-    tag = _yaml_resolver.resolve(yaml.ScalarNode, value, (True, False))
-    return tag != "tag:yaml.org,2002:str"
-
-
 def _key_needs_quoting(key: str) -> bool:
     """Return True if a YAML key should be quoted to avoid parse errors."""
     return "&" in key or "*" in key
@@ -106,8 +97,6 @@ def _prepare_yaml_data(data):
             )
             if isinstance(v, str) and "\n" in v:
                 result[new_key] = yaml.scalarstring.LiteralScalarString(v)
-            elif isinstance(v, str) and _value_needs_quoting(v):
-                result[new_key] = yaml.scalarstring.DoubleQuotedScalarString(v)
             else:
                 result[new_key] = _prepare_yaml_data(v)
         return result
@@ -517,11 +506,11 @@ def format_json(json_content: str) -> str:
         json_content: Raw JSON string.
 
     Returns:
-        Formatted JSON string (indent=2, sort_keys=True), or original on parse error.
+        Formatted JSON string (indent=2), or original on parse error.
     """
     try:
         data = json.loads(json_content)
-        return json.dumps(data, indent=2, sort_keys=True) + "\n"
+        return json.dumps(data, indent=2) + "\n"
     except Exception:
         return json_content
 
