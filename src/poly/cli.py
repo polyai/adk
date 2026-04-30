@@ -956,6 +956,11 @@ class AgentStudioCLI:
             action="store_true",
             help="Force the promotion without confirmation. When used, the existing deployment message is kept unless --message is provided. This is default in non-interactive mode (e.g. when --json is used)",
         )
+        deployment_promote_parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Show what would be promoted without actually promoting. Displays the deployment hash, target environment, and changes included.",
+        )
 
         deployment_rollback_parser = deployments_subparsers.add_parser(
             "rollback",
@@ -1176,6 +1181,7 @@ class AgentStudioCLI:
                         args.message,
                         force=args.force,
                         output_json=args.json,
+                        dry_run=args.dry_run,
                     )
                 elif args.deployments_subcommand == "rollback":
                     cls.deployments_rollback(
@@ -3157,6 +3163,7 @@ class AgentStudioCLI:
         message: Optional[str] = None,
         force: bool = False,
         output_json: bool = False,
+        dry_run: bool = False,
     ) -> None:
         """Promote a deployment to a different environment.
 
@@ -3167,15 +3174,17 @@ class AgentStudioCLI:
             force: If True, bypass confirmation prompt.
             message: Optional deployment message to include with the promotion (defaults to original deployment message).
             output_json: If True, print result as JSON instead of rich text.
+            dry_run: If True, show what would be promoted without actually promoting.
         """
         project = cls._load_project(base_path, output_json=output_json)
 
+        result: dict = {"success": False, "to_env": to_env}
         deployment_hash = None
 
         if to_env not in ["pre-release", "live"]:
             msg = f"Invalid target environment '{to_env}'. Must be 'pre-release' or 'live'."
             if output_json:
-                json_print({"success": False, "error": msg})
+                json_print({**result, "error": msg})
             else:
                 error(msg)
             sys.exit(1)
@@ -3204,13 +3213,16 @@ class AgentStudioCLI:
         if not deployment_version:
             msg = f"Deployment '{from_deployment}' not found in {search_env}."
             if output_json:
-                json_print({"success": False, "error": msg})
+                json_print({**result, "error": msg})
             else:
                 error(msg)
             sys.exit(1)
 
         deployment_metadata = deployment_version.get("deployment_metadata", {})
         deployment_message = deployment_metadata.get("deployment_message")
+
+        result["from_hash"] = deployment_version.get("version_hash", "")
+        result["message"] = message or deployment_message or ""
 
         # Compute changes between this deployment and the currently active deployment in the target environment
         previous_deployment = active_deployment_hashes.get(to_env)
@@ -3226,16 +3238,22 @@ class AgentStudioCLI:
         changes = []
         if previous_version and previous_index > deployment_index:
             changes = versions[deployment_index:previous_index]
+        result["changes"] = changes
 
         if not output_json:
-            plain(
-                f"Promoting hash [bold]{deployment_version.get('version_hash', '')[:9]}[/bold] to [info]{to_env}[/info]"
-            )
+            plain(f"Promoting hash [bold]{result['from_hash'][:9]}[/bold] to [info]{to_env}[/info]")
             if not changes:
                 plain(f"Rolling back to an earlier version: {deployment_message or '-'}")
             else:
                 plain("Changes included:")
                 print_deployments(changes, {})
+
+        if dry_run:
+            if output_json:
+                json_print({**result, "dry_run": True})
+            else:
+                plain("[dim]Dry run — no changes were made.[/dim]")
+            return
 
         if not output_json and not force:
             if not questionary.confirm(
@@ -3246,18 +3264,19 @@ class AgentStudioCLI:
 
             if not message:
                 message = questionary.text("Deployment message (default: merge message):").ask()
+                result["message"] = message or deployment_message or ""
 
         try:
             project.promote_deployment(
-                deployment_version.get("id"), to_env, message=message or deployment_message or ""
+                deployment_version.get("id"), to_env, message=result["message"]
             )
             if output_json:
-                json_print({"success": True, "changes_deployed": changes})
+                json_print({**result, "success": True})
             else:
                 success(f"Deployment {from_deployment} promoted to {to_env}.")
         except Exception as e:
             if output_json:
-                json_print({"success": False, "error": str(e)})
+                json_print({**result, "error": str(e)})
             else:
                 error(f"Failed to promote deployment: {e}")
             sys.exit(1)
