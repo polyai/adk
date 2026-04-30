@@ -1246,3 +1246,8 @@ class SyncClientHandler:
         """Get deployment info needed to start a draft chat on a branch."""
         self.assert_branch_exists()
         return self.sdk.get_branch_chat_info(branch_id)
+
+    def get_branch_deploy_info(self, branch_id: str) -> dict[str, Any]:
+        """Get deployment info needed to start a draft call on a branch."""
+        self.assert_branch_exists()
+        return self.sdk.get_branch_deploy_info(branch_id)

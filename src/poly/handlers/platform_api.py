@@ -429,3 +429,15 @@ class PlatformAPIHandler:
         if output_lang:
             data["tts_lang_code"] = output_lang
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
+
+    @staticmethod
+    def get_webrtc_config(region: str) -> dict:
+        """Get WebRTC configuration for the given region.
+
+        Args:
+            region (str): The region name
+
+        Returns:
+            dict: Contains 'signalingUrl' for the WebRTC gateway WebSocket endpoint.
+        """
+        return PlatformAPIHandler.make_request(region, "/webrtc-config")

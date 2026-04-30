@@ -2491,6 +2491,61 @@ class AgentStudioProject:
             environment=environment,
         )
 
+    # ── Call ──────────────────────────────────────────────────────
+
+    def prepare_call_session(self) -> dict:
+        """Prepare a WebRTC call session for the current branch.
+
+        Reuses the branch chat deployment info (same endpoint, same deployment object)
+        to obtain the agentVersionOverride payload for the WebRTC offer.
+
+        Returns:
+            dict: {"agentVersionOverride": {"artifactVersion": ..., "lambdaDeploymentVersion": ...}}
+
+        Raises:
+            requests.HTTPError: If the API call fails.
+            ValueError: If the deployment response is missing expected fields.
+        """
+        call_info = self.api_handler.get_branch_deploy_info(self.branch_id)
+
+        artifact_version = call_info.get("artifactVersion")
+        lambda_deployment_version = call_info.get("lambdaDeploymentVersion")
+        if not artifact_version or not lambda_deployment_version:
+            raise ValueError(f"Unexpected response from get_branch_deploy_info: {call_info}")
+
+        return {
+            "agentVersionOverride": {
+                "artifactVersion": artifact_version,
+                "lambdaDeploymentVersion": lambda_deployment_version,
+            }
+        }
+
+    def get_webrtc_signaling_url(self) -> str:
+        """Fetch the WebRTC signaling WebSocket URL for this project's region from the platform API.
+
+        Falls back to a hardcoded map if the endpoint is not yet deployed.
+        """
+        # TODO: remove fallback once WEBRTC_CONFIG is deployed to all regions
+        _fallback_region_to_ws = {
+            "dev": "wss://webrtc-gateway.dev.polyai.app/api/v1/webrtc/signal",
+            "staging": "wss://webrtc-gateway.staging.us-1.platform.polyai.app/api/v1/webrtc/signal",
+            "euw-1": "wss://webrtc-gateway.euw-1.platform.polyai.app/api/v1/webrtc/signal",
+            "uk-1": "wss://webrtc-gateway.uk-1.platform.polyai.app/api/v1/webrtc/signal",
+            "us-1": "wss://webrtc-gateway.us-1.platform.polyai.app/api/v1/webrtc/signal",
+            "studio": "wss://webrtc-gateway.studio.polyai.app/api/v1/webrtc/signal",
+        }
+        try:
+            config = AgentStudioInterface.get_webrtc_config(self.region)
+            url = config.get("signalingUrl")
+            if url:
+                return url
+        except Exception:
+            logger.debug("webrtc-config endpoint unavailable, using fallback URL map")
+        url = _fallback_region_to_ws.get(self.region)
+        if not url:
+            raise ValueError(f"No WebRTC signaling URL configured for region: {self.region}")
+        return url
+
     def get_conversation_url(self, conversation_id: str) -> str:
         """Build the Studio URL for a conversation.
 

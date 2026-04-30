@@ -831,6 +831,34 @@ class AgentStudioCLI:
             help="Reuse an existing conversation ID instead of starting a new conversation.",
         )
 
+        # CALL
+        call_parser = subparsers.add_parser(
+            "call",
+            parents=[verbose_parent, debug_parent],
+            help="Start a live voice call with the current branch.",
+            description=(
+                "Start a real-time voice call with the agent's current branch using WebRTC.\n\n"
+                "Requires ffmpeg to be installed on your system:\n"
+                "  macOS:  brew install ffmpeg\n"
+                "Examples:\n"
+                "  poly call\n"
+                "  poly call --path /path/to/project\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        call_parser.add_argument(
+            "--path",
+            type=str,
+            default=os.getcwd(),
+            help="Base path to the project. Defaults to current working directory.",
+        )
+        call_parser.add_argument(
+            "--push",
+            action="store_true",
+            default=False,
+            help="Push the project before starting the call.",
+        )
+
         # COMPLETION
         completion_parser = subparsers.add_parser(
             "completion",
@@ -1017,6 +1045,12 @@ class AgentStudioCLI:
                     input_messages=input_messages,
                     conversation_id=args.conversation_id,
                     output_json=args.json,
+                )
+
+            elif args.command == "call":
+                cls.call(
+                    args.path,
+                    push_before_call=args.push,
                 )
 
             elif args.command == "review":
@@ -2956,6 +2990,73 @@ class AgentStudioCLI:
                 processed_json["state_changes"] = state_reply
 
         return processed_json
+
+    @classmethod
+    def call(
+        cls,
+        base_path: str,
+        push_before_call: bool = False,
+    ) -> None:
+        """Start a live voice call with the current branch using WebRTC."""
+        try:
+            import asyncio
+            from poly.call import c
+        except ImportError as exc:
+            error(
+                "poly call requires additional packages: aiortc, sounddevice, websockets.\n"
+                "Install them with: uv pip install 'polyai-adk[call]'\n"
+                "If error persists, ensure ffmpeg is installed on your system."
+                f"{exc}"
+            )
+            raise SystemExit(1) from exc
+
+        project = cls._load_project(base_path)
+
+        if push_before_call:
+            info("Pushing project before starting call...")
+            push_success, output, _ = project.push_project(
+                force=False,
+                skip_validation=False,
+                dry_run=False,
+                format=False,
+                email=None,
+            )
+            if output == "No changes detected":
+                push_success = True
+            if push_success:
+                success("Project pushed successfully.")
+            else:
+                error(f"Failed to push {project.account_id}/{project.project_id} to Agent Studio.")
+                plain(output)
+                sys.exit(1)
+
+        branch_label = project.get_current_branch() or project.branch_id
+        label = f"[bold]{project.account_id}/{project.project_id}[/bold] branch=[bold]{branch_label}[/bold]"
+        info(f"Preparing call for {label}...")
+
+        try:
+            auth_payload = project.prepare_call_session()
+        except requests.HTTPError as exc:
+            error(f"Failed to prepare call session: {exc}")
+            sys.exit(1)
+        except ValueError as exc:
+            error(str(exc))
+            sys.exit(1)
+
+        signaling_url = project.get_webrtc_signaling_url()
+
+        info("Connecting... Press Ctrl+C to hang up.")
+
+        session = CallSession(
+            signaling_url=signaling_url,
+            auth_payload=auth_payload,
+            account_id=project.account_id,
+            project_id=project.project_id,
+        )
+        try:
+            asyncio.run(session.run())
+        except KeyboardInterrupt:
+            info("Call ended.")
 
     @classmethod
     def validate_project(cls, base_path: str, output_json: bool = False) -> None:
