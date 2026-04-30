@@ -172,11 +172,11 @@ Copying a project directory, updating `project.yaml` or `project.json` with new 
 ### Right
 
 ~~~bash
-poly init --account_id <account_id> --project_id <project_id>
+poly init
 poly pull
 ~~~
 
-Start every new project fresh with `poly init` and `poly pull`. If you need to reuse flows, functions, or topics from an existing project, copy those individual resource files into the new directory — do not copy `.agent_studio_config` or the whole project directory.
+Start every new project fresh with `poly init` and `poly pull`. `poly init` will walk you through dropdowns to pick the right project; pass `--account_id` / `--project_id` if you want to skip the prompts. If you need to reuse flows, functions, or topics from an existing project, copy those individual resource files into the new directory — do not copy `.agent_studio_config` or the whole project directory.
 
 ## Quick reference
 
