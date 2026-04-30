@@ -72,9 +72,6 @@ def _serialize_value(value):
     return value
 
 
-_yaml_resolver = yaml.YAML().resolver
-
-
 def _key_needs_quoting(key: str) -> bool:
     """Return True if a YAML key should be quoted to avoid parse errors."""
     return "&" in key or "*" in key
@@ -506,11 +503,11 @@ def format_json(json_content: str) -> str:
         json_content: Raw JSON string.
 
     Returns:
-        Formatted JSON string (indent=2), or original on parse error.
+        Formatted JSON string (indent=2, sort_keys=True), or original on parse error.
     """
     try:
         data = json.loads(json_content)
-        return json.dumps(data, indent=2) + "\n"
+        return json.dumps(data, indent=2, sort_keys=True) + "\n"
     except Exception:
         return json_content
 
