@@ -922,7 +922,7 @@ class AgentStudioCLI:
 
         deployment_promote_parser = deployments_subparsers.add_parser(
             "promote",
-            parents=[deployments_path_parent, json_parent, verbose_parent],
+            parents=[deployments_path_parent, json_parent, verbose_parent, debug_parent],
             help="Promote a deployment to the next environment.",
             description=(
                 "Promote a deployment to the next environment.\n\nExamples:\n  poly deployments promote --from <deployment_id> --to <target_env>\n"
@@ -954,15 +954,12 @@ class AgentStudioCLI:
         deployment_promote_parser.add_argument(
             "--force",
             action="store_true",
-            help="Force the promotion without confirmation. This is default in non-interactive mode (e.g. when --json is used)",
-        )
-        deployment_promote_parser.add_argument(
-            "--debug", action="store_true", help="Display debug logs."
+            help="Force the promotion without confirmation. When used, the existing deployment message is kept unless --message is provided. This is default in non-interactive mode (e.g. when --json is used)",
         )
 
         deployment_rollback_parser = deployments_subparsers.add_parser(
             "rollback",
-            parents=[deployments_path_parent, json_parent],
+            parents=[deployments_path_parent, json_parent, verbose_parent, debug_parent],
             help="Rollback sandbox/main to a previous version.",
             description=(
                 "Rollback a deployment to a previous version.\n\nExamples:\n  poly deployments rollback --to <deployment_id>\n"
@@ -986,11 +983,7 @@ class AgentStudioCLI:
         deployment_rollback_parser.add_argument(
             "--force",
             action="store_true",
-            help="Force the rollback without confirmation. This is default in non-interactive mode (e.g. when --json is used)",
-        )
-
-        deployment_rollback_parser.add_argument(
-            "--debug", action="store_true", help="Display debug logs."
+            help="Force the rollback without confirmation. When used, the existing deployment message is kept unless --message is provided. This is default in non-interactive mode (e.g. when --json is used)",
         )
 
         return parser
@@ -3172,6 +3165,7 @@ class AgentStudioCLI:
             from_deployment: Version hash of the deployment to promote.
             to_env: Target environment to promote to — pre-release or live.
             force: If True, bypass confirmation prompt.
+            message: Optional deployment message to include with the promotion (defaults to original deployment message).
             output_json: If True, print result as JSON instead of rich text.
         """
         project = cls._load_project(base_path, output_json=output_json)
@@ -3240,7 +3234,7 @@ class AgentStudioCLI:
             if not changes:
                 plain(f"Rolling back to an earlier version: {deployment_message or '-'}")
             else:
-                plain(f"Changes included:")
+                plain("Changes included:")
                 print_deployments(changes, {})
 
         if not output_json and not force:
@@ -3282,7 +3276,6 @@ class AgentStudioCLI:
 
         versions, active_deployment_hashes = project.get_deployments("sandbox")
 
-        deployment_hash = None
         # Resolve deployment to full version hash
         if deployment in active_deployment_hashes:
             deployment_hash = active_deployment_hashes[deployment]
@@ -3309,7 +3302,7 @@ class AgentStudioCLI:
                 f"Rolling back sandbox to deployment '{(deployment_version.get('version_hash') or '')[:9]}: "
                 f"{deployment_message or '-'}'?"
             )
-            console.print(f"{confirm_msg}")
+            plain(f"{confirm_msg}")
             if not questionary.confirm("Confirm?", default=False, auto_enter=False).ask():
                 warning("Aborted.")
                 sys.exit(0)

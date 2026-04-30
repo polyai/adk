@@ -25,8 +25,9 @@ DRAFT_CHAT_CONVERSATION_URL = (
     "/adk/v1/accounts/{account_id}/projects/{project_id}/draft/chat/{conversation_id}"
 )
 CHAT_END_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/chat/{conversation_id}/end"
-PROMOTE_URL = "/v1/agents/{project_id}/deployments/{deploymentId}/promote"
-ROLLBACK_URL = "/v1/agents/{project_id}/deployments/{deploymentId}/rollback"
+# These use public APIs not /adk endpoints
+PROMOTE_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/promote"
+ROLLBACK_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/rollback"
 
 
 class PlatformAPIHandler:
@@ -451,7 +452,7 @@ class PlatformAPIHandler:
         Returns:
             dict: The API response
         """
-        endpoint = PROMOTE_URL.format(project_id=project_id, deploymentId=deployment_id)
+        endpoint = PROMOTE_URL.format(project_id=project_id, deployment_id=deployment_id)
         body = {
             "targetEnvironment": target_env,
             "deploymentMessage": message,
@@ -476,6 +477,6 @@ class PlatformAPIHandler:
         Returns:
             dict: The API response
         """
-        endpoint = ROLLBACK_URL.format(project_id=project_id, deploymentId=deployment_id)
+        endpoint = ROLLBACK_URL.format(project_id=project_id, deployment_id=deployment_id)
         body = {"deploymentMessage": message}
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=body)
