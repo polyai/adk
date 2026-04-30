@@ -1,6 +1,40 @@
 # CHANGELOG
 
 
+## v0.15.2 (2026-04-30)
+
+### Bug Fixes
+
+- Cross-platform path handling + add Windows CI ([#121](https://github.com/polyai/adk/pull/121),
+  [`e70e937`](https://github.com/polyai/adk/commit/e70e9371e9a2a1cf629e055b5332c6499f89daf9))
+
+## Summary - Fixes cross-platform bugs in production code where `file_path.split(os.sep)` failed on
+  Windows because paths containing forward slashes weren't normalized first — adds
+  `os.path.normpath()` before splitting - Normalizes topic names in `migration_utils.py` to always
+  use `/` regardless of OS - Adds a `test-windows` CI job (`continue-on-error: true`) to catch
+  platform-specific bugs - Updates test assertions to use `os.path.join()` instead of hardcoded
+  forward-slash paths
+
+## Production code changes | File | Fix | |---|---| | `src/poly/resources/function.py` |
+  `os.path.normpath()` before `split(os.sep)` in `get_function_type()` and `read_local_resource()` |
+  | `src/poly/resources/flows.py` | Same in `FlowStep` condition matching and
+  `FunctionStep.read_local_resource()` | | `src/poly/resources/resource_utils.py` | Same in
+  `get_flow_name_from_path()` | | `src/poly/migration_utils.py` | `os.path.relpath` returns
+  OS-native separators; normalize to `/` for topic names |
+
+## Test changes | File | Fix | |---|---| | `src/poly/tests/project_test.py` | `os.path.join()` in
+  `get_diffs` assertions | | `src/poly/tests/resources_test.py` | `os.path.join()` for mock dict
+  keys and file_path args; skip Unix-specific path test on Windows |
+
+## Test plan - [x] CI passes on Ubuntu, Windows, and coverage
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.15.1 (2026-04-30)
 
 ### Bug Fixes
