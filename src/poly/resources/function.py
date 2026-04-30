@@ -242,7 +242,7 @@ class Function(Resource):
         Returns:
             Optional[FunctionType]: The function type.
         """
-        parts = file_path.split(os.sep)
+        parts = os.path.normpath(file_path).split(os.sep)
         function_name = os.path.splitext(parts[-1])[0]
         if len(parts) >= 4 and parts[-4] == "flows":
             if parts[-2] == "function_steps":
@@ -725,7 +725,7 @@ class Function(Resource):
 
         # flow_name can be inferred from file path
         # e.g. flows/{flow_name}/functions/{function_name}.py
-        parts = file_path.split(os.sep)
+        parts = os.path.normpath(file_path).split(os.sep)
         if len(parts) >= 4 and parts[-4] == "flows":
             flow_folder_name = parts[-3]
         else:

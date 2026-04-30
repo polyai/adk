@@ -342,7 +342,7 @@ def get_flow_id_from_flow_name(
 
 def get_flow_name_from_path(file_path: str) -> Optional[str]:
     """Extract the flow name from the file path."""
-    parts = file_path.split(os.sep)
+    parts = os.path.normpath(file_path).split(os.sep)
     if "flows" in parts:
         flow_index = parts.index("flows")
         if flow_index < len(parts) - 1:

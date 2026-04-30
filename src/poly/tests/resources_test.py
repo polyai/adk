@@ -1507,7 +1507,8 @@ class VoiceDisclaimerMessageTests(unittest.TestCase):
         def getmtime_config(path):
             return 1.0 if "configuration.yaml" in str(path) else os.path.getmtime(path)
 
-        with mock_read_from_file({"voice/configuration.yaml": test_file_content}):
+        config_path = os.path.join("voice", "configuration.yaml")
+        with mock_read_from_file({config_path: test_file_content}):
             with unittest.mock.patch(
                 "poly.resources.resource.os.path.exists", side_effect=exists_config
             ), unittest.mock.patch(
@@ -1516,7 +1517,7 @@ class VoiceDisclaimerMessageTests(unittest.TestCase):
                 "poly.resources.resource.os.path.getmtime", side_effect=getmtime_config
             ):
                 result = VoiceDisclaimerMessage.read_local_resource(
-                    file_path="voice/configuration.yaml/disclaimer_messages",
+                    file_path=os.path.join("voice", "configuration.yaml", "disclaimer_messages"),
                     resource_id="disclaimer_123",
                     resource_name="disclaimer_message",
                 )
@@ -1629,7 +1630,8 @@ class VoiceGreetingTests(unittest.TestCase):
         def getmtime_config(path):
             return 1.0 if "configuration.yaml" in str(path) else os.path.getmtime(path)
 
-        with mock_read_from_file({"voice/configuration.yaml": test_file_content}):
+        config_path = os.path.join("voice", "configuration.yaml")
+        with mock_read_from_file({config_path: test_file_content}):
             with unittest.mock.patch(
                 "poly.resources.resource.os.path.exists", side_effect=exists_config
             ), unittest.mock.patch(
@@ -1638,7 +1640,7 @@ class VoiceGreetingTests(unittest.TestCase):
                 "poly.resources.resource.os.path.getmtime", side_effect=getmtime_config
             ):
                 result = VoiceGreeting.read_local_resource(
-                    file_path="voice/configuration.yaml/greeting",
+                    file_path=os.path.join("voice", "configuration.yaml", "greeting"),
                     resource_id="greeting_123",
                     resource_name="greeting",
                 )
@@ -5067,7 +5069,7 @@ class VariableTest(unittest.TestCase):
 
     def test_file_path(self):
         var = Variable(resource_id="VAR-123", name="customer_name")
-        self.assertEqual(var.file_path, "variables/customer_name")
+        self.assertEqual(var.file_path, os.path.join("variables", "customer_name"))
 
     def test_raw(self):
         var = Variable(resource_id="VAR-123", name="order_id")
@@ -6939,6 +6941,7 @@ class ParseMultiResourcePathTests(unittest.TestCase):
         self.assertEqual(yaml_path, os.path.join("voice", "configuration.yaml"))
         self.assertEqual(segments, ["greeting"])
 
+    @unittest.skipIf(os.name == "nt", "Unix-specific path test")
     def test_absolute_unix_path(self):
         yaml_path, segments = _parse_multi_resource_path(
             "/home/user/project/voice/configuration.yaml/greeting"
