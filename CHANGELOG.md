@@ -1,6 +1,99 @@
 # CHANGELOG
 
 
+## v0.15.3 (2026-05-01)
+
+### Bug Fixes
+
+- Show clear error when POLY_ADK_KEY is not set ([#110](https://github.com/polyai/adk/pull/110),
+  [`b066753`](https://github.com/polyai/adk/commit/b0667534c82468ab69c83f664c0146afda48a50c))
+
+## Summary - Running `poly init` without `POLY_ADK_KEY` set now shows `POLY_ADK_KEY environment
+  variable is not set. Export your API key with: export POLY_ADK_KEY=<your-api-key>` instead of the
+  misleading "No accessible regions found for your API key." - Adds early env var check in
+  `init_project` before any API calls - Fixes `_retrieve_api_key` in both `PlatformAPIHandler` and
+  `SyncClientHandler` to raise immediately when the key is missing (previously `os.getenv()`
+  silently returned `None`)
+
+## Test plan - [x] Lint passes (`ruff check`) - [x] Format passes (`ruff format --check`) - [x] All
+  500 tests pass - [x] Manual: run `unset POLY_ADK_KEY && poly init` and verify the new error
+  message <img width="569" height="48" alt="image"
+  src="https://github.com/user-attachments/assets/9d227ac8-c847-49ac-a4c8-39843d7ab3e3" />
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Documentation
+
+- Lead with bare poly init, treat ID flags as escape hatch
+  ([#122](https://github.com/polyai/adk/pull/122),
+  [`25bda57`](https://github.com/polyai/adk/commit/25bda579ec5960d56992a363f3c39ffb53d32865))
+
+## Summary
+
+Customer onboarding feedback from Naorin: users hit \`poly init --account_id <account_id>
+  --project_id <project_id>\` in the docs and don't know what to fill in. They should just be able
+  to run \`poly init\` — the CLI walks them through dropdowns to pick the project. Updates the docs
+  across index, get-started, tutorials, anti-patterns, and CLI reference to lead with the bare form
+  and present the flag form as a script/CI escape hatch.
+
+## Motivation
+
+Naorin (in #docs):
+
+> they should just be able to do poly init
+
+Onboarding session at a customer office got stuck on this exact question.
+
+## Verification
+
+Cross-checked against \`src/poly/cli.py:1231-1330\` — \`init_project\` with no arguments:
+
+1. Calls \`get_accessible_regions()\` and either auto-selects (one region) or prompts via
+  \`questionary.select\`. 2. Calls \`get_accounts(region)\` and either auto-selects (one account) or
+  prompts with a searchable dropdown. 3. Calls \`get_projects(region, account_id)\` and prompts with
+  a searchable dropdown.
+
+Verified live during PR #114 testing — \`poly init\` against my workspace auto-selected
+  region+account and would have surfaced the project dropdown if I hadn't been running
+  non-interactively. The flag form remains required for \`--json\` mode (see \`reference/cli.md\`
+  JSON output section).
+
+## Changes
+
+- **\`index.md\`** — "Three commands" snippet now uses bare \`poly init\`. -
+  **\`get-started/first-commands.md\`** — leads with \`poly init\`, adds a numbered list describing
+  the dropdown flow; flag form moves to a "Skip the prompts" tip. -
+  **\`get-started/get-started.md\`** — Step 6 and the "Already have an agent" section both updated.
+  - **\`tutorials/build-an-agent.md\`** — Step 1 same treatment. The AI-agent workflow section keeps
+  the explicit flag form because that flow runs unattended. -
+  **\`tutorials/restaurant-booking-agent.md\`** — Initialize section same treatment. -
+  **\`concepts/anti-patterns.md\`** — "Right" example uses bare \`poly init\`. -
+  **\`reference/cli.md\`** — \`poly init\` section restructured: dropdown flow documented first,
+  flag form positioned as a script/CI escape hatch. Examples reordered (bare \`poly init\` first,
+  progressively more flags). The JSON-mode requirement at line 486 already reads correctly.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (\`poly <command>\`) — \`poly init\`
+  interactive flow verified during PR #114 walkthrough - [ ] Tested against a live Agent Studio
+  project - [x] N/A (docs, config, or trivial change)
+
+\`mkdocs build --strict\` passes.
+
+## Checklist
+
+- [ ] \`ruff check .\` and \`ruff format --check .\` pass - [ ] \`pytest\` passes - [x] No breaking
+  changes to the \`poly\` CLI interface - [x] Commit messages follow conventional commits
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+
 ## v0.15.2 (2026-04-30)
 
 ### Bug Fixes
