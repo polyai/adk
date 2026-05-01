@@ -87,7 +87,7 @@ class SourcererSDK:
         self.session.headers.update(
             {
                 "Content-Type": "application/json",
-                "X-API-KEY": retrieve_api_key(),
+                "X-API-KEY": retrieve_api_key(region),
                 "X-PolyAI-Correlation-Id": correlation_id,
             }
         )
@@ -554,7 +554,7 @@ class SourcererSDK:
             # Update headers for protobuf content
             correlation_id = f"adk-{uuid.uuid4()}"
             headers = {
-                "X-API-KEY": retrieve_api_key(),
+                "X-API-KEY": retrieve_api_key(self.region),
                 "X-PolyAI-Correlation-Id": correlation_id,
                 "Content-Type": "application/octet-stream",
             }

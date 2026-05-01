@@ -2547,7 +2547,14 @@ class AgentStudioProject:
         )
         all_mappings = new_resources_mappings + kept_resources_mappings
         resource_mappings: list[ResourceMapping] = [
-            m for m in all_mappings if (not files or m.file_path in files)
+            m
+            for m in all_mappings
+            if not files
+            or m.file_path in files
+            or (
+                issubclass(m.resource_type, MultiResourceYamlResource)
+                and _parse_multi_resource_path(m.file_path)[0] in files
+            )
         ]
         return self._format_resources(resource_mappings, check_only=check_only)
 
@@ -2566,7 +2573,34 @@ class AgentStudioProject:
         """
         affected: list[str] = []
         errors: list[str] = []
+
+        # Multi-resource YAML files share a single .yaml file across many virtual
+        # sub-paths. Format at the whole-file level instead of per-resource.
+        multi_file_paths: set[str] = set()
+        regular_mappings: list[ResourceMapping] = []
         for resource_mapping in resource_mappings:
+            if issubclass(resource_mapping.resource_type, MultiResourceYamlResource):
+                true_path, _ = _parse_multi_resource_path(resource_mapping.file_path)
+                multi_file_paths.add(true_path)
+            else:
+                regular_mappings.append(resource_mapping)
+
+        for file_path in multi_file_paths:
+            try:
+                content = Resource.read_from_file(file_path)
+                formatted_content = MultiResourceYamlResource.format_resource(
+                    content, file_name=file_path
+                )
+                if check_only:
+                    if formatted_content.strip() != content.strip():
+                        affected.append(file_path)
+                elif formatted_content.strip() != content.strip():
+                    Resource.save_to_file(formatted_content, file_path)
+                    affected.append(file_path)
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"{file_path}: {e}")
+
+        for resource_mapping in regular_mappings:
             try:
                 content = resource_mapping.resource_type.read_from_file(resource_mapping.file_path)
                 formatted_content = resource_mapping.resource_type.format_resource(
@@ -2576,7 +2610,7 @@ class AgentStudioProject:
                 if check_only:
                     if formatted_content.strip() != content.strip():
                         affected.append(resource_mapping.file_path)
-                else:
+                elif formatted_content.strip() != content.strip():
                     resource_mapping.resource_type.save_to_file(
                         formatted_content, resource_mapping.file_path
                     )

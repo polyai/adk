@@ -2722,12 +2722,12 @@ class PullProjectTest(unittest.TestCase):
         # Local: PolyAI level maximum → default (conflicts with remote "boosted")
         local_kp_content = (
             "keyphrases:\n"
-            "- keyphrase: PolyAI\n"
-            "  level: default\n"
-            "- keyphrase: reservation\n"
-            "  level: boosted\n"
-            "- keyphrase: check-in\n"
-            "  level: default\n"
+            "  - keyphrase: PolyAI\n"
+            "    level: default\n"
+            "  - keyphrase: reservation\n"
+            "    level: boosted\n"
+            "  - keyphrase: check-in\n"
+            "    level: default\n"
         )
 
         MultiResourceYamlResource._file_cache.clear()

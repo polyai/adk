@@ -67,6 +67,7 @@ If the account or project ID is invalid or inaccessible, `poly init` returns a d
 
 | Situation | Error message |
 |---|---|
+| `POLY_ADK_KEY` not set | `POLY_ADK_KEY environment variable is not set. Export your API key with: export POLY_ADK_KEY=<your-api-key>` |
 | Project not found | `Project '<project_id>' not found in account '<account_id>'.` |
 | Permission denied | `Forbidden: you do not have permission to access project '<project_id>' in account '<account_id>'.` |
 
