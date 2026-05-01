@@ -21,8 +21,40 @@ _TYPES_PACKAGE = "poly.types"
 _API_KEY_ENV_VAR = "POLY_ADK_KEY"
 
 
-def retrieve_api_key() -> str:
-    """Return the POLY_ADK_KEY value or raise with a helpful message."""
+def _region_to_env_suffix(region: str) -> str:
+    """Derive env-var suffix from a region identifier.
+
+    Strips a trailing ``-<digit>`` segment (e.g. ``-1``) and uppercases.
+
+    Examples:
+        us-1    -> US
+        euw-1   -> EUW
+        uk-1    -> UK
+        studio  -> STUDIO
+        staging -> STAGING
+        dev     -> DEV
+    """
+    # Strip trailing -<digits> (e.g. "us-1" -> "us", "euw-1" -> "euw")
+    suffix = re.sub(r"-\d+$", "", region)
+    return suffix.upper()
+
+
+def retrieve_api_key(region: Optional[str] = None) -> str:
+    """Return an API key, preferring a per-region key when available.
+
+    Resolution order:
+      1. ``POLY_ADK_KEY_{REGION}`` (if *region* is provided, e.g. ``POLY_ADK_KEY_US``)
+      2. ``POLY_ADK_KEY``
+
+    Raises ``ValueError`` with a helpful message when no key is found.
+    """
+    if region:
+        suffix = _region_to_env_suffix(region)
+        per_region_var = f"{_API_KEY_ENV_VAR}_{suffix}"
+        per_region_key = os.getenv(per_region_var)
+        if per_region_key:
+            return per_region_key
+
     api_key = os.getenv(_API_KEY_ENV_VAR)
     if not api_key:
         raise ValueError(

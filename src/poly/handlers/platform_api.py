@@ -76,7 +76,7 @@ class PlatformAPIHandler:
         correlation_id = f"adk-{uuid.uuid4()}"
 
         headers = {
-            "X-API-KEY": retrieve_api_key(),
+            "X-API-KEY": retrieve_api_key(region),
             "X-PolyAI-Correlation-Id": correlation_id,
             "Content-Type": "application/json",
         }
@@ -217,7 +217,11 @@ class PlatformAPIHandler:
         endpoint = DEPLOYMENTS_URL.format(account_id=account_id, project_id=project_id)
 
         deployments_data = PlatformAPIHandler.make_request(
-            region, endpoint, "GET", data=None, params={"client_env": client_env}
+            region,
+            endpoint,
+            "GET",
+            data=None,
+            params={"client_env": client_env},
         )
         deployments_list = deployments_data.get("deployments", [])
 
@@ -344,7 +348,10 @@ class PlatformAPIHandler:
             conversation_id=conversation_id,
         )
         return PlatformAPIHandler.make_request(
-            region, endpoint, "POST", data={"client_env": environment}
+            region,
+            endpoint,
+            "POST",
+            data={"client_env": environment},
         )
 
     @staticmethod
