@@ -70,6 +70,11 @@ class SourcererSDK:
         self.project_id = project_id
         self.branch_id = branch_id
 
+        if environment == "prod":
+            self.key_region = region
+        else:
+            self.key_region = environment
+
         # Set base URL
         if base_url:
             self.base_url = base_url
@@ -87,7 +92,7 @@ class SourcererSDK:
         self.session.headers.update(
             {
                 "Content-Type": "application/json",
-                "X-API-KEY": retrieve_api_key(region),
+                "X-API-KEY": retrieve_api_key(self.key_region),
                 "X-PolyAI-Correlation-Id": correlation_id,
             }
         )
@@ -554,7 +559,7 @@ class SourcererSDK:
             # Update headers for protobuf content
             correlation_id = f"adk-{uuid.uuid4()}"
             headers = {
-                "X-API-KEY": retrieve_api_key(self.region),
+                "X-API-KEY": retrieve_api_key(self.key_region),
                 "X-PolyAI-Correlation-Id": correlation_id,
                 "Content-Type": "application/octet-stream",
             }
