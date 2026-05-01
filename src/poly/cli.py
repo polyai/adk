@@ -3159,7 +3159,7 @@ class AgentStudioCLI:
         sandbox_versions: list[dict[str, Any]],
         target_hash: str,
         predecessor_hash: str | None,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], bool]:
         """Slice sandbox history to find deployments between two versions.
 
         For promotions (target is newer), returns deployments from target
@@ -3175,17 +3175,17 @@ class AgentStudioCLI:
                 the target env, or None if this is the first deployment.
 
         Returns:
-            List of sandbox deployments between target and predecessor.
+            Tuple of (included deployments, is_rollback).
         """
         target_idx = next(
             (i for i, v in enumerate(sandbox_versions) if v.get("version_hash") == target_hash),
             None,
         )
         if target_idx is None:
-            return []
+            return [], False
 
         if not predecessor_hash:
-            return sandbox_versions[target_idx:]
+            return sandbox_versions[target_idx:], False
 
         pred_idx = next(
             (
@@ -3196,12 +3196,12 @@ class AgentStudioCLI:
             None,
         )
         if pred_idx is None:
-            return sandbox_versions[target_idx:]
+            return sandbox_versions[target_idx:], False
 
         if pred_idx < target_idx:
-            return sandbox_versions[pred_idx:target_idx]
+            return sandbox_versions[pred_idx:target_idx], True
 
-        return sandbox_versions[target_idx:pred_idx]
+        return sandbox_versions[target_idx:pred_idx], False
 
     @classmethod
     def deployments_promote(
@@ -3278,35 +3278,10 @@ class AgentStudioCLI:
         else:
             sandbox_versions, _ = project.get_deployments("sandbox")
 
-        included = cls._resolve_included_deployments(
+        included, is_rollback = cls._resolve_included_deployments(
             sandbox_versions, target_full_hash, predecessor_hash
         )
         result["included_deployments"] = included
-
-        is_rollback = False
-        if predecessor_hash:
-            pred_sandbox_idx = next(
-                (
-                    i
-                    for i, v in enumerate(sandbox_versions)
-                    if v.get("version_hash") == predecessor_hash
-                ),
-                None,
-            )
-            target_sandbox_idx = next(
-                (
-                    i
-                    for i, v in enumerate(sandbox_versions)
-                    if v.get("version_hash") == target_full_hash
-                ),
-                None,
-            )
-            if (
-                pred_sandbox_idx is not None
-                and target_sandbox_idx is not None
-                and target_sandbox_idx > pred_sandbox_idx
-            ):
-                is_rollback = True
 
         if not output_json:
             plain(f"Promoting hash [bold]{result['from_hash'][:9]}[/bold] to [info]{to_env}[/info]")
