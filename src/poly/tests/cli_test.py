@@ -607,6 +607,8 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
         table = rendered.renderable if isinstance(rendered, Panel) else rendered
         self.assertEqual(len(table.columns), 1)
         self.assertEqual(len(table.rows), 1)
+
+
 class ChatLoopTest(unittest.TestCase):
     """Tests for AgentStudioCLI._run_chat_loop.
 
@@ -616,7 +618,10 @@ class ChatLoopTest(unittest.TestCase):
 
     def setUp(self):
         self.proj = MagicMock()
-        self.proj.send_message.return_value = {"response": "Agent reply", "conversation_ended": False}
+        self.proj.send_message.return_value = {
+            "response": "Agent reply",
+            "conversation_ended": False,
+        }
         self.proj.end_chat.return_value = None
         self.proj.get_conversation_url.return_value = "https://example.com/conv-123"
 
@@ -1177,3 +1182,256 @@ class PrintDeploymentsTest(unittest.TestCase):
         mock_print_dep.assert_called_once()
         call_kwargs = mock_print_dep.call_args[1]
         self.assertTrue(call_kwargs["details"])
+
+
+def _make_version(index: int, env: str = "sandbox") -> dict:
+    """Build a realistic deployment version dict for tests."""
+    return {
+        "id": f"dep-{index}",
+        "version_hash": f"hash{index:05d}xxxx",
+        "created_at": f"Mon, 28 Apr 2026 14:{index:02d}:00 GMT",
+        "created_by": "user@example.com",
+        "artifact_version": str(40 + index),
+        "function_deployment_version": str(index),
+        "client_env": env,
+        "deployment_metadata": {
+            "deployment_type": "manual",
+            "deployment_message": f"Deploy {index}",
+        },
+    }
+
+
+class DeploymentsShowTest(unittest.TestCase):
+    """Tests for the deployments_show CLI method."""
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli.AgentStudioCLI._load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.mock_load.return_value = self.proj
+
+        # Sandbox versions: [v0(newest), v1, v2, v3, v4(oldest)]
+        self.sandbox_versions = [_make_version(i) for i in range(5)]
+        self.active_hashes = {"sandbox": "hash00000xxxx"}
+
+    def tearDown(self):
+        patch.stopall()
+
+    # ── Error cases ──────────────────────────────────────────────────
+
+    @patch("poly.cli.error")
+    def test_no_versions_calls_error(self, mock_error):
+        """When the project has no versions, error is called."""
+        self.proj.get_deployments.return_value = ([], {})
+
+        AgentStudioCLI.deployments_show(TEST_DIR, version_hash="hash00000")
+
+        mock_error.assert_called_once()
+        self.assertIn("No versions found", mock_error.call_args[0][0])
+
+    @patch("poly.cli.error")
+    def test_hash_not_found_calls_error(self, mock_error):
+        """When the version hash doesn't match any version, error is called."""
+        self.proj.get_deployments.return_value = (self.sandbox_versions, self.active_hashes)
+
+        AgentStudioCLI.deployments_show(TEST_DIR, version_hash="zzz999999")
+
+        mock_error.assert_called_once()
+        self.assertIn("not found", mock_error.call_args[0][0])
+
+    # ── JSON output structure ────────────────────────────────────────
+
+    @patch("poly.cli.json_print")
+    def test_json_output_contains_required_keys(self, mock_json):
+        """JSON output includes success, deployment, active_deployment_hashes, included."""
+        self.proj.get_deployments.return_value = (self.sandbox_versions, self.active_hashes)
+
+        AgentStudioCLI.deployments_show(TEST_DIR, version_hash="hash00000", output_json=True)
+
+        mock_json.assert_called_once()
+        payload = mock_json.call_args[0][0]
+        self.assertTrue(payload["success"])
+        self.assertIn("deployment", payload)
+        self.assertIn("active_deployment_hashes", payload)
+        self.assertIn("included_deployments", payload)
+
+    @patch("poly.cli.json_print")
+    def test_json_deployment_matches_target_version(self, mock_json):
+        """The deployment field in JSON output matches the requested version."""
+        self.proj.get_deployments.return_value = (self.sandbox_versions, self.active_hashes)
+
+        AgentStudioCLI.deployments_show(TEST_DIR, version_hash="hash00002", output_json=True)
+
+        payload = mock_json.call_args[0][0]
+        self.assertEqual(payload["deployment"]["id"], "dep-2")
+        self.assertEqual(payload["deployment"]["version_hash"], "hash00002xxxx")
+
+    # ── Sandbox included deployments ─────────────────────────────────
+
+    @patch("poly.cli.json_print")
+    def test_sandbox_target_with_predecessor(self, mock_json):
+        """In sandbox, included = sandbox[target:predecessor].
+
+        sandbox: [v0, v1, v2, v3, v4]
+        target = v1, predecessor = v2 (next in list)
+        included = sandbox[1:2] = [v1]
+        """
+        self.proj.get_deployments.return_value = (self.sandbox_versions, {})
+
+        AgentStudioCLI.deployments_show(TEST_DIR, version_hash="hash00001", output_json=True)
+
+        payload = mock_json.call_args[0][0]
+        included_ids = [d["id"] for d in payload["included_deployments"]]
+        self.assertEqual(included_ids, ["dep-1"])
+
+    @patch("poly.cli.json_print")
+    def test_sandbox_last_version_no_predecessor(self, mock_json):
+        """The oldest sandbox version has no predecessor — included is just itself.
+
+        sandbox: [v0, v1, v2, v3, v4]
+        target = v4, no predecessor → included = sandbox[4:] = [v4]
+        """
+        self.proj.get_deployments.return_value = (self.sandbox_versions, {})
+
+        AgentStudioCLI.deployments_show(TEST_DIR, version_hash="hash00004", output_json=True)
+
+        payload = mock_json.call_args[0][0]
+        included_ids = [d["id"] for d in payload["included_deployments"]]
+        self.assertEqual(included_ids, ["dep-4"])
+
+    # ── Cross-env (pre-release/live) included deployments ────────────
+
+    @patch("poly.cli.json_print")
+    def test_live_resolves_included_from_sandbox(self, mock_json):
+        """For live, included deployments are resolved from sandbox history.
+
+        sandbox: [v0, v1, v2, v3, v4]
+        live:    [v0(promoted), v3(promoted)]
+        target = v0, predecessor in live = v3
+        → look up in sandbox: v0 at idx 0, v3 at idx 3
+        → included = sandbox[0:3] = [v0, v1, v2]
+        """
+        live_versions = [
+            _make_version(0, env="live"),
+            _make_version(3, env="live"),
+        ]
+        self.proj.get_deployments.side_effect = [
+            (live_versions, {"live": "hash00000xxxx"}),
+            (self.sandbox_versions, {}),
+        ]
+
+        AgentStudioCLI.deployments_show(
+            TEST_DIR, version_hash="hash00000", environment="live", output_json=True
+        )
+
+        payload = mock_json.call_args[0][0]
+        included_ids = [d["id"] for d in payload["included_deployments"]]
+        self.assertEqual(included_ids, ["dep-0", "dep-1", "dep-2"])
+
+    @patch("poly.cli.json_print")
+    def test_live_first_deployment_includes_all_sandbox(self, mock_json):
+        """First deployment in live has no predecessor — included is everything from target onward.
+
+        sandbox: [v0, v1, v2, v3, v4]
+        live:    [v2(promoted)]  (first ever live deployment)
+        target = v2, no predecessor
+        → included = sandbox[2:] = [v2, v3, v4]
+        """
+        live_versions = [_make_version(2, env="live")]
+        self.proj.get_deployments.side_effect = [
+            (live_versions, {"live": "hash00002xxxx"}),
+            (self.sandbox_versions, {}),
+        ]
+
+        AgentStudioCLI.deployments_show(
+            TEST_DIR, version_hash="hash00002", environment="live", output_json=True
+        )
+
+        payload = mock_json.call_args[0][0]
+        included_ids = [d["id"] for d in payload["included_deployments"]]
+        self.assertEqual(included_ids, ["dep-2", "dep-3", "dep-4"])
+
+    @patch("poly.cli.json_print")
+    def test_live_adjacent_versions_includes_only_target(self, mock_json):
+        """When live target and predecessor are adjacent in sandbox, included is just target.
+
+        sandbox: [v0, v1, v2, v3, v4]
+        live:    [v1(promoted), v2(promoted)]
+        target = v1, predecessor in live = v2
+        → included = sandbox[1:2] = [v1]
+        """
+        live_versions = [
+            _make_version(1, env="live"),
+            _make_version(2, env="live"),
+        ]
+        self.proj.get_deployments.side_effect = [
+            (live_versions, {"live": "hash00001xxxx"}),
+            (self.sandbox_versions, {}),
+        ]
+
+        AgentStudioCLI.deployments_show(
+            TEST_DIR, version_hash="hash00001", environment="live", output_json=True
+        )
+
+        payload = mock_json.call_args[0][0]
+        included_ids = [d["id"] for d in payload["included_deployments"]]
+        self.assertEqual(included_ids, ["dep-1"])
+
+    # ── Environment routing ──────────────────────────────────────────
+
+    @patch("poly.cli.json_print")
+    def test_non_sandbox_env_fetches_sandbox_separately(self, mock_json):
+        """For non-sandbox envs, get_deployments is called twice: env + sandbox."""
+        live_versions = [_make_version(0, env="live")]
+        self.proj.get_deployments.side_effect = [
+            (live_versions, {}),
+            (self.sandbox_versions, {}),
+        ]
+
+        AgentStudioCLI.deployments_show(
+            TEST_DIR, version_hash="hash00000", environment="live", output_json=True
+        )
+
+        calls = self.proj.get_deployments.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0].kwargs["client_env"], "live")
+        self.assertEqual(calls[1].kwargs["client_env"], "sandbox")
+
+    @patch("poly.cli.json_print")
+    def test_sandbox_env_does_not_fetch_twice(self, mock_json):
+        """For sandbox, get_deployments is only called once."""
+        self.proj.get_deployments.return_value = (self.sandbox_versions, {})
+
+        AgentStudioCLI.deployments_show(
+            TEST_DIR, version_hash="hash00000", environment="sandbox", output_json=True
+        )
+
+        self.proj.get_deployments.assert_called_once_with(client_env="sandbox")
+
+    # ── Rich output path ─────────────────────────────────────────────
+
+    @patch("poly.cli.print_deployment_show")
+    def test_rich_output_calls_print_deployment_show(self, mock_show):
+        """Without output_json, the rich console function is called."""
+        self.proj.get_deployments.return_value = (self.sandbox_versions, self.active_hashes)
+
+        AgentStudioCLI.deployments_show(TEST_DIR, version_hash="hash00000")
+
+        mock_show.assert_called_once()
+        args = mock_show.call_args[0]
+        self.assertEqual(args[0]["id"], "dep-0")
+        self.assertEqual(args[1], self.active_hashes)
+
+    # ── Hash prefix truncation ───────────────────────────────────────
+
+    @patch("poly.cli.json_print")
+    def test_long_hash_is_truncated_to_nine_chars(self, mock_json):
+        """A hash longer than 9 characters still matches via its 9-char prefix."""
+        self.proj.get_deployments.return_value = (self.sandbox_versions, {})
+
+        AgentStudioCLI.deployments_show(
+            TEST_DIR, version_hash="hash00001xxxx_extra", output_json=True
+        )
+
+        payload = mock_json.call_args[0][0]
+        self.assertEqual(payload["deployment"]["id"], "dep-1")

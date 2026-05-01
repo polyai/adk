@@ -43,6 +43,7 @@ from poly.output.console import (
     output_merge_conflict_table,
     print_merge_conflict_interactive_header,
     print_deployments,
+    print_deployment_show,
 )
 from poly.output.json_output import json_print, commands_to_dicts
 from poly.handlers.github_api_handler import GitHubAPIHandler
@@ -920,6 +921,33 @@ class AgentStudioCLI:
             help="Output each deployment with detailed information.",
         )
 
+        deployment_show_parser = deployments_subparsers.add_parser(
+            "show",
+            parents=[deployments_path_parent, json_parent],
+            help="Show details for a specific deployment.",
+            description=(
+                "Show detailed metadata and included deployments for a specific"
+                " version.\n\n"
+                "Examples:\n"
+                "  poly deployments show abc123def\n"
+                "  poly deployments show abc123def --env live\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        deployment_show_parser.add_argument(
+            "hash",
+            type=str,
+            help="Version hash (or prefix) of the deployment to show.",
+        )
+        deployment_show_parser.add_argument(
+            "--env",
+            "-e",
+            type=str,
+            default="sandbox",
+            choices=["sandbox", "pre-release", "live"],
+            help="Environment to query. Defaults to sandbox.",
+        )
+
         return parser
 
     @classmethod
@@ -1101,6 +1129,13 @@ class AgentStudioCLI:
                         args.hash,
                         args.json,
                         args.details,
+                    )
+                elif args.deployments_subcommand == "show":
+                    cls.deployments_show(
+                        args.path,
+                        args.hash,
+                        args.env,
+                        args.json,
                     )
 
         except Exception as e:
@@ -3006,6 +3041,118 @@ class AgentStudioCLI:
             success(f"Documentation written to {output_path}")
         else:
             plain(content)
+
+    @classmethod
+    def deployments_show(
+        cls,
+        base_path: str,
+        version_hash: str,
+        environment: str = "sandbox",
+        output_json: bool = False,
+    ) -> None:
+        """Show detailed metadata and included deployments for a single deployment.
+
+        Displays the deployment record and the sandbox deployments included since
+        the previous version in the given environment. Sandbox is always the source
+        of truth for the linear version history — pre-release/live only contain
+        promotions that reference the same version hashes.
+
+        Args:
+            base_path: Base path for the project.
+            version_hash: Full or prefix hash of the target deployment.
+            environment: Environment to query (sandbox, pre-release, live).
+            output_json: If True, emit machine-readable JSON.
+        """
+        project = cls._load_project(base_path, output_json=output_json)
+        env_versions, active_deployment_hashes = project.get_deployments(client_env=environment)
+
+        if not env_versions:
+            error("No versions found.")
+            return
+
+        version_hash = version_hash[:9]
+        version_idx = next(
+            (
+                i
+                for i, v in enumerate(env_versions)
+                if (v.get("version_hash") or "")[:9] == version_hash
+            ),
+            None,
+        )
+        if version_idx is None:
+            error(f"Version hash '{version_hash}' not found.")
+            return
+
+        deployment = env_versions[version_idx]
+        target_full_hash = deployment.get("version_hash", "")
+
+        # Find predecessor in the same environment (next entry in the env list)
+        predecessor_full_hash = None
+        if version_idx < len(env_versions) - 1:
+            predecessor_full_hash = env_versions[version_idx + 1].get("version_hash", "")
+
+        # Resolve included deployments from sandbox (the linear history)
+        if environment == "sandbox":
+            sandbox_versions = env_versions
+        else:
+            sandbox_versions, _ = project.get_deployments(client_env="sandbox")
+
+        included = cls._resolve_included_deployments(
+            sandbox_versions, target_full_hash, predecessor_full_hash
+        )
+
+        if output_json:
+            json_print(
+                {
+                    "success": True,
+                    "deployment": deployment,
+                    "active_deployment_hashes": active_deployment_hashes,
+                    "included_deployments": included,
+                }
+            )
+            return
+
+        print_deployment_show(deployment, active_deployment_hashes, included)
+
+    @staticmethod
+    def _resolve_included_deployments(
+        sandbox_versions: list[dict[str, ty.Any]],
+        target_hash: str,
+        predecessor_hash: str | None,
+    ) -> list[dict[str, ty.Any]]:
+        """Slice sandbox history to find deployments included between two versions.
+
+        Args:
+            sandbox_versions: Full sandbox deployment list (newest first).
+            target_hash: Version hash of the deployment being shown.
+            predecessor_hash: Version hash of the previous deployment in the env,
+                or None if this is the first deployment.
+
+        Returns:
+            List of sandbox deployments from target (inclusive) to predecessor (exclusive).
+        """
+        target_idx = next(
+            (i for i, v in enumerate(sandbox_versions) if v.get("version_hash") == target_hash),
+            None,
+        )
+        if target_idx is None:
+            return []
+
+        if not predecessor_hash:
+            return sandbox_versions[target_idx:]
+
+        pred_idx = next(
+            (
+                i
+                for i, v in enumerate(sandbox_versions)
+                if v.get("version_hash") == predecessor_hash
+            ),
+            None,
+        )
+        if pred_idx is None:
+            return sandbox_versions[target_idx:]
+
+        return sandbox_versions[target_idx:pred_idx]
 
     @classmethod
     def deployments_list(
