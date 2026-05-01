@@ -20,6 +20,15 @@ _TYPES_PACKAGE = "poly.types"
 
 _API_KEY_ENV_VAR = "POLY_ADK_KEY"
 
+_REGION_TO_KEY_SUFFIX: dict[str, str] = {
+    "us-1": "US",
+    "euw-1": "EUW",
+    "uk-1": "UK",
+    "studio": "STUDIO",
+    "staging": "STAGING",
+    "dev": "DEV",
+}
+
 
 def retrieve_api_key(region: Optional[str] = None) -> str:
     """Return an API key, preferring a per-region key when available.
@@ -31,10 +40,11 @@ def retrieve_api_key(region: Optional[str] = None) -> str:
     Raises ``ValueError`` with a helpful message when no key is found.
     """
     if region:
-        suffix = re.sub(r"-\d+$", "", region).upper()
-        per_region_key = os.getenv(f"{_API_KEY_ENV_VAR}_{suffix}")
-        if per_region_key:
-            return per_region_key
+        suffix = _REGION_TO_KEY_SUFFIX.get(region)
+        if suffix:
+            per_region_key = os.getenv(f"{_API_KEY_ENV_VAR}_{suffix}")
+            if per_region_key:
+                return per_region_key
 
     api_key = os.getenv(_API_KEY_ENV_VAR)
     if not api_key:
