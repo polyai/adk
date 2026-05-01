@@ -1,6 +1,117 @@
 # CHANGELOG
 
 
+## v0.16.0 (2026-05-01)
+
+### Bug Fixes
+
+- Format for multi-resource YAML files ([#119](https://github.com/polyai/adk/pull/119),
+  [`cbc96fc`](https://github.com/polyai/adk/commit/cbc96fcd199883ddfe0506cfaa1bd604c78e5879))
+
+## Summary
+
+Fix formatting for `MultiResourceYamlResource` types and refactor YAML/JSON formatting utilities.
+
+## Motivation
+
+`_format_resources` treated multi-resource virtual paths as literal file paths, causing format to
+  fail for any `MultiResourceYamlResource` (entities, handoffs, etc.). The YAML dump pipeline also
+  had redundant recursive walks and created a new YAML resolver instance on every string value.
+
+## Changes
+
+- Fix `_format_resources` to format multi-resource YAML at the whole-file level instead of per
+  virtual sub-path - Fix `format_files` to match on the true `.yaml` path, not just the virtual
+  sub-path - Only write files that actually changed after formatting - Consolidate
+  `_quote_keys_for_yaml` + `set_block_style_for_multiline_strings` into single-pass
+  `_prepare_yaml_data` - Cache YAML resolver at module level instead of creating a new instance per
+  call - Collapse `format_yaml` / `format_yaml_python` into one function - Rename
+  `format_json_python` → `format_json` - Fix `ExperimentalConfig.raw` JSON indent 4→2
+
+## Test strategy
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (545 tests) - [ ] Manual
+  CLI testing (`poly format`) - [ ] Tested against a live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Documentation
+
+- [small docs update] show clear error when POLY_ADK_KEY is not set
+  ([#124](https://github.com/polyai/adk/pull/124),
+  [`47b2db1`](https://github.com/polyai/adk/commit/47b2db1baaa0b46f513c5631c19c73637a242227))
+
+## Summary
+
+PR #110 (very small change)
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+---------
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+### Features
+
+- Support per-region API keys via POLY_ADK_KEY_{REGION} for the incoming PAT change
+  ([#123](https://github.com/polyai/adk/pull/123),
+  [`94cb27b`](https://github.com/polyai/adk/commit/94cb27b607ffdabcea75896ffbcc01f0406b90c0))
+
+## Summary
+
+- `retrieve_api_key()` now accepts an optional `account_id` parameter - When provided, tries
+  `POLY_ADK_KEY_{SUFFIX}` first (e.g. `POLY_ADK_KEY_US`), then falls back to `POLY_ADK_KEY` - This
+  adds support for PAT which are incoming.
+
+## Test plan
+
+- [x] Lint passes (`ruff check`) - [x] Format passes (`ruff format --check`) - [x] All 552 tests
+  pass - [x] Manual: set `POLY_ADK_KEY_US=<key>` and run `poly init` - [x] Manual: update
+  POLY_ADK_KEY_US=<key>` to fail and set `POLY_ADK_KEY` — should fall back gracefully - [x] Manual:
+  unset both — should show the existing error message
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.15.3 (2026-05-01)
 
 ### Bug Fixes
