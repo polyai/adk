@@ -94,7 +94,7 @@ class PlatformAPIHandler:
         )
 
         logger.debug(
-            f"Request/response url={url!r} headers={headers!r} body={data!r}"
+            f"Request/response url={url!r} correlation_id={correlation_id!r} body={data!r}"
             f" status_code={api_response.status_code!r} response={api_response.text!r}"
         )
 
@@ -102,7 +102,7 @@ class PlatformAPIHandler:
             api_response.raise_for_status()
         except requests.HTTPError:
             logger.debug(
-                f"Error in request. url={url!r} headers={headers!r} body={data!r}"
+                f"Error in request. url={url!r} correlation_id={correlation_id!r} body={data!r}"
                 f" status_code={api_response.status_code!r} response={api_response.text!r}"
             )
             raise
