@@ -5,15 +5,15 @@ Copyright PolyAI Limited
 
 import json
 import logging
-import os
 import typing as ty
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
-logger = logging.getLogger(__name__)
+from poly.utils import retrieve_api_key
 
+logger = logging.getLogger(__name__)
 ACCOUNTS_URL = "/accounts"
 PROJECTS_URL = "/accounts/{account_id}/projects"
 DEPLOYMENTS_URL = "/accounts/{account_id}/projects/{project_id}/deployments"
@@ -53,14 +53,6 @@ class PlatformAPIHandler:
         raise ValueError(f"Unknown region: {region}")
 
     @staticmethod
-    def _retrieve_api_key() -> str:
-        """Get API key from environment"""
-        try:
-            return os.getenv("POLY_ADK_KEY")
-        except Exception:
-            raise ValueError("POLY_ADK_KEY environment variable is required")
-
-    @staticmethod
     def make_request(
         region: str,
         endpoint: str,
@@ -84,7 +76,7 @@ class PlatformAPIHandler:
         correlation_id = f"adk-{uuid.uuid4()}"
 
         headers = {
-            "X-API-KEY": PlatformAPIHandler._retrieve_api_key(),
+            "X-API-KEY": retrieve_api_key(),
             "X-PolyAI-Correlation-Id": correlation_id,
             "Content-Type": "application/json",
         }
@@ -138,6 +130,9 @@ class PlatformAPIHandler:
             list[str]: Regions that returned at least one account, preserving
                 the original ordering.
         """
+
+        retrieve_api_key()
+
         accessible: set[str] = set()
 
         def _probe(region: str) -> str | None:

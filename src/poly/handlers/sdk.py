@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 import requests
 
+from poly.utils import retrieve_api_key
 from .protobuf.commands_pb2 import Command, CommandBatch
 
 logger = logging.getLogger(__name__)
@@ -86,7 +87,7 @@ class SourcererSDK:
         self.session.headers.update(
             {
                 "Content-Type": "application/json",
-                "X-API-KEY": self._retrieve_api_key(),
+                "X-API-KEY": retrieve_api_key(),
                 "X-PolyAI-Correlation-Id": correlation_id,
             }
         )
@@ -101,13 +102,6 @@ class SourcererSDK:
         # Initialize branch_id if not provided
         if self.branch_id is None:
             self.branch_id = self._initialize_branch()
-
-    def _retrieve_api_key(self) -> str:
-        """Get API key from environment"""
-        try:
-            return os.getenv("POLY_ADK_KEY")
-        except Exception:
-            raise ValueError("POLY_ADK_KEY environment variable is required")
 
     def create_metadata(self):
         """Create metadata with the current user's email from JWT token
@@ -560,7 +554,7 @@ class SourcererSDK:
             # Update headers for protobuf content
             correlation_id = f"adk-{uuid.uuid4()}"
             headers = {
-                "X-API-KEY": self._retrieve_api_key(),
+                "X-API-KEY": retrieve_api_key(),
                 "X-PolyAI-Correlation-Id": correlation_id,
                 "Content-Type": "application/octet-stream",
             }
