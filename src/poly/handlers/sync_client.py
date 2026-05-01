@@ -66,15 +66,6 @@ RULES = "rules"
 class SyncClientHandler:
     """Sync client for Agent Studio content management"""
 
-    region_to_region_env = {
-        "euw-1": ("euw", "prod"),
-        "uk-1": ("uk", "prod"),
-        "us-1": ("us", "prod"),
-        "studio": ("studio", "prod"),
-        "staging": ("us", "staging"),
-        "dev": ("us", "dev"),
-    }
-
     _sdk: Optional[SourcererSDK] = None
     region: str
     account_id: str
@@ -92,17 +83,17 @@ class SyncClientHandler:
         project_id: str,
         branch_id: Optional[str] = None,
     ):
-        region_env = SyncClientHandler.region_to_region_env.get(region)
-        if not region_env:
-            raise ValueError(f"Unsupported region: {region}")
+        if region not in SourcererSDK.ENVIRONMENT_URLS:
+            raise ValueError(
+                f"Invalid region '{region}'. Valid regions are: {list(SourcererSDK.ENVIRONMENT_URLS.keys())}"
+            )
 
         self.region = region
         self.account_id = account_id
         self.project_id = project_id
 
         self._sdk = SourcererSDK(
-            region=region_env[0],
-            environment=region_env[1],
+            region=region,
             account_id=account_id,
             project_id=project_id,
             branch_id=branch_id,
