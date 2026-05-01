@@ -5,15 +5,15 @@ Copyright PolyAI Limited
 
 import json
 import logging
-import os
 import typing as ty
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
-logger = logging.getLogger(__name__)
+from poly.utils import retrieve_api_key
 
+logger = logging.getLogger(__name__)
 ACCOUNTS_URL = "/adk/v1/accounts"
 PROJECTS_URL = "/adk/v1/accounts/{account_id}/projects"
 DEPLOYMENTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/deployments"
@@ -56,14 +56,6 @@ class PlatformAPIHandler:
         raise ValueError(f"Unknown region: {region}")
 
     @staticmethod
-    def _retrieve_api_key() -> str:
-        """Get API key from environment"""
-        try:
-            return os.getenv("POLY_ADK_KEY")
-        except Exception:
-            raise ValueError("POLY_ADK_KEY environment variable is required")
-
-    @staticmethod
     def make_request(
         region: str,
         endpoint: str,
@@ -87,7 +79,7 @@ class PlatformAPIHandler:
         correlation_id = f"adk-{uuid.uuid4()}"
 
         headers = {
-            "X-API-KEY": PlatformAPIHandler._retrieve_api_key(),
+            "X-API-KEY": retrieve_api_key(region),
             "X-PolyAI-Correlation-Id": correlation_id,
             "Content-Type": "application/json",
         }
@@ -140,6 +132,9 @@ class PlatformAPIHandler:
             list[str]: Regions that returned at least one account, preserving
                 the original ordering.
         """
+
+        retrieve_api_key()
+
         accessible: set[str] = set()
 
         def _probe(region: str) -> str | None:
@@ -224,7 +219,11 @@ class PlatformAPIHandler:
         endpoint = DEPLOYMENTS_URL.format(account_id=account_id, project_id=project_id)
 
         deployments_data = PlatformAPIHandler.make_request(
-            region, endpoint, "GET", data=None, params={"client_env": client_env}
+            region,
+            endpoint,
+            "GET",
+            data=None,
+            params={"client_env": client_env},
         )
         deployments_list = deployments_data.get("deployments", [])
 
@@ -351,7 +350,10 @@ class PlatformAPIHandler:
             conversation_id=conversation_id,
         )
         return PlatformAPIHandler.make_request(
-            region, endpoint, "POST", data={"client_env": environment}
+            region,
+            endpoint,
+            "POST",
+            data={"client_env": environment},
         )
 
     @staticmethod

@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 import requests
 
+from poly.utils import retrieve_api_key
 from .protobuf.commands_pb2 import Command, CommandBatch
 
 logger = logging.getLogger(__name__)
@@ -37,17 +38,16 @@ class SourcererSDK:
     # Environment to base URL mapping
     ENVIRONMENT_URLS = {
         "dev": "https://api.dev.poly.ai/adk/v1",
-        "us-staging": "https://api.staging.poly.ai/adk/v1",
-        "euw-prod": "https://api.eu.poly.ai/adk/v1",
-        "us-prod": "https://api.us.poly.ai/adk/v1",
-        "uk-prod": "https://api.uk.poly.ai/adk/v1",
-        "studio-prod": "https://api.studio.poly.ai/adk/v1",
+        "staging": "https://api.staging.poly.ai/adk/v1",
+        "euw-1": "https://api.eu.poly.ai/adk/v1",
+        "us-1": "https://api.us.poly.ai/adk/v1",
+        "uk-1": "https://api.uk.poly.ai/adk/v1",
+        "studio": "https://api.studio.poly.ai/adk/v1",
     }
 
     def __init__(
         self,
         region: str,
-        environment: str,
         account_id: str,
         project_id: str,
         branch_id: Optional[str] = None,
@@ -56,15 +56,13 @@ class SourcererSDK:
         """Initialize the Sourcerer SDK
 
         Args:
-            region: The region (e.g., 'us', 'euw', 'uk')
-            environment: The environment (e.g., 'dev', 'prod', 'staging')
+            region: The region (e.g., 'us-1', 'euw-1', 'uk-1', 'studio', 'staging', 'dev')
             account_id: The account ID
             project_id: The project ID
             branch_id: Optional branch ID. If not provided, will use the first available branch or create a new one
             base_url: Optional custom base URL. If not provided, will use the environment mapping
         """
         self.region = region
-        self.environment = environment
         self.account_id = account_id
         self.project_id = project_id
         self.branch_id = branch_id
@@ -73,12 +71,11 @@ class SourcererSDK:
         if base_url:
             self.base_url = base_url
         else:
-            env_key = f"{region}-{environment}" if environment != "dev" else "dev"
-            if env_key not in self.ENVIRONMENT_URLS:
+            if region not in self.ENVIRONMENT_URLS:
                 raise ValueError(
-                    f"Unknown environment: {env_key}. Available environments: {list(self.ENVIRONMENT_URLS.keys())}"
+                    f"Unknown region: {region}. Available regions: {list(self.ENVIRONMENT_URLS.keys())}"
                 )
-            self.base_url = self.ENVIRONMENT_URLS[env_key]
+            self.base_url = self.ENVIRONMENT_URLS[region]
 
         # Initialize session with auth headers
         correlation_id = f"adk-{uuid.uuid4()}"
@@ -86,7 +83,7 @@ class SourcererSDK:
         self.session.headers.update(
             {
                 "Content-Type": "application/json",
-                "X-API-KEY": self._retrieve_api_key(),
+                "X-API-KEY": retrieve_api_key(self.region),
                 "X-PolyAI-Correlation-Id": correlation_id,
             }
         )
@@ -101,13 +98,6 @@ class SourcererSDK:
         # Initialize branch_id if not provided
         if self.branch_id is None:
             self.branch_id = self._initialize_branch()
-
-    def _retrieve_api_key(self) -> str:
-        """Get API key from environment"""
-        try:
-            return os.getenv("POLY_ADK_KEY")
-        except Exception:
-            raise ValueError("POLY_ADK_KEY environment variable is required")
 
     def create_metadata(self):
         """Create metadata with the current user's email from JWT token
@@ -560,7 +550,7 @@ class SourcererSDK:
             # Update headers for protobuf content
             correlation_id = f"adk-{uuid.uuid4()}"
             headers = {
-                "X-API-KEY": self._retrieve_api_key(),
+                "X-API-KEY": retrieve_api_key(self.region),
                 "X-PolyAI-Correlation-Id": correlation_id,
                 "Content-Type": "application/octet-stream",
             }

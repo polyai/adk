@@ -1,6 +1,520 @@
 # CHANGELOG
 
 
+## v0.16.0 (2026-05-01)
+
+### Bug Fixes
+
+- Format for multi-resource YAML files ([#119](https://github.com/polyai/adk/pull/119),
+  [`cbc96fc`](https://github.com/polyai/adk/commit/cbc96fcd199883ddfe0506cfaa1bd604c78e5879))
+
+## Summary
+
+Fix formatting for `MultiResourceYamlResource` types and refactor YAML/JSON formatting utilities.
+
+## Motivation
+
+`_format_resources` treated multi-resource virtual paths as literal file paths, causing format to
+  fail for any `MultiResourceYamlResource` (entities, handoffs, etc.). The YAML dump pipeline also
+  had redundant recursive walks and created a new YAML resolver instance on every string value.
+
+## Changes
+
+- Fix `_format_resources` to format multi-resource YAML at the whole-file level instead of per
+  virtual sub-path - Fix `format_files` to match on the true `.yaml` path, not just the virtual
+  sub-path - Only write files that actually changed after formatting - Consolidate
+  `_quote_keys_for_yaml` + `set_block_style_for_multiline_strings` into single-pass
+  `_prepare_yaml_data` - Cache YAML resolver at module level instead of creating a new instance per
+  call - Collapse `format_yaml` / `format_yaml_python` into one function - Rename
+  `format_json_python` → `format_json` - Fix `ExperimentalConfig.raw` JSON indent 4→2
+
+## Test strategy
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (545 tests) - [ ] Manual
+  CLI testing (`poly format`) - [ ] Tested against a live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Documentation
+
+- [small docs update] show clear error when POLY_ADK_KEY is not set
+  ([#124](https://github.com/polyai/adk/pull/124),
+  [`47b2db1`](https://github.com/polyai/adk/commit/47b2db1baaa0b46f513c5631c19c73637a242227))
+
+## Summary
+
+PR #110 (very small change)
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+---------
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+### Features
+
+- Support per-region API keys via POLY_ADK_KEY_{REGION} for the incoming PAT change
+  ([#123](https://github.com/polyai/adk/pull/123),
+  [`94cb27b`](https://github.com/polyai/adk/commit/94cb27b607ffdabcea75896ffbcc01f0406b90c0))
+
+## Summary
+
+- `retrieve_api_key()` now accepts an optional `account_id` parameter - When provided, tries
+  `POLY_ADK_KEY_{SUFFIX}` first (e.g. `POLY_ADK_KEY_US`), then falls back to `POLY_ADK_KEY` - This
+  adds support for PAT which are incoming.
+
+## Test plan
+
+- [x] Lint passes (`ruff check`) - [x] Format passes (`ruff format --check`) - [x] All 552 tests
+  pass - [x] Manual: set `POLY_ADK_KEY_US=<key>` and run `poly init` - [x] Manual: update
+  POLY_ADK_KEY_US=<key>` to fail and set `POLY_ADK_KEY` — should fall back gracefully - [x] Manual:
+  unset both — should show the existing error message
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.15.3 (2026-05-01)
+
+### Bug Fixes
+
+- Show clear error when POLY_ADK_KEY is not set ([#110](https://github.com/polyai/adk/pull/110),
+  [`b066753`](https://github.com/polyai/adk/commit/b0667534c82468ab69c83f664c0146afda48a50c))
+
+## Summary - Running `poly init` without `POLY_ADK_KEY` set now shows `POLY_ADK_KEY environment
+  variable is not set. Export your API key with: export POLY_ADK_KEY=<your-api-key>` instead of the
+  misleading "No accessible regions found for your API key." - Adds early env var check in
+  `init_project` before any API calls - Fixes `_retrieve_api_key` in both `PlatformAPIHandler` and
+  `SyncClientHandler` to raise immediately when the key is missing (previously `os.getenv()`
+  silently returned `None`)
+
+## Test plan - [x] Lint passes (`ruff check`) - [x] Format passes (`ruff format --check`) - [x] All
+  500 tests pass - [x] Manual: run `unset POLY_ADK_KEY && poly init` and verify the new error
+  message <img width="569" height="48" alt="image"
+  src="https://github.com/user-attachments/assets/9d227ac8-c847-49ac-a4c8-39843d7ab3e3" />
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Documentation
+
+- Lead with bare poly init, treat ID flags as escape hatch
+  ([#122](https://github.com/polyai/adk/pull/122),
+  [`25bda57`](https://github.com/polyai/adk/commit/25bda579ec5960d56992a363f3c39ffb53d32865))
+
+## Summary
+
+Customer onboarding feedback from Naorin: users hit \`poly init --account_id <account_id>
+  --project_id <project_id>\` in the docs and don't know what to fill in. They should just be able
+  to run \`poly init\` — the CLI walks them through dropdowns to pick the project. Updates the docs
+  across index, get-started, tutorials, anti-patterns, and CLI reference to lead with the bare form
+  and present the flag form as a script/CI escape hatch.
+
+## Motivation
+
+Naorin (in #docs):
+
+> they should just be able to do poly init
+
+Onboarding session at a customer office got stuck on this exact question.
+
+## Verification
+
+Cross-checked against \`src/poly/cli.py:1231-1330\` — \`init_project\` with no arguments:
+
+1. Calls \`get_accessible_regions()\` and either auto-selects (one region) or prompts via
+  \`questionary.select\`. 2. Calls \`get_accounts(region)\` and either auto-selects (one account) or
+  prompts with a searchable dropdown. 3. Calls \`get_projects(region, account_id)\` and prompts with
+  a searchable dropdown.
+
+Verified live during PR #114 testing — \`poly init\` against my workspace auto-selected
+  region+account and would have surfaced the project dropdown if I hadn't been running
+  non-interactively. The flag form remains required for \`--json\` mode (see \`reference/cli.md\`
+  JSON output section).
+
+## Changes
+
+- **\`index.md\`** — "Three commands" snippet now uses bare \`poly init\`. -
+  **\`get-started/first-commands.md\`** — leads with \`poly init\`, adds a numbered list describing
+  the dropdown flow; flag form moves to a "Skip the prompts" tip. -
+  **\`get-started/get-started.md\`** — Step 6 and the "Already have an agent" section both updated.
+  - **\`tutorials/build-an-agent.md\`** — Step 1 same treatment. The AI-agent workflow section keeps
+  the explicit flag form because that flow runs unattended. -
+  **\`tutorials/restaurant-booking-agent.md\`** — Initialize section same treatment. -
+  **\`concepts/anti-patterns.md\`** — "Right" example uses bare \`poly init\`. -
+  **\`reference/cli.md\`** — \`poly init\` section restructured: dropdown flow documented first,
+  flag form positioned as a script/CI escape hatch. Examples reordered (bare \`poly init\` first,
+  progressively more flags). The JSON-mode requirement at line 486 already reads correctly.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (\`poly <command>\`) — \`poly init\`
+  interactive flow verified during PR #114 walkthrough - [ ] Tested against a live Agent Studio
+  project - [x] N/A (docs, config, or trivial change)
+
+\`mkdocs build --strict\` passes.
+
+## Checklist
+
+- [ ] \`ruff check .\` and \`ruff format --check .\` pass - [ ] \`pytest\` passes - [x] No breaking
+  changes to the \`poly\` CLI interface - [x] Commit messages follow conventional commits
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+
+## v0.15.2 (2026-04-30)
+
+### Bug Fixes
+
+- Cross-platform path handling + add Windows CI ([#121](https://github.com/polyai/adk/pull/121),
+  [`e70e937`](https://github.com/polyai/adk/commit/e70e9371e9a2a1cf629e055b5332c6499f89daf9))
+
+## Summary - Fixes cross-platform bugs in production code where `file_path.split(os.sep)` failed on
+  Windows because paths containing forward slashes weren't normalized first — adds
+  `os.path.normpath()` before splitting - Normalizes topic names in `migration_utils.py` to always
+  use `/` regardless of OS - Adds a `test-windows` CI job (`continue-on-error: true`) to catch
+  platform-specific bugs - Updates test assertions to use `os.path.join()` instead of hardcoded
+  forward-slash paths
+
+## Production code changes | File | Fix | |---|---| | `src/poly/resources/function.py` |
+  `os.path.normpath()` before `split(os.sep)` in `get_function_type()` and `read_local_resource()` |
+  | `src/poly/resources/flows.py` | Same in `FlowStep` condition matching and
+  `FunctionStep.read_local_resource()` | | `src/poly/resources/resource_utils.py` | Same in
+  `get_flow_name_from_path()` | | `src/poly/migration_utils.py` | `os.path.relpath` returns
+  OS-native separators; normalize to `/` for topic names |
+
+## Test changes | File | Fix | |---|---| | `src/poly/tests/project_test.py` | `os.path.join()` in
+  `get_diffs` assertions | | `src/poly/tests/resources_test.py` | `os.path.join()` for mock dict
+  keys and file_path args; skip Unix-specific path test on Windows |
+
+## Test plan - [x] CI passes on Ubuntu, Windows, and coverage
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.15.1 (2026-04-30)
+
+### Bug Fixes
+
+- Handle Windows drive-letter paths in multi-resource path parsing
+  ([#120](https://github.com/polyai/adk/pull/120),
+  [`1e6059f`](https://github.com/polyai/adk/commit/1e6059fba9c8a3d8d24a4c68abd234fcc331b3a1))
+
+## Summary
+
+On Windows, `poly validate`, `poly push`, and `poly status` fail with:
+
+``` File not found: C:users\billlewis\...\voice\configuration.yaml ```
+
+Note the missing `\` after `C:`.
+
+### Root cause
+
+`_parse_multi_resource_path` splits a path with `os.sep` then reassembles it with `os.path.join`. On
+  Windows, `os.path.join('C:', 'users', ...)` produces a **drive-relative** path — `C:users\...` —
+  not an absolute one.
+
+```python >>> import ntpath >>> ntpath.join('C:', 'users', 'bill') 'C:users\\bill' # wrong —
+  drive-relative
+
+>>> ntpath.join('C:\\', 'users', 'bill') 'C:\\users\\bill' # correct — absolute ```
+
+### Fix
+
+Append `os.sep` to bare drive letters before joining:
+
+```diff base_parts = parts[: yaml_idx + 1] + if base_parts[0].endswith(":"): + base_parts[0] +=
+  os.sep yaml_file_path = ( ```
+
+**Before:** `C:users\billlewis\project\voice\configuration.yaml` (broken) **After:**
+  `C:\users\billlewis\project\voice\configuration.yaml` (correct)
+
+## Test plan - [x] 7 new tests in `ParseMultiResourcePathTests` — Windows drive letters, Unix
+  absolute paths, relative paths, error cases - [x] Full test suite passes (547 tests)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Continuous Integration
+
+- Fix coverage comment for fork PRs ([#118](https://github.com/polyai/adk/pull/118),
+  [`1c0f288`](https://github.com/polyai/adk/commit/1c0f28847b81b28f6672dc22cecf0fc15adac105))
+
+## Summary
+
+Split the coverage workflow into two so the PR comment can be posted with write permissions, even on
+  fork PRs.
+
+## Motivation
+
+Fork PRs run with a read-only `GITHUB_TOKEN`, so the "Post coverage comment" step fails with a 403.
+  The `workflow_run` event runs in the base repo's context and has full write access.
+
+## Changes
+
+- Removed PR comment and minimize steps from `coverage.yml`; it now only generates coverage data and
+  uploads it as an artifact - Added `coverage-comment.yml` triggered by `workflow_run` to download
+  the artifact and post/minimize comments with write permissions - Dropped `pull-requests: write`
+  from `coverage.yml` since it no longer needs it
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+### Documentation
+
+- Add standalone Branch merging reference page ([#114](https://github.com/polyai/adk/pull/114),
+  [`f5509cd`](https://github.com/polyai/adk/commit/f5509cd4ec467f767fe6cdf2c595201a09a9ddf5))
+
+## Summary
+
+`poly branch merge` is rich enough to warrant its own page — conflict tables, `--interactive` flow,
+  `--resolutions` JSON format, post-merge behavior, troubleshooting. This PR pulls that content out
+  of `cli.md` into `reference/branch_merge.md` and threads cross-links into every other page that
+  mentions branch merging.
+
+## Motivation
+
+Follow-up to #113. The merge story was buried five levels deep in `cli.md` and several other docs
+  were either silent on the CLI path (`concepts/working-locally.md`,
+  `get-started/what-is-the-adk.md`, `examples/venue-specific-goodbye.md`) or actively wrong about it
+  ("branch merges still happen in Agent Studio"). A dedicated page makes it discoverable and gives
+  the rest of the docs something to link to.
+
+Also addresses the request to add inter-doc links throughout the ADK docs — every page that mentions
+  branch merging now links into the new reference.
+
+## Changes
+
+### New page - `reference/branch_merge.md` — standalone reference covering: when to use, basic
+  usage, argument table, conflict tables, `--interactive` flow with editor tip, `--resolutions`
+  source forms (file / inline / stdin), JSON schema with example, combining flags, post-merge
+  behavior, Agent Studio UI alternative, troubleshooting matrix, related-pages grid.
+
+### CLI reference slim-down - `reference/cli.md` — `#### poly branch merge` keeps the three
+  top-level examples and a stub link; the deep-dive content moves to the new page.
+
+### Cross-links and stale-claim fixes - `concepts/working-locally.md` — platform-sync card and
+  workflow step now mention `poly branch merge`. - `concepts/multi-user-and-guardrails.md` —
+  workflow step and guardrails list updated; "branch merges still happen in Agent Studio" was wrong.
+  - `get-started/what-is-the-adk.md` — intro paragraph reflects the CLI merge path. -
+  `get-started/first-commands.md` — branch-chat troubleshooting links to the new page. -
+  `examples/venue-specific-goodbye.md` — variant-resolution callout links to the new page. -
+  `tutorials/build-an-agent.md` and `tutorials/restaurant-booking-agent.md` — merge callouts link to
+  the new page for the conflict-resolution flow.
+
+### Nav - `docs/mkdocs.yml` — adds `Branch merging: reference/branch_merge.md` to the Reference
+  section.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+`mkdocs build --strict` passes — every internal link resolves. Content cross-checked against
+  `branch_merge_parser` in `src/poly/cli.py:628-657` and `merge_branch` in
+  `src/poly/project.py:2662`.
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface - [x] Commit messages follow conventional commits
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+- Align tutorials and CLI reference with actual ADK surface
+  ([#113](https://github.com/polyai/adk/pull/113),
+  [`2da9111`](https://github.com/polyai/adk/commit/2da91112f570275fa0f3ac9f4141116c2db988e7))
+
+## Summary
+
+Audit fixes against `src/poly/cli.py` and `src/poly/project.py`. Several places in the tutorials and
+  CLI reference described behavior that does not match the code — most visibly Naorin's flag that
+  `build-an-agent.md` claims "there is no `poly merge` command" when `poly branch merge` exists.
+
+## Motivation
+
+- Naorin flagged `poly merge` references in `build-an-agent.md` step 7 and step 13. The audit found
+  a third occurrence and the same staleness in `restaurant-booking-agent.md`. - A wider sweep of
+  recent merges turned up several `cli.md` examples that no longer parse against the real argparse
+  definitions.
+
+Closes Naorin's `#docs` thread on the `poly merge` references.
+
+## Changes
+
+### Tutorials - **`build-an-agent.md`** L290 / L313 / L489: replace "there is no `poly merge`
+  command" with the real story — `poly branch merge '<commit message>'` (CLI) or merge in Agent
+  Studio. Reword the "main branch of your sandbox" claim about `poly chat`; the real default is
+  `--environment branch` (current branch), falling back to sandbox on `main`. -
+  **`restaurant-booking-agent.md`** L604 / L608: same fixes.
+
+### CLI reference (`reference/cli.md`) - `poly diff file1.yaml` → `poly diff --files file1.yaml`
+  (the positional is `hash`, not a path). - `poly revert --all` → `poly revert` (no `--all` flag
+  exists; bare invocation reverts everything). - `poly format file1.py` → `poly format --files
+  <path>`. - `poly review` examples now use the required `create` subcommand. Bare `poly review` is
+  a no-op — the dispatch only handles `create`/`list`/`delete`. - `poly revert --json --all` → `poly
+  revert --json` in the JSON examples.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+Verified each corrected command against `poly <command> --help` output and the argparse definitions
+  in `src/poly/cli.py`. `mkdocs build --strict` passes.
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface - [x] Commit messages follow conventional commits
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+- Fix safety filters page rendering ([#112](https://github.com/polyai/adk/pull/112),
+  [`641a99f`](https://github.com/polyai/adk/commit/641a99f4ee7d671ee6e9c3c25bfde6ac56cc7499))
+
+## Summary
+
+Closes the `<p class="lead">` tag at the top of `docs/docs/reference/safety_filters.md`. The closing
+  `</p>` was lost during the merge of #111, which caused mkdocs-material to treat the rest of the
+  file as raw HTML and skip markdown rendering — the page shipped without styling.
+
+## Motivation
+
+The page on the live docs site rendered as unstyled plain text. Every other reference page closes
+  the lead `<p>` (e.g.
+  [agent_settings.md](https://github.com/polyai/adk/blob/main/docs/docs/reference/agent_settings.md),
+  [voice_settings.md](https://github.com/polyai/adk/blob/main/docs/docs/reference/voice_settings.md))
+  — this brings safety_filters in line.
+
+## Changes
+
+- Add closing `</p>` after the lead paragraph in `docs/docs/reference/safety_filters.md`.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+Verified locally with `mkdocs build --strict`: lead paragraph now closes correctly, 3 grid card
+  blocks and 10 H2 headings render in the output HTML.
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface - [x] Commit messages follow conventional commits
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+- Safety Filters docs rollout ([#111](https://github.com/polyai/adk/pull/111),
+  [`01272b0`](https://github.com/polyai/adk/commit/01272b0edec1a7cd7f3538c6ec64b0b92ea4a5d5))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+---------
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+Co-authored-by: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
+
+
 ## v0.15.0 (2026-04-28)
 
 ### Documentation

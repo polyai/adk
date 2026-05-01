@@ -517,7 +517,8 @@ class FlowStep(BaseFlowStep, YamlResource):
                     for resource in resource_mappings or []:
                         if (
                             issubclass(resource.resource_type, BaseFlowStep)
-                            and flow_folder_name in resource.file_path.split(os.sep)
+                            and flow_folder_name
+                            in os.path.normpath(resource.file_path).split(os.sep)
                             and resource.resource_id.removeprefix(resource.flow_name + "_")
                             == child_step_id
                         ):
@@ -572,7 +573,8 @@ class FlowStep(BaseFlowStep, YamlResource):
                     for resource in resource_mappings or []:
                         if (
                             issubclass(resource.resource_type, BaseFlowStep)
-                            and flow_folder_name in resource.file_path.split(os.sep)
+                            and flow_folder_name
+                            in os.path.normpath(resource.file_path).split(os.sep)
                             and resource.resource_name == child_step_name
                         ):
                             condition["child_step"] = resource.resource_id.removeprefix(
@@ -1420,7 +1422,7 @@ class FunctionStep(Function, BaseFlowStep):
         )
 
         # e.g. flows/{flow_name}/function_steps/{function_name}.py
-        parts = file_path.split(os.sep)
+        parts = os.path.normpath(file_path).split(os.sep)
         if len(parts) >= 4 and parts[-4] == "flows":
             flow_folder_name = parts[-3]
         else:

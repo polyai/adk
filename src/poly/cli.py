@@ -50,7 +50,7 @@ from poly.handlers.interface import (
     REGIONS,
     AgentStudioInterface,
 )
-from poly.utils import merge_strings
+from poly.utils import merge_strings, retrieve_api_key
 from poly.resources.resource_utils import contains_merge_conflict
 from poly.project import (
     PROJECT_CONFIG_FILE,

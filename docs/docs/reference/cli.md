@@ -32,7 +32,13 @@ poly push --help
 
 Initialize a new Agent Studio project locally.
 
-`poly init` creates the project directory at `{base_path}/{account_id}/{project_id}` and immediately pulls the current configuration from Agent Studio. After it completes, change into the project directory before running any other commands.
+Run with no arguments and `poly init` walks you through interactive dropdowns:
+
+1. **Region** — auto-selected if your API key only has access to one.
+2. **Account** — auto-selected if there's only one in the region; otherwise pick from a searchable list.
+3. **Project** — pick from a searchable list of every project the API key can see.
+
+After selection, `poly init` creates the project directory at `{base_path}/{account_id}/{project_id}` and immediately pulls the current configuration from Agent Studio. Change into the project directory before running any other commands.
 
 The human-readable project name is stored in `project.yaml` alongside the `project_id`, `account_id`, and `region`:
 
@@ -43,10 +49,13 @@ region: us-1
 project_name: My Project
 ~~~
 
+Pass any combination of `--region`, `--account_id`, and `--project_id` to skip the matching prompt. This is the form to use in scripts and CI.
+
 Examples:
 
 ~~~bash
 poly init
+poly init --account_id 123 --project_id my_project
 poly init --region us-1 --account_id 123 --project_id my_project
 poly init --base-path /path/to/projects
 poly init --format
@@ -58,6 +67,7 @@ If the account or project ID is invalid or inaccessible, `poly init` returns a d
 
 | Situation | Error message |
 |---|---|
+| `POLY_ADK_KEY` not set | `POLY_ADK_KEY environment variable is not set. Export your API key with: export POLY_ADK_KEY=<your-api-key>` |
 | Project not found | `Project '<project_id>' not found in account '<account_id>'.` |
 | Permission denied | `Forbidden: you do not have permission to access project '<project_id>' in account '<account_id>'.` |
 

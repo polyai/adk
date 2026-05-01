@@ -609,7 +609,7 @@ class GetDiffsTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         diffs = project.get_diffs(all_files=True)
 
-        topic_path = "topics/topic_1.yaml"
+        topic_path = os.path.join("topics", "topic_1.yaml")
         self.assertIn(topic_path, diffs)
 
         diff = diffs[topic_path]
@@ -651,7 +651,7 @@ class GetDiffsTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         diffs = project.get_diffs(all_files=True)
 
-        func_path = "functions/test_function.py"
+        func_path = os.path.join("functions", "test_function.py")
         self.assertIn(func_path, diffs)
 
         diff = diffs[func_path]
@@ -678,7 +678,7 @@ class GetDiffsTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         diffs = project.get_diffs(all_files=True)
 
-        topic_path = "topics/topic_1.yaml"
+        topic_path = os.path.join("topics", "topic_1.yaml")
         func_path = os.path.join(TEST_DIR, "functions", "extra_function.py")
         self.assertIn(topic_path, diffs)
         self.assertIn(func_path, diffs)
@@ -712,7 +712,7 @@ class GetDiffsTest(unittest.TestCase):
         diffs = project.get_diffs(files=[requested_file])
 
         # Topic diff
-        topic_path = "topics/topic_1.yaml"
+        topic_path = os.path.join("topics", "topic_1.yaml")
         self.assertIn(topic_path, diffs)
         diff = diffs[topic_path]
         self.assertIn("--- original", diff)
@@ -2722,12 +2722,12 @@ class PullProjectTest(unittest.TestCase):
         # Local: PolyAI level maximum → default (conflicts with remote "boosted")
         local_kp_content = (
             "keyphrases:\n"
-            "- keyphrase: PolyAI\n"
-            "  level: default\n"
-            "- keyphrase: reservation\n"
-            "  level: boosted\n"
-            "- keyphrase: check-in\n"
-            "  level: default\n"
+            "  - keyphrase: PolyAI\n"
+            "    level: default\n"
+            "  - keyphrase: reservation\n"
+            "    level: boosted\n"
+            "  - keyphrase: check-in\n"
+            "    level: default\n"
         )
 
         MultiResourceYamlResource._file_cache.clear()

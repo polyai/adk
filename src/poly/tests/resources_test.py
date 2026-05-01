@@ -60,7 +60,11 @@ from poly.resources.handoff import Handoff
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation
-from poly.resources.resource import MultiResourceYamlResource, ResourceMapping
+from poly.resources.resource import (
+    MultiResourceYamlResource,
+    ResourceMapping,
+    _parse_multi_resource_path,
+)
 from poly.resources.sms import EnvPhoneNumbers, SMSTemplate
 from poly.resources.topic import (
     FUNCTION_REGEX,
@@ -1503,7 +1507,8 @@ class VoiceDisclaimerMessageTests(unittest.TestCase):
         def getmtime_config(path):
             return 1.0 if "configuration.yaml" in str(path) else os.path.getmtime(path)
 
-        with mock_read_from_file({"voice/configuration.yaml": test_file_content}):
+        config_path = os.path.join("voice", "configuration.yaml")
+        with mock_read_from_file({config_path: test_file_content}):
             with unittest.mock.patch(
                 "poly.resources.resource.os.path.exists", side_effect=exists_config
             ), unittest.mock.patch(
@@ -1512,7 +1517,7 @@ class VoiceDisclaimerMessageTests(unittest.TestCase):
                 "poly.resources.resource.os.path.getmtime", side_effect=getmtime_config
             ):
                 result = VoiceDisclaimerMessage.read_local_resource(
-                    file_path="voice/configuration.yaml/disclaimer_messages",
+                    file_path=os.path.join("voice", "configuration.yaml", "disclaimer_messages"),
                     resource_id="disclaimer_123",
                     resource_name="disclaimer_message",
                 )
@@ -1625,7 +1630,8 @@ class VoiceGreetingTests(unittest.TestCase):
         def getmtime_config(path):
             return 1.0 if "configuration.yaml" in str(path) else os.path.getmtime(path)
 
-        with mock_read_from_file({"voice/configuration.yaml": test_file_content}):
+        config_path = os.path.join("voice", "configuration.yaml")
+        with mock_read_from_file({config_path: test_file_content}):
             with unittest.mock.patch(
                 "poly.resources.resource.os.path.exists", side_effect=exists_config
             ), unittest.mock.patch(
@@ -1634,7 +1640,7 @@ class VoiceGreetingTests(unittest.TestCase):
                 "poly.resources.resource.os.path.getmtime", side_effect=getmtime_config
             ):
                 result = VoiceGreeting.read_local_resource(
-                    file_path="voice/configuration.yaml/greeting",
+                    file_path=os.path.join("voice", "configuration.yaml", "greeting"),
                     resource_id="greeting_123",
                     resource_name="greeting",
                 )
@@ -5063,7 +5069,7 @@ class VariableTest(unittest.TestCase):
 
     def test_file_path(self):
         var = Variable(resource_id="VAR-123", name="customer_name")
-        self.assertEqual(var.file_path, "variables/customer_name")
+        self.assertEqual(var.file_path, os.path.join("variables", "customer_name"))
 
     def test_raw(self):
         var = Variable(resource_id="VAR-123", name="order_id")
@@ -6920,6 +6926,66 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertIn("Invalid level", error)
         self.assertIn("full", error)
         self.assertIn("hate", error)
+
+
+class ParseMultiResourcePathTests(unittest.TestCase):
+    """Tests for _parse_multi_resource_path including Windows drive-letter handling."""
+
+    def test_relative_path(self):
+        yaml_path, segments = _parse_multi_resource_path("config/entities.yaml/entities/name")
+        self.assertEqual(yaml_path, os.path.join("config", "entities.yaml"))
+        self.assertEqual(segments, ["entities", "name"])
+
+    def test_single_segment_after_yaml(self):
+        yaml_path, segments = _parse_multi_resource_path("voice/configuration.yaml/greeting")
+        self.assertEqual(yaml_path, os.path.join("voice", "configuration.yaml"))
+        self.assertEqual(segments, ["greeting"])
+
+    @unittest.skipIf(os.name == "nt", "Unix-specific path test")
+    def test_absolute_unix_path(self):
+        yaml_path, segments = _parse_multi_resource_path(
+            "/home/user/project/voice/configuration.yaml/greeting"
+        )
+        self.assertEqual(yaml_path, "/home/user/project/voice/configuration.yaml")
+        self.assertEqual(segments, ["greeting"])
+
+    def test_no_yaml_extension_raises(self):
+        with self.assertRaises(ValueError):
+            _parse_multi_resource_path("config/entities/name")
+
+    def test_no_segments_after_yaml_raises(self):
+        with self.assertRaises(ValueError):
+            _parse_multi_resource_path("config/entities.yaml")
+
+    def test_windows_drive_letter_path(self):
+        """Regression: os.path.join('C:', 'foo') produces 'C:foo' on Windows."""
+        import ntpath
+        from unittest.mock import patch
+
+        win_path = "C:\\users\\bill\\project\\voice\\configuration.yaml\\greeting"
+        with (
+            patch("poly.resources.resource.os.sep", ntpath.sep),
+            patch("poly.resources.resource.os.path", ntpath),
+        ):
+            yaml_path, segments = _parse_multi_resource_path(win_path)
+
+        self.assertEqual(yaml_path, "C:\\users\\bill\\project\\voice\\configuration.yaml")
+        self.assertEqual(segments, ["greeting"])
+
+    def test_windows_drive_letter_multiple_segments(self):
+        """Windows path with multiple segments after .yaml."""
+        import ntpath
+        from unittest.mock import patch
+
+        win_path = "D:\\data\\entities.yaml\\entities\\customer_name"
+        with (
+            patch("poly.resources.resource.os.sep", ntpath.sep),
+            patch("poly.resources.resource.os.path", ntpath),
+        ):
+            yaml_path, segments = _parse_multi_resource_path(win_path)
+
+        self.assertEqual(yaml_path, "D:\\data\\entities.yaml")
+        self.assertEqual(segments, ["entities", "customer_name"])
 
 
 if __name__ == "__main__":
