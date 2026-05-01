@@ -17,7 +17,7 @@ from argparse import SUPPRESS, ArgumentParser, RawTextHelpFormatter
 from contextlib import nullcontext
 from importlib.metadata import version as get_package_version
 from collections import Counter
-from typing import Any, Optional
+from typing import Any, Optional, Any
 
 import argcomplete
 import requests
@@ -3097,7 +3097,7 @@ class AgentStudioCLI:
         else:
             sandbox_versions, _ = project.get_deployments(client_env="sandbox")
 
-        included = cls._resolve_included_deployments(
+        included, is_rollback = cls._resolve_included_deployments(
             sandbox_versions, target_full_hash, predecessor_full_hash
         )
 
@@ -3108,38 +3108,45 @@ class AgentStudioCLI:
                     "deployment": deployment,
                     "active_deployment_hashes": active_deployment_hashes,
                     "included_deployments": included,
+                    "is_rollback": is_rollback,
                 }
             )
             return
 
-        print_deployment_show(deployment, active_deployment_hashes, included)
+        print_deployment_show(deployment, active_deployment_hashes, included, is_rollback)
 
     @staticmethod
     def _resolve_included_deployments(
-        sandbox_versions: list[dict[str, ty.Any]],
+        sandbox_versions: list[dict[str, Any]],
         target_hash: str,
         predecessor_hash: str | None,
-    ) -> list[dict[str, ty.Any]]:
-        """Slice sandbox history to find deployments included between two versions.
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Slice sandbox history to find deployments between two versions.
+
+        For promotions (target is newer), returns deployments from target
+        to predecessor (target inclusive, predecessor exclusive).
+        For rollbacks (target is older), returns deployments from predecessor
+        to target (predecessor inclusive, target exclusive) — the versions
+        being reverted.
 
         Args:
             sandbox_versions: Full sandbox deployment list (newest first).
-            target_hash: Version hash of the deployment being shown.
-            predecessor_hash: Version hash of the previous deployment in the env,
-                or None if this is the first deployment.
+            target_hash: Version hash of the deployment being promoted.
+            predecessor_hash: Version hash of the current active deployment in
+                the target env, or None if this is the first deployment.
 
         Returns:
-            List of sandbox deployments from target (inclusive) to predecessor (exclusive).
+            Tuple of (included deployments, is_rollback).
         """
         target_idx = next(
             (i for i, v in enumerate(sandbox_versions) if v.get("version_hash") == target_hash),
             None,
         )
         if target_idx is None:
-            return []
+            return [], False
 
         if not predecessor_hash:
-            return sandbox_versions[target_idx:]
+            return sandbox_versions[target_idx:], False
 
         pred_idx = next(
             (
@@ -3150,9 +3157,12 @@ class AgentStudioCLI:
             None,
         )
         if pred_idx is None:
-            return sandbox_versions[target_idx:]
+            return sandbox_versions[target_idx:], False
 
-        return sandbox_versions[target_idx:pred_idx]
+        if pred_idx < target_idx:
+            return sandbox_versions[pred_idx:target_idx], True
+
+        return sandbox_versions[target_idx:pred_idx], False
 
     @classmethod
     def deployments_list(

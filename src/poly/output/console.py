@@ -504,6 +504,7 @@ def print_deployment_show(
     deployment: dict[str, Any],
     active_deployment_hashes: dict[str, str],
     included_deployments: list[dict[str, Any]],
+    is_rollback: bool = False,
 ) -> None:
     """Print detailed deployment metadata and included deployments.
 
@@ -511,6 +512,7 @@ def print_deployment_show(
         deployment: Single deployment record dict.
         active_deployment_hashes: Mapping of env names to active version hashes.
         included_deployments: List of deployment versions included since predecessor.
+        is_rollback: Whether this deployment is a rollback to an older version.
     """
     meta = deployment.get("deployment_metadata", {})
     version_hash = deployment.get("version_hash")
@@ -549,7 +551,8 @@ def print_deployment_show(
         console.print("[muted]No intermediate deployments.[/muted]")
     else:
         count = len(included_deployments)
-        console.print(f"[label]Included deployments ({count}):[/label]")
+        label = "Reverted deployments" if is_rollback else "Included deployments"
+        console.print(f"[label]{label} ({count}):[/label]")
         print_deployments(included_deployments, {})
 
 
