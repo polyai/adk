@@ -960,6 +960,4 @@ class Function(Resource):
     @staticmethod
     def format_resource(content, file_name: str) -> str:
         """Format the resource code using ruff."""
-        content = utils.format_code_with_ruff(content, file_name)
-        content = utils.restore_function_def_line(content, file_name)
-        return content
+        return utils.format_code_with_ruff(content, file_name)
