@@ -1,6 +1,44 @@
 # CHANGELOG
 
 
+## v0.16.1 (2026-05-01)
+
+### Bug Fixes
+
+- Pass ADK region directly to SourcererSDK for correct API key lookup
+  ([#126](https://github.com/polyai/adk/pull/126),
+  [`3441444`](https://github.com/polyai/adk/commit/3441444b84728f24702288d8a680850d92eab92e))
+
+## Summary
+
+Pass the ADK region directly to `SourcererSDK` instead of decomposing it into `(region,
+  environment)` tuples, fixing incorrect API key lookup for dev/staging environments.
+
+## Motivation
+
+When using `POLY_ADK_KEY_DEV`, the dev environment incorrectly called `retrieve_api_key("us")` (the
+  decomposed region) instead of `retrieve_api_key("dev")`, falling back to the generic
+  `POLY_ADK_KEY` and ignoring the per-region key.
+
+## Changes
+
+- Removed `region_to_region_env` mapping from `SyncClientHandler` - `SourcererSDK` now takes the ADK
+  region directly (`"dev"`, `"us-1"`, etc.) instead of separate `region`/`environment` params -
+  `ENVIRONMENT_URLS` keys updated to use ADK region names (`"us-1"` instead of `"us-prod"`) -
+  `retrieve_api_key()` now receives the correct region for all environments
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.16.0 (2026-05-01)
 
 ### Bug Fixes
