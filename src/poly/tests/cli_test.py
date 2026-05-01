@@ -607,6 +607,8 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
         table = rendered.renderable if isinstance(rendered, Panel) else rendered
         self.assertEqual(len(table.columns), 1)
         self.assertEqual(len(table.rows), 1)
+
+
 class ChatLoopTest(unittest.TestCase):
     """Tests for AgentStudioCLI._run_chat_loop.
 
@@ -616,7 +618,10 @@ class ChatLoopTest(unittest.TestCase):
 
     def setUp(self):
         self.proj = MagicMock()
-        self.proj.send_message.return_value = {"response": "Agent reply", "conversation_ended": False}
+        self.proj.send_message.return_value = {
+            "response": "Agent reply",
+            "conversation_ended": False,
+        }
         self.proj.end_chat.return_value = None
         self.proj.get_conversation_url.return_value = "https://example.com/conv-123"
 
@@ -1222,7 +1227,10 @@ class DeploymentsPromoteTest(unittest.TestCase):
         self.proj.promote_deployment.assert_called_once_with(
             "dep-1", "pre-release", message="ship it"
         )
-        mock_json.assert_called_once_with({"success": True})
+        payload = mock_json.call_args[0][0]
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["from_hash"], "abc123456xyz")
+        self.assertIn("included_deployments", payload)
 
     @patch("poly.cli.success")
     def test_promote_happy_path_force(self, mock_success):
@@ -1239,8 +1247,8 @@ class DeploymentsPromoteTest(unittest.TestCase):
         self.proj.promote_deployment.assert_called_once()
         mock_success.assert_called_once()
 
-    def test_promote_to_live_searches_pre_release(self):
-        """Promoting to live fetches deployments from pre-release."""
+    def test_promote_to_live_searches_pre_release_and_sandbox(self):
+        """Promoting to live fetches pre-release then sandbox for linear history."""
         AgentStudioCLI.deployments_promote(
             TEST_DIR,
             from_deployment="def789012",
@@ -1249,7 +1257,10 @@ class DeploymentsPromoteTest(unittest.TestCase):
             output_json=True,
         )
 
-        self.proj.get_deployments.assert_called_once_with("pre-release")
+        calls = self.proj.get_deployments.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0][0], ("pre-release",))
+        self.assertEqual(calls[1][0], ("sandbox",))
 
     def test_promote_to_pre_release_searches_sandbox(self):
         """Promoting to pre-release fetches deployments from sandbox."""
@@ -1262,6 +1273,29 @@ class DeploymentsPromoteTest(unittest.TestCase):
         )
 
         self.proj.get_deployments.assert_called_once_with("sandbox")
+
+    @patch("poly.cli.json_print")
+    def test_promote_rollback_returns_reverted_deployments(self, mock_json):
+        """Promoting to an older version returns the deployments being reverted.
+
+        sandbox: [dep-1(newest), dep-2(oldest)]
+        active pre-release = dep-1 (newer), promoting dep-2 (older)
+        → rollback: included = sandbox[0:1] = [dep-1] (the version being reverted)
+        """
+        active = {"sandbox": "abc123456xyz", "pre-release": "abc123456xyz"}
+        self.proj.get_deployments.return_value = (list(self.VERSIONS), active)
+
+        AgentStudioCLI.deployments_promote(
+            TEST_DIR,
+            from_deployment="def789012",
+            to_env="pre-release",
+            force=True,
+            output_json=True,
+        )
+
+        payload = mock_json.call_args[0][0]
+        included_ids = [d["id"] for d in payload["included_deployments"]]
+        self.assertEqual(included_ids, ["dep-1"])
 
     @patch("poly.cli.json_print")
     def test_promote_resolves_env_name_to_hash(self, mock_json):
@@ -1478,9 +1512,7 @@ class DeploymentsRollbackTest(unittest.TestCase):
         )
 
         # sandbox -> abc123456xyz -> matches dep-1
-        self.proj.rollback_deployment.assert_called_once_with(
-            "dep-1", message="initial release"
-        )
+        self.proj.rollback_deployment.assert_called_once_with("dep-1", message="initial release")
 
     @patch("poly.cli.json_print")
     def test_rollback_not_found_json(self, mock_json):
@@ -1575,9 +1607,7 @@ class DeploymentsRollbackTest(unittest.TestCase):
             output_json=True,
         )
 
-        self.proj.rollback_deployment.assert_called_once_with(
-            "dep-1", message="initial release"
-        )
+        self.proj.rollback_deployment.assert_called_once_with("dep-1", message="initial release")
 
     @patch("poly.cli.json_print")
     def test_rollback_custom_message_overrides_deployment_message(self, mock_json):
@@ -1590,6 +1620,4 @@ class DeploymentsRollbackTest(unittest.TestCase):
             output_json=True,
         )
 
-        self.proj.rollback_deployment.assert_called_once_with(
-            "dep-1", message="emergency fix"
-        )
+        self.proj.rollback_deployment.assert_called_once_with("dep-1", message="emergency fix")

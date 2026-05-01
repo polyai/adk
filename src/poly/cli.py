@@ -3154,6 +3154,55 @@ class AgentStudioCLI:
         else:
             print_deployments(versions, active_deployment_hashes, details=details)
 
+    @staticmethod
+    def _resolve_included_deployments(
+        sandbox_versions: list[dict[str, Any]],
+        target_hash: str,
+        predecessor_hash: str | None,
+    ) -> list[dict[str, Any]]:
+        """Slice sandbox history to find deployments between two versions.
+
+        For promotions (target is newer), returns deployments from target
+        to predecessor (target inclusive, predecessor exclusive).
+        For rollbacks (target is older), returns deployments from predecessor
+        to target (predecessor inclusive, target exclusive) — the versions
+        being reverted.
+
+        Args:
+            sandbox_versions: Full sandbox deployment list (newest first).
+            target_hash: Version hash of the deployment being promoted.
+            predecessor_hash: Version hash of the current active deployment in
+                the target env, or None if this is the first deployment.
+
+        Returns:
+            List of sandbox deployments between target and predecessor.
+        """
+        target_idx = next(
+            (i for i, v in enumerate(sandbox_versions) if v.get("version_hash") == target_hash),
+            None,
+        )
+        if target_idx is None:
+            return []
+
+        if not predecessor_hash:
+            return sandbox_versions[target_idx:]
+
+        pred_idx = next(
+            (
+                i
+                for i, v in enumerate(sandbox_versions)
+                if v.get("version_hash") == predecessor_hash
+            ),
+            None,
+        )
+        if pred_idx is None:
+            return sandbox_versions[target_idx:]
+
+        if pred_idx < target_idx:
+            return sandbox_versions[pred_idx:target_idx]
+
+        return sandbox_versions[target_idx:pred_idx]
+
     @classmethod
     def deployments_promote(
         cls,
@@ -3201,13 +3250,9 @@ class AgentStudioCLI:
         else:
             deployment_hash = from_deployment
 
-        deployment_version, deployment_index = next(
-            (
-                (v, i)
-                for i, v in enumerate(versions)
-                if v.get("version_hash", "")[:9] == deployment_hash[:9]
-            ),
-            (None, None),
+        deployment_version = next(
+            (v for v in versions if (v.get("version_hash") or "")[:9] == deployment_hash[:9]),
+            None,
         )
 
         if not deployment_version:
@@ -3224,29 +3269,55 @@ class AgentStudioCLI:
         result["from_hash"] = deployment_version.get("version_hash", "")
         result["message"] = message or deployment_message or ""
 
-        # Compute changes between this deployment and the currently active deployment in the target environment
-        previous_deployment = active_deployment_hashes.get(to_env)
-        previous_version, previous_index = next(
-            (
-                (v, i)
-                for i, v in enumerate(versions)
-                if v.get("version_hash", "") == previous_deployment
-            ),
-            (None, None),
-        )
+        # Resolve included deployments using sandbox as the linear history
+        target_full_hash = deployment_version.get("version_hash", "")
+        predecessor_hash = active_deployment_hashes.get(to_env)
 
-        changes = []
-        if previous_version and previous_index > deployment_index:
-            changes = versions[deployment_index:previous_index]
-        result["changes"] = changes
+        if search_env == "sandbox":
+            sandbox_versions = versions
+        else:
+            sandbox_versions, _ = project.get_deployments("sandbox")
+
+        included = cls._resolve_included_deployments(
+            sandbox_versions, target_full_hash, predecessor_hash
+        )
+        result["included_deployments"] = included
+
+        is_rollback = False
+        if predecessor_hash:
+            pred_sandbox_idx = next(
+                (
+                    i
+                    for i, v in enumerate(sandbox_versions)
+                    if v.get("version_hash") == predecessor_hash
+                ),
+                None,
+            )
+            target_sandbox_idx = next(
+                (
+                    i
+                    for i, v in enumerate(sandbox_versions)
+                    if v.get("version_hash") == target_full_hash
+                ),
+                None,
+            )
+            if (
+                pred_sandbox_idx is not None
+                and target_sandbox_idx is not None
+                and target_sandbox_idx > pred_sandbox_idx
+            ):
+                is_rollback = True
 
         if not output_json:
             plain(f"Promoting hash [bold]{result['from_hash'][:9]}[/bold] to [info]{to_env}[/info]")
-            if not changes:
+            if is_rollback:
                 plain(f"Rolling back to an earlier version: {deployment_message or '-'}")
-            else:
-                plain("Changes included:")
-                print_deployments(changes, {})
+            elif not predecessor_hash:
+                plain(f"First deployment to {to_env}.")
+            if included:
+                label = "Reverting deployments" if is_rollback else "Included deployments"
+                plain(f"{label} ({len(included)}):")
+                print_deployments(included, {})
 
         if dry_run:
             if output_json:
