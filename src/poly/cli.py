@@ -1277,6 +1277,17 @@ class AgentStudioCLI:
 
         if not account_id:
             accounts = api_handler.get_accounts(region)
+            if not accounts:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No accounts found in the selected region.",
+                        }
+                    )
+                else:
+                    error("No accounts found in the selected region.")
+                sys.exit(1)
             if len(accounts) == 1:
                 account_id, account_name = next(iter(accounts.items()))
                 if not output_json:
@@ -1307,6 +1318,18 @@ class AgentStudioCLI:
 
         if not project_id:
             projects = api_handler.get_projects(region, account_id)
+
+            if not projects:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No projects found in the selected account.",
+                        }
+                    )
+                else:
+                    error("No projects found in the selected account.")
+                sys.exit(1)
 
             project_choices = [
                 questionary.Choice(title=f"{name} ({proj_id})", value=proj_id)
