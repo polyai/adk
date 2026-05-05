@@ -1209,16 +1209,49 @@ class InitProjectTest(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 1)
 
     @patch("poly.cli.AgentStudioInterface")
-    def test_init_exits_when_no_projects(self, mock_iface_cls):
-        """When get_projects returns empty dict, init exits with error."""
+    def test_init_exits_when_no_projects_json_mode(self, mock_iface_cls):
+        """When get_projects returns empty dict in JSON mode, init exits with error."""
         api = mock_iface_cls.return_value
         api.get_accounts.return_value = {"acc_1": "Only Account"}
         api.get_projects.return_value = {}
 
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.init_project(TEST_DIR, region="eu-west-1")
+            AgentStudioCLI.init_project(
+                TEST_DIR, region="eu-west-1", account_id="acc_1", output_json=True
+            )
 
         self.assertEqual(ctx.exception.code, 1)
+
+    @patch("poly.cli.questionary")
+    @patch("poly.cli.AgentStudioInterface")
+    def test_init_offers_create_when_no_projects(self, mock_iface_cls, mock_q):
+        """When get_projects returns empty dict, user is offered to create a project."""
+        api = mock_iface_cls.return_value
+        api.get_accounts.return_value = {"acc_1": "Only Account"}
+        api.get_projects.return_value = {}
+        mock_q.confirm.return_value.ask.return_value = False
+
+        AgentStudioCLI.init_project(TEST_DIR, region="eu-west-1")
+
+        mock_q.confirm.assert_called_once()
+
+    @patch("poly.cli.AgentStudioCLI.create_project")
+    @patch("poly.cli.questionary")
+    @patch("poly.cli.AgentStudioInterface")
+    def test_init_delegates_to_create_project_when_accepted(
+        self, mock_iface_cls, mock_q, mock_create
+    ):
+        """When user accepts create prompt, create_project is called."""
+        api = mock_iface_cls.return_value
+        api.get_accounts.return_value = {"acc_1": "Only Account"}
+        api.get_projects.return_value = {}
+        mock_q.confirm.return_value.ask.return_value = True
+
+        AgentStudioCLI.init_project(TEST_DIR, region="eu-west-1")
+
+        mock_create.assert_called_once_with(
+            TEST_DIR, region="eu-west-1", account_id="acc_1", output_json=False
+        )
 
 
 class CreateProjectTest(unittest.TestCase):

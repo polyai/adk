@@ -1457,9 +1457,21 @@ class AgentStudioCLI:
                             "error": "No projects found in the selected account.",
                         }
                     )
-                else:
-                    error("No projects found in the selected account.")
-                sys.exit(1)
+                    sys.exit(1)
+
+                should_create = questionary.confirm(
+                    "No projects found in this account. Would you like to create one?"
+                ).ask()
+                if not should_create:
+                    return
+
+                cls.create_project(
+                    base_path,
+                    region=region,
+                    account_id=account_id,
+                    output_json=False,
+                )
+                return
 
             project_choices = [
                 questionary.Choice(title=f"{name} ({proj_id})", value=proj_id)
