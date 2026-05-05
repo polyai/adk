@@ -607,6 +607,8 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
         table = rendered.renderable if isinstance(rendered, Panel) else rendered
         self.assertEqual(len(table.columns), 1)
         self.assertEqual(len(table.rows), 1)
+
+
 class ChatLoopTest(unittest.TestCase):
     """Tests for AgentStudioCLI._run_chat_loop.
 
@@ -616,7 +618,10 @@ class ChatLoopTest(unittest.TestCase):
 
     def setUp(self):
         self.proj = MagicMock()
-        self.proj.send_message.return_value = {"response": "Agent reply", "conversation_ended": False}
+        self.proj.send_message.return_value = {
+            "response": "Agent reply",
+            "conversation_ended": False,
+        }
         self.proj.end_chat.return_value = None
         self.proj.get_conversation_url.return_value = "https://example.com/conv-123"
 
@@ -1287,12 +1292,13 @@ class CreateProjectTest(unittest.TestCase):
     def test_interactive_flow_selects_region_account_and_name(
         self, mock_q, mock_iface_cls, mock_init
     ):
-        """create-project with no args prompts for region, account, and name."""
-        mock_q.select.return_value.ask.side_effect = ["us-1", "My Account"]
+        """create-project with no args probes regions, prompts account/name."""
+        mock_q.select.return_value.ask.side_effect = ["us-1", "acc-789"]
         mock_q.text.return_value.ask.return_value = "new-project"
 
         mock_iface = mock_iface_cls.return_value
-        mock_iface.get_accounts.return_value = {"My Account": "acc-789"}
+        mock_iface.get_accessible_regions.return_value = ["us-1", "euw-1"]
+        mock_iface.get_accounts.return_value = {"acc-789": "My Account", "acc-456": "Other"}
         mock_iface.create_project.return_value = {"id": "proj-001", "name": "new-project"}
 
         AgentStudioCLI.create_project(
@@ -1303,6 +1309,7 @@ class CreateProjectTest(unittest.TestCase):
             output_json=False,
         )
 
+        mock_iface.get_accessible_regions.assert_called_once()
         mock_iface.get_accounts.assert_called_once_with("us-1")
         mock_iface.create_project.assert_called_once_with("us-1", "acc-789", "new-project")
         mock_init.assert_called_once_with(
@@ -1312,6 +1319,29 @@ class CreateProjectTest(unittest.TestCase):
             project_id="proj-001",
             output_json=False,
         )
+
+    @patch("poly.cli.AgentStudioCLI.init_project")
+    @patch("poly.cli.AgentStudioInterface")
+    @patch("poly.cli.questionary")
+    def test_auto_selects_single_region_and_account(self, mock_q, mock_iface_cls, mock_init):
+        """create-project auto-selects when only one region and one account."""
+        mock_q.text.return_value.ask.return_value = "new-project"
+
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_accessible_regions.return_value = ["us-1"]
+        mock_iface.get_accounts.return_value = {"acc-789": "My Account"}
+        mock_iface.create_project.return_value = {"id": "proj-001", "name": "new-project"}
+
+        AgentStudioCLI.create_project(
+            TEST_DIR,
+            region=None,
+            account_id=None,
+            project_name=None,
+            output_json=False,
+        )
+
+        mock_q.select.assert_not_called()
+        mock_iface.create_project.assert_called_once_with("us-1", "acc-789", "new-project")
 
     @patch("poly.cli.AgentStudioInterface")
     def test_json_mode_requires_all_args(self, mock_iface_cls):
@@ -1333,6 +1363,8 @@ class CreateProjectTest(unittest.TestCase):
     @patch("poly.cli.questionary")
     def test_user_cancels_region_selection(self, mock_q, mock_iface_cls, mock_init):
         """create-project returns early when user cancels region selection."""
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_accessible_regions.return_value = ["us-1", "euw-1"]
         mock_q.select.return_value.ask.return_value = None
 
         AgentStudioCLI.create_project(
@@ -1343,7 +1375,7 @@ class CreateProjectTest(unittest.TestCase):
             output_json=False,
         )
 
-        mock_iface_cls.return_value.create_project.assert_not_called()
+        mock_iface.create_project.assert_not_called()
         mock_init.assert_not_called()
 
     @patch("poly.cli.AgentStudioCLI.init_project")
@@ -1351,10 +1383,10 @@ class CreateProjectTest(unittest.TestCase):
     @patch("poly.cli.questionary")
     def test_user_cancels_account_selection(self, mock_q, mock_iface_cls, mock_init):
         """create-project returns early when user cancels account selection."""
-        mock_q.select.return_value.ask.side_effect = ["us-1", None]
-
         mock_iface = mock_iface_cls.return_value
-        mock_iface.get_accounts.return_value = {"Acme Corp": "acc-100"}
+        mock_iface.get_accessible_regions.return_value = ["us-1", "euw-1"]
+        mock_iface.get_accounts.return_value = {"acc-100": "Acme Corp", "acc-200": "Other"}
+        mock_q.select.return_value.ask.side_effect = ["us-1", None]
 
         AgentStudioCLI.create_project(
             TEST_DIR,
@@ -1372,11 +1404,11 @@ class CreateProjectTest(unittest.TestCase):
     @patch("poly.cli.questionary")
     def test_user_cancels_project_name_entry(self, mock_q, mock_iface_cls, mock_init):
         """create-project returns early when user enters empty project name."""
-        mock_q.select.return_value.ask.side_effect = ["us-1", "My Account"]
-        mock_q.text.return_value.ask.return_value = ""
-
         mock_iface = mock_iface_cls.return_value
-        mock_iface.get_accounts.return_value = {"My Account": "acc-200"}
+        mock_iface.get_accessible_regions.return_value = ["us-1", "euw-1"]
+        mock_iface.get_accounts.return_value = {"acc-200": "My Account", "acc-300": "Other"}
+        mock_q.select.return_value.ask.side_effect = ["us-1", "acc-200"]
+        mock_q.text.return_value.ask.return_value = ""
 
         AgentStudioCLI.create_project(
             TEST_DIR,
@@ -1427,21 +1459,23 @@ class CreateProjectTest(unittest.TestCase):
     @patch("poly.cli.AgentStudioCLI.init_project")
     @patch("poly.cli.AgentStudioInterface")
     @patch("poly.cli.questionary")
-    def test_no_accounts_found_returns_early(self, mock_q, mock_iface_cls, mock_init):
-        """create-project returns early when no accounts exist for the region."""
+    def test_no_accounts_found_exits(self, mock_q, mock_iface_cls, mock_init):
+        """create-project exits when no accounts exist for the region."""
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_accessible_regions.return_value = ["us-1", "euw-1"]
+        mock_iface.get_accounts.return_value = {}
         mock_q.select.return_value.ask.return_value = "us-1"
 
-        mock_iface = mock_iface_cls.return_value
-        mock_iface.get_accounts.return_value = {}
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.create_project(
+                TEST_DIR,
+                region=None,
+                account_id=None,
+                project_name=None,
+                output_json=False,
+            )
 
-        AgentStudioCLI.create_project(
-            TEST_DIR,
-            region=None,
-            account_id=None,
-            project_name=None,
-            output_json=False,
-        )
-
+        self.assertEqual(ctx.exception.code, 1)
         mock_iface.create_project.assert_not_called()
         mock_init.assert_not_called()
 
@@ -1467,12 +1501,11 @@ class CreateProjectTest(unittest.TestCase):
     @patch("poly.cli.questionary")
     def test_project_name_is_stripped(self, mock_q, mock_iface_cls, mock_init):
         """create-project strips whitespace from interactively entered project name."""
-        mock_q.select.return_value.ask.side_effect = ["euw-1", "My Account"]
-        mock_q.text.return_value.ask.return_value = "  spaced-name  "
-
         mock_iface = mock_iface_cls.return_value
-        mock_iface.get_accounts.return_value = {"My Account": "acc-600"}
+        mock_iface.get_accessible_regions.return_value = ["euw-1"]
+        mock_iface.get_accounts.return_value = {"acc-600": "My Account"}
         mock_iface.create_project.return_value = {"id": "proj-007", "name": "spaced-name"}
+        mock_q.text.return_value.ask.return_value = "  spaced-name  "
 
         AgentStudioCLI.create_project(
             TEST_DIR,

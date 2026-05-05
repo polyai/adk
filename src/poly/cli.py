@@ -1294,29 +1294,66 @@ class AgentStudioCLI:
             )
             sys.exit(1)
 
-        if not region:
-            region = questionary.select("Select Region", choices=REGIONS).ask()
-            if not region:
-                warning("No region selected. Exiting.")
-                return
-
         api_handler = AgentStudioInterface()
+
+        if not region:
+            with console.status("[info]Fetching available regions...[/info]"):
+                regions = api_handler.get_accessible_regions()
+            if not regions:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No accessible regions found for your API key.",
+                        }
+                    )
+                else:
+                    error("No accessible regions found for your API key.")
+                sys.exit(1)
+            if len(regions) == 1:
+                region = regions[0]
+                if not output_json:
+                    info(f"Auto-selected region [bold]{region}[/bold].")
+            else:
+                region = questionary.select("Select Region", choices=regions).ask()
+                if not region:
+                    warning("No region selected. Exiting.")
+                    return
 
         if not account_id:
             accounts = api_handler.get_accounts(region)
             if not accounts:
-                error("No accounts found for this region.")
-                return
-            account_menu = questionary.select(
-                "Select Account",
-                choices=list(accounts.keys()),
-                use_search_filter=True,
-                use_jk_keys=False,
-            ).ask()
-            if not account_menu:
-                warning("No account selected. Exiting.")
-                return
-            account_id = accounts[account_menu]
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No accounts found in the selected region.",
+                        }
+                    )
+                else:
+                    error("No accounts found in the selected region.")
+                sys.exit(1)
+            if len(accounts) == 1:
+                account_id, account_name = next(iter(accounts.items()))
+                if not output_json:
+                    info(f"Auto-selected account [bold]{account_name}[/bold].")
+            else:
+                account_choices = [
+                    questionary.Choice(title=f"{name} ({acc_id})", value=acc_id)
+                    for acc_id, name in accounts.items()
+                ]
+                account_id = questionary.select(
+                    "Select Account",
+                    choices=account_choices,
+                    use_search_filter=True,
+                    use_jk_keys=False,
+                ).ask()
+                if not account_id:
+                    if output_json:
+                        json_print({"success": False, "error": "No account selected."})
+                        sys.exit(1)
+                    warning("No account selected. Exiting.")
+                    return
 
         if not project_name:
             project_name = questionary.text("Enter project name:").ask()

@@ -265,15 +265,12 @@ class PlatformAPIHandler:
         if not project_id:
             project_id = project_name.lower().replace(" ", "-")
 
-        url = PlatformAPIHandler.get_agents_api_url(region) + "/agents"
+        url = PlatformAPIHandler.get_agents_api_url(region) + f"/accounts/{account_id}/agents"
         data = {
             "name": project_name,
             "agentId": project_id,
             "responseSettings": {
                 "greeting": "Hello, how can I help you?",
-            },
-            "voiceSettings": {
-                "voiceId": "GZ3zQrAt2WDldEUul9JQ",
             },
         }
 
@@ -281,7 +278,6 @@ class PlatformAPIHandler:
         headers = {
             "X-API-KEY": retrieve_api_key(region),
             "X-PolyAI-Correlation-Id": correlation_id,
-            "X-PolyAI-Account-Id": account_id,
             "Content-Type": "application/json",
         }
 
