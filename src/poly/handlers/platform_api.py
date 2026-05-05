@@ -47,6 +47,15 @@ class PlatformAPIHandler:
         "us-1": "https://sourcerer.us-1.platform.polyai.app/api/v1",
     }
 
+    region_to_agents_api_url = {
+        "dev": "https://api.dev.poly.ai/v1",
+        "staging": "https://api.staging.poly.ai/v1",
+        "euw-1": "https://api.eu.poly.ai/v1",
+        "uk-1": "https://api.uk.poly.ai/v1",
+        "us-1": "https://api.us.poly.ai/v1",
+        "studio": "https://api.studio.poly.ai/v1",
+    }
+
     @staticmethod
     def get_base_url(region: str) -> str:
         """Get the base URL for the Platform API based on the region.
@@ -74,12 +83,17 @@ class PlatformAPIHandler:
         raise ValueError(f"Unknown region: {region}")
 
     @staticmethod
-    def _retrieve_api_key() -> str:
-        """Get API key from environment"""
-        try:
-            return os.getenv("POLY_ADK_KEY")
-        except Exception:
-            raise ValueError("POLY_ADK_KEY environment variable is required")
+    def get_agents_api_url(region: str) -> str:
+        """Get the Agents API base URL for the given region.
+
+        Args:
+            region (str): The region name
+        Returns:
+            str: The Agents API base URL
+        """
+        if base_url := PlatformAPIHandler.region_to_agents_api_url.get(region):
+            return base_url
+        raise ValueError(f"Unknown region: {region}")
 
     @staticmethod
     def make_request(
@@ -236,7 +250,7 @@ class PlatformAPIHandler:
         project_name: str,
         project_id: str = None,
     ) -> dict[str, str]:
-        """Create a new project in an account via the Sourcerer API.
+        """Create a new project (agent) via the Agents API.
 
         Args:
             region (str): The region name
@@ -251,28 +265,23 @@ class PlatformAPIHandler:
         if not project_id:
             project_id = project_name.lower().replace(" ", "-")
 
-        endpoint = PROJECTS_URL.format(account_id=account_id)
-        url = PlatformAPIHandler.get_sourcerer_url(region) + endpoint
+        url = PlatformAPIHandler.get_agents_api_url(region) + "/agents"
         data = {
             "name": project_name,
-            "project_id": project_id,
-            "config": {
-                "voice_id": "VOICE-afe2b8e8",
-                "model_id": "MODEL-27a9c7af",
-                "config": {"language_code": "en-US"},
+            "agentId": project_id,
+            "responseSettings": {
+                "greeting": "Hello, how can I help you?",
             },
-            "topic_names": [],
-            "knowledge_base": {
-                "welcome_message": "Hello, how can I help you?",
-                "additional_context": {},
-                "knowledge_base": {"rules": {"behaviour": ""}},
+            "voiceSettings": {
+                "voiceId": "PLACEHOLDER",
             },
         }
 
         correlation_id = f"adk-{uuid.uuid4()}"
         headers = {
-            "X-API-KEY": PlatformAPIHandler._retrieve_api_key(),
+            "X-API-KEY": retrieve_api_key(region),
             "X-PolyAI-Correlation-Id": correlation_id,
+            "X-PolyAI-Account-Id": account_id,
             "Content-Type": "application/json",
         }
 
@@ -295,7 +304,7 @@ class PlatformAPIHandler:
             raise
 
         result = response.json()
-        return {"id": result.get("id"), "name": result.get("name")}
+        return {"id": result.get("agentId"), "name": result.get("agentName")}
 
     @staticmethod
     def get_deployments(
@@ -309,6 +318,7 @@ class PlatformAPIHandler:
             project_id (str): The project ID
             client_env (str): The client environment (sandbox, pre-release, live)
                 defaults to sandbox
+
         Returns:
             list[dict[str, Any]]: A list of deployment records from the API
         """
