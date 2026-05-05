@@ -1177,3 +1177,57 @@ class PrintDeploymentsTest(unittest.TestCase):
         mock_print_dep.assert_called_once()
         call_kwargs = mock_print_dep.call_args[1]
         self.assertTrue(call_kwargs["details"])
+
+
+class PlatformAPIGetAccountsTest(unittest.TestCase):
+    """Tests for PlatformAPIHandler.get_accounts and get_projects dict orientation."""
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_get_accounts_returns_id_to_name_and_preserves_duplicates(self, mock_request):
+        """get_accounts keys by ID so duplicate names don't collide."""
+        from poly.handlers.platform_api import PlatformAPIHandler
+
+        mock_request.return_value = [
+            {"id": "acc_1", "name": "Same Name", "active": True},
+            {"id": "acc_2", "name": "Same Name", "active": True},
+            {"id": "acc_3", "name": "Inactive", "active": False},
+        ]
+
+        result = PlatformAPIHandler.get_accounts("eu-west-1")
+
+        self.assertEqual(result, {"acc_1": "Same Name", "acc_2": "Same Name"})
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_get_projects_returns_id_to_name_and_preserves_duplicates(self, mock_request):
+        """get_projects keys by ID so duplicate names don't collide."""
+        from poly.handlers.platform_api import PlatformAPIHandler
+
+        mock_request.return_value = {
+            "projects": [
+                {"id": "proj_1", "name": "Same Name"},
+                {"id": "proj_2", "name": "Same Name"},
+            ]
+        }
+
+        result = PlatformAPIHandler.get_projects("eu-west-1", "acc_1")
+
+        self.assertEqual(result, {"proj_1": "Same Name", "proj_2": "Same Name"})
+
+
+class InitProjectTest(unittest.TestCase):
+    """Tests for the init_project interactive selection flow."""
+
+    @patch("poly.cli.AgentStudioProject.init_project")
+    @patch("poly.cli.AgentStudioInterface")
+    def test_init_with_explicit_ids_looks_up_project_name(self, mock_iface_cls, mock_init):
+        """When all IDs are provided, project name is looked up by project_id key."""
+        api = mock_iface_cls.return_value
+        api.get_projects.return_value = {"proj_1": "My Project"}
+        mock_init.return_value = (MagicMock(), None)
+
+        AgentStudioCLI.init_project(
+            TEST_DIR, region="eu-west-1", account_id="acc_1", project_id="proj_1"
+        )
+
+        mock_init.assert_called_once()
+        self.assertEqual(mock_init.call_args[1]["project_name"], "My Project")

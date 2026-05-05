@@ -1278,17 +1278,21 @@ class AgentStudioCLI:
         if not account_id:
             accounts = api_handler.get_accounts(region)
             if len(accounts) == 1:
-                account_name, account_id = next(iter(accounts.items()))
+                account_id, account_name = next(iter(accounts.items()))
                 if not output_json:
                     info(f"Auto-selected account [bold]{account_name}[/bold].")
             else:
-                account_menu = questionary.select(
+                account_choices = [
+                    questionary.Choice(title=f"{name} ({acc_id})", value=acc_id)
+                    for acc_id, name in accounts.items()
+                ]
+                account_id = questionary.select(
                     "Select Account",
-                    choices=list(accounts.keys()),
+                    choices=account_choices,
                     use_search_filter=True,
                     use_jk_keys=False,
                 ).ask()
-                if not account_menu:
+                if not account_id:
                     if output_json:
                         json_print(
                             {
@@ -1299,17 +1303,23 @@ class AgentStudioCLI:
                         sys.exit(1)
                     warning("No account selected. Exiting.")
                     return
-                account_id = accounts[account_menu]
+                account_name = accounts[account_id]
 
         if not project_id:
             projects = api_handler.get_projects(region, account_id)
-            project_menu = questionary.select(
+
+            project_choices = [
+                questionary.Choice(title=f"{name} ({proj_id})", value=proj_id)
+                for proj_id, name in projects.items()
+            ]
+
+            project_id = questionary.select(
                 "Select Project",
-                choices=list(projects.keys()),
+                choices=project_choices,
                 use_search_filter=True,
                 use_jk_keys=False,
             ).ask()
-            if not project_menu:
+            if not project_id:
                 if output_json:
                     json_print(
                         {
@@ -1320,16 +1330,12 @@ class AgentStudioCLI:
                     sys.exit(1)
                 warning("No project selected. Exiting.")
                 return
-            project_name = project_menu
-            project_id = projects[project_menu]
+
+            project_name = projects.get(project_id)
         else:
             # project_id was passed directly — look up the name
             projects = api_handler.get_projects(region, account_id)
-            # Reverse lookup: find name for the given ID
-            project_name = next(
-                (name for name, pid in projects.items() if pid == project_id),
-                None,
-            )
+            project_name = projects.get(project_id)
 
         if not output_json:
             info(f"Initializing project [bold]{account_id}/{project_id}[/bold]...")
