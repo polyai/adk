@@ -1196,3 +1196,26 @@ class InitProjectTest(unittest.TestCase):
 
         mock_init.assert_called_once()
         self.assertEqual(mock_init.call_args[1]["project_name"], "My Project")
+
+    @patch("poly.cli.AgentStudioInterface")
+    def test_init_exits_when_no_accounts(self, mock_iface_cls):
+        """When get_accounts returns empty dict, init exits with error."""
+        api = mock_iface_cls.return_value
+        api.get_accounts.return_value = {}
+
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.init_project(TEST_DIR, region="eu-west-1")
+
+        self.assertEqual(ctx.exception.code, 1)
+
+    @patch("poly.cli.AgentStudioInterface")
+    def test_init_exits_when_no_projects(self, mock_iface_cls):
+        """When get_projects returns empty dict, init exits with error."""
+        api = mock_iface_cls.return_value
+        api.get_accounts.return_value = {"acc_1": "Only Account"}
+        api.get_projects.return_value = {}
+
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.init_project(TEST_DIR, region="eu-west-1")
+
+        self.assertEqual(ctx.exception.code, 1)
