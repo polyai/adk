@@ -1474,7 +1474,12 @@ class DeploymentsRollbackTest(unittest.TestCase):
         )
 
         self.proj.rollback_deployment.assert_called_once_with("dep-2", message="revert")
-        mock_json.assert_called_once_with({"success": True})
+        mock_json.assert_called_once()
+        payload = mock_json.call_args[0][0]
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["target_hash"], "def789012xyz")
+        self.assertEqual(payload["message"], "revert")
+        self.assertIn("reverted_deployments", payload)
 
     @patch("poly.cli.success")
     def test_rollback_happy_path_force(self, mock_success):
@@ -1621,3 +1626,26 @@ class DeploymentsRollbackTest(unittest.TestCase):
         )
 
         self.proj.rollback_deployment.assert_called_once_with("dep-1", message="emergency fix")
+
+    # ── Dry run ──────────────────────────────────────────────────────
+
+    @patch("poly.cli.json_print")
+    def test_dry_run_shows_reverted_without_calling_api(self, mock_json):
+        """Dry run shows reverted deployments but does not call rollback_deployment.
+
+        versions: [dep-1(newest, active sandbox), dep-2(oldest)]
+        Rolling back to dep-2 → dep-1 is reverted.
+        """
+        AgentStudioCLI.deployments_rollback(
+            TEST_DIR,
+            deployment="def789012",
+            output_json=True,
+            dry_run=True,
+        )
+
+        self.proj.rollback_deployment.assert_not_called()
+        payload = mock_json.call_args[0][0]
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual(payload["target_hash"], "def789012xyz")
+        reverted_ids = [d["id"] for d in payload["reverted_deployments"]]
+        self.assertEqual(reverted_ids, ["dep-1"])

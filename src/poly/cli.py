@@ -990,6 +990,11 @@ class AgentStudioCLI:
             action="store_true",
             help="Force the rollback without confirmation. When used, the existing deployment message is kept unless --message is provided. This is default in non-interactive mode (e.g. when --json is used)",
         )
+        deployment_rollback_parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Show what would be rolled back without actually rolling back. Displays the target deployment and reverted deployments.",
+        )
 
         return parser
 
@@ -1190,6 +1195,7 @@ class AgentStudioCLI:
                         args.message,
                         force=args.force,
                         output_json=args.json,
+                        dry_run=args.dry_run,
                     )
 
         except Exception as e:
@@ -3335,6 +3341,7 @@ class AgentStudioCLI:
         message: Optional[str] = None,
         force: bool = False,
         output_json: bool = False,
+        dry_run: bool = False,
     ) -> None:
         """Rollback sandbox/main to a previous deployment."""
         project = cls._load_project(base_path, output_json=output_json)
@@ -3362,13 +3369,39 @@ class AgentStudioCLI:
 
         deployment_metadata = deployment_version.get("deployment_metadata", {})
         deployment_message = deployment_metadata.get("deployment_message")
-        if not output_json and not force:
-            confirm_msg = (
-                f"Rolling back sandbox to deployment '{(deployment_version.get('version_hash') or '')[:9]}: "
-                f"{deployment_message or '-'}'?"
+
+        # Resolve reverted deployments (current sandbox -> target)
+        target_full_hash = deployment_version.get("version_hash", "")
+        current_sandbox_hash = active_deployment_hashes.get("sandbox")
+        reverted, _ = cls._resolve_included_deployments(
+            versions, current_sandbox_hash, target_full_hash
+        )
+
+        result = {
+            "success": False,
+            "target_hash": target_full_hash,
+            "message": message or deployment_message or "",
+            "reverted_deployments": reverted,
+        }
+
+        if not output_json:
+            plain(
+                f"Rolling back sandbox to deployment "
+                f"'[bold]{target_full_hash[:9]}[/bold]: {deployment_message or '-'}'"
             )
-            plain(f"{confirm_msg}")
-            if not questionary.confirm("Confirm?", default=False, auto_enter=False).ask():
+            if reverted:
+                plain(f"Reverting deployments ({len(reverted)}):")
+                print_deployments(reverted, {})
+
+        if dry_run:
+            if output_json:
+                json_print({**result, "dry_run": True})
+            else:
+                plain("[dim]Dry run — no changes were made.[/dim]")
+            return
+
+        if not output_json and not force:
+            if not questionary.confirm("Confirm Rollback?", default=False, auto_enter=False).ask():
                 warning("Aborted.")
                 sys.exit(0)
 
@@ -3377,12 +3410,12 @@ class AgentStudioCLI:
                 deployment_version.get("id"), message=message or deployment_message or ""
             )
             if output_json:
-                json_print({"success": True})
+                json_print({**result, "success": True})
             else:
                 success(f"Sandbox rolled back to deployment {deployment}.")
         except Exception as e:
             if output_json:
-                json_print({"success": False, "error": str(e)})
+                json_print({**result, "error": str(e)})
             else:
                 error(f"Failed to rollback deployment: {e}")
             sys.exit(1)
