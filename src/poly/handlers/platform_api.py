@@ -273,7 +273,7 @@ class PlatformAPIHandler:
                 "greeting": "Hello, how can I help you?",
             },
             "voiceSettings": {
-                "voiceId": "PLACEHOLDER",
+                "voiceId": "GZ3zQrAt2WDldEUul9JQ",
             },
         }
 
