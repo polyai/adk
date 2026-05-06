@@ -43,6 +43,7 @@ from poly.output.console import (
     output_merge_conflict_table,
     print_merge_conflict_interactive_header,
     print_deployments,
+    prompt_typed_edit,
 )
 from poly.output.json_output import json_print, commands_to_dicts
 from poly.handlers.github_api_handler import GitHubAPIHandler
@@ -2247,11 +2248,10 @@ class AgentStudioCLI:
         def _is_heavy_content(c: dict[str, Any]) -> bool:
             for key in ("baseValue", "theirsValue", "oursValue"):
                 v = c.get(key, "")
-                if not isinstance(v, str):
+                s = v if isinstance(v, str) else str(v)
+                if "\n" in s:
                     return True
-                if "\n" in v:
-                    return True
-                if len(v) > _BRANCH_MERGE_LONG_LINE_THRESHOLD:
+                if len(s) > _BRANCH_MERGE_LONG_LINE_THRESHOLD:
                     return True
             return False
 
@@ -2304,7 +2304,8 @@ class AgentStudioCLI:
                     {"name": "Use original (base)", "value": "base"},
                 ]
             )
-            if merged_version is not None:
+            original = conflict.get("theirsValue", conflict.get("oursValue"))
+            if not isinstance(original, dict):
                 choices.append({"name": "Edit manually", "value": "edit"})
 
             extension = ".py" if path[-1] == "code" else ".txt"
@@ -2319,9 +2320,18 @@ class AgentStudioCLI:
                 if answer == "merged":
                     resolutions.append(_auto_merge_resolution(path, merged_version))
                     break
-                if answer == "edit" and merged_version is not None:
+                if answer == "edit":
+                    if isinstance(original, (bool, int, float, list)):
+                        edited_val = prompt_typed_edit(original)
+                        if edited_val is None:
+                            return []
+                        resolutions.append(
+                            {"path": path, "value": edited_val, "strategy": "theirs"}
+                        )
+                        break
+
                     try:
-                        if heavy:
+                        if heavy and merged_version is not None:
                             edited = edit_in_editor(
                                 merged_version, extension=extension, filename=fk
                             )
