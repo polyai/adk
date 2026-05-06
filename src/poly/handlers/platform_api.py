@@ -137,7 +137,7 @@ class PlatformAPIHandler:
         )
 
         logger.debug(
-            f"Request/response url={url!r} headers={headers!r} body={data!r}"
+            f"Request/response url={url!r} body={data!r}"
             f" status_code={api_response.status_code!r} response={api_response.text!r}"
         )
 
@@ -145,8 +145,8 @@ class PlatformAPIHandler:
             api_response.raise_for_status()
         except requests.HTTPError:
             logger.debug(
-                f"Error in request. url={url!r} headers={headers!r} body={data!r}"
-                f" status_code={api_response.status_code!r} response={api_response.text!r}"
+                f"Error in request. url={url!r} status_code={api_response.status_code!r}"
+                f" response={api_response.text!r}"
             )
             raise
 
@@ -272,6 +272,9 @@ class PlatformAPIHandler:
             "responseSettings": {
                 "greeting": "Hello, how can I help you?",
             },
+            "voiceSettings": {
+                "voiceId": "VOICE-86f7b4cf",
+            },
         }
 
         correlation_id = f"adk-{uuid.uuid4()}"
@@ -292,13 +295,19 @@ class PlatformAPIHandler:
 
         try:
             response.raise_for_status()
-        except requests.HTTPError:
+        except requests.HTTPError as e:
             logger.debug(
                 f"Error creating project. url={url!r} status_code={response.status_code!r}"
                 f" response={response.text!r}"
             )
-            raise
+            try:
+                body = response.json()
+                message = body.get("error_message") or body.get("message") or body.get("error")
+            except (json.JSONDecodeError, KeyError, ValueError):
+                message = None
+            raise ValueError(message or f"{response.status_code} {response.reason}") from e
 
+        logger.info(f"Request to {url} successful")
         result = response.json()
         return {"id": result.get("agentId"), "name": result.get("agentName")}
 

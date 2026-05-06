@@ -257,7 +257,7 @@ class AgentStudioCLI:
         # CREATE-PROJECT
         create_project_parser = subparsers.add_parser(
             "create-project",
-            parents=[verbose_parent, json_parent],
+            parents=[verbose_parent, json_parent, debug_parent],
             help="Create a new Agent Studio project under an account.",
             description=(
                 "Create a new Agent Studio project under an interactively selected account.\n\n"
