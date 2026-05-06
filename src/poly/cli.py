@@ -88,7 +88,9 @@ def enrich_branch_merge_conflicts(conflicts: list[dict[str, Any]]) -> list[dict[
         if not path or path[-1] in {"updatedAt", "createdAt"}:
             out.append(row)
             continue
-        merged = merge_strings(row["baseValue"], row["theirsValue"], row["oursValue"])
+        merged = merge_strings(
+            row.get("baseValue", ""), row.get("theirsValue", ""), row.get("oursValue", "")
+        )
         fk = _branch_merge_conflict_file_key(path)
         row["visual_path"] = os.sep.join(path)
         row["merged_value"] = merged
@@ -2259,7 +2261,9 @@ class AgentStudioCLI:
             existing_resolution = existing_resolutions.get(clean_path)
             if merged_version is None:
                 merged_version = merge_strings(
-                    conflict["baseValue"], conflict["theirsValue"], conflict["oursValue"]
+                    conflict.get("baseValue", ""),
+                    conflict.get("theirsValue", ""),
+                    conflict.get("oursValue", ""),
                 )
             auto_merged = conflict.get("can_auto_merge")
             if auto_merged is None:
