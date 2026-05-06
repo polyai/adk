@@ -123,8 +123,8 @@ class PlatformAPIHandler:
             api_response.raise_for_status()
         except requests.HTTPError:
             logger.debug(
-                f"Error in request. url={url!r} status_code={api_response.status_code!r}"
-                f" response={api_response.text!r}"
+                f"Error in request. url={url!r} body={data!r}"
+                f" status_code={api_response.status_code!r} response={api_response.text!r}"
             )
             raise
 
@@ -243,6 +243,15 @@ class PlatformAPIHandler:
         if not project_id:
             project_id = project_name.lower().replace(" ", "-")
 
+        region_to_voice_id = {
+            "us-1": "VOICE-afe2b8e8",
+            "euw-1": "VOICE-7def3647",
+            "uk-1": "VOICE-37966683",
+            "dev": "VOICE-86f7b4cf",
+            "staging": "VOICE-86f7b4cf",
+        }
+        voice_id = region_to_voice_id.get(region, "VOICE-afe2b8e8")
+
         url = PlatformAPIHandler.get_agents_api_url(region) + f"/accounts/{account_id}/agents"
         data = {
             "name": project_name,
@@ -251,7 +260,7 @@ class PlatformAPIHandler:
                 "greeting": "Hello, how can I help you?",
             },
             "voiceSettings": {
-                "voiceId": "VOICE-86f7b4cf",
+                "voiceId": voice_id,
             },
         }
 
