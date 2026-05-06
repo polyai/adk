@@ -1387,17 +1387,24 @@ class AgentStudioCLI:
                 return
             project_id = project_id.strip()
 
-        if not output_json:
-            info(f"Creating project [bold]{project_name}[/bold] under account {account_id}...")
+        ctx = (
+            console.status(
+                f"[info]Creating project [bold]{project_name}[/bold]"
+                f" under account {account_id}...[/info]"
+            )
+            if not output_json
+            else nullcontext()
+        )
 
-        try:
-            result = api_handler.create_project(region, account_id, project_name, project_id)
-        except Exception as e:
-            if output_json:
-                json_print({"success": False, "error": str(e)})
-            else:
-                error(f"Failed to create project: {e}")
-            return
+        with ctx:
+            try:
+                result = api_handler.create_project(region, account_id, project_name, project_id)
+            except Exception as e:
+                if output_json:
+                    json_print({"success": False, "error": str(e)})
+                else:
+                    error(f"Failed to create project: {e}")
+                return
 
         project_id = result.get("id")
         if not project_id:
@@ -1409,7 +1416,6 @@ class AgentStudioCLI:
 
         if not output_json:
             success(f"Created project [bold]{project_name}[/bold] ({project_id})")
-            info("Initializing project locally...")
 
         cls.init_project(
             base_path,
@@ -1440,9 +1446,6 @@ class AgentStudioCLI:
                 }
             )
             sys.exit(1)
-
-        if not output_json:
-            info("Initialising project...")
 
         api_handler = AgentStudioInterface()
 
@@ -1564,16 +1567,15 @@ class AgentStudioCLI:
             projects = api_handler.get_projects(region, account_id)
             project_name = projects.get(project_id)
 
-        if not output_json:
-            info(f"Initializing project [bold]{account_id}/{project_id}[/bold]...")
-
         projection_json = cls._parse_from_projection_json(
             from_projection,
             json_errors=output_json or output_json_projection,
         )
 
         ctx = (
-            console.status("[info]Saving resources...[/info]") if not output_json else nullcontext()
+            console.status(f"[info]Initializing project {account_id}/{project_id}...[/info]")
+            if not output_json
+            else nullcontext()
         )
         on_save = None
 
