@@ -88,15 +88,20 @@ def enrich_branch_merge_conflicts(conflicts: list[dict[str, Any]]) -> list[dict[
         if not path or path[-1] in {"updatedAt", "createdAt"}:
             out.append(row)
             continue
-        merged = merge_strings(
-            row.get("baseValue", ""), row.get("theirsValue", ""), row.get("oursValue", "")
-        )
+        base_value = row.get("baseValue") or ""
+        theirs_value = row.get("theirsValue") or ""
+        ours_value = row.get("oursValue") or ""
         fk = _branch_merge_conflict_file_key(path)
         row["visual_path"] = os.sep.join(path)
-        row["merged_value"] = merged
-        row["can_auto_merge"] = not contains_merge_conflict(merged)
         row["file_key"] = fk
         row["conflicts_in_resource"] = counts[fk]
+        if all(isinstance(v, str) for v in [base_value, theirs_value, ours_value]):
+            merged = merge_strings(base_value, theirs_value, ours_value)
+            row["merged_value"] = merged
+            row["can_auto_merge"] = not contains_merge_conflict(merged)
+        else:
+            row["merged_value"] = None
+            row["can_auto_merge"] = False
         out.append(row)
     return out
 
@@ -2259,17 +2264,8 @@ class AgentStudioCLI:
             clean_path = conflict.get("visual_path") or os.sep.join(path)
             merged_version = conflict.get("merged_value")
             existing_resolution = existing_resolutions.get(clean_path)
-            if merged_version is None:
-                merged_version = merge_strings(
-                    conflict.get("baseValue", ""),
-                    conflict.get("theirsValue", ""),
-                    conflict.get("oursValue", ""),
-                )
             auto_merged = conflict.get("can_auto_merge")
-            if auto_merged is None:
-                auto_merged = not contains_merge_conflict(merged_version)
-
-            fk = conflict.get("file_key") or _branch_merge_conflict_file_key(path)
+            fk = conflict.get("file_key")
             index_in_resource[fk] = index_in_resource.get(fk, 0) + 1
             idx = index_in_resource[fk]
             total = int(conflict.get("conflicts_in_resource") or 1)
@@ -2306,9 +2302,10 @@ class AgentStudioCLI:
                     {"name": "Use main", "value": "ours"},
                     {"name": f"Use branch — {branch_label}", "value": "theirs"},
                     {"name": "Use original (base)", "value": "base"},
-                    {"name": "Edit in editor", "value": "edit"},
                 ]
             )
+            if merged_version is not None:
+                choices.append({"name": "Edit manually", "value": "edit"})
 
             extension = ".py" if path[-1] == "code" else ".txt"
 
@@ -2322,7 +2319,7 @@ class AgentStudioCLI:
                 if answer == "merged":
                     resolutions.append(_auto_merge_resolution(path, merged_version))
                     break
-                if answer == "edit":
+                if answer == "edit" and merged_version is not None:
                     try:
                         if heavy:
                             edited = edit_in_editor(
