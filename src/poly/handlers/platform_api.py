@@ -39,21 +39,12 @@ class PlatformAPIHandler:
         "studio": "https://api.studio.poly.ai/adk/v1",
     }
 
-    region_to_sourcerer_url = {
-        "dev": "https://sourcerer.dev.platform.polyai.app/api/v1",
-        "staging": "https://sourcerer.staging.platform.polyai.app/api/v1",
-        "euw-1": "https://sourcerer.euw-1.platform.polyai.app/api/v1",
-        "uk-1": "https://sourcerer.uk-1.platform.polyai.app/api/v1",
-        "us-1": "https://sourcerer.us-1.platform.polyai.app/api/v1",
-    }
-
     region_to_agents_api_url = {
         "dev": "https://api.dev.poly.ai/v1",
         "staging": "https://api.staging.poly.ai/v1",
         "euw-1": "https://api.eu.poly.ai/v1",
         "uk-1": "https://api.uk.poly.ai/v1",
         "us-1": "https://api.us.poly.ai/v1",
-        "studio": "https://api.studio.poly.ai/v1",
     }
 
     @staticmethod
@@ -66,19 +57,6 @@ class PlatformAPIHandler:
             str: The base URL for the Platform API
         """
         if base_url := PlatformAPIHandler.region_to_base_url.get(region):
-            return base_url
-        raise ValueError(f"Unknown region: {region}")
-
-    @staticmethod
-    def get_sourcerer_url(region: str) -> str:
-        """Get the Sourcerer API base URL for the given region.
-
-        Args:
-            region (str): The region name
-        Returns:
-            str: The Sourcerer API base URL
-        """
-        if base_url := PlatformAPIHandler.region_to_sourcerer_url.get(region):
             return base_url
         raise ValueError(f"Unknown region: {region}")
 
