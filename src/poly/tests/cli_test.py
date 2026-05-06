@@ -1435,3 +1435,43 @@ class DeploymentsShowTest(unittest.TestCase):
 
         payload = mock_json.call_args[0][0]
         self.assertEqual(payload["deployment"]["id"], "dep-1")
+class InitProjectTest(unittest.TestCase):
+    """Tests for the init_project interactive selection flow."""
+
+    @patch("poly.cli.AgentStudioProject.init_project")
+    @patch("poly.cli.AgentStudioInterface")
+    def test_init_with_explicit_ids_looks_up_project_name(self, mock_iface_cls, mock_init):
+        """When all IDs are provided, project name is looked up by project_id key."""
+        api = mock_iface_cls.return_value
+        api.get_projects.return_value = {"proj_1": "My Project"}
+        mock_init.return_value = (MagicMock(), None)
+
+        AgentStudioCLI.init_project(
+            TEST_DIR, region="eu-west-1", account_id="acc_1", project_id="proj_1"
+        )
+
+        mock_init.assert_called_once()
+        self.assertEqual(mock_init.call_args[1]["project_name"], "My Project")
+
+    @patch("poly.cli.AgentStudioInterface")
+    def test_init_exits_when_no_accounts(self, mock_iface_cls):
+        """When get_accounts returns empty dict, init exits with error."""
+        api = mock_iface_cls.return_value
+        api.get_accounts.return_value = {}
+
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.init_project(TEST_DIR, region="eu-west-1")
+
+        self.assertEqual(ctx.exception.code, 1)
+
+    @patch("poly.cli.AgentStudioInterface")
+    def test_init_exits_when_no_projects(self, mock_iface_cls):
+        """When get_projects returns empty dict, init exits with error."""
+        api = mock_iface_cls.return_value
+        api.get_accounts.return_value = {"acc_1": "Only Account"}
+        api.get_projects.return_value = {}
+
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.init_project(TEST_DIR, region="eu-west-1")
+
+        self.assertEqual(ctx.exception.code, 1)

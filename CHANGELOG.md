@@ -1,6 +1,91 @@
 # CHANGELOG
 
 
+## v0.16.2 (2026-05-05)
+
+### Bug Fixes
+
+- Key accounts/projects dicts by ID to prevent duplicate name collisions
+  ([#127](https://github.com/polyai/adk/pull/127),
+  [`b71b6a7`](https://github.com/polyai/adk/commit/b71b6a70aaa0939a437da5500f0727a5d6e86d0d))
+
+## Summary
+
+Fix `get_accounts` and `get_projects` to key by ID instead of name, preventing silent data loss when
+  accounts or projects share the same name. Also adds error handling when no accounts or projects
+  are found.
+
+## Motivation
+
+When two accounts (or projects) had the same display name, the old `name → id` dict would silently
+  overwrite one entry. This caused missing options during `poly init` interactive selection.
+  Additionally, empty account/project lists would fall through to `questionary.select` with no
+  choices, causing an unhelpful crash.
+
+## Changes
+
+- `PlatformAPIHandler.get_accounts` and `get_projects` now return `{id: name}` instead of `{name:
+  id}` - `init_project` uses `questionary.Choice` objects to display `"name (id)"` while selecting
+  by ID - Added early exit with clear error message when no accounts or projects are found -
+  Simplified project name lookup to `projects.get(project_id)` - Updated docstrings in
+  `interface.py` and `platform_api.py`
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.16.1 (2026-05-01)
+
+### Bug Fixes
+
+- Pass ADK region directly to SourcererSDK for correct API key lookup
+  ([#126](https://github.com/polyai/adk/pull/126),
+  [`3441444`](https://github.com/polyai/adk/commit/3441444b84728f24702288d8a680850d92eab92e))
+
+## Summary
+
+Pass the ADK region directly to `SourcererSDK` instead of decomposing it into `(region,
+  environment)` tuples, fixing incorrect API key lookup for dev/staging environments.
+
+## Motivation
+
+When using `POLY_ADK_KEY_DEV`, the dev environment incorrectly called `retrieve_api_key("us")` (the
+  decomposed region) instead of `retrieve_api_key("dev")`, falling back to the generic
+  `POLY_ADK_KEY` and ignoring the per-region key.
+
+## Changes
+
+- Removed `region_to_region_env` mapping from `SyncClientHandler` - `SourcererSDK` now takes the ADK
+  region directly (`"dev"`, `"us-1"`, etc.) instead of separate `region`/`environment` params -
+  `ENVIRONMENT_URLS` keys updated to use ADK region names (`"us-1"` instead of `"us-prod"`) -
+  `retrieve_api_key()` now receives the correct region for all environments
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.16.0 (2026-05-01)
 
 ### Bug Fixes

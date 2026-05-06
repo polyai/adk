@@ -161,7 +161,7 @@ class PlatformAPIHandler:
             region (str): The region name
 
         Returns:
-            dict[str, str]: A dictionary mapping account names to account IDs
+            dict[str, str]: A dictionary mapping account ids to account names
         """
         accounts = {}
         accounts_data = PlatformAPIHandler.make_request(region, ACCOUNTS_URL, "GET")
@@ -171,7 +171,7 @@ class PlatformAPIHandler:
 
         for account in accounts_data:
             if account.get("active", False) and account.get("id") and account.get("name"):
-                accounts[account.get("name")] = account.get("id")
+                accounts[account.get("id")] = account.get("name")
 
         return accounts
 
@@ -184,7 +184,7 @@ class PlatformAPIHandler:
             account_id (str): The account ID
 
         Returns:
-            dict[str, str]: A dictionary mapping project names to project IDs
+            dict[str, str]: A dictionary mapping project IDs to project names
         """
         projects = {}
         endpoint = PROJECTS_URL.format(account_id=account_id)
@@ -196,7 +196,7 @@ class PlatformAPIHandler:
 
         for project in projects_list:
             if project.get("id") and project.get("name"):
-                projects[project.get("name")] = project.get("id")
+                projects[project.get("id")] = project.get("name")
 
         return projects
 
