@@ -9,6 +9,7 @@ import base64
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -289,6 +290,12 @@ class AgentStudioCLI:
             type=str,
             dest="project_name",
             help="Name for the new project.",
+        )
+        create_project_parser.add_argument(
+            "--id",
+            type=str,
+            dest="project_id",
+            help="Optional slug/ID for the project. Defaults to a slugified version of the name.",
         )
 
         # PULL
@@ -986,6 +993,7 @@ class AgentStudioCLI:
                     region=args.region,
                     account_id=args.account_id,
                     project_name=args.project_name,
+                    project_id=args.project_id,
                     output_json=args.json,
                 )
 
@@ -1280,6 +1288,7 @@ class AgentStudioCLI:
         region: str = None,
         account_id: str = None,
         project_name: str = None,
+        project_id: str = None,
         output_json: bool = False,
     ) -> None:
         """Create a new Agent Studio project under an interactively selected account."""
@@ -1362,11 +1371,27 @@ class AgentStudioCLI:
                 return
             project_name = project_name.strip()
 
+        if not project_id:
+            default_id = re.sub(r"[^a-zA-Z0-9-]", "", project_name.lower().replace(" ", "-"))
+            default_id = default_id.strip("-") or ""
+            project_id = questionary.text(
+                "Enter project ID:",
+                default=default_id,
+                validate=lambda val: (
+                    True
+                    if re.fullmatch(r"[a-zA-Z0-9-]+", val)
+                    else "Project ID can only contain alphanumeric characters and dashes."
+                ),
+            ).ask()
+            if not project_id or not project_id.strip():
+                return
+            project_id = project_id.strip()
+
         if not output_json:
             info(f"Creating project [bold]{project_name}[/bold] under account {account_id}...")
 
         try:
-            result = api_handler.create_project(region, account_id, project_name)
+            result = api_handler.create_project(region, account_id, project_name, project_id)
         except Exception as e:
             if output_json:
                 json_print({"success": False, "error": str(e)})

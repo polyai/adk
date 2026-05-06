@@ -1274,10 +1274,13 @@ class CreateProjectTest(unittest.TestCase):
             region="us-1",
             account_id="acc-456",
             project_name="my-project",
+            project_id="proj-123",
             output_json=False,
         )
 
-        mock_iface.create_project.assert_called_once_with("us-1", "acc-456", "my-project")
+        mock_iface.create_project.assert_called_once_with(
+            "us-1", "acc-456", "my-project", "proj-123"
+        )
         mock_init.assert_called_once_with(
             TEST_DIR,
             region="us-1",
@@ -1292,9 +1295,9 @@ class CreateProjectTest(unittest.TestCase):
     def test_interactive_flow_selects_region_account_and_name(
         self, mock_q, mock_iface_cls, mock_init
     ):
-        """create-project with no args probes regions, prompts account/name."""
+        """create-project with no args probes regions, prompts account/name/id."""
         mock_q.select.return_value.ask.side_effect = ["us-1", "acc-789"]
-        mock_q.text.return_value.ask.return_value = "new-project"
+        mock_q.text.return_value.ask.side_effect = ["new-project", "new-project"]
 
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_accessible_regions.return_value = ["us-1", "euw-1"]
@@ -1311,7 +1314,9 @@ class CreateProjectTest(unittest.TestCase):
 
         mock_iface.get_accessible_regions.assert_called_once()
         mock_iface.get_accounts.assert_called_once_with("us-1")
-        mock_iface.create_project.assert_called_once_with("us-1", "acc-789", "new-project")
+        mock_iface.create_project.assert_called_once_with(
+            "us-1", "acc-789", "new-project", "new-project"
+        )
         mock_init.assert_called_once_with(
             TEST_DIR,
             region="us-1",
@@ -1325,7 +1330,7 @@ class CreateProjectTest(unittest.TestCase):
     @patch("poly.cli.questionary")
     def test_auto_selects_single_region_and_account(self, mock_q, mock_iface_cls, mock_init):
         """create-project auto-selects when only one region and one account."""
-        mock_q.text.return_value.ask.return_value = "new-project"
+        mock_q.text.return_value.ask.side_effect = ["new-project", "new-project"]
 
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_accessible_regions.return_value = ["us-1"]
@@ -1341,7 +1346,9 @@ class CreateProjectTest(unittest.TestCase):
         )
 
         mock_q.select.assert_not_called()
-        mock_iface.create_project.assert_called_once_with("us-1", "acc-789", "new-project")
+        mock_iface.create_project.assert_called_once_with(
+            "us-1", "acc-789", "new-project", "new-project"
+        )
 
     @patch("poly.cli.AgentStudioInterface")
     def test_json_mode_requires_all_args(self, mock_iface_cls):
@@ -1433,6 +1440,7 @@ class CreateProjectTest(unittest.TestCase):
             region="us-1",
             account_id="acc-300",
             project_name="bad-project",
+            project_id="bad-project",
             output_json=False,
         )
 
@@ -1451,6 +1459,7 @@ class CreateProjectTest(unittest.TestCase):
             region="us-1",
             account_id="acc-400",
             project_name="failing-project",
+            project_id="failing-project",
             output_json=True,
         )
 
@@ -1491,6 +1500,7 @@ class CreateProjectTest(unittest.TestCase):
             region="us-1",
             account_id="acc-500",
             project_name="orphan",
+            project_id="orphan",
             output_json=False,
         )
 
@@ -1505,7 +1515,7 @@ class CreateProjectTest(unittest.TestCase):
         mock_iface.get_accessible_regions.return_value = ["euw-1"]
         mock_iface.get_accounts.return_value = {"acc-600": "My Account"}
         mock_iface.create_project.return_value = {"id": "proj-007", "name": "spaced-name"}
-        mock_q.text.return_value.ask.return_value = "  spaced-name  "
+        mock_q.text.return_value.ask.side_effect = ["  spaced-name  ", "spaced-name"]
 
         AgentStudioCLI.create_project(
             TEST_DIR,
@@ -1515,4 +1525,29 @@ class CreateProjectTest(unittest.TestCase):
             output_json=False,
         )
 
-        mock_iface.create_project.assert_called_once_with("euw-1", "acc-600", "spaced-name")
+        mock_iface.create_project.assert_called_once_with(
+            "euw-1", "acc-600", "spaced-name", "spaced-name"
+        )
+
+    @patch("poly.cli.AgentStudioCLI.init_project")
+    @patch("poly.cli.AgentStudioInterface")
+    @patch("poly.cli.questionary")
+    def test_project_id_defaults_to_slugified_name(self, mock_q, mock_iface_cls, mock_init):
+        """create-project ID prompt defaults to lowercase hyphenated version of the name."""
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_accessible_regions.return_value = ["us-1"]
+        mock_iface.get_accounts.return_value = {"acc-1": "Acme"}
+        mock_iface.create_project.return_value = {"id": "my-new-project", "name": "My New Project"}
+        mock_q.text.return_value.ask.side_effect = ["My New Project", "my-new-project"]
+
+        AgentStudioCLI.create_project(
+            TEST_DIR,
+            region=None,
+            account_id=None,
+            project_name=None,
+            output_json=False,
+        )
+
+        mock_iface.create_project.assert_called_once_with(
+            "us-1", "acc-1", "My New Project", "my-new-project"
+        )
