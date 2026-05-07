@@ -114,7 +114,7 @@ class AgentStudioInterface:
             region (str): The region name
 
         Returns:
-            dict[str, str]: A dictionary mapping account names to account IDs
+            dict[str, str]: A dictionary mapping account ids to account names
         """
         return PlatformAPIHandler.get_accounts(region)
 
@@ -127,7 +127,7 @@ class AgentStudioInterface:
             account_id (str): The account ID
 
         Returns:
-            dict[str, str]: A dictionary mapping project names to project IDs
+            dict[str, str]: A dictionary mapping project IDs to project names
         """
         return PlatformAPIHandler.get_projects(region, account_id)
 
