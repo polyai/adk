@@ -401,7 +401,7 @@ Use `--output` to write the documentation to a local file. This is useful when w
 
 ### `poly deployments`
 
-List deployments for the project.
+List and inspect deployments for the project.
 
 Examples:
 
@@ -409,7 +409,13 @@ Examples:
 poly deployments list
 poly deployments list --env live
 poly deployments list --details
+poly deployments show abc123def
+poly deployments show abc123def --env live
 ~~~
+
+#### `poly deployments list`
+
+List deployments for the project.
 
 | Flag | Description |
 |---|---|
@@ -419,6 +425,33 @@ poly deployments list --details
 !!! tip "Use `--details` for readable output"
 
     The default tabular view may wrap long URLs across multiple rows, making it unreadable in narrow terminals. `--details` produces a vertical layout that is easier to read.
+
+#### `poly deployments show`
+
+Show detailed metadata for a specific deployment and the sandbox deployments included since the previous version in the given environment.
+
+~~~bash
+poly deployments show <hash>
+poly deployments show <hash> --env live
+poly deployments show <hash> --json
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `hash` | Version hash (or prefix) of the deployment to show. A 9-character prefix is sufficient. |
+| `--env`, `-e` | Environment to query. Choices: `sandbox`, `pre-release`, `live`. Defaults to `sandbox`. |
+| `--json` | Emit machine-readable JSON output. |
+
+The command displays:
+
+- **Deployment metadata** — version hash, deployment type, date, author, deployment ID, artifact version, lambda deployment version, client environment, and message.
+- **Active environment badges** — indicates whether the version is currently active in sandbox, pre-release, or live.
+- **Included deployments** — the sandbox deployments bundled since the previous version in the queried environment. For promotions to pre-release or live, this shows which sandbox versions were promoted together.
+- **Reverted deployments** — if the deployment is a rollback to an older version, the section is labelled "Reverted deployments" instead of "Included deployments" and lists the versions being reverted.
+
+!!! info "Sandbox is the source of truth for version history"
+
+    For pre-release and live environments, included deployments are always resolved from the sandbox linear history. Pre-release and live only contain promotions that reference sandbox version hashes.
 
 ## Machine-readable JSON output
 
@@ -442,6 +475,7 @@ poly format --json
 poly init --region us-1 --account_id 123 --project_id my_project --json
 poly chat --json -m 'Hello'
 poly chat --json --input-file ./script.txt
+poly deployments show abc123def --json
 ~~~
 
 When `--json` is used:
@@ -475,10 +509,18 @@ The exact fields vary by command. Common fields include:
 | `poly format --json` | `success`, `check_only`, `format_errors`, `affected`, `ty_ran`, `ty_returncode`, `ty_timed_out` |
 | `poly init --json` | `success`, `root_path` |
 | `poly chat --json` | `conversations` (array); optional `push` (when `--push` is used) |
+| `poly deployments show --json` | `success`, `deployment`, `active_deployment_hashes`, `included_deployments`, `is_rollback` |
 
 For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
 
 For `poly branch merge --json`, a successful merge returns `{ "success": true }`. When conflicts or errors are present, the response includes `"conflicts"` and `"errors"` arrays containing the raw conflict and error objects from the platform.
+
+For `poly deployments show --json`, the response includes:
+
+- `deployment` — the full deployment record for the requested version hash.
+- `active_deployment_hashes` — a map of environment names to the currently active version hash in each environment.
+- `included_deployments` — the list of sandbox deployments included since the predecessor version in the queried environment.
+- `is_rollback` — `true` if the deployment is a rollback to an older version.
 
 Error responses always include `{ "success": false, "error": "...", "traceback": "..." }`.
 
