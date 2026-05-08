@@ -484,14 +484,14 @@ def print_deployments(
             artifact_version = version.get("artifact_version")
             lambda_deployment_version = version.get("function_deployment_version")
             console.print(
-                f"([cyan]{deployment_type}[/cyan]) [bold][yellow]{version_hash}[/yellow][/bold] {badges_str}"
+                f"([cyan]{deployment_type or '—'}[/cyan]) [bold][yellow]{(version_hash or '')[:9]}[/yellow][/bold] {badges_str}"
             )
             console.print(f"Date: {created_at}")
-            console.print(f"By: {created_by}")
-            console.print(f"Deployment ID: {deployment_id}")
-            console.print(f"Artifact Version: {artifact_version}")
-            console.print(f"Lambda Deployment Version: {lambda_deployment_version}")
-            console.print(f"Client Environment: {client_env}")
+            console.print(f"By: {created_by or '—'}")
+            console.print(f"Deployment ID: {deployment_id or '—'}")
+            console.print(f"Artifact Version: {artifact_version or '—'}")
+            console.print(f"Lambda Deployment Version: {lambda_deployment_version or '—'}")
+            console.print(f"Client Environment: {client_env or '—'}")
             console.print(f"Message: {deployment_message}")
             console.print()
 
@@ -535,15 +535,15 @@ def print_deployment_show(
     badges_str = " ".join(badges) if badges else ""
 
     console.print(
-        f"([cyan]{deployment_type}[/cyan]) "
-        f"[bold][yellow]{version_hash}[/yellow][/bold] {badges_str}"
+        f"([cyan]{deployment_type or '—'}[/cyan]) "
+        f"[bold][yellow]{(version_hash or '')[:9]}[/yellow][/bold] {badges_str}"
     )
     console.print(f"Date: {created_at}")
-    console.print(f"By: {created_by}")
-    console.print(f"Deployment ID: {deployment_id}")
-    console.print(f"Artifact Version: {artifact_version}")
-    console.print(f"Lambda Deployment Version: {lambda_deployment_version}")
-    console.print(f"Client Environment: {client_env}")
+    console.print(f"By: {created_by or '—'}")
+    console.print(f"Deployment ID: {deployment_id or '—'}")
+    console.print(f"Artifact Version: {artifact_version or '—'}")
+    console.print(f"Lambda Deployment Version: {lambda_deployment_version or '—'}")
+    console.print(f"Client Environment: {client_env or '—'}")
     console.print(f"Message: {deployment_message}")
     console.print()
 

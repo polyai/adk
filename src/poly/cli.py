@@ -17,7 +17,7 @@ from argparse import SUPPRESS, ArgumentParser, RawTextHelpFormatter
 from contextlib import nullcontext
 from importlib.metadata import version as get_package_version
 from collections import Counter
-from typing import Any, Optional, Any
+from typing import Any, Optional
 
 import argcomplete
 import requests
@@ -3255,9 +3255,9 @@ class AgentStudioCLI:
 
         Args:
             sandbox_versions: Full sandbox deployment list (newest first).
-            target_hash: Version hash of the deployment being promoted.
-            predecessor_hash: Version hash of the current active deployment in
-                the target env, or None if this is the first deployment.
+            target_hash: Version hash of the target deployment.
+            predecessor_hash: Version hash of the deployment being replaced
+                in the target env, or None if this is the first deployment.
 
         Returns:
             Tuple of (included deployments, is_rollback).
