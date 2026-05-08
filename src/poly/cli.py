@@ -922,7 +922,7 @@ class AgentStudioCLI:
 
         deployment_list_parser = deployments_subparsers.add_parser(
             "list",
-            parents=[deployments_path_parent, json_parent],
+            parents=[deployments_path_parent, json_parent, verbose_parent],
             help="List deployments for the project.",
             description=(
                 "List deployments for the project.\n\n"
@@ -962,6 +962,82 @@ class AgentStudioCLI:
             "--details",
             action="store_true",
             help="Output each deployment with detailed information.",
+        )
+
+        deployment_promote_parser = deployments_subparsers.add_parser(
+            "promote",
+            parents=[deployments_path_parent, json_parent, verbose_parent, debug_parent],
+            help="Promote a deployment to the next environment.",
+            description=(
+                "Promote a deployment to the next environment.\n\nExamples:\n  poly deployments promote --from <deployment_id> --to <target_env>\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        deployment_promote_parser.add_argument(
+            "--from",
+            dest="from_deployment",
+            type=str,
+            required=True,
+            help="ID/env of the deployment to promote.",
+        )
+        deployment_promote_parser.add_argument(
+            "--to",
+            dest="to_env",
+            type=str,
+            required=True,
+            choices=["pre-release", "live"],
+            help="Target environment to promote to.",
+        )
+        deployment_promote_parser.add_argument(
+            "--message",
+            "-m",
+            type=str,
+            required=False,
+            help="Optional message to include with the promotion (e.g. release notes or changelog). If not specified, current deployment message will be used instead",
+        )
+        deployment_promote_parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Force the promotion without confirmation. When used, the existing deployment message is kept unless --message is provided. This is default in non-interactive mode (e.g. when --json is used)",
+        )
+        deployment_promote_parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Show what would be promoted without actually promoting. Displays the deployment hash, target environment, and changes included.",
+        )
+
+        deployment_rollback_parser = deployments_subparsers.add_parser(
+            "rollback",
+            parents=[deployments_path_parent, json_parent, verbose_parent, debug_parent],
+            help="Rollback sandbox/main to a previous version.",
+            description=(
+                "Rollback a deployment to a previous version.\n\nExamples:\n  poly deployments rollback --to <deployment_id>\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        deployment_rollback_parser.add_argument(
+            "--to",
+            dest="to_deployment",
+            type=str,
+            required=True,
+            help="ID/env of the deployment to rollback to.",
+        )
+        deployment_rollback_parser.add_argument(
+            "--message",
+            "-m",
+            type=str,
+            required=False,
+            help="Optional message to include with the rollback (e.g. release notes or changelog). If not specified, current deployment message will be used instead",
+        )
+        deployment_rollback_parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Force the rollback without confirmation. When used, the existing deployment message is kept unless --message is provided. This is default in non-interactive mode (e.g. when --json is used)",
+        )
+        deployment_rollback_parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Show what would be rolled back without actually rolling back. Displays the target deployment and reverted deployments.",
         )
 
         return parser
@@ -1155,6 +1231,25 @@ class AgentStudioCLI:
                         args.hash,
                         args.json,
                         args.details,
+                    )
+                elif args.deployments_subcommand == "promote":
+                    cls.deployments_promote(
+                        args.path,
+                        args.from_deployment,
+                        args.to_env,
+                        args.message,
+                        force=args.force,
+                        output_json=args.json,
+                        dry_run=args.dry_run,
+                    )
+                elif args.deployments_subcommand == "rollback":
+                    cls.deployments_rollback(
+                        args.path,
+                        args.to_deployment,
+                        args.message,
+                        force=args.force,
+                        output_json=args.json,
+                        dry_run=args.dry_run,
                     )
 
         except Exception as e:
@@ -3299,6 +3394,266 @@ class AgentStudioCLI:
             json_print(json_output)
         else:
             print_deployments(versions, active_deployment_hashes, details=details)
+
+    @staticmethod
+    def _resolve_included_deployments(
+        sandbox_versions: list[dict[str, Any]],
+        target_hash: str,
+        predecessor_hash: str | None,
+    ) -> tuple[list[dict[str, Any]], bool]:
+        """Slice sandbox history to find deployments between two versions.
+
+        For promotions (target is newer), returns deployments from target
+        to predecessor (target inclusive, predecessor exclusive).
+        For rollbacks (target is older), returns deployments from predecessor
+        to target (predecessor inclusive, target exclusive) — the versions
+        being reverted.
+
+        Args:
+            sandbox_versions: Full sandbox deployment list (newest first).
+            target_hash: Version hash of the deployment being promoted.
+            predecessor_hash: Version hash of the current active deployment in
+                the target env, or None if this is the first deployment.
+
+        Returns:
+            Tuple of (included deployments, is_rollback).
+        """
+        target_idx = next(
+            (i for i, v in enumerate(sandbox_versions) if v.get("version_hash") == target_hash),
+            None,
+        )
+        if target_idx is None:
+            return [], False
+
+        if not predecessor_hash:
+            return sandbox_versions[target_idx:], False
+
+        pred_idx = next(
+            (
+                i
+                for i, v in enumerate(sandbox_versions)
+                if v.get("version_hash") == predecessor_hash
+            ),
+            None,
+        )
+        if pred_idx is None:
+            return sandbox_versions[target_idx:], False
+
+        if pred_idx < target_idx:
+            return sandbox_versions[pred_idx:target_idx], True
+
+        return sandbox_versions[target_idx:pred_idx], False
+
+    @classmethod
+    def deployments_promote(
+        cls,
+        base_path: str,
+        from_deployment: str,
+        to_env: str,
+        message: Optional[str] = None,
+        force: bool = False,
+        output_json: bool = False,
+        dry_run: bool = False,
+    ) -> None:
+        """Promote a deployment to a different environment.
+
+        Args:
+            base_path: Base path for the project.
+            from_deployment: Version hash of the deployment to promote.
+            to_env: Target environment to promote to — pre-release or live.
+            force: If True, bypass confirmation prompt.
+            message: Optional deployment message to include with the promotion (defaults to original deployment message).
+            output_json: If True, print result as JSON instead of rich text.
+            dry_run: If True, show what would be promoted without actually promoting.
+        """
+        project = cls._load_project(base_path, output_json=output_json)
+
+        result: dict = {"success": False, "to_env": to_env}
+        deployment_hash = None
+
+        if to_env not in ["pre-release", "live"]:
+            msg = f"Invalid target environment '{to_env}'. Must be 'pre-release' or 'live'."
+            if output_json:
+                json_print({**result, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        if to_env == "live":
+            search_env = "pre-release"
+        else:
+            search_env = "sandbox"
+        versions, active_deployment_hashes = project.get_deployments(search_env)
+
+        # Resolve from_deployment to full version hash
+        if from_deployment in active_deployment_hashes:
+            deployment_hash = active_deployment_hashes[from_deployment]
+        else:
+            deployment_hash = from_deployment
+
+        deployment_version = next(
+            (v for v in versions if (v.get("version_hash") or "")[:9] == deployment_hash[:9]),
+            None,
+        )
+
+        if not deployment_version:
+            msg = f"Deployment '{from_deployment}' not found in {search_env}."
+            if output_json:
+                json_print({**result, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        deployment_metadata = deployment_version.get("deployment_metadata", {})
+        deployment_message = deployment_metadata.get("deployment_message")
+
+        result["from_hash"] = deployment_version.get("version_hash", "")
+        result["message"] = message or deployment_message or ""
+
+        # Resolve included deployments using sandbox as the linear history
+        target_full_hash = deployment_version.get("version_hash", "")
+        predecessor_hash = active_deployment_hashes.get(to_env)
+
+        if search_env == "sandbox":
+            sandbox_versions = versions
+        else:
+            sandbox_versions, _ = project.get_deployments("sandbox")
+
+        included, is_rollback = cls._resolve_included_deployments(
+            sandbox_versions, target_full_hash, predecessor_hash
+        )
+        result["included_deployments"] = included
+
+        if not output_json:
+            plain(f"Promoting hash [bold]{result['from_hash'][:9]}[/bold] to [info]{to_env}[/info]")
+            if is_rollback:
+                plain(f"Rolling back to an earlier version: {deployment_message or '-'}")
+            elif not predecessor_hash:
+                plain(f"First deployment to {to_env}.")
+            if included:
+                label = "Reverting deployments" if is_rollback else "Included deployments"
+                plain(f"{label} ({len(included)}):")
+                print_deployments(included, {})
+
+        if dry_run:
+            if output_json:
+                json_print({**result, "dry_run": True})
+            else:
+                plain("[dim]Dry run — no changes were made.[/dim]")
+            return
+
+        if not output_json and not force:
+            if not questionary.confirm(
+                "Confirm Deployment?", default=False, auto_enter=False
+            ).ask():
+                warning("Aborted.")
+                sys.exit(0)
+
+            if not message:
+                message = questionary.text("Deployment message (default: merge message):").ask()
+                result["message"] = message or deployment_message or ""
+
+        try:
+            project.promote_deployment(
+                deployment_version.get("id"), to_env, message=result["message"]
+            )
+            if output_json:
+                json_print({**result, "success": True})
+            else:
+                success(f"Deployment {from_deployment} promoted to {to_env}.")
+        except Exception as e:
+            if output_json:
+                json_print({**result, "error": str(e)})
+            else:
+                error(f"Failed to promote deployment: {e}")
+            sys.exit(1)
+
+    @classmethod
+    def deployments_rollback(
+        cls,
+        base_path: str,
+        deployment: str,
+        message: Optional[str] = None,
+        force: bool = False,
+        output_json: bool = False,
+        dry_run: bool = False,
+    ) -> None:
+        """Rollback sandbox/main to a previous deployment."""
+        project = cls._load_project(base_path, output_json=output_json)
+
+        versions, active_deployment_hashes = project.get_deployments("sandbox")
+
+        # Resolve deployment to full version hash
+        if deployment in active_deployment_hashes:
+            deployment_hash = active_deployment_hashes[deployment]
+        else:
+            deployment_hash = deployment
+
+        deployment_version = next(
+            (v for v in versions if v.get("version_hash", "")[:9] == deployment_hash[:9]),
+            None,
+        )
+
+        if not deployment_version:
+            msg = f"Deployment '{deployment}' not found in sandbox."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        deployment_metadata = deployment_version.get("deployment_metadata", {})
+        deployment_message = deployment_metadata.get("deployment_message")
+
+        # Resolve reverted deployments (current sandbox -> target)
+        target_full_hash = deployment_version.get("version_hash", "")
+        current_sandbox_hash = active_deployment_hashes.get("sandbox")
+        reverted, _ = cls._resolve_included_deployments(
+            versions, current_sandbox_hash, target_full_hash
+        )
+
+        result = {
+            "success": False,
+            "target_hash": target_full_hash,
+            "message": message or deployment_message or "",
+            "reverted_deployments": reverted,
+        }
+
+        if not output_json:
+            plain(
+                f"Rolling back sandbox to deployment "
+                f"'[bold]{target_full_hash[:9]}[/bold]: {deployment_message or '-'}'"
+            )
+            if reverted:
+                plain(f"Reverting deployments ({len(reverted)}):")
+                print_deployments(reverted, {})
+
+        if dry_run:
+            if output_json:
+                json_print({**result, "dry_run": True})
+            else:
+                plain("[dim]Dry run — no changes were made.[/dim]")
+            return
+
+        if not output_json and not force:
+            if not questionary.confirm("Confirm Rollback?", default=False, auto_enter=False).ask():
+                warning("Aborted.")
+                sys.exit(0)
+
+        try:
+            project.rollback_deployment(
+                deployment_version.get("id"), message=message or deployment_message or ""
+            )
+            if output_json:
+                json_print({**result, "success": True})
+            else:
+                success(f"Sandbox rolled back to deployment {deployment}.")
+        except Exception as e:
+            if output_json:
+                json_print({**result, "error": str(e)})
+            else:
+                error(f"Failed to rollback deployment: {e}")
+            sys.exit(1)
 
 
 def main():
