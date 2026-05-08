@@ -607,6 +607,8 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
         table = rendered.renderable if isinstance(rendered, Panel) else rendered
         self.assertEqual(len(table.columns), 1)
         self.assertEqual(len(table.rows), 1)
+
+
 class ChatLoopTest(unittest.TestCase):
     """Tests for AgentStudioCLI._run_chat_loop.
 
@@ -616,7 +618,10 @@ class ChatLoopTest(unittest.TestCase):
 
     def setUp(self):
         self.proj = MagicMock()
-        self.proj.send_message.return_value = {"response": "Agent reply", "conversation_ended": False}
+        self.proj.send_message.return_value = {
+            "response": "Agent reply",
+            "conversation_ended": False,
+        }
         self.proj.end_chat.return_value = None
         self.proj.get_conversation_url.return_value = "https://example.com/conv-123"
 
@@ -1179,6 +1184,471 @@ class PrintDeploymentsTest(unittest.TestCase):
         self.assertTrue(call_kwargs["details"])
 
 
+class DeploymentsPromoteTest(unittest.TestCase):
+    """Tests for AgentStudioCLI.deployments_promote."""
+
+    VERSIONS = [
+        {
+            "id": "dep-1",
+            "version_hash": "abc123456xyz",
+            "deployment_metadata": {"deployment_message": "initial release"},
+        },
+        {
+            "id": "dep-2",
+            "version_hash": "def789012xyz",
+            "deployment_metadata": {"deployment_message": "hotfix"},
+        },
+    ]
+    ACTIVE_HASHES = {"sandbox": "abc123456xyz", "pre-release": "def789012xyz"}
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli.AgentStudioCLI._load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.get_deployments.return_value = (list(self.VERSIONS), dict(self.ACTIVE_HASHES))
+        self.proj.promote_deployment.return_value = True
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.cli.json_print")
+    def test_promote_happy_path_json(self, mock_json):
+        """Promote with --json prints success and calls promote_deployment."""
+        AgentStudioCLI.deployments_promote(
+            TEST_DIR,
+            from_deployment="abc123456",
+            to_env="pre-release",
+            message="ship it",
+            force=True,
+            output_json=True,
+        )
+
+        self.proj.promote_deployment.assert_called_once_with(
+            "dep-1", "pre-release", message="ship it"
+        )
+        payload = mock_json.call_args[0][0]
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["from_hash"], "abc123456xyz")
+        self.assertIn("included_deployments", payload)
+
+    @patch("poly.cli.success")
+    def test_promote_happy_path_force(self, mock_success):
+        """Promote with --force skips confirmation and prints success."""
+        AgentStudioCLI.deployments_promote(
+            TEST_DIR,
+            from_deployment="abc123456",
+            to_env="pre-release",
+            message="ship it",
+            force=True,
+            output_json=False,
+        )
+
+        self.proj.promote_deployment.assert_called_once()
+        mock_success.assert_called_once()
+
+    def test_promote_to_live_searches_pre_release_and_sandbox(self):
+        """Promoting to live fetches pre-release then sandbox for linear history."""
+        AgentStudioCLI.deployments_promote(
+            TEST_DIR,
+            from_deployment="def789012",
+            to_env="live",
+            force=True,
+            output_json=True,
+        )
+
+        calls = self.proj.get_deployments.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0][0], ("pre-release",))
+        self.assertEqual(calls[1][0], ("sandbox",))
+
+    def test_promote_to_pre_release_searches_sandbox(self):
+        """Promoting to pre-release fetches deployments from sandbox."""
+        AgentStudioCLI.deployments_promote(
+            TEST_DIR,
+            from_deployment="abc123456",
+            to_env="pre-release",
+            force=True,
+            output_json=True,
+        )
+
+        self.proj.get_deployments.assert_called_once_with("sandbox")
+
+    @patch("poly.cli.json_print")
+    def test_promote_rollback_returns_reverted_deployments(self, mock_json):
+        """Promoting to an older version returns the deployments being reverted.
+
+        sandbox: [dep-1(newest), dep-2(oldest)]
+        active pre-release = dep-1 (newer), promoting dep-2 (older)
+        → rollback: included = sandbox[0:1] = [dep-1] (the version being reverted)
+        """
+        active = {"sandbox": "abc123456xyz", "pre-release": "abc123456xyz"}
+        self.proj.get_deployments.return_value = (list(self.VERSIONS), active)
+
+        AgentStudioCLI.deployments_promote(
+            TEST_DIR,
+            from_deployment="def789012",
+            to_env="pre-release",
+            force=True,
+            output_json=True,
+        )
+
+        payload = mock_json.call_args[0][0]
+        included_ids = [d["id"] for d in payload["included_deployments"]]
+        self.assertEqual(included_ids, ["dep-1"])
+
+    @patch("poly.cli.json_print")
+    def test_promote_resolves_env_name_to_hash(self, mock_json):
+        """Passing an env name like 'sandbox' resolves via active_deployment_hashes."""
+        AgentStudioCLI.deployments_promote(
+            TEST_DIR,
+            from_deployment="sandbox",
+            to_env="pre-release",
+            force=True,
+            output_json=True,
+        )
+
+        # sandbox -> abc123456xyz -> matches dep-1
+        self.proj.promote_deployment.assert_called_once_with(
+            "dep-1", "pre-release", message="initial release"
+        )
+
+    @patch("poly.cli.json_print")
+    def test_promote_not_found_json(self, mock_json):
+        """Promote with unknown hash prints error JSON and exits."""
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.deployments_promote(
+                TEST_DIR,
+                from_deployment="zzz999999",
+                to_env="pre-release",
+                force=True,
+                output_json=True,
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_json.assert_called_once()
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("not found", payload["error"])
+
+    @patch("poly.cli.error")
+    def test_promote_not_found_rich(self, mock_error):
+        """Promote with unknown hash prints error and exits."""
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI.deployments_promote(
+                TEST_DIR,
+                from_deployment="zzz999999",
+                to_env="pre-release",
+                force=True,
+                output_json=False,
+            )
+
+        mock_error.assert_called_once()
+        self.assertIn("not found", mock_error.call_args[0][0])
+
+    @patch("poly.cli.json_print")
+    def test_promote_api_error_json(self, mock_json):
+        """API exception during promote prints error JSON and exits."""
+        self.proj.promote_deployment.side_effect = RuntimeError("API down")
+
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.deployments_promote(
+                TEST_DIR,
+                from_deployment="abc123456",
+                to_env="pre-release",
+                force=True,
+                output_json=True,
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("API down", payload["error"])
+
+    @patch("poly.cli.error")
+    def test_promote_api_error_rich(self, mock_error):
+        """API exception during promote prints error and exits."""
+        self.proj.promote_deployment.side_effect = RuntimeError("API down")
+
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI.deployments_promote(
+                TEST_DIR,
+                from_deployment="abc123456",
+                to_env="pre-release",
+                force=True,
+                output_json=False,
+            )
+
+        mock_error.assert_called_once()
+        self.assertIn("API down", mock_error.call_args[0][0])
+
+    @patch("poly.cli.questionary")
+    @patch("poly.cli.warning")
+    def test_promote_user_aborts_confirmation(self, mock_warning, mock_q):
+        """User declining confirmation aborts with exit 0."""
+        mock_q.confirm.return_value.ask.return_value = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.deployments_promote(
+                TEST_DIR,
+                from_deployment="abc123456",
+                to_env="pre-release",
+                force=False,
+                output_json=False,
+            )
+
+        self.assertEqual(ctx.exception.code, 0)
+        mock_warning.assert_called_once()
+        self.proj.promote_deployment.assert_not_called()
+
+    @patch("poly.cli.json_print")
+    def test_promote_uses_deployment_message_when_no_message_provided(self, mock_json):
+        """When --message is not given, the existing deployment_message is used."""
+        AgentStudioCLI.deployments_promote(
+            TEST_DIR,
+            from_deployment="abc123456",
+            to_env="pre-release",
+            message=None,
+            force=True,
+            output_json=True,
+        )
+
+        self.proj.promote_deployment.assert_called_once_with(
+            "dep-1", "pre-release", message="initial release"
+        )
+
+    @patch("poly.cli.json_print")
+    def test_promote_custom_message_overrides_deployment_message(self, mock_json):
+        """When --message is provided, it overrides the deployment_message."""
+        AgentStudioCLI.deployments_promote(
+            TEST_DIR,
+            from_deployment="abc123456",
+            to_env="pre-release",
+            message="custom notes",
+            force=True,
+            output_json=True,
+        )
+
+        self.proj.promote_deployment.assert_called_once_with(
+            "dep-1", "pre-release", message="custom notes"
+        )
+
+
+class DeploymentsRollbackTest(unittest.TestCase):
+    """Tests for AgentStudioCLI.deployments_rollback."""
+
+    VERSIONS = [
+        {
+            "id": "dep-1",
+            "version_hash": "abc123456xyz",
+            "deployment_metadata": {"deployment_message": "initial release"},
+        },
+        {
+            "id": "dep-2",
+            "version_hash": "def789012xyz",
+            "deployment_metadata": {"deployment_message": "hotfix"},
+        },
+    ]
+    ACTIVE_HASHES = {"sandbox": "abc123456xyz"}
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli.AgentStudioCLI._load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.get_deployments.return_value = (list(self.VERSIONS), dict(self.ACTIVE_HASHES))
+        self.proj.rollback_deployment.return_value = True
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.cli.json_print")
+    def test_rollback_happy_path_json(self, mock_json):
+        """Rollback with --json prints success and calls rollback_deployment."""
+        AgentStudioCLI.deployments_rollback(
+            TEST_DIR,
+            deployment="def789012",
+            message="revert",
+            force=True,
+            output_json=True,
+        )
+
+        self.proj.rollback_deployment.assert_called_once_with("dep-2", message="revert")
+        mock_json.assert_called_once()
+        payload = mock_json.call_args[0][0]
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["target_hash"], "def789012xyz")
+        self.assertEqual(payload["message"], "revert")
+        self.assertIn("reverted_deployments", payload)
+
+    @patch("poly.cli.success")
+    def test_rollback_happy_path_force(self, mock_success):
+        """Rollback with --force skips confirmation and prints success."""
+        AgentStudioCLI.deployments_rollback(
+            TEST_DIR,
+            deployment="def789012",
+            message="revert",
+            force=True,
+            output_json=False,
+        )
+
+        self.proj.rollback_deployment.assert_called_once()
+        mock_success.assert_called_once()
+
+    def test_rollback_always_searches_sandbox(self):
+        """Rollback always fetches deployments from sandbox."""
+        AgentStudioCLI.deployments_rollback(
+            TEST_DIR,
+            deployment="abc123456",
+            force=True,
+            output_json=True,
+        )
+
+        self.proj.get_deployments.assert_called_once_with("sandbox")
+
+    @patch("poly.cli.json_print")
+    def test_rollback_resolves_env_name_to_hash(self, mock_json):
+        """Passing 'sandbox' as deployment resolves via active_deployment_hashes."""
+        AgentStudioCLI.deployments_rollback(
+            TEST_DIR,
+            deployment="sandbox",
+            force=True,
+            output_json=True,
+        )
+
+        # sandbox -> abc123456xyz -> matches dep-1
+        self.proj.rollback_deployment.assert_called_once_with("dep-1", message="initial release")
+
+    @patch("poly.cli.json_print")
+    def test_rollback_not_found_json(self, mock_json):
+        """Rollback with unknown hash prints error JSON and exits."""
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.deployments_rollback(
+                TEST_DIR,
+                deployment="zzz999999",
+                force=True,
+                output_json=True,
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("not found", payload["error"])
+
+    @patch("poly.cli.error")
+    def test_rollback_not_found_rich(self, mock_error):
+        """Rollback with unknown hash prints error and exits."""
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI.deployments_rollback(
+                TEST_DIR,
+                deployment="zzz999999",
+                force=True,
+                output_json=False,
+            )
+
+        mock_error.assert_called_once()
+        self.assertIn("not found", mock_error.call_args[0][0])
+
+    @patch("poly.cli.json_print")
+    def test_rollback_api_error_json(self, mock_json):
+        """API exception during rollback prints error JSON and exits."""
+        self.proj.rollback_deployment.side_effect = RuntimeError("timeout")
+
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.deployments_rollback(
+                TEST_DIR,
+                deployment="abc123456",
+                force=True,
+                output_json=True,
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("timeout", payload["error"])
+
+    @patch("poly.cli.error")
+    def test_rollback_api_error_rich(self, mock_error):
+        """API exception during rollback prints error and exits."""
+        self.proj.rollback_deployment.side_effect = RuntimeError("timeout")
+
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI.deployments_rollback(
+                TEST_DIR,
+                deployment="abc123456",
+                force=True,
+                output_json=False,
+            )
+
+        mock_error.assert_called_once()
+        self.assertIn("timeout", mock_error.call_args[0][0])
+
+    @patch("poly.cli.questionary")
+    @patch("poly.cli.warning")
+    def test_rollback_user_aborts_confirmation(self, mock_warning, mock_q):
+        """User declining confirmation aborts with exit 0."""
+        mock_q.confirm.return_value.ask.return_value = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.deployments_rollback(
+                TEST_DIR,
+                deployment="abc123456",
+                force=False,
+                output_json=False,
+            )
+
+        self.assertEqual(ctx.exception.code, 0)
+        mock_warning.assert_called_once()
+        self.proj.rollback_deployment.assert_not_called()
+
+    @patch("poly.cli.json_print")
+    def test_rollback_uses_deployment_message_when_no_message_provided(self, mock_json):
+        """When --message is not given, the existing deployment_message is used."""
+        AgentStudioCLI.deployments_rollback(
+            TEST_DIR,
+            deployment="abc123456",
+            message=None,
+            force=True,
+            output_json=True,
+        )
+
+        self.proj.rollback_deployment.assert_called_once_with("dep-1", message="initial release")
+
+    @patch("poly.cli.json_print")
+    def test_rollback_custom_message_overrides_deployment_message(self, mock_json):
+        """When --message is provided, it overrides the deployment_message."""
+        AgentStudioCLI.deployments_rollback(
+            TEST_DIR,
+            deployment="abc123456",
+            message="emergency fix",
+            force=True,
+            output_json=True,
+        )
+
+        self.proj.rollback_deployment.assert_called_once_with("dep-1", message="emergency fix")
+
+    # ── Dry run ──────────────────────────────────────────────────────
+
+    @patch("poly.cli.json_print")
+    def test_dry_run_shows_reverted_without_calling_api(self, mock_json):
+        """Dry run shows reverted deployments but does not call rollback_deployment.
+
+        versions: [dep-1(newest, active sandbox), dep-2(oldest)]
+        Rolling back to dep-2 → dep-1 is reverted.
+        """
+        AgentStudioCLI.deployments_rollback(
+            TEST_DIR,
+            deployment="def789012",
+            output_json=True,
+            dry_run=True,
+        )
+
+        self.proj.rollback_deployment.assert_not_called()
+        payload = mock_json.call_args[0][0]
+        self.assertTrue(payload["dry_run"])
+        self.assertEqual(payload["target_hash"], "def789012xyz")
+        reverted_ids = [d["id"] for d in payload["reverted_deployments"]]
+        self.assertEqual(reverted_ids, ["dep-1"])
 class InitProjectTest(unittest.TestCase):
     """Tests for the init_project interactive selection flow."""
 
