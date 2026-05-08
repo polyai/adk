@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
+from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
 from poly.utils import retrieve_api_key
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,7 @@ class PlatformAPIHandler:
         method: str = "GET",
         data: ty.Optional[dict] = None,
         params: ty.Optional[dict] = None,
+        base_url: ty.Optional[str] = None,
     ) -> dict:
         """Make a request to the Platform API.
 
@@ -92,11 +94,15 @@ class PlatformAPIHandler:
             method (str): The HTTP method
             data (dict | None): The request body for POST/PUT requests
             params (dict | None): Query string parameters
+            base_url (str | None): Override the base URL. Defaults to the
+                Platform API base URL for the region.
 
         Returns:
             dict: The response JSON
         """
-        url = PlatformAPIHandler.get_base_url(region) + endpoint
+        if base_url is None:
+            base_url = PlatformAPIHandler.get_base_url(region)
+        url = base_url + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
 
         headers = {
@@ -245,16 +251,9 @@ class PlatformAPIHandler:
         if not project_id:
             project_id = project_name.lower().replace(" ", "-")
 
-        region_to_voice_id = {
-            "us-1": "VOICE-6fad73f6",  # Anne
-            "euw-1": "VOICE-8b814724",  # Ben
-            "uk-1": "VOICE-37966683",  # Ben
-            "dev": "VOICE-e2b01d55",  # Anne
-            "staging": "VOICE-e2b01d55",  # Anne
-        }
-        voice_id = region_to_voice_id.get(region, "VOICE-afe2b8e8")
+        voice_id = DEFAULT_VOICE_IDS.get(region, DEFAULT_VOICE_ID_FALLBACK)
 
-        url = PlatformAPIHandler.get_agents_api_url(region) + f"/accounts/{account_id}/agents"
+        endpoint = f"/accounts/{account_id}/agents"
         data = {
             "name": project_name,
             "agentId": project_id,
@@ -266,38 +265,13 @@ class PlatformAPIHandler:
             },
         }
 
-        correlation_id = f"adk-{uuid.uuid4()}"
-        headers = {
-            "X-API-KEY": retrieve_api_key(region),
-            "X-PolyAI-Correlation-Id": correlation_id,
-            "Content-Type": "application/json",
-        }
-
-        logger.info(f"Creating project at {url}")
-        response = requests.request(
-            method="POST",
-            url=url,
-            headers=headers,
-            allow_redirects=False,
-            data=json.dumps(data),
+        result = PlatformAPIHandler.make_request(
+            region,
+            endpoint,
+            "POST",
+            data=data,
+            base_url=PlatformAPIHandler.get_agents_api_url(region),
         )
-
-        try:
-            response.raise_for_status()
-        except requests.HTTPError as e:
-            logger.debug(
-                f"Error creating project. url={url!r} status_code={response.status_code!r}"
-                f" response={response.text!r}"
-            )
-            try:
-                body = response.json()
-                message = body.get("error_message") or body.get("message") or body.get("error")
-            except (json.JSONDecodeError, KeyError, ValueError):
-                message = None
-            raise ValueError(message or f"{response.status_code} {response.reason}") from e
-
-        logger.info(f"Request to {url} successful")
-        result = response.json()
         return {"id": result.get("agentId"), "name": result.get("agentName")}
 
     @staticmethod

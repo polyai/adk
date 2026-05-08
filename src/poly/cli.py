@@ -255,16 +255,31 @@ class AgentStudioCLI:
             default=False,
         )
 
-        # CREATE-PROJECT
-        create_project_parser = subparsers.add_parser(
-            "create-project",
+        # CREATE
+        create_parser = subparsers.add_parser(
+            "create",
+            parents=[],
+            help="Create resources in Agent Studio.",
+            description=(
+                "Create resources in Agent Studio.\n\n"
+                "Examples:\n"
+                "  poly create project\n"
+                "  poly create project --region us-1 --account_id my-account --name my-project\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        create_subparsers = create_parser.add_subparsers(dest="create_subcommand", required=True)
+
+        # CREATE PROJECT
+        create_project_parser = create_subparsers.add_parser(
+            "project",
             parents=[verbose_parent, json_parent, debug_parent],
             help="Create a new Agent Studio project under an account.",
             description=(
                 "Create a new Agent Studio project under an interactively selected account.\n\n"
                 "Examples:\n"
-                "  poly create-project\n"
-                "  poly create-project --region us-1 --account_id my-account --name my-project\n"
+                "  poly create project\n"
+                "  poly create project --region us-1 --account_id my-account --name my-project\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -1063,15 +1078,16 @@ class AgentStudioCLI:
                     output_json_projection=args.output_json_projection,
                 )
 
-            elif args.command == "create-project":
-                cls.create_project(
-                    args.base_path,
-                    region=args.region,
-                    account_id=args.account_id,
-                    project_name=args.project_name,
-                    project_id=args.project_id,
-                    output_json=args.json,
-                )
+            elif args.command == "create":
+                if args.create_subcommand == "project":
+                    cls.create_project(
+                        args.base_path,
+                        region=args.region,
+                        account_id=args.account_id,
+                        project_name=args.project_name,
+                        project_id=args.project_id,
+                        output_json=args.json,
+                    )
 
             elif args.command == "pull":
                 cls.pull(
@@ -1392,7 +1408,7 @@ class AgentStudioCLI:
                 {
                     "success": False,
                     "error": (
-                        "create-project with --json requires --region, --account_id, and --name."
+                        "create project with --json requires --region, --account_id, and --name."
                     ),
                 }
             )
