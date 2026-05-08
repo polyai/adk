@@ -1,6 +1,50 @@
 # CHANGELOG
 
 
+## v0.18.0 (2026-05-08)
+
+### Features
+
+- Add deployments show subcommand ([#125](https://github.com/polyai/adk/pull/125),
+  [`6cfd07d`](https://github.com/polyai/adk/commit/6cfd07d28c5e265a7a47511b7f5db98440781634))
+
+## Summary
+
+Adds `poly deployments show <hash>` subcommand to display detailed metadata for a specific
+  deployment and the sandbox deployments included since the previous version in the given
+  environment.
+
+## Motivation
+
+When reviewing deployment history, users need to drill into a specific version to see its full
+  metadata (deployment ID, artifact version, lambda version, message, etc.) and understand which
+  sandbox deployments were bundled into a promotion to pre-release or live.
+
+## Changes
+
+- Add `show` subparser under `deployments` with `hash` positional arg and `--env` flag
+  (sandbox/pre-release/live) - Add `deployments_show()` and `_resolve_included_deployments()`
+  methods to `AgentStudioCLI` - Add `print_deployment_show()` rich console output function - Add
+  comprehensive tests covering error cases, JSON output, cross-env resolution, hash prefix matching,
+  and rich output path
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs Default sandbox: <img width="856" height="171" alt="Screenshot 2026-05-01 at
+  16 23 20" src="https://github.com/user-attachments/assets/9287f99c-087f-40b9-b556-aff2f78a1556" />
+  Live push: <img width="1075" height="238" alt="Screenshot 2026-05-01 at 16 23 13"
+  src="https://github.com/user-attachments/assets/68b4205c-c9e3-4767-82ac-a5e3da0d8277" />
+
+
 ## v0.17.0 (2026-05-08)
 
 ### Features
