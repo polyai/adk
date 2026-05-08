@@ -137,6 +137,8 @@ class AgentStudioInterface:
         account_id: str,
         project_name: str,
         project_id: str = None,
+        greeting: str = "Hello, how can I help you?",
+        voice_id: str | None = None,
     ) -> dict[str, str]:
         """Create a new project in an account.
 
@@ -145,11 +147,15 @@ class AgentStudioInterface:
             account_id (str): The account ID
             project_name (str): The display name for the new project
             project_id (str | None): Optional slug/ID for the project
+            greeting (str): The initial greeting message for the agent.
+            voice_id (str | None): The voice ID to use.
 
         Returns:
             dict[str, str]: A dictionary with the created project's 'id' and 'name'
         """
-        return PlatformAPIHandler.create_project(region, account_id, project_name, project_id)
+        return PlatformAPIHandler.create_project(
+            region, account_id, project_name, project_id, greeting, voice_id
+        )
 
     @staticmethod
     def get_deployments(

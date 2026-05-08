@@ -1649,6 +1649,8 @@ class DeploymentsRollbackTest(unittest.TestCase):
         self.assertEqual(payload["target_hash"], "def789012xyz")
         reverted_ids = [d["id"] for d in payload["reverted_deployments"]]
         self.assertEqual(reverted_ids, ["dep-1"])
+
+
 class InitProjectTest(unittest.TestCase):
     """Tests for the init_project interactive selection flow."""
 
@@ -1744,7 +1746,12 @@ class CreateProjectTest(unittest.TestCase):
         )
 
         mock_iface.create_project.assert_called_once_with(
-            "us-1", "acc-456", "my-project", "proj-123"
+            "us-1",
+            "acc-456",
+            "my-project",
+            "proj-123",
+            "Hello, how can I help you?",
+            None,
         )
         mock_init.assert_called_once_with(
             TEST_DIR,
@@ -1780,7 +1787,12 @@ class CreateProjectTest(unittest.TestCase):
         mock_iface.get_accessible_regions.assert_called_once()
         mock_iface.get_accounts.assert_called_once_with("us-1")
         mock_iface.create_project.assert_called_once_with(
-            "us-1", "acc-789", "new-project", "new-project"
+            "us-1",
+            "acc-789",
+            "new-project",
+            "new-project",
+            "Hello, how can I help you?",
+            None,
         )
         mock_init.assert_called_once_with(
             TEST_DIR,
@@ -1812,7 +1824,12 @@ class CreateProjectTest(unittest.TestCase):
 
         mock_q.select.assert_not_called()
         mock_iface.create_project.assert_called_once_with(
-            "us-1", "acc-789", "new-project", "new-project"
+            "us-1",
+            "acc-789",
+            "new-project",
+            "new-project",
+            "Hello, how can I help you?",
+            None,
         )
 
     @patch("poly.cli.AgentStudioInterface")
@@ -1896,38 +1913,42 @@ class CreateProjectTest(unittest.TestCase):
     @patch("poly.cli.AgentStudioCLI.init_project")
     @patch("poly.cli.AgentStudioInterface")
     def test_api_error_during_creation_reports_failure(self, mock_iface_cls, mock_init):
-        """create project reports error and does not init when API call fails."""
+        """create project reports error and exits when API call fails."""
         mock_iface = mock_iface_cls.return_value
         mock_iface.create_project.side_effect = RuntimeError("API is down")
 
-        AgentStudioCLI.create_project(
-            TEST_DIR,
-            region="us-1",
-            account_id="acc-300",
-            project_name="bad-project",
-            project_id="bad-project",
-            output_json=False,
-        )
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.create_project(
+                TEST_DIR,
+                region="us-1",
+                account_id="acc-300",
+                project_name="bad-project",
+                project_id="bad-project",
+                output_json=False,
+            )
 
+        self.assertEqual(ctx.exception.code, 1)
         mock_iface.create_project.assert_called_once()
         mock_init.assert_not_called()
 
     @patch("poly.cli.AgentStudioCLI.init_project")
     @patch("poly.cli.AgentStudioInterface")
     def test_api_error_in_json_mode_returns_error_json(self, mock_iface_cls, mock_init):
-        """create project --json returns error JSON when API call fails."""
+        """create project --json exits with error JSON when API call fails."""
         mock_iface = mock_iface_cls.return_value
         mock_iface.create_project.side_effect = RuntimeError("Server error")
 
-        AgentStudioCLI.create_project(
-            TEST_DIR,
-            region="us-1",
-            account_id="acc-400",
-            project_name="failing-project",
-            project_id="failing-project",
-            output_json=True,
-        )
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.create_project(
+                TEST_DIR,
+                region="us-1",
+                account_id="acc-400",
+                project_name="failing-project",
+                project_id="failing-project",
+                output_json=True,
+            )
 
+        self.assertEqual(ctx.exception.code, 1)
         mock_init.assert_not_called()
 
     @patch("poly.cli.AgentStudioCLI.init_project")
@@ -1956,19 +1977,21 @@ class CreateProjectTest(unittest.TestCase):
     @patch("poly.cli.AgentStudioCLI.init_project")
     @patch("poly.cli.AgentStudioInterface")
     def test_no_project_id_in_response_does_not_init(self, mock_iface_cls, mock_init):
-        """create project does not init when API response has no project ID."""
+        """create project exits when API response has no project ID."""
         mock_iface = mock_iface_cls.return_value
         mock_iface.create_project.return_value = {"id": None, "name": "orphan"}
 
-        AgentStudioCLI.create_project(
-            TEST_DIR,
-            region="us-1",
-            account_id="acc-500",
-            project_name="orphan",
-            project_id="orphan",
-            output_json=False,
-        )
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.create_project(
+                TEST_DIR,
+                region="us-1",
+                account_id="acc-500",
+                project_name="orphan",
+                project_id="orphan",
+                output_json=False,
+            )
 
+        self.assertEqual(ctx.exception.code, 1)
         mock_init.assert_not_called()
 
     @patch("poly.cli.AgentStudioCLI.init_project")
@@ -1991,7 +2014,12 @@ class CreateProjectTest(unittest.TestCase):
         )
 
         mock_iface.create_project.assert_called_once_with(
-            "euw-1", "acc-600", "spaced-name", "spaced-name"
+            "euw-1",
+            "acc-600",
+            "spaced-name",
+            "spaced-name",
+            "Hello, how can I help you?",
+            None,
         )
 
     @patch("poly.cli.AgentStudioCLI.init_project")
@@ -2014,5 +2042,10 @@ class CreateProjectTest(unittest.TestCase):
         )
 
         mock_iface.create_project.assert_called_once_with(
-            "us-1", "acc-1", "My New Project", "my-new-project"
+            "us-1",
+            "acc-1",
+            "My New Project",
+            "my-new-project",
+            "Hello, how can I help you?",
+            None,
         )

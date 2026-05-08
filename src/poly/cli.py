@@ -312,6 +312,18 @@ class AgentStudioCLI:
             dest="project_id",
             help="Optional slug/ID for the project. Defaults to a slugified version of the name.",
         )
+        create_project_parser.add_argument(
+            "--greeting",
+            type=str,
+            default="Hello, how can I help you?",
+            help="Initial greeting message for the agent.",
+        )
+        create_project_parser.add_argument(
+            "--voice-id",
+            type=str,
+            dest="voice_id",
+            help="Voice ID for the agent. Defaults to a region-specific voice.",
+        )
 
         # PULL
         pull_parser = subparsers.add_parser(
@@ -1086,6 +1098,8 @@ class AgentStudioCLI:
                         account_id=args.account_id,
                         project_name=args.project_name,
                         project_id=args.project_id,
+                        greeting=args.greeting,
+                        voice_id=args.voice_id,
                         output_json=args.json,
                     )
 
@@ -1400,6 +1414,8 @@ class AgentStudioCLI:
         account_id: str = None,
         project_name: str = None,
         project_id: str = None,
+        greeting: str = "Hello, how can I help you?",
+        voice_id: str = None,
         output_json: bool = False,
     ) -> None:
         """Create a new Agent Studio project under an interactively selected account."""
@@ -1509,13 +1525,15 @@ class AgentStudioCLI:
 
         with ctx:
             try:
-                result = api_handler.create_project(region, account_id, project_name, project_id)
+                result = api_handler.create_project(
+                    region, account_id, project_name, project_id, greeting, voice_id
+                )
             except Exception as e:
                 if output_json:
                     json_print({"success": False, "error": str(e)})
                 else:
                     error(f"Failed to create project: {e}")
-                return
+                sys.exit(1)
 
         project_id = result.get("id")
         if not project_id:
@@ -1523,7 +1541,7 @@ class AgentStudioCLI:
                 json_print({"success": False, "error": "No project ID returned by API."})
             else:
                 error("No project ID returned by API.")
-            return
+            sys.exit(1)
 
         if not output_json:
             success(f"Created project [bold]{project_name}[/bold] ({project_id})")

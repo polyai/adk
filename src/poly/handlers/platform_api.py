@@ -43,14 +43,6 @@ class PlatformAPIHandler:
         "studio": "https://api.studio.poly.ai",
     }
 
-    region_to_agents_api_url = {
-        "dev": "https://api.dev.poly.ai/v1",
-        "staging": "https://api.staging.poly.ai/v1",
-        "euw-1": "https://api.eu.poly.ai/v1",
-        "uk-1": "https://api.uk.poly.ai/v1",
-        "us-1": "https://api.us.poly.ai/v1",
-    }
-
     @staticmethod
     def get_base_url(region: str) -> str:
         """Get the base URL for the Platform API based on the region.
@@ -65,26 +57,12 @@ class PlatformAPIHandler:
         raise ValueError(f"Unknown region: {region}")
 
     @staticmethod
-    def get_agents_api_url(region: str) -> str:
-        """Get the Agents API base URL for the given region.
-
-        Args:
-            region (str): The region name
-        Returns:
-            str: The Agents API base URL
-        """
-        if base_url := PlatformAPIHandler.region_to_agents_api_url.get(region):
-            return base_url
-        raise ValueError(f"Unknown region: {region}")
-
-    @staticmethod
     def make_request(
         region: str,
         endpoint: str,
         method: str = "GET",
         data: ty.Optional[dict] = None,
         params: ty.Optional[dict] = None,
-        base_url: ty.Optional[str] = None,
     ) -> dict:
         """Make a request to the Platform API.
 
@@ -94,14 +72,11 @@ class PlatformAPIHandler:
             method (str): The HTTP method
             data (dict | None): The request body for POST/PUT requests
             params (dict | None): Query string parameters
-            base_url (str | None): Override the base URL. Defaults to the
-                Platform API base URL for the region.
 
         Returns:
             dict: The response JSON
         """
-        if base_url is None:
-            base_url = PlatformAPIHandler.get_base_url(region)
+        base_url = PlatformAPIHandler.get_base_url(region)
         url = base_url + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
 
@@ -235,6 +210,8 @@ class PlatformAPIHandler:
         account_id: str,
         project_name: str,
         project_id: str = None,
+        greeting: str = "Hello, how can I help you?",
+        voice_id: ty.Optional[str] = None,
     ) -> dict[str, str]:
         """Create a new project (agent) via the Agents API.
 
@@ -244,6 +221,9 @@ class PlatformAPIHandler:
             project_name (str): The display name for the new project
             project_id (str | None): Optional slug/ID for the project.
                 Defaults to a slugified version of the project name.
+            greeting (str): The initial greeting message for the agent.
+            voice_id (str | None): The voice ID to use. Defaults to the
+                region-specific voice ID.
 
         Returns:
             dict[str, str]: A dictionary with the created project's 'id' and 'name'
@@ -251,14 +231,15 @@ class PlatformAPIHandler:
         if not project_id:
             project_id = project_name.lower().replace(" ", "-")
 
-        voice_id = DEFAULT_VOICE_IDS.get(region, DEFAULT_VOICE_ID_FALLBACK)
+        if not voice_id:
+            voice_id = DEFAULT_VOICE_IDS.get(region, DEFAULT_VOICE_ID_FALLBACK)
 
-        endpoint = f"/accounts/{account_id}/agents"
+        endpoint = f"/v1/accounts/{account_id}/agents"
         data = {
             "name": project_name,
             "agentId": project_id,
             "responseSettings": {
-                "greeting": "Hello, how can I help you?",
+                "greeting": greeting,
             },
             "voiceSettings": {
                 "voiceId": voice_id,
@@ -270,7 +251,6 @@ class PlatformAPIHandler:
             endpoint,
             "POST",
             data=data,
-            base_url=PlatformAPIHandler.get_agents_api_url(region),
         )
         return {"id": result.get("agentId"), "name": result.get("agentName")}
 

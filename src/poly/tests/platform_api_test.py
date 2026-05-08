@@ -18,8 +18,8 @@ class MakeRequestTest(unittest.TestCase):
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="test-key")
     @patch("poly.handlers.platform_api.requests.request")
-    def test_uses_default_base_url_when_none_provided(self, mock_request, _mock_key):
-        """make_request uses get_base_url when base_url is not specified."""
+    def test_uses_default_base_url(self, mock_request, _mock_key):
+        """make_request uses get_base_url for the given region."""
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {"ok": True}
@@ -35,19 +35,6 @@ class MakeRequestTest(unittest.TestCase):
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="test-key")
     @patch("poly.handlers.platform_api.requests.request")
-    def test_uses_custom_base_url_when_provided(self, mock_request, _mock_key):
-        """make_request uses the provided base_url instead of the default."""
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {"ok": True}
-        mock_request.return_value = mock_response
-
-        PlatformAPIHandler.make_request("us-1", "/test", base_url="https://custom.api")
-
-        assert mock_request.call_args.kwargs["url"] == "https://custom.api/test"
-
-    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="test-key")
-    @patch("poly.handlers.platform_api.requests.request")
     def test_posts_json_body(self, mock_request, _mock_key):
         """make_request serialises data as JSON for POST requests."""
         mock_response = MagicMock()
@@ -55,9 +42,7 @@ class MakeRequestTest(unittest.TestCase):
         mock_response.json.return_value = {"created": True}
         mock_request.return_value = mock_response
 
-        PlatformAPIHandler.make_request(
-            "us-1", "/items", "POST", data={"name": "x"}, base_url="https://api"
-        )
+        PlatformAPIHandler.make_request("us-1", "/items", "POST", data={"name": "x"})
 
         assert mock_request.call_args.kwargs["method"] == "POST"
         assert mock_request.call_args.kwargs["data"] == json.dumps({"name": "x"})
@@ -72,34 +57,27 @@ class MakeRequestTest(unittest.TestCase):
         mock_request.return_value = mock_response
 
         with self.assertRaises(requests.HTTPError):
-            PlatformAPIHandler.make_request("us-1", "/secret", base_url="https://api")
+            PlatformAPIHandler.make_request("us-1", "/secret")
 
 
 class CreateProjectTest(unittest.TestCase):
     """Tests for PlatformAPIHandler.create_project."""
 
     @patch.object(PlatformAPIHandler, "make_request")
-    @patch.object(
-        PlatformAPIHandler, "get_agents_api_url", return_value="https://agents.api"
-    )
-    def test_calls_make_request_with_agents_api_url(self, _mock_url, mock_make):
-        """create_project delegates to make_request with the agents API base URL."""
+    def test_calls_make_request_with_v1_endpoint(self, mock_make):
+        """create_project uses the /v1/accounts/.../agents endpoint."""
         mock_make.return_value = {"agentId": "my-proj", "agentName": "My Proj"}
 
         result = PlatformAPIHandler.create_project("us-1", "acct-1", "My Proj", "my-proj")
 
         mock_make.assert_called_once()
-        call_kwargs = mock_make.call_args
-        assert call_kwargs.kwargs["base_url"] == "https://agents.api"
-        assert call_kwargs.args[1] == "/accounts/acct-1/agents"
-        assert call_kwargs.args[2] == "POST"
+        call_args = mock_make.call_args
+        assert call_args.args[1] == "/v1/accounts/acct-1/agents"
+        assert call_args.args[2] == "POST"
         assert result == {"id": "my-proj", "name": "My Proj"}
 
     @patch.object(PlatformAPIHandler, "make_request")
-    @patch.object(
-        PlatformAPIHandler, "get_agents_api_url", return_value="https://agents.api"
-    )
-    def test_slugifies_project_name_when_id_not_provided(self, _mock_url, mock_make):
+    def test_slugifies_project_name_when_id_not_provided(self, mock_make):
         """create_project generates a slug from the name when project_id is omitted."""
         mock_make.return_value = {"agentId": "my-project", "agentName": "My Project"}
 
@@ -109,10 +87,7 @@ class CreateProjectTest(unittest.TestCase):
         assert data["agentId"] == "my-project"
 
     @patch.object(PlatformAPIHandler, "make_request")
-    @patch.object(
-        PlatformAPIHandler, "get_agents_api_url", return_value="https://agents.api"
-    )
-    def test_uses_region_voice_id(self, _mock_url, mock_make):
+    def test_uses_region_voice_id(self, mock_make):
         """create_project uses the voice ID mapped to the given region."""
         mock_make.return_value = {"agentId": "p", "agentName": "P"}
 
@@ -122,10 +97,7 @@ class CreateProjectTest(unittest.TestCase):
         assert data["voiceSettings"]["voiceId"] == DEFAULT_VOICE_IDS["euw-1"]
 
     @patch.object(PlatformAPIHandler, "make_request")
-    @patch.object(
-        PlatformAPIHandler, "get_agents_api_url", return_value="https://agents.api"
-    )
-    def test_uses_fallback_voice_id_for_unknown_region(self, _mock_url, mock_make):
+    def test_uses_fallback_voice_id_for_unknown_region(self, mock_make):
         """create_project falls back to DEFAULT_VOICE_ID_FALLBACK for unmapped regions."""
         mock_make.return_value = {"agentId": "p", "agentName": "P"}
 
@@ -133,3 +105,26 @@ class CreateProjectTest(unittest.TestCase):
 
         data = mock_make.call_args.kwargs["data"]
         assert data["voiceSettings"]["voiceId"] == DEFAULT_VOICE_ID_FALLBACK
+
+    @patch.object(PlatformAPIHandler, "make_request")
+    def test_custom_greeting_and_voice_id(self, mock_make):
+        """create_project passes custom greeting and voice_id when provided."""
+        mock_make.return_value = {"agentId": "p", "agentName": "P"}
+
+        PlatformAPIHandler.create_project(
+            "us-1", "acct-1", "P", "p", greeting="Hi there!", voice_id="VOICE-custom"
+        )
+
+        data = mock_make.call_args.kwargs["data"]
+        assert data["responseSettings"]["greeting"] == "Hi there!"
+        assert data["voiceSettings"]["voiceId"] == "VOICE-custom"
+
+    @patch.object(PlatformAPIHandler, "make_request")
+    def test_default_greeting(self, mock_make):
+        """create_project uses the default greeting when none is provided."""
+        mock_make.return_value = {"agentId": "p", "agentName": "P"}
+
+        PlatformAPIHandler.create_project("us-1", "acct-1", "P", "p")
+
+        data = mock_make.call_args.kwargs["data"]
+        assert data["responseSettings"]["greeting"] == "Hello, how can I help you?"
