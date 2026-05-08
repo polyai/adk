@@ -1502,17 +1502,17 @@ class AgentStudioCLI:
             default_id = re.sub(r"[^a-zA-Z0-9-]", "", project_name.lower().replace(" ", "-"))
             default_id = default_id.strip("-") or ""
             project_id = questionary.text(
-                "Enter project ID:",
+                "Enter project ID (leave empty to let the platform generate one):",
                 default=default_id,
                 validate=lambda val: (
                     True
-                    if re.fullmatch(r"[a-zA-Z0-9-]+", val)
+                    if not val or re.fullmatch(r"[a-zA-Z0-9-]+", val)
                     else "Project ID can only contain alphanumeric characters and dashes."
                 ),
             ).ask()
-            if not project_id or not project_id.strip():
+            if project_id is None:
                 return
-            project_id = project_id.strip()
+            project_id = project_id.strip() or None
 
         ctx = (
             console.status(

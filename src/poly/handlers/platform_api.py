@@ -220,7 +220,7 @@ class PlatformAPIHandler:
             account_id (str): The account ID
             project_name (str): The display name for the new project
             project_id (str | None): Optional slug/ID for the project.
-                Defaults to a slugified version of the project name.
+                When omitted the platform generates one automatically.
             greeting (str): The initial greeting message for the agent.
             voice_id (str | None): The voice ID to use. Defaults to the
                 region-specific voice ID.
@@ -228,16 +228,12 @@ class PlatformAPIHandler:
         Returns:
             dict[str, str]: A dictionary with the created project's 'id' and 'name'
         """
-        if not project_id:
-            project_id = project_name.lower().replace(" ", "-")
-
         if not voice_id:
             voice_id = DEFAULT_VOICE_IDS.get(region, DEFAULT_VOICE_ID_FALLBACK)
 
         endpoint = f"/v1/accounts/{account_id}/agents"
         data = {
             "name": project_name,
-            "agentId": project_id,
             "responseSettings": {
                 "greeting": greeting,
             },
@@ -245,6 +241,8 @@ class PlatformAPIHandler:
                 "voiceId": voice_id,
             },
         }
+        if project_id:
+            data["agentId"] = project_id
 
         result = PlatformAPIHandler.make_request(
             region,
