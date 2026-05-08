@@ -246,11 +246,11 @@ class PlatformAPIHandler:
             project_id = project_name.lower().replace(" ", "-")
 
         region_to_voice_id = {
-            "us-1": "VOICE-afe2b8e8",
-            "euw-1": "VOICE-7def3647",
-            "uk-1": "VOICE-37966683",
-            "dev": "VOICE-86f7b4cf",
-            "staging": "VOICE-86f7b4cf",
+            "us-1": "VOICE-6fad73f6",  # Anne
+            "euw-1": "VOICE-8b814724",  # Ben
+            "uk-1": "VOICE-37966683",  # Ben
+            "dev": "VOICE-e2b01d55",  # Anne
+            "staging": "VOICE-e2b01d55",  # Anne
         }
         voice_id = region_to_voice_id.get(region, "VOICE-afe2b8e8")
 
