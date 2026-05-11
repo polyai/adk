@@ -242,20 +242,6 @@ poly format --check
 poly format --files src/functions/booking.py
 ~~~
 
-!!! warning "`poly format` may crash on projects with YAML sub-resources"
-
-    Running `poly format` over a project that contains YAML-defined sub-resources (for example `config/handoffs.yaml` or `voice/configuration.yaml`) can produce errors like:
-
-    ~~~text
-    [Errno 20] Not a directory: '.../config/handoffs.yaml/handoffs/Default_handoff'
-    ~~~
-
-    This is a known issue in how the formatter resolves paths inside YAML files. Until it's fixed, scope the run with `--files` and pass specific Python files:
-
-    ~~~bash
-    poly format --files functions/my_function.py
-    ~~~
-
 ### `poly validate`
 
 Validate project configuration locally.
@@ -401,7 +387,11 @@ Use `--output` to write the documentation to a local file. This is useful when w
 
 ### `poly deployments`
 
-List and inspect deployments for the project.
+Manage deployments for the project.
+
+#### `poly deployments list`
+
+List deployments for the project.
 
 Examples:
 
@@ -421,37 +411,68 @@ List deployments for the project.
 |---|---|
 | `--env` | Environment to list deployments for. Choices: `sandbox`, `pre-release`, `live`. Defaults to `sandbox`. |
 | `--details` | Show additional deployment details. |
+| `--verbose` | Show full error tracebacks for debugging. |
 
 !!! tip "Use `--details` for readable output"
 
     The default tabular view may wrap long URLs across multiple rows, making it unreadable in narrow terminals. `--details` produces a vertical layout that is easier to read.
 
-#### `poly deployments show`
+#### `poly deployments promote`
 
-Show detailed metadata for a specific deployment and the sandbox deployments included since the previous version in the given environment.
+Promote a deployment to the next environment (`pre-release` or `live`), removing the need to use the Agent Studio UI.
+
+Examples:
 
 ~~~bash
-poly deployments show <hash>
-poly deployments show <hash> --env live
-poly deployments show <hash> --json
+poly deployments promote --from <deployment_id> --to pre-release
+poly deployments promote --from sandbox --to live --message "Release notes here"
+poly deployments promote --from <deployment_id> --to pre-release --dry-run
+poly deployments promote --from <deployment_id> --to live --force
 ~~~
 
-| Argument / Flag | Description |
+| Flag | Description |
 |---|---|
-| `hash` | Version hash (or prefix) of the deployment to show. A 9-character prefix is sufficient. |
-| `--env`, `-e` | Environment to query. Choices: `sandbox`, `pre-release`, `live`. Defaults to `sandbox`. |
-| `--json` | Emit machine-readable JSON output. |
+| `--from` | ID or environment name of the deployment to promote. Required. |
+| `--to` | Target environment. Choices: `pre-release`, `live`. Required. |
+| `--message`, `-m` | Optional message to include with the promotion (e.g. release notes or changelog). If not specified, the existing deployment message is used. |
+| `--force` | Skip the confirmation prompt. When used without `--message`, the existing deployment message is kept. This is the default in non-interactive mode (e.g. when `--json` is used). |
+| `--dry-run` | Show what would be promoted without actually promoting. Displays the deployment hash, target environment, and changes included. |
+| `--verbose` | Show full error tracebacks for debugging. |
 
-The command displays:
+When promoting to `live`, the command searches for the deployment in `pre-release` and uses sandbox as the linear history source for computing included changes. When promoting to `pre-release`, the command searches sandbox.
 
-- **Deployment metadata** — version hash, deployment type, date, author, deployment ID, artifact version, lambda deployment version, client environment, and message.
-- **Active environment badges** — indicates whether the version is currently active in sandbox, pre-release, or live.
-- **Included deployments** — the sandbox deployments bundled since the previous version in the queried environment. For promotions to pre-release or live, this shows which sandbox versions were promoted together.
-- **Reverted deployments** — if the deployment is a rollback to an older version, the section is labelled "Reverted deployments" instead of "Included deployments" and lists the versions being reverted.
+The output includes:
 
-!!! info "Sandbox is the source of truth for version history"
+- the deployment hash being promoted
+- whether it is a first-time promotion to that environment
+- a list of **included deployments** (changes being promoted) or **reverting deployments** (when promoting to an older version)
 
-    For pre-release and live environments, included deployments are always resolved from the sandbox linear history. Pre-release and live only contain promotions that reference sandbox version hashes.
+Without `--force`, the command prompts for confirmation before proceeding and optionally allows you to enter or override the deployment message interactively.
+
+#### `poly deployments rollback`
+
+Roll back sandbox to a previous deployment version.
+
+Examples:
+
+~~~bash
+poly deployments rollback --to <deployment_id>
+poly deployments rollback --to <deployment_id> --message "Rolling back due to regression"
+poly deployments rollback --to <deployment_id> --dry-run
+poly deployments rollback --to <deployment_id> --force
+~~~
+
+| Flag | Description |
+|---|---|
+| `--to` | ID or environment name of the deployment to roll back to. Required. |
+| `--message`, `-m` | Optional message to include with the rollback. If not specified, the existing deployment message is used. |
+| `--force` | Skip the confirmation prompt. This is the default in non-interactive mode (e.g. when `--json` is used). |
+| `--dry-run` | Show what would be rolled back without actually rolling back. Displays the target deployment and the deployments that would be reverted. |
+| `--verbose` | Show full error tracebacks for debugging. |
+
+The output includes a list of **reverting deployments** — the versions that will be undone when the rollback completes.
+
+Without `--force`, the command prompts for confirmation before proceeding.
 
 ## Machine-readable JSON output
 
@@ -476,6 +497,9 @@ poly init --region us-1 --account_id 123 --project_id my_project --json
 poly chat --json -m 'Hello'
 poly chat --json --input-file ./script.txt
 poly deployments show abc123def --json
+poly deployments list --json
+poly deployments promote --from <id> --to pre-release --force --json
+poly deployments rollback --to <id> --force --json
 ~~~
 
 When `--json` is used:
@@ -487,6 +511,10 @@ When `--json` is used:
 !!! info "`--interactive` and `--json` cannot be used together"
 
     `poly branch merge --interactive` requires a terminal for its conflict-resolution prompts and is incompatible with `--json`.
+
+!!! info "`--json` implies `--force` for deployments commands"
+
+    When `--json` is used with `poly deployments promote` or `poly deployments rollback`, the confirmation prompt is automatically skipped (equivalent to passing `--force`).
 
 ### JSON output shapes
 
@@ -510,6 +538,8 @@ The exact fields vary by command. Common fields include:
 | `poly init --json` | `success`, `root_path` |
 | `poly chat --json` | `conversations` (array); optional `push` (when `--push` is used) |
 | `poly deployments show --json` | `success`, `deployment`, `active_deployment_hashes`, `included_deployments`, `is_rollback` |
+| `poly deployments promote --json` | `success`, `from_hash`, `to_env`, `message`, `included_deployments`; `dry_run` when `--dry-run` is used |
+| `poly deployments rollback --json` | `success`, `target_hash`, `message`, `reverted_deployments`; `dry_run` when `--dry-run` is used |
 
 For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
 
@@ -552,6 +582,33 @@ When `--json` is used with `poly chat`, the command emits a single JSON object w
 - If `--push` is also supplied, the output includes a `push` key: `{ "push": { "success": true, "message": "..." } }`.
 - If `--functions`, `--flows`, or `--state` are also set, the relevant metadata fields are included in each turn.
 
+#### `poly deployments promote --json` output shape
+
+~~~json
+{
+  "success": true,
+  "from_hash": "abc123456xyz",
+  "to_env": "pre-release",
+  "message": "Release notes here",
+  "included_deployments": [...]
+}
+~~~
+
+On dry run, `"dry_run": true` is added and `"success"` reflects the pre-flight state without any changes being made. On error, `"success": false` and `"error": "..."` are returned.
+
+#### `poly deployments rollback --json` output shape
+
+~~~json
+{
+  "success": true,
+  "target_hash": "def789012xyz",
+  "message": "Rolling back due to regression",
+  "reverted_deployments": [...]
+}
+~~~
+
+On dry run, `"dry_run": true` is added. On error, `"success": false` and `"error": "..."` are returned.
+
 ### `poly push --output-json-commands`
 
 Adds a `commands` array to the JSON output of `poly push`, containing the serialized Agent Studio commands that were staged. Useful for dry-run review and integration testing.
@@ -593,6 +650,7 @@ A typical CLI workflow looks like this:
 7. optionally review with `poly review`
 8. test or chat with the agent using `poly chat`
 9. merge the branch with `poly branch merge '<message>'`
+10. promote to pre-release or live with `poly deployments promote`
 
 !!! info "Run commands from the project folder"
 
