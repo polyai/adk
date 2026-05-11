@@ -244,20 +244,6 @@ poly format --check
 poly format --files src/functions/booking.py
 ~~~
 
-!!! warning "`poly format` may crash on projects with YAML sub-resources"
-
-    Running `poly format` over a project that contains YAML-defined sub-resources (for example `config/handoffs.yaml` or `voice/configuration.yaml`) can produce errors like:
-
-    ~~~text
-    [Errno 20] Not a directory: '.../config/handoffs.yaml/handoffs/Default_handoff'
-    ~~~
-
-    This is a known issue in how the formatter resolves paths inside YAML files. Until it's fixed, scope the run with `--files` and pass specific Python files:
-
-    ~~~bash
-    poly format --files functions/my_function.py
-    ~~~
-
 ### `poly validate`
 
 Validate project configuration locally.
