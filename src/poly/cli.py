@@ -3666,7 +3666,7 @@ class AgentStudioCLI:
         if user_pats:
             pat = user_pats[0].get("key")
             os.environ["POLY_ADK_KEY"] = pat
-            success("An existing API key was found in your account and will be used.")
+            success(f"Found existing API Token: {pat}")
         else:
             info("No existing API key found in your account.")
             ctx = console.status("[info]Creating a new API key...[/info]")
@@ -3688,11 +3688,11 @@ class AgentStudioCLI:
                         time.sleep(1)
 
             success(f"Created a new API Token: {pat}")
-            plain(
-                "Set this in your environment variables as POLY_ADK_KEY to authenticate future commands"
-            )
-            info("export POLY_ADK_KEY=your_token_here  # on Linux/MacOS")
-            info("setx POLY_ADK_KEY your_token_here  # on Windows")
+        plain(
+            "Set this in your environment variables as POLY_ADK_KEY to authenticate future commands"
+        )
+        info("export POLY_ADK_KEY=your_token_here  # on Linux/MacOS")
+        info("setx POLY_ADK_KEY your_token_here  # on Windows")
 
         cls.init_project(base_path, region="studio")
 
