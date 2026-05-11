@@ -76,8 +76,7 @@ class PlatformAPIHandler:
         Returns:
             dict: The response JSON
         """
-        base_url = PlatformAPIHandler.get_base_url(region)
-        url = base_url + endpoint
+        url = PlatformAPIHandler.get_base_url(region) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
 
         headers = {

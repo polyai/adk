@@ -256,70 +256,70 @@ class AgentStudioCLI:
             default=False,
         )
 
-        # CREATE
-        create_parser = subparsers.add_parser(
-            "create",
+        # PROJECT
+        project_parser = subparsers.add_parser(
+            "project",
             parents=[],
-            help="Create resources in Agent Studio.",
+            help="Manage Agent Studio projects.",
             description=(
-                "Create resources in Agent Studio.\n\n"
+                "Manage Agent Studio projects.\n\n"
                 "Examples:\n"
-                "  poly create project\n"
-                "  poly create project --region us-1 --account_id my-account --name my-project\n"
+                "  poly project create\n"
+                "  poly project create --region us-1 --account_id my-account --name my-project\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
-        create_subparsers = create_parser.add_subparsers(dest="create_subcommand", required=True)
+        project_subparsers = project_parser.add_subparsers(dest="project_subcommand", required=True)
 
-        # CREATE PROJECT
-        create_project_parser = create_subparsers.add_parser(
-            "project",
+        # PROJECT CREATE
+        project_create_parser = project_subparsers.add_parser(
+            "create",
             parents=[verbose_parent, json_parent, debug_parent],
             help="Create a new Agent Studio project under an account.",
             description=(
                 "Create a new Agent Studio project under an interactively selected account.\n\n"
                 "Examples:\n"
-                "  poly create project\n"
-                "  poly create project --region us-1 --account_id my-account --name my-project\n"
+                "  poly project create\n"
+                "  poly project create --region us-1 --account_id my-account --name my-project\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
-        create_project_parser.add_argument(
+        project_create_parser.add_argument(
             "--base-path",
             type=str,
             default=os.getcwd(),
             help="Base path to initialize the project. Defaults to current working directory.",
         )
-        create_project_parser.add_argument(
+        project_create_parser.add_argument(
             "--region",
             type=str,
             choices=REGIONS,
             help="Region for the Agent Studio project.",
         )
-        create_project_parser.add_argument(
+        project_create_parser.add_argument(
             "--account_id",
             type=str,
             help="Account ID for the Agent Studio project.",
         )
-        create_project_parser.add_argument(
+        project_create_parser.add_argument(
             "--name",
             type=str,
             dest="project_name",
             help="Name for the new project.",
         )
-        create_project_parser.add_argument(
+        project_create_parser.add_argument(
             "--id",
             type=str,
             dest="project_id",
             help="Optional slug/ID for the project. Defaults to a slugified version of the name.",
         )
-        create_project_parser.add_argument(
+        project_create_parser.add_argument(
             "--greeting",
             type=str,
             default="Hello, how can I help you?",
             help="Initial greeting message for the agent.",
         )
-        create_project_parser.add_argument(
+        project_create_parser.add_argument(
             "--voice-id",
             type=str,
             dest="voice_id",
@@ -1118,8 +1118,8 @@ class AgentStudioCLI:
                     output_json_projection=args.output_json_projection,
                 )
 
-            elif args.command == "create":
-                if args.create_subcommand == "project":
+            elif args.command == "project":
+                if args.project_subcommand == "create":
                     cls.create_project(
                         args.base_path,
                         region=args.region,
