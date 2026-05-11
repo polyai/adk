@@ -42,17 +42,31 @@ class PlatformAPIHandler:
         "studio": "https://api.studio.poly.ai",
     }
 
+    jupiter_region_to_base_url = {
+        "euw-1": "https://jupiter-api.euw-1.platform.polyai.app",
+        "uk-1": "https://jupiter-api.uk-1.platform.polyai.app",
+        "us-1": "https://jupiter-api.us-1.platform.polyai.app",
+        "dev": "https://jupiter-api.dev.polyai.app",
+        "staging": "https://jupiter-api.staging.us-1.platform.polyai.app",
+        "studio": "https://jupiter-api.plg-us-1-prod.polyai.app",
+    }
+
     @staticmethod
-    def get_base_url(region: str) -> str:
+    def get_base_url(region: str, use_jupiter_api: bool = False) -> str:
         """Get the base URL for the Platform API based on the region.
 
         Args:
             region (str): The region name
+            use_jupiter_api (bool): Whether to use the Jupiter API
         Returns:
             str: The base URL for the Platform API
         """
-        if base_url := PlatformAPIHandler.region_to_base_url.get(region):
-            return base_url
+        if use_jupiter_api:
+            if base_url := PlatformAPIHandler.jupiter_region_to_base_url.get(region):
+                return base_url
+        else:
+            if base_url := PlatformAPIHandler.region_to_base_url.get(region):
+                return base_url
         raise ValueError(f"Unknown region: {region}")
 
     @staticmethod
@@ -62,6 +76,8 @@ class PlatformAPIHandler:
         method: str = "GET",
         data: ty.Optional[dict] = None,
         params: ty.Optional[dict] = None,
+        headers: ty.Optional[dict] = None,
+        use_jupiter_api: bool = False,
     ) -> dict:
         """Make a request to the Platform API.
 
@@ -75,14 +91,15 @@ class PlatformAPIHandler:
         Returns:
             dict: The response JSON
         """
-        url = PlatformAPIHandler.get_base_url(region) + endpoint
+        url = PlatformAPIHandler.get_base_url(region, use_jupiter_api) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
 
-        headers = {
-            "X-API-KEY": retrieve_api_key(region),
-            "X-PolyAI-Correlation-Id": correlation_id,
-            "Content-Type": "application/json",
-        }
+        if headers is None:
+            headers = {
+                "X-API-KEY": retrieve_api_key(region),
+                "X-PolyAI-Correlation-Id": correlation_id,
+                "Content-Type": "application/json",
+            }
 
         logger.info(f"Making {method} request to {url}")
 
@@ -97,7 +114,7 @@ class PlatformAPIHandler:
         )
 
         logger.debug(
-            f"Request/response url={url!r} body={data!r}"
+            f"Request/response url={url!r} headers={headers!r} body={data!r}"
             f" status_code={api_response.status_code!r} response={api_response.text!r}"
         )
 
@@ -482,3 +499,76 @@ class PlatformAPIHandler:
         endpoint = ROLLBACK_URL.format(project_id=project_id, deployment_id=deployment_id)
         body = {"deploymentMessage": message}
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=body)
+
+    @staticmethod
+    def authorise(region: str, jwt_token: str) -> dict:
+        """Authorise the user via JWT, creating their account if needed.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+
+        Returns:
+            dict: The user record.
+        """
+        correlation_id = f"adk-{uuid.uuid4()}"
+        headers = {
+            "Authorization": f"Bearer {jwt_token}",
+            "Content-Type": "application/json",
+            "X-PolyAI-Correlation-Id": correlation_id,
+        }
+
+        return PlatformAPIHandler.make_request(
+            region, "/jupiter/v1/authorise", "GET", headers=headers, use_jupiter_api=True
+        )
+
+    @staticmethod
+    def get_pats_internal(region: str, jwt_token: str) -> list[dict]:
+        """Get all Personal Access Tokens for the authenticated user.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+
+        Returns:
+            list[dict]: List of PAT records.
+        """
+        correlation_id = f"adk-{uuid.uuid4()}"
+        headers = {
+            "Authorization": f"Bearer {jwt_token}",
+            "Content-Type": "application/json",
+            "X-PolyAI-Correlation-Id": correlation_id,
+        }
+
+        return PlatformAPIHandler.make_request(
+            region, "/jupiter/v2/pats", "GET", headers=headers, use_jupiter_api=True
+        )
+
+    @staticmethod
+    def create_pat_internal(region: str, jwt_token: str, name: str) -> dict:
+        """Create a Personal Access Token using a JWT for authentication.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            name: A label for the PAT.
+
+        Returns:
+            dict: The PAT response including the token.
+        """
+        correlation_id = f"adk-{uuid.uuid4()}"
+        headers = {
+            "Authorization": f"Bearer {jwt_token}",
+            "Content-Type": "application/json",
+            "X-PolyAI-Correlation-Id": correlation_id,
+        }
+
+        response = PlatformAPIHandler.make_request(
+            region,
+            "/jupiter/v2/pats",
+            "POST",
+            data={"name": name},
+            headers=headers,
+            use_jupiter_api=True,
+        )
+        return response.get("key")

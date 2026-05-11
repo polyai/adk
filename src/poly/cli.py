@@ -24,6 +24,9 @@ import requests
 import questionary
 import traceback
 
+from poly.utils import retrieve_api_key
+import time
+
 from poly.output.console import (
     console,
     error,
@@ -44,14 +47,21 @@ from poly.output.console import (
     print_merge_conflict_interactive_header,
     print_deployments,
     print_deployment_show,
+    print_welcome_message,
 )
 from poly.output.json_output import json_print, commands_to_dicts
 from poly.handlers.github_api_handler import GitHubAPIHandler
+from poly.handlers.auth0_handler import Auth0Handler
 from poly.handlers.interface import (
     REGIONS,
     AgentStudioInterface,
 )
-from poly.utils import merge_strings, retrieve_api_key
+from poly.constants import (
+    MIN_PASSWORD_LENGTH,
+    PRIVACY_POLICY_URL,
+    TRIAL_AGREEMENT_URL,
+)
+from poly.utils import merge_strings
 from poly.resources.resource_utils import contains_merge_conflict
 from poly.project import (
     PROJECT_CONFIG_FILE,
@@ -65,6 +75,55 @@ logger = logging.getLogger(__name__)
 _BRANCH_MERGE_LONG_LINE_THRESHOLD = 800
 
 DOCUMENT_CHOICES = AgentStudioProject.discover_docs()
+
+
+def _validate_name(name: str) -> bool | str:
+    """Questionary validator for full name input."""
+    if not name or not name.strip():
+        return "Name is required."
+    return True
+
+
+def _validate_email(email: str) -> bool | str:
+    """Questionary validator for email input."""
+    email = email.strip().lower()
+    if not email:
+        return "Email is required."
+    if "@" not in email:
+        return "Invalid email format."
+    parts = email.split("@")
+    if len(parts) != 2 or not parts[1]:
+        return "Invalid email format."
+    return True
+
+
+def _validate_password(password: str) -> bool | str:
+    """Questionary validator for password input."""
+    if not password:
+        return "Password is required."
+
+    failed: list[str] = []
+
+    if len(password) < MIN_PASSWORD_LENGTH:
+        failed.append("length")
+
+    categories = sum(
+        [
+            any(c.islower() for c in password),
+            any(c.isupper() for c in password),
+            any(c.isdigit() for c in password),
+            any(not c.isalnum() for c in password),
+        ]
+    )
+    if categories < 3:
+        failed.append("complexity")
+
+    if any(password[i] == password[i + 1] == password[i + 2] for i in range(len(password) - 2)):
+        failed.append("repeated characters")
+
+    if failed:
+        return "Password does not meet requirements: " + ", ".join(failed) + "."
+    return True
 
 
 def _branch_merge_conflict_file_key(path: list[str]) -> str:
@@ -206,6 +265,22 @@ class AgentStudioCLI:
             help="Write output to FILE_PATH instead of stdout.",
         )
 
+        # Start
+        start_parser = subparsers.add_parser(
+            "start",
+            parents=[verbose_parent, debug_parent],
+            help="Get started with PolyAI Agent Studio",
+            description=(
+                "Create a new Agent Studio Account, set up API key and create a first project with a single command.\n\n"
+            ),
+        )
+        start_parser.add_argument(
+            "--base-path",
+            type=str,
+            default=os.getcwd(),
+            help="Base path to initialize the project. Defaults to current working directory.",
+        )
+
         # INIT
         init_parser = subparsers.add_parser(
             "init",
@@ -218,9 +293,7 @@ class AgentStudioCLI:
             "--base-path",
             type=str,
             default=os.getcwd(),
-            help="""
-            Base path to initialize the project. Defaults to current working directory.
-            """,
+            help="Base path to initialize the project. Defaults to current working directory.",
         )
         init_parser.add_argument(
             "--region",
@@ -1232,6 +1305,11 @@ class AgentStudioCLI:
                         output_json=args.json,
                         dry_run=args.dry_run,
                     )
+
+            elif args.command == "start":
+                cls.start(
+                    base_path=args.base_path,
+                )
 
         except Exception as e:
             if hasattr(args, "json") and args.json:
@@ -3605,6 +3683,125 @@ class AgentStudioCLI:
             else:
                 error(f"Failed to rollback deployment: {e}")
             sys.exit(1)
+
+    @classmethod
+    def start(cls, base_path: str) -> None:
+        """Authenticate via device flow, obtain a JWT, and initialise a project."""
+        print_welcome_message()
+
+        # --- 1. Check for existing API key ---
+        try:
+            retrieve_api_key()
+            warning("An existing API key was found in your environment.")
+            use_existing = questionary.confirm(
+                "Do you want to continue with the existing key?",
+                auto_enter=False,
+                default=True,
+            ).ask()
+            if use_existing:
+                success("Continuing with existing API key.")
+                cls.init_project(base_path)
+                return
+        except ValueError:
+            pass
+
+        # --- 2. Authenticate via device flow ---
+        jwt_access_token = cls._signin()
+
+        api_handler = AgentStudioInterface()
+
+        # --- 3. Authorise user (creates account if needed) ---
+        info("Setting up your account...")
+        api_handler.authorise(region="studio", jwt_token=jwt_access_token)
+
+        # --- 4. Generate PAT token ---
+        info("Fetching API key...")
+        user_pats = api_handler.get_pats(region="studio", jwt_token=jwt_access_token)
+        if user_pats:
+            pat = user_pats[0].get("key")
+            os.environ["POLY_ADK_KEY"] = pat
+            success("An existing API key was found in your account and will be used.")
+        else:
+            info("No existing API key found in your account.")
+            ctx = console.status("[info]Creating a new API key...[/info]")
+            with ctx:
+                pat = api_handler.create_pat(
+                    region="studio", jwt_token=jwt_access_token, name="adk-key"
+                )
+                os.environ["POLY_ADK_KEY"] = pat
+
+                attempts = 0
+                # After creating a new PAT, there may be a short delay before it's active.
+                # Poll the accounts endpoint until it works or we hit a timeout.
+                while attempts < 10:
+                    try:
+                        api_handler.get_accounts(region="studio")
+                        break
+                    except Exception:
+                        attempts += 1
+                        time.sleep(1)
+
+            success(f"Created a new API Token: {pat}")
+            plain(
+                "Set this in your environment variables as POLY_ADK_KEY to authenticate future commands"
+            )
+            info("export POLY_ADK_KEY=your_token_here  # on Linux/MacOS")
+            info("setx POLY_ADK_KEY your_token_here  # on Windows")
+
+        cls.init_project(base_path, region="studio")
+
+    @classmethod
+    def _signin(cls) -> str:
+        """Sign in via the Auth0 device authorization flow and return a JWT access token."""
+        auth0_handler = Auth0Handler()
+
+        try:
+            device_response = auth0_handler.request_device_code()
+        except Exception as e:
+            error(f"Failed to start authorization: {e}")
+            sys.exit(1)
+
+        user_code = device_response["user_code"]
+        verification_uri = device_response["verification_uri_complete"]
+        device_code = device_response["device_code"]
+        interval = device_response.get("interval", 5)
+
+        info(
+            "To sign in or create an account, open the following link in your browser\n"
+            "and enter the code when prompted.\n\n"
+            f"  URL:  {verification_uri}\n"
+            f"  Code: [bold]{user_code}[/bold]"
+        )
+        # webbrowser.open(verification_uri)
+
+        info("Waiting for authorization...")
+        access_token = None
+        while not access_token:
+            time.sleep(interval)
+            try:
+                token_response = auth0_handler.poll_device_token(device_code)
+                access_token = token_response.get("access_token")
+            except requests.HTTPError as e:
+                try:
+                    body = e.response.json()
+                except (ValueError, AttributeError):
+                    error(f"Authorization failed: {e}")
+                    sys.exit(1)
+                err_code = body.get("error")
+                if err_code == "authorization_pending":
+                    continue
+                elif err_code == "slow_down":
+                    interval += 5
+                    continue
+                elif err_code == "expired_token":
+                    error("Authorization timed out. Please try again.")
+                    sys.exit(1)
+                else:
+                    error(f"Authorization failed: {body.get('error_description', e)}")
+                    sys.exit(1)
+
+        success("Authenticated successfully!")
+        return access_token
 
 
 def main():

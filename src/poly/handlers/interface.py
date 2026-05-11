@@ -591,3 +591,44 @@ class AgentStudioInterface:
             dict: The API response
         """
         return PlatformAPIHandler.rollback_deployment(region, project_id, deployment_id, message)
+
+    @staticmethod
+    def authorise(region: str, jwt_token: str) -> dict:
+        """Authorise the user via JWT, creating their account if needed.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+
+        Returns:
+            dict: The user record.
+        """
+        return PlatformAPIHandler.authorise(region, jwt_token)
+
+    @staticmethod
+    def get_pats(region: str, jwt_token: str) -> list[dict]:
+        """Create a new Personal Access Token (PAT) for the user.
+
+        Args:
+            region: The region name
+            jwt_token: The user's JWT access token
+            name: A name for the new PAT
+
+        Returns:
+            str: The newly created PAT token
+        """
+        return PlatformAPIHandler.get_pats_internal(region, jwt_token)
+
+    @staticmethod
+    def create_pat(region: str, jwt_token: str, name: str) -> str:
+        """Create a new Personal Access Token (PAT) for the user.
+
+        Args:
+            region: The region name
+            jwt_token: The user's JWT access token
+            name: A name for the new PAT
+
+        Returns:
+            str: The newly created PAT token
+        """
+        return PlatformAPIHandler.create_pat_internal(region, jwt_token, name)

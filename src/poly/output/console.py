@@ -569,6 +569,34 @@ _ERROR_MESSAGES: dict[type, str] = {
 }
 
 
+_POLY_LOGO = """\
+        ●
+    ●   ●   ●      ██████   ██████  ██   ██    ██   █████  ██
+      ●   ●        ██   ██ ██    ██ ██    ██  ██   ██   ██ ██
+    ●   ●   ●      ██████  ██    ██ ██     ████    ███████ ██
+      ●   ●        ██      ██    ██ ██      ██     ██   ██ ██
+    ●   ●   ●      ██       ██████  ██████  ██     ██   ██ ██
+        ●\
+"""
+
+
+def print_welcome_message() -> None:
+    """Display a welcome banner for the ADK onboarding flow."""
+    console.print()
+    console.print(
+        Panel(
+            f"[bold black on #D9EE50]{_POLY_LOGO}[/bold black on #D9EE50]",
+            style="on #D9EE50",
+            border_style="#D9EE50",
+            padding=(1, 6),
+        )
+    )
+    console.print("[bold]Welcome to the PolyAI Agent Development Kit (ADK)![/bold]")
+    console.print("Build and edit Agent Studio projects locally with the PolyAI ADK")
+    console.print("Documentation: https://polyai.github.io/adk/")
+    console.print()
+
+
 def handle_exception(exc: Exception) -> None:
     """Print a clean error message, or full traceback in verbose mode."""
     if _verbose:
