@@ -77,14 +77,14 @@ class CreateProjectTest(unittest.TestCase):
         assert result == {"id": "my-proj", "name": "My Proj"}
 
     @patch.object(PlatformAPIHandler, "make_request")
-    def test_slugifies_project_name_when_id_not_provided(self, mock_make):
-        """create_project generates a slug from the name when project_id is omitted."""
+    def test_omits_agent_id_when_project_id_not_provided(self, mock_make):
+        """create_project omits agentId so the API can default it."""
         mock_make.return_value = {"agentId": "my-project", "agentName": "My Project"}
 
         PlatformAPIHandler.create_project("us-1", "acct-1", "My Project")
 
         data = mock_make.call_args.kwargs["data"]
-        assert data["agentId"] == "my-project"
+        assert "agentId" not in data
 
     @patch.object(PlatformAPIHandler, "make_request")
     def test_uses_region_voice_id(self, mock_make):
