@@ -56,11 +56,6 @@ from poly.handlers.interface import (
     REGIONS,
     AgentStudioInterface,
 )
-from poly.constants import (
-    MIN_PASSWORD_LENGTH,
-    PRIVACY_POLICY_URL,
-    TRIAL_AGREEMENT_URL,
-)
 from poly.utils import merge_strings
 from poly.resources.resource_utils import contains_merge_conflict
 from poly.project import (
@@ -75,55 +70,6 @@ logger = logging.getLogger(__name__)
 _BRANCH_MERGE_LONG_LINE_THRESHOLD = 800
 
 DOCUMENT_CHOICES = AgentStudioProject.discover_docs()
-
-
-def _validate_name(name: str) -> bool | str:
-    """Questionary validator for full name input."""
-    if not name or not name.strip():
-        return "Name is required."
-    return True
-
-
-def _validate_email(email: str) -> bool | str:
-    """Questionary validator for email input."""
-    email = email.strip().lower()
-    if not email:
-        return "Email is required."
-    if "@" not in email:
-        return "Invalid email format."
-    parts = email.split("@")
-    if len(parts) != 2 or not parts[1]:
-        return "Invalid email format."
-    return True
-
-
-def _validate_password(password: str) -> bool | str:
-    """Questionary validator for password input."""
-    if not password:
-        return "Password is required."
-
-    failed: list[str] = []
-
-    if len(password) < MIN_PASSWORD_LENGTH:
-        failed.append("length")
-
-    categories = sum(
-        [
-            any(c.islower() for c in password),
-            any(c.isupper() for c in password),
-            any(c.isdigit() for c in password),
-            any(not c.isalnum() for c in password),
-        ]
-    )
-    if categories < 3:
-        failed.append("complexity")
-
-    if any(password[i] == password[i + 1] == password[i + 2] for i in range(len(password) - 2)):
-        failed.append("repeated characters")
-
-    if failed:
-        return "Password does not meet requirements: " + ", ".join(failed) + "."
-    return True
 
 
 def _branch_merge_conflict_file_key(path: list[str]) -> str:
@@ -3772,33 +3718,33 @@ class AgentStudioCLI:
             f"  URL:  {verification_uri}\n"
             f"  Code: [bold]{user_code}[/bold]"
         )
-        # webbrowser.open(verification_uri)
+        webbrowser.open(verification_uri)
 
-        info("Waiting for authorization...")
         access_token = None
-        while not access_token:
-            time.sleep(interval)
-            try:
-                token_response = auth0_handler.poll_device_token(device_code)
-                access_token = token_response.get("access_token")
-            except requests.HTTPError as e:
+        with console.status("[info]Waiting for authorization...[/info]"):
+            while not access_token:
+                time.sleep(interval)
                 try:
-                    body = e.response.json()
-                except (ValueError, AttributeError):
-                    error(f"Authorization failed: {e}")
-                    sys.exit(1)
-                err_code = body.get("error")
-                if err_code == "authorization_pending":
-                    continue
-                elif err_code == "slow_down":
-                    interval += 5
-                    continue
-                elif err_code == "expired_token":
-                    error("Authorization timed out. Please try again.")
-                    sys.exit(1)
-                else:
-                    error(f"Authorization failed: {body.get('error_description', e)}")
-                    sys.exit(1)
+                    token_response = auth0_handler.poll_device_token(device_code)
+                    access_token = token_response.get("access_token")
+                except requests.HTTPError as e:
+                    try:
+                        body = e.response.json()
+                    except (ValueError, AttributeError):
+                        error(f"Authorization failed: {e}")
+                        sys.exit(1)
+                    err_code = body.get("error")
+                    if err_code == "authorization_pending":
+                        continue
+                    elif err_code == "slow_down":
+                        interval += 5
+                        continue
+                    elif err_code == "expired_token":
+                        error("Authorization timed out. Please try again.")
+                        sys.exit(1)
+                    else:
+                        error(f"Authorization failed: {body.get('error_description', e)}")
+                        sys.exit(1)
 
         success("Authenticated successfully!")
         return access_token

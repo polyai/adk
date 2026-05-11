@@ -607,15 +607,14 @@ class AgentStudioInterface:
 
     @staticmethod
     def get_pats(region: str, jwt_token: str) -> list[dict]:
-        """Create a new Personal Access Token (PAT) for the user.
+        """Get all Personal Access Tokens for the authenticated user.
 
         Args:
             region: The region name
             jwt_token: The user's JWT access token
-            name: A name for the new PAT
 
         Returns:
-            str: The newly created PAT token
+            list[dict]: List of PAT records.
         """
         return PlatformAPIHandler.get_pats_internal(region, jwt_token)
 

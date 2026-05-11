@@ -3,10 +3,6 @@
 Copyright PolyAI Limited
 """
 
-TRIAL_AGREEMENT_URL = "https://poly.ai/trial-agreement"
-PRIVACY_POLICY_URL = "https://poly.ai/privacy-policy/"
-MIN_PASSWORD_LENGTH = 12
-
 PERMISSIONS = [
     "home",
     "conversations",
