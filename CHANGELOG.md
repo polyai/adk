@@ -1,6 +1,297 @@
 # CHANGELOG
 
 
+## v0.18.0 (2026-05-08)
+
+### Features
+
+- Add deployments show subcommand ([#125](https://github.com/polyai/adk/pull/125),
+  [`6cfd07d`](https://github.com/polyai/adk/commit/6cfd07d28c5e265a7a47511b7f5db98440781634))
+
+## Summary
+
+Adds `poly deployments show <hash>` subcommand to display detailed metadata for a specific
+  deployment and the sandbox deployments included since the previous version in the given
+  environment.
+
+## Motivation
+
+When reviewing deployment history, users need to drill into a specific version to see its full
+  metadata (deployment ID, artifact version, lambda version, message, etc.) and understand which
+  sandbox deployments were bundled into a promotion to pre-release or live.
+
+## Changes
+
+- Add `show` subparser under `deployments` with `hash` positional arg and `--env` flag
+  (sandbox/pre-release/live) - Add `deployments_show()` and `_resolve_included_deployments()`
+  methods to `AgentStudioCLI` - Add `print_deployment_show()` rich console output function - Add
+  comprehensive tests covering error cases, JSON output, cross-env resolution, hash prefix matching,
+  and rich output path
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs Default sandbox: <img width="856" height="171" alt="Screenshot 2026-05-01 at
+  16 23 20" src="https://github.com/user-attachments/assets/9287f99c-087f-40b9-b556-aff2f78a1556" />
+  Live push: <img width="1075" height="238" alt="Screenshot 2026-05-01 at 16 23 13"
+  src="https://github.com/user-attachments/assets/68b4205c-c9e3-4767-82ac-a5e3da0d8277" />
+
+
+## v0.17.0 (2026-05-08)
+
+### Features
+
+- Add deployment promote and rollback commands ([#91](https://github.com/polyai/adk/pull/91),
+  [`f20556f`](https://github.com/polyai/adk/commit/f20556f0461901ece39cf231cfde5665928fd9e7))
+
+## Summary
+
+Adds `poly deployments promote` and `poly deployments rollback` subcommands, allowing users to
+  promote a deployment to a target environment (pre-release or live) and rollback sandbox to a
+  previous deployment version.
+
+## Motivation
+
+Enables deployment lifecycle management directly from the CLI, removing the need to use the Agent
+  Studio UI for promotions and rollbacks.
+
+## Changes
+
+- Add `poly deployments promote --from <id> --to <env>` command with `--message`, `--force`, and
+  `--dry-run` flags - Add `poly deployments rollback --to <id>` command with `--message` and
+  `--force` flags - Add `_resolve_included_deployments` to compute included/reverted deployments
+  using sandbox as the linear history source of truth - Promotions show "Included deployments" list,
+  rollbacks show "Reverting deployments" list, first-time promotions are labelled as such - Add
+  `promote_deployment` and `rollback_deployment` methods to `AgentStudioProject`,
+  `AgentStudioInterface`, and `PlatformAPIHandler` - Refactor API URL constants: move `/adk/v1`
+  prefix from base URLs into individual route constants - Add new `PROMOTE_URL` and `ROLLBACK_URL`
+  endpoint constants using public API paths (`/v1/agents/...`) - Remove `headers` from debug log
+  output
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Promote: <img width="812" height="253" alt="Screenshot 2026-05-01 at 17 11 25"
+  src="https://github.com/user-attachments/assets/dd7e1c4a-76c5-45e3-aeb1-9fcfd9de0b69" />
+
+Rollback: <img width="711" height="211" alt="Screenshot 2026-05-01 at 17 22 00"
+  src="https://github.com/user-attachments/assets/20687a8d-8f3d-43b7-a674-e2ec292271cd" />
+
+
+## v0.16.2 (2026-05-05)
+
+### Bug Fixes
+
+- Key accounts/projects dicts by ID to prevent duplicate name collisions
+  ([#127](https://github.com/polyai/adk/pull/127),
+  [`b71b6a7`](https://github.com/polyai/adk/commit/b71b6a70aaa0939a437da5500f0727a5d6e86d0d))
+
+## Summary
+
+Fix `get_accounts` and `get_projects` to key by ID instead of name, preventing silent data loss when
+  accounts or projects share the same name. Also adds error handling when no accounts or projects
+  are found.
+
+## Motivation
+
+When two accounts (or projects) had the same display name, the old `name → id` dict would silently
+  overwrite one entry. This caused missing options during `poly init` interactive selection.
+  Additionally, empty account/project lists would fall through to `questionary.select` with no
+  choices, causing an unhelpful crash.
+
+## Changes
+
+- `PlatformAPIHandler.get_accounts` and `get_projects` now return `{id: name}` instead of `{name:
+  id}` - `init_project` uses `questionary.Choice` objects to display `"name (id)"` while selecting
+  by ID - Added early exit with clear error message when no accounts or projects are found -
+  Simplified project name lookup to `projects.get(project_id)` - Updated docstrings in
+  `interface.py` and `platform_api.py`
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.16.1 (2026-05-01)
+
+### Bug Fixes
+
+- Pass ADK region directly to SourcererSDK for correct API key lookup
+  ([#126](https://github.com/polyai/adk/pull/126),
+  [`3441444`](https://github.com/polyai/adk/commit/3441444b84728f24702288d8a680850d92eab92e))
+
+## Summary
+
+Pass the ADK region directly to `SourcererSDK` instead of decomposing it into `(region,
+  environment)` tuples, fixing incorrect API key lookup for dev/staging environments.
+
+## Motivation
+
+When using `POLY_ADK_KEY_DEV`, the dev environment incorrectly called `retrieve_api_key("us")` (the
+  decomposed region) instead of `retrieve_api_key("dev")`, falling back to the generic
+  `POLY_ADK_KEY` and ignoring the per-region key.
+
+## Changes
+
+- Removed `region_to_region_env` mapping from `SyncClientHandler` - `SourcererSDK` now takes the ADK
+  region directly (`"dev"`, `"us-1"`, etc.) instead of separate `region`/`environment` params -
+  `ENVIRONMENT_URLS` keys updated to use ADK region names (`"us-1"` instead of `"us-prod"`) -
+  `retrieve_api_key()` now receives the correct region for all environments
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
+## v0.16.0 (2026-05-01)
+
+### Bug Fixes
+
+- Format for multi-resource YAML files ([#119](https://github.com/polyai/adk/pull/119),
+  [`cbc96fc`](https://github.com/polyai/adk/commit/cbc96fcd199883ddfe0506cfaa1bd604c78e5879))
+
+## Summary
+
+Fix formatting for `MultiResourceYamlResource` types and refactor YAML/JSON formatting utilities.
+
+## Motivation
+
+`_format_resources` treated multi-resource virtual paths as literal file paths, causing format to
+  fail for any `MultiResourceYamlResource` (entities, handoffs, etc.). The YAML dump pipeline also
+  had redundant recursive walks and created a new YAML resolver instance on every string value.
+
+## Changes
+
+- Fix `_format_resources` to format multi-resource YAML at the whole-file level instead of per
+  virtual sub-path - Fix `format_files` to match on the true `.yaml` path, not just the virtual
+  sub-path - Only write files that actually changed after formatting - Consolidate
+  `_quote_keys_for_yaml` + `set_block_style_for_multiline_strings` into single-pass
+  `_prepare_yaml_data` - Cache YAML resolver at module level instead of creating a new instance per
+  call - Collapse `format_yaml` / `format_yaml_python` into one function - Rename
+  `format_json_python` → `format_json` - Fix `ExperimentalConfig.raw` JSON indent 4→2
+
+## Test strategy
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (545 tests) - [ ] Manual
+  CLI testing (`poly format`) - [ ] Tested against a live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Documentation
+
+- [small docs update] show clear error when POLY_ADK_KEY is not set
+  ([#124](https://github.com/polyai/adk/pull/124),
+  [`47b2db1`](https://github.com/polyai/adk/commit/47b2db1baaa0b46f513c5631c19c73637a242227))
+
+## Summary
+
+PR #110 (very small change)
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+---------
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+### Features
+
+- Support per-region API keys via POLY_ADK_KEY_{REGION} for the incoming PAT change
+  ([#123](https://github.com/polyai/adk/pull/123),
+  [`94cb27b`](https://github.com/polyai/adk/commit/94cb27b607ffdabcea75896ffbcc01f0406b90c0))
+
+## Summary
+
+- `retrieve_api_key()` now accepts an optional `account_id` parameter - When provided, tries
+  `POLY_ADK_KEY_{SUFFIX}` first (e.g. `POLY_ADK_KEY_US`), then falls back to `POLY_ADK_KEY` - This
+  adds support for PAT which are incoming.
+
+## Test plan
+
+- [x] Lint passes (`ruff check`) - [x] Format passes (`ruff format --check`) - [x] All 552 tests
+  pass - [x] Manual: set `POLY_ADK_KEY_US=<key>` and run `poly init` - [x] Manual: update
+  POLY_ADK_KEY_US=<key>` to fail and set `POLY_ADK_KEY` — should fall back gracefully - [x] Manual:
+  unset both — should show the existing error message
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.15.3 (2026-05-01)
 
 ### Bug Fixes
