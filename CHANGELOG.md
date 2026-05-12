@@ -1,6 +1,46 @@
 # CHANGELOG
 
 
+## v0.19.2 (2026-05-12)
+
+### Bug Fixes
+
+- Deepcopy FlowConfig before dummy start step swap ([#136](https://github.com/polyai/adk/pull/136),
+  [`1824946`](https://github.com/polyai/adk/commit/18249460733980c29b4040215d2b329d63ec72f5))
+
+## Summary
+
+Prevents `_start_step_temp` suffix from leaking into local state after pushing flows with a
+  FunctionStep as start step.
+
+## Motivation
+
+When creating a flow whose start step is a FunctionStep, `_clean_resources_before_push` creates a
+  temporary dummy default step and mutates `flow_config.start_step` and `flow_config.steps`
+  in-place. After push, `self.resources = new_state` saves this mutated config — persisting the
+  `_start_step_temp` suffix into `flow_config.yaml`. Subsequent pushes then fail with "Old start
+  step not found".
+
+## Changes
+
+- Use `copy.deepcopy(flow_config)` before the dummy step swap so the original FlowConfig stays clean
+  - Only the copy gets the dummy step and temp start_step ID
+
+## Test strategy
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] Manual CLI testing
+  (`poly push --dry-run`) - [x] Tested against a live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface - [x] Commit messages follow conventional commits
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.19.1 (2026-05-12)
 
 ### Bug Fixes
