@@ -105,9 +105,10 @@ build_command = "pip install build && python -m build"
 tag_format = "v{version}"
 
 
+
 [project]
 name = "polyai-adk"
-version = "0.19.0"
+version = "0.19.1"
 description = "Agent Development Kit (ADK) — a CLI for managing Agent Studio projects locally"
 readme = "README.md"
 requires-python = ">=3.14.0"

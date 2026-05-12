@@ -1,6 +1,45 @@
 # CHANGELOG
 
 
+## v0.19.1 (2026-05-12)
+
+### Bug Fixes
+
+- Normalize local resources during pull merge ([#135](https://github.com/polyai/adk/pull/135),
+  [`baa5523`](https://github.com/polyai/adk/commit/baa5523d6b52cdb52d16d2e50201b1ae54b9294d))
+
+## Summary
+
+Fix `_update_pulled_resources` to properly normalize local Function resources before three-way
+  merge, preventing `TypeError` from missing `known_parameters`.
+
+## Motivation
+
+The direct `resource_type.read_local_resource()` call in `_update_pulled_resources` bypassed the
+  `read_local_resource` wrapper that supplies required kwargs like `known_parameters` for Functions.
+  This caused a `TypeError` on push/pull when Function resources existed locally.
+
+## Changes
+
+- Extract `_make_resource_mapping` helper from `_make_resource_mappings` for single-resource use -
+  Use `self.read_local_resource()` in `_update_pulled_resources` instead of calling the class method
+  directly, so Function/FlowStep/FunctionStep resources get their required kwargs - Re-raise
+  `FileNotFoundError` from `read_local_resource` so the existing `except FileNotFoundError` handler
+  in `_update_pulled_resources` catches it (previously wrapped in `ValueError`) - Update pull merge
+  test expectations to match the canonical `to_pretty` format (extra newline after header when
+  content doesn't start with an import)
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly push`)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.19.0 (2026-05-12)
 
 ### Documentation
