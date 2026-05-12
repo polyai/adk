@@ -4,6 +4,7 @@ Copyright PolyAI Limited
 """
 
 import base64
+import copy
 import json
 import logging
 import os
@@ -1461,8 +1462,10 @@ class AgentStudioProject:
                     step_type=StepType.DEFAULT_STEP,
                     prompt="temp prompt",
                 )
-                flow_config.steps.append(dummy)
-                flow_config.start_step = dummy.step_id
+                push_flow_config = copy.deepcopy(flow_config)
+                push_flow_config.steps.append(dummy)
+                push_flow_config.start_step = dummy.step_id
+                new_resources[FlowConfig][flow_config_id] = push_flow_config
                 reset_flow_config = FlowConfig(
                     resource_id=flow_config.resource_id,
                     name=flow_config.name,
