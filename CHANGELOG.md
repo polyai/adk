@@ -1,6 +1,210 @@
 # CHANGELOG
 
 
+## v0.19.0 (2026-05-12)
+
+### Documentation
+
+- Feat: add deployment promote and rollback commands
+  ([#133](https://github.com/polyai/adk/pull/133),
+  [`7f2df7a`](https://github.com/polyai/adk/commit/7f2df7afdd68fde6cf788571833400684a9f4076))
+
+## Summary
+
+This relates to PR #91
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Feat: support per-region API keys via POLY_ADK_KEY_{REGION}
+  ([#130](https://github.com/polyai/adk/pull/130),
+  [`2d4124b`](https://github.com/polyai/adk/commit/2d4124b7f69342524b8dfad9dbc99e2eafa60c1d))
+
+## Summary
+
+This relates to commit https://github.com/polyai/adk/commit/94cb27b607ffdabcea75896ffbcc01f0406b90c0
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Fix: format for multi-resource YAML files ([#131](https://github.com/polyai/adk/pull/131),
+  [`482c439`](https://github.com/polyai/adk/commit/482c4396f68f0aaa33a62b1b62835cbd2f4f6bd6))
+
+## Summary
+
+These changes relate to PR #119
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Fix: key accounts/projects dicts by ID to prevent duplicate name collisions
+  ([#132](https://github.com/polyai/adk/pull/132),
+  [`d0e628e`](https://github.com/polyai/adk/commit/d0e628ed5e78e1383d02e1b7945def1d34d90134))
+
+## Summary
+
+This relates to work from commit
+  https://github.com/polyai/adk/commit/b71b6a70aaa0939a437da5500f0727a5d6e86d0d
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+### Features
+
+- Add `poly create project` command ([#64](https://github.com/polyai/adk/pull/64),
+  [`b7276be`](https://github.com/polyai/adk/commit/b7276be1e09292ac19a048214854615253c6419a))
+
+## Summary
+
+Adds a new `poly create project` CLI command that creates a new Agent Studio project under an
+  interactively selected account, then initializes it locally. Uses the Agents API (`POST
+  /v1/accounts/{accountId}/agents`) for project creation.
+
+<img width="805" height="169" alt="image"
+  src="https://github.com/user-attachments/assets/5664b7b6-34fc-4154-9d80-7eafa232c117" /> <img
+  width="1137" height="208" alt="image"
+  src="https://github.com/user-attachments/assets/dfa70eac-9775-43cc-9127-a9aa4dfce33c" />
+
+## Changes
+
+- Add `create project` subparser with `--region`, `--account_id`, `--name`, `--json` flags - Add
+  `AgentStudioCLI.create_project()` with interactive and non-interactive flows - After creation,
+  automatically calls `init_project` to set up the local project - Add
+  `PlatformAPIHandler.create_project()` — calls `POST /v1/agents` (Agents API) - Add
+  `region_to_agents_api_url` mapping and `get_agents_api_url()` for the Agents API base URLs - Add
+  `AgentStudioInterface.create_project()` wrapper - Remove dead `_retrieve_api_key()` method - Fix
+  duplicate `get_deployments` definitions and indentation issues
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.18.0 (2026-05-08)
 
 ### Features
