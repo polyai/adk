@@ -52,6 +52,7 @@ from poly.resources.function import (
     FunctionType,
 )
 from poly.resources.handoff import Handoff
+from poly.resources.flow_layout_utils import assign_flow_positions
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation
@@ -7267,6 +7268,286 @@ class ExtractGoToFlowsTests(unittest.TestCase):
         """Flow names with spaces are extracted correctly."""
         code = 'conv.goto_flow("My Flow Name")'
         self.assertEqual(extract_go_to_flows(code), ["My Flow Name"])
+
+
+def _visualize_layout(nodes):
+    """ASCII visualization of flow layout for test debugging."""
+    layers = {}
+    for node in nodes:
+        if not node.position:
+            continue
+        y = node.position["y"]
+        layers.setdefault(y, []).append(node)
+
+    lines = []
+    for y in sorted(layers):
+        layer_nodes = sorted(layers[y], key=lambda n: n.position["x"])
+        parts = []
+        for n in layer_nodes:
+            parts.append(f"[{n.name}](x={n.position['x']:.0f}, y={y:.0f})")
+        lines.append("  ".join(parts))
+    return "\n".join(lines)
+
+
+def _make_step(name, step_id, flow_id="flow-1", conditions=None, position=None):
+    return FlowStep(
+        resource_id=f"{flow_id}_{step_id}",
+        step_id=step_id,
+        name=name,
+        flow_id=flow_id,
+        flow_name="Test Flow",
+        step_type=StepType.DEFAULT_STEP,
+        conditions=conditions or [],
+        prompt="test",
+        position=position,
+    )
+
+
+def _make_condition(name, cond_id, step_id, flow_id="flow-1", child_step="",
+                    condition_type=ConditionType.STEP):
+    return Condition(
+        resource_id=cond_id,
+        name=name,
+        condition_type=condition_type,
+        step_id=step_id,
+        flow_id=flow_id,
+        child_step=child_step,
+    )
+
+
+def _make_function_step(name, step_id, flow_id="flow-1", flow_name="Test Flow",
+                        code="def f(conv, flow): pass", position=None):
+    return FunctionStep(
+        resource_id=f"{flow_id}_{step_id}",
+        step_id=step_id,
+        name=name,
+        flow_id=flow_id,
+        flow_name=flow_name,
+        code=code,
+        position=position,
+    )
+
+
+class FlowLayoutTests(unittest.TestCase):
+    """Tests for the hierarchical flow layout algorithm."""
+
+    def test_linear_flow(self):
+        """A -> B -> C: nodes stacked vertically, centered at x=0."""
+        a = _make_step("A", "s-a", conditions=[
+            _make_condition("go_b", "c-1", "s-a", child_step="B"),
+        ])
+        b = _make_step("B", "s-b", conditions=[
+            _make_condition("go_c", "c-2", "s-b", child_step="C"),
+        ])
+        c = _make_step("C", "s-c")
+
+        assign_flow_positions([a, b, c], start_node_id="s-a", clean=True)
+        print("\n=== Linear Flow ===")
+        print(_visualize_layout([a, b, c]))
+
+        self.assertEqual(a.position["x"], b.position["x"])
+        self.assertEqual(b.position["x"], c.position["x"])
+        self.assertLess(a.position["y"], b.position["y"])
+        self.assertLess(b.position["y"], c.position["y"])
+
+    def test_branching_flow(self):
+        """A -> B, A -> C: B and C side by side below A."""
+        a = _make_step("A", "s-a", conditions=[
+            _make_condition("go_b", "c-1", "s-a", child_step="B"),
+            _make_condition("go_c", "c-2", "s-a", child_step="C"),
+        ])
+        b = _make_step("B", "s-b")
+        c = _make_step("C", "s-c")
+
+        assign_flow_positions([a, b, c], start_node_id="s-a", clean=True)
+        print("\n=== Branching Flow ===")
+        print(_visualize_layout([a, b, c]))
+
+        self.assertLess(a.position["y"], b.position["y"])
+        self.assertEqual(b.position["y"], c.position["y"])
+        self.assertNotEqual(b.position["x"], c.position["x"])
+
+    def test_cycle_no_infinite_loop(self):
+        """A -> B -> A: both get positioned without hanging."""
+        a = _make_step("A", "s-a", conditions=[
+            _make_condition("go_b", "c-1", "s-a", child_step="B"),
+        ])
+        b = _make_step("B", "s-b", conditions=[
+            _make_condition("go_a", "c-2", "s-b", child_step="A"),
+        ])
+
+        assign_flow_positions([a, b], start_node_id="s-a", clean=True)
+        print("\n=== Cycle Flow ===")
+        print(_visualize_layout([a, b]))
+
+        self.assertTrue(a.position)
+        self.assertTrue(b.position)
+        self.assertLess(a.position["y"], b.position["y"])
+
+    def test_exit_flow_condition(self):
+        """Exit flow conditions create virtual nodes below parent."""
+        a = _make_step("A", "s-a", conditions=[
+            _make_condition("go_b", "c-1", "s-a", child_step="B"),
+            _make_condition("exit", "c-2", "s-a",
+                            condition_type=ConditionType.EXIT_FLOW),
+        ])
+        b = _make_step("B", "s-b")
+
+        assign_flow_positions([a, b], start_node_id="s-a", clean=True)
+        print("\n=== Exit Flow ===")
+        print(_visualize_layout([a, b]))
+
+        exit_cond = a.conditions[1]
+        self.assertTrue(exit_cond.exit_flow_position)
+        self.assertGreater(exit_cond.exit_flow_position["y"], a.position["y"])
+        self.assertEqual(exit_cond.exit_flow_position["y"], b.position["y"])
+
+    def test_existing_positions_recomputed(self):
+        """All positions are recomputed even if nodes already have positions."""
+        a = _make_step("A", "s-a", conditions=[
+            _make_condition("go_b", "c-1", "s-a", child_step="B"),
+        ], position={"x": 999.0, "y": 888.0})
+        b = _make_step("B", "s-b", position={"x": 999.0, "y": 888.0})
+
+        assign_flow_positions([a, b], start_node_id="s-a", clean=True)
+
+        # Both should be recomputed to a proper hierarchical layout
+        self.assertNotEqual(a.position["y"], b.position["y"])
+        self.assertLess(a.position["y"], b.position["y"])
+
+    def test_condition_label_positions_midpoint(self):
+        """Condition labels are placed at the midpoint between parent and child."""
+        a = _make_step("A", "s-a", conditions=[
+            _make_condition("go_b", "c-1", "s-a", child_step="B"),
+        ])
+        b = _make_step("B", "s-b")
+
+        assign_flow_positions([a, b], start_node_id="s-a", clean=True)
+
+        cond = a.conditions[0]
+        self.assertAlmostEqual(
+            cond.position["x"], (a.position["x"] + b.position["x"]) / 2
+        )
+        self.assertAlmostEqual(
+            cond.position["y"], (a.position["y"] + b.position["y"]) / 2
+        )
+
+    def test_exit_condition_label_midpoint(self):
+        """Exit flow condition label is midpoint between parent and exit node."""
+        a = _make_step("A", "s-a", conditions=[
+            _make_condition("exit", "c-1", "s-a",
+                            condition_type=ConditionType.EXIT_FLOW),
+        ])
+
+        assign_flow_positions([a], start_node_id="s-a", clean=True)
+
+        cond = a.conditions[0]
+        self.assertTrue(cond.exit_flow_position)
+        self.assertAlmostEqual(
+            cond.position["x"],
+            (a.position["x"] + cond.exit_flow_position["x"]) / 2,
+        )
+        self.assertAlmostEqual(
+            cond.position["y"],
+            (a.position["y"] + cond.exit_flow_position["y"]) / 2,
+        )
+
+    def test_function_step_goto_edge(self):
+        """FunctionStep with goto_step() creates an edge to the target."""
+        a = _make_step("A", "s-a", conditions=[
+            _make_condition("go_func", "c-1", "s-a", child_step="do_work"),
+        ])
+        func = _make_function_step(
+            "do_work", "s-func",
+            code='def f(conv, flow):\n    flow.goto_step("B")\n',
+        )
+        b = _make_step("B", "s-b")
+
+        assign_flow_positions([a, func, b], start_node_id="s-a", clean=True)
+        print("\n=== FunctionStep goto ===")
+        print(_visualize_layout([a, func, b]))
+
+        # A at top, func below A, B below func
+        self.assertLess(a.position["y"], func.position["y"])
+        self.assertLess(func.position["y"], b.position["y"])
+
+    def test_hotel_booking_flow(self):
+        """Integration test matching the hotel booking flow from the screenshot."""
+        collect = _make_step("Collect Details", "s-collect", conditions=[
+            _make_condition("All details collected", "c-1", "s-collect",
+                            child_step="Confirm Booking"),
+        ])
+        confirm = _make_step("Confirm Booking", "s-confirm", conditions=[
+            _make_condition("Booking confirmed", "c-2", "s-confirm",
+                            child_step="process_handoff"),
+            _make_condition("Change details", "c-3", "s-confirm",
+                            child_step="Collect Details"),
+            _make_condition("Cancel booking", "c-4", "s-confirm",
+                            condition_type=ConditionType.EXIT_FLOW),
+        ])
+        handoff = _make_function_step(
+            "process_handoff", "s-handoff",
+            code='def process_handoff(conv, flow):\n    conv.call_handoff("Default")\n',
+        )
+
+        nodes = [collect, confirm, handoff]
+        assign_flow_positions(nodes, start_node_id="s-collect", clean=True)
+        print("\n=== Hotel Booking Flow ===")
+        print(_visualize_layout(nodes))
+
+        # Layer 0: Collect Details (top)
+        # Layer 1: Confirm Booking (below)
+        # Layer 2: process_handoff + exit:Cancel (bottom)
+        self.assertLess(collect.position["y"], confirm.position["y"])
+        self.assertLess(confirm.position["y"], handoff.position["y"])
+
+        # Exit condition positioned at same layer as handoff
+        cancel_cond = confirm.conditions[2]
+        self.assertTrue(cancel_cond.exit_flow_position)
+        self.assertEqual(cancel_cond.exit_flow_position["y"], handoff.position["y"])
+
+        # Handoff and exit node side by side (different x)
+        self.assertNotEqual(
+            handoff.position["x"], cancel_cond.exit_flow_position["x"]
+        )
+
+        # No overlapping: handoff and exit separated by at least NODE_SEP
+        x_diff = abs(handoff.position["x"] - cancel_cond.exit_flow_position["x"])
+        self.assertGreater(x_diff, 50)
+
+        # Condition labels exist
+        for cond in collect.conditions + confirm.conditions:
+            if cond.condition_type == ConditionType.EXIT_FLOW:
+                self.assertTrue(cond.exit_flow_position, f"Missing exit_flow_position: {cond.name}")
+            if cond.child_step or cond.exit_flow_position:
+                self.assertTrue(cond.position, f"Missing condition label position: {cond.name}")
+
+    def test_flow_function_routing(self):
+        """Steps with {{ft:func}} in prompts route through flow function goto_step."""
+        a = _make_step("A", "s-a")
+        a.prompt = 'Ask the question then call {{ft:do_routing}}'
+        b = _make_step("B", "s-b")
+
+        mock_func = type("MockFunc", (), {
+            "name": "do_routing",
+            "code": 'def do_routing(conv, flow):\n    flow.goto_step("B")\n',
+        })()
+
+        assign_flow_positions([a, b], start_node_id="s-a", flow_functions=[mock_func], clean=True)
+        print("\n=== Flow Function Routing ===")
+        print(_visualize_layout([a, b]))
+
+        self.assertLess(a.position["y"], b.position["y"])
+
+    def test_empty_nodes(self):
+        """Empty node list does not error."""
+        assign_flow_positions([], start_node_id="s-a", clean=True)
+
+    def test_single_node(self):
+        """Single node gets positioned."""
+        a = _make_step("A", "s-a")
+        assign_flow_positions([a], start_node_id="s-a", clean=True)
+        self.assertTrue(a.position)
 
 
 if __name__ == "__main__":

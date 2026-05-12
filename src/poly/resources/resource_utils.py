@@ -23,7 +23,6 @@ import ruamel.yaml as yaml
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from poly.resources.flows import BaseFlowStep
     from poly.resources.resource import ResourceMapping
 
 # Create YAML instances with block style for multiline strings
@@ -550,7 +549,6 @@ def convert_keys_to_snake_case(dict_obj: dict) -> dict:
     """Convert config keys to snake_case for consistency."""
     return {to_snake_case(k): v for k, v in dict_obj.items()}
 
-
 def extract_go_to_steps(code: str) -> list[tuple[str, Optional[str]]]:
     """Extract goto_step calls, returning (step_name, condition_name) tuples."""
     pattern = re.compile(
@@ -567,203 +565,9 @@ def extract_go_to_steps(code: str) -> list[tuple[str, Optional[str]]]:
         results.append((step_name, condition_name))
     return results
 
-
 def extract_go_to_flows(code: str) -> list[str]:
     pattern = re.compile(
         r"conv\.goto_flow\(\s*"
         r"""(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')"""
     )
     return [m.group(1) or m.group(2) for m in pattern.finditer(code)]
-
-
-def assign_flow_positions(
-    nodes: list["BaseFlowStep"],
-    start_node_id: str,
-    x_start: float = 0.0,
-    y_start: float = 0.0,
-    x_gap: float = 600.0,
-    y_gap: float = 500.0,
-) -> None:
-    """Assign positions to flow nodes in a grid layout.
-
-    Args:
-        nodes (list[dict]): List of node dictionaries to assign positions to.
-        x_start (float): Starting x position.
-        y_start (float): Starting y position.
-        x_gap (float): Gap between nodes in the x direction.
-        y_gap (float): Gap between nodes in the y direction.
-    """
-    known_positions = [node.position for node in nodes if node.position]
-
-    x_max = x_start
-    if known_positions:
-        x_max = max(pos["x"] for pos in known_positions)
-
-    # Assign start node position first
-    assigning_order: list[BaseFlowStep] = []
-    for node in nodes:
-        if node.step_id != start_node_id:
-            assigning_order.append(node)
-        else:
-            assigning_order.insert(0, node)
-
-    for node in assigning_order:
-        if node.position:
-            continue
-
-        if node.step_id == start_node_id and not known_positions:
-            node.position = {"x": x_start, "y": y_start}
-        else:
-            x_max = assign_flow_node_position(
-                node,
-                nodes,
-                visited_node_ids=set(),
-                x_start=x_max,
-                y_start=y_start,
-                x_gap=x_gap,
-                y_gap=y_gap,
-            )
-
-    # Assign conditions label positions
-    for node in nodes:
-        if not hasattr(node, "conditions"):
-            continue
-        for condition in node.conditions:
-            if condition.position:
-                continue
-            # If child_node position condition between parent and child
-            if condition.child_step:
-                child_node = next((n for n in nodes if n.step_id == condition.child_step), None)
-                if child_node and child_node.position and node.position:
-                    condition.position = {
-                        "x": (node.position["x"] + child_node.position["x"]) / 2,
-                        "y": (node.position["y"] + child_node.position["y"]) / 2,
-                    }
-            elif not condition.exit_flow_position:
-                # Collect sibling positions: child nodes and other exit_flow_positions
-                sibling_x_positions = []
-
-                # Get positions of child node siblings and other exit_flow_positions
-                for other_condition in node.conditions:
-                    if other_condition == condition:
-                        continue
-
-                    # Check for child node siblings
-                    if other_condition.child_step:
-                        sibling_node = next(
-                            (n for n in nodes if n.step_id == other_condition.child_step),
-                            None,
-                        )
-                        if sibling_node and sibling_node.position:
-                            sibling_x_positions.append(sibling_node.position["x"])
-
-                    # Check for other exit_flow_positions
-                    if other_condition.exit_flow_position:
-                        sibling_x_positions.append(other_condition.exit_flow_position["x"])
-
-                max_x_sibling = (
-                    max(sibling_x_positions + [node.position["x"]]) + x_gap
-                    if sibling_x_positions
-                    else node.position["x"]
-                )
-                condition.exit_flow_position = {
-                    "x": max_x_sibling,
-                    "y": node.position["y"] + y_gap,
-                }
-                condition.position = {
-                    "x": (node.position["x"] + condition.exit_flow_position["x"]) / 2,
-                    "y": node.position["y"] + y_gap / 2,
-                }
-
-
-def assign_flow_node_position(
-    node: "BaseFlowStep",
-    nodes: list["BaseFlowStep"],
-    visited_node_ids: set[str] = None,
-    x_start: float = 0.0,
-    y_start: float = 0.0,
-    x_gap: float = 600.0,
-    y_gap: float = 150.0,
-) -> float:
-    """Assign positions to flow nodes in a grid layout.
-
-    Args:
-        nodes (list[dict]): List of node dictionaries to assign positions to.
-        x_start (float): Starting x position.
-        y_start (float): Starting y position.
-        x_gap (float): Gap between nodes in the x direction.
-        y_gap (float): Gap between nodes in the y direction.
-
-    Returns:
-        float: The maximum x position assigned.
-    """
-    if node.position:
-        return x_start
-
-    if not visited_node_ids:
-        visited_node_ids = set()
-
-    if node.step_id in visited_node_ids:
-        # Prevent infinite recursion on cycles
-        node.position = {
-            "x": x_start + x_gap,
-            "y": y_start,
-        }
-        return node.position["x"]
-
-    # Work out if node has a parent node
-    parent_node = None
-    max_x_sibling = None
-    for potential_parent in nodes:
-        if not hasattr(potential_parent, "conditions"):
-            continue
-        for condition in potential_parent.conditions:
-            if condition.child_step == node.step_id:
-                parent_node = potential_parent
-
-                if not parent_node.position:
-                    # Parent has no position yet, assign it first
-                    x_start = assign_flow_node_position(
-                        parent_node,
-                        nodes,
-                        visited_node_ids | {node.step_id},
-                        x_start,
-                        y_start,
-                        x_gap,
-                        y_gap,
-                    )
-
-                sibling_ids = [
-                    c.child_step for c in parent_node.conditions if c.child_step != node.step_id
-                ]
-                sibling_x_positions = [
-                    n.position["x"] for n in nodes if n.step_id in sibling_ids and n.position
-                ]
-                # Add x positions for end flow conditions
-                for c in parent_node.conditions:
-                    if c.exit_flow_position and c.child_step not in sibling_ids:
-                        sibling_x_positions.append(c.exit_flow_position["x"])
-
-                max_x_sibling = (
-                    max(sibling_x_positions + [parent_node.position["x"]]) + x_gap
-                    if sibling_x_positions
-                    else parent_node.position["x"]
-                )
-                break
-
-    if parent_node:
-        # Position below parent node
-        node.position = {
-            "x": max_x_sibling,
-            "y": parent_node.position["y"] + y_gap,
-        }
-
-        return max(x_start, node.position["x"])
-
-    else:
-        # Position to the right of the last node
-        node.position = {
-            "x": x_start + x_gap,
-            "y": y_start,
-        }
-        return node.position["x"]

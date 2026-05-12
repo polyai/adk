@@ -66,6 +66,7 @@ from poly.resources import (
     VoiceSafetyFilters,
     VoiceStylePrompt,
 )
+from poly.resources.flow_layout_utils import assign_flow_positions
 from poly.resources.resource import _parse_multi_resource_path
 from poly.utils import compute_variable_references
 
@@ -1017,6 +1018,13 @@ class AgentStudioProject:
     ) -> list[Message]:
         """Stage commands for the project."""
 
+        # Assign positions to new flows
+        new_resources, updated_resources = self._assign_flow_positions(
+            new_resources,
+            updated_resources,
+            new_state,
+        )
+
         # Group flow resources together
         # Creating flow config, group all new steps/functions under it and remove from
         # new resources
@@ -1031,13 +1039,6 @@ class AgentStudioProject:
         deleted_resources = push_changes.main.deleted
         pre_changes = push_changes.pre
         post_changes = push_changes.post
-
-        # Assign positions to new flows
-        new_resources, updated_resources = self._assign_flow_positions(
-            new_resources,
-            updated_resources,
-            new_state,
-        )
 
         # Queue new/updated/deleted resources
         commands = []
@@ -1243,7 +1244,25 @@ class AgentStudioProject:
         for flow_config in new_resources.get(FlowConfig, {}).values():
             if not isinstance(flow_config, FlowConfig):
                 raise TypeError(f"Flow config is not a FlowConfig: {flow_config}")
-            resource_utils.assign_flow_positions(flow_config.steps, flow_config.start_step)
+            flow_steps = [
+                step
+                for step in (
+                    list(new_resources.get(FlowStep, {}).values())
+                    + list(new_resources.get(FunctionStep, {}).values())
+                )
+                if isinstance(step, BaseFlowStep) and step.flow_id == flow_config.resource_id
+            ]
+            flow_functions = [
+                func
+                for func in new_resources.get(Function, {}).values()
+                if getattr(func, "flow_id", None) == flow_config.resource_id
+            ]
+            assign_flow_positions(
+                flow_steps,
+                flow_config.start_step,
+                flow_functions=flow_functions,
+                clean=True,
+            )
 
         # Assign positions to flows with new/updated steps
         updated_flow_ids = set()
@@ -1271,8 +1290,13 @@ class AgentStudioProject:
                 )
                 if isinstance(step, BaseFlowStep) and step.flow_id == updated_flow_id
             ]
+            flow_functions = [
+                func
+                for func in new_state.get(Function, {}).values()
+                if getattr(func, "flow_id", None) == updated_flow_id
+            ]
 
-            resource_utils.assign_flow_positions(flow_steps, flow_config.start_step)
+            assign_flow_positions(flow_steps, flow_config.start_step, flow_functions=flow_functions)
 
         return new_resources, updated_resources
 
