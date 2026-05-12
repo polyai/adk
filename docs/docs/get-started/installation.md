@@ -55,6 +55,28 @@ export POLY_ADK_KEY=<your-api-key>
 
 The `POLY_ADK_KEY` environment variable must be set before running any `poly` commands. To make it permanent, add the export line to your shell profile (for example, `~/.zshrc` or `~/.bashrc`).
 
+### Per-region API keys
+
+If you need a separate API key for a specific region, you can set a region-scoped variable alongside `POLY_ADK_KEY`. The ADK checks for the region-specific key first and falls back to `POLY_ADK_KEY` if it is not set.
+
+| Region | Environment variable |
+|---|---|
+| `us-1` | `POLY_ADK_KEY_US` |
+| `euw-1` | `POLY_ADK_KEY_EUW` |
+| `uk-1` | `POLY_ADK_KEY_UK` |
+| `studio` | `POLY_ADK_KEY_STUDIO` |
+| `staging` | `POLY_ADK_KEY_STAGING` |
+| `dev` | `POLY_ADK_KEY_DEV` |
+
+For example, to use a dedicated key for the US region:
+
+~~~bash
+export POLY_ADK_KEY_US=<your-us-api-key>
+export POLY_ADK_KEY=<your-fallback-api-key>   # used for any other region
+~~~
+
+`POLY_ADK_KEY` is still required as the fallback. If neither the region-specific key nor `POLY_ADK_KEY` is set, the CLI will raise an error.
+
 Once the ADK is installed and your API key is set, you can use the `poly` command to interact with Agent Studio projects locally.
 
 ## Verify the installation

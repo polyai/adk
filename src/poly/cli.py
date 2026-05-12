@@ -9,6 +9,7 @@ import base64
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -272,6 +273,77 @@ class AgentStudioCLI:
             action="store_true",
             help=SUPPRESS,
             default=False,
+        )
+
+        # PROJECT
+        project_parser = subparsers.add_parser(
+            "project",
+            parents=[],
+            help="Manage Agent Studio projects.",
+            description=(
+                "Manage Agent Studio projects.\n\n"
+                "Examples:\n"
+                "  poly project create\n"
+                "  poly project create --region us-1 --account_id my-account --name my-project\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        project_subparsers = project_parser.add_subparsers(dest="project_subcommand", required=True)
+
+        # PROJECT CREATE
+        project_create_parser = project_subparsers.add_parser(
+            "create",
+            parents=[verbose_parent, json_parent, debug_parent],
+            help="Create a new Agent Studio project under an account.",
+            description=(
+                "Create a new Agent Studio project under an interactively selected account.\n\n"
+                "Examples:\n"
+                "  poly project create\n"
+                "  poly project create --region us-1 --account_id my-account --name my-project\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        project_create_parser.add_argument(
+            "--base-path",
+            type=str,
+            default=os.getcwd(),
+            help="Base path to initialize the project. Defaults to current working directory.",
+        )
+        project_create_parser.add_argument(
+            "--region",
+            type=str,
+            choices=REGIONS,
+            help="Region for the Agent Studio project.",
+        )
+        project_create_parser.add_argument(
+            "--account_id",
+            type=str,
+            help="Account ID for the Agent Studio project.",
+        )
+        project_create_parser.add_argument(
+            "--name",
+            type=str,
+            dest="project_name",
+            help="Name for the new project.",
+        )
+        project_create_parser.add_argument(
+            "--id",
+            "--project_id",
+            type=str,
+            dest="project_id",
+            help="Optional slug/ID for the project. Defaults to a slugified version of the name.",
+        )
+        project_create_parser.add_argument(
+            "--greeting",
+            type=str,
+            default="Hello, how can I help you?",
+            help="Initial greeting message for the agent.",
+        )
+        project_create_parser.add_argument(
+            "--voice-id",
+            type=str,
+            dest="voice_id",
+            help="Voice ID for the agent. Defaults to a region-specific voice.",
         )
 
         # PULL
@@ -1066,6 +1138,19 @@ class AgentStudioCLI:
                     output_json_projection=args.output_json_projection,
                 )
 
+            elif args.command == "project":
+                if args.project_subcommand == "create":
+                    cls.create_project(
+                        args.base_path,
+                        region=args.region,
+                        account_id=args.account_id,
+                        project_name=args.project_name,
+                        project_id=args.project_id,
+                        greeting=args.greeting,
+                        voice_id=args.voice_id,
+                        output_json=args.json,
+                    )
+
             elif args.command == "pull":
                 cls.pull(
                     args.path,
@@ -1382,6 +1467,154 @@ class AgentStudioCLI:
         return cls.read_project_config(parent_path)
 
     @classmethod
+    def create_project(
+        cls,
+        base_path: str,
+        region: str = None,
+        account_id: str = None,
+        project_name: str = None,
+        project_id: str = None,
+        greeting: str = "Hello, how can I help you?",
+        voice_id: str = None,
+        output_json: bool = False,
+    ) -> None:
+        """Create a new Agent Studio project under an interactively selected account."""
+        if output_json and not (region and account_id and project_name):
+            json_print(
+                {
+                    "success": False,
+                    "error": (
+                        "create project with --json requires --region, --account_id, and --name."
+                    ),
+                }
+            )
+            sys.exit(1)
+
+        api_handler = AgentStudioInterface()
+
+        if not region:
+            with console.status("[info]Fetching available regions...[/info]"):
+                regions = api_handler.get_accessible_regions()
+            if not regions:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No accessible regions found for your API key.",
+                        }
+                    )
+                else:
+                    error("No accessible regions found for your API key.")
+                sys.exit(1)
+            if len(regions) == 1:
+                region = regions[0]
+                if not output_json:
+                    info(f"Auto-selected region [bold]{region}[/bold].")
+            else:
+                region = questionary.select("Select Region", choices=regions).ask()
+                if not region:
+                    warning("No region selected. Exiting.")
+                    return
+
+        if not account_id:
+            accounts = api_handler.get_accounts(region)
+            if not accounts:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No accounts found in the selected region.",
+                        }
+                    )
+                else:
+                    error("No accounts found in the selected region.")
+                sys.exit(1)
+            if len(accounts) == 1:
+                account_id, account_name = next(iter(accounts.items()))
+                if not output_json:
+                    info(f"Auto-selected account [bold]{account_name}[/bold].")
+            else:
+                account_choices = [
+                    questionary.Choice(title=f"{name} ({acc_id})", value=acc_id)
+                    for acc_id, name in accounts.items()
+                ]
+                account_id = questionary.select(
+                    "Select Account",
+                    choices=account_choices,
+                    use_search_filter=True,
+                    use_jk_keys=False,
+                ).ask()
+                if not account_id:
+                    if output_json:
+                        json_print({"success": False, "error": "No account selected."})
+                        sys.exit(1)
+                    warning("No account selected. Exiting.")
+                    return
+
+        if not project_name:
+            project_name = questionary.text("Enter project name:").ask()
+            if not project_name or not project_name.strip():
+                warning("No project name provided. Exiting.")
+                return
+            project_name = project_name.strip()
+
+        if not project_id:
+            default_id = re.sub(r"[^a-zA-Z0-9-]", "", project_name.lower().replace(" ", "-"))
+            default_id = default_id.strip("-") or ""
+            project_id = questionary.text(
+                "Enter project ID (leave empty to let the platform generate one):",
+                default=default_id,
+                validate=lambda val: (
+                    True
+                    if not val or re.fullmatch(r"[a-zA-Z0-9-]+", val)
+                    else "Project ID can only contain alphanumeric characters and dashes."
+                ),
+            ).ask()
+            if project_id is None:
+                return
+            project_id = project_id.strip() or None
+
+        ctx = (
+            console.status(
+                f"[info]Creating project [bold]{project_name}[/bold]"
+                f" under account {account_id}...[/info]"
+            )
+            if not output_json
+            else nullcontext()
+        )
+
+        with ctx:
+            try:
+                result = api_handler.create_project(
+                    region, account_id, project_name, project_id, greeting, voice_id
+                )
+            except Exception as e:
+                if output_json:
+                    json_print({"success": False, "error": str(e)})
+                else:
+                    error(f"Failed to create project: {e}")
+                sys.exit(1)
+
+        project_id = result.get("id")
+        if not project_id:
+            if output_json:
+                json_print({"success": False, "error": "No project ID returned by API."})
+            else:
+                error("No project ID returned by API.")
+            sys.exit(1)
+
+        if not output_json:
+            success(f"Created project [bold]{project_name}[/bold] ({project_id})")
+
+        cls.init_project(
+            base_path,
+            region=region,
+            account_id=account_id,
+            project_id=project_id,
+            output_json=output_json,
+        )
+
+    @classmethod
     def init_project(
         cls,
         base_path: str,
@@ -1402,9 +1635,6 @@ class AgentStudioCLI:
                 }
             )
             sys.exit(1)
-
-        if not output_json:
-            info("Initialising project...")
 
         api_handler = AgentStudioInterface()
 
@@ -1481,9 +1711,21 @@ class AgentStudioCLI:
                             "error": "No projects found in the selected account.",
                         }
                     )
-                else:
-                    error("No projects found in the selected account.")
-                sys.exit(1)
+                    sys.exit(1)
+
+                should_create = questionary.confirm(
+                    "No projects found in this account. Would you like to create one?"
+                ).ask()
+                if not should_create:
+                    return
+
+                cls.create_project(
+                    base_path,
+                    region=region,
+                    account_id=account_id,
+                    output_json=False,
+                )
+                return
 
             project_choices = [
                 questionary.Choice(title=f"{name} ({proj_id})", value=proj_id)
@@ -1514,16 +1756,15 @@ class AgentStudioCLI:
             projects = api_handler.get_projects(region, account_id)
             project_name = projects.get(project_id)
 
-        if not output_json:
-            info(f"Initializing project [bold]{account_id}/{project_id}[/bold]...")
-
         projection_json = cls._parse_from_projection_json(
             from_projection,
             json_errors=output_json or output_json_projection,
         )
 
         ctx = (
-            console.status("[info]Saving resources...[/info]") if not output_json else nullcontext()
+            console.status(f"[info]Initializing project {account_id}/{project_id}...[/info]")
+            if not output_json
+            else nullcontext()
         )
         on_save = None
 

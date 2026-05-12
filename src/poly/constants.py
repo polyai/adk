@@ -3,6 +3,16 @@
 Copyright PolyAI Limited
 """
 
+DEFAULT_VOICE_IDS: dict[str, str] = {
+    "us-1": "VOICE-6fad73f6",  # Anne
+    "euw-1": "VOICE-8b814724",  # Ben
+    "uk-1": "VOICE-37966683",  # Ben
+    "dev": "VOICE-e2b01d55",  # Anne
+    "staging": "VOICE-e2b01d55",  # Anne
+}
+
+DEFAULT_VOICE_ID_FALLBACK = "VOICE-afe2b8e8"
+
 PERMISSIONS = [
     "home",
     "conversations",
