@@ -915,10 +915,9 @@ class AgentStudioProject:
                     local_file_path = incoming_resource.get_path(self.root_path)
                 try:
                     # Normalise the local resource to ensure formatting differences don't cause unnecessary merge conflicts
-                    local_resource = resource_type.read_local_resource(
-                        local_file_path,
-                        resource_id=incoming_resource.resource_id,
-                        resource_name=incoming_resource.name,
+                    incoming_resource_mapping = self._make_resource_mapping(incoming_resource)
+                    local_resource = self.read_local_resource(
+                        resource=incoming_resource_mapping,
                         resource_mappings=incoming_resource_mappings,
                     )
                     local_content = local_resource.to_pretty(
@@ -2070,6 +2069,10 @@ class AgentStudioProject:
                 resource_mappings=resource_mappings,
                 **additional_kwargs,
             )
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                f"File not found for resource {resource.resource_name} at {resource.file_path}"
+            ) from e
         except Exception as e:
             raise ValueError(
                 f"Error reading resource {resource.resource_name} at {resource.file_path}: {str(e)}"
@@ -2510,24 +2513,24 @@ class AgentStudioProject:
 
     def _make_resource_mappings(self, resources: ResourceMap) -> list[ResourceMapping]:
         resource_mappings: list[ResourceMapping] = []
-        for resource_type, resources_dict in resources.items():
-            for resource_id, resource in resources_dict.items():
-                resource_path = resource.get_path(self.root_path)
-                resource_mappings.append(
-                    ResourceMapping(
-                        resource_id=resource_id,
-                        resource_type=resource_type,
-                        resource_name=resource.name,
-                        file_path=resource_path,
-                        flow_name=(
-                            resource.name
-                            if isinstance(resource, FlowConfig)
-                            else getattr(resource, "flow_name", None)
-                        ),
-                        resource_prefix=resource.get_resource_prefix(file_path=resource.file_path),
-                    )
-                )
+        for resources_dict in resources.values():
+            for resource in resources_dict.values():
+                resource_mappings.append(self._make_resource_mapping(resource))
         return resource_mappings
+
+    def _make_resource_mapping(self, resource: Resource) -> ResourceMapping:
+        return ResourceMapping(
+            resource_id=resource.resource_id,
+            resource_type=type(resource),
+            resource_name=resource.name,
+            file_path=resource.get_path(self.root_path),
+            flow_name=(
+                resource.name
+                if isinstance(resource, FlowConfig)
+                else getattr(resource, "flow_name", None)
+            ),
+            resource_prefix=resource.get_resource_prefix(file_path=resource.file_path),
+        )
 
     def format_files(
         self, files: list[str] = None, check_only: bool = False
