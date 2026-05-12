@@ -309,6 +309,7 @@ class AgentStudioCLI:
         )
         project_create_parser.add_argument(
             "--id",
+            "--project_id",
             type=str,
             dest="project_id",
             help="Optional slug/ID for the project. Defaults to a slugified version of the name.",
