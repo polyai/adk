@@ -585,8 +585,8 @@ def print_welcome_message() -> None:
     console.print()
     console.print(
         Panel(
-            f"[bold black on #D9EE50]{_POLY_LOGO}[/bold black on #D9EE50]",
-            style="on #D9EE50",
+            f"[bold #D9EE50]{_POLY_LOGO}[/bold #D9EE50]",
+            style="on black",
             border_style="#D9EE50",
             padding=(1, 6),
         )
