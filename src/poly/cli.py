@@ -3887,7 +3887,7 @@ class AgentStudioCLI:
             ).ask()
             if use_existing:
                 success("Continuing with existing API key.")
-                cls.init_project(base_path)
+                cls.create_project(base_path)
                 return
         except ValueError:
             pass
@@ -3935,7 +3935,7 @@ class AgentStudioCLI:
         info("export POLY_ADK_KEY=your_token_here  # on Linux/MacOS")
         info("setx POLY_ADK_KEY your_token_here  # on Windows")
 
-        cls.init_project(base_path, region="studio")
+        cls.create_project(base_path, region="studio")
 
     @classmethod
     def _signin(cls) -> str:
