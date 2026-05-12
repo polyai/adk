@@ -3875,10 +3875,14 @@ class AgentStudioCLI:
     def start(cls, base_path: str) -> None:
         """Authenticate via device flow, obtain a JWT, and initialise a project."""
         print_welcome_message()
+        plain(
+            "This will guide you through setting up your API key and creating a new project in Agent Studio."
+        )
+        questionary.press_any_key_to_continue("Press any key to continue...").ask()
 
         # --- 1. Check for existing API key ---
         try:
-            retrieve_api_key()
+            key = retrieve_api_key()
             warning("An existing API key was found in your environment.")
             use_existing = questionary.confirm(
                 "Do you want to continue with the existing key?",
@@ -3887,7 +3891,15 @@ class AgentStudioCLI:
             ).ask()
             if use_existing:
                 success("Continuing with existing API key.")
-                cls.create_project(base_path)
+                create_project = questionary.confirm(
+                    "Would you like to create a new project in Agent Studio now?",
+                    auto_enter=False,
+                    default=True,
+                ).ask()
+                if create_project:
+                    cls.create_project(base_path, region="studio")
+                else:
+                    info("You can create a new project later by running 'poly project create'")
                 return
         except ValueError:
             pass
@@ -3934,8 +3946,16 @@ class AgentStudioCLI:
         )
         info("export POLY_ADK_KEY=your_token_here  # on Linux/MacOS")
         info("setx POLY_ADK_KEY your_token_here  # on Windows")
-
-        cls.create_project(base_path, region="studio")
+        plain("")
+        create_project = questionary.confirm(
+            "Would you like to create a new project in Agent Studio now?",
+            auto_enter=False,
+            default=True,
+        ).ask()
+        if create_project:
+            cls.create_project(base_path, region="studio")
+        else:
+            info("You can create a new project later by running 'poly project create'")
 
     @classmethod
     def _signin(cls) -> str:
