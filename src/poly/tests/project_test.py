@@ -2282,7 +2282,7 @@ class PullProjectTest(unittest.TestCase):
         ]
         # Check that the saved content contains merge conflict
         saved_content = test_func_calls[0][0][0] if test_func_calls else ""
-        merged_content = 'from _gen import *  # <AUTO GENERATED>\n\n@func_description(\'A test function for global use.\')\ndef test_function(conv: Conversation):\n<<<<<<<\n    """Modified locally."""\n    return "Local change"\n=======\n    """Modified remotely."""\n    return "Remote change"\n>>>>>>>\n'
+        merged_content = 'from _gen import *  # <AUTO GENERATED>\n\n\n@func_description(\'A test function for global use.\')\ndef test_function(conv: Conversation):\n<<<<<<<\n    """Modified locally."""\n    return "Local change"\n=======\n    """Modified remotely."""\n    return "Remote change"\n>>>>>>>\n'
         self.assertEqual(saved_content, merged_content)
 
     def test_pull_project_modify_flow_config_conflict(self):
@@ -2404,7 +2404,7 @@ class PullProjectTest(unittest.TestCase):
         ]
         # Check that the saved content contains merged version
         saved_content = test_func_calls[0][0][0] if test_func_calls else ""
-        merged_content = 'from _gen import *  # <AUTO GENERATED>\n\ndef added_extra_function():\n    pass\n\n@func_description(\'A test function for global use.\')\ndef test_function(conv: Conversation):\n    """Modified remotely."""\n    return "Remote change"\n'
+        merged_content = 'from _gen import *  # <AUTO GENERATED>\n\n\ndef added_extra_function():\n    pass\n\n@func_description(\'A test function for global use.\')\ndef test_function(conv: Conversation):\n    """Modified remotely."""\n    return "Remote change"\n'
         self.assertEqual(saved_content, merged_content)
 
     def test_pull_project_force(self):
