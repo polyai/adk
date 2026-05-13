@@ -11,6 +11,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
+from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
 from poly.utils import retrieve_api_key
 
 logger = logging.getLogger(__name__)
@@ -203,16 +204,66 @@ class PlatformAPIHandler:
         return projects
 
     @staticmethod
+    def create_project(
+        region: str,
+        account_id: str,
+        project_name: str,
+        project_id: str = None,
+        greeting: str = "Hello, how can I help you?",
+        voice_id: ty.Optional[str] = None,
+    ) -> dict[str, str]:
+        """Create a new project (agent) via the Agents API.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+            project_name (str): The display name for the new project
+            project_id (str | None): Optional slug/ID for the project.
+                When omitted the platform generates one automatically.
+            greeting (str): The initial greeting message for the agent.
+            voice_id (str | None): The voice ID to use. Defaults to the
+                region-specific voice ID.
+
+        Returns:
+            dict[str, str]: A dictionary with the created project's 'id' and 'name'
+        """
+        if not voice_id:
+            voice_id = DEFAULT_VOICE_IDS.get(region, DEFAULT_VOICE_ID_FALLBACK)
+
+        endpoint = f"/v1/accounts/{account_id}/agents"
+        data = {
+            "name": project_name,
+            "responseSettings": {
+                "greeting": greeting,
+            },
+            "voiceSettings": {
+                "voiceId": voice_id,
+            },
+        }
+        if project_id:
+            data["agentId"] = project_id
+
+        result = PlatformAPIHandler.make_request(
+            region,
+            endpoint,
+            "POST",
+            data=data,
+        )
+        return {"id": result.get("agentId"), "name": result.get("agentName")}
+
+    @staticmethod
     def get_deployments(
         region: str, account_id: str, project_id: str, client_env: str = "sandbox"
     ) -> list[dict[str, ty.Any]]:
         """Get the deployments for a given project and client environment.
+
         Args:
             region (str): The region name
             account_id (str): The account ID
             project_id (str): The project ID
             client_env (str): The client environment (sandbox, pre-release, live)
                 defaults to sandbox
+
         Returns:
             list[dict[str, Any]]: A list of deployment records from the API
         """

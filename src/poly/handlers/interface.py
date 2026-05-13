@@ -132,16 +132,44 @@ class AgentStudioInterface:
         return PlatformAPIHandler.get_projects(region, account_id)
 
     @staticmethod
+    def create_project(
+        region: str,
+        account_id: str,
+        project_name: str,
+        project_id: str = None,
+        greeting: str = "Hello, how can I help you?",
+        voice_id: str | None = None,
+    ) -> dict[str, str]:
+        """Create a new project in an account.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+            project_name (str): The display name for the new project
+            project_id (str | None): Optional slug/ID for the project
+            greeting (str): The initial greeting message for the agent.
+            voice_id (str | None): The voice ID to use.
+
+        Returns:
+            dict[str, str]: A dictionary with the created project's 'id' and 'name'
+        """
+        return PlatformAPIHandler.create_project(
+            region, account_id, project_name, project_id, greeting, voice_id
+        )
+
+    @staticmethod
     def get_deployments(
         region: str, account_id: str, project_id: str, client_env: str = "sandbox"
     ) -> list[dict[str, Any]]:
         """Get the deployments for a given project and client environment.
+
         Args:
             region (str): The region name
             account_id (str): The account ID
             project_id (str): The project ID
             client_env (str): The client environment (sandbox, pre-release, live)
                 defaults to sandbox
+
         Returns:
             list[dict[str, Any]]: A list of deployment records from the API
         """
