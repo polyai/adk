@@ -82,17 +82,21 @@ class SyncClientHandler:
         account_id: str,
         project_id: str,
         branch_id: Optional[str] = None,
+        sdk_class: Optional[type[SourcererSDK]] = None,
     ):
-        if region not in SourcererSDK.ENVIRONMENT_URLS:
+        if sdk_class is None:
+            sdk_class = SourcererSDK
+
+        if region not in sdk_class.ENVIRONMENT_URLS:
             raise ValueError(
-                f"Invalid region '{region}'. Valid regions are: {list(SourcererSDK.ENVIRONMENT_URLS.keys())}"
+                f"Invalid region '{region}'. Valid regions are: {list(sdk_class.ENVIRONMENT_URLS.keys())}"
             )
 
         self.region = region
         self.account_id = account_id
         self.project_id = project_id
 
-        self._sdk = SourcererSDK(
+        self._sdk = sdk_class(
             region=region,
             account_id=account_id,
             project_id=project_id,
