@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 import requests
 
+from poly.utils import retrieve_api_key
 from .protobuf.commands_pb2 import Command, CommandBatch
 
 logger = logging.getLogger(__name__)
@@ -82,7 +83,9 @@ class SourcererSDK:
 
     def _get_auth_headers(self) -> dict[str, str]:
         """Return the authentication headers for this SDK instance."""
-        return {"Authorization": f"Bearer {self._access_token}"}
+        return {
+            "X-API-KEY": retrieve_api_key(self.region),
+        }
 
     def _initialise_session(self, region: str, base_url: Optional[str] = None):
         """Initialize the requests session with authentication headers."""
