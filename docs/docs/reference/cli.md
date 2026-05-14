@@ -28,6 +28,58 @@ poly push --help
 
 ## Core commands
 
+### `poly project`
+
+Manage Agent Studio projects.
+
+#### `poly project create`
+
+Create a new Agent Studio project under an account, then initialize it locally.
+
+Run with no arguments and `poly project create` walks you through interactive prompts:
+
+1. **Region** — auto-selected if your API key only has access to one.
+2. **Account** — auto-selected if there's only one in the region; otherwise pick from a searchable list.
+3. **Project name** — free-text name for the new project.
+4. **Project ID** — optional slug. Defaults to a slugified version of the name (lowercased, spaces replaced with hyphens, special characters removed). Leave empty to let the platform generate one.
+
+After the project is created in Agent Studio, `poly project create` automatically calls `poly init` to initialize the local project directory.
+
+Examples:
+
+~~~bash
+poly project create
+poly project create --region us-1 --account_id my-account --name my-project
+poly project create --region us-1 --account_id my-account --name "My Project" --id my-project
+poly project create --region us-1 --account_id my-account --name my-project --greeting "Hi, how can I help?"
+poly project create --base-path /path/to/projects
+~~~
+
+| Flag | Description |
+|---|---|
+| `--region` | Region for the new project. Choices match the standard region list. |
+| `--account_id` | Account ID to create the project under. |
+| `--name` | Display name for the new project. |
+| `--id`, `--project_id` | Optional slug/ID for the project. Defaults to a slugified version of the name. |
+| `--greeting` | Initial greeting message for the agent. Defaults to `"Hello, how can I help you?"`. |
+| `--voice-id` | Voice ID for the agent. Defaults to a region-specific voice if not supplied. |
+| `--base-path` | Base path to initialize the project in. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). Requires `--region`, `--account_id`, and `--name`. |
+
+!!! info "`--json` requires explicit flags for `poly project create`"
+
+    When using `poly project create --json`, you must supply `--region`, `--account_id`, and `--name` explicitly. Interactive prompts are not supported in JSON mode.
+
+#### Error handling
+
+| Situation | Behaviour |
+|---|---|
+| `--json` used without `--region`, `--account_id`, or `--name` | Exits with `{ "success": false, "error": "..." }` |
+| No accessible regions found | Exits with an error |
+| No accounts found in the selected region | Exits with an error |
+| API error during project creation | Exits with an error; local init is not attempted |
+| No project ID returned by the API | Exits with an error; local init is not attempted |
+
 ### `poly init`
 
 Initialize a new Agent Studio project locally.
@@ -37,6 +89,8 @@ Run with no arguments and `poly init` walks you through interactive dropdowns:
 1. **Region** — auto-selected if your API key only has access to one.
 2. **Account** — auto-selected if there's only one in the region; otherwise pick from a searchable list. Each entry is shown as `"name (id)"` to disambiguate accounts that share the same display name.
 3. **Project** — pick from a searchable list of every project the API key can see. Each entry is shown as `"name (id)"` for the same reason.
+
+If no projects are found in the selected account, `poly init` offers to create one. Accepting the prompt starts the [`poly project create`](#poly-project-create) flow with the region and account already pre-selected.
 
 After selection, `poly init` creates the project directory at `{base_path}/{account_id}/{project_id}` and immediately pulls the current configuration from Agent Studio. Change into the project directory before running any other commands.
 
@@ -69,7 +123,7 @@ If the account or project ID is invalid or inaccessible, `poly init` returns a d
 |---|---|
 | `POLY_ADK_KEY` not set | `POLY_ADK_KEY environment variable is not set. Export your API key with: export POLY_ADK_KEY=<your-api-key>` |
 | No accounts found in the region | `No accounts found in the selected region.` |
-| No projects found in the account | `No projects found in the selected account.` |
+| No projects found in the account | Prompts to create a new project (interactive) or exits with error (JSON mode). |
 | Project not found | `Project '<project_id>' not found in account '<account_id>'.` |
 | Permission denied | `Forbidden: you do not have permission to access project '<project_id>' in account '<account_id>'.` |
 
@@ -496,6 +550,7 @@ poly branch delete my-feature --json
 poly branch merge 'Merge message' --json
 poly format --json
 poly init --region us-1 --account_id 123 --project_id my_project --json
+poly project create --region us-1 --account_id my-account --name my-project --json
 poly chat --json -m 'Hello'
 poly chat --json --input-file ./script.txt
 poly deployments show abc123def --json
@@ -538,6 +593,7 @@ The exact fields vary by command. Common fields include:
 | `poly branch merge --json` | `success`; on conflict: `conflicts`, `errors` |
 | `poly format --json` | `success`, `check_only`, `format_errors`, `affected`, `ty_ran`, `ty_returncode`, `ty_timed_out` |
 | `poly init --json` | `success`, `root_path` |
+| `poly project create --json` | `success`, `root_path` (via init); on error: `success`, `error` |
 | `poly chat --json` | `conversations` (array); optional `push` (when `--push` is used) |
 | `poly deployments show --json` | `success`, `deployment`, `active_deployment_hashes`, `included_deployments`, `is_rollback` |
 | `poly deployments promote --json` | `success`, `from_hash`, `to_env`, `message`, `included_deployments`; `dry_run` when `--dry-run` is used |
@@ -559,6 +615,10 @@ Error responses always include `{ "success": false, "error": "...", "traceback":
 !!! info "`init` with `--json` requires explicit flags"
 
     When using `poly init --json`, you must supply `--region`, `--account_id`, and `--project_id` explicitly. Interactive prompts are not supported in JSON mode.
+
+!!! info "`poly project create` with `--json` requires explicit flags"
+
+    When using `poly project create --json`, you must supply `--region`, `--account_id`, and `--name` explicitly. Interactive prompts are not supported in JSON mode.
 
 #### `poly chat --json` output shape
 
@@ -643,16 +703,17 @@ poly push --from-projection - < proj.json
 
 A typical CLI workflow looks like this:
 
-1. initialize or pull a project locally
-2. create or switch to a branch
-3. edit files
-4. inspect changes with `poly status` and `poly diff`
-5. validate with `poly validate`
-6. push with `poly push`
-7. optionally review with `poly review`
-8. test or chat with the agent using `poly chat`
-9. merge the branch with `poly branch merge '<message>'`
-10. promote to pre-release or live with `poly deployments promote`
+1. create a new project with `poly project create` or initialize an existing one with `poly init`
+2. pull with `poly pull` if needed to refresh local state
+3. create or switch to a branch
+4. edit files
+5. inspect changes with `poly status` and `poly diff`
+6. validate with `poly validate`
+7. push with `poly push`
+8. optionally review with `poly review`
+9. test or chat with the agent using `poly chat`
+10. merge the branch with `poly branch merge '<message>'`
+11. promote to pre-release or live with `poly deployments promote`
 
 !!! info "Run commands from the project folder"
 
