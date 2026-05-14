@@ -3882,7 +3882,7 @@ class AgentStudioCLI:
 
         # --- 1. Check for existing API key ---
         try:
-            key = retrieve_api_key()
+            retrieve_api_key()
             warning("An existing API key was found in your environment.")
             use_existing = questionary.confirm(
                 "Do you want to continue with the existing key?",
@@ -3904,12 +3904,12 @@ class AgentStudioCLI:
         except ValueError:
             pass
 
-        # --- 2. Authenticate via device flow ---
+        # --- 2. Create account/signin via device flow ---
         jwt_access_token = cls._signin()
 
         api_handler = AgentStudioInterface()
 
-        # --- 3. Authorise user (creates account if needed) ---
+        # --- 3. Authorise user  ---
         info("Setting up your account...")
         api_handler.authorise(region="studio", jwt_token=jwt_access_token)
 
