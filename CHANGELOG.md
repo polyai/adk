@@ -1,6 +1,384 @@
 # CHANGELOG
 
 
+## v0.19.2 (2026-05-12)
+
+### Bug Fixes
+
+- Deepcopy FlowConfig before dummy start step swap ([#136](https://github.com/polyai/adk/pull/136),
+  [`1824946`](https://github.com/polyai/adk/commit/18249460733980c29b4040215d2b329d63ec72f5))
+
+## Summary
+
+Prevents `_start_step_temp` suffix from leaking into local state after pushing flows with a
+  FunctionStep as start step.
+
+## Motivation
+
+When creating a flow whose start step is a FunctionStep, `_clean_resources_before_push` creates a
+  temporary dummy default step and mutates `flow_config.start_step` and `flow_config.steps`
+  in-place. After push, `self.resources = new_state` saves this mutated config — persisting the
+  `_start_step_temp` suffix into `flow_config.yaml`. Subsequent pushes then fail with "Old start
+  step not found".
+
+## Changes
+
+- Use `copy.deepcopy(flow_config)` before the dummy step swap so the original FlowConfig stays clean
+  - Only the copy gets the dummy step and temp start_step ID
+
+## Test strategy
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] Manual CLI testing
+  (`poly push --dry-run`) - [x] Tested against a live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface - [x] Commit messages follow conventional commits
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.19.1 (2026-05-12)
+
+### Bug Fixes
+
+- Normalize local resources during pull merge ([#135](https://github.com/polyai/adk/pull/135),
+  [`baa5523`](https://github.com/polyai/adk/commit/baa5523d6b52cdb52d16d2e50201b1ae54b9294d))
+
+## Summary
+
+Fix `_update_pulled_resources` to properly normalize local Function resources before three-way
+  merge, preventing `TypeError` from missing `known_parameters`.
+
+## Motivation
+
+The direct `resource_type.read_local_resource()` call in `_update_pulled_resources` bypassed the
+  `read_local_resource` wrapper that supplies required kwargs like `known_parameters` for Functions.
+  This caused a `TypeError` on push/pull when Function resources existed locally.
+
+## Changes
+
+- Extract `_make_resource_mapping` helper from `_make_resource_mappings` for single-resource use -
+  Use `self.read_local_resource()` in `_update_pulled_resources` instead of calling the class method
+  directly, so Function/FlowStep/FunctionStep resources get their required kwargs - Re-raise
+  `FileNotFoundError` from `read_local_resource` so the existing `except FileNotFoundError` handler
+  in `_update_pulled_resources` catches it (previously wrapped in `ValueError`) - Update pull merge
+  test expectations to match the canonical `to_pretty` format (extra newline after header when
+  content doesn't start with an import)
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly push`)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
+## v0.19.0 (2026-05-12)
+
+### Documentation
+
+- Feat: add deployment promote and rollback commands
+  ([#133](https://github.com/polyai/adk/pull/133),
+  [`7f2df7a`](https://github.com/polyai/adk/commit/7f2df7afdd68fde6cf788571833400684a9f4076))
+
+## Summary
+
+This relates to PR #91
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Feat: support per-region API keys via POLY_ADK_KEY_{REGION}
+  ([#130](https://github.com/polyai/adk/pull/130),
+  [`2d4124b`](https://github.com/polyai/adk/commit/2d4124b7f69342524b8dfad9dbc99e2eafa60c1d))
+
+## Summary
+
+This relates to commit https://github.com/polyai/adk/commit/94cb27b607ffdabcea75896ffbcc01f0406b90c0
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Fix: format for multi-resource YAML files ([#131](https://github.com/polyai/adk/pull/131),
+  [`482c439`](https://github.com/polyai/adk/commit/482c4396f68f0aaa33a62b1b62835cbd2f4f6bd6))
+
+## Summary
+
+These changes relate to PR #119
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Fix: key accounts/projects dicts by ID to prevent duplicate name collisions
+  ([#132](https://github.com/polyai/adk/pull/132),
+  [`d0e628e`](https://github.com/polyai/adk/commit/d0e628ed5e78e1383d02e1b7945def1d34d90134))
+
+## Summary
+
+This relates to work from commit
+  https://github.com/polyai/adk/commit/b71b6a70aaa0939a437da5500f0727a5d6e86d0d
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+### Features
+
+- Add `poly create project` command ([#64](https://github.com/polyai/adk/pull/64),
+  [`b7276be`](https://github.com/polyai/adk/commit/b7276be1e09292ac19a048214854615253c6419a))
+
+## Summary
+
+Adds a new `poly create project` CLI command that creates a new Agent Studio project under an
+  interactively selected account, then initializes it locally. Uses the Agents API (`POST
+  /v1/accounts/{accountId}/agents`) for project creation.
+
+<img width="805" height="169" alt="image"
+  src="https://github.com/user-attachments/assets/5664b7b6-34fc-4154-9d80-7eafa232c117" /> <img
+  width="1137" height="208" alt="image"
+  src="https://github.com/user-attachments/assets/dfa70eac-9775-43cc-9127-a9aa4dfce33c" />
+
+## Changes
+
+- Add `create project` subparser with `--region`, `--account_id`, `--name`, `--json` flags - Add
+  `AgentStudioCLI.create_project()` with interactive and non-interactive flows - After creation,
+  automatically calls `init_project` to set up the local project - Add
+  `PlatformAPIHandler.create_project()` — calls `POST /v1/agents` (Agents API) - Add
+  `region_to_agents_api_url` mapping and `get_agents_api_url()` for the Agents API base URLs - Add
+  `AgentStudioInterface.create_project()` wrapper - Remove dead `_retrieve_api_key()` method - Fix
+  duplicate `get_deployments` definitions and indentation issues
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.18.0 (2026-05-08)
+
+### Features
+
+- Add deployments show subcommand ([#125](https://github.com/polyai/adk/pull/125),
+  [`6cfd07d`](https://github.com/polyai/adk/commit/6cfd07d28c5e265a7a47511b7f5db98440781634))
+
+## Summary
+
+Adds `poly deployments show <hash>` subcommand to display detailed metadata for a specific
+  deployment and the sandbox deployments included since the previous version in the given
+  environment.
+
+## Motivation
+
+When reviewing deployment history, users need to drill into a specific version to see its full
+  metadata (deployment ID, artifact version, lambda version, message, etc.) and understand which
+  sandbox deployments were bundled into a promotion to pre-release or live.
+
+## Changes
+
+- Add `show` subparser under `deployments` with `hash` positional arg and `--env` flag
+  (sandbox/pre-release/live) - Add `deployments_show()` and `_resolve_included_deployments()`
+  methods to `AgentStudioCLI` - Add `print_deployment_show()` rich console output function - Add
+  comprehensive tests covering error cases, JSON output, cross-env resolution, hash prefix matching,
+  and rich output path
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs Default sandbox: <img width="856" height="171" alt="Screenshot 2026-05-01 at
+  16 23 20" src="https://github.com/user-attachments/assets/9287f99c-087f-40b9-b556-aff2f78a1556" />
+  Live push: <img width="1075" height="238" alt="Screenshot 2026-05-01 at 16 23 13"
+  src="https://github.com/user-attachments/assets/68b4205c-c9e3-4767-82ac-a5e3da0d8277" />
+
+
+## v0.17.0 (2026-05-08)
+
+### Features
+
+- Add deployment promote and rollback commands ([#91](https://github.com/polyai/adk/pull/91),
+  [`f20556f`](https://github.com/polyai/adk/commit/f20556f0461901ece39cf231cfde5665928fd9e7))
+
+## Summary
+
+Adds `poly deployments promote` and `poly deployments rollback` subcommands, allowing users to
+  promote a deployment to a target environment (pre-release or live) and rollback sandbox to a
+  previous deployment version.
+
+## Motivation
+
+Enables deployment lifecycle management directly from the CLI, removing the need to use the Agent
+  Studio UI for promotions and rollbacks.
+
+## Changes
+
+- Add `poly deployments promote --from <id> --to <env>` command with `--message`, `--force`, and
+  `--dry-run` flags - Add `poly deployments rollback --to <id>` command with `--message` and
+  `--force` flags - Add `_resolve_included_deployments` to compute included/reverted deployments
+  using sandbox as the linear history source of truth - Promotions show "Included deployments" list,
+  rollbacks show "Reverting deployments" list, first-time promotions are labelled as such - Add
+  `promote_deployment` and `rollback_deployment` methods to `AgentStudioProject`,
+  `AgentStudioInterface`, and `PlatformAPIHandler` - Refactor API URL constants: move `/adk/v1`
+  prefix from base URLs into individual route constants - Add new `PROMOTE_URL` and `ROLLBACK_URL`
+  endpoint constants using public API paths (`/v1/agents/...`) - Remove `headers` from debug log
+  output
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Promote: <img width="812" height="253" alt="Screenshot 2026-05-01 at 17 11 25"
+  src="https://github.com/user-attachments/assets/dd7e1c4a-76c5-45e3-aeb1-9fcfd9de0b69" />
+
+Rollback: <img width="711" height="211" alt="Screenshot 2026-05-01 at 17 22 00"
+  src="https://github.com/user-attachments/assets/20687a8d-8f3d-43b7-a674-e2ec292271cd" />
+
+
 ## v0.16.2 (2026-05-05)
 
 ### Bug Fixes

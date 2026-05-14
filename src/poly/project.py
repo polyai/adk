@@ -4,6 +4,7 @@ Copyright PolyAI Limited
 """
 
 import base64
+import copy
 import json
 import logging
 import os
@@ -915,10 +916,9 @@ class AgentStudioProject:
                     local_file_path = incoming_resource.get_path(self.root_path)
                 try:
                     # Normalise the local resource to ensure formatting differences don't cause unnecessary merge conflicts
-                    local_resource = resource_type.read_local_resource(
-                        local_file_path,
-                        resource_id=incoming_resource.resource_id,
-                        resource_name=incoming_resource.name,
+                    incoming_resource_mapping = self._make_resource_mapping(incoming_resource)
+                    local_resource = self.read_local_resource(
+                        resource=incoming_resource_mapping,
                         resource_mappings=incoming_resource_mappings,
                     )
                     local_content = local_resource.to_pretty(
@@ -1462,8 +1462,10 @@ class AgentStudioProject:
                     step_type=StepType.DEFAULT_STEP,
                     prompt="temp prompt",
                 )
-                flow_config.steps.append(dummy)
-                flow_config.start_step = dummy.step_id
+                push_flow_config = copy.deepcopy(flow_config)
+                push_flow_config.steps.append(dummy)
+                push_flow_config.start_step = dummy.step_id
+                new_resources[FlowConfig][flow_config_id] = push_flow_config
                 reset_flow_config = FlowConfig(
                     resource_id=flow_config.resource_id,
                     name=flow_config.name,
@@ -2070,6 +2072,10 @@ class AgentStudioProject:
                 resource_mappings=resource_mappings,
                 **additional_kwargs,
             )
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                f"File not found for resource {resource.resource_name} at {resource.file_path}"
+            ) from e
         except Exception as e:
             raise ValueError(
                 f"Error reading resource {resource.resource_name} at {resource.file_path}: {str(e)}"
@@ -2510,24 +2516,24 @@ class AgentStudioProject:
 
     def _make_resource_mappings(self, resources: ResourceMap) -> list[ResourceMapping]:
         resource_mappings: list[ResourceMapping] = []
-        for resource_type, resources_dict in resources.items():
-            for resource_id, resource in resources_dict.items():
-                resource_path = resource.get_path(self.root_path)
-                resource_mappings.append(
-                    ResourceMapping(
-                        resource_id=resource_id,
-                        resource_type=resource_type,
-                        resource_name=resource.name,
-                        file_path=resource_path,
-                        flow_name=(
-                            resource.name
-                            if isinstance(resource, FlowConfig)
-                            else getattr(resource, "flow_name", None)
-                        ),
-                        resource_prefix=resource.get_resource_prefix(file_path=resource.file_path),
-                    )
-                )
+        for resources_dict in resources.values():
+            for resource in resources_dict.values():
+                resource_mappings.append(self._make_resource_mapping(resource))
         return resource_mappings
+
+    def _make_resource_mapping(self, resource: Resource) -> ResourceMapping:
+        return ResourceMapping(
+            resource_id=resource.resource_id,
+            resource_type=type(resource),
+            resource_name=resource.name,
+            file_path=resource.get_path(self.root_path),
+            flow_name=(
+                resource.name
+                if isinstance(resource, FlowConfig)
+                else getattr(resource, "flow_name", None)
+            ),
+            resource_prefix=resource.get_resource_prefix(file_path=resource.file_path),
+        )
 
     def format_files(
         self, files: list[str] = None, check_only: bool = False
@@ -2880,4 +2886,44 @@ class AgentStudioProject:
         self.file_structure_info = self.compute_file_structure_info(self.resources)
         self.save_config()
 
+        return True
+
+    def promote_deployment(self, deployment_id: str, target_env: str, message: str) -> bool:
+        """Promote a deployment to specified environment.
+
+        Args:
+            deployment_id (str): The ID of the deployment to promote.
+            target_env (str): The target environment to promote to (pre-release or live)
+            message (str, optional): Optional message to include with the promotion
+
+        Returns:
+            bool: True if the promotion was successful, False otherwise
+        """
+        if target_env not in {"pre-release", "live"}:
+            raise ValueError("target_env must be either 'pre-release' or 'live'.")
+        self.api_handler.promote_deployment(
+            region=self.region,
+            project_id=self.project_id,
+            deployment_id=deployment_id,
+            target_env=target_env,
+            message=message,
+        )
+        return True
+
+    def rollback_deployment(self, deployment_id: str, message: str) -> bool:
+        """Rollback sandbox/main to a previous deployment.
+
+        Args:
+            deployment_id (str): The ID of the deployment to rollback.
+            message (str, optional): Optional message to include with the rollback
+
+        Returns:
+            bool: True if the rollback was successful, False otherwise
+        """
+        self.api_handler.rollback_deployment(
+            region=self.region,
+            project_id=self.project_id,
+            deployment_id=deployment_id,
+            message=message,
+        )
         return True
