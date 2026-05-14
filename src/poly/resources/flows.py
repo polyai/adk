@@ -373,7 +373,7 @@ class FlowStep(BaseFlowStep, YamlResource):
             output["conditions"] = [condition.to_yaml_dict() for condition in self.conditions]
             output["extracted_entities"] = sorted(self.extracted_entities)
 
-        output["prompt"] = self.prompt
+        output["prompt"] = self.prompt.strip()
         return output
 
     @classmethod

@@ -145,7 +145,7 @@ class FunctionTests(unittest.TestCase):
             function_type=None,
         )
         pretty_code = function_with_docstring.to_pretty(resource_mappings=[])
-        expected_code = '"""This is a docstring."""\n' + TEST_CODE_PRETTY
+        expected_code = '"""This is a docstring."""\n\n' + TEST_CODE_PRETTY
         self.assertEqual(pretty_code, expected_code)
 
     def test_to_pretty_convert_flow_import(self):
