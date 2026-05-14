@@ -115,7 +115,7 @@ class PlatformAPIHandler:
         )
 
         logger.debug(
-            f"Request/response url={url!r} headers={headers!r} body={data!r}"
+            f"Request/response url={url!r} body={data!r}"
             f" status_code={api_response.status_code!r} response={api_response.text!r}"
         )
 
