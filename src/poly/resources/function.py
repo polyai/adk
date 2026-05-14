@@ -386,9 +386,13 @@ class Function(Resource):
 
         return code
 
-    @staticmethod
+    @classmethod
     def from_pretty(
-        contents: str, resource_mappings: list[ResourceMapping], resource_name: str = None, **kwargs
+        cls,
+        contents: str,
+        resource_mappings: list[ResourceMapping],
+        resource_name: str = None,
+        **kwargs,
     ) -> str:
         """Undo formatting or changes made to the local resource."""
         # Remove typing import if it exists

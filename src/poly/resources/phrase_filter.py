@@ -118,18 +118,6 @@ class PhraseFilter(MultiResourceYamlResource):
                     break
         return yaml_dict
 
-    @classmethod
-    def from_pretty(
-        cls, contents: str, resource_mappings: list[ResourceMapping] = None, **kwargs
-    ) -> str:
-        """Replace function name with ID. Returns original contents on invalid YAML."""
-        try:
-            yaml_dict = utils.load_yaml(contents) or {}
-        except Exception:
-            return contents
-        yaml_dict = cls.from_pretty_dict(yaml_dict, resource_mappings=resource_mappings, **kwargs)
-        return utils.dump_yaml(yaml_dict)
-
     @property
     def command_type(self) -> str:
         return "stop_keywords"

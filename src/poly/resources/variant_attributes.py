@@ -234,18 +234,6 @@ class VariantAttribute(MultiResourceYamlResource):
         yaml_dict["values"] = new_mapping
         return yaml_dict
 
-    @classmethod
-    def from_pretty(
-        cls, contents: str, resource_mappings: list[ResourceMapping] = None, **kwargs
-    ) -> str:
-        """Replace variant names with IDs in the provided contents."""
-        try:
-            yaml_dict = utils.load_yaml(contents) or {}
-        except Exception as e:
-            raise ValueError("Error loading YAML content") from e
-        yaml_dict = cls.from_pretty_dict(yaml_dict, resource_mappings=resource_mappings, **kwargs)
-        return utils.dump_yaml(yaml_dict)
-
     @property
     def command_type(self) -> str:
         return "variant_attribute"

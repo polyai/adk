@@ -87,9 +87,9 @@ class Variable(Resource):
         """Replace resource IDs with resource names in the provided contents."""
         return contents
 
-    @staticmethod
+    @classmethod
     def from_pretty(
-        contents: str, resource_mappings: list[ResourceMapping] = None, **kwargs
+        cls, contents: str, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> str:
         """Replace resource names with resource IDs in the provided contents."""
         return contents
