@@ -11,7 +11,7 @@ import typing as ty
 import uuid
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import cached_property
+from functools import cached_property, lru_cache
 from typing import Literal, Optional, Union
 
 from google.protobuf.message import Message
@@ -540,6 +540,7 @@ class Function(Resource):
                         )
 
     @staticmethod
+    @lru_cache(maxsize=2048)
     def _get_target_function(
         code: str, function_name: str
     ) -> Optional[Union[ast.FunctionDef, ast.AsyncFunctionDef]]:
