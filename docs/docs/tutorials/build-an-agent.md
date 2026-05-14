@@ -269,7 +269,29 @@ Use Agent Studio analytics to monitor containment, CSAT, handle time, and flagge
 
 ## Workflow 2 - AI-agent workflow
 
-The AI-agent workflow uses a coding agent — such as **Claude Code**, or an in-editor agent in **VS Code** or **Cursor** paired with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) — to run the same development loop on your behalf. You provide the brief, the coding tool generates and pushes project files, and you review and deploy in Agent Studio.
+The AI-agent workflow uses a coding agent — such as **Claude Code**, or an in-editor agent in **VS Code** or **Cursor** paired with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) — to run the same development loop on your behalf.
+
+<div class="grid cards" markdown>
+
+-   **You provide the brief**
+
+    ---
+
+    Requirements, business rules, integrations, and API documentation.
+
+-   **The coding tool generates the project**
+
+    ---
+
+    It uses the ADK to read documentation, generate files, and push the result.
+
+-   **You review and deploy**
+
+    ---
+
+    Agent Studio remains the place where the work is checked, merged, and deployed.
+
+</div>
 
 ### Step 1 - Gather requirements
 
@@ -318,13 +340,12 @@ At this stage:
 
 ~~~bash
 poly init --region <region> --account_id <account_id> --project_id <project_id>
-poly pull
 ~~~
 
-The ADK acts as the bridge between your local environment and Agent Studio. It lets the coding tool read from and write back to the project.
+`poly init` pulls the current configuration automatically — there is no need to run `poly pull` separately. The ADK acts as the bridge between your local environment and Agent Studio, letting the coding tool read from and write back to the project.
 
 !!! tip "Run `poly docs --all` before generating any files"
-    Immediately after pulling, run `poly docs --all` to produce a complete resource reference. Without it, a coding agent has no schema context for resource structure and field names, and will hallucinate them. This should be the first thing the coding tool does after `poly pull`.
+    Immediately after initializing, run `poly docs --all` to produce a complete resource reference. Without it, a coding agent has no schema context for resource structure and field names, and will hallucinate them.
 
     Note that `poly docs --all` documents the ADK's resource layer (topics, flows, entities, variants, and so on) but does not cover every runtime `Conversation` method. In particular, `conv.send_sms_template`, `conv.send_sms`, and `conv.caller_number` are not present in the output. For the full runtime API, direct the coding agent to the [conv object reference](https://docs.poly.ai/tools/classes/conv-object){ target="_blank" rel="noopener" } on the platform docs.
 

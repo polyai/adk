@@ -99,6 +99,10 @@ The ADK also fits well with standard local development tooling such as:
 
 Tooling slots into the standard [CLI workflow](./cli.md#working-pattern): pull or init, edit with your tool of choice, validate, push, and review in Agent Studio.
 
+!!! tip "Tooling should reduce friction, not reduce scrutiny"
+
+    Faster editing and generation are valuable, but project review, validation, and testing still matter.
+
 ## Related pages
 
 <div class="grid cards" markdown>

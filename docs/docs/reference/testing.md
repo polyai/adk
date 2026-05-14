@@ -43,6 +43,20 @@ Testing is useful when you want to:
 
 Testing sits between validation and merge in the standard [CLI workflow](./cli.md#working-pattern). Edit locally, validate with `poly validate`, push, then test the branch in Agent Studio or with `poly chat`.
 
+## What to test
+
+- function logic and return values
+- state transitions across turns
+- API integration helpers
+- formatting or normalization utilities
+- project-specific edge cases
+
+## Best practices
+
+- validate as part of the normal workflow, not just before merge
+- test important error paths, not only success cases
+- combine `poly chat` with interactive review when behavior depends on conversation flow
+
 ## Related pages
 
 <div class="grid cards" markdown>

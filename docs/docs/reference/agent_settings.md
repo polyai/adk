@@ -153,7 +153,7 @@ The rules file supports the following references:
 | `{{twilio_sms:template_name}}` | [SMS template](./sms.md) |
 | `{{ho:handoff_name}}` | [Handoff destination](./handoffs.md) |
 | `{{attr:attribute_name}}` | [Variant attribute](./variants.md) |
-| `{{vrbl:variable_name}}` | [State variable](./variables.md) |
+| `{{vrbl:variable_name}}` or `$variable_name` | [State variable](./variables.md) |
 
 ### Example
 

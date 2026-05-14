@@ -31,7 +31,7 @@ Install the following tools before continuing:
 | Tool | Version | Notes |
 |---|---|---|
 | **uv** | latest | Manages Python and virtual environments |
-| **Git** | any | Required to clone the repository or contribute |
+| **Git** | any | Optional — recommended for version control of your local project files |
 
 ### Install uv
 
@@ -56,7 +56,6 @@ Before continuing, confirm:
 - You have access to an **Agent Studio workspace**
 - You have generated an **API key** in Agent Studio
 - `uv` is installed
-- `git` is available locally
 
 ## Next step
 
