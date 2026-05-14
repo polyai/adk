@@ -65,21 +65,6 @@ class Auth0Handler:
         return api_response
 
     @classmethod
-    def register_user(cls, email: str, password: str, name: str) -> dict:
-        """Register a new user with the Auth0 tenant."""
-        data = {
-            "client_id": STUDIO_CLIENT_ID,
-            "connection": STUDIO_CONNECTION,
-            "email": email,
-            "password": password,
-            "name": name,
-            "user_metadata": {
-                "terms_accepted_via_api": "on",
-            },
-        }
-        return cls.make_request("/dbconnections/signup", method="POST", data=data)
-
-    @classmethod
     def request_device_code(cls) -> dict:
         """Start the device authorization flow.
 
