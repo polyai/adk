@@ -596,7 +596,7 @@ class PlatformAPIHandler:
         )
 
     @staticmethod
-    def create_pat_internal(region: str, jwt_token: str, name: str) -> dict:
+    def create_pat_internal(region: str, jwt_token: str, name: str) -> str:
         """Create a Personal Access Token using a JWT for authentication.
 
         Args:
@@ -605,7 +605,7 @@ class PlatformAPIHandler:
             name: A label for the PAT.
 
         Returns:
-            dict: The PAT response including the token.
+            str: The PAT token.
         """
         correlation_id = f"adk-{uuid.uuid4()}"
         headers = {

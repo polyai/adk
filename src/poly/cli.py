@@ -25,7 +25,7 @@ import requests
 import questionary
 import traceback
 
-from poly.utils import retrieve_api_key
+from poly.utils import retrieve_api_key, merge_strings
 import time
 
 from poly.output.console import (
@@ -57,7 +57,6 @@ from poly.handlers.interface import (
     REGIONS,
     AgentStudioInterface,
 )
-from poly.utils import merge_strings
 from poly.resources.resource_utils import contains_merge_conflict
 from poly.project import (
     PROJECT_CONFIG_FILE,
@@ -3897,7 +3896,7 @@ class AgentStudioCLI:
                     default=True,
                 ).ask()
                 if create_project:
-                    cls.create_project(base_path, region="studio")
+                    cls.create_project(base_path)
                 else:
                     info("You can create a new project later by running 'poly project create'")
                 return
@@ -3939,6 +3938,11 @@ class AgentStudioCLI:
                     except Exception:
                         attempts += 1
                         time.sleep(1)
+                else:
+                    error(
+                        "API key was created but is not active yet. Please wait a moment and try again."
+                    )
+                    sys.exit(1)
 
             success(f"Created a new API Token: {pat}")
         plain(

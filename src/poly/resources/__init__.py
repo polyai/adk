@@ -46,12 +46,6 @@ from poly.resources.handoff import (
 )
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.phrase_filter import PhraseFilter
-from poly.resources.safety_filters import (
-    ChatSafetyFilters,
-    GeneralSafetyFilters,
-    VoiceSafetyFilters,
-    SafetyFilterCategory,
-)
 from poly.resources.pronunciation import Pronunciation
 from poly.resources.resource import (
     BaseResource,
@@ -59,6 +53,12 @@ from poly.resources.resource import (
     Resource,
     ResourceMapping,
     SubResource,
+)
+from poly.resources.safety_filters import (
+    ChatSafetyFilters,
+    GeneralSafetyFilters,
+    SafetyFilterCategory,
+    VoiceSafetyFilters,
 )
 from poly.resources.sms import SMSTemplate
 from poly.resources.topic import Topic

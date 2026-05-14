@@ -48,7 +48,9 @@ pip install polyai-adk
 Once installed, use the `poly` command to manage your projects:
 
 ```bash
-poly init       # Initialize a project (interactive)
+poly start      # Create an account, access token and new project
+poly init       # Initialize a project
+poly project    # Manage poly projects
 poly pull       # Pull latest configuration
 poly push       # Push local changes
 poly status     # View project status
@@ -57,7 +59,7 @@ poly branch     # Manage branches
 poly format     # Format resources
 poly validate   # Validate configuration
 poly review     # Create a review gist
-poly deployments  # List deployment history
+poly deployments  # Manage deployments
 poly docs       # Output reference documentation
 ```
 

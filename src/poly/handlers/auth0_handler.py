@@ -39,7 +39,7 @@ class Auth0Handler:
         )
 
         cleaned_data = {
-            k: ("<redacted>" if k in {"password", "client_id"} else v)
+            k: ("<redacted>" if k in {"password", "client_id", "device_code"} else v)
             for k, v in (data or {}).items()
         }
 

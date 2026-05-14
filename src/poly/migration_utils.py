@@ -4,11 +4,11 @@ Tools to help with migrating from older versions of the Agent Development Kit to
 Copyright PolyAI Limited
 """
 
-from copy import deepcopy
 import os
-from poly.resources import resource_utils
-
+from copy import deepcopy
 from enum import Enum
+
+from poly.resources import resource_utils
 
 
 class MigrationFlag(Enum):

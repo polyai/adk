@@ -9,6 +9,7 @@ import unittest
 import yaml
 from jsonschema import ValidationError
 
+from poly.handlers.sync_client import SyncClientHandler
 from poly.resources.agent_settings import (
     SettingsPersonality,
     SettingsRole,
@@ -24,12 +25,6 @@ from poly.resources.api_integration import (
     ApiIntegrationOperation,
 )
 from poly.resources.asr_settings import AsrSettings
-from poly.resources.safety_filters import (
-    ChatSafetyFilters,
-    GeneralSafetyFilters,
-    VoiceSafetyFilters,
-    SafetyFilterCategory,
-)
 from poly.resources.channel_settings import (
     ChatGreeting,
     ChatStylePrompt,
@@ -65,12 +60,17 @@ from poly.resources.resource import (
     ResourceMapping,
     _parse_multi_resource_path,
 )
+from poly.resources.safety_filters import (
+    ChatSafetyFilters,
+    GeneralSafetyFilters,
+    SafetyFilterCategory,
+    VoiceSafetyFilters,
+)
 from poly.resources.sms import EnvPhoneNumbers, SMSTemplate
 from poly.resources.topic import (
     FUNCTION_REGEX,
     Topic,
 )
-from poly.handlers.sync_client import SyncClientHandler
 from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
 from poly.resources.variable import Variable
 from poly.resources.variant_attributes import Variant, VariantAttribute
