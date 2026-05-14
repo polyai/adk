@@ -225,13 +225,16 @@ class AgentStudioCLI:
             help="Write output to FILE_PATH instead of stdout.",
         )
 
-        # Start
+        # Start (new free-tier users)
         start_parser = subparsers.add_parser(
             "start",
             parents=[verbose_parent, debug_parent],
             help="Get started with PolyAI Agent Studio",
             description=(
-                "Create a new Agent Studio Account, set up API key and create a first project with a single command.\n\n"
+                "Create a new Agent Studio account, set up your API key, and create a first project"
+                " with a single command.\n\n"
+                "Examples:\n"
+                "  poly start\n"
             ),
         )
         start_parser.add_argument(
@@ -239,6 +242,31 @@ class AgentStudioCLI:
             type=str,
             default=os.getcwd(),
             help="Base path to initialize the project. Defaults to current working directory.",
+        )
+
+        # Signin (existing enterprise users)
+        signin_parser = subparsers.add_parser(
+            "signin",
+            parents=[verbose_parent, debug_parent],
+            help="Sign in to your Agent Studio account and save API key credentials for CLI access.",
+            description=(
+                "Sign in to your existing Agent Studio account and save API key credentials"
+                " for CLI access.\n\n"
+                "This command will open a browser window for you to authenticate and authorize"
+                " the CLI. After successful authentication, the necessary API key credentials"
+                " will be saved to a local credential file for future CLI commands.\n\n"
+                "Examples:\n"
+                "  poly signin\n"
+                "  poly signin --region us-1\n"
+                "Note: Enterprise clients should specify a region."
+            ),
+        )
+        signin_parser.add_argument(
+            "--region",
+            type=str,
+            choices=REGIONS,
+            default="studio",
+            help="Region to sign in to. Defaults to 'studio' (the free-tier region). Enterprise clients should specify their region.",
         )
 
         # INIT
@@ -1351,9 +1379,10 @@ class AgentStudioCLI:
                     )
 
             elif args.command == "start":
-                cls.start(
-                    base_path=args.base_path,
-                )
+                cls.start(base_path=args.base_path)
+
+            elif args.command == "signin":
+                cls.signin(region=args.region)
 
         except Exception as e:
             if hasattr(args, "json") and args.json:
@@ -3886,10 +3915,11 @@ class AgentStudioCLI:
 
     @classmethod
     def start(cls, base_path: str) -> None:
-        """Authenticate via device flow, obtain a JWT, and initialise a project."""
+        """Create an Agent Studio account, set up API key, and create a first project."""
         print_welcome_message()
         plain(
-            "This will guide you through setting up your API key and creating a new project in Agent Studio."
+            "This will guide you through setting up your API key"
+            " and creating a new project in Agent Studio."
         )
         questionary.press_any_key_to_continue("Press any key to continue...").ask()
 
@@ -3914,54 +3944,13 @@ class AgentStudioCLI:
                     info("You can create a new project later by running 'poly project create'")
                 return
 
-        # --- 2. Create account/signin via device flow ---
+        # --- 2. Sign in via device flow ---
         jwt_access_token = cls._signin()
 
-        api_handler = AgentStudioInterface()
+        # --- 3. Authorise and save API key ---
+        cls._authenticate_and_save_key(jwt_access_token, region="studio")
 
-        # --- 3. Authorise user  ---
-        info("Setting up your account...")
-        api_handler.authorise(region="studio", jwt_token=jwt_access_token)
-
-        # --- 4. Generate PAT token ---
-        info("Fetching API key...")
-        user_pats = api_handler.get_pats(region="studio", jwt_token=jwt_access_token)
-        if user_pats:
-            pat = user_pats[0].get("key")
-            os.environ["POLY_ADK_KEY"] = pat
-            success(f"Found existing API Token: {mask_api_key(pat)}")
-        else:
-            info("No existing API key found in your account.")
-            ctx = console.status("[info]Creating a new API key...[/info]")
-            with ctx:
-                pat = api_handler.create_pat(
-                    region="studio", jwt_token=jwt_access_token, name="adk-key"
-                )
-                os.environ["POLY_ADK_KEY"] = pat
-
-                attempts = 0
-                # After creating a new PAT, there may be a short delay before it's active.
-                # Poll the accounts endpoint until it works or we hit a timeout.
-                while attempts < 10:
-                    try:
-                        api_handler.get_accounts(region="studio")
-                        break
-                    except Exception:
-                        attempts += 1
-                        time.sleep(1)
-                else:
-                    error(
-                        "API key was created but is not active yet. Please wait a moment and try again."
-                    )
-                    sys.exit(1)
-
-            success(f"Created a new API Key: {mask_api_key(pat)}")
-
-        save_api_key_credential_file(pat, region="studio")
-        plain("API key has been saved to your credential file for future use.")
-        info(f"Credential file path: {CREDENTIALS_FILE_PATH}")
-        plain("")
-
+        # --- 4. Optionally create a project ---
         create_project = questionary.confirm(
             "Would you like to create a new project in Agent Studio now?",
             auto_enter=False,
@@ -3971,6 +3960,66 @@ class AgentStudioCLI:
             cls.create_project(base_path, region="studio")
         else:
             info("You can create a new project later by running 'poly project create'")
+
+    @classmethod
+    def signin(cls, region: str = "studio") -> None:
+        """Sign in to an existing Agent Studio account and save API key credentials."""
+        print_welcome_message()
+        plain(
+            "This will guide you through signing in to your Agent Studio account"
+            " and setting up your API key for use with the ADK."
+        )
+        questionary.press_any_key_to_continue("Press any key to continue...").ask()
+
+        jwt_access_token = cls._signin()
+        cls._authenticate_and_save_key(jwt_access_token, region=region)
+
+    @classmethod
+    def _authenticate_and_save_key(cls, jwt_access_token: str, region: str) -> str:
+        """Authorise the user, fetch or create a PAT, and save it to the credential file."""
+        api_handler = AgentStudioInterface()
+
+        info("Setting up your account...")
+        api_handler.authorise(region=region, jwt_token=jwt_access_token)
+
+        info("Fetching API key...")
+        user_pats = api_handler.get_pats(region=region, jwt_token=jwt_access_token)
+        if user_pats:
+            pat = user_pats[0].get("key")
+            os.environ["POLY_ADK_KEY"] = pat
+            success(f"Found existing API Token: {mask_api_key(pat)}")
+        else:
+            info("No existing API key found in your account.")
+            ctx = console.status("[info]Creating a new API key...[/info]")
+            with ctx:
+                pat = api_handler.create_pat(
+                    region=region, jwt_token=jwt_access_token, name="adk-key"
+                )
+                os.environ["POLY_ADK_KEY"] = pat
+
+                attempts = 0
+                # After creating a new PAT, there may be a short delay before it's active.
+                while attempts < 10:
+                    try:
+                        api_handler.get_accounts(region=region)
+                        break
+                    except Exception:
+                        attempts += 1
+                        time.sleep(1)
+                else:
+                    error(
+                        "API key was created but is not active yet."
+                        " Please wait a moment and try again."
+                    )
+                    sys.exit(1)
+
+            success(f"Created a new API Key: {mask_api_key(pat)}")
+
+        save_api_key_credential_file(pat, region=region)
+        plain("API key has been saved to your credential file for future use.")
+        info(f"Credential file path: {CREDENTIALS_FILE_PATH}")
+        plain("")
+        return pat
 
     @classmethod
     def _signin(cls) -> str:
