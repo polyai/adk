@@ -792,7 +792,7 @@ class Function(Resource):
             "code": self.code,
             "description": self.description,
         }
-        if self.function_type in (FunctionType.GLOBAL, FunctionType.FUNCTION_STEP):
+        if self.function_type in (FunctionType.GLOBAL, FunctionType.TRANSITION):
             fn_proto["parameters"] = params_update
 
         if self.function_type != FunctionType.TRANSITION:
