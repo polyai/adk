@@ -597,6 +597,12 @@ def print_welcome_message() -> None:
     console.print()
 
 
+def mask_api_key(key: str) -> str:
+    """Display masked API key"""
+    masked = key[:4] + "****" + key[-4:] if len(key) > 8 else "****"
+    return f"[yellow]{masked}[/yellow]"
+
+
 def handle_exception(exc: Exception) -> None:
     """Print a clean error message, or full traceback in verbose mode."""
     if _verbose:

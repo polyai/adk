@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 
 from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
-from poly.utils import retrieve_api_key
+from poly.utils import retrieve_api_key, any_credentials_exist
 
 logger = logging.getLogger(__name__)
 ACCOUNTS_URL = "/adk/v1/accounts"
@@ -151,7 +151,9 @@ class PlatformAPIHandler:
                 the original ordering.
         """
 
-        retrieve_api_key()
+        if not any_credentials_exist():
+            # Will raise a ValueError with instructions on how to set the API key
+            retrieve_api_key(region="studio")
 
         accessible: set[str] = set()
 
