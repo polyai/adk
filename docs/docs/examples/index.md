@@ -3,20 +3,7 @@ title: Examples
 description: Focused examples for common PolyAI ADK patterns and workflows.
 ---
 
-This section contains small, focused examples that can be copied, adapted, and reused when building with the **PolyAI ADK**.
-
-Examples are intended to show practical patterns rather than explain every concept in depth.
-
-## What examples are for
-
-Use examples when you want to:
-
-- see a pattern in a compact form
-- copy a starting point into a project
-- compare one implementation approach with another
-- understand how a resource is typically structured
-
-Examples work best alongside the conceptual and reference documentation.
+Small, focused examples that can be copied and adapted when building with the **PolyAI ADK**.
 
 <div class="grid cards" markdown>
 
@@ -31,7 +18,7 @@ Examples work best alongside the conceptual and reference documentation.
 
     ---
 
-    Look up the exact fields, structures, and command behavior.
+    Look up exact fields, structures, and command behavior.
     [Open CLI reference](../reference/cli.md)
 
 -   **Tutorials**
@@ -40,35 +27,5 @@ Examples work best alongside the conceptual and reference documentation.
 
     Follow a complete workflow from start to finish.
     [Open tutorials](../tutorials/build-an-agent.md)
-
-</div>
-
-## What will appear here
-
-Over time, this section can include examples such as:
-
-- simple flow structures
-- common function patterns
-- topic and action examples
-- entity collection patterns
-- variant-based configuration examples
-- review and validation workflows
-
-!!! info "Examples are intentionally small"
-
-    A good example should be easy to scan, easy to copy, and easy to adapt. Larger workflows belong in tutorials.
-
-## Suggested next step
-
-If you are looking for a full end-to-end workflow, start with the tutorial instead.
-
-<div class="grid cards" markdown>
-
--   **Build an agent with the ADK**
-
-    ---
-
-    Follow the main tutorial for the complete workflow from setup to deployment.
-    [Open the tutorial](../tutorials/build-an-agent.md)
 
 </div>

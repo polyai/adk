@@ -97,21 +97,7 @@ The ADK also fits well with standard local development tooling such as:
 
 ## How tooling fits into the workflow
 
-A common pattern looks like this:
-
-1. use the ADK to pull or initialize a project locally
-2. open the project in your editor or IDE
-3. use an AI coding tool or standard editing workflow to make changes
-4. inspect and validate those changes locally
-5. push them back to Agent Studio
-
-## Best practices
-
-- use the CLI as the source of truth for project operations
-- keep AI-assisted generation grounded in real project requirements
-- validate generated output before pushing
-- review changes in Agent Studio before merging
-- treat tooling as an accelerator, not a substitute for review
+Tooling slots into the standard [CLI workflow](./cli.md#working-pattern): pull or init, edit with your tool of choice, validate, push, and review in Agent Studio.
 
 !!! tip "Tooling should reduce friction, not reduce scrutiny"
 

@@ -161,13 +161,11 @@ If the user is expected to answer, put the full question in the utterance and le
 
 ## Don't copy project directories between projects
 
-Copying an existing ADK project directory and pointing it at a different Agent Studio project will cause push failures.
-
-The `.agent_studio_config` file contains resource IDs from the source project. When the ADK compares local files against the target project, those IDs do not match what the remote has registered. Resources that are not registered on the target project get classified as new creates — and several resources (voice settings, chat settings, personality, role, and ASR settings) cannot be created through the ADK because they are provisioned automatically by the platform when a project is created.
+Copying an existing ADK project directory and pointing it at a different Agent Studio project will cause push failures. The `.agent_studio_config` file contains resource IDs from the source project, and platform-provisioned resources (voice settings, chat settings, personality, role, ASR settings) cannot be created through the ADK.
 
 ### Wrong
 
-Copying a project directory, updating `project.yaml` or `project.json` with new IDs, then running `poly push` against a different project.
+Copying a project directory, updating `project.yaml` with new IDs, then running `poly push` against a different project.
 
 ### Right
 
@@ -176,7 +174,7 @@ poly init
 poly pull
 ~~~
 
-Start every new project fresh with `poly init` and `poly pull`. `poly init` will walk you through dropdowns to pick the right project; pass `--account_id` / `--project_id` if you want to skip the prompts. If you need to reuse flows, functions, or topics from an existing project, copy those individual resource files into the new directory — do not copy `.agent_studio_config` or the whole project directory.
+Start every new project with `poly init` and `poly pull`. Copy individual resource files if you need to reuse them — never copy `.agent_studio_config` or the whole directory.
 
 ## Quick reference
 

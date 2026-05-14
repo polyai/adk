@@ -233,45 +233,7 @@ Decorate that main function and have it return a utility-module message. Helper 
 
 ## State
 
-`conv.state` is preserved between turns.
-
-### In code
-
-Set a state value:
-
-~~~python
-conv.state.variable_name = value
-~~~
-
-Read a state value:
-
-~~~python
-conv.state.variable_name
-~~~
-
-### In prompts
-
-Use:
-
-- `$variable`
-- `{{vrbl:variable}}`
-
-Do not use:
-
-- `conv.state.variable`
-- `$var.attribute`
-
-If you need complex structured data in prompts, stringify it in Python first and store the string in state.
-
-## Counters
-
-State counters are useful for limiting retries and preventing loops.
-
-For example:
-
-- initialize a counter
-- increment it after each retry
-- hand off or exit after a defined limit
+Functions read and write conversation state via `conv.state`. See the [Variables reference](./variables.md) for the full details on setting, reading, and referencing state in prompts.
 
 ## Metrics and logging
 
@@ -303,21 +265,6 @@ conv.log.error(...)
 - use grouped naming patterns where helpful
 - use `write_once=True` for one-time events
 - log important outcomes around external calls and failures
-
-## Quick reference
-
-| Task | Code |
-|---|---|
-| State in prompt | `$variable` or `{{vrbl:variable}}` |
-| State in code | `conv.state.variable` |
-| Persist data | `conv.state.variable = value` |
-| Track event | `conv.write_metric("NAME", value)` |
-| Call global function | `conv.functions.my_function(...)` |
-| Call flow function | `flow.functions.my_function(...)` |
-| Navigate to flow | `conv.goto_flow("Flow Name")` |
-| Navigate to step | `flow.goto_step("Step Name", "reason")` |
-| Exit flow | `conv.exit_flow()` |
-| Transfer call | `conv.call_handoff(destination="...", reason="...")` |
 
 ## Related pages
 

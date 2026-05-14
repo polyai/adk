@@ -50,22 +50,7 @@ The ADK is designed to reduce those risks by combining local editing with valida
 
 ## Branch workflow
 
-A typical collaborative workflow looks like this:
-
-1. start from the `main` branch
-2. create a new branch with [`poly branch create {name}`](../reference/cli.md#poly-branch-create)
-3. switch branches as needed with [`poly branch switch {name}`](../reference/cli.md#poly-branch)
-4. edit files locally
-5. inspect changes with [`poly status`](../reference/cli.md#poly-status) and [`poly diff`](../reference/cli.md#poly-diff)
-6. validate the project with [`poly validate`](../reference/cli.md#poly-validate)
-7. push changes with [`poly push`](../reference/cli.md#poly-push)
-8. review the branch in Agent Studio
-9. merge the branch with [`poly branch merge`](../reference/branch_merge.md) or through the Agent Studio UI when ready
-
-You can also use:
-
-- [`poly branch list`](../reference/cli.md#poly-branch) to view available branches
-- [`poly branch current`](../reference/cli.md#poly-branch) to check the active branch
+The collaborative workflow follows the standard [CLI working pattern](../reference/cli.md#working-pattern), with each developer working on their own branch. Create a branch with [`poly branch create`](../reference/cli.md#poly-branch-create), edit and push, then merge with [`poly branch merge`](../reference/branch_merge.md) or through the Agent Studio UI when ready.
 
 ## Validation as a guardrail
 

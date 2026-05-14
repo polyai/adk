@@ -11,7 +11,7 @@ They are defined in <code>voice/configuration.yaml</code>.
 </p>
 
 !!! note "Platform-provisioned — update only"
-    Voice settings (`voice/configuration.yaml`) are created automatically by the platform when a project is created. They always exist on any Agent Studio project and can be updated with `poly push`, but cannot be created from scratch via the ADK. If this file appears in a project directory without a matching entry in `.agent_studio_config` — for example, after copying a directory from another project — the push will fail with a "Create operation not supported" error. Always start a new project with [`poly init`](./cli.md#poly-init) and [`poly pull`](./cli.md#poly-pull) rather than copying an existing directory.
+    Voice settings are created automatically when a project is created. They can be updated with `poly push` but not created from scratch. See the [equivalent note on agent settings](./agent_settings.md) for details.
 
 Voice settings control what the agent says at the start of a call and how it should sound throughout the conversation.
 
@@ -133,26 +133,7 @@ disclaimer_messages:
 
 `voice/safety_filters.yaml` is an optional file that overrides the project-level safety filter settings for the voice channel. When present, it takes precedence over `agent_settings/safety_filters.yaml` for voice interactions.
 
-See the [Safety filters reference](./safety_filters.md) for the full schema, field descriptions, and examples. The equivalent UI lives in the [Voice configuration page on docs.poly.ai](https://docs.poly.ai/voice/voice-configuration#safety-filters){ target="_blank" rel="noopener" }.
-
-### Example
-
-~~~yaml
-enabled: true
-categories:
-  violence:
-    enabled: true
-    level: medium
-  hate:
-    enabled: true
-    level: medium
-  sexual:
-    enabled: true
-    level: medium
-  self_harm:
-    enabled: true
-    level: medium
-~~~
+See the [Safety filters reference](./safety_filters.md) for the full schema, field descriptions, and examples.
 
 ## Full example
 

@@ -11,15 +11,17 @@ The ADK gives you a local, Git-like workflow for Agent Studio projects: pull, ed
 
 ## From zero to a local project
 
-Three commands take you from an empty machine to a working local copy of your agent:
+A few commands take you from an empty machine to a working local copy of your agent:
 
 ~~~bash
+uv venv --python=3.14 --seed
+source .venv/bin/activate
 pip install polyai-adk
 export POLY_ADK_KEY=<your-api-key>
 poly init
 ~~~
 
-`poly init` walks you through interactive dropdowns to pick a region, account, and project — single options are auto-selected. See [Prerequisites](get-started/prerequisites.md) for how to generate an API key, and [Initialize your project](get-started/first-commands.md) for a short walkthrough of the third command.
+See [Prerequisites](get-started/prerequisites.md) for how to install `uv` and generate an API key, [Installation](get-started/installation.md) for environment setup, and [First commands](get-started/first-commands.md) for a walkthrough of `poly init`.
 
 ## Start here
 
