@@ -133,23 +133,17 @@ class Pronunciation(MultiResourceYamlResource):
         yaml_list = list(top_level_yaml_dict.get(top_level_name, []))
 
         position = 0
-        contents = None
+        yaml_dict = None
         for i, item in enumerate(yaml_list):
             if i == int(resource_clean_name):
                 position = i
-                contents = utils.dump_yaml(item)
+                yaml_dict = item
                 break
 
-        if not contents:
+        if yaml_dict is None:
             raise FileNotFoundError(
                 f"Resource with name {resource_clean_name} not found in {true_file_path}"
             )
-
-        content = cls.from_pretty(contents, file_path=file_path, **kwargs)
-        try:
-            yaml_dict = utils.load_yaml(content) or {}
-        except Exception as e:
-            raise ValueError(f"Error loading YAML file: {file_path}") from e
 
         return cls.from_yaml_dict(
             yaml_dict, resource_id=resource_id, name="", position=position, **kwargs

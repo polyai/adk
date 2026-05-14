@@ -118,6 +118,7 @@ class FlowConfig(YamlResource):
         flow_config: FlowConfig = super().read_local_resource(
             file_path, resource_id=resource_id, resource_name=resource_name, **kwargs
         )
+
         # Just check flow folder name (one level up from file) matches flow name
         file_path_part_flow_folder = utils.get_flow_name_from_path(file_path)
         expected_flow_folder = utils.clean_name(flow_config.name)
@@ -149,20 +150,15 @@ class FlowConfig(YamlResource):
                     break
         return d
 
-    @staticmethod
-    def from_pretty(
-        contents: str,
-        resource_name: str = None,
+    @classmethod
+    def from_pretty_dict(
+        cls,
+        yaml_dict: dict,
         resource_mappings: list[ResourceMapping] = None,
+        resource_name: str = None,
         **kwargs,
-    ) -> str:
-        """Replace resource names with resource IDs in the provided contents."""
-        # Replace start_step name with ID if step from same flow
-        try:
-            yaml_dict = utils.load_yaml(contents) or {}
-        except Exception as e:
-            raise ValueError(f"Error loading YAML content for {resource_name}") from e
-
+    ) -> dict:
+        """Replace start_step name with ID in a parsed YAML dict."""
         start_step_name = yaml_dict.get("start_step")
         if start_step_name:
             for resource in resource_mappings or []:
@@ -175,6 +171,18 @@ class FlowConfig(YamlResource):
                         resource.flow_name + "_"
                     )
                     break
+        return yaml_dict
+
+    @classmethod
+    def from_pretty(
+        cls, contents: str, resource_mappings: list[ResourceMapping] = None, **kwargs
+    ) -> str:
+        """Replace resource names with resource IDs in the provided contents."""
+        try:
+            yaml_dict = utils.load_yaml(contents) or {}
+        except Exception as e:
+            raise ValueError("Error loading YAML content") from e
+        yaml_dict = cls.from_pretty_dict(yaml_dict, resource_mappings=resource_mappings, **kwargs)
         return utils.dump_yaml(yaml_dict)
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
@@ -531,23 +539,19 @@ class FlowStep(BaseFlowStep, YamlResource):
                     ]
         return d
 
-    @staticmethod
-    def from_pretty(
-        contents: str,
-        file_path: str = None,
+    @classmethod
+    def from_pretty_dict(
+        cls,
+        yaml_dict: dict,
         resource_mappings: list[ResourceMapping] = None,
+        file_path: str = None,
         **kwargs,
-    ) -> str:
-        """Replace resource names with resource IDs in the provided contents."""
+    ) -> dict:
+        """Replace resource names with IDs in a parsed YAML dict."""
         flow_folder_name = utils.get_flow_name_from_path(file_path)
 
         if not flow_folder_name:
             raise ValueError("flow_name could not be determined from file_path")
-
-        try:
-            yaml_dict = utils.load_yaml(contents) or {}
-        except Exception as e:
-            raise ValueError(f"Error loading YAML content for {file_path}") from e
 
         if prompt := yaml_dict.get("prompt"):
             yaml_dict["prompt"] = utils.replace_resource_names_with_ids(
@@ -589,6 +593,18 @@ class FlowStep(BaseFlowStep, YamlResource):
                     ]
                     condition["required_entities"] = new_required_entities
 
+        return yaml_dict
+
+    @classmethod
+    def from_pretty(
+        cls, contents: str, resource_mappings: list[ResourceMapping] = None, **kwargs
+    ) -> str:
+        """Replace resource names with resource IDs in the provided contents."""
+        try:
+            yaml_dict = utils.load_yaml(contents) or {}
+        except Exception as e:
+            raise ValueError("Error loading YAML content") from e
+        yaml_dict = cls.from_pretty_dict(yaml_dict, resource_mappings=resource_mappings, **kwargs)
         return utils.dump_yaml(yaml_dict)
 
     @cached_property
@@ -618,16 +634,15 @@ class FlowStep(BaseFlowStep, YamlResource):
         # Extract flow_id from resource mappings
         flow_id, flow_name = utils.get_flow_id_from_flow_name(flow_folder_name, resource_mappings)
 
-        content = cls.read_to_raw(
-            file_path,
-            resource_mappings=resource_mappings,
-            flow_name=flow_name,
-            **kwargs,
-        )
+        contents = cls.read_from_file(file_path)
         try:
-            yaml_dict = utils.load_yaml(content) or {}
+            yaml_dict = utils.load_yaml(contents) or {}
         except Exception as e:
             raise ValueError(f"Error loading YAML file: {file_path}") from e
+
+        yaml_dict = cls.from_pretty_dict(
+            yaml_dict, resource_mappings=resource_mappings, file_path=file_path
+        )
 
         # Get file name from file_path
         file_name = os.path.splitext(os.path.basename(file_path))[0]

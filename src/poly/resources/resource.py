@@ -324,6 +324,13 @@ class YamlResource(Resource, ABC):
             )
         )
 
+    @classmethod
+    def from_pretty_dict(
+        cls, yaml_dict: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
+    ) -> dict:
+        """Replace resource names with IDs in a parsed YAML dict. Override in subclasses."""
+        return yaml_dict
+
     @staticmethod
     def from_pretty(
         contents: str, resource_mappings: list[ResourceMapping] = None, **kwargs
@@ -336,12 +343,27 @@ class YamlResource(Resource, ABC):
         cls, file_path: str, resource_id: str, resource_name: str, **kwargs
     ) -> "YamlResource":
         """Read a local YAML resource from the given file path."""
-        content = cls.read_to_raw(file_path, resource_name=resource_name, **kwargs)
+        contents = cls.read_from_file(file_path)
+        resource_mappings = kwargs.pop("resource_mappings", None)
+        contents = utils.replace_resource_names_with_ids(contents, resource_mappings or [])
         try:
-            yaml_dict = utils.load_yaml(content) or {}
+            yaml_dict = utils.load_yaml(contents) or {}
         except Exception as e:
             raise ValueError(f"Error loading YAML file: {file_path}") from e
-        return cls.from_yaml_dict(yaml_dict, resource_id=resource_id, name=resource_name, **kwargs)
+        yaml_dict = cls.from_pretty_dict(
+            yaml_dict,
+            resource_mappings=resource_mappings,
+            resource_name=resource_name,
+            file_path=file_path,
+            **kwargs,
+        )
+        return cls.from_yaml_dict(
+            yaml_dict,
+            resource_id=resource_id,
+            name=resource_name,
+            resource_mappings=resource_mappings,
+            **kwargs,
+        )
 
     @abstractmethod
     def to_yaml_dict(self) -> dict:
@@ -563,12 +585,27 @@ class MultiResourceYamlResource(YamlResource, ABC):
         cls, file_path: str, resource_id: str, resource_name: str, **kwargs
     ) -> "YamlResource":
         """Read a local YAML resource from the given file path."""
-        content = cls.read_to_raw(file_path, resource_name=resource_name, **kwargs)
+        contents = cls.read_from_file(file_path)
+        resource_mappings = kwargs.pop("resource_mappings", None)
+        contents = utils.replace_resource_names_with_ids(contents, resource_mappings or [])
         try:
-            yaml_dict = utils.load_yaml(content) or {}
+            yaml_dict = utils.load_yaml(contents) or {}
         except Exception as e:
             raise ValueError(f"Error loading YAML file: {file_path}") from e
-        return cls.from_yaml_dict(yaml_dict, resource_id=resource_id, name=resource_name, **kwargs)
+        yaml_dict = cls.from_pretty_dict(
+            yaml_dict,
+            resource_mappings=resource_mappings,
+            resource_name=resource_name,
+            file_path=file_path,
+            **kwargs,
+        )
+        return cls.from_yaml_dict(
+            yaml_dict,
+            resource_id=resource_id,
+            name=resource_name,
+            resource_mappings=resource_mappings,
+            **kwargs,
+        )
 
     @abstractmethod
     def to_yaml_dict(self) -> dict:

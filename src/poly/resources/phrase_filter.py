@@ -101,16 +101,11 @@ class PhraseFilter(MultiResourceYamlResource):
                     break
         return d
 
-    @staticmethod
-    def from_pretty(
-        contents: str, resource_mappings: list[ResourceMapping] = None, **kwargs
-    ) -> str:
-        """Replace human-readable function name with function ID."""
-        try:
-            yaml_dict = utils.load_yaml(contents) or {}
-        except Exception:
-            return contents
-
+    @classmethod
+    def from_pretty_dict(
+        cls, yaml_dict: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
+    ) -> dict:
+        """Replace function name with ID in a parsed YAML dict."""
         function_name = yaml_dict.get("function")
         if function_name:
             for resource in resource_mappings or []:
@@ -121,7 +116,18 @@ class PhraseFilter(MultiResourceYamlResource):
                 ):
                     yaml_dict["function"] = resource.resource_id
                     break
+        return yaml_dict
 
+    @classmethod
+    def from_pretty(
+        cls, contents: str, resource_mappings: list[ResourceMapping] = None, **kwargs
+    ) -> str:
+        """Replace function name with ID. Returns original contents on invalid YAML."""
+        try:
+            yaml_dict = utils.load_yaml(contents) or {}
+        except Exception:
+            return contents
+        yaml_dict = cls.from_pretty_dict(yaml_dict, resource_mappings=resource_mappings, **kwargs)
         return utils.dump_yaml(yaml_dict)
 
     @property
