@@ -455,7 +455,13 @@ Examples:
 poly deployments list
 poly deployments list --env live
 poly deployments list --details
+poly deployments show abc123def
+poly deployments show abc123def --env live
 ~~~
+
+#### `poly deployments list`
+
+List deployments for the project.
 
 | Flag | Description |
 |---|---|
@@ -547,6 +553,7 @@ poly init --region us-1 --account_id 123 --project_id my_project --json
 poly project create --region us-1 --account_id my-account --name my-project --json
 poly chat --json -m 'Hello'
 poly chat --json --input-file ./script.txt
+poly deployments show abc123def --json
 poly deployments list --json
 poly deployments promote --from <id> --to pre-release --force --json
 poly deployments rollback --to <id> --force --json
@@ -588,12 +595,20 @@ The exact fields vary by command. Common fields include:
 | `poly init --json` | `success`, `root_path` |
 | `poly project create --json` | `success`, `root_path` (via init); on error: `success`, `error` |
 | `poly chat --json` | `conversations` (array); optional `push` (when `--push` is used) |
+| `poly deployments show --json` | `success`, `deployment`, `active_deployment_hashes`, `included_deployments`, `is_rollback` |
 | `poly deployments promote --json` | `success`, `from_hash`, `to_env`, `message`, `included_deployments`; `dry_run` when `--dry-run` is used |
 | `poly deployments rollback --json` | `success`, `target_hash`, `message`, `reverted_deployments`; `dry_run` when `--dry-run` is used |
 
 For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
 
 For `poly branch merge --json`, a successful merge returns `{ "success": true }`. When conflicts or errors are present, the response includes `"conflicts"` and `"errors"` arrays containing the raw conflict and error objects from the platform.
+
+For `poly deployments show --json`, the response includes:
+
+- `deployment` — the full deployment record for the requested version hash.
+- `active_deployment_hashes` — a map of environment names to the currently active version hash in each environment.
+- `included_deployments` — the list of sandbox deployments included since the predecessor version in the queried environment.
+- `is_rollback` — `true` if the deployment is a rollback to an older version.
 
 Error responses always include `{ "success": false, "error": "...", "traceback": "..." }`.
 
