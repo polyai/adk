@@ -41,19 +41,9 @@ pip install polyai-adk
 
     If you plan to work in **VS Code** or **Cursor**, you can also install the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) for resource-aware editing on top of the CLI. The extension is additive — the `poly` command remains the source of truth for every workflow.
 
-## Generate API key
+## Set your API key
 
-Log in to Agent Studio and open your workspace. In the **API Keys** tab (next to the **Users** tab), click **+ API key** in the top right to generate a key.
-
-![Generating an API key in Agent Studio — API Keys tab with the + API key button highlighted](../assets/api-key-data-access.png)
-
-Then set it as an environment variable:
-
-~~~bash
-export POLY_ADK_KEY=<your-api-key>
-~~~
-
-The `POLY_ADK_KEY` environment variable must be set before running any `poly` commands. To make it permanent, add the export line to your shell profile (for example, `~/.zshrc` or `~/.bashrc`).
+If you haven't generated an API key yet, follow the steps in [Prerequisites — Generate API key](./prerequisites.md#generate-api-key).
 
 ### Per-region API keys
 
@@ -76,8 +66,6 @@ export POLY_ADK_KEY=<your-fallback-api-key>   # used for any other region
 ~~~
 
 `POLY_ADK_KEY` is still required as the fallback. If neither the region-specific key nor `POLY_ADK_KEY` is set, the CLI will raise an error.
-
-Once the ADK is installed and your API key is set, you can use the `poly` command to interact with Agent Studio projects locally.
 
 ## Verify the installation
 

@@ -57,17 +57,7 @@ Copy both values — you will need them in the next step.
 
 ![Go back to key](../assets/go-back-to-key.png)
 
-The ADK uses an API key to authenticate with Agent Studio. Click **Back to agents** to return to your **workspace**, open the **API Keys** tab (next to the **Users** tab) and click **+ API key** to generate one.
-
-![Generating an API key in Agent Studio — API Keys tab with the + API key button highlighted](../assets/api-key-data-access.png)
-
-Then set it as an environment variable:
-
-~~~bash
-export POLY_ADK_KEY=<your-api-key>
-~~~
-
-To make it permanent, add the export line to your shell profile (`~/.zshrc` or `~/.bashrc`).
+The ADK uses an API key to authenticate with Agent Studio. Click **Back to agents** to return to your **workspace**, then follow the steps in [Prerequisites — Generate API key](./prerequisites.md#generate-api-key) to create and export your key.
 
 ### Step 6 — Pull the agent into the ADK
 
@@ -77,13 +67,7 @@ Once the [ADK is installed](./installation.md), link your local folder to the pr
 poly init
 ```
 
-[`poly init`](../reference/cli.md#poly-init) walks you through interactive dropdowns to pick a region, account, and project — single options are auto-selected. It creates a subdirectory at `{account_id}/{project_id}` inside your current directory and pulls the current configuration down automatically. [`poly pull`](../reference/cli.md#poly-pull) can be used to refresh it at any time. Change into the project directory before running any further commands.
-
-If you already know the IDs (or want to script the call), pass them as flags to skip the prompts:
-
-```bash
-poly init --account_id <account_id> --project_id <project_id>
-```
+[`poly init`](../reference/cli.md#poly-init) walks you through interactive dropdowns to pick a region, account, and project. It creates a subdirectory and pulls the configuration automatically. Change into the project directory before running any further commands. See [First commands](./first-commands.md) for the full walkthrough.
 
 You now have a fully editable local copy of your agent.
 
@@ -121,7 +105,7 @@ If you already have an agent in Agent Studio — built in the browser editor, by
     poly init
     ~~~
 
-    `poly init` shows a searchable dropdown of every project visible to your API key — pick the one you want to work on. If you'd rather pass the IDs directly (they're in the Agent Studio URL), use `poly init --account_id <account_id> --project_id <project_id>`.
+    `poly init` shows interactive dropdowns to pick your project. See [First commands](./first-commands.md) for details.
 
 Your local folder will mirror the project in Agent Studio and you can begin editing immediately.
 

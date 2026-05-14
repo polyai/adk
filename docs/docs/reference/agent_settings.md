@@ -207,25 +207,7 @@ That kind of logic belongs in flows and Python functions.
 
 The `safety_filters.yaml` file configures project-level content safety filtering. It controls whether harmful content is filtered across all channels by default.
 
-See the [Safety filters reference](./safety_filters.md) for full field descriptions, schema, and examples. The equivalent UI lives on the [General settings page on docs.poly.ai](https://docs.poly.ai/settings/introduction){ target="_blank" rel="noopener" }.
-
-### Example
-
-~~~yaml
-categories:
-  violence:
-    enabled: true
-    level: medium
-  hate:
-    enabled: true
-    level: medium
-  sexual:
-    enabled: true
-    level: medium
-  self_harm:
-    enabled: true
-    level: medium
-~~~
+See the [Safety filters reference](./safety_filters.md) for field descriptions, schema, and examples.
 
 ## Best practices
 

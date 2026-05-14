@@ -45,56 +45,7 @@ There are two common ways to build with the ADK:
 
 ## Local project structure
 
-When an Agent Studio project is linked locally, it follows this general structure:
-
-~~~text
-<account>/<project>/
-├── _gen/                               # Generated stubs — do not edit
-├── agent_settings/
-│   ├── personality.yaml
-│   ├── role.yaml
-│   ├── rules.txt
-│   ├── safety_filters.yaml             # Optional
-│   └── experimental_config.json        # Optional
-├── config/
-│   ├── entities.yaml                   # Optional
-│   ├── handoffs.yaml                   # Optional
-│   ├── sms_templates.yaml              # Optional
-│   └── variant_attributes.yaml         # Optional
-├── voice/
-│   ├── configuration.yaml
-│   ├── safety_filters.yaml             # Optional
-│   ├── speech_recognition/
-│   │   ├── asr_settings.yaml
-│   │   ├── keyphrase_boosting.yaml
-│   │   └── transcript_corrections.yaml
-│   └── response_control/
-│       ├── pronunciations.yaml
-│       └── phrase_filtering.yaml
-├── chat/                               # Optional - chat channel settings
-│   ├── configuration.yaml
-│   └── safety_filters.yaml             # Optional
-├── flows/
-│   └── {flow_name}/
-│       ├── flow_config.yaml
-│       ├── steps/
-│       │   └── {step_name}.yaml
-│       ├── function_steps/
-│       │   └── {function_step}.py
-│       └── functions/
-│           └── {function_name}.py
-├── functions/
-│   ├── start_function.py
-│   ├── end_function.py
-│   └── {function_name}.py
-├── topics/
-│   └── {topic_name}.yaml
-├── variables/                          # Virtual — no files on disk
-│   └── {variable_name}
-└── project.yaml
-~~~
-
-This structure mirrors the parts of the agent that Agent Studio understands: settings, flows, functions, topics, channel configuration, and supporting resources.
+See [Working locally — What a local project contains](../concepts/working-locally.md#what-a-local-project-contains) for the full directory tree. In short, the project mirrors what Agent Studio understands: `agent_settings/`, `flows/`, `functions/`, `topics/`, `voice/`, `chat/`, and `config/`.
 
 ## Workflow 1 - CLI workflow
 
@@ -110,18 +61,11 @@ Link a local folder to an existing Agent Studio project. The agent must already 
 poly init
 ~~~
 
-`poly init` walks you through interactive dropdowns for region, account, and project — single options are auto-selected. It creates the project directory at `{account_id}/{project_id}` inside your current working directory, pulls the current configuration, and writes the metadata needed to connect the folder to Agent Studio. Change into the project directory before running any further commands.
-
-For scripted runs you can pass any of the IDs directly to skip the matching prompt:
-
-~~~bash
-poly init --account_id <account_id> --project_id <project_id>
-poly init --region <region> --account_id <account_id> --project_id <project_id>
-~~~
+`poly init` walks you through interactive dropdowns for region, account, and project. It creates the project directory and pulls the current configuration. Change into the project directory before running any further commands. See [First commands](../get-started/first-commands.md) for flag options and details.
 
 ### Step 2 - Set up the environment
 
-Configure any API keys or environment variables needed for the project. Use `poly pull` at any time to refresh the local project with the latest remote configuration.
+Configure any API keys or environment variables needed for the project. `poly init` pulls the current configuration automatically, but you can run `poly pull` at any time to refresh it:
 
 ~~~bash
 poly pull
@@ -138,7 +82,7 @@ Start an interactive chat session to confirm the connection works and inspect ru
 
 !!! info "`poly chat` runs against Agent Studio, not your local files"
 
-    The ADK has no local runtime — `poly chat` talks to the agent running in Agent Studio. At this stage you are on `main`, so the session connects to your sandbox. To chat against a feature branch, push it first with `poly push` and then run `poly chat` (or use `poly chat --push` to do both in one step).
+    `poly chat` connects to the last pushed state of your current branch (or sandbox on `main`). Push first, or use `poly chat --push`.
 
 ~~~bash
 poly chat
@@ -294,7 +238,7 @@ Once your branch is merged in Agent Studio, test the agent by chatting with it a
 
 !!! note "Pushing before chatting"
 
-    By default, `poly chat` connects to your current branch's last pushed state — so push your latest changes first. On the `main` branch, `poly chat` falls back to the sandbox environment. To target a specific environment explicitly, pass `--environment sandbox`, `--environment pre-release`, or `--environment live`.
+    Push your latest changes before chatting — `poly chat` connects to the last pushed state. Target a specific environment with `--environment sandbox`, `--environment pre-release`, or `--environment live`.
 
 ~~~bash
 poly chat --environment sandbox
@@ -325,33 +269,7 @@ Use Agent Studio analytics to monitor containment, CSAT, handle time, and flagge
 
 ## Workflow 2 - AI-agent workflow
 
-The AI-agent workflow uses a coding agent — such as **Claude Code**, or an in-editor agent in **VS Code** or **Cursor** paired with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) — to run the same development loop on your behalf.
-
-<div class="grid cards" markdown>
-
--   **You provide the brief**
-
-    ---
-
-    Requirements, business rules, integrations, and API documentation.
-
--   **The coding tool generates the project**
-
-    ---
-
-    It uses the ADK to read documentation, generate files, and push the result.
-
--   **You review and deploy**
-
-    ---
-
-    Agent Studio remains the place where the work is checked, merged, and deployed.
-
-</div>
-
-!!! info "No manual flow-building required"
-
-    In this workflow, the coding tool generates the project files. Agent Studio is where the output is reviewed, tested, and deployed.
+The AI-agent workflow uses a coding agent — such as **Claude Code**, or an in-editor agent in **VS Code** or **Cursor** paired with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) — to run the same development loop on your behalf. You provide the brief, the coding tool generates and pushes project files, and you review and deploy in Agent Studio.
 
 ### Step 1 - Gather requirements
 

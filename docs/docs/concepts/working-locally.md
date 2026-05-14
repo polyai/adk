@@ -99,18 +99,7 @@ This means the local filesystem becomes your main editing surface, while Agent S
 
 ## Standard CLI workflow
 
-The standard workflow is:
-
-1. initialize the local project with [`poly init`](../reference/cli.md#poly-init) if it is not already present
-2. pull the latest project configuration with [`poly pull`](../reference/cli.md#poly-pull)
-3. create a branch with [`poly branch create {name}`](../reference/cli.md#poly-branch-create)
-4. edit files locally
-5. inspect changes with [`poly diff`](../reference/cli.md#poly-diff) and [`poly status`](../reference/cli.md#poly-status)
-6. validate locally with [`poly validate`](../reference/cli.md#poly-validate)
-7. push changes with [`poly push`](../reference/cli.md#poly-push)
-8. optionally generate a review gist with [`poly review create`](../reference/cli.md#poly-review)
-9. merge the branch with [`poly branch merge`](../reference/branch_merge.md) or in Agent Studio
-10. test by chatting with the agent using [`poly chat`](../reference/cli.md#poly-chat) — by default this connects to your current branch's pushed state. Use [`poly push`](../reference/cli.md#poly-push) first, or `poly chat --push` to push and start the session in one step. On the main branch it falls back to Sandbox.
+See the [CLI working pattern](../reference/cli.md#working-pattern) for the full step-by-step. The short version: init → pull → branch → edit → validate → push → review → merge → chat.
 
 !!! tip "Run commands from the project folder"
 
@@ -137,27 +126,6 @@ These references let settings, prompts, and behaviors point to resources by name
 !!! tip "A Git-like workflow for Agent Studio"
 
     Think of the ADK as a synchronization layer between your local files and the Agent Studio platform.
-
-## Development setup from source
-
-If you are contributing to the ADK itself or working directly from the repository, you can set it up locally from source instead.
-
-~~~bash
-git clone https://github.com/polyai/adk.git
-cd adk
-uv venv --python=3.14 --seed
-source .venv/bin/activate
-uv pip install -e ".[dev]"
-pre-commit install
-~~~
-
-This installs the project in editable mode and enables the repository's development hooks. To run the test suite:
-
-~~~bash
-pytest
-~~~
-
-Test files are located in `src/poly/tests/`.
 
 ## Related pages
 

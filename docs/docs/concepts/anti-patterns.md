@@ -161,22 +161,7 @@ If the user is expected to answer, put the full question in the utterance and le
 
 ## Don't copy project directories between projects
 
-Copying an existing ADK project directory and pointing it at a different Agent Studio project will cause push failures.
-
-The `.agent_studio_config` file contains resource IDs from the source project. When the ADK compares local files against the target project, those IDs do not match what the remote has registered. Resources that are not registered on the target project get classified as new creates — and several resources (voice settings, chat settings, personality, role, and ASR settings) cannot be created through the ADK because they are provisioned automatically by the platform when a project is created.
-
-### Wrong
-
-Copying a project directory, updating `project.yaml` or `project.json` with new IDs, then running `poly push` against a different project.
-
-### Right
-
-~~~bash
-poly init
-poly pull
-~~~
-
-Start every new project fresh with `poly init` and `poly pull`. `poly init` will walk you through dropdowns to pick the right project; pass `--account_id` / `--project_id` if you want to skip the prompts. If you need to reuse flows, functions, or topics from an existing project, copy those individual resource files into the new directory — do not copy `.agent_studio_config` or the whole project directory.
+Never copy a whole project directory to start a new project — the `.agent_studio_config` IDs won't match the target and platform-provisioned resources will fail to push. Always start with `poly init` + `poly pull`. If you need to reuse resources, copy individual files into the new directory. See the [platform-provisioned note on agent settings](../reference/agent_settings.md) for details.
 
 ## Quick reference
 
