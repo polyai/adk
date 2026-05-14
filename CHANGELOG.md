@@ -1,6 +1,162 @@
 # CHANGELOG
 
 
+## v0.19.3 (2026-05-14)
+
+### Bug Fixes
+
+- Eliminate phantom diffs after poly pull --force ([#138](https://github.com/polyai/adk/pull/138),
+  [`94597b4`](https://github.com/polyai/adk/commit/94597b447195c5bb1570fa05d7d9eac76b0df60c))
+
+## Summary
+
+Fixes two serialization bugs that caused `poly diff` to show spurious changes immediately after
+  `poly pull --force`.
+
+## Motivation
+
+After a force pull, users expect `poly diff` to show no changes. Instead, it showed blank line
+  removals in Python files and `|` → `|-` changes in YAML step prompts.
+
+## Changes
+
+- **function.py**: Preserve blank line between docstring and imports in `make_pretty` so the local
+  file matches the remote `.raw` format - **flows.py**: Normalize prompt in `to_yaml_dict()` with
+  `.strip()` so remote and local resources produce identical YAML output (both use `|-`) -
+  **resources_test.py**: Update `test_to_pretty_import_after_docstring` expected value to include
+  the preserved blank line
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Before: `poly pull --force && poly diff` showed 12 phantom diffs (blank line removals in .py files,
+  `|` → `|-` in .yaml files). After: `poly pull --force && poly diff` should show no diffs.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Documentation
+
+- Add `poly create` project command ([#140](https://github.com/polyai/adk/pull/140),
+  [`7b837cb`](https://github.com/polyai/adk/commit/7b837cbab983d6861a76cd525fb5c4211fee66a0))
+
+## Summary
+
+This relates to PR #64
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Deduplicate content and trim bloat across ADK docs
+  ([#141](https://github.com/polyai/adk/pull/141),
+  [`0ab1be6`](https://github.com/polyai/adk/commit/0ab1be6514460a76651070c3c24ded506168136d))
+
+## Summary
+
+**Deduplication (-340 lines net across 16 files):** - Consolidate API key generation instructions in
+  prerequisites.md; other pages cross-reference - Consolidate platform-provisioned notes in
+  agent_settings.md; voice/chat/speech pages cross-reference - Move safety filter YAML examples to
+  safety_filters.md only - Move state/variable docs from functions.md to variables.md - Replace
+  duplicated CLI workflow steps (5 files) with cross-references to cli.md#working-pattern - Shorten
+  repeated poly init dropdown descriptions - Remove duplicated project directory tree from
+  build-an-agent.md - Trim examples/index.md meta-content - Remove misplaced dev-setup-from-source
+  from working-locally.md (already in CONTRIBUTING.md)
+
+**Informational inconsistencies fixed:** - **index.md quickstart** now includes venv setup (was
+  contradicting installation.md) - **build-an-agent.md Workflow 2 Step 3** no longer shows a
+  separate `poly pull` after `poly init` (poly init pulls automatically) - **prerequisites.md** Git
+  marked as optional/recommended, not required — the ADK itself doesn't use git -
+  **agent_settings.md** rules reference table now includes `$variable_name` syntax alongside
+  `{{vrbl:...}}` (was inconsistent with variables.md and topics.md)
+
+Visual formatting (cards, grids, admonitions) preserved throughout.
+
+## Files changed
+
+| Area | Files | |---|---| | Get started | `index.md`, `get-started.md`, `prerequisites.md`,
+  `installation.md` | | Reference | `agent_settings.md`, `voice_settings.md`, `chat_settings.md`,
+  `speech_recognition.md`, `functions.md`, `testing.md`, `tooling.md` | | Concepts |
+  `working-locally.md`, `multi-user-and-guardrails.md`, `anti-patterns.md` | | Tutorials |
+  `build-an-agent.md` | | Examples | `index.md` |
+
+## Test plan
+
+- [ ] Run `mkdocs serve` and verify all cross-reference links resolve - [ ] Spot-check that each
+  deduplicated section still has a working link to the canonical content - [ ] Confirm no broken
+  anchors (e.g. `cli.md#working-pattern`, `prerequisites.md#generate-api-key`)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
+
+- Feat: add deployments show subcommand ([#134](https://github.com/polyai/adk/pull/134),
+  [`ff15134`](https://github.com/polyai/adk/commit/ff15134b8772ec15f35c306ddbf9b08ee64bd10b))
+
+## Summary
+
+This work relates to PR #125
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+
 ## v0.19.2 (2026-05-12)
 
 ### Bug Fixes
