@@ -364,7 +364,7 @@ class Function(Resource):
                 after_docstring.startswith("from ") or after_docstring.startswith("import ")
             ):
                 # There are imports right after, add header with single newline
-                code = before_docstring + "\n" + FUNCTION_HEADER + after_docstring
+                code = before_docstring + "\n\n" + FUNCTION_HEADER + after_docstring
             else:
                 # No imports right after, add header with two newlines
                 code = before_docstring + "\n" + FUNCTION_HEADER + "\n" + after_docstring
