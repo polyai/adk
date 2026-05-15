@@ -1,6 +1,128 @@
 # CHANGELOG
 
 
+## v0.20.1 (2026-05-15)
+
+### Bug Fixes
+
+- Handle non-string merge conflict values ([#129](https://github.com/polyai/adk/pull/129),
+  [`15c3902`](https://github.com/polyai/adk/commit/15c39027a77335f8890cea8ff06c079882b80398))
+
+## Summary
+
+Branch merge conflicts can contain non-string values (ints, bools, dicts, lists, None) from the
+  platform's conflict resolver. Previously the CLI crashed or showed useless output for these types.
+
+## Motivation
+
+The conflict resolution UI called `merge_strings()` on all values regardless of type, crashing on
+  dicts/ints/None. Merge values can also be empty or missing entirely, which caused similar
+  failures. Non-string conflicts also showed a blank "Needs decision" panel with no values
+  displayed.
+
+## Changes
+
+- Fix crash when merge values are empty or None - Gate `merge_strings()` behind a type check — only
+  called when theirs/ours are strings; None/missing base falls back to empty string - Show
+  non-string values inline in the conflict panel instead of hiding behind "Multiline or long values"
+  - Add type-appropriate edit prompts: `confirm` for bools, validated text for ints/floats, JSON
+  input for lists - Hide "Edit manually" for dict values (pick a side only) - Extract
+  `prompt_typed_edit` and validators into `console.py` - Remove redundant fallback merge logic from
+  the interactive handler
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs <img width="872" height="322" alt="Screenshot 2026-05-06 at 15 49 49"
+  src="https://github.com/user-attachments/assets/0c651da5-dd41-4e07-92ea-57cc7f3cf5f4" />
+
+<!-- Tested with numeric entity min/max conflicts on a live project -->
+
+- Send empty parameters ([#144](https://github.com/polyai/adk/pull/144),
+  [`5fe68e5`](https://github.com/polyai/adk/commit/5fe68e5e4ade1a0fed31e02f503fb3c9588e6e3c))
+
+## Summary Send an empty list of parameters when no parameters
+
+## Motivation Couldn't delete function parameters
+
+## Changes - Send parameters for function types that accept it, even when empty
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+### Chores
+
+- Remove client ID of unused connections ([#149](https://github.com/polyai/adk/pull/149),
+  [`fe0191b`](https://github.com/polyai/adk/commit/fe0191b5c62b99f6b1de3e56c4c9d13e8b5b760a))
+
+## Summary Remove client ID and connection of unused Auth0 Connection
+
+## Motivation Dead code which was confusing
+
+## Changes Remove unused constants
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+### Documentation
+
+- Update getting started for poly start ([#147](https://github.com/polyai/adk/pull/147),
+  [`86aa472`](https://github.com/polyai/adk/commit/86aa472c663bdf17d3741a784f8a5c8374192dee))
+
+## Summary - Reworks the getting started flow to lead with `poly start` as the primary onboarding
+  path — signup, API key generation, and project creation in one command - Manual API key setup via
+  env vars kept as an alternative for existing users - Documents the credential file
+  (`~/.poly/credentials.json`) and the resolution order (credential file → region env var →
+  `POLY_ADK_KEY`) - Addresses Naorin's ask to update docs ahead of `poly start` going to prod
+
+### Pages changed - **get-started.md** — Steps 1–5 (manual signup, find IDs, generate key) collapsed
+  into a single `poly start` step - **prerequisites.md** — Option A (`poly start`) / Option B
+  (manual) for API key setup, credential resolution order documented - **installation.md** — "Set
+  your API key" points at `poly start`, credential file fallback noted
+
+## Test plan - [x] `mkdocs serve` — all three pages render correctly - [ ] Internal links between
+  pages resolve (prerequisites ↔ installation ↔ get-started) - [ ] Screenshot/image references still
+  work (no images were changed) - [ ] Should be merged after or alongside Ruari's `poly start` PRs
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
+
+
 ## v0.20.0 (2026-05-15)
 
 ### Features
