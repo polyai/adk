@@ -3,16 +3,16 @@ title: Installation
 description: Install the PolyAI ADK and prepare your local environment.
 ---
 
-The **PolyAI ADK** can be installed as a Python package.
+The **PolyAI ADK** is a Python package. We recommend installing in a virtual environment.
 
 ## Install the ADK
 
-We recommend installing in a virtual environment rather than installing to the global system Python. If you don't have `uv` installed, see the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/){ target="_blank" rel="noopener" }.
-
-Run the following to create a virtual environment:
+If you don't have `uv` installed, see [Prerequisites](./prerequisites.md#install-uv).
 
 ```bash
 uv venv --python=3.14 --seed
+source .venv/bin/activate
+pip install polyai-adk
 ```
 
 !!! info "Suppress SyntaxWarnings from platform-generated code"
@@ -25,37 +25,41 @@ uv venv --python=3.14 --seed
     export PYTHONWARNINGS=ignore
     ```
 
-Activate the virtual environment:
+Verify the CLI is available:
 
 ```bash
-source .venv/bin/activate
-```
-
-Install the package with pip:
-
-```bash
-pip install polyai-adk
+poly --help
 ```
 
 !!! tip "Optional — install the VS Code / Cursor extension"
 
     If you plan to work in **VS Code** or **Cursor**, you can also install the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) for resource-aware editing on top of the CLI. The extension is additive — the `poly` command remains the source of truth for every workflow.
 
-## Set your API key
+## Authenticate
 
-The fastest way to authenticate is with `poly start`, which signs you in and saves your API key to `~/.poly/credentials.json` automatically:
+Run `poly start` to sign in (or create an account) and save your API key:
 
 ```bash
 poly start
 ```
 
-See [Getting started](./get-started.md#step-2--run-poly-start) for the full walkthrough.
+Your API key is saved to `~/.poly/credentials.json` and used automatically by all `poly` commands. No environment variables needed.
 
-If you prefer to manage keys manually, follow the steps in [Prerequisites — API key](./prerequisites.md#authenticate-with-an-api-key) to generate a key and export it as `POLY_ADK_KEY`.
+`poly start` can also create your first project and pull it down locally — follow the prompts or see [Getting started](./get-started.md) for the full walkthrough.
+
+??? note "Manual API key setup"
+
+    If you prefer environment variables, generate a key in Agent Studio and export it:
+
+    ```bash
+    export POLY_ADK_KEY=<your-api-key>
+    ```
+
+    See [Prerequisites — Manual setup](./prerequisites.md#api-key) for step-by-step instructions.
 
 ### Per-region API keys
 
-If you need a separate API key for a specific region, you can set a region-scoped variable alongside `POLY_ADK_KEY`. The ADK checks for the region-specific key first and falls back to the credential file, then `POLY_ADK_KEY`.
+If you work across multiple regions, you can set region-scoped environment variables. The ADK checks for these before falling back to the credential file and `POLY_ADK_KEY`.
 
 | Region | Environment variable |
 |---|---|
@@ -66,26 +70,12 @@ If you need a separate API key for a specific region, you can set a region-scope
 | `staging` | `POLY_ADK_KEY_STAGING` |
 | `dev` | `POLY_ADK_KEY_DEV` |
 
-For example, to use a dedicated key for the US region:
-
 ```bash
 export POLY_ADK_KEY_US=<your-us-api-key>
 export POLY_ADK_KEY=<your-fallback-api-key>   # used for any other region
 ```
 
-## Verify the installation
-
-Confirm the CLI is available:
-
-```bash
-poly --help
-```
-
-You should see the top-level command help if installation succeeded.
-
 ## Next step
-
-With the ADK installed and your API key set, run `poly init` to create your local project and get familiar with the CLI.
 
 <div class="grid cards" markdown>
 
