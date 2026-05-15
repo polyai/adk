@@ -51,26 +51,41 @@ If the merge has conflicts, the command prints a conflict table and exits with a
 
 - **Path** — the resource and field that conflicts (for example `topics > Booking > content`)
 - **Base / Ours / Theirs** — the original value and the two competing values
-- **Auto-merged value** — what the ADK would produce by line-merging the two sides
-- **Auto-mergeable** — whether the auto-merged value contains any unresolved markers
+- **Auto-merged value** — what the ADK would produce by line-merging the two sides (string conflicts only)
+- **Auto-mergeable** — whether the auto-merged value contains any unresolved markers (string conflicts only)
+
+For non-string conflicts (for example, fields whose values are numbers, booleans, lists, or objects), the auto-merge columns are not populated — these values cannot be line-merged and must be resolved by picking a side or providing a custom value.
 
 If every conflict is auto-mergeable and you want to accept the auto-merge, re-run the command with `--interactive` and accept the suggestions, or pre-populate `--resolutions` with the auto-merge values.
 
 ### `--interactive` / `-i`
 
-Interactive mode walks you through each conflict and asks how to resolve it. For every conflict you can:
+Interactive mode walks you through each conflict and asks how to resolve it. The available options depend on the type of the conflicting value.
 
-- accept the auto-merge (when available)
+**For all conflicts**, you can:
+
 - pick `main` (`ours`)
 - pick branch (`theirs`)
 - pick `base` (revert to the original value)
+
+**For string conflicts**, you can additionally:
+
+- accept the auto-merge (when available)
 - open the value in your `$EDITOR` or `$VISUAL` for free-form editing
 
-After you've answered every conflict the merge is re-attempted automatically.
+**For non-string conflicts**, the edit option adapts to the value type:
+
+- **Booleans** — a `true`/`false` confirmation prompt
+- **Integers** — a validated text prompt that accepts only whole numbers
+- **Floats** — a validated text prompt that accepts decimal numbers
+- **Lists** — a text prompt that accepts a JSON array (for example `["a", "b"]`)
+- **Objects (dicts)** — no edit option; pick one of the three sides
 
 !!! tip "Set `$EDITOR` or `$VISUAL` before starting an interactive merge"
 
-    Interactive mode shells out to your editor for multiline or long values. If neither variable is set it falls back to `vi`. Setting `EDITOR=code --wait` (or your editor of choice) in your shell profile makes the experience much smoother.
+    Interactive mode shells out to your editor for multiline or long string values. If neither variable is set it falls back to `vi`. Setting `EDITOR=code --wait` (or your editor of choice) in your shell profile makes the experience much smoother.
+
+    This only applies to string conflicts. Non-string conflicts use inline prompts regardless of editor settings.
 
 ### `--resolutions <source>`
 
@@ -137,6 +152,7 @@ The web UI surfaces the same conflicts as the CLI and lets you resolve them in t
 | Conflict table appears and the command exits non-zero | One or more fields conflict between branch and `main`. | Re-run with `--interactive` or supply `--resolutions`. |
 | `[Errno 22] Invalid argument` during interactive prompt | The shell isn't a TTY (CI, scripts, non-interactive containers). | Run interactively, or use `--resolutions` with a pre-built JSON file. |
 | Editor doesn't open in interactive mode | `$EDITOR` and `$VISUAL` are unset. | Export one of them before running the merge. |
+| Non-string conflict shows no "Edit manually" option | The conflicting value is an object (dict). | Pick one of the three sides (`ours`, `theirs`, or `base`). |
 | Local changes block the merge | You have unpushed work on the source branch. | Run [`poly push`](./cli.md#poly-push) first, or [`poly revert`](./cli.md#poly-revert) to discard. |
 
 ## Related references
