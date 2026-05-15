@@ -41,7 +41,7 @@ Run with no arguments and `poly project create` walks you through interactive pr
 1. **Region** — auto-selected if your API key only has access to one.
 2. **Account** — auto-selected if there's only one in the region; otherwise pick from a searchable list.
 3. **Project name** — free-text name for the new project.
-4. **Project ID** — optional slug. Defaults to a slugified version of the name (lowercased, spaces replaced with hyphens, special characters removed). Leave empty to let the platform generate one.
+4. **Project ID** — optional unique slug. Leave empty to let the platform generate one. This prompt is skipped entirely when `--region studio` is used, and the platform always generates the ID.
 
 After the project is created in Agent Studio, `poly project create` automatically calls `poly init` to initialize the local project directory.
 
@@ -60,7 +60,7 @@ poly project create --base-path /path/to/projects
 | `--region` | Region for the new project. Choices match the standard region list. |
 | `--account_id` | Account ID to create the project under. |
 | `--name` | Display name for the new project. |
-| `--id`, `--project_id` | Optional slug/ID for the project. Defaults to a slugified version of the name. |
+| `--id`, `--project_id` | Optional unique slug/ID for the project. If not provided the platform will generate one. Ignored for `--region studio`. |
 | `--greeting` | Initial greeting message for the agent. Defaults to `"Hello, how can I help you?"`. |
 | `--voice-id` | Voice ID for the agent. Defaults to a region-specific voice if not supplied. |
 | `--base-path` | Base path to initialize the project in. Defaults to the current working directory. |
@@ -69,6 +69,10 @@ poly project create --base-path /path/to/projects
 !!! info "`--json` requires explicit flags for `poly project create`"
 
     When using `poly project create --json`, you must supply `--region`, `--account_id`, and `--name` explicitly. Interactive prompts are not supported in JSON mode.
+
+!!! info "Project ID is always platform-generated for Studio"
+
+    When `--region studio` is used, the project ID prompt is skipped and `--id`/`--project_id` is ignored. The platform generates a unique ID automatically. This avoids collisions in the Studio region where project IDs must be globally unique.
 
 #### Error handling
 
