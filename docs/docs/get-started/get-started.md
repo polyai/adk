@@ -167,7 +167,7 @@ poly init     # interactive prompts to pick region, account, and project
 
 ## Per-region API keys
 
-If you work across multiple regions, you can set region-scoped environment variables. The ADK checks for these before falling back to the credential file and `POLY_ADK_KEY`.
+If you work across multiple regions, you can set region-scoped environment variables. The ADK checks the credential file first, then region-scoped env vars, then `POLY_ADK_KEY`.
 
 | Region | Environment variable |
 |---|---|
