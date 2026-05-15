@@ -783,19 +783,16 @@ class Function(Resource):
     ]:
         """Create a proto for updating the resource."""
 
-        if self.parameters:
-            params_update = ParametersUpdate(
-                parameters=self._create_function_param_updates(self.parameters)
-            )
-        else:
-            params_update = None
+        params_update = ParametersUpdate(
+            parameters=self._create_function_param_updates(self.parameters)
+        )
 
         fn_proto = {
             "id": self.resource_id,
             "code": self.code,
             "description": self.description,
         }
-        if params_update is not None:
+        if self.function_type in (FunctionType.GLOBAL, FunctionType.TRANSITION):
             fn_proto["parameters"] = params_update
 
         if self.function_type != FunctionType.TRANSITION:
