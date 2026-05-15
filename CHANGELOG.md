@@ -1,6 +1,80 @@
 # CHANGELOG
 
 
+## v0.19.4 (2026-05-15)
+
+### Bug Fixes
+
+- Remove project_id prompt for Studio region ([#148](https://github.com/polyai/adk/pull/148),
+  [`7fa88a2`](https://github.com/polyai/adk/commit/7fa88a2abb5d2705c2ed53237a9e3e36cceb9cf8))
+
+## Summary
+
+Removes the default project_id slug generation and skips the project_id prompt entirely for Studio
+  (`--region studio`), since project_id must be unique across all projects in the region and
+  prompting for it in PLG causes friction.
+
+## Motivation
+
+- `project_id` must be globally unique per region — if the user picks a taken ID, the API errors. We
+  can't validate uniqueness client-side. - For PLG (Studio) we expect many projects, so defaulting
+  to empty and letting the platform generate the ID avoids collisions. - The default slugified name
+  was often not useful and led to conflicts.
+
+## Changes
+
+- Remove default slug generation from `project_name` for the `project_id` field - Skip the
+  `project_id` interactive prompt when `--region studio` - Update help text to clarify the platform
+  generates the ID if omitted - Fix `is not` → `!=` for string comparison (identity vs equality bug)
+
+## Test strategy
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [ ] N/A (docs, config,
+  or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+### Documentation
+
+- Add Discord community page ([#145](https://github.com/polyai/adk/pull/145),
+  [`f924a6f`](https://github.com/polyai/adk/commit/f924a6f094dc54d16160984a4fc2782a2193b92b))
+
+## Summary - Adds a new **Community > Discord** page to the ADK docs inviting users to join the
+  Discord server (`https://discord.gg/nzGcCt6SE`). - Wires the page into the mkdocs nav between
+  Examples and Legal.
+
+## Test plan - [ ] `mkdocs serve` renders the new page correctly - [ ] Discord invite link resolves
+  - [ ] Navigation shows the Community section in the right position
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
+
+- Discord page invisible button and broken icon ([#146](https://github.com/polyai/adk/pull/146),
+  [`890fc78`](https://github.com/polyai/adk/commit/890fc78101c9384b6f5cbac3050466ccc3671f54))
+
+## Summary - The `.md-button--primary` class used `--md-primary-fg-color` for its background, which
+  resolves to `#fff` in the custom light theme — white button on white page. - The
+  `:fontawesome-brands-discord:` inline icon syntax requires the `pymdownx.emoji` extension, which
+  isn't enabled — rendered as literal text. - Replaced with a `.discord-btn` class in
+  `components.css` using Discord's brand purple (`#5865F2`), and removed the icon reference.
+
+## Test plan - [ ] `mkdocs serve` — button is visible in both light and dark mode - [ ] Button hover
+  darkens to `#4752C4` - [ ] Discord invite link still works
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
+
+
 ## v0.19.3 (2026-05-14)
 
 ### Bug Fixes
