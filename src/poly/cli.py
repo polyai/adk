@@ -3886,8 +3886,7 @@ class AgentStudioCLI:
         questionary.press_any_key_to_continue("Press any key to continue...").ask()
 
         # --- 1. Check for existing API key ---
-        try:
-            any_credentials_exist()
+        if any_credentials_exist():
             warning("An existing API key was found in your environment.")
             use_existing = questionary.confirm(
                 "Do you want to continue with the existing key?",
@@ -3906,8 +3905,6 @@ class AgentStudioCLI:
                 else:
                     info("You can create a new project later by running 'poly project create'")
                 return
-        except ValueError:
-            pass
 
         # --- 2. Create account/signin via device flow ---
         jwt_access_token = cls._signin()
