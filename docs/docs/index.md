@@ -13,15 +13,15 @@ The ADK gives you a local, Git-like workflow for Agent Studio projects: pull, ed
 
 A few commands take you from an empty machine to a working local copy of your agent:
 
-~~~bash
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh   # install uv (skip if you have it)
 uv venv --python=3.14 --seed
 source .venv/bin/activate
 pip install polyai-adk
-export POLY_ADK_KEY=<your-api-key>
-poly init
-~~~
+poly start                                          # sign in, get API key, create project
+```
 
-See [Prerequisites](get-started/prerequisites.md) for how to install `uv` and generate an API key, [Installation](get-started/installation.md) for environment setup, and [First commands](get-started/first-commands.md) for a walkthrough of `poly init`.
+See [Getting started](get-started/get-started.md) for the full walkthrough, [Prerequisites](get-started/prerequisites.md) for local tool setup, and [First commands](get-started/first-commands.md) for a guide to `poly init` and the core CLI.
 
 ## Start here
 
@@ -70,9 +70,7 @@ This documentation follows the developer journey:
 
 If you are new to the ADK, follow this order:
 
-1. read **Not sure where to start?** — especially if you do not yet have an agent in Agent Studio
+1. follow **Getting started** — install the ADK, run `poly start`, and create your first project
 2. read **What is the PolyAI ADK?**
-3. complete **Prerequisites**
-4. follow **Installation**
-5. use **First commands** — run `poly init` to create your local project, then explore the rest of the CLI
-6. continue to **Build an agent with the ADK**
+3. use **First commands** — explore the core CLI commands
+4. continue to **Build an agent with the ADK**

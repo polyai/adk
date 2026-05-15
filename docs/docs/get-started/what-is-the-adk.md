@@ -56,8 +56,8 @@ It preserves the same guardrails as Agent Studio, so developers cannot push chan
 
     ---
 
-    Set up the ADK and prepare your environment.
-    [Open installation](./installation.md)
+    Install the ADK and get your first project running.
+    [Open getting started](./get-started.md)
 
 -   **Watch the walkthrough**
 
