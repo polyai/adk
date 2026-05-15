@@ -407,6 +407,60 @@ def edit_in_editor(initial_content: str, extension: str = ".txt", filename: str 
     return edited
 
 
+# ── TYPED MERGE EDITING ──────────────────────────────────────────────
+
+
+def _validate_int(v: str) -> bool | str:
+    """Questionary validator for integer input."""
+    return True if v.lstrip("-").isdigit() else "Please enter a valid integer"
+
+
+def _validate_float(v: str) -> bool | str:
+    """Questionary validator for float input."""
+    try:
+        float(v)
+        return True
+    except ValueError:
+        return "Please enter a valid number"
+
+
+def _validate_json_list(v: str) -> bool | str:
+    """Questionary validator for JSON list input."""
+    try:
+        return True if isinstance(json.loads(v), list) else "Please enter a valid JSON list"
+    except json.JSONDecodeError:
+        return "Please enter valid JSON"
+
+
+def prompt_typed_edit(original: Any) -> Any | None:
+    """Prompt the user for a custom value, using a type-appropriate questionary widget.
+
+    Returns the edited value cast to the original type, or ``None`` if the user cancels.
+    """
+    import questionary
+
+    if isinstance(original, bool):
+        return questionary.confirm("Custom resolution (true/false)", default=original).ask()
+    if isinstance(original, int):
+        raw = questionary.text(
+            "Custom resolution (integer)", default=str(original), validate=_validate_int
+        ).ask()
+        return int(raw) if raw is not None else None
+    if isinstance(original, float):
+        raw = questionary.text(
+            "Custom resolution (number)", default=str(original), validate=_validate_float
+        ).ask()
+        return float(raw) if raw is not None else None
+    if isinstance(original, list):
+        raw = questionary.text(
+            "Custom resolution (JSON list)",
+            default=json.dumps(original),
+            validate=_validate_json_list,
+        ).ask()
+        return json.loads(raw) if raw is not None else None
+    return None
+
+
 # ── DEPLOYMENTS ───────────────────────────────────────────────────────
 
 
