@@ -67,26 +67,8 @@ class SourcererSDK:
         self.project_id = project_id
         self.branch_id = branch_id
 
-        # Set base URL
-        if base_url:
-            self.base_url = base_url
-        else:
-            if region not in self.ENVIRONMENT_URLS:
-                raise ValueError(
-                    f"Unknown region: {region}. Available regions: {list(self.ENVIRONMENT_URLS.keys())}"
-                )
-            self.base_url = self.ENVIRONMENT_URLS[region]
-
-        # Initialize session with auth headers
-        correlation_id = f"adk-{uuid.uuid4()}"
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "Content-Type": "application/json",
-                "X-API-KEY": retrieve_api_key(self.region),
-                "X-PolyAI-Correlation-Id": correlation_id,
-            }
-        )
+        # Initialize session with auth headers and base URL
+        self._initialise_session(region, base_url)
 
         # Cache for projection and sequence number
         self._projection_cache: Optional[dict[str, Any]] = None
@@ -98,6 +80,33 @@ class SourcererSDK:
         # Initialize branch_id if not provided
         if self.branch_id is None:
             self.branch_id = self._initialize_branch()
+
+    def _get_auth_headers(self) -> dict[str, str]:
+        """Return the authentication headers for this SDK instance."""
+        return {
+            "X-API-KEY": retrieve_api_key(self.region),
+        }
+
+    def _initialise_session(self, region: str, base_url: Optional[str] = None):
+        """Initialize the requests session with authentication headers."""
+        if base_url:
+            self.base_url = base_url
+        else:
+            if region not in self.ENVIRONMENT_URLS:
+                raise ValueError(
+                    f"Unknown region: {region}. Available regions: {list(self.ENVIRONMENT_URLS.keys())}"
+                )
+            self.base_url = self.ENVIRONMENT_URLS[region]
+
+        correlation_id = f"adk-{uuid.uuid4()}"
+        self.session = requests.Session()
+        self.session.headers.update(
+            {
+                "Content-Type": "application/json",
+                **self._get_auth_headers(),
+                "X-PolyAI-Correlation-Id": correlation_id,
+            }
+        )
 
     def create_metadata(self):
         """Create metadata with the current user's email from JWT token
@@ -550,7 +559,7 @@ class SourcererSDK:
             # Update headers for protobuf content
             correlation_id = f"adk-{uuid.uuid4()}"
             headers = {
-                "X-API-KEY": retrieve_api_key(self.region),
+                **self._get_auth_headers(),
                 "X-PolyAI-Correlation-Id": correlation_id,
                 "Content-Type": "application/octet-stream",
             }
