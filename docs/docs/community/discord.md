@@ -7,7 +7,7 @@ description: Join the PolyAI ADK Discord server to ask questions, share what you
 
 We have a Discord server where ADK users and contributors hang out. Whether you're just getting started or building something advanced, it's the fastest way to get help, share ideas, and stay in the loop on what's new.
 
-**[:fontawesome-brands-discord: Join the ADK Discord](https://discord.gg/nzGcCt6SE){ .md-button .md-button--primary }**
+[Join the ADK Discord](https://discord.gg/nzGcCt6SE){ .discord-btn }
 
 ## What you'll find there
 
