@@ -25,7 +25,12 @@ import requests
 import questionary
 import traceback
 
-from poly.utils import retrieve_api_key, merge_strings
+from poly.utils import (
+    any_credentials_exist,
+    merge_strings,
+    save_api_key_credential_file,
+    CREDENTIALS_FILE_PATH,
+)
 import time
 
 from poly.output.console import (
@@ -49,6 +54,7 @@ from poly.output.console import (
     print_deployments,
     print_deployment_show,
     print_welcome_message,
+    mask_api_key,
 )
 from poly.output.json_output import json_print, commands_to_dicts
 from poly.handlers.github_api_handler import GitHubAPIHandler
@@ -3881,7 +3887,7 @@ class AgentStudioCLI:
 
         # --- 1. Check for existing API key ---
         try:
-            retrieve_api_key()
+            any_credentials_exist()
             warning("An existing API key was found in your environment.")
             use_existing = questionary.confirm(
                 "Do you want to continue with the existing key?",
@@ -3918,7 +3924,7 @@ class AgentStudioCLI:
         if user_pats:
             pat = user_pats[0].get("key")
             os.environ["POLY_ADK_KEY"] = pat
-            success(f"Found existing API Token: {pat}")
+            success(f"Found existing API Token: {mask_api_key(pat)}")
         else:
             info("No existing API key found in your account.")
             ctx = console.status("[info]Creating a new API key...[/info]")
@@ -3944,13 +3950,13 @@ class AgentStudioCLI:
                     )
                     sys.exit(1)
 
-            success(f"Created a new API Token: {pat}")
-        plain(
-            "Set this in your environment variables as POLY_ADK_KEY to authenticate future commands"
-        )
-        info("export POLY_ADK_KEY=your_token_here  # on Linux/MacOS")
-        info("setx POLY_ADK_KEY your_token_here  # on Windows")
+            success(f"Created a new API Key: {mask_api_key(pat)}")
+
+        save_api_key_credential_file(pat, region="studio")
+        plain("API key has been saved to your credential file for future use.")
+        info(f"Credential file path: {CREDENTIALS_FILE_PATH}")
         plain("")
+
         create_project = questionary.confirm(
             "Would you like to create a new project in Agent Studio now?",
             auto_enter=False,
