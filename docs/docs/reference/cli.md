@@ -28,6 +28,31 @@ poly push --help
 
 ## Core commands
 
+### `poly start`
+
+A guided onboarding flow for new users. Authenticates via the Auth0 device flow, sets up an API key (Personal Access Token), saves it to a local credential file, and optionally creates a first Agent Studio project — all in a single interactive command.
+
+~~~bash
+poly start
+poly start --base-path /path/to/projects
+~~~
+
+The flow works as follows:
+
+1. **Check for existing credentials** — if an API key is already found (via environment variable or credential file), you are asked whether to continue with it or proceed through the full setup.
+2. **Sign in or create an account** — opens `https://studio.poly.ai` in your browser and displays a device code to enter. Once authorized, a JWT is issued.
+3. **Set up an API key** — if you have an existing Personal Access Token (PAT), it is reused; otherwise a new one named `adk-key` is created for you.
+4. **Save credentials** — the API key is written to `~/.poly/credentials.json` (permissions `0600`) for future use without needing to export `POLY_ADK_KEY` manually.
+5. **Create a project (optional)** — prompts whether to create a new Agent Studio project immediately, running the same flow as [`poly project create`](#poly-project-create).
+
+| Flag | Description |
+|---|---|
+| `--base-path` | Base path to initialize the project in. Defaults to the current working directory. |
+
+!!! tip "Use `poly start` for brand-new setups"
+
+    `poly start` is the recommended entry point for new users. If you already have an API key and an existing project, use `poly init` instead.
+
 ### `poly project`
 
 Manage Agent Studio projects.
@@ -121,7 +146,7 @@ If the account or project ID is invalid or inaccessible, `poly init` returns a d
 
 | Situation | Error message |
 |---|---|
-| `POLY_ADK_KEY` not set | `POLY_ADK_KEY environment variable is not set. Export your API key with: export POLY_ADK_KEY=<your-api-key>` |
+| No API key found | `POLY_ADK_KEY environment variable is not set. Export your API key with: export POLY_ADK_KEY=<your-api-key>` |
 | No accounts found in the region | `No accounts found in the selected region.` |
 | No projects found in the account | Prompts to create a new project (interactive) or exits with error (JSON mode). |
 | Project not found | `Project '<project_id>' not found in account '<account_id>'.` |
@@ -703,17 +728,18 @@ poly push --from-projection - < proj.json
 
 A typical CLI workflow looks like this:
 
-1. create a new project with `poly project create` or initialize an existing one with `poly init`
-2. pull with `poly pull` if needed to refresh local state
-3. create or switch to a branch
-4. edit files
-5. inspect changes with `poly status` and `poly diff`
-6. validate with `poly validate`
-7. push with `poly push`
-8. optionally review with `poly review`
-9. test or chat with the agent using `poly chat`
-10. merge the branch with `poly branch merge '<message>'`
-11. promote to pre-release or live with `poly deployments promote`
+1. for first-time setup, run `poly start` to authenticate and configure your API key
+2. create a new project with `poly project create` or initialize an existing one with `poly init`
+3. pull with `poly pull` if needed to refresh local state
+4. create or switch to a branch
+5. edit files
+6. inspect changes with `poly status` and `poly diff`
+7. validate with `poly validate`
+8. push with `poly push`
+9. optionally review with `poly review`
+10. test or chat with the agent using `poly chat`
+11. merge the branch with `poly branch merge '<message>'`
+12. promote to pre-release or live with `poly deployments promote`
 
 !!! info "Run commands from the project folder"
 

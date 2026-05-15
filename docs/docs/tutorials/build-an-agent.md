@@ -53,7 +53,19 @@ The CLI workflow is the manual developer path. You use the ADK directly, edit th
 
 You can run this workflow in whichever editing surface you prefer: a plain terminal, or **VS Code** / **Cursor** with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) for resource-aware navigation and validation. Both count as the CLI workflow — the difference is only the editing surface.
 
-### Step 1 - Initialize your project
+### Step 1 - Set up your environment (first time only)
+
+If this is your first time using the ADK, run `poly start` to authenticate and configure your API key in a single step:
+
+~~~bash
+poly start
+~~~
+
+`poly start` opens a browser sign-in flow, generates a Personal Access Token, and saves it to `~/.poly/credentials.json`. You can then skip manual key exports going forward. See [`poly start`](../reference/cli.md#poly-start) for details.
+
+If you already have an API key set up (via `POLY_ADK_KEY` or the credential file), skip this step.
+
+### Step 2 - Initialize your project
 
 Link a local folder to an existing Agent Studio project. The agent must already exist in Agent Studio.
 
@@ -63,7 +75,7 @@ poly init
 
 `poly init` walks you through interactive dropdowns for region, account, and project. It creates the project directory and pulls the current configuration. Change into the project directory before running any further commands. See [First commands](../get-started/first-commands.md) for flag options and details.
 
-### Step 2 - Set up the environment
+### Step 3 - Set up the environment
 
 Configure any API keys or environment variables needed for the project. `poly init` pulls the current configuration automatically, but you can run `poly pull` at any time to refresh it:
 
@@ -76,7 +88,7 @@ poly pull -f
 
     All CLI commands should be run from within the local project folder, unless you explicitly use the relevant path flag.
 
-### Step 3 - Chat with the agent
+### Step 4 - Chat with the agent
 
 Start an interactive chat session to confirm the connection works and inspect runtime behavior.
 
@@ -90,7 +102,7 @@ poly chat --environment sandbox --channel voice
 poly chat --functions --flows --state
 ~~~
 
-### Step 4 - Review the docs and understand the SDK
+### Step 5 - Review the docs and understand the SDK
 
 Use the CLI docs command to inspect the available resources and learn how they fit together.
 
@@ -116,7 +128,7 @@ Resource-specific documentation is available in the reference section:
 [safety filters](../reference/safety_filters.md), and
 [experimental config](../reference/experimental_config.md).
 
-### Step 5 - Customize the agent
+### Step 6 - Customize the agent
 
 This is the core build phase. Create a branch, edit resources locally, track changes, and push them back.
 
@@ -176,7 +188,7 @@ Tune [speech recognition](../reference/speech_recognition.md) and control [TTS b
 
 Enable or tune [experimental features](../reference/experimental_config.md) where needed.
 
-### Step 6 - Track and validate changes
+### Step 7 - Track and validate changes
 
 Inspect the local changes before pushing.
 
@@ -221,7 +233,7 @@ poly revert <file>
     poly push --skip-validation
     ~~~
 
-### Step 7 - Push changes
+### Step 8 - Push changes
 
 Push the local changes back to Agent Studio.
 
@@ -232,7 +244,7 @@ poly push -f
 poly push --skip-validation
 ~~~
 
-### Step 8 - Test against sandbox
+### Step 9 - Test against sandbox
 
 Once your branch is merged in Agent Studio, test the agent by chatting with it against the sandbox environment.
 
@@ -245,7 +257,7 @@ poly chat --environment sandbox
 poly chat --environment sandbox --functions --flows
 ~~~
 
-### Step 9 - Iterate on quality
+### Step 10 - Iterate on quality
 
 Review, refine, and test again. You can also use the review command to share diffs with teammates.
 
@@ -256,14 +268,14 @@ poly review create --before main --after my-feature
 
 Make test calls, inspect transcripts, refine prompts, flows, and functions, and then re-push.
 
-### Step 10 - Deploy to production
+### Step 11 - Deploy to production
 
 Once the changes are pushed and validated, merge the branch in Agent Studio and deploy the project.
 
 !!! note "Merging from the CLI or the Agent Studio web UI"
     Merge from the CLI with `poly branch merge '<commit message>'`, which merges the current branch into `main`. You can also merge through the Agent Studio web UI by switching to the branch and clicking **Merge**. After merging, run `poly chat --environment sandbox` to test. See the [Branch merging reference](../reference/branch_merge.md) for the full conflict-resolution flow.
 
-### Step 11 - Monitor performance
+### Step 12 - Monitor performance
 
 Use Agent Studio analytics to monitor containment, CSAT, handle time, and flagged transcripts. Pull changes back locally as needed and continue iterating.
 
@@ -441,6 +453,7 @@ At that point, the agent is live.
 
 | Command | Description |
 |---|---|
+| **poly start** | Guided onboarding: authenticate, set up API key, optionally create a project |
 | **poly init** | Initialize a new project locally |
 | **poly pull** | Pull remote config into the local project |
 | **poly push** | Push local changes to Agent Studio |

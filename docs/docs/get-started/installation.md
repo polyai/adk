@@ -45,9 +45,35 @@ pip install polyai-adk
 
 If you haven't generated an API key yet, follow the steps in [Prerequisites — Generate API key](./prerequisites.md#generate-api-key).
 
+There are two ways to make your API key available to the ADK:
+
+### Option A — `poly start` (recommended for new users)
+
+Run `poly start` after installing. This interactive command signs you in via your browser, generates a Personal Access Token, and saves it automatically to `~/.poly/credentials.json`. No manual `export` step required.
+
+~~~bash
+poly start
+~~~
+
+See [`poly start`](../reference/cli.md#poly-start) in the CLI reference for the full flow.
+
+### Option B — Environment variable
+
+Export the key in your shell before running any `poly` commands:
+
+~~~bash
+export POLY_ADK_KEY=<your-api-key>
+~~~
+
+To make it permanent, add this line to your shell profile (for example, `~/.zshrc` or `~/.bashrc`).
+
+### Credential file
+
+`poly start` saves the key to `~/.poly/credentials.json` (file permissions `0600`, readable only by you). The ADK checks this file automatically before falling back to environment variables, so once saved you do not need to export `POLY_ADK_KEY` again for that region.
+
 ### Per-region API keys
 
-If you need a separate API key for a specific region, you can set a region-scoped variable alongside `POLY_ADK_KEY`. The ADK checks for the region-specific key first and falls back to `POLY_ADK_KEY` if it is not set.
+If you need a separate API key for a specific region, you can set a region-scoped environment variable alongside `POLY_ADK_KEY`. The ADK checks for the region-specific key first, then the credential file, then falls back to `POLY_ADK_KEY`.
 
 | Region | Environment variable |
 |---|---|
@@ -65,7 +91,7 @@ export POLY_ADK_KEY_US=<your-us-api-key>
 export POLY_ADK_KEY=<your-fallback-api-key>   # used for any other region
 ~~~
 
-`POLY_ADK_KEY` is still required as the fallback. If neither the region-specific key nor `POLY_ADK_KEY` is set, the CLI will raise an error.
+`POLY_ADK_KEY` is still required as the fallback when no credential file or region-specific variable is set.
 
 ## Verify the installation
 
@@ -79,7 +105,7 @@ You should see the top-level command help if installation succeeded.
 
 ## Next step
 
-With the ADK installed and your API key set, run `poly init` to create your local project and get familiar with the CLI.
+With the ADK installed and your API key set, run `poly start` (new users) or `poly init` (existing projects) to get started.
 
 <div class="grid cards" markdown>
 

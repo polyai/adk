@@ -43,25 +43,25 @@ Agent Studio crawls your website and generates a working agent configuration —
 
 Once the agent is ready, test it inside Agent Studio to confirm it's filled in with information as expected. This gives you a working baseline before you move to local development.
 
-### Step 4 — Find your account and project IDs
+### Step 4 — Install the ADK and run `poly start`
 
-To pull the agent into the ADK, you need two identifiers from Agent Studio. You can find them in the URL when your project is open:
+Once the [ADK is installed](./installation.md), run:
 
+~~~bash
+poly start
 ~~~
-https://studio.poly.ai/<account_id>/<project_id>/...
-~~~
 
-Copy both values — you will need them in the next step.
+[`poly start`](../reference/cli.md#poly-start) is the recommended entry point for new users. It:
 
-### Step 5 — Generate an API key
+1. opens `https://studio.poly.ai` in your browser so you can sign in or create an account
+2. sets up a Personal Access Token (API key) and saves it to `~/.poly/credentials.json`
+3. optionally creates a first project (or you can skip this and initialize an existing one)
 
-![Go back to key](../assets/go-back-to-key.png)
+If you already have an API key and just want to link a local folder to an existing project, use `poly init` directly — see [Step 5](#step-5--pull-the-agent-into-the-adk) below.
 
-The ADK uses an API key to authenticate with Agent Studio. Click **Back to agents** to return to your **workspace**, then follow the steps in [Prerequisites — Generate API key](./prerequisites.md#generate-api-key) to create and export your key.
+### Step 5 — Pull the agent into the ADK
 
-### Step 6 — Pull the agent into the ADK
-
-Once the [ADK is installed](./installation.md), link your local folder to the project:
+Link your local folder to the project you created in Agent Studio:
 
 ```bash
 poly init
@@ -71,7 +71,7 @@ poly init
 
 You now have a fully editable local copy of your agent.
 
-### Step 7 — Continue with the ADK
+### Step 6 — Continue with the ADK
 
 From here, the standard ADK workflow applies. You can:
 
