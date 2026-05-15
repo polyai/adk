@@ -569,6 +569,40 @@ _ERROR_MESSAGES: dict[type, str] = {
 }
 
 
+_POLY_LOGO = """\
+        ●
+    ●   ●   ●      ██████   ██████  ██   ██    ██   █████  ██
+      ●   ●        ██   ██ ██    ██ ██    ██  ██   ██   ██ ██
+    ●   ●   ●      ██████  ██    ██ ██     ████    ███████ ██
+      ●   ●        ██      ██    ██ ██      ██     ██   ██ ██
+    ●   ●   ●      ██       ██████  ██████  ██     ██   ██ ██
+        ●\
+"""
+
+
+def print_welcome_message() -> None:
+    """Display a welcome banner for the ADK onboarding flow."""
+    console.print()
+    console.print(
+        Panel(
+            f"[bold #D9EE50]{_POLY_LOGO}[/bold #D9EE50]",
+            style="on black",
+            border_style="#D9EE50",
+            padding=(1, 6),
+        )
+    )
+    console.print("[bold]Welcome to the PolyAI Agent Development Kit (ADK)![/bold]")
+    console.print("Build and edit Agent Studio projects locally with the PolyAI ADK")
+    console.print("Documentation: https://polyai.github.io/adk/")
+    console.print()
+
+
+def mask_api_key(key: str) -> str:
+    """Display masked API key"""
+    masked = key[:4] + "****" + key[-4:] if len(key) > 8 else "****"
+    return f"[yellow]{masked}[/yellow]"
+
+
 def handle_exception(exc: Exception) -> None:
     """Print a clean error message, or full traceback in verbose mode."""
     if _verbose:

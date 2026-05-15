@@ -19,9 +19,14 @@ from google.protobuf.message import Message
 
 import poly.resources.resource_utils as resource_utils
 import poly.utils as utils
-
 from poly.handlers.interface import (
     AgentStudioInterface,
+)
+from poly.migration_utils import (
+    MigrationFlag,
+    get_all_migration_flags,
+    load_migration_flags,
+    run_migrations,
 )
 from poly.resources import (
     ApiIntegration,
@@ -37,6 +42,7 @@ from poly.resources import (
     FlowStep,
     Function,
     FunctionStep,
+    GeneralSafetyFilters,
     Handoff,
     KeyphraseBoosting,
     MultiResourceYamlResource,
@@ -44,7 +50,6 @@ from poly.resources import (
     Pronunciation,
     Resource,
     ResourceMapping,
-    GeneralSafetyFilters,
     SettingsPersonality,
     SettingsRole,
     SettingsRules,
@@ -63,12 +68,6 @@ from poly.resources import (
 )
 from poly.resources.resource import _parse_multi_resource_path
 from poly.utils import compute_variable_references
-from poly.migration_utils import (
-    run_migrations,
-    get_all_migration_flags,
-    MigrationFlag,
-    load_migration_flags,
-)
 
 logger = logging.getLogger(__name__)
 

@@ -17,6 +17,7 @@ from typing import Any, Optional
 import requests
 
 from poly.utils import retrieve_api_key
+
 from .protobuf.commands_pb2 import Command, CommandBatch
 
 logger = logging.getLogger(__name__)

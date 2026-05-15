@@ -25,6 +25,14 @@ import requests
 import questionary
 import traceback
 
+from poly.utils import (
+    any_credentials_exist,
+    merge_strings,
+    save_api_key_credential_file,
+    CREDENTIALS_FILE_PATH,
+)
+import time
+
 from poly.output.console import (
     console,
     error,
@@ -45,14 +53,16 @@ from poly.output.console import (
     print_merge_conflict_interactive_header,
     print_deployments,
     print_deployment_show,
+    print_welcome_message,
+    mask_api_key,
 )
 from poly.output.json_output import json_print, commands_to_dicts
 from poly.handlers.github_api_handler import GitHubAPIHandler
+from poly.handlers.auth0_handler import Auth0Handler
 from poly.handlers.interface import (
     REGIONS,
     AgentStudioInterface,
 )
-from poly.utils import merge_strings, retrieve_api_key
 from poly.resources.resource_utils import contains_merge_conflict
 from poly.project import (
     PROJECT_CONFIG_FILE,
@@ -207,6 +217,22 @@ class AgentStudioCLI:
             help="Write output to FILE_PATH instead of stdout.",
         )
 
+        # Start
+        start_parser = subparsers.add_parser(
+            "start",
+            parents=[verbose_parent, debug_parent],
+            help="Get started with PolyAI Agent Studio",
+            description=(
+                "Create a new Agent Studio Account, set up API key and create a first project with a single command.\n\n"
+            ),
+        )
+        start_parser.add_argument(
+            "--base-path",
+            type=str,
+            default=os.getcwd(),
+            help="Base path to initialize the project. Defaults to current working directory.",
+        )
+
         # INIT
         init_parser = subparsers.add_parser(
             "init",
@@ -219,9 +245,7 @@ class AgentStudioCLI:
             "--base-path",
             type=str,
             default=os.getcwd(),
-            help="""
-            Base path to initialize the project. Defaults to current working directory.
-            """,
+            help="Base path to initialize the project. Defaults to current working directory.",
         )
         init_parser.add_argument(
             "--region",
@@ -1317,6 +1341,11 @@ class AgentStudioCLI:
                         output_json=args.json,
                         dry_run=args.dry_run,
                     )
+
+            elif args.command == "start":
+                cls.start(
+                    base_path=args.base_path,
+                )
 
         except Exception as e:
             if hasattr(args, "json") and args.json:
@@ -3843,6 +3872,147 @@ class AgentStudioCLI:
             else:
                 error(f"Failed to rollback deployment: {e}")
             sys.exit(1)
+
+    @classmethod
+    def start(cls, base_path: str) -> None:
+        """Authenticate via device flow, obtain a JWT, and initialise a project."""
+        print_welcome_message()
+        plain(
+            "This will guide you through setting up your API key and creating a new project in Agent Studio."
+        )
+        questionary.press_any_key_to_continue("Press any key to continue...").ask()
+
+        # --- 1. Check for existing API key ---
+        if any_credentials_exist():
+            warning("An existing API key was found in your environment.")
+            use_existing = questionary.confirm(
+                "Do you want to continue with the existing key?",
+                auto_enter=False,
+                default=True,
+            ).ask()
+            if use_existing:
+                success("Continuing with existing API key.")
+                create_project = questionary.confirm(
+                    "Would you like to create a new project in Agent Studio now?",
+                    auto_enter=False,
+                    default=True,
+                ).ask()
+                if create_project:
+                    cls.create_project(base_path)
+                else:
+                    info("You can create a new project later by running 'poly project create'")
+                return
+
+        # --- 2. Create account/signin via device flow ---
+        jwt_access_token = cls._signin()
+
+        api_handler = AgentStudioInterface()
+
+        # --- 3. Authorise user  ---
+        info("Setting up your account...")
+        api_handler.authorise(region="studio", jwt_token=jwt_access_token)
+
+        # --- 4. Generate PAT token ---
+        info("Fetching API key...")
+        user_pats = api_handler.get_pats(region="studio", jwt_token=jwt_access_token)
+        if user_pats:
+            pat = user_pats[0].get("key")
+            os.environ["POLY_ADK_KEY"] = pat
+            success(f"Found existing API Token: {mask_api_key(pat)}")
+        else:
+            info("No existing API key found in your account.")
+            ctx = console.status("[info]Creating a new API key...[/info]")
+            with ctx:
+                pat = api_handler.create_pat(
+                    region="studio", jwt_token=jwt_access_token, name="adk-key"
+                )
+                os.environ["POLY_ADK_KEY"] = pat
+
+                attempts = 0
+                # After creating a new PAT, there may be a short delay before it's active.
+                # Poll the accounts endpoint until it works or we hit a timeout.
+                while attempts < 10:
+                    try:
+                        api_handler.get_accounts(region="studio")
+                        break
+                    except Exception:
+                        attempts += 1
+                        time.sleep(1)
+                else:
+                    error(
+                        "API key was created but is not active yet. Please wait a moment and try again."
+                    )
+                    sys.exit(1)
+
+            success(f"Created a new API Key: {mask_api_key(pat)}")
+
+        save_api_key_credential_file(pat, region="studio")
+        plain("API key has been saved to your credential file for future use.")
+        info(f"Credential file path: {CREDENTIALS_FILE_PATH}")
+        plain("")
+
+        create_project = questionary.confirm(
+            "Would you like to create a new project in Agent Studio now?",
+            auto_enter=False,
+            default=True,
+        ).ask()
+        if create_project:
+            cls.create_project(base_path, region="studio")
+        else:
+            info("You can create a new project later by running 'poly project create'")
+
+    @classmethod
+    def _signin(cls) -> str:
+        """Sign in via the Auth0 device authorization flow and return a JWT access token."""
+        auth0_handler = Auth0Handler()
+
+        try:
+            device_response = auth0_handler.request_device_code()
+        except Exception as e:
+            error(f"Failed to start authorization: {e}")
+            sys.exit(1)
+
+        user_code = device_response["user_code"]
+        verification_uri = device_response["verification_uri_complete"]
+        device_code = device_response["device_code"]
+        interval = device_response.get("interval", 5)
+
+        info(
+            "To sign in or create an account, open the following link in your browser\n"
+            "and enter the code when prompted.\n\n"
+            f"  URL:  {verification_uri}\n"
+            f"  Code: [bold]{user_code}[/bold]"
+        )
+        webbrowser.open(verification_uri)
+
+        access_token = None
+        with console.status("[info]Waiting for authorization...[/info]"):
+            while not access_token:
+                time.sleep(interval)
+                try:
+                    token_response = auth0_handler.poll_device_token(device_code)
+                    access_token = token_response.get("access_token")
+                except requests.HTTPError as e:
+                    try:
+                        body = e.response.json()
+                    except (ValueError, AttributeError):
+                        error(f"Authorization failed: {e}")
+                        sys.exit(1)
+                    err_code = body.get("error")
+                    if err_code == "authorization_pending":
+                        continue
+                    elif err_code == "slow_down":
+                        interval += 5
+                        continue
+                    elif err_code == "expired_token":
+                        error("Authorization timed out. Please try again.")
+                        sys.exit(1)
+                    else:
+                        error(f"Authorization failed: {body.get('error_description', e)}")
+                        sys.exit(1)
+
+        success("Authenticated successfully!")
+        return access_token
 
 
 def main():
