@@ -2766,7 +2766,7 @@ class AgentStudioProject:
         success = self.api_handler.delete_branch(branches[branch_name])
         if success and self.branch_id == branches[branch_name]:
             self.switch_branch("main", force=True)
-        return True
+        return success
 
     def sync_ids_with_sandbox(self, email: str = None) -> bool:
         """Sync ids of resources in sandbox into current branch
