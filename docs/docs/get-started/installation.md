@@ -11,9 +11,9 @@ We recommend installing in a virtual environment rather than installing to the g
 
 Run the following to create a virtual environment:
 
-~~~bash
+```bash
 uv venv --python=3.14 --seed
-~~~
+```
 
 !!! info "Suppress SyntaxWarnings from platform-generated code"
 
@@ -21,21 +21,21 @@ uv venv --python=3.14 --seed
 
     To suppress them, set this before running any `poly` command:
 
-    ~~~bash
+    ```bash
     export PYTHONWARNINGS=ignore
-    ~~~
+    ```
 
 Activate the virtual environment:
 
-~~~bash
+```bash
 source .venv/bin/activate
-~~~
+```
 
 Install the package with pip:
 
-~~~bash
+```bash
 pip install polyai-adk
-~~~
+```
 
 !!! tip "Optional — install the VS Code / Cursor extension"
 
@@ -43,11 +43,19 @@ pip install polyai-adk
 
 ## Set your API key
 
-If you haven't generated an API key yet, follow the steps in [Prerequisites — Generate API key](./prerequisites.md#generate-api-key).
+The fastest way to authenticate is with `poly start`, which signs you in and saves your API key to `~/.poly/credentials.json` automatically:
+
+```bash
+poly start
+```
+
+See [Getting started](./get-started.md#step-2--run-poly-start) for the full walkthrough.
+
+If you prefer to manage keys manually, follow the steps in [Prerequisites — API key](./prerequisites.md#authenticate-with-an-api-key) to generate a key and export it as `POLY_ADK_KEY`.
 
 ### Per-region API keys
 
-If you need a separate API key for a specific region, you can set a region-scoped variable alongside `POLY_ADK_KEY`. The ADK checks for the region-specific key first and falls back to `POLY_ADK_KEY` if it is not set.
+If you need a separate API key for a specific region, you can set a region-scoped variable alongside `POLY_ADK_KEY`. The ADK checks for the region-specific key first and falls back to the credential file, then `POLY_ADK_KEY`.
 
 | Region | Environment variable |
 |---|---|
@@ -60,20 +68,18 @@ If you need a separate API key for a specific region, you can set a region-scope
 
 For example, to use a dedicated key for the US region:
 
-~~~bash
+```bash
 export POLY_ADK_KEY_US=<your-us-api-key>
 export POLY_ADK_KEY=<your-fallback-api-key>   # used for any other region
-~~~
-
-`POLY_ADK_KEY` is still required as the fallback. If neither the region-specific key nor `POLY_ADK_KEY` is set, the CLI will raise an error.
+```
 
 ## Verify the installation
 
 Confirm the CLI is available:
 
-~~~bash
+```bash
 poly --help
-~~~
+```
 
 You should see the top-level command help if installation succeeded.
 

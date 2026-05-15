@@ -7,19 +7,39 @@ If you haven't already, start with the [Getting started](./get-started.md) page 
 
 Before using the **PolyAI ADK**, you need the correct **platform access** and the required **local tools**.
 
-## Generate API key
+## Authenticate with an API key
 
-Log in to Agent Studio and open your workspace. In the **API Keys** tab (next to the **Users** tab), click **+ API key** in the top right to generate a key.
+The ADK needs an API key to communicate with Agent Studio. There are two ways to set one up:
+
+### Option A — `poly start` (recommended)
+
+If you are new to PolyAI, run `poly start` after [installing the ADK](./installation.md). It handles account creation, API key generation, and credential storage in one step. The key is saved to `~/.poly/credentials.json` automatically — no manual export needed.
+
+### Option B — Manual setup
+
+If you already have an Agent Studio account, you can generate and export a key manually:
+
+1. Log in to Agent Studio and open your workspace.
+2. In the **API Keys** tab (next to the **Users** tab), click **+ API key** in the top right.
 
 ![Generating an API key in Agent Studio — API Keys tab with the + API key button highlighted](../assets/api-key-data-access.png)
 
 Then set it as an environment variable:
 
-~~~bash
+```bash
 export POLY_ADK_KEY=<your-api-key>
-~~~
+```
 
-The `POLY_ADK_KEY` environment variable must be set before running any `poly` commands. To make it permanent, add the export line to your shell profile (for example, `~/.zshrc` or `~/.bashrc`).
+To make it permanent, add the export line to your shell profile (for example, `~/.zshrc` or `~/.bashrc`).
+
+!!! info "How the ADK resolves API keys"
+    The ADK checks for credentials in the following order:
+
+    1. **Credential file** — `~/.poly/credentials.json` (written by `poly start`)
+    2. **Region-specific env var** — e.g. `POLY_ADK_KEY_US` (see [per-region keys](./installation.md#per-region-api-keys))
+    3. **General env var** — `POLY_ADK_KEY`
+
+    The first match wins. If nothing is found, the CLI raises an error.
 
 !!! warning "API keys are workspace-scoped"
     An API key grants access to one specific Agent Studio workspace. When you run `poly init`, it lists all projects visible to that key. If you see many projects that do not look like yours, you are likely using a key scoped to the wrong workspace — for example, an organization-wide key rather than one scoped to your personal workspace. Contact your PolyAI contact to confirm you have a key for the correct workspace.
@@ -37,15 +57,15 @@ Install the following tools before continuing:
 
 `uv` manages Python versions for you, including the version required by the ADK. Install it with:
 
-~~~bash
+```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh
-~~~
+```
 
 Alternatively, with Homebrew on macOS:
 
-~~~bash
+```bash
 brew install uv
-~~~
+```
 
 See the [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/){ target="_blank" rel="noopener" } for more options.
 
@@ -53,8 +73,7 @@ See the [uv installation guide](https://docs.astral.sh/uv/getting-started/instal
 
 Before continuing, confirm:
 
-- You have access to an **Agent Studio workspace**
-- You have generated an **API key** in Agent Studio
+- You have an **API key** — either saved by `poly start` or exported manually
 - `uv` is installed
 
 ## Next step

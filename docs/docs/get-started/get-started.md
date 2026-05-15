@@ -13,13 +13,26 @@ If you do not yet have an agent in Agent Studio, or you want a working starting 
 
 If you do not yet have access to Agent Studio or an existing agent, start here.
 
-### Step 1 — Get access to Agent Studio
+### Step 1 — Install the ADK
 
-Go to [studio.poly.ai](https://studio.poly.ai) and sign up. You can sign up with your email or login with SSO.
+Follow the [Installation](./installation.md) guide to install the ADK and its prerequisites. Once installed, come back here to set up your account.
 
-![Agent Studio sign up for the first time](../assets/agent-studio-login.png)
+### Step 2 — Run `poly start`
 
-### Step 2 — Create an agent from your website
+```bash
+poly start
+```
+
+`poly start` handles signup, API key generation, and project creation in a single command:
+
+1. Opens a browser for you to **create an Agent Studio account** (or sign in to an existing one). This can be on any device — it does not have to be the machine running the CLI.
+2. Once authenticated, it **generates an API key** and saves it to `~/.poly/credentials.json` so future `poly` commands authenticate automatically.
+3. Optionally **creates a new project** in Agent Studio and initializes it locally.
+
+!!! tip "Already have an account?"
+    If you already have an API key set (via the credential file or an environment variable), `poly start` detects it and skips straight to project creation.
+
+### Step 3 — Create an agent from your website
 
 ![Quick setup button Agent Studio](../assets/quick-agent-setup.png)
 
@@ -37,31 +50,15 @@ Agent Studio crawls your website and generates a working agent configuration —
 
     Agent Studio populates **topics** (knowledge base entries) and basic **agent settings** (personality, role, rules) from your website's public content. This gives you an agent that knows about your company and can answer questions — but it does not generate flows, variants, entities, handoffs, or integrations. Those are for you to build locally with the ADK. Everything that is generated is standard ADK-compatible configuration and fully editable once pulled down.
 
-### Step 3 — Test your agent in Agent Studio
+### Step 4 — Test your agent in Agent Studio
 
 ![Completed lite builder](../assets/setup-agent.png)
 
 Once the agent is ready, test it inside Agent Studio to confirm it's filled in with information as expected. This gives you a working baseline before you move to local development.
 
-### Step 4 — Find your account and project IDs
+### Step 5 — Pull the agent into the ADK
 
-To pull the agent into the ADK, you need two identifiers from Agent Studio. You can find them in the URL when your project is open:
-
-~~~
-https://studio.poly.ai/<account_id>/<project_id>/...
-~~~
-
-Copy both values — you will need them in the next step.
-
-### Step 5 — Generate an API key
-
-![Go back to key](../assets/go-back-to-key.png)
-
-The ADK uses an API key to authenticate with Agent Studio. Click **Back to agents** to return to your **workspace**, then follow the steps in [Prerequisites — Generate API key](./prerequisites.md#generate-api-key) to create and export your key.
-
-### Step 6 — Pull the agent into the ADK
-
-Once the [ADK is installed](./installation.md), link your local folder to the project:
+If `poly start` already created and initialized a project for you, skip this step. Otherwise, link your local folder to the project:
 
 ```bash
 poly init
@@ -71,7 +68,7 @@ poly init
 
 You now have a fully editable local copy of your agent.
 
-### Step 7 — Continue with the ADK
+### Step 6 — Continue with the ADK
 
 From here, the standard ADK workflow applies. You can:
 
@@ -97,13 +94,14 @@ From here, the standard ADK workflow applies. You can:
 
 If you already have an agent in Agent Studio — built in the browser editor, by a PolyAI team, or using any other method — you can connect it directly to the ADK. The ADK connects to any existing Agent Studio project using the same `poly init` + `poly pull` workflow described above.
 
-1. Complete [Prerequisites](./prerequisites.md) to generate your API key and install local tools.
+1. Complete [Prerequisites](./prerequisites.md) to install local tools.
 2. Follow [Installation](./installation.md) to install the ADK.
-3. Run:
+3. Run `poly start` to sign in and save your API key, or set it manually (see [Prerequisites — API key](./prerequisites.md#authenticate-with-an-api-key)).
+4. Run:
 
-    ~~~bash
+    ```bash
     poly init
-    ~~~
+    ```
 
     `poly init` shows interactive dropdowns to pick your project. See [First commands](./first-commands.md) for details.
 
