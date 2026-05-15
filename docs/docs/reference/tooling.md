@@ -107,12 +107,12 @@ Tooling slots into the standard [CLI workflow](./cli.md#working-pattern): pull o
 
 <div class="grid cards" markdown>
 
--   **Installation**
+-   **Getting started**
 
     ---
 
-    Set up the ADK locally before using it with development tools.
-    [Open installation](../get-started/installation.md)
+    Install the ADK and set up your environment.
+    [Open getting started](../get-started/get-started.md)
 
 -   **CLI reference**
 
