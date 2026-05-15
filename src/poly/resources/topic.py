@@ -71,9 +71,10 @@ class Topic(YamlResource):
         cls, yaml_dict: dict, resource_id: str, name: str, **kwargs
     ) -> "YamlResource":
         """Create an instance from YAML data and identity fields."""
+        resolved_name = yaml_dict.get("name") or name
         return cls(
             resource_id=resource_id,
-            name=name,
+            name=resolved_name,
             actions=yaml_dict.get("actions", ""),
             content=yaml_dict.get("content", ""),
             example_queries=yaml_dict.get("example_queries", []),
@@ -84,29 +85,20 @@ class Topic(YamlResource):
     def read_local_resource(
         cls, file_path: str, resource_id: str, resource_name: str, **kwargs
     ) -> "Topic":
-        """Read a local YAML resource from the given file path."""
-        content = cls.read_to_raw(file_path, resource_name=resource_name, **kwargs)
-        try:
-            yaml_dict = utils.load_yaml(content) or {}
-        except Exception as e:
-            raise ValueError(f"Error loading YAML file: {file_path}") from e
+        """Read a local YAML resource, validating name against filename."""
+        topic: Topic = super().read_local_resource(
+            file_path, resource_id=resource_id, resource_name=resource_name, **kwargs
+        )
 
         file_name = os.path.splitext(os.path.basename(file_path))[0]
-        yaml_name = yaml_dict.get("name")
+        yaml_name = topic.name if topic.name != resource_name else None
 
-        if yaml_name:
-            # New format: name is in the YAML, validate against filename
-            if file_name != utils.clean_name(yaml_name):
-                raise ValueError(
-                    f"Topic name '{yaml_name}' in file {file_name}.yaml does not match "
-                    f"expected filename: {utils.clean_name(yaml_name)}.yaml"
-                )
-            name = yaml_name
-        else:
-            # Legacy format: name comes from filename
-            name = resource_name
-
-        return cls.from_yaml_dict(yaml_dict, resource_id=resource_id, name=name, **kwargs)
+        if yaml_name and file_name != utils.clean_name(yaml_name):
+            raise ValueError(
+                f"Topic name '{yaml_name}' in file {file_name}.yaml does not match "
+                f"expected filename: {utils.clean_name(yaml_name)}.yaml"
+            )
+        return topic
 
     @classmethod
     def to_pretty_dict(

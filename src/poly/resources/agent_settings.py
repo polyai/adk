@@ -250,9 +250,9 @@ class SettingsRules(Resource):
         """Replace resource IDs with resource names in the provided contents."""
         return utils.replace_resource_ids_with_names(contents, resource_mappings or [])
 
-    @staticmethod
+    @classmethod
     def from_pretty(
-        contents: str, resource_mappings: list[ResourceMapping] = None, **kwargs
+        cls, contents: str, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> str:
         """Replace resource names with resource IDs in the provided contents."""
         return utils.replace_resource_names_with_ids(contents, resource_mappings or [])
