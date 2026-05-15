@@ -1,6 +1,47 @@
 # CHANGELOG
 
 
+## v0.20.0 (2026-05-15)
+
+### Features
+
+- Add `poly start` onboarding command ([#137](https://github.com/polyai/adk/pull/137),
+  [`9c714cc`](https://github.com/polyai/adk/commit/9c714cc1db27b70475e8850b51d551521515da44))
+
+## Summary
+
+Adds a new `poly start` command that provides a guided onboarding flow: authenticate via Auth0
+  device flow, set up an API key (PAT), and optionally create a first Agent Studio project — all in
+  a single command.
+
+## Motivation
+
+New users currently need to manually create an account, obtain an API key, and configure their
+  environment before they can use the ADK. `poly start` streamlines this into one interactive flow.
+
+## Changes
+
+- New `poly start` CLI subcommand with `--base-path` option - Auth0 device authorization flow via
+  new `Auth0Handler` (`src/poly/handlers/auth0_handler.py`) - Jupiter API support in
+  `PlatformAPIHandler` (new base URL map, JWT-based `authorise`, PAT CRUD) - Corresponding
+  high-level methods in `AgentStudioInterface` - Welcome banner and branding in `console.py` - Added
+  `studio` region default voice ID in `constants.py`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly start`) - [x] Tested against a live
+  Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs <img width="1824" height="534" alt="Screenshot 2026-05-12 at 18 42 05"
+  src="https://github.com/user-attachments/assets/5482321d-a0cc-4e6a-8d58-3d2701e5f823" />
+
+
 ## v0.19.4 (2026-05-15)
 
 ### Bug Fixes
