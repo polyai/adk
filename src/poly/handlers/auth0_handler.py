@@ -13,8 +13,6 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = "https://login.studio.poly.ai"
 DEVICE_CLIENT_ID = "6uLCbsn6UxXJlnGKE4ypqwQqt3UqTUnd"
-STUDIO_CLIENT_ID = "v7NO1stPOf28i9FCdbuhs5WSUbOHTVtG"
-STUDIO_CONNECTION = "Self-Serve-Signup-Headless"
 
 
 class Auth0Handler:
