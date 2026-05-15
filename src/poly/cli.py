@@ -312,7 +312,7 @@ class AgentStudioCLI:
             "--project_id",
             type=str,
             dest="project_id",
-            help="Optional slug/ID for the project. Defaults to a slugified version of the name.",
+            help="Optional unique slug/ID for the project. If not provided the platform will generate one",
         )
         project_create_parser.add_argument(
             "--greeting",
@@ -1534,12 +1534,9 @@ class AgentStudioCLI:
                 return
             project_name = project_name.strip()
 
-        if not project_id:
-            default_id = re.sub(r"[^a-zA-Z0-9-]", "", project_name.lower().replace(" ", "-"))
-            default_id = default_id.strip("-") or ""
+        if not project_id and region is not "studio":
             project_id = questionary.text(
                 "Enter project ID (leave empty to let the platform generate one):",
-                default=default_id,
                 validate=lambda val: (
                     True
                     if not val or re.fullmatch(r"[a-zA-Z0-9-]+", val)
