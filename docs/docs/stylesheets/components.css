@@ -116,6 +116,30 @@
    ADMONITIONS
    ============================================================================= */
 
+/* =============================================================================
+   BUTTONS
+   ============================================================================= */
+
+.md-typeset .discord-btn {
+  display: inline-block;
+  padding: 0.6rem 1.4rem;
+  border-radius: var(--radius-m);
+  background: #5865F2;
+  color: #fff !important;
+  font-weight: var(--font-weight-semi);
+  font-size: var(--font-size-base);
+  text-decoration: none !important;
+  transition: background 120ms ease;
+}
+
+.md-typeset .discord-btn:hover {
+  background: #4752C4;
+}
+
+/* =============================================================================
+   ADMONITIONS
+   ============================================================================= */
+
 .md-typeset .admonition,
 .md-typeset details {
   border-radius: 0.3rem;
