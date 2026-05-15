@@ -139,5 +139,8 @@ nav:
           - Speech recognition: reference/speech_recognition.md
           - Response control: reference/response_control.md
 
+  - Community:
+      - Discord: community/discord.md
+
   - Legal:
       - Licensing: legal/licensing.md
