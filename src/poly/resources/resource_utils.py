@@ -7,6 +7,7 @@ import ast
 import functools
 import hashlib
 import inspect
+import langcodes
 import json
 import logging
 import os
@@ -173,6 +174,7 @@ REFERENCES_PREFIX_MAP = {
     "global_functions": "fn",
     "entities": "entity",
     "variables": "vrbl",
+    "translations": "tn",
 }
 REFERENCES_PREFIX_MAP_REGEX = {
     reference: re.compile(rf"{{{{{prefix}:([\w-]+)}}}}")
@@ -549,6 +551,11 @@ def to_snake_case(s: str) -> str:
 def convert_keys_to_snake_case(dict_obj: dict) -> dict:
     """Convert config keys to snake_case for consistency."""
     return {to_snake_case(k): v for k, v in dict_obj.items()}
+
+
+def is_valid_language_code(code: str) -> bool:
+    """Check if the given code is a valid BCP 47 language code."""
+    return langcodes.tag_is_valid(code)
 
 
 def assign_flow_positions(

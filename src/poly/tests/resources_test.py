@@ -73,6 +73,7 @@ from poly.resources.topic import (
 )
 from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
 from poly.resources.variable import Variable
+from poly.resources.translations import Translation
 from poly.resources.variant_attributes import Variant, VariantAttribute
 from poly.tests.testing_utils import mock_read_from_file, mock_variant_attributes_file
 
@@ -1273,7 +1274,7 @@ class TopicTests(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             topic_with_flow_function.validate(resource_mappings=[])
         self.assertIn(
-            "Invalid reference type: transition_functions is not a valid reference type for this resource. Valid references are: ['global_functions', 'sms', 'handoff', 'attributes', 'variables']", str(cm.exception)
+            "Invalid reference type: transition_functions is not a valid reference type for this resource.", str(cm.exception)
         )
 
     def test_validate_topic_example_queries(self):
@@ -1424,7 +1425,7 @@ class VoiceDisclaimerMessageTests(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             invalid_disclaimer.validate(resource_mappings=[])
         self.assertIn(
-            "Invalid reference type: global_functions is not a valid reference type for this resource. Valid references are: ['attributes', 'variables']",
+            "Invalid reference type: global_functions is not a valid reference type for this resource.",
             str(cm.exception),
         )
 
@@ -1439,7 +1440,7 @@ class VoiceDisclaimerMessageTests(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             handoff_disclaimer.validate(resource_mappings=[])
         self.assertIn(
-            "Invalid reference type: handoff is not a valid reference type for this resource. Valid references are: ['attributes', 'variables']",
+            "Invalid reference type: handoff is not a valid reference type for this resource.",
             str(cm.exception),
         )
 
@@ -1585,7 +1586,7 @@ class VoiceGreetingTests(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             invalid_greeting.validate(resource_mappings=[])
         self.assertIn(
-            "Invalid reference type: global_functions is not a valid reference type for this resource. Valid references are: ['attributes', 'variables']",
+            "Invalid reference type: global_functions is not a valid reference type for this resource.",
             str(cm.exception),
         )
 
@@ -1599,7 +1600,7 @@ class VoiceGreetingTests(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             handoff_greeting.validate()
         self.assertIn(
-            "Invalid reference type: handoff is not a valid reference type for this resource. Valid references are: ['attributes', 'variables']",
+            "Invalid reference type: handoff is not a valid reference type for this resource.",
             str(cm.exception),
         )
 
@@ -1730,7 +1731,7 @@ class SettingsPersonalityTests(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             invalid_personality.validate()
         self.assertIn(
-            "Invalid reference type: global_functions is not a valid reference type for this resource. Valid references are: ['attributes', 'variables']",
+            "Invalid reference type: global_functions is not a valid reference type for this resource.",
             str(cm.exception),
         )
 
@@ -1824,7 +1825,7 @@ class SettingsRoleTests(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             invalid_role.validate(resource_mappings=[])
         self.assertIn(
-            "Invalid reference type: global_functions is not a valid reference type for this resource. Valid references are: ['attributes', 'variables']",
+            "Invalid reference type: global_functions is not a valid reference type for this resource.",
             str(cm.exception),
         )
 
@@ -6986,6 +6987,196 @@ class ParseMultiResourcePathTests(unittest.TestCase):
 
         self.assertEqual(yaml_path, "D:\\data\\entities.yaml")
         self.assertEqual(segments, ["entities", "customer_name"])
+
+
+class TranslationTests(unittest.TestCase):
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+
+    def test_init_defaults(self):
+        """Translation initialises with sensible defaults."""
+        t = Translation(resource_id="tn-1", name="greeting")
+        self.assertEqual(t.resource_id, "tn-1")
+        self.assertEqual(t.name, "greeting")
+        self.assertEqual(t.translations, {})
+
+    def test_to_yaml_dict_from_yaml_dict_roundtrip(self):
+        """Init from kwargs, to_yaml_dict, from_yaml_dict roundtrip preserves all fields."""
+        t = Translation(
+            resource_id="tn-1",
+            name="greeting",
+            translations={"en-US": "Hello", "es": "Hola"},
+        )
+        d = t.to_yaml_dict()
+        self.assertEqual(d["name"], "greeting")
+        self.assertEqual(d["translations"], {"en-US": "Hello", "es": "Hola"})
+
+        t2 = Translation.from_yaml_dict(d, resource_id="tn-1", name="greeting")
+        self.assertEqual(t2.name, t.name)
+        self.assertEqual(t2.translations, t.translations)
+
+    def test_file_path(self):
+        """file_path returns the expected multi-resource path."""
+        t = Translation(resource_id="tn-1", name="greeting")
+        self.assertEqual(
+            t.file_path,
+            os.path.join("voice", "translations.yaml", "translations", "greeting"),
+        )
+
+    def test_get_resource_prefix(self):
+        """get_resource_prefix returns 'tn'."""
+        self.assertEqual(Translation.get_resource_prefix(), "tn")
+
+    def test_command_type(self):
+        """command_type returns 'translation'."""
+        t = Translation(resource_id="tn-1", name="greeting")
+        self.assertEqual(t.command_type, "translation")
+
+    def test_build_create_proto(self):
+        """build_create_proto sets fields correctly."""
+        t = Translation(
+            resource_id="tn-1",
+            name="greeting",
+            translations={"en-US": "Hello", "es": "Hola"},
+        )
+        proto = t.build_create_proto()
+        self.assertEqual(proto.id, "tn-1")
+        self.assertEqual(proto.translation_key, "greeting")
+        self.assertEqual(len(proto.translations), 2)
+
+    def test_build_update_proto(self):
+        """build_update_proto sets fields correctly."""
+        t = Translation(
+            resource_id="tn-1",
+            name="greeting",
+            translations={"en-US": "Hello"},
+        )
+        proto = t.build_update_proto()
+        self.assertEqual(proto.id, "tn-1")
+        self.assertEqual(proto.translation_key, "greeting")
+        self.assertEqual(len(proto.translations), 1)
+
+    def test_build_delete_proto(self):
+        """build_delete_proto sets the id."""
+        t = Translation(resource_id="tn-1", name="greeting")
+        proto = t.build_delete_proto()
+        self.assertEqual(proto.id, "tn-1")
+
+    def test_validate_empty_name_raises(self):
+        """validate raises ValueError when name is empty."""
+        t = Translation(resource_id="tn-1", name="", translations={"en-US": "Hello"})
+        with self.assertRaises(ValueError) as cm:
+            t.validate()
+        self.assertIn("name cannot be empty", str(cm.exception))
+
+    def test_validate_empty_translations_raises(self):
+        """validate raises ValueError when translations dict is empty."""
+        t = Translation(resource_id="tn-1", name="greeting", translations={})
+        with self.assertRaises(ValueError) as cm:
+            t.validate()
+        self.assertIn("cannot be empty", str(cm.exception))
+
+    def test_validate_empty_language_code_raises(self):
+        """validate raises ValueError when a language code is empty string."""
+        t = Translation(resource_id="tn-1", name="greeting", translations={"": "Hello"})
+        with self.assertRaises(ValueError) as cm:
+            t.validate()
+        self.assertIn("Language code cannot be empty", str(cm.exception))
+
+    def test_validate_invalid_language_code_raises(self):
+        """validate raises ValueError for an invalid BCP 47 language code."""
+        t = Translation(
+            resource_id="tn-1", name="greeting", translations={"!!!": "Hello"}
+        )
+        with self.assertRaises(ValueError) as cm:
+            t.validate()
+        self.assertIn("Invalid language code", str(cm.exception))
+
+    def test_validate_passes_with_valid_data(self):
+        """validate succeeds with valid name and translations."""
+        t = Translation(
+            resource_id="tn-1",
+            name="greeting",
+            translations={"en-US": "Hello", "fr": "Bonjour"},
+        )
+        t.validate()
+
+    def test_discover_resources_nonexistent_path(self):
+        """discover_resources returns empty list when YAML file doesn't exist."""
+        self.assertEqual(Translation.discover_resources("/nonexistent"), [])
+
+    def test_discover_resources_with_file(self):
+        """discover_resources returns name-based paths for each translation."""
+        yaml_content = """translations:
+- name: greeting
+  translations:
+    en-US: Hello
+    es: Hola
+- name: farewell
+  translations:
+    en-US: Goodbye
+    es: Adiós
+"""
+        base_path = "."
+        yaml_path = os.path.join(base_path, "voice", "translations.yaml")
+
+        def exists_tn(p):
+            return yaml_path in str(p) or os.path.exists(p)
+
+        def isfile_tn(p):
+            return yaml_path in str(p) or os.path.isfile(p)
+
+        def getmtime_tn(p):
+            return 1.0 if yaml_path in str(p) else os.path.getmtime(p)
+
+        with mock_read_from_file({yaml_path: yaml_content}):
+            with unittest.mock.patch(
+                "poly.resources.translations.os.path.exists", side_effect=exists_tn
+            ), unittest.mock.patch(
+                "poly.resources.resource.os.path.exists", side_effect=exists_tn
+            ), unittest.mock.patch(
+                "poly.resources.resource.os.path.isfile", side_effect=isfile_tn
+            ), unittest.mock.patch(
+                "poly.resources.resource.os.path.getmtime", side_effect=getmtime_tn
+            ):
+                discovered = Translation.discover_resources(base_path)
+        self.assertEqual(len(discovered), 2)
+        self.assertIn("greeting", discovered[0])
+        self.assertIn("farewell", discovered[1])
+
+    def test_discover_resources_skips_nameless_entries(self):
+        """discover_resources skips entries without a name."""
+        yaml_content = """translations:
+- name: greeting
+  translations:
+    en-US: Hello
+- translations:
+    en-US: Orphan
+"""
+        base_path = "."
+        yaml_path = os.path.join(base_path, "voice", "translations.yaml")
+
+        def exists_tn(p):
+            return yaml_path in str(p) or os.path.exists(p)
+
+        def isfile_tn(p):
+            return yaml_path in str(p) or os.path.isfile(p)
+
+        def getmtime_tn(p):
+            return 1.0 if yaml_path in str(p) else os.path.getmtime(p)
+
+        with mock_read_from_file({yaml_path: yaml_content}):
+            with unittest.mock.patch(
+                "poly.resources.translations.os.path.exists", side_effect=exists_tn
+            ), unittest.mock.patch(
+                "poly.resources.resource.os.path.exists", side_effect=exists_tn
+            ), unittest.mock.patch(
+                "poly.resources.resource.os.path.isfile", side_effect=isfile_tn
+            ), unittest.mock.patch(
+                "poly.resources.resource.os.path.getmtime", side_effect=getmtime_tn
+            ):
+                discovered = Translation.discover_resources(base_path)
+        self.assertEqual(len(discovered), 1)
 
 
 if __name__ == "__main__":

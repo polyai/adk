@@ -21,7 +21,14 @@ from poly.resources.resource import (
     YamlResource,
 )
 
-ALLOWED_BEHAVIOUR_REFERENCES = ["global_functions", "sms", "handoff", "attributes", "variables"]
+ALLOWED_BEHAVIOUR_REFERENCES = [
+    "global_functions",
+    "sms",
+    "handoff",
+    "attributes",
+    "variables",
+    "translations",
+]
 ALLOWED_ADJECTIVES = {
     "Polite",
     "Calm",

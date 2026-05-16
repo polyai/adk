@@ -1124,6 +1124,18 @@
           "self_harm": {"enabled": true, "precision": "MEDIUM"}
         }
       }
+    },
+    "translations": {
+      "TN-greeting": {
+        "resource_id": "TN-greeting",
+        "name": "greeting",
+        "translations": {"en-US": "Hello, how can I help you?", "es": "Hola, ¿cómo puedo ayudarte?"}
+      },
+      "TN-farewell": {
+        "resource_id": "TN-farewell",
+        "name": "farewell",
+        "translations": {"en-US": "Goodbye, have a nice day!", "es": "Adiós, ¡que tengas un buen día!"}
+      }
     }
   },
   "file_structure_info": {},
