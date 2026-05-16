@@ -17,7 +17,7 @@ class SMSEnvPhoneNumbers(_message.Message):
     def __init__(self, sandbox: _Optional[str] = ..., pre_release: _Optional[str] = ..., live: _Optional[str] = ...) -> None: ...
 
 class SMSTemplateReferences(_message.Message):
-    __slots__ = ("topics", "flow_steps", "variables")
+    __slots__ = ("topics", "flow_steps", "variables", "translations")
     class TopicsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -39,13 +39,22 @@ class SMSTemplateReferences(_message.Message):
         key: str
         value: bool
         def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    class TranslationsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
     TOPICS_FIELD_NUMBER: _ClassVar[int]
     FLOW_STEPS_FIELD_NUMBER: _ClassVar[int]
     VARIABLES_FIELD_NUMBER: _ClassVar[int]
+    TRANSLATIONS_FIELD_NUMBER: _ClassVar[int]
     topics: _containers.ScalarMap[str, bool]
     flow_steps: _containers.ScalarMap[str, bool]
     variables: _containers.ScalarMap[str, bool]
-    def __init__(self, topics: _Optional[_Mapping[str, bool]] = ..., flow_steps: _Optional[_Mapping[str, bool]] = ..., variables: _Optional[_Mapping[str, bool]] = ...) -> None: ...
+    translations: _containers.ScalarMap[str, bool]
+    def __init__(self, topics: _Optional[_Mapping[str, bool]] = ..., flow_steps: _Optional[_Mapping[str, bool]] = ..., variables: _Optional[_Mapping[str, bool]] = ..., translations: _Optional[_Mapping[str, bool]] = ...) -> None: ...
 
 class SMS(_message.Message):
     __slots__ = ("templates",)
@@ -124,3 +133,19 @@ class SMS_DeleteTemplate(_message.Message):
     ID_FIELD_NUMBER: _ClassVar[int]
     id: str
     def __init__(self, id: _Optional[str] = ...) -> None: ...
+
+class SMS_DuplicateTemplate(_message.Message):
+    __slots__ = ("id", "name", "text", "env_phone_numbers", "references", "active")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    ENV_PHONE_NUMBERS_FIELD_NUMBER: _ClassVar[int]
+    REFERENCES_FIELD_NUMBER: _ClassVar[int]
+    ACTIVE_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    name: str
+    text: str
+    env_phone_numbers: SMSEnvPhoneNumbers
+    references: SMSTemplateReferences
+    active: bool
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., text: _Optional[str] = ..., env_phone_numbers: _Optional[_Union[SMSEnvPhoneNumbers, _Mapping]] = ..., references: _Optional[_Union[SMSTemplateReferences, _Mapping]] = ..., active: bool = ...) -> None: ...

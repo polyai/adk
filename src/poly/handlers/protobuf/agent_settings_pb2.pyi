@@ -58,7 +58,7 @@ class Greeting_UpdateGreeting(_message.Message):
     def __init__(self, welcome_message: _Optional[str] = ..., references: _Optional[_Union[GreetingReferences, _Mapping]] = ..., language_code: _Optional[str] = ...) -> None: ...
 
 class GreetingReferences(_message.Message):
-    __slots__ = ("variables",)
+    __slots__ = ("variables", "translations")
     class VariablesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -66,9 +66,18 @@ class GreetingReferences(_message.Message):
         key: str
         value: bool
         def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    class TranslationsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
     VARIABLES_FIELD_NUMBER: _ClassVar[int]
+    TRANSLATIONS_FIELD_NUMBER: _ClassVar[int]
     variables: _containers.ScalarMap[str, bool]
-    def __init__(self, variables: _Optional[_Mapping[str, bool]] = ...) -> None: ...
+    translations: _containers.ScalarMap[str, bool]
+    def __init__(self, variables: _Optional[_Mapping[str, bool]] = ..., translations: _Optional[_Mapping[str, bool]] = ...) -> None: ...
 
 class Adjectives(_message.Message):
     __slots__ = ("values",)
@@ -176,8 +185,21 @@ class RoleReferences(_message.Message):
     variables: _containers.ScalarMap[str, bool]
     def __init__(self, variables: _Optional[_Mapping[str, bool]] = ...) -> None: ...
 
+class DisclaimerMessageReferences(_message.Message):
+    __slots__ = ("translations",)
+    class TranslationsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    TRANSLATIONS_FIELD_NUMBER: _ClassVar[int]
+    translations: _containers.ScalarMap[str, bool]
+    def __init__(self, translations: _Optional[_Mapping[str, bool]] = ...) -> None: ...
+
 class DisclaimerMessage(_message.Message):
-    __slots__ = ("is_enabled", "message", "ringing_tone", "created_at", "created_by", "updated_at", "updated_by", "language_code")
+    __slots__ = ("is_enabled", "message", "ringing_tone", "created_at", "created_by", "updated_at", "updated_by", "language_code", "references")
     IS_ENABLED_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
     RINGING_TONE_FIELD_NUMBER: _ClassVar[int]
@@ -186,6 +208,7 @@ class DisclaimerMessage(_message.Message):
     UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
     UPDATED_BY_FIELD_NUMBER: _ClassVar[int]
     LANGUAGE_CODE_FIELD_NUMBER: _ClassVar[int]
+    REFERENCES_FIELD_NUMBER: _ClassVar[int]
     is_enabled: bool
     message: str
     ringing_tone: AudioToPlay
@@ -194,19 +217,22 @@ class DisclaimerMessage(_message.Message):
     updated_at: _timestamp_pb2.Timestamp
     updated_by: str
     language_code: str
-    def __init__(self, is_enabled: bool = ..., message: _Optional[str] = ..., ringing_tone: _Optional[_Union[AudioToPlay, _Mapping]] = ..., created_at: _Optional[str] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., language_code: _Optional[str] = ...) -> None: ...
+    references: DisclaimerMessageReferences
+    def __init__(self, is_enabled: bool = ..., message: _Optional[str] = ..., ringing_tone: _Optional[_Union[AudioToPlay, _Mapping]] = ..., created_at: _Optional[str] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., language_code: _Optional[str] = ..., references: _Optional[_Union[DisclaimerMessageReferences, _Mapping]] = ...) -> None: ...
 
 class DisclaimerMessage_UpdateDisclaimerMessage(_message.Message):
-    __slots__ = ("is_enabled", "message", "ringing_tone", "language_code")
+    __slots__ = ("is_enabled", "message", "ringing_tone", "language_code", "references")
     IS_ENABLED_FIELD_NUMBER: _ClassVar[int]
     MESSAGE_FIELD_NUMBER: _ClassVar[int]
     RINGING_TONE_FIELD_NUMBER: _ClassVar[int]
     LANGUAGE_CODE_FIELD_NUMBER: _ClassVar[int]
+    REFERENCES_FIELD_NUMBER: _ClassVar[int]
     is_enabled: bool
     message: str
     ringing_tone: UpdateRingingTone
     language_code: str
-    def __init__(self, is_enabled: bool = ..., message: _Optional[str] = ..., ringing_tone: _Optional[_Union[UpdateRingingTone, _Mapping]] = ..., language_code: _Optional[str] = ...) -> None: ...
+    references: DisclaimerMessageReferences
+    def __init__(self, is_enabled: bool = ..., message: _Optional[str] = ..., ringing_tone: _Optional[_Union[UpdateRingingTone, _Mapping]] = ..., language_code: _Optional[str] = ..., references: _Optional[_Union[DisclaimerMessageReferences, _Mapping]] = ...) -> None: ...
 
 class UpdateRingingTone(_message.Message):
     __slots__ = ("s3_path", "original_filename", "public_url")
@@ -229,7 +255,7 @@ class AudioToPlay(_message.Message):
     def __init__(self, s3_path: _Optional[str] = ..., original_filename: _Optional[str] = ..., public_url: _Optional[str] = ...) -> None: ...
 
 class RulesReferences(_message.Message):
-    __slots__ = ("sms", "handoff", "attributes", "globalFunctions", "variables")
+    __slots__ = ("sms", "handoff", "attributes", "globalFunctions", "variables", "translations")
     class SmsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -265,17 +291,26 @@ class RulesReferences(_message.Message):
         key: str
         value: bool
         def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    class TranslationsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
     SMS_FIELD_NUMBER: _ClassVar[int]
     HANDOFF_FIELD_NUMBER: _ClassVar[int]
     ATTRIBUTES_FIELD_NUMBER: _ClassVar[int]
     GLOBALFUNCTIONS_FIELD_NUMBER: _ClassVar[int]
     VARIABLES_FIELD_NUMBER: _ClassVar[int]
+    TRANSLATIONS_FIELD_NUMBER: _ClassVar[int]
     sms: _containers.ScalarMap[str, bool]
     handoff: _containers.ScalarMap[str, bool]
     attributes: _containers.ScalarMap[str, bool]
     globalFunctions: _containers.ScalarMap[str, bool]
     variables: _containers.ScalarMap[str, bool]
-    def __init__(self, sms: _Optional[_Mapping[str, bool]] = ..., handoff: _Optional[_Mapping[str, bool]] = ..., attributes: _Optional[_Mapping[str, bool]] = ..., globalFunctions: _Optional[_Mapping[str, bool]] = ..., variables: _Optional[_Mapping[str, bool]] = ...) -> None: ...
+    translations: _containers.ScalarMap[str, bool]
+    def __init__(self, sms: _Optional[_Mapping[str, bool]] = ..., handoff: _Optional[_Mapping[str, bool]] = ..., attributes: _Optional[_Mapping[str, bool]] = ..., globalFunctions: _Optional[_Mapping[str, bool]] = ..., variables: _Optional[_Mapping[str, bool]] = ..., translations: _Optional[_Mapping[str, bool]] = ...) -> None: ...
 
 class Rules(_message.Message):
     __slots__ = ("behaviour", "references", "created_at", "created_by", "updated_at", "updated_by")

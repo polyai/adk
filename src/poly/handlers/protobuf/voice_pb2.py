@@ -15,13 +15,17 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0bvoice.proto\x12\x05voice\x1a\x1fgoogle/protobuf/timestamp.proto\"r\n\x13\x45levenLabsTtsConfig\x12\x10\n\x08model_id\x18\x01 \x01(\t\x12\x18\n\x10similarity_boost\x18\x02 \x01(\x01\x12\x11\n\tstability\x18\x03 \x01(\x01\x12\x12\n\x05speed\x18\x04 \x01(\x01H\x00\x88\x01\x01\x42\x08\n\x06_speed\"\x11\n\x0fPlayHTTtsConfig\"\x85\x01\n\x11\x43\x61rtesiaTtsConfig\x12\x10\n\x08model_id\x18\x01 \x01(\t\x12\x12\n\x05speed\x18\x02 \x01(\x01H\x00\x88\x01\x01\x12\x14\n\x07\x65motion\x18\x03 \x01(\tH\x01\x88\x01\x01\x12\x13\n\x06volume\x18\x04 \x01(\x01H\x02\x88\x01\x01\x42\x08\n\x06_speedB\n\n\x08_emotionB\t\n\x07_volume\"\xa7\x01\n\rHumeTtsConfig\x12\x10\n\x08model_id\x18\x01 \x01(\t\x12\x1e\n\x11voice_description\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x19\n\x0cinstant_mode\x18\x03 \x01(\x08H\x01\x88\x01\x01\x12\x15\n\x08provider\x18\x04 \x01(\tH\x02\x88\x01\x01\x42\x14\n\x12_voice_descriptionB\x0f\n\r_instant_modeB\x0b\n\t_provider\"\xdf\x02\n\x05Voice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x12\n\ncreated_by\x18\x02 \x01(\t\x12.\n\ncreated_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\nupdated_by\x18\x04 \x01(\t\x12.\n\nupdated_at\x18\x05 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x31\n\x0b\x65leven_labs\x18\x06 \x01(\x0b\x32\x1a.voice.ElevenLabsTtsConfigH\x00\x12)\n\x07play_ht\x18\x07 \x01(\x0b\x32\x16.voice.PlayHTTtsConfigH\x00\x12,\n\x08\x63\x61rtesia\x18\x08 \x01(\x0b\x32\x18.voice.CartesiaTtsConfigH\x00\x12$\n\x04hume\x18\t \x01(\x0b\x32\x14.voice.HumeTtsConfigH\x00\x42\n\n\x08settings\"\xa5\x01\n\nAgentVoice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x13\n\x0bprobability\x18\x02 \x01(\x01\x12\x12\n\nupdated_by\x18\x03 \x01(\t\x12.\n\nupdated_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x1a\n\rlanguage_code\x18\x05 \x01(\tH\x00\x88\x01\x01\x42\x10\n\x0e_language_code\"\x95\x01\n\x0f\x44isclaimerVoice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x12\n\nupdated_by\x18\x02 \x01(\t\x12.\n\nupdated_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x1a\n\rlanguage_code\x18\x04 \x01(\tH\x00\x88\x01\x01\x42\x10\n\x0e_language_code\"\xbd\x01\n\rFavoriteVoice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x12\n\naccount_id\x18\x02 \x01(\t\x12\x12\n\ncreated_by\x18\x03 \x01(\t\x12.\n\ncreated_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\nupdated_by\x18\x05 \x01(\t\x12.\n\nupdated_at\x18\x06 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\"\xf0\x01\n\x06Voices\x12\'\n\x0c\x61gent_voices\x18\x01 \x03(\x0b\x32\x11.voice.AgentVoice\x12\x31\n\x11\x64isclaimer_voices\x18\x02 \x03(\x0b\x32\x16.voice.DisclaimerVoice\x12*\n\x14\x61gent_voice_settings\x18\x03 \x03(\x0b\x32\x0c.voice.Voice\x12/\n\x19\x64isclaimer_voice_settings\x18\x04 \x03(\x0b\x32\x0c.voice.Voice\x12-\n\x0f\x66\x61vorite_voices\x18\x05 \x03(\x0b\x32\x14.voice.FavoriteVoice\"j\n\x13Voice_AddAgentVoice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x13\n\x0bprobability\x18\x02 \x01(\x01\x12\x1a\n\rlanguage_code\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\x10\n\x0e_language_code\"*\n\x16Voice_DeleteAgentVoice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\"k\n\x16Voice_UpdateAgentVoice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x13\n\x0bprobability\x18\x02 \x01(\x01\x12\x19\n\x0cnew_voice_id\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\x0f\n\r_new_voice_id\"\xf0\x01\n\x1eVoice_CreateAgentVoiceSettings\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x31\n\x0b\x65leven_labs\x18\x02 \x01(\x0b\x32\x1a.voice.ElevenLabsTtsConfigH\x00\x12)\n\x07play_ht\x18\x07 \x01(\x0b\x32\x16.voice.PlayHTTtsConfigH\x00\x12,\n\x08\x63\x61rtesia\x18\x08 \x01(\x0b\x32\x18.voice.CartesiaTtsConfigH\x00\x12$\n\x04hume\x18\t \x01(\x0b\x32\x14.voice.HumeTtsConfigH\x00\x42\n\n\x08settings\"\xf0\x01\n\x1eVoice_UpdateAgentVoiceSettings\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x31\n\x0b\x65leven_labs\x18\x02 \x01(\x0b\x32\x1a.voice.ElevenLabsTtsConfigH\x00\x12)\n\x07play_ht\x18\x07 \x01(\x0b\x32\x16.voice.PlayHTTtsConfigH\x00\x12,\n\x08\x63\x61rtesia\x18\x08 \x01(\x0b\x32\x18.voice.CartesiaTtsConfigH\x00\x12$\n\x04hume\x18\t \x01(\x0b\x32\x14.voice.HumeTtsConfigH\x00\x42\n\n\x08settings\"]\n\x1bVoice_UpdateDisclaimerVoice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x1a\n\rlanguage_code\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\x10\n\x0e_language_code\"\xf5\x01\n#Voice_CreateDisclaimerVoiceSettings\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x31\n\x0b\x65leven_labs\x18\x02 \x01(\x0b\x32\x1a.voice.ElevenLabsTtsConfigH\x00\x12)\n\x07play_ht\x18\x07 \x01(\x0b\x32\x16.voice.PlayHTTtsConfigH\x00\x12,\n\x08\x63\x61rtesia\x18\x08 \x01(\x0b\x32\x18.voice.CartesiaTtsConfigH\x00\x12$\n\x04hume\x18\t \x01(\x0b\x32\x14.voice.HumeTtsConfigH\x00\x42\n\n\x08settings\"\xf5\x01\n#Voice_UpdateDisclaimerVoiceSettings\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x31\n\x0b\x65leven_labs\x18\x02 \x01(\x0b\x32\x1a.voice.ElevenLabsTtsConfigH\x00\x12)\n\x07play_ht\x18\x07 \x01(\x0b\x32\x16.voice.PlayHTTtsConfigH\x00\x12,\n\x08\x63\x61rtesia\x18\x08 \x01(\x0b\x32\x18.voice.CartesiaTtsConfigH\x00\x12$\n\x04hume\x18\t \x01(\x0b\x32\x14.voice.HumeTtsConfigH\x00\x42\n\n\x08settings\">\n\x16Voice_AddFavoriteVoice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x12\n\naccount_id\x18\x02 \x01(\t\"A\n\x19Voice_RemoveFavoriteVoice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x12\n\naccount_id\x18\x02 \x01(\tb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0bvoice.proto\x12\x05voice\x1a\x1fgoogle/protobuf/timestamp.proto\"r\n\x13\x45levenLabsTtsConfig\x12\x10\n\x08model_id\x18\x01 \x01(\t\x12\x18\n\x10similarity_boost\x18\x02 \x01(\x01\x12\x11\n\tstability\x18\x03 \x01(\x01\x12\x12\n\x05speed\x18\x04 \x01(\x01H\x00\x88\x01\x01\x42\x08\n\x06_speed\"\x11\n\x0fPlayHTTtsConfig\"\x85\x01\n\x11\x43\x61rtesiaTtsConfig\x12\x10\n\x08model_id\x18\x01 \x01(\t\x12\x12\n\x05speed\x18\x02 \x01(\x01H\x00\x88\x01\x01\x12\x14\n\x07\x65motion\x18\x03 \x01(\tH\x01\x88\x01\x01\x12\x13\n\x06volume\x18\x04 \x01(\x01H\x02\x88\x01\x01\x42\x08\n\x06_speedB\n\n\x08_emotionB\t\n\x07_volume\"\xa7\x01\n\rHumeTtsConfig\x12\x10\n\x08model_id\x18\x01 \x01(\t\x12\x1e\n\x11voice_description\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x19\n\x0cinstant_mode\x18\x03 \x01(\x08H\x01\x88\x01\x01\x12\x15\n\x08provider\x18\x04 \x01(\tH\x02\x88\x01\x01\x42\x14\n\x12_voice_descriptionB\x0f\n\r_instant_modeB\x0b\n\t_provider\"\xeb\x02\n\x05Voice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x12\n\ncreated_by\x18\x02 \x01(\t\x12.\n\ncreated_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\nupdated_by\x18\x04 \x01(\t\x12.\n\nupdated_at\x18\x05 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x31\n\x0b\x65leven_labs\x18\x06 \x01(\x0b\x32\x1a.voice.ElevenLabsTtsConfigH\x00\x12)\n\x07play_ht\x18\x07 \x01(\x0b\x32\x16.voice.PlayHTTtsConfigH\x00\x12,\n\x08\x63\x61rtesia\x18\x08 \x01(\x0b\x32\x18.voice.CartesiaTtsConfigH\x00\x12$\n\x04hume\x18\t \x01(\x0b\x32\x14.voice.HumeTtsConfigH\x00\x12\n\n\x02id\x18\n \x01(\tB\n\n\x08settings\"\xb1\x01\n\nAgentVoice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x13\n\x0bprobability\x18\x02 \x01(\x01\x12\x12\n\nupdated_by\x18\x03 \x01(\t\x12.\n\nupdated_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x1a\n\rlanguage_code\x18\x05 \x01(\tH\x00\x88\x01\x01\x12\n\n\x02id\x18\x06 \x01(\tB\x10\n\x0e_language_code\"\x95\x01\n\x0f\x44isclaimerVoice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x12\n\nupdated_by\x18\x02 \x01(\t\x12.\n\nupdated_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x1a\n\rlanguage_code\x18\x04 \x01(\tH\x00\x88\x01\x01\x42\x10\n\x0e_language_code\"\xbd\x01\n\rFavoriteVoice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x12\n\naccount_id\x18\x02 \x01(\t\x12\x12\n\ncreated_by\x18\x03 \x01(\t\x12.\n\ncreated_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\nupdated_by\x18\x05 \x01(\t\x12.\n\nupdated_at\x18\x06 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\"\xf0\x01\n\x06Voices\x12\'\n\x0c\x61gent_voices\x18\x01 \x03(\x0b\x32\x11.voice.AgentVoice\x12\x31\n\x11\x64isclaimer_voices\x18\x02 \x03(\x0b\x32\x16.voice.DisclaimerVoice\x12*\n\x14\x61gent_voice_settings\x18\x03 \x03(\x0b\x32\x0c.voice.Voice\x12/\n\x19\x64isclaimer_voice_settings\x18\x04 \x03(\x0b\x32\x0c.voice.Voice\x12-\n\x0f\x66\x61vorite_voices\x18\x05 \x03(\x0b\x32\x14.voice.FavoriteVoice\"v\n\x13Voice_AddAgentVoice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x13\n\x0bprobability\x18\x02 \x01(\x01\x12\x1a\n\rlanguage_code\x18\x03 \x01(\tH\x00\x88\x01\x01\x12\n\n\x02id\x18\x04 \x01(\tB\x10\n\x0e_language_code\":\n\x16Voice_DeleteAgentVoice\x12\x14\n\x08voice_id\x18\x01 \x01(\tB\x02\x18\x01\x12\n\n\x02id\x18\x02 \x01(\t\"{\n\x16Voice_UpdateAgentVoice\x12\x14\n\x08voice_id\x18\x01 \x01(\tB\x02\x18\x01\x12\x13\n\x0bprobability\x18\x02 \x01(\x01\x12\x19\n\x0cnew_voice_id\x18\x03 \x01(\tH\x00\x88\x01\x01\x12\n\n\x02id\x18\x04 \x01(\tB\x0f\n\r_new_voice_id\"\xf0\x01\n\x1eVoice_CreateAgentVoiceSettings\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x31\n\x0b\x65leven_labs\x18\x02 \x01(\x0b\x32\x1a.voice.ElevenLabsTtsConfigH\x00\x12)\n\x07play_ht\x18\x07 \x01(\x0b\x32\x16.voice.PlayHTTtsConfigH\x00\x12,\n\x08\x63\x61rtesia\x18\x08 \x01(\x0b\x32\x18.voice.CartesiaTtsConfigH\x00\x12$\n\x04hume\x18\t \x01(\x0b\x32\x14.voice.HumeTtsConfigH\x00\x42\n\n\x08settings\"\xf0\x01\n\x1eVoice_UpdateAgentVoiceSettings\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x31\n\x0b\x65leven_labs\x18\x02 \x01(\x0b\x32\x1a.voice.ElevenLabsTtsConfigH\x00\x12)\n\x07play_ht\x18\x07 \x01(\x0b\x32\x16.voice.PlayHTTtsConfigH\x00\x12,\n\x08\x63\x61rtesia\x18\x08 \x01(\x0b\x32\x18.voice.CartesiaTtsConfigH\x00\x12$\n\x04hume\x18\t \x01(\x0b\x32\x14.voice.HumeTtsConfigH\x00\x42\n\n\x08settings\"]\n\x1bVoice_UpdateDisclaimerVoice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x1a\n\rlanguage_code\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\x10\n\x0e_language_code\"\xf5\x01\n#Voice_CreateDisclaimerVoiceSettings\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x31\n\x0b\x65leven_labs\x18\x02 \x01(\x0b\x32\x1a.voice.ElevenLabsTtsConfigH\x00\x12)\n\x07play_ht\x18\x07 \x01(\x0b\x32\x16.voice.PlayHTTtsConfigH\x00\x12,\n\x08\x63\x61rtesia\x18\x08 \x01(\x0b\x32\x18.voice.CartesiaTtsConfigH\x00\x12$\n\x04hume\x18\t \x01(\x0b\x32\x14.voice.HumeTtsConfigH\x00\x42\n\n\x08settings\"\xf5\x01\n#Voice_UpdateDisclaimerVoiceSettings\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x31\n\x0b\x65leven_labs\x18\x02 \x01(\x0b\x32\x1a.voice.ElevenLabsTtsConfigH\x00\x12)\n\x07play_ht\x18\x07 \x01(\x0b\x32\x16.voice.PlayHTTtsConfigH\x00\x12,\n\x08\x63\x61rtesia\x18\x08 \x01(\x0b\x32\x18.voice.CartesiaTtsConfigH\x00\x12$\n\x04hume\x18\t \x01(\x0b\x32\x14.voice.HumeTtsConfigH\x00\x42\n\n\x08settings\">\n\x16Voice_AddFavoriteVoice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x12\n\naccount_id\x18\x02 \x01(\t\"A\n\x19Voice_RemoveFavoriteVoice\x12\x10\n\x08voice_id\x18\x01 \x01(\t\x12\x12\n\naccount_id\x18\x02 \x01(\tb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'voice_pb2', _globals)
 if _descriptor._USE_C_DESCRIPTORS == False:
   DESCRIPTOR._options = None
+  _globals['_VOICE_DELETEAGENTVOICE'].fields_by_name['voice_id']._options = None
+  _globals['_VOICE_DELETEAGENTVOICE'].fields_by_name['voice_id']._serialized_options = b'\030\001'
+  _globals['_VOICE_UPDATEAGENTVOICE'].fields_by_name['voice_id']._options = None
+  _globals['_VOICE_UPDATEAGENTVOICE'].fields_by_name['voice_id']._serialized_options = b'\030\001'
   _globals['_ELEVENLABSTTSCONFIG']._serialized_start=55
   _globals['_ELEVENLABSTTSCONFIG']._serialized_end=169
   _globals['_PLAYHTTTSCONFIG']._serialized_start=171
@@ -31,33 +35,33 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _globals['_HUMETTSCONFIG']._serialized_start=327
   _globals['_HUMETTSCONFIG']._serialized_end=494
   _globals['_VOICE']._serialized_start=497
-  _globals['_VOICE']._serialized_end=848
-  _globals['_AGENTVOICE']._serialized_start=851
-  _globals['_AGENTVOICE']._serialized_end=1016
-  _globals['_DISCLAIMERVOICE']._serialized_start=1019
-  _globals['_DISCLAIMERVOICE']._serialized_end=1168
-  _globals['_FAVORITEVOICE']._serialized_start=1171
-  _globals['_FAVORITEVOICE']._serialized_end=1360
-  _globals['_VOICES']._serialized_start=1363
-  _globals['_VOICES']._serialized_end=1603
-  _globals['_VOICE_ADDAGENTVOICE']._serialized_start=1605
-  _globals['_VOICE_ADDAGENTVOICE']._serialized_end=1711
-  _globals['_VOICE_DELETEAGENTVOICE']._serialized_start=1713
-  _globals['_VOICE_DELETEAGENTVOICE']._serialized_end=1755
-  _globals['_VOICE_UPDATEAGENTVOICE']._serialized_start=1757
-  _globals['_VOICE_UPDATEAGENTVOICE']._serialized_end=1864
-  _globals['_VOICE_CREATEAGENTVOICESETTINGS']._serialized_start=1867
-  _globals['_VOICE_CREATEAGENTVOICESETTINGS']._serialized_end=2107
-  _globals['_VOICE_UPDATEAGENTVOICESETTINGS']._serialized_start=2110
-  _globals['_VOICE_UPDATEAGENTVOICESETTINGS']._serialized_end=2350
-  _globals['_VOICE_UPDATEDISCLAIMERVOICE']._serialized_start=2352
-  _globals['_VOICE_UPDATEDISCLAIMERVOICE']._serialized_end=2445
-  _globals['_VOICE_CREATEDISCLAIMERVOICESETTINGS']._serialized_start=2448
-  _globals['_VOICE_CREATEDISCLAIMERVOICESETTINGS']._serialized_end=2693
-  _globals['_VOICE_UPDATEDISCLAIMERVOICESETTINGS']._serialized_start=2696
-  _globals['_VOICE_UPDATEDISCLAIMERVOICESETTINGS']._serialized_end=2941
-  _globals['_VOICE_ADDFAVORITEVOICE']._serialized_start=2943
-  _globals['_VOICE_ADDFAVORITEVOICE']._serialized_end=3005
-  _globals['_VOICE_REMOVEFAVORITEVOICE']._serialized_start=3007
-  _globals['_VOICE_REMOVEFAVORITEVOICE']._serialized_end=3072
+  _globals['_VOICE']._serialized_end=860
+  _globals['_AGENTVOICE']._serialized_start=863
+  _globals['_AGENTVOICE']._serialized_end=1040
+  _globals['_DISCLAIMERVOICE']._serialized_start=1043
+  _globals['_DISCLAIMERVOICE']._serialized_end=1192
+  _globals['_FAVORITEVOICE']._serialized_start=1195
+  _globals['_FAVORITEVOICE']._serialized_end=1384
+  _globals['_VOICES']._serialized_start=1387
+  _globals['_VOICES']._serialized_end=1627
+  _globals['_VOICE_ADDAGENTVOICE']._serialized_start=1629
+  _globals['_VOICE_ADDAGENTVOICE']._serialized_end=1747
+  _globals['_VOICE_DELETEAGENTVOICE']._serialized_start=1749
+  _globals['_VOICE_DELETEAGENTVOICE']._serialized_end=1807
+  _globals['_VOICE_UPDATEAGENTVOICE']._serialized_start=1809
+  _globals['_VOICE_UPDATEAGENTVOICE']._serialized_end=1932
+  _globals['_VOICE_CREATEAGENTVOICESETTINGS']._serialized_start=1935
+  _globals['_VOICE_CREATEAGENTVOICESETTINGS']._serialized_end=2175
+  _globals['_VOICE_UPDATEAGENTVOICESETTINGS']._serialized_start=2178
+  _globals['_VOICE_UPDATEAGENTVOICESETTINGS']._serialized_end=2418
+  _globals['_VOICE_UPDATEDISCLAIMERVOICE']._serialized_start=2420
+  _globals['_VOICE_UPDATEDISCLAIMERVOICE']._serialized_end=2513
+  _globals['_VOICE_CREATEDISCLAIMERVOICESETTINGS']._serialized_start=2516
+  _globals['_VOICE_CREATEDISCLAIMERVOICESETTINGS']._serialized_end=2761
+  _globals['_VOICE_UPDATEDISCLAIMERVOICESETTINGS']._serialized_start=2764
+  _globals['_VOICE_UPDATEDISCLAIMERVOICESETTINGS']._serialized_end=3009
+  _globals['_VOICE_ADDFAVORITEVOICE']._serialized_start=3011
+  _globals['_VOICE_ADDFAVORITEVOICE']._serialized_end=3073
+  _globals['_VOICE_REMOVEFAVORITEVOICE']._serialized_start=3075
+  _globals['_VOICE_REMOVEFAVORITEVOICE']._serialized_end=3140
 # @@protoc_insertion_point(module_scope)
