@@ -43,7 +43,7 @@ class Translation(MultiResourceYamlResource):
     def file_path(self) -> str:
         path_safe_name = utils.clean_name(self.name, lowercase=False)
         return os.path.join(
-            "voice",
+            "config",
             "translations.yaml",
             self.top_level_name,
             path_safe_name,
@@ -125,7 +125,7 @@ class Translation(MultiResourceYamlResource):
 
     @staticmethod
     def discover_resources(base_path):
-        translations_path = os.path.join(base_path, "voice", "translations.yaml")
+        translations_path = os.path.join(base_path, "config", "translations.yaml")
         discovered_translations: list[str] = []
 
         if not os.path.exists(translations_path):

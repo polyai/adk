@@ -351,10 +351,10 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
             local_resources[Translation],
             [
                 os.path.join(
-                    TEST_DIR, "voice", "translations.yaml", "translations", "greeting"
+                    TEST_DIR, "config", "translations.yaml", "translations", "greeting"
                 ),
                 os.path.join(
-                    TEST_DIR, "voice", "translations.yaml", "translations", "farewell"
+                    TEST_DIR, "config", "translations.yaml", "translations", "farewell"
                 ),
             ],
         )

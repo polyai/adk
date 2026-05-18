@@ -7110,7 +7110,7 @@ class TranslationTests(unittest.TestCase):
         t = Translation(resource_id="tn-1", name="greeting")
         self.assertEqual(
             t.file_path,
-            os.path.join("voice", "translations.yaml", "translations", "greeting"),
+            os.path.join("config", "translations.yaml", "translations", "greeting"),
         )
 
     def test_get_resource_prefix(self):
@@ -7206,7 +7206,7 @@ class TranslationTests(unittest.TestCase):
     es: Adiós
 """
         base_path = "."
-        yaml_path = os.path.join(base_path, "voice", "translations.yaml")
+        yaml_path = os.path.join(base_path, "config", "translations.yaml")
 
         def exists_tn(p):
             return yaml_path in str(p) or os.path.exists(p)
@@ -7247,7 +7247,7 @@ class TranslationTests(unittest.TestCase):
     en-US: Orphan
 """
         base_path = "."
-        yaml_path = os.path.join(base_path, "voice", "translations.yaml")
+        yaml_path = os.path.join(base_path, "config", "translations.yaml")
 
         def exists_tn(p):
             return yaml_path in str(p) or os.path.exists(p)
