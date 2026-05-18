@@ -66,7 +66,8 @@ from poly.resources import (
     VoiceGreeting,
     VoiceSafetyFilters,
     VoiceStylePrompt,
-    Language,
+    AdditionalLanguage,
+    DefaultLanguage,
 )
 from poly.resources.resource import _parse_multi_resource_path
 from poly.utils import compute_variable_references
@@ -109,7 +110,8 @@ RESOURCE_NAME_TO_CLASS: dict[str, type[Resource]] = {
     "phrase_filtering": PhraseFilter,
     "pronunciations": Pronunciation,
     "translations": Translation,
-    "languages": Language,
+    "default_language": DefaultLanguage,
+    "additional_languages": AdditionalLanguage,
 }
 
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
@@ -1362,7 +1364,6 @@ class AgentStudioProject:
         )
 
         Only update the default variant if it's being enabled.
-        Only update the default language if it's being enabled.
 
         If a function is new or updated and it references a variable, update the variable references.
 
@@ -1611,12 +1612,6 @@ class AgentStudioProject:
         for variant in updated_variants:
             if not variant.is_default:
                 updated_resources[Variant].pop(variant.resource_id, None)
-
-        # Only update the default language if it's being enabled
-        updated_languages: list[Language] = list(updated_resources.get(Language, {}).values())
-        for language in updated_languages:
-            if not language.is_default:
-                updated_resources[Language].pop(language.resource_id, None)
 
         # Don't delete condition if parent step is being deleted
         for flow_step in list(deleted_resources.get(FlowStep, {}).values()):

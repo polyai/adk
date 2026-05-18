@@ -1137,16 +1137,16 @@
         "translations": {"en-US": "Goodbye, have a nice day!", "es": "Adiós, ¡que tengas un buen día!"}
       }
     },
-    "languages": {
+    "default_language": {
       "en-GB": {
         "resource_id": "en-GB",
-        "name": "en-GB",
-        "is_default": true
-      },
+        "name": "en-GB"
+      }
+    },
+    "additional_languages": {
       "fr-FR": {
         "resource_id": "fr-FR",
-        "name": "fr-FR",
-        "is_default": false
+        "name": "fr-FR"
       }
     }
   },

@@ -1,4 +1,3 @@
-languages:
-- language_code: en-GB
-  is_default: true
-- language_code: fr-FR
+default_language: en-GB
+additional_languages:
+- fr-FR

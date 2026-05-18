@@ -55,7 +55,8 @@ from poly.resources import (
     VoiceSafetyFilters,
     VoiceStylePrompt,
     Translation,
-    Language,
+    AdditionalLanguage,
+    DefaultLanguage,
 )
 
 logger = logging.getLogger(__name__)
@@ -142,7 +143,7 @@ class SyncClientHandler:
             GeneralSafetyFilters: cls._read_safety_filters_from_projection(projection),
             ApiIntegration: cls._read_api_integrations_from_projection(projection),
             Translation: cls._read_translations_from_projection(projection),
-            Language: cls._read_language_from_projection(projection),
+            **cls._read_languages_from_projection(projection),
         }  # ty:ignore[invalid-return-type]
 
     def pull_deployment_resources(
@@ -926,28 +927,33 @@ class SyncClientHandler:
         return translations
 
     @staticmethod
-    def _read_language_from_projection(projection: dict) -> dict[str, Language]:
+    def _read_languages_from_projection(
+        projection: dict,
+    ) -> dict[type[Resource], dict[str, Resource]]:
         language_data = projection.get("languages", {})
         if not language_data:
-            return {}
+            return {DefaultLanguage: {}, AdditionalLanguage: {}}
 
-        default_language = language_data.get("defaultLanguage", "en-GB")
-        languages = {
-            default_language: Language(
-                resource_id=default_language,
-                name=default_language,
-                is_default=True,
+        default_code = language_data.get("defaultLanguage", "en-GB")
+        default_languages = {
+            default_code: DefaultLanguage(
+                resource_id=default_code,
+                name=default_code,
             )
         }
-        for language_id, language in (
+        additional_languages = {}
+        for lang_id, lang in (
             language_data.get("additionalLanguages", {}).get("entities", {}).items()
         ):
-            languages[language_id] = Language(
-                resource_id=language_id,
-                name=language.get("code"),
-                is_default=False,
+            code = lang.get("code")
+            additional_languages[lang_id] = AdditionalLanguage(
+                resource_id=lang_id,
+                name=code,
             )
-        return languages
+        return {
+            DefaultLanguage: default_languages,
+            AdditionalLanguage: additional_languages,
+        }
 
     # Types that should be created first
     # as they are referenced by other resources
