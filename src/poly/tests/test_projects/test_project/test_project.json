@@ -1134,7 +1134,7 @@
       "TN-farewell": {
         "resource_id": "TN-farewell",
         "name": "farewell",
-        "translations": {"en-GB": "Goodbye, have a nice day!", "fr-FR": "Au revoir, bonne journée!"}
+        "translations": {"en-GB": "Goodbye", "fr-FR": "Au revoir"}
       }
     },
     "default_language": {

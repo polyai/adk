@@ -5,5 +5,5 @@ translations:
     fr-FR: Bonjour, comment puis-je vous aider?
 - name: farewell
   translations:
-    en-GB: Goodbye, have a nice day!
-    fr-FR: Au revoir, bonne journée!
+    en-GB: Goodbye
+    fr-FR: Au revoir
