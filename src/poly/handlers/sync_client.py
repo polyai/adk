@@ -55,6 +55,7 @@ from poly.resources import (
     VoiceSafetyFilters,
     VoiceStylePrompt,
     Translation,
+    Language,
 )
 
 logger = logging.getLogger(__name__)
@@ -141,6 +142,7 @@ class SyncClientHandler:
             GeneralSafetyFilters: cls._read_safety_filters_from_projection(projection),
             ApiIntegration: cls._read_api_integrations_from_projection(projection),
             Translation: cls._read_translations_from_projection(projection),
+            Language: cls._read_language_from_projection(projection),
         }  # ty:ignore[invalid-return-type]
 
     def pull_deployment_resources(
@@ -922,6 +924,30 @@ class SyncClientHandler:
             )
 
         return translations
+
+    @staticmethod
+    def _read_language_from_projection(projection: dict) -> dict[str, Language]:
+        language_data = projection.get("languages", {})
+        if not language_data:
+            return {}
+
+        default_language = language_data.get("defaultLanguage", "en-GB")
+        languages = {
+            default_language: Language(
+                resource_id=default_language,
+                name=default_language,
+                is_default=True,
+            )
+        }
+        for language_id, language in (
+            language_data.get("additionalLanguages", {}).get("entities", {}).items()
+        ):
+            languages[language_id] = Language(
+                resource_id=language_id,
+                name=language.get("code"),
+                is_default=False,
+            )
+        return languages
 
     # Types that should be created first
     # as they are referenced by other resources

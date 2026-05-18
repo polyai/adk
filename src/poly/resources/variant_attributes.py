@@ -137,7 +137,7 @@ class Variant(MultiResourceYamlResource):
         variants: list[str] = yaml_data.get("variants", []) if yaml_data else []
 
         for variant_dict in variants:
-            variant_name = variant_dict.get("name")
+            variant_name = variant_dict.get(Variant.resource_key)
 
             if not variant_name:
                 continue
@@ -319,7 +319,7 @@ class VariantAttribute(MultiResourceYamlResource):
         variant_attributes: list[dict] = yaml_dict.get("attributes", []) if yaml_dict else []
 
         for variant_attribute in variant_attributes:
-            name = variant_attribute.get("name")
+            name = variant_attribute.get(VariantAttribute.resource_key)
             if not name:
                 continue
             path_safe_name = utils.clean_name(name, lowercase=False)

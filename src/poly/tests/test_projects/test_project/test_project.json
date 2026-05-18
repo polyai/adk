@@ -1136,6 +1136,18 @@
         "name": "farewell",
         "translations": {"en-US": "Goodbye, have a nice day!", "es": "Adiós, ¡que tengas un buen día!"}
       }
+    },
+    "languages": {
+      "en-GB": {
+        "resource_id": "en-GB",
+        "name": "en-GB",
+        "is_default": true
+      },
+      "fr-FR": {
+        "resource_id": "fr-FR",
+        "name": "fr-FR",
+        "is_default": false
+      }
     }
   },
   "file_structure_info": {},
