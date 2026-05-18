@@ -15,7 +15,8 @@ from poly.handlers.protobuf.translations_pb2 import (
     UpdateEntry,
 )
 
-from poly.resources.resource import MultiResourceYamlResource
+from poly.resources.resource import MultiResourceYamlResource, ResourceMapping
+from poly.resources.languages import AdditionalLanguage, DefaultLanguage
 
 import poly.resources.resource_utils as utils
 
@@ -95,7 +96,7 @@ class Translation(MultiResourceYamlResource):
     def build_delete_proto(self):
         return LanguageHubTranslations_Delete(id=self.resource_id)
 
-    def validate(self, **kwargs):
+    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
         if not self.name:
             raise ValueError("Translation name cannot be empty.")
         if not self.translations:
@@ -109,7 +110,18 @@ class Translation(MultiResourceYamlResource):
                     f"Invalid language code: '{lang}'. Must be a valid BCP 47 language tag."
                 )
 
-            # TODO: Check if all bot language codes are included
+        if resource_mappings:
+            configured_languages = {
+                m.resource_name
+                for m in resource_mappings
+                if m.resource_type in (DefaultLanguage, AdditionalLanguage)
+            }
+            if configured_languages:
+                missing = configured_languages - set(self.translations.keys())
+                if missing:
+                    raise ValueError(
+                        f"Missing translations for configured languages: {sorted(missing)}."
+                    )
 
     @staticmethod
     def discover_resources(base_path):

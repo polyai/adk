@@ -1129,12 +1129,12 @@
       "TN-greeting": {
         "resource_id": "TN-greeting",
         "name": "greeting",
-        "translations": {"en-US": "Hello, how can I help you?", "es": "Hola, ¿cómo puedo ayudarte?"}
+        "translations": {"en-GB": "Hello, how can I help you?", "fr-FR": "Bonjour, comment puis-je vous aider?"}
       },
       "TN-farewell": {
         "resource_id": "TN-farewell",
         "name": "farewell",
-        "translations": {"en-US": "Goodbye, have a nice day!", "es": "Adiós, ¡que tengas un buen día!"}
+        "translations": {"en-GB": "Goodbye, have a nice day!", "fr-FR": "Au revoir, bonne journée!"}
       }
     },
     "default_language": {

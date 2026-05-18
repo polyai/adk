@@ -1,9 +1,9 @@
 translations:
 - name: greeting
   translations:
-    en-US: Hello, how can I help you?
-    es: Hola, ¿cómo puedo ayudarte?
+    en-GB: Hello, how can I help you?
+    fr-FR: Bonjour, comment puis-je vous aider?
 - name: farewell
   translations:
-    en-US: Goodbye, have a nice day!
-    es: Adiós, ¡que tengas un buen día!
+    en-GB: Goodbye, have a nice day!
+    fr-FR: Au revoir, bonne journée!

@@ -14,7 +14,11 @@ from poly.handlers.protobuf.languages_pb2 import (
     Languages_DeleteLanguage,
     Languages_UpdateDefaultLanguage,
 )
-from poly.resources.resource import MultiResourceYamlResource, _parse_multi_resource_path
+from poly.resources.resource import (
+    MultiResourceYamlResource,
+    ResourceMapping,
+    _parse_multi_resource_path,
+)
 
 import poly.resources.resource_utils as utils
 
@@ -121,9 +125,17 @@ class DefaultLanguage(MultiResourceYamlResource):
             return [os.path.join(file_path, "default_language")]
         return []
 
-    def validate(self, **kwargs) -> None:
+    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         if not self.name:
             raise ValueError("Default language code is required.")
+        if resource_mappings:
+            additional_codes = [
+                m.resource_name for m in resource_mappings if m.resource_type == AdditionalLanguage
+            ]
+            if self.name in additional_codes:
+                raise ValueError(
+                    f"Default language '{self.name}' also appears in additional languages."
+                )
 
 
 @dataclass
@@ -213,6 +225,15 @@ class AdditionalLanguage(MultiResourceYamlResource):
         additional = top_level.get("additional_languages") or []
         return [os.path.join(file_path, "additional_languages", lang) for lang in additional]
 
-    def validate(self, **kwargs) -> None:
+    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         if not self.name:
             raise ValueError("Language code is required.")
+        if resource_mappings:
+            all_language_codes = [
+                m.resource_name
+                for m in resource_mappings
+                if m.resource_type in (DefaultLanguage, AdditionalLanguage)
+                and m.resource_id != self.resource_id
+            ]
+            if self.name in all_language_codes:
+                raise ValueError(f"Duplicate language code: '{self.name}'.")
