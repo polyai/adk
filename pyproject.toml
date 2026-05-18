@@ -127,6 +127,7 @@ dependencies = [
     "ruff>=0.14.0",
     "ty",
     "argcomplete>=3.0.0",
+    "langcodes==3.5.1"
 ]
 
 [project.license]
