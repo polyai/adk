@@ -7166,20 +7166,6 @@ class TranslationTests(unittest.TestCase):
             t.validate()
         self.assertIn("cannot be empty", str(cm.exception))
 
-    def test_validate_empty_language_code_raises(self):
-        """validate raises ValueError when a language code is empty string."""
-        t = Translation(resource_id="tn-1", name="greeting", translations={"": "Hello"})
-        with self.assertRaises(ValueError) as cm:
-            t.validate()
-        self.assertIn("Language code cannot be empty", str(cm.exception))
-
-    def test_validate_invalid_language_code_raises(self):
-        """validate raises ValueError for an invalid BCP 47 language code."""
-        t = Translation(resource_id="tn-1", name="greeting", translations={"!!!": "Hello"})
-        with self.assertRaises(ValueError) as cm:
-            t.validate()
-        self.assertIn("Invalid language code", str(cm.exception))
-
     def test_validate_passes_with_valid_data(self):
         """validate succeeds with valid name and translations."""
         t = Translation(
@@ -7387,6 +7373,12 @@ class DefaultLanguageTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             lang.validate()
 
+    def test_validate_invalid_language_code_raises(self):
+        lang = DefaultLanguage(resource_id="!!!", name="!!!")
+        with self.assertRaises(ValueError) as cm:
+            lang.validate()
+        self.assertIn("Invalid language code", str(cm.exception))
+
     def test_discover_resources(self):
         base_path = os.path.join(os.path.dirname(__file__), "test_projects", "test_project")
         discovered = DefaultLanguage.discover_resources(base_path)
@@ -7472,6 +7464,12 @@ class AdditionalLanguageTests(unittest.TestCase):
         lang = AdditionalLanguage(resource_id="", name="")
         with self.assertRaises(ValueError):
             lang.validate()
+
+    def test_validate_invalid_language_code_raises(self):
+        lang = AdditionalLanguage(resource_id="!!!", name="!!!")
+        with self.assertRaises(ValueError) as cm:
+            lang.validate()
+        self.assertIn("Invalid language code", str(cm.exception))
 
     def test_discover_resources(self):
         base_path = os.path.join(os.path.dirname(__file__), "test_projects", "test_project")

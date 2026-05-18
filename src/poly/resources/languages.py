@@ -128,6 +128,12 @@ class DefaultLanguage(MultiResourceYamlResource):
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         if not self.name:
             raise ValueError("Default language code is required.")
+
+        if not utils.is_valid_language_code(self.name):
+            raise ValueError(
+                f"Invalid language code: '{self.name}'. Must be a valid BCP 47 language tag."
+            )
+
         if resource_mappings:
             additional_codes = [
                 m.resource_name for m in resource_mappings if m.resource_type == AdditionalLanguage
@@ -228,6 +234,12 @@ class AdditionalLanguage(MultiResourceYamlResource):
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         if not self.name:
             raise ValueError("Language code is required.")
+
+        if not utils.is_valid_language_code(self.name):
+            raise ValueError(
+                f"Invalid language code: '{self.name}'. Must be a valid BCP 47 language tag."
+            )
+
         if resource_mappings:
             all_language_codes = [
                 m.resource_name
