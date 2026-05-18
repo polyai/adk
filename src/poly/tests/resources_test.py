@@ -7276,6 +7276,91 @@ class TranslationTests(unittest.TestCase):
                 discovered = Translation.discover_resources(base_path)
         self.assertEqual(len(discovered), 1)
 
+    def test_validate_missing_configured_language_raises(self):
+        """validate raises when a configured language has no translation."""
+        t = Translation(
+            resource_id="tn-1",
+            name="greeting",
+            translations={"en-GB": "hello"},
+        )
+        mappings = [
+            ResourceMapping(
+                resource_id="en-GB",
+                resource_type=DefaultLanguage,
+                resource_name="en-GB",
+                file_path=None,
+                flow_name=None,
+                resource_prefix=None,
+            ),
+            ResourceMapping(
+                resource_id="fr-FR",
+                resource_type=AdditionalLanguage,
+                resource_name="fr-FR",
+                file_path=None,
+                flow_name=None,
+                resource_prefix=None,
+            ),
+        ]
+        with self.assertRaises(ValueError) as cm:
+            t.validate(resource_mappings=mappings)
+        self.assertIn("Missing translations for configured languages", str(cm.exception))
+        self.assertIn("fr-FR", str(cm.exception))
+
+    def test_validate_all_configured_languages_present(self):
+        """validate passes when all configured languages have translations."""
+        t = Translation(
+            resource_id="tn-1",
+            name="greeting",
+            translations={"en-GB": "hello", "fr-FR": "bonjour"},
+        )
+        mappings = [
+            ResourceMapping(
+                resource_id="en-GB",
+                resource_type=DefaultLanguage,
+                resource_name="en-GB",
+                file_path=None,
+                flow_name=None,
+                resource_prefix=None,
+            ),
+            ResourceMapping(
+                resource_id="fr-FR",
+                resource_type=AdditionalLanguage,
+                resource_name="fr-FR",
+                file_path=None,
+                flow_name=None,
+                resource_prefix=None,
+            ),
+        ]
+        t.validate(resource_mappings=mappings)
+
+    def test_validate_extra_language_ok(self):
+        """validate passes when translation has languages beyond what's configured."""
+        t = Translation(
+            resource_id="tn-1",
+            name="greeting",
+            translations={"en-GB": "hello", "fr-FR": "bonjour", "de-DE": "hallo"},
+        )
+        mappings = [
+            ResourceMapping(
+                resource_id="en-GB",
+                resource_type=DefaultLanguage,
+                resource_name="en-GB",
+                file_path=None,
+                flow_name=None,
+                resource_prefix=None,
+            ),
+        ]
+        t.validate(resource_mappings=mappings)
+
+    def test_validate_no_resource_mappings_skips_language_check(self):
+        """validate without resource_mappings only does basic checks."""
+        t = Translation(
+            resource_id="tn-1",
+            name="greeting",
+            translations={"en-GB": "hello"},
+        )
+        t.validate()
+
 
 class DefaultLanguageTests(unittest.TestCase):
     """Tests for DefaultLanguage resource."""
@@ -7316,6 +7401,54 @@ class DefaultLanguageTests(unittest.TestCase):
         proto = lang.build_update_proto()
         self.assertEqual(proto.language_code, "en-GB")
 
+    def test_validate_duplicate_with_additional_raises(self):
+        """validate raises when default language code also appears in additional languages."""
+        lang = DefaultLanguage(resource_id="en-GB", name="en-GB")
+        mappings = [
+            ResourceMapping(
+                resource_id="en-GB",
+                resource_type=DefaultLanguage,
+                resource_name="en-GB",
+                file_path=None,
+                flow_name=None,
+                resource_prefix=None,
+            ),
+            ResourceMapping(
+                resource_id="en-GB-additional",
+                resource_type=AdditionalLanguage,
+                resource_name="en-GB",
+                file_path=None,
+                flow_name=None,
+                resource_prefix=None,
+            ),
+        ]
+        with self.assertRaises(ValueError) as cm:
+            lang.validate(resource_mappings=mappings)
+        self.assertIn("also appears in additional languages", str(cm.exception))
+
+    def test_validate_no_duplicate_with_additional(self):
+        """validate passes when default and additional language codes are different."""
+        lang = DefaultLanguage(resource_id="en-GB", name="en-GB")
+        mappings = [
+            ResourceMapping(
+                resource_id="en-GB",
+                resource_type=DefaultLanguage,
+                resource_name="en-GB",
+                file_path=None,
+                flow_name=None,
+                resource_prefix=None,
+            ),
+            ResourceMapping(
+                resource_id="fr-FR",
+                resource_type=AdditionalLanguage,
+                resource_name="fr-FR",
+                file_path=None,
+                flow_name=None,
+                resource_prefix=None,
+            ),
+        ]
+        lang.validate(resource_mappings=mappings)
+
 
 class AdditionalLanguageTests(unittest.TestCase):
     """Tests for AdditionalLanguage resource."""
@@ -7332,9 +7465,7 @@ class AdditionalLanguageTests(unittest.TestCase):
 
     def test_file_path(self):
         lang = AdditionalLanguage(resource_id="fr-FR", name="fr-FR")
-        expected = os.path.join(
-            "agent_settings", "languages.yaml", "additional_languages", "fr-FR"
-        )
+        expected = os.path.join("agent_settings", "languages.yaml", "additional_languages", "fr-FR")
         self.assertEqual(lang.file_path, expected)
 
     def test_validate_empty_raises(self):
@@ -7360,6 +7491,63 @@ class AdditionalLanguageTests(unittest.TestCase):
         lang = AdditionalLanguage(resource_id="fr-FR", name="fr-FR")
         proto = lang.build_delete_proto()
         self.assertEqual(proto.code, "fr-FR")
+
+    def test_validate_duplicate_code_raises(self):
+        """validate raises when another additional language has the same code."""
+        lang = AdditionalLanguage(resource_id="fr-FR-1", name="fr-FR")
+        mappings = [
+            ResourceMapping(
+                resource_id="fr-FR-2",
+                resource_type=AdditionalLanguage,
+                resource_name="fr-FR",
+                file_path=None,
+                flow_name=None,
+                resource_prefix=None,
+            ),
+        ]
+        with self.assertRaises(ValueError) as cm:
+            lang.validate(resource_mappings=mappings)
+        self.assertIn("Duplicate language code", str(cm.exception))
+
+    def test_validate_no_duplicate_code(self):
+        """validate passes when additional language codes are all unique."""
+        lang = AdditionalLanguage(resource_id="fr-FR", name="fr-FR")
+        mappings = [
+            ResourceMapping(
+                resource_id="fr-FR",
+                resource_type=AdditionalLanguage,
+                resource_name="fr-FR",
+                file_path=None,
+                flow_name=None,
+                resource_prefix=None,
+            ),
+            ResourceMapping(
+                resource_id="de-DE",
+                resource_type=AdditionalLanguage,
+                resource_name="de-DE",
+                file_path=None,
+                flow_name=None,
+                resource_prefix=None,
+            ),
+        ]
+        lang.validate(resource_mappings=mappings)
+
+    def test_validate_duplicate_with_default_raises(self):
+        """validate raises when additional language code matches the default language."""
+        lang = AdditionalLanguage(resource_id="en-GB-additional", name="en-GB")
+        mappings = [
+            ResourceMapping(
+                resource_id="en-GB",
+                resource_type=DefaultLanguage,
+                resource_name="en-GB",
+                file_path=None,
+                flow_name=None,
+                resource_prefix=None,
+            ),
+        ]
+        with self.assertRaises(ValueError) as cm:
+            lang.validate(resource_mappings=mappings)
+        self.assertIn("Duplicate language code", str(cm.exception))
 
 
 if __name__ == "__main__":
