@@ -3762,7 +3762,7 @@ class ExperimentalConfigTests(unittest.TestCase):
         with self.assertRaises(ValidationError) as cm:
             experimental_config.validate()
         self.assertIn(
-            "'deepgram' is not one of",
+            "'fakegram' is not one of",
             str(cm.exception),
         )
 
