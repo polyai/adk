@@ -1,6 +1,72 @@
 # CHANGELOG
 
 
+## v0.20.4 (2026-05-19)
+
+### Performance Improvements
+
+- Speed up read_local_resource by eliminating redundant YAML parsing
+  ([#139](https://github.com/polyai/adk/pull/139),
+  [`3cbc449`](https://github.com/polyai/adk/commit/3cbc44965db3300cafac0eb26370398f35a39e4f))
+
+## Summary
+
+Optimizes `read_local_resource` by eliminating redundant YAML parse/dump cycles and caching repeated
+  `ast.parse` calls. Reduces `poly diff` / `poly status` / `poly push` time by ~15% across all
+  projects.
+
+## Motivation
+
+Profiling `poly diff` on large projects revealed two bottlenecks in `read_local_resource`, which is
+  called for every resource during diff, status, and push operations: - **YAML double-parse (67% of
+  time):** `from_pretty` would load YAML → transform → dump back to string, then
+  `read_local_resource` would immediately re-parse that string - **Redundant `ast.parse` (8% of
+  time):** `_get_target_function` re-parsed the same Python source multiple times per Function
+  resource
+
+## Changes
+
+- Add `from_pretty_dict` to base `YamlResource` as a standardized dict→dict transform hook (mirrors
+  existing `to_pretty_dict`), wired into `read_local_resource` for a single-parse path - Override
+  `from_pretty_dict` in FlowStep, FlowConfig, VariantAttribute, PhraseFilter for their name→ID
+  transformations - Base `read_local_resource` now does: `read_from_file` → string regex →
+  `load_yaml` → `from_pretty_dict` → `from_yaml_dict` (one YAML parse, zero dumps) - Subclasses that
+  need YAML transforms in `from_pretty` (for `read_to_raw` callers) override it with: `load_yaml` →
+  `from_pretty_dict` → `dump_yaml` - Add `@lru_cache` to `Function._get_target_function` to avoid
+  redundant `ast.parse` calls - Simplify `Pronunciation.read_local_resource` to pass the dict
+  directly instead of dump→re-parse - Simplify `Topic.read_local_resource` to use `super()` and
+  validate after
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly diff`) - [x] Tested against a live
+  Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+All 608 existing tests pass. Profiled and benchmarked across 43 projects.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Benchmarks
+
+Benchmarked `poly diff` (no local changes) across 43 projects:
+
+| Metric | Before | After | Change | |--------|--------|-------|--------| | **Total time (43
+  projects)** | 27.56s | 23.55s | **-14.5%** | | Largest project | 4.38s | 3.06s | **-30%** |
+
+Per-resource improvements (profiled on largest project):
+
+| Metric | Before | After | Change | |--------|--------|-------|--------| | `load_yaml` calls | 954
+  | 642 | -33% | | `dump_yaml` calls | 570 | 0 | -100% | | `ast.parse` calls | 1,896 | 805 | -58% |
+  | Total function calls | 18.8M | 10.3M | -45% |
+
+Savings scale with project size. Small projects (~0.2s) are dominated by import time; large projects
+  (1s+) see 20-30% improvement.
+
+
 ## v0.20.3 (2026-05-19)
 
 ### Bug Fixes
