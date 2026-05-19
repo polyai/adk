@@ -104,6 +104,40 @@ Common use cases include:
 
 The following sections describe notable feature areas available in the schema.
 
+### ASR provider
+
+The `asr` object configures the speech recognition provider and its settings. Supported providers are:
+
+| Provider | Description |
+|---|---|
+| `google` | Google Cloud Speech-to-Text service |
+| `riva` | Riva in-house speech recognition engine |
+| `openai` | OpenAI Realtime API |
+| `deepgram` | Deepgram cloud speech recognition |
+| `fano` | Fano ASR |
+| `nemo` | NeMo ASR |
+
+Model names vary by provider. Examples include:
+
+- **riva**: `"parakeet-0.6b-ctc-latency-6.0"` (architecture, size, decoder type, and latency characteristics)
+- **openai**: `"gpt-4o-transcribe"`, `"gpt-4o-mini-transcribe"`, `"whisper-1"`
+- **deepgram**: `"nova-3"`, `"nova-2"`
+
+The `provider_config` field (type: object) is available at all configuration levels (base, flow, step, and language) for provider-specific settings.
+
+Example:
+
+~~~json
+{
+  "asr": {
+    "provider": "deepgram",
+    "model": "nova-3",
+    "language": "en",
+    "provider_config": {}
+  }
+}
+~~~
+
 ### Audio enhancement
 
 Configure audio enhancement processing applied to the incoming audio stream before speech recognition. Three providers are available: `ai-coustics`, `dolby`, and `krisp`.
@@ -114,10 +148,14 @@ Krisp provides noise cancellation and voice isolation. Settings include:
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `model` | string | Krisp model variant: `"noise-cancellation"`, `"voice-isolation"`, `"telephony"`, `"telephony-lite"`, `"transcription"` | `"telephony-lite"` |
+| `model` | string | Krisp model variant: `"voicefocus_small"`, `"voicefocus"`, `"fast"`. Deprecated values: `"standard"` (remaps to `"voicefocus_small"`), `"high"` (remaps to `"voicefocus"`). | `"voicefocus_small"` |
 | `noise_suppression_level` | integer | Noise suppression intensity. `0` = off, `100` = max. | `100` |
 | `frame_duration_ms` | integer | Audio frame duration in milliseconds. Allowed values: `10`, `15`, `20`, `30`, `32`. | `20` |
 | `timeout_ms` | integer | Max milliseconds to wait for enhancement per chunk before falling back to original audio. `0` = no timeout. | `100` |
+
+!!! info "Deprecated Krisp model names"
+
+    The model names `"standard"` and `"high"` are deprecated. Use `"voicefocus_small"` and `"voicefocus"` respectively. Both deprecated names are automatically remapped at runtime, but new configurations should use the current names.
 
 Example:
 
@@ -125,7 +163,7 @@ Example:
 {
   "audio_enhancement": {
     "krisp": {
-      "model": "telephony-lite",
+      "model": "voicefocus_small",
       "noise_suppression_level": 100,
       "frame_duration_ms": 20,
       "timeout_ms": 100
@@ -172,6 +210,60 @@ Example:
 }
 ~~~
 
+### Barge-in
+
+The barge-in section controls how the agent handles user interruptions during agent speech.
+
+Notable fields include:
+
+| Field | Type | Description |
+|---|---|---|
+| `min_partial_transcripts` | number | Minimum number of partial transcripts required to trigger barge-in. To be deprecated — set to zero. |
+| `interrupted_tags` | boolean | When `true`, unsaid agent text during barge-in is wrapped in `<interrupted>` XML tags in the LLM conversation history. Defaults to `false`. |
+| `interrupted_tags_history` | boolean | When `true`, goose writes `<interrupted>` XML tags into `message.text` for visibility in stored conversation data. Independent of `interrupted_tags` (which controls the LLM view). Defaults to `false`. |
+| `max_per_call` | integer | Maximum number of barge-ins allowed per call. |
+
+Example:
+
+~~~json
+{
+  "barge_in": {
+    "interrupted_tags": true,
+    "interrupted_tags_history": false,
+    "max_per_call": 10
+  }
+}
+~~~
+
+### Smart VAD
+
+Smart VAD controls voice activity detection behavior, including function execution gating.
+
+Notable fields include:
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `default_function_wait` | duration string | Minimum effective VAD duration for standard functions. The function execution may be delayed to ensure the user is not about to interrupt. Only applies to functions not marked as gated or nongated. Inclusive of the primary VAD end duration. | `"0.8s"` |
+| `nongated_functions` | object | Functions that bypass the barrier and execute immediately. Keys are flow names (use `""` for the global scope); values are arrays of function names. **Warning**: these functions are erased from history if the user resumes speaking during execution. Avoid external side effects such as POST API calls. | — |
+| `flow_overrides` | object | Flow-specific Smart VAD configuration overrides. Each key is a flow name. | — |
+
+Example:
+
+~~~json
+{
+  "smart_vad": {
+    "default_function_wait": "0.8s",
+    "nongated_functions": {
+      "": ["lookup_balance", "get_store_hours"]
+    }
+  }
+}
+~~~
+
+!!! warning "Use `nongated_functions` with caution"
+
+    Functions listed under `nongated_functions` execute immediately without waiting for the user to finish speaking. If the user resumes speaking during execution, these functions are erased from conversation history. Do not use functions with external side effects (such as POST API calls) here, as this can produce phantom events.
+
 ### Memory
 
 Configure agent memory features, including repeat-caller identification.
@@ -212,6 +304,20 @@ Example:
     "transcription": {
       "set_transcriber_language": true
     }
+  }
+}
+~~~
+
+### `polyff`
+
+The `polyff` object is used to pass PolyAI feature flags to downstream services. Each key is a feature flag name and the value is a string.
+
+Example:
+
+~~~json
+{
+  "polyff": {
+    "some_feature_flag": "enabled"
   }
 }
 ~~~
