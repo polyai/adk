@@ -216,7 +216,6 @@ class BranchCreateFromEnvTest(unittest.TestCase):
             skip_validation=True,
             dry_run=False,
             format=False,
-            email=None,
         )
 
     def test_branch_create_env_pulls_from_specified_env(self):
@@ -235,7 +234,6 @@ class BranchCreateFromEnvTest(unittest.TestCase):
             skip_validation=True,
             dry_run=False,
             format=False,
-            email=None,
         )
 
     def test_branch_create_env_raises_when_live_deployment_missing(self):
@@ -981,7 +979,6 @@ class ChatCommandTest(unittest.TestCase):
             skip_validation=False,
             dry_run=False,
             format=False,
-            email=None,
         )
         self.proj.create_chat_session.assert_called_once()
 
