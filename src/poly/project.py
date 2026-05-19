@@ -2706,7 +2706,7 @@ class AgentStudioProject:
 
     def merge_branch(
         self, message: str, conflict_resolutions: list[dict[str, Any]] = None
-    ) -> tuple[bool, list[str], list[str]]:
+    ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
         """Merge the current branch into main in the project.
 
         Args:
@@ -2719,8 +2719,8 @@ class AgentStudioProject:
 
         Returns:
             bool: True if the merge was successful, False otherwise
-            list[str]: A list of conflict paths if the merge failed, empty list if successful
-            list[str]: A list of error messages if the merge failed, empty list if successful
+            list[dict[str, str]]: A list of conflicts
+            list[dict[str, str]]: A list of errors
         """
         branches = self.api_handler.get_branches()
         if self.branch_id not in branches.values():

@@ -1,6 +1,268 @@
 # CHANGELOG
 
 
+## v0.20.4 (2026-05-19)
+
+### Performance Improvements
+
+- Speed up read_local_resource by eliminating redundant YAML parsing
+  ([#139](https://github.com/polyai/adk/pull/139),
+  [`3cbc449`](https://github.com/polyai/adk/commit/3cbc44965db3300cafac0eb26370398f35a39e4f))
+
+## Summary
+
+Optimizes `read_local_resource` by eliminating redundant YAML parse/dump cycles and caching repeated
+  `ast.parse` calls. Reduces `poly diff` / `poly status` / `poly push` time by ~15% across all
+  projects.
+
+## Motivation
+
+Profiling `poly diff` on large projects revealed two bottlenecks in `read_local_resource`, which is
+  called for every resource during diff, status, and push operations: - **YAML double-parse (67% of
+  time):** `from_pretty` would load YAML → transform → dump back to string, then
+  `read_local_resource` would immediately re-parse that string - **Redundant `ast.parse` (8% of
+  time):** `_get_target_function` re-parsed the same Python source multiple times per Function
+  resource
+
+## Changes
+
+- Add `from_pretty_dict` to base `YamlResource` as a standardized dict→dict transform hook (mirrors
+  existing `to_pretty_dict`), wired into `read_local_resource` for a single-parse path - Override
+  `from_pretty_dict` in FlowStep, FlowConfig, VariantAttribute, PhraseFilter for their name→ID
+  transformations - Base `read_local_resource` now does: `read_from_file` → string regex →
+  `load_yaml` → `from_pretty_dict` → `from_yaml_dict` (one YAML parse, zero dumps) - Subclasses that
+  need YAML transforms in `from_pretty` (for `read_to_raw` callers) override it with: `load_yaml` →
+  `from_pretty_dict` → `dump_yaml` - Add `@lru_cache` to `Function._get_target_function` to avoid
+  redundant `ast.parse` calls - Simplify `Pronunciation.read_local_resource` to pass the dict
+  directly instead of dump→re-parse - Simplify `Topic.read_local_resource` to use `super()` and
+  validate after
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly diff`) - [x] Tested against a live
+  Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+All 608 existing tests pass. Profiled and benchmarked across 43 projects.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Benchmarks
+
+Benchmarked `poly diff` (no local changes) across 43 projects:
+
+| Metric | Before | After | Change | |--------|--------|-------|--------| | **Total time (43
+  projects)** | 27.56s | 23.55s | **-14.5%** | | Largest project | 4.38s | 3.06s | **-30%** |
+
+Per-resource improvements (profiled on largest project):
+
+| Metric | Before | After | Change | |--------|--------|-------|--------| | `load_yaml` calls | 954
+  | 642 | -33% | | `dump_yaml` calls | 570 | 0 | -100% | | `ast.parse` calls | 1,896 | 805 | -58% |
+  | Total function calls | 18.8M | 10.3M | -45% |
+
+Savings scale with project size. Small projects (~0.2s) are dominated by import time; large projects
+  (1s+) see 20-30% improvement.
+
+
+## v0.20.3 (2026-05-19)
+
+### Bug Fixes
+
+- Use dynamic key for experimental config ([#154](https://github.com/polyai/adk/pull/154),
+  [`e57a8ef`](https://github.com/polyai/adk/commit/e57a8efc00e2fb701db3c90f82d9ba209788daaf))
+
+## Summary
+
+Stop hardcoding `"default"` as the experimental config key — use the actual key from the projection
+  dict instead.
+
+## Motivation
+
+Projects with a non-default experimental config identifier fail because
+  `_read_experimental_config_from_projection` always looks up `"default"`. This dynamically reads
+  the first config entry.
+
+## Changes
+
+- Read the first key-value pair from the experimental configs dict instead of hardcoding `"default"`
+  - Use the actual config ID as both the dict key and `resource_id`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.20.2 (2026-05-18)
+
+### Bug Fixes
+
+- Correct merge_branch return type annotations in project.py
+  ([#153](https://github.com/polyai/adk/pull/153),
+  [`1ff1b59`](https://github.com/polyai/adk/commit/1ff1b59464bf1a3ace5fbbcfa8e174ff06803900))
+
+## Summary
+
+Fixes the return type annotation on `AgentStudioProject.merge_branch()` to match the actual return
+  type from the handler layer.
+
+## Motivation
+
+The `project.py` method declared `list[str]` for the conflicts and errors return values, but the
+  handlers (`interface.py`, `sync_client.py`) correctly return `list[dict[str, str]]`. This mismatch
+  could mislead type checkers and developers.
+
+## Changes
+
+- Updated `merge_branch` return type from `tuple[bool, list[str], list[str]]` to `tuple[bool,
+  list[dict[str, str]], list[dict[str, str]]]` - Updated docstring to match
+
+## Test strategy
+
+- [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
+## v0.20.1 (2026-05-15)
+
+### Bug Fixes
+
+- Handle non-string merge conflict values ([#129](https://github.com/polyai/adk/pull/129),
+  [`15c3902`](https://github.com/polyai/adk/commit/15c39027a77335f8890cea8ff06c079882b80398))
+
+## Summary
+
+Branch merge conflicts can contain non-string values (ints, bools, dicts, lists, None) from the
+  platform's conflict resolver. Previously the CLI crashed or showed useless output for these types.
+
+## Motivation
+
+The conflict resolution UI called `merge_strings()` on all values regardless of type, crashing on
+  dicts/ints/None. Merge values can also be empty or missing entirely, which caused similar
+  failures. Non-string conflicts also showed a blank "Needs decision" panel with no values
+  displayed.
+
+## Changes
+
+- Fix crash when merge values are empty or None - Gate `merge_strings()` behind a type check — only
+  called when theirs/ours are strings; None/missing base falls back to empty string - Show
+  non-string values inline in the conflict panel instead of hiding behind "Multiline or long values"
+  - Add type-appropriate edit prompts: `confirm` for bools, validated text for ints/floats, JSON
+  input for lists - Hide "Edit manually" for dict values (pick a side only) - Extract
+  `prompt_typed_edit` and validators into `console.py` - Remove redundant fallback merge logic from
+  the interactive handler
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs <img width="872" height="322" alt="Screenshot 2026-05-06 at 15 49 49"
+  src="https://github.com/user-attachments/assets/0c651da5-dd41-4e07-92ea-57cc7f3cf5f4" />
+
+<!-- Tested with numeric entity min/max conflicts on a live project -->
+
+- Send empty parameters ([#144](https://github.com/polyai/adk/pull/144),
+  [`5fe68e5`](https://github.com/polyai/adk/commit/5fe68e5e4ade1a0fed31e02f503fb3c9588e6e3c))
+
+## Summary Send an empty list of parameters when no parameters
+
+## Motivation Couldn't delete function parameters
+
+## Changes - Send parameters for function types that accept it, even when empty
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+### Chores
+
+- Remove client ID of unused connections ([#149](https://github.com/polyai/adk/pull/149),
+  [`fe0191b`](https://github.com/polyai/adk/commit/fe0191b5c62b99f6b1de3e56c4c9d13e8b5b760a))
+
+## Summary Remove client ID and connection of unused Auth0 Connection
+
+## Motivation Dead code which was confusing
+
+## Changes Remove unused constants
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+### Documentation
+
+- Update getting started for poly start ([#147](https://github.com/polyai/adk/pull/147),
+  [`86aa472`](https://github.com/polyai/adk/commit/86aa472c663bdf17d3741a784f8a5c8374192dee))
+
+## Summary - Reworks the getting started flow to lead with `poly start` as the primary onboarding
+  path — signup, API key generation, and project creation in one command - Manual API key setup via
+  env vars kept as an alternative for existing users - Documents the credential file
+  (`~/.poly/credentials.json`) and the resolution order (credential file → region env var →
+  `POLY_ADK_KEY`) - Addresses Naorin's ask to update docs ahead of `poly start` going to prod
+
+### Pages changed - **get-started.md** — Steps 1–5 (manual signup, find IDs, generate key) collapsed
+  into a single `poly start` step - **prerequisites.md** — Option A (`poly start`) / Option B
+  (manual) for API key setup, credential resolution order documented - **installation.md** — "Set
+  your API key" points at `poly start`, credential file fallback noted
+
+## Test plan - [x] `mkdocs serve` — all three pages render correctly - [ ] Internal links between
+  pages resolve (prerequisites ↔ installation ↔ get-started) - [ ] Screenshot/image references still
+  work (no images were changed) - [ ] Should be merged after or alongside Ruari's `poly start` PRs
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
+
+
 ## v0.20.0 (2026-05-15)
 
 ### Features

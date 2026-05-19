@@ -3734,12 +3734,18 @@ class ExperimentalConfigTests(unittest.TestCase):
         experimental_config = ExperimentalConfig(
             resource_id="experimental-config-123",
             name="experimental_config",
-            config={"asr": {"provider": "deepgram", "model": "nova-2", "language": "en"}},
+            config={
+                "asr": {
+                    "provider": "fakegram",
+                    "model": "nova-2",
+                    "language": "en"
+                }
+            }
         )
         with self.assertRaises(ValidationError) as cm:
             experimental_config.validate()
         self.assertIn(
-            "'deepgram' is not one of",
+            "'fakegram' is not one of",
             str(cm.exception),
         )
 

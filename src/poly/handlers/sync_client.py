@@ -626,13 +626,15 @@ class SyncClientHandler:
             .get("experimentalConfigs", {})
             .get("entities", {})
         )
-        # Only get the default experimental config
-        default_experimental_config = experimental_configs.get("default", {})
+        config_id, config_data = (
+            next(iter(experimental_configs.items()), {}) if experimental_configs else {}
+        )
+        # Only get the first experimental config
         return {
-            "default": ExperimentalConfig(
-                resource_id="default",
+            config_id: ExperimentalConfig(
+                resource_id=config_id,
                 name="experimental_config",
-                config=default_experimental_config.get("features", {}),
+                config=config_data.get("features", {}),
             )
         }
 

@@ -52,6 +52,7 @@ from poly.output.console import (
     output_merge_conflict_table,
     print_merge_conflict_interactive_header,
     print_deployments,
+    prompt_typed_edit,
     print_deployment_show,
     print_welcome_message,
     mask_api_key,
@@ -100,13 +101,20 @@ def enrich_branch_merge_conflicts(conflicts: list[dict[str, Any]]) -> list[dict[
         if not path or path[-1] in {"updatedAt", "createdAt"}:
             out.append(row)
             continue
-        merged = merge_strings(row["baseValue"], row["theirsValue"], row["oursValue"])
+        base_value = row.get("baseValue") or ""
+        theirs_value = row.get("theirsValue") or ""
+        ours_value = row.get("oursValue") or ""
         fk = _branch_merge_conflict_file_key(path)
         row["visual_path"] = os.sep.join(path)
-        row["merged_value"] = merged
-        row["can_auto_merge"] = not contains_merge_conflict(merged)
         row["file_key"] = fk
         row["conflicts_in_resource"] = counts[fk]
+        if all(isinstance(v, str) for v in [base_value, theirs_value, ours_value]):
+            merged = merge_strings(base_value, theirs_value, ours_value)
+            row["merged_value"] = merged
+            row["can_auto_merge"] = not contains_merge_conflict(merged)
+        else:
+            row["merged_value"] = None
+            row["can_auto_merge"] = False
         out.append(row)
     return out
 
@@ -2637,11 +2645,10 @@ class AgentStudioCLI:
         def _is_heavy_content(c: dict[str, Any]) -> bool:
             for key in ("baseValue", "theirsValue", "oursValue"):
                 v = c.get(key, "")
-                if not isinstance(v, str):
+                s = v if isinstance(v, str) else str(v)
+                if "\n" in s:
                     return True
-                if "\n" in v:
-                    return True
-                if len(v) > _BRANCH_MERGE_LONG_LINE_THRESHOLD:
+                if len(s) > _BRANCH_MERGE_LONG_LINE_THRESHOLD:
                     return True
             return False
 
@@ -2654,15 +2661,8 @@ class AgentStudioCLI:
             clean_path = conflict.get("visual_path") or os.sep.join(path)
             merged_version = conflict.get("merged_value")
             existing_resolution = existing_resolutions.get(clean_path)
-            if merged_version is None:
-                merged_version = merge_strings(
-                    conflict["baseValue"], conflict["theirsValue"], conflict["oursValue"]
-                )
             auto_merged = conflict.get("can_auto_merge")
-            if auto_merged is None:
-                auto_merged = not contains_merge_conflict(merged_version)
-
-            fk = conflict.get("file_key") or _branch_merge_conflict_file_key(path)
+            fk = conflict.get("file_key")
             index_in_resource[fk] = index_in_resource.get(fk, 0) + 1
             idx = index_in_resource[fk]
             total = int(conflict.get("conflicts_in_resource") or 1)
@@ -2699,9 +2699,11 @@ class AgentStudioCLI:
                     {"name": "Use main", "value": "ours"},
                     {"name": f"Use branch — {branch_label}", "value": "theirs"},
                     {"name": "Use original (base)", "value": "base"},
-                    {"name": "Edit in editor", "value": "edit"},
                 ]
             )
+            original = conflict.get("theirsValue", conflict.get("oursValue"))
+            if not isinstance(original, dict):
+                choices.append({"name": "Edit manually", "value": "edit"})
 
             extension = ".py" if path[-1] == "code" else ".txt"
 
@@ -2716,8 +2718,17 @@ class AgentStudioCLI:
                     resolutions.append(_auto_merge_resolution(path, merged_version))
                     break
                 if answer == "edit":
+                    if isinstance(original, (bool, int, float, list)):
+                        edited_val = prompt_typed_edit(original)
+                        if edited_val is None:
+                            return []
+                        resolutions.append(
+                            {"path": path, "value": edited_val, "strategy": "theirs"}
+                        )
+                        break
+
                     try:
-                        if heavy:
+                        if heavy and merged_version is not None:
                             edited = edit_in_editor(
                                 merged_version, extension=extension, filename=fk
                             )

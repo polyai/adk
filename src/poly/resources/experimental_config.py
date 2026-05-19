@@ -37,8 +37,8 @@ class ExperimentalConfig(Resource):
     def make_pretty(contents: str, **kwargs) -> str:
         return contents
 
-    @staticmethod
-    def from_pretty(contents: str, **kwargs) -> str:
+    @classmethod
+    def from_pretty(cls, contents: str, **kwargs) -> str:
         return contents
 
     @classmethod

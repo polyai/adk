@@ -51,8 +51,8 @@ It demonstrates the end-to-end developer workflow and shows how the ADK fits alo
 
     ---
 
-    Install the ADK locally and prepare your development environment.
-    [Open installation](./installation.md)
+    Install the ADK and get your first project running.
+    [Open getting started](./get-started.md)
 
 -   **Build an agent**
 

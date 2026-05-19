@@ -559,6 +559,126 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
         out = enrich_branch_merge_conflicts(conflicts)
         self.assertNotIn("merged_value", out[0])
 
+    def test_enrich_dict_values_skips_merge_and_marks_not_auto_mergeable(self):
+        from poly.cli import enrich_branch_merge_conflicts
+
+        conflicts = [
+            {
+                "path": ["entities", "TOPIC-1", "content"],
+                "baseValue": {"id": 1, "name": "base"},
+                "theirsValue": {"id": 1, "name": "theirs"},
+                "oursValue": {"id": 1, "name": "ours"},
+            },
+        ]
+        out = enrich_branch_merge_conflicts(conflicts)
+        self.assertIsNone(out[0]["merged_value"])
+        self.assertFalse(out[0]["can_auto_merge"])
+        self.assertEqual(out[0]["visual_path"], os.path.join("entities", "TOPIC-1", "content"))
+
+    def test_enrich_none_base_with_string_theirs_ours_auto_merges(self):
+        from poly.cli import enrich_branch_merge_conflicts
+
+        conflicts = [
+            {
+                "path": ["user", "city"],
+                "baseValue": None,
+                "theirsValue": "NYC",
+                "oursValue": "Boston",
+            },
+        ]
+        out = enrich_branch_merge_conflicts(conflicts)
+        self.assertIsNotNone(out[0]["merged_value"])
+        self.assertFalse(out[0]["can_auto_merge"])
+
+    def test_enrich_numeric_values_skips_merge(self):
+        from poly.cli import enrich_branch_merge_conflicts
+
+        conflicts = [
+            {
+                "path": ["products", "0", "price"],
+                "baseValue": 10,
+                "theirsValue": 12,
+                "oursValue": 15,
+            },
+        ]
+        out = enrich_branch_merge_conflicts(conflicts)
+        self.assertIsNone(out[0]["merged_value"])
+        self.assertFalse(out[0]["can_auto_merge"])
+
+    def test_enrich_array_values_skips_merge(self):
+        from poly.cli import enrich_branch_merge_conflicts
+
+        conflicts = [
+            {
+                "path": ["tags", "list"],
+                "baseValue": ["javascript", "react"],
+                "theirsValue": ["javascript", "vue"],
+                "oursValue": ["javascript", "typescript"],
+            },
+        ]
+        out = enrich_branch_merge_conflicts(conflicts)
+        self.assertIsNone(out[0]["merged_value"])
+        self.assertFalse(out[0]["can_auto_merge"])
+
+    def test_enrich_missing_base_with_string_theirs_ours_auto_merges(self):
+        """Add conflicts where baseValue is absent but theirs/ours are strings."""
+        from poly.cli import enrich_branch_merge_conflicts
+
+        conflicts = [
+            {
+                "path": ["user", "name"],
+                "theirsValue": "Alice",
+                "oursValue": "Bob",
+            },
+        ]
+        out = enrich_branch_merge_conflicts(conflicts)
+        self.assertIsNotNone(out[0]["merged_value"])
+        self.assertFalse(out[0]["can_auto_merge"])
+
+    def test_enrich_none_base_with_non_string_theirs_ours_skips_merge(self):
+        """Delete-vs-update where the surviving values are dicts, not strings."""
+        from poly.cli import enrich_branch_merge_conflicts
+
+        conflicts = [
+            {
+                "path": ["user"],
+                "baseValue": {"id": 1, "name": "John"},
+                "oursValue": None,
+                "theirsValue": {"id": 1, "name": "John", "age": 35},
+            },
+        ]
+        out = enrich_branch_merge_conflicts(conflicts)
+        self.assertIsNone(out[0]["merged_value"])
+        self.assertFalse(out[0]["can_auto_merge"])
+
+    def test_enrich_mixed_string_and_non_string_conflicts(self):
+        from poly.cli import enrich_branch_merge_conflicts
+
+        conflicts = [
+            {
+                "path": ["kb", "t1", "name"],
+                "baseValue": "old",
+                "theirsValue": "new-theirs",
+                "oursValue": "new-ours",
+            },
+            {
+                "path": ["kb", "t1", "metadata"],
+                "baseValue": {"key": "val"},
+                "theirsValue": {"key": "val2"},
+                "oursValue": {"key": "val3"},
+            },
+        ]
+        out = enrich_branch_merge_conflicts(conflicts)
+        self.assertIsNotNone(out[0]["merged_value"])
+        self.assertFalse(out[0]["can_auto_merge"])
+        self.assertIsNone(out[1]["merged_value"])
+        self.assertFalse(out[1]["can_auto_merge"])
+        fk = os.path.join("kb", "t1")
+        self.assertEqual(out[0]["conflicts_in_resource"], 2)
+        self.assertEqual(out[1]["conflicts_in_resource"], 2)
+        self.assertEqual(out[0]["file_key"], fk)
+        self.assertEqual(out[1]["file_key"], fk)
+
     def test_auto_merge_resolution_payload(self):
         from poly.cli import _auto_merge_resolution
 
