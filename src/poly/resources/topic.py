@@ -91,12 +91,12 @@ class Topic(YamlResource):
         )
 
         file_name = os.path.splitext(os.path.basename(file_path))[0]
-        yaml_name = topic.name if topic.name != resource_name else None
+        expected_file_name = utils.clean_name(topic.name)
 
-        if yaml_name and file_name != utils.clean_name(yaml_name):
+        if file_name != expected_file_name:
             raise ValueError(
-                f"Topic name '{yaml_name}' in file {file_name}.yaml does not match "
-                f"expected filename: {utils.clean_name(yaml_name)}.yaml"
+                f"Topic name '{topic.name}' in file {file_name}.yaml does not match "
+                f"expected filename: {expected_file_name}.yaml"
             )
         return topic
 
