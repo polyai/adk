@@ -28,6 +28,7 @@ components:
         - openai
         - fano
         - nemo
+        - deepgram
 
     asr_common_config_properties:
       type: object
@@ -41,6 +42,7 @@ components:
             - google: Google Cloud Speech-to-Text service
             - riva: Riva in-house speech recognition engine
             - openai: OpenAI realtime API
+            - deepgram: Deepgram cloud speech recognition
         model:
           type: string
           minLength: 1
@@ -52,6 +54,7 @@ components:
             - riva: models use detailed naming like "parakeet-0.6b-ctc-latency-6.0" specifying
               architecture, size, decoder type, and latency characteristics
             - openai: "gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"
+            - deepgram: "nova-3", "nova-2"
         language:
           type: string
           minLength: 2
@@ -94,6 +97,9 @@ components:
             If set to true, the ASR will return text without any punctuation.
             NOTE: This is a RIVA-specific feature only.
           type: boolean
+        provider_config:
+          type: object
+          description: Provider specific config.
       dependentRequired:
         provider: [model]
         model: [provider]
@@ -140,9 +146,6 @@ components:
       type: object
       description: ASR properties that can only be configured at the base level (not overrideable by flow/step/language)
       properties:
-        provider_config:
-          type: object
-          description: Provider specific config.
         use_asr_lib:
           type: boolean
           description: Whether to use the asr_lib for experimental ASR providers.
@@ -414,9 +417,9 @@ components:
             model:
               type: string
               description: |
-                Model/quality tier: "standard", "high", "fast"
-                Note: Currently all map to the same SDK model but infrastructure is ready for different tiers
-              default: "standard"
+                Model/quality tier: "voicefocus_small", "voicefocus", "fast"
+                Deprecated: "standard" remaps to "voicefocus_small", "high" remaps to "voicefocus".
+              default: "voicefocus_small"
             noise_reduction:
               type: number
               description: Background noise removal strength (0.0=off, 1.0=max)
@@ -544,6 +547,12 @@ components:
             min_partial_transcripts:
               type: number
               description: Minimum number of partial transcripts required to trigger barge-in. To be deprecated, set to zero.
+            interrupted_tags:
+              type: boolean
+              description: When true, unsaid agent text during barge-in is wrapped in <interrupted> XML tags in the LLM conversation history. Defaults to false.
+            interrupted_tags_history:
+              type: boolean
+              description: When true, goose writes <interrupted> XML tags into message.text for visibility in stored conversation data. Independent of interrupted_tags (which controls the LLM view). Defaults to false.
             max_per_call:
               type: integer
               description: Maximum number of barge-ins allowed per call.
@@ -676,6 +685,35 @@ components:
             - "": ["send_payment"]
               checkout_flow: ["process_payment", "validate_card"]
               booking_flow: ["create_booking", "confirm_booking"]
+        default_function_wait:
+          $ref: "#/components/schemas/proto_duration"
+          default: "0.8s"
+          description: >
+            Minimum effective VAD duration for standard functions.
+            The function execution may be delayed to ensure the user is not about
+            to interrupt. Only applies to functions that are not marked as
+            gated or nongated.
+            This is inclusive of the primary VAD end duration.
+        nongated_functions:
+          type: object
+          description: >
+            Functions that bypass the barrier and execute immediately.
+
+            WARNING: These functions will be erased from history if the user
+            resumes speaking during execution. You should ensure that there are no
+            external side effects like a POST API call, otherwise there will be phantom
+            events.
+          properties:
+            "":
+              type: array
+              items:
+                type: string
+              examples:
+                - ["lookup_balance", "get_store_hours"]
+          additionalProperties:
+            type: array
+            items:
+              type: string
         flow_overrides:
           type: object
           description: Flow-specific Smart VAD configuration overrides. Each key should be a flow name.
@@ -1473,6 +1511,11 @@ components:
           $ref: "#/components/schemas/webhooks"
         dtmf:
           $ref: "#/components/schemas/dtmf"
+        polyff:
+          type: object
+          description: PolyAI feature flags propagated to downstream services.
+          additionalProperties:
+            type: string
       additionalProperties: false
 
 paths:
