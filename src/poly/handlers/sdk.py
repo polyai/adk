@@ -80,7 +80,7 @@ class SourcererSDK:
 
         # Initialize session with auth headers
         correlation_id = f"adk-{uuid.uuid4()}"
-        self.email = os.environ.get("POLY_ADK_EMAIL")
+        self.email = os.environ.get("ADK_COMMAND_USER_OVERRIDE")
         self.session = requests.Session()
         headers = {
             "Content-Type": "application/json",
