@@ -258,7 +258,6 @@ class AgentStudioCLI:
                 "Examples:\n"
                 "  poly login\n"
                 "  poly login --region us-1\n"
-                "Note: Enterprise clients should specify a region."
             ),
         )
         login_parser.add_argument(
