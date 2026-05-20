@@ -3945,7 +3945,7 @@ class AgentStudioCLI:
                 return
 
         # --- 2. Sign in via device flow ---
-        jwt_access_token = cls._signin()
+        jwt_access_token = cls._signin("studio")
 
         # --- 3. Authorise and save API key ---
         cls._authenticate_and_save_key(jwt_access_token, region="studio")
@@ -3971,7 +3971,7 @@ class AgentStudioCLI:
         )
         questionary.press_any_key_to_continue("Press any key to continue...").ask()
 
-        jwt_access_token = cls._signin()
+        jwt_access_token = cls._signin(region)
         cls._authenticate_and_save_key(jwt_access_token, region=region)
 
     @classmethod
@@ -4022,12 +4022,12 @@ class AgentStudioCLI:
         return pat
 
     @classmethod
-    def _signin(cls) -> str:
+    def _signin(cls, region: str) -> str:
         """Sign in via the Auth0 device authorization flow and return a JWT access token."""
         auth0_handler = Auth0Handler()
 
         try:
-            device_response = auth0_handler.request_device_code()
+            device_response = auth0_handler.request_device_code(region)
         except Exception as e:
             error(f"Failed to start authorization: {e}")
             sys.exit(1)
@@ -4050,7 +4050,7 @@ class AgentStudioCLI:
             while not access_token:
                 time.sleep(interval)
                 try:
-                    token_response = auth0_handler.poll_device_token(device_code)
+                    token_response = auth0_handler.poll_device_token(device_code, region)
                     access_token = token_response.get("access_token")
                 except requests.HTTPError as e:
                     try:
