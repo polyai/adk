@@ -47,6 +47,15 @@ poly --help
 
 ## Step 2 — Sign in and set up your API key
 
+The right setup path depends on the type of Agent Studio account you have:
+
+- **Self-serve accounts** (signed up at [studio.poly.ai](https://studio.poly.ai)) — use `poly start` for an end-to-end setup.
+- **Enterprise accounts** (a workspace provisioned by PolyAI on a regional cluster such as `us-1`, `euw-1`, or `uk-1`) — follow the [manual API key setup](#manual-api-key-setup-enterprise-accounts) below. `poly start` is not yet supported for enterprise clusters.
+
+If you're not sure which you have, your PolyAI contact can confirm.
+
+### Self-serve accounts — `poly start`
+
 ```bash
 poly start
 ```
@@ -57,25 +66,25 @@ poly start
 2. **API key** — generates a key and saves it to `~/.poly/credentials.json`. Future `poly` commands pick it up automatically — no environment variables to manage.
 3. **Create a project** — optionally creates a new Agent Studio project and pulls it down locally so you can start editing immediately.
 
-!!! tip "Already have an account?"
+!!! tip "Already have a self-serve account?"
     If `poly start` detects an existing API key (from the credential file or an environment variable), it skips authentication and goes straight to project creation.
 
-??? note "Manual API key setup"
+### Manual API key setup (enterprise accounts) { #manual-api-key-setup-enterprise-accounts }
 
-    If you prefer to manage API keys through the Agent Studio UI:
+If your workspace is on an enterprise cluster, create the API key in the Agent Studio UI and export it locally:
 
-    1. Log in to [Agent Studio](https://studio.poly.ai) and open your workspace.
-    2. In the **API Keys** tab (next to the **Users** tab), click **+ API key**.
+1. Log in to Agent Studio for your region and open your workspace.
+2. In the **API Keys** tab (next to the **Users** tab), click **+ API key**.
 
-    ![Generating an API key in Agent Studio — API Keys tab with the + API key button highlighted](../assets/api-key-data-access.png)
+![Generating an API key in Agent Studio — API Keys tab selected, showing the + API key button in the top-right](../assets/api-keys-tab.png)
 
-    Then export the key:
+Then export the key:
 
-    ```bash
-    export POLY_ADK_KEY=<your-api-key>
-    ```
+```bash
+export POLY_ADK_KEY=<your-api-key>
+```
 
-    To make it permanent, add the export line to your shell profile (`~/.zshrc` or `~/.bashrc`).
+To make it permanent, add the export line to your shell profile (`~/.zshrc` or `~/.bashrc`). If you work across more than one region, use the region-scoped variables in [per-region API keys](#per-region-api-keys) below.
 
 !!! info "How the ADK resolves API keys"
     The ADK checks for credentials in the following order:
@@ -85,8 +94,6 @@ poly start
     3. **General env var** — `POLY_ADK_KEY`
 
     The first match wins. If nothing is found, the CLI raises an error.
-
-    If you work across multiple regions, you can set region-scoped variables. See [per-region API keys](#per-region-api-keys) below.
 
 ## Step 3 — Start building
 
@@ -154,11 +161,16 @@ poly pull
 
 ## Already have an agent in Agent Studio?
 
-If you have an existing project — built in the browser, by a PolyAI team, or by any other method — connect it to the ADK in two commands:
+If you have an existing project — built in the browser, by a PolyAI team, or by any other method — connect it to the ADK with `poly init` once your API key is set up:
 
 ```bash
+# Self-serve accounts:
 poly start    # sign in and save your API key (skip if already done)
 poly init     # interactive prompts to pick region, account, and project
+
+# Enterprise accounts:
+export POLY_ADK_KEY=<your-api-key>   # see "Manual API key setup" above
+poly init
 ```
 
 `poly init` creates a local directory and pulls the full project configuration. From there the standard `poly status` / `poly push` / `poly pull` workflow applies.

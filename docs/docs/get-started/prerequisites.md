@@ -30,7 +30,12 @@ See the [uv installation guide](https://docs.astral.sh/uv/getting-started/instal
 
 ## API key
 
-The ADK needs an API key to communicate with Agent Studio. `poly start` handles this for you — see [Getting started](./get-started.md#step-2--sign-in-and-set-up-your-api-key) for the full walkthrough.
+The ADK needs an API key to communicate with Agent Studio. How you obtain it depends on your account type:
+
+- **Self-serve accounts** ([studio.poly.ai](https://studio.poly.ai)) — `poly start` signs you in and saves the key automatically.
+- **Enterprise accounts** (regional clusters such as `us-1`, `euw-1`, `uk-1`) — create the key in the Agent Studio UI and export it locally. `poly start` is not yet supported for enterprise clusters.
+
+See [Getting started](./get-started.md#step-2--sign-in-and-set-up-your-api-key) for the full walkthrough.
 
 !!! warning "API keys are workspace-scoped"
     An API key grants access to one specific Agent Studio workspace. When you run `poly init`, it lists all projects visible to that key. If you see projects that don't look like yours, you may be using a key scoped to the wrong workspace. Contact your PolyAI contact to confirm.
@@ -40,7 +45,7 @@ The ADK needs an API key to communicate with Agent Studio. `poly start` handles 
 Before continuing, confirm:
 
 - `uv` is installed
-- You have an API key — either saved by `poly start` or exported manually
+- You have an API key — saved by `poly start` (self-serve) or exported manually (enterprise)
 
 ## Next step
 
