@@ -248,7 +248,7 @@ class AgentStudioCLI:
         signin_parser = subparsers.add_parser(
             "signin",
             parents=[verbose_parent, debug_parent],
-            help="Sign in to your Agent Studio account and save API key credentials for CLI access.",
+            help="Sign in to an existing Agent Studio account",
             description=(
                 "Sign in to your existing Agent Studio account and save API key credentials"
                 " for CLI access.\n\n"
@@ -265,8 +265,8 @@ class AgentStudioCLI:
             "--region",
             type=str,
             choices=REGIONS,
-            default="studio",
-            help="Region to sign in to. Defaults to 'studio' (the free-tier region). Enterprise clients should specify their region.",
+            default=None,
+            help="Region to sign in to. If omitted, you will be prompted to select one.",
         )
 
         # INIT
@@ -3962,7 +3962,7 @@ class AgentStudioCLI:
             info("You can create a new project later by running 'poly project create'")
 
     @classmethod
-    def signin(cls, region: str = "studio") -> None:
+    def signin(cls, region: str | None = None) -> None:
         """Sign in to an existing Agent Studio account and save API key credentials."""
         print_welcome_message()
         plain(
@@ -3971,11 +3971,19 @@ class AgentStudioCLI:
         )
         questionary.press_any_key_to_continue("Press any key to continue...").ask()
 
+        if region is None:
+            region = questionary.select(
+                "Select your region:",
+                choices=REGIONS,
+                default="studio",
+            ).ask()
+
         jwt_access_token = cls._signin(region)
         cls._authenticate_and_save_key(jwt_access_token, region=region)
+        success("Signed in successfully!")
 
     @classmethod
-    def _authenticate_and_save_key(cls, jwt_access_token: str, region: str) -> str:
+    def _authenticate_and_save_key(cls, jwt_access_token: str, region: str) -> None:
         """Authorise the user, fetch or create a PAT, and save it to the credential file."""
         api_handler = AgentStudioInterface()
 
@@ -3986,6 +3994,9 @@ class AgentStudioCLI:
         user_pats = api_handler.get_pats(region=region, jwt_token=jwt_access_token)
         if user_pats:
             pat = user_pats[0].get("key")
+            if not pat:
+                error("API key not found in account data. Please contact support.")
+                sys.exit(1)
             os.environ["POLY_ADK_KEY"] = pat
             success(f"Found existing API Token: {mask_api_key(pat)}")
         else:
@@ -4019,7 +4030,6 @@ class AgentStudioCLI:
         plain("API key has been saved to your credential file for future use.")
         info(f"Credential file path: {CREDENTIALS_FILE_PATH}")
         plain("")
-        return pat
 
     @classmethod
     def _signin(cls, region: str) -> str:
@@ -4050,7 +4060,7 @@ class AgentStudioCLI:
             while not access_token:
                 time.sleep(interval)
                 try:
-                    token_response = auth0_handler.poll_device_token(device_code, region)
+                    token_response = auth0_handler.poll_device_token(region, device_code)
                     access_token = token_response.get("access_token")
                 except requests.HTTPError as e:
                     try:

@@ -21,7 +21,8 @@ class AuthDetails:
 
 REGION_TO_AUTH_DETAILS = {
     "studio": AuthDetails(
-        base_url="https://login.studio.poly.ai", device_client_id="6uLCbsn6UxXJlnGKE4ypqwQqt3UqTUnd"
+        base_url="https://login.studio.poly.ai",
+        device_client_id="6uLCbsn6UxXJlnGKE4ypqwQqt3UqTUnd",
     ),
     "us-1": AuthDetails(
         base_url="https://login.us-1.polyai.app",
@@ -36,7 +37,8 @@ REGION_TO_AUTH_DETAILS = {
         device_client_id="SjDXzApQAQ9TkJHSDlASLkw7lBOe2QA4",
     ),
     "dev": AuthDetails(
-        base_url="https://login.dev.polyai.app", device_client_id="xkHpmZsOmINkW5Khe406tHJPm9XkDVdf"
+        base_url="https://login.dev.polyai.app",
+        device_client_id="xkHpmZsOmINkW5Khe406tHJPm9XkDVdf",
     ),
     "staging": AuthDetails(
         base_url="https://login.staging.polyai.app",
@@ -50,14 +52,14 @@ class Auth0Handler:
 
     @staticmethod
     def make_request(
-        region: str,
+        base_url: str,
         endpoint: str,
         method: str,
         data: Optional[dict] = None,
         params: Optional[dict] = None,
     ) -> dict:
         """Make a request to the Auth0 API."""
-        url = REGION_TO_AUTH_DETAILS.get(region).base_url + endpoint
+        url = base_url + endpoint
 
         headers = {"Content-Type": "application/json"}
 
@@ -104,18 +106,26 @@ class Auth0Handler:
             Dict containing device_code, user_code, verification_uri,
             verification_uri_complete, expires_in, and interval.
         """
+        auth_details = REGION_TO_AUTH_DETAILS.get(region)
+        if auth_details is None:
+            raise ValueError(
+                f"Unknown region '{region}'. Valid regions: {', '.join(REGION_TO_AUTH_DETAILS)}"
+            )
         data = {
-            "client_id": REGION_TO_AUTH_DETAILS.get(region).device_client_id,
+            "client_id": auth_details.device_client_id,
             "scope": "openid profile email",
             "audience": "https://platform.polyai.app/api",
         }
-        return cls.make_request(region, "/oauth/device/code", method="POST", data=data)
+        return cls.make_request(
+            auth_details.base_url, "/oauth/device/code", method="POST", data=data
+        )
 
     @classmethod
-    def poll_device_token(cls, device_code: str, region: str) -> dict:
+    def poll_device_token(cls, region: str, device_code: str) -> dict:
         """Poll for a token after the user has authorized the device.
 
         Args:
+            region: The Auth0 region to poll.
             device_code: The device_code from request_device_code.
 
         Returns:
@@ -125,9 +135,14 @@ class Auth0Handler:
             requests.HTTPError: 403 with 'authorization_pending' or 'slow_down'
                 while the user hasn't authorized yet.
         """
+        auth_details = REGION_TO_AUTH_DETAILS.get(region)
+        if auth_details is None:
+            raise ValueError(
+                f"Unknown region '{region}'. Valid regions: {', '.join(REGION_TO_AUTH_DETAILS)}"
+            )
         data = {
-            "client_id": REGION_TO_AUTH_DETAILS.get(region).device_client_id,
+            "client_id": auth_details.device_client_id,
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
             "device_code": device_code,
         }
-        return cls.make_request(region, "/oauth/token", method="POST", data=data)
+        return cls.make_request(auth_details.base_url, "/oauth/token", method="POST", data=data)
