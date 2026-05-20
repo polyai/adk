@@ -244,29 +244,29 @@ class AgentStudioCLI:
             help="Base path to initialize the project. Defaults to current working directory.",
         )
 
-        # Signin (existing enterprise users)
-        signin_parser = subparsers.add_parser(
-            "signin",
+        # Login (existing enterprise users)
+        login_parser = subparsers.add_parser(
+            "login",
             parents=[verbose_parent, debug_parent],
-            help="Sign in to an existing Agent Studio account",
+            help="Log in to an existing Agent Studio account",
             description=(
-                "Sign in to your existing Agent Studio account and save API key credentials"
+                "Log in to your existing Agent Studio account and save API key credentials"
                 " for CLI access.\n\n"
                 "This command will open a browser window for you to authenticate and authorize"
                 " the CLI. After successful authentication, the necessary API key credentials"
                 " will be saved to a local credential file for future CLI commands.\n\n"
                 "Examples:\n"
-                "  poly signin\n"
-                "  poly signin --region us-1\n"
+                "  poly login\n"
+                "  poly login --region us-1\n"
                 "Note: Enterprise clients should specify a region."
             ),
         )
-        signin_parser.add_argument(
+        login_parser.add_argument(
             "--region",
             type=str,
             choices=REGIONS,
             default=None,
-            help="Region to sign in to. If omitted, you will be prompted to select one.",
+            help="Region to log in to. If omitted, you will be prompted to select one.",
         )
 
         # INIT
@@ -1381,8 +1381,8 @@ class AgentStudioCLI:
             elif args.command == "start":
                 cls.start(base_path=args.base_path)
 
-            elif args.command == "signin":
-                cls.signin(region=args.region)
+            elif args.command == "login":
+                cls.login(region=args.region)
 
         except Exception as e:
             if hasattr(args, "json") and args.json:
@@ -3962,11 +3962,11 @@ class AgentStudioCLI:
             info("You can create a new project later by running 'poly project create'")
 
     @classmethod
-    def signin(cls, region: str | None = None) -> None:
-        """Sign in to an existing Agent Studio account and save API key credentials."""
+    def login(cls, region: str | None = None) -> None:
+        """Log in to an existing Agent Studio account and save API key credentials."""
         print_welcome_message()
         plain(
-            "This will guide you through signing in to your Agent Studio account"
+            "This will guide you through logging in to your Agent Studio account"
             " and setting up your API key for use with the ADK."
         )
         questionary.press_any_key_to_continue("Press any key to continue...").ask()
@@ -3985,7 +3985,7 @@ class AgentStudioCLI:
 
         jwt_access_token = cls._signin(region)
         cls._authenticate_and_save_key(jwt_access_token, region=region)
-        success("Signed in successfully!")
+        success("Logged in successfully!")
 
     @classmethod
     def _authenticate_and_save_key(cls, jwt_access_token: str, region: str) -> None:
