@@ -7,10 +7,10 @@ import ast
 import difflib
 import importlib.resources
 import inspect
+import json
 import logging
 import os
 import re
-import json
 from typing import Callable, Optional
 
 from poly.resources import Function, FunctionStep, Resource, ResourceMapping
