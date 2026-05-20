@@ -3974,7 +3974,12 @@ class AgentStudioCLI:
         if region is None:
             region = questionary.select(
                 "Select your region:",
-                choices=REGIONS,
+                choices=[
+                    questionary.Choice("Studio", value="studio"),
+                    questionary.Choice("US (us-1) — Enterprise", value="us-1"),
+                    questionary.Choice("UK (uk-1) — Enterprise", value="uk-1"),
+                    questionary.Choice("EU West (euw-1) — Enterprise", value="euw-1"),
+                ],
                 default="studio",
             ).ask()
 
