@@ -3949,7 +3949,23 @@ class AgentStudioCLI:
         # --- 3. Authorise and save API key ---
         cls._authenticate_and_save_key(jwt_access_token, region="studio")
 
-        # --- 4. Optionally create a project ---
+        # --- 4. Wait for the new PAT to become active (needed for project creation) ---
+        api_handler = AgentStudioInterface()
+        with console.status("[info]Verifying API key is active...[/info]"):
+            for attempt in range(20):
+                try:
+                    api_handler.get_accounts(region="studio")
+                    break
+                except Exception:
+                    time.sleep(1)
+            else:
+                error(
+                    "API key was created but is not active yet."
+                    " Please wait a moment and try 'poly project create'."
+                )
+                return
+
+        # --- 5. Optionally create a project ---
         create_project = questionary.confirm(
             "Would you like to create a new project in Agent Studio now?",
             auto_enter=False,
@@ -4011,22 +4027,6 @@ class AgentStudioCLI:
                     region=region, jwt_token=jwt_access_token, name="adk-key"
                 )
                 os.environ["POLY_ADK_KEY"] = pat
-
-                attempts = 0
-                # After creating a new PAT, there may be a short delay before it's active.
-                while attempts < 10:
-                    try:
-                        api_handler.get_accounts(region=region)
-                        break
-                    except Exception:
-                        attempts += 1
-                        time.sleep(1)
-                else:
-                    error(
-                        "API key was created but is not active yet."
-                        " Please wait a moment and try again."
-                    )
-                    sys.exit(1)
 
             success(f"Created a new API Key: {mask_api_key(pat)}")
 
