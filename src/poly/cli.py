@@ -3952,7 +3952,7 @@ class AgentStudioCLI:
         # --- 4. Wait for the new PAT to become active (needed for project creation) ---
         api_handler = AgentStudioInterface()
         with console.status("[info]Verifying API key is active...[/info]"):
-            for attempt in range(20):
+            for _ in range(20):
                 try:
                     api_handler.get_accounts(region="studio")
                     break
