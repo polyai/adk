@@ -159,6 +159,7 @@ class AgentStudioProject:
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
+    email: Optional[str] = None
 
     # Store resources that were not loaded from the status file
     # So they aren't considered locally deleted when pushing/pulling
@@ -182,6 +183,7 @@ class AgentStudioProject:
                 self.account_id,
                 self.project_id,
                 self.branch_id,
+                email=self.email,
             )
         self.branch_id = self._api_handler.branch_id
         if self.branch_id:
@@ -1879,7 +1881,7 @@ class AgentStudioProject:
         if name in branches:
             branch_id = branches[name]
             branch_api_handler = AgentStudioInterface(
-                self.region, self.account_id, self.project_id, branch_id
+                self.region, self.account_id, self.project_id, branch_id, email=self.email
             )
             logger.info(f"Pulling resources from branch '{name}'...")
             resources, _ = branch_api_handler.pull_resources()

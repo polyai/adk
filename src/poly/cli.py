@@ -194,6 +194,14 @@ class AgentStudioCLI:
             help="Display debug logs.",
         )
 
+        email_parent = ArgumentParser(add_help=False)
+        email_parent.add_argument(
+            "--email",
+            type=str,
+            help=SUPPRESS,
+            default=None,
+        )
+
         subparsers = parser.add_subparsers(dest="command", required=True)
 
         # DOCS
@@ -244,7 +252,7 @@ class AgentStudioCLI:
         # INIT
         init_parser = subparsers.add_parser(
             "init",
-            parents=[verbose_parent, json_parent, debug_parent],
+            parents=[verbose_parent, json_parent, debug_parent, email_parent],
             help="Initialize a new Agent Studio project.",
             description="Initialize a new Agent Studio project.\n\nExamples:\n  poly init --region eu-west-1 --account_id 123 --project_id my_project\n  poly init  # (interactive selection)",
             formatter_class=RawTextHelpFormatter,
@@ -362,7 +370,7 @@ class AgentStudioCLI:
         # PULL
         pull_parser = subparsers.add_parser(
             "pull",
-            parents=[verbose_parent, json_parent, debug_parent],
+            parents=[verbose_parent, json_parent, debug_parent, email_parent],
             help="Pull the latest project configuration from Agent Studio.",
             description="Pull the latest project configuration from Agent Studio.\n\nExamples:\n  poly pull --path /path/to/project\n  poly pull -f  # force overwrite local changes",
             formatter_class=RawTextHelpFormatter,
@@ -402,7 +410,7 @@ class AgentStudioCLI:
         # PUSH
         push_parser = subparsers.add_parser(
             "push",
-            parents=[verbose_parent, json_parent, debug_parent],
+            parents=[verbose_parent, json_parent, debug_parent, email_parent],
             help="Push the project configuration to Agent Studio.",
             description="Push the project configuration to Agent Studio.\n\nExamples:\n  poly push --path /path/to/project\n  poly push --skip-validation --dry-run",
             formatter_class=RawTextHelpFormatter,
@@ -639,14 +647,14 @@ class AgentStudioCLI:
 
         branch_list_parser = branch_subparsers.add_parser(
             "list",
-            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent, email_parent],
             help="List all branches in the project.",
         )
         branch_list_parser.set_defaults(branch_subcommand="list")
 
         branch_create_parser = branch_subparsers.add_parser(
             "create",
-            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent, email_parent],
             help="Create a new branch.",
         )
         branch_create_parser.add_argument(
@@ -671,7 +679,7 @@ class AgentStudioCLI:
 
         branch_switch_parser = branch_subparsers.add_parser(
             "switch",
-            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent, email_parent],
             help="Switch to a different branch.",
         )
         branch_switch_parser.add_argument(
@@ -705,14 +713,14 @@ class AgentStudioCLI:
 
         branch_current_parser = branch_subparsers.add_parser(
             "current",
-            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent, email_parent],
             help="Show the current branch.",
         )
         branch_current_parser.set_defaults(branch_subcommand="current")
 
         branch_delete_parser = branch_subparsers.add_parser(
             "delete",
-            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent, email_parent],
             help="Interactively select and delete a branch.",
         )
         branch_delete_parser.add_argument(
@@ -725,7 +733,7 @@ class AgentStudioCLI:
 
         branch_merge_parser = branch_subparsers.add_parser(
             "merge",
-            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent],
+            parents=[branch_path_parent, verbose_parent, json_parent, debug_parent, email_parent],
             help="Merge branch into main",
         )
         branch_merge_parser.add_argument(
@@ -810,7 +818,7 @@ class AgentStudioCLI:
         # CHAT
         chat_parser = subparsers.add_parser(
             "chat",
-            parents=[verbose_parent, debug_parent, json_parent],
+            parents=[verbose_parent, debug_parent, json_parent, email_parent],
             help="Start an interactive chat session with the agent.",
             description=(
                 "Start an interactive chat session with the agent.\n\n"
@@ -976,7 +984,7 @@ class AgentStudioCLI:
 
         deployment_list_parser = deployments_subparsers.add_parser(
             "list",
-            parents=[deployments_path_parent, json_parent, verbose_parent],
+            parents=[deployments_path_parent, json_parent, verbose_parent, email_parent],
             help="List deployments for the project.",
             description=(
                 "List deployments for the project.\n\n"
@@ -1020,7 +1028,7 @@ class AgentStudioCLI:
 
         deployment_show_parser = deployments_subparsers.add_parser(
             "show",
-            parents=[deployments_path_parent, json_parent],
+            parents=[deployments_path_parent, json_parent, email_parent],
             help="Show details for a specific deployment.",
             description=(
                 "Show detailed metadata and included deployments for a specific"
@@ -1047,7 +1055,13 @@ class AgentStudioCLI:
 
         deployment_promote_parser = deployments_subparsers.add_parser(
             "promote",
-            parents=[deployments_path_parent, json_parent, verbose_parent, debug_parent],
+            parents=[
+                deployments_path_parent,
+                json_parent,
+                verbose_parent,
+                debug_parent,
+                email_parent,
+            ],
             help="Promote a deployment to the next environment.",
             description=(
                 "Promote a deployment to the next environment.\n\nExamples:\n  poly deployments promote --from <deployment_id> --to <target_env>\n"
@@ -1089,7 +1103,13 @@ class AgentStudioCLI:
 
         deployment_rollback_parser = deployments_subparsers.add_parser(
             "rollback",
-            parents=[deployments_path_parent, json_parent, verbose_parent, debug_parent],
+            parents=[
+                deployments_path_parent,
+                json_parent,
+                verbose_parent,
+                debug_parent,
+                email_parent,
+            ],
             help="Rollback sandbox/main to a previous version.",
             description=(
                 "Rollback a deployment to a previous version.\n\nExamples:\n  poly deployments rollback --to <deployment_id>\n"
@@ -1165,6 +1185,7 @@ class AgentStudioCLI:
                     args.from_projection,
                     output_json=args.json,
                     output_json_projection=args.output_json_projection,
+                    email=args.email,
                 )
 
             elif args.command == "push":
@@ -1174,6 +1195,7 @@ class AgentStudioCLI:
                     args.skip_validation,
                     args.dry_run,
                     args.format,
+                    args.email,
                     args.from_projection,
                     output_json=args.json,
                     output_commands=args.output_json_commands,
@@ -1230,6 +1252,7 @@ class AgentStudioCLI:
                     input_messages=input_messages,
                     conversation_id=args.conversation_id,
                     output_json=args.json,
+                    email=args.email,
                 )
 
             elif args.command == "review":
@@ -1249,7 +1272,7 @@ class AgentStudioCLI:
 
             elif args.command == "branch":
                 if args.branch_subcommand == "list":
-                    cls.branch_list(args.path, args.json)
+                    cls.branch_list(args.path, args.json, email=args.email)
 
                 elif args.branch_subcommand == "create":
                     cls.branch_create(
@@ -1258,6 +1281,7 @@ class AgentStudioCLI:
                         args.json,
                         getattr(args, "environment", None),
                         getattr(args, "force", False),
+                        email=args.email,
                     )
 
                 elif args.branch_subcommand == "switch":
@@ -1269,17 +1293,23 @@ class AgentStudioCLI:
                         args.json,
                         output_json_projection=args.output_json_projection,
                         from_projection=args.from_projection,
+                        email=args.email,
                     )
 
                 elif args.branch_subcommand == "current":
-                    cls.get_current_branch(args.path, args.json)
+                    cls.get_current_branch(args.path, args.json, email=args.email)
 
                 elif args.branch_subcommand == "delete":
-                    cls.branch_delete(args.path, args.branch_name, args.json)
+                    cls.branch_delete(args.path, args.branch_name, args.json, email=args.email)
 
                 elif args.branch_subcommand == "merge":
                     cls.branch_merge(
-                        args.path, args.message, args.json, args.interactive, args.resolutions
+                        args.path,
+                        args.message,
+                        args.json,
+                        args.interactive,
+                        args.resolutions,
+                        email=args.email,
                     )
 
             elif args.command == "format":
@@ -1314,6 +1344,7 @@ class AgentStudioCLI:
                         args.hash,
                         args.json,
                         args.details,
+                        email=args.email,
                     )
                 elif args.deployments_subcommand == "show":
                     cls.deployments_show(
@@ -1321,6 +1352,7 @@ class AgentStudioCLI:
                         args.hash,
                         args.env,
                         args.json,
+                        email=args.email,
                     )
                 elif args.deployments_subcommand == "promote":
                     cls.deployments_promote(
@@ -1331,6 +1363,7 @@ class AgentStudioCLI:
                         force=args.force,
                         output_json=args.json,
                         dry_run=args.dry_run,
+                        email=args.email,
                     )
                 elif args.deployments_subcommand == "rollback":
                     cls.deployments_rollback(
@@ -1340,6 +1373,7 @@ class AgentStudioCLI:
                         force=args.force,
                         output_json=args.json,
                         dry_run=args.dry_run,
+                        email=args.email,
                     )
 
             elif args.command == "start":
@@ -1422,7 +1456,9 @@ class AgentStudioCLI:
         return parsed
 
     @classmethod
-    def _load_project(cls, base_path: str, output_json: bool = False) -> AgentStudioProject:
+    def _load_project(
+        cls, base_path: str, output_json: bool = False, email: Optional[str] = None
+    ) -> AgentStudioProject:
         """Read project config or exit with a helpful error if not found.
 
         Args:
@@ -1443,6 +1479,7 @@ class AgentStudioCLI:
                 "No project configuration found. Run [bold]poly init[/bold] to initialize a project."
             )
             sys.exit(1)
+        project.email = email
         return project
 
     @classmethod
@@ -1814,9 +1851,10 @@ class AgentStudioCLI:
         from_projection: str = None,
         output_json: bool = False,
         output_json_projection: bool = False,
+        email: Optional[str] = None,
     ) -> None:
         """Pull the latest project configuration from the Agent Studio."""
-        project = cls._load_project(base_path, output_json=output_json)
+        project = cls._load_project(base_path, output_json=output_json, email=email)
         if not output_json:
             info(f"Pulling project [bold]{project.account_id}/{project.project_id}[/bold]...")
 
@@ -1877,12 +1915,13 @@ class AgentStudioCLI:
         skip_validation: bool = False,
         dry_run: bool = False,
         format: bool = False,
+        email: Optional[str] = None,
         from_projection: str = None,
         output_json: bool = False,
         output_commands: bool = False,
     ) -> None:
         """Push the project configuration to the Agent Studio."""
-        project = cls._load_project(base_path, output_json=output_json)
+        project = cls._load_project(base_path, output_json=output_json, email=email)
         if not output_json and not output_commands:
             info(
                 f"Pushing local changes for [bold]{project.account_id}/{project.project_id}[/bold]..."
@@ -2299,9 +2338,11 @@ class AgentStudioCLI:
                 error(str(e))
 
     @classmethod
-    def branch_list(cls, base_path: str, output_json: bool = False) -> None:
+    def branch_list(
+        cls, base_path: str, output_json: bool = False, email: Optional[str] = None
+    ) -> None:
         """List branches in the Agent Studio project."""
-        project = cls._load_project(base_path, output_json=output_json)
+        project = cls._load_project(base_path, output_json=output_json, email=email)
 
         current_branch, branches = project.get_branches()
 
@@ -2333,9 +2374,10 @@ class AgentStudioCLI:
         output_json: bool = False,
         env: str = None,
         force: bool = False,
+        email: Optional[str] = None,
     ) -> None:
         """Create a new branch in the Agent Studio project."""
-        project = cls._load_project(base_path, output_json=output_json)
+        project = cls._load_project(base_path, output_json=output_json, email=email)
 
         if project.branch_id != "main":
             if output_json:
@@ -2414,9 +2456,10 @@ class AgentStudioCLI:
         output_json: bool = False,
         output_json_projection: bool = False,
         from_projection: str = None,
+        email: Optional[str] = None,
     ) -> None:
         """Switch to a different branch in the Agent Studio project."""
-        project = cls._load_project(base_path, output_json=output_json)
+        project = cls._load_project(base_path, output_json=output_json, email=email)
 
         if not branch_name:
             if output_json:
@@ -2495,9 +2538,11 @@ class AgentStudioCLI:
             sys.exit(1)
 
     @classmethod
-    def get_current_branch(cls, base_path: str, output_json: bool = False) -> None:
+    def get_current_branch(
+        cls, base_path: str, output_json: bool = False, email: Optional[str] = None
+    ) -> None:
         """Get the current branch of the Agent Studio project."""
-        project = cls._load_project(base_path, output_json=output_json)
+        project = cls._load_project(base_path, output_json=output_json, email=email)
 
         current_branch = project.get_current_branch()
         if output_json:
@@ -2521,12 +2566,13 @@ class AgentStudioCLI:
         base_path: str,
         branch_name: Optional[str] = None,
         output_json: bool = False,
+        email: Optional[str] = None,
     ) -> None:
         """Interactively select and delete a branch from the Agent Studio project.
 
         If branch_name is provided, delete that specific branch without an interactive prompt.
         """
-        project = cls._load_project(base_path, output_json=output_json)
+        project = cls._load_project(base_path, output_json=output_json, email=email)
         current_branch, branches = project.get_branches()
 
         # Filter out 'main' — it cannot be deleted
@@ -2771,6 +2817,7 @@ class AgentStudioCLI:
         output_json: bool = False,
         interactive: bool = False,
         resolutions_file: str = None,
+        email: Optional[str] = None,
     ):
         """Merge the current branch into main, with optional conflict resolutions."""
         if message is None or (isinstance(message, str) and not message.strip()):
@@ -2808,7 +2855,7 @@ class AgentStudioCLI:
                     error(f"Failed to parse resolutions: {exc}")
                 sys.exit(1)
 
-        project = cls._load_project(base_path, output_json=output_json)
+        project = cls._load_project(base_path, output_json=output_json, email=email)
 
         branch_name = project.get_current_branch()
         ctx = console.status("[info]Merging branch...[/info]") if not output_json else nullcontext()
@@ -3058,9 +3105,10 @@ class AgentStudioCLI:
         output_json: bool = False,
         input_messages: Optional[list[str]] = None,
         conversation_id: Optional[str] = None,
+        email: Optional[str] = None,
     ) -> None:
         """Start an interactive chat session with the agent."""
-        project = cls._load_project(base_path)
+        project = cls._load_project(base_path, email=email)
 
         json_output = {}
 
@@ -3439,6 +3487,7 @@ class AgentStudioCLI:
         version_hash: str,
         environment: str = "sandbox",
         output_json: bool = False,
+        email: Optional[str] = None,
     ) -> None:
         """Show detailed metadata and included deployments for a single deployment.
 
@@ -3453,7 +3502,7 @@ class AgentStudioCLI:
             environment: Environment to query (sandbox, pre-release, live).
             output_json: If True, emit machine-readable JSON.
         """
-        project = cls._load_project(base_path, output_json=output_json)
+        project = cls._load_project(base_path, output_json=output_json, email=email)
         env_versions, active_deployment_hashes = project.get_deployments(client_env=environment)
 
         if not env_versions:
@@ -3564,6 +3613,7 @@ class AgentStudioCLI:
         version_hash: str = None,
         output_json: bool = False,
         details: bool = False,
+        email: Optional[str] = None,
     ) -> None:
         """List deployment history for the project.
 
@@ -3580,7 +3630,7 @@ class AgentStudioCLI:
             output_json: If True, print result as JSON instead of rich text.
             details: If True, print full metadata for each deployment.
         """
-        project = cls._load_project(base_path)
+        project = cls._load_project(base_path, email=email)
         versions, active_deployment_hashes = project.get_deployments(client_env=environment)
 
         if not versions:
@@ -3671,6 +3721,7 @@ class AgentStudioCLI:
         force: bool = False,
         output_json: bool = False,
         dry_run: bool = False,
+        email: Optional[str] = None,
     ) -> None:
         """Promote a deployment to a different environment.
 
@@ -3683,7 +3734,7 @@ class AgentStudioCLI:
             output_json: If True, print result as JSON instead of rich text.
             dry_run: If True, show what would be promoted without actually promoting.
         """
-        project = cls._load_project(base_path, output_json=output_json)
+        project = cls._load_project(base_path, output_json=output_json, email=email)
 
         result: dict = {"success": False, "to_env": to_env}
         deployment_hash = None
@@ -3794,9 +3845,10 @@ class AgentStudioCLI:
         force: bool = False,
         output_json: bool = False,
         dry_run: bool = False,
+        email: Optional[str] = None,
     ) -> None:
         """Rollback sandbox/main to a previous deployment."""
-        project = cls._load_project(base_path, output_json=output_json)
+        project = cls._load_project(base_path, output_json=output_json, email=email)
 
         versions, active_deployment_hashes = project.get_deployments("sandbox")
 

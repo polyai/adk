@@ -53,6 +53,7 @@ class SourcererSDK:
         project_id: str,
         branch_id: Optional[str] = None,
         base_url: Optional[str] = None,
+        email: Optional[str] = None,
     ):
         """Initialize the Sourcerer SDK
 
@@ -80,7 +81,7 @@ class SourcererSDK:
 
         # Initialize session with auth headers
         correlation_id = f"adk-{uuid.uuid4()}"
-        self.email = os.environ.get("POLY_ADK_EMAIL")
+        self.email = email
         self.session = requests.Session()
         headers = {
             "Content-Type": "application/json",

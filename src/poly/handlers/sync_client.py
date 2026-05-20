@@ -82,6 +82,7 @@ class SyncClientHandler:
         account_id: str,
         project_id: str,
         branch_id: Optional[str] = None,
+        email: Optional[str] = None,
     ):
         if region not in SourcererSDK.ENVIRONMENT_URLS:
             raise ValueError(
@@ -97,6 +98,7 @@ class SyncClientHandler:
             account_id=account_id,
             project_id=project_id,
             branch_id=branch_id,
+            email=email,
         )
 
     @property

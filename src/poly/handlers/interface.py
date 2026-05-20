@@ -90,12 +90,15 @@ class AgentStudioInterface:
         account_id: Optional[str] = None,
         project_id: Optional[str] = None,
         branch_id: Optional[str] = None,
+        email: Optional[str] = None,
     ):
         self.region = region
         self.account_id = account_id
         self.project_id = project_id
         if region and account_id and project_id:
-            self.sync_client = SyncClientHandler(region, account_id, project_id, branch_id)
+            self.sync_client = SyncClientHandler(
+                region, account_id, project_id, branch_id, email=email
+            )
 
     @staticmethod
     def get_accessible_regions() -> list[str]:
