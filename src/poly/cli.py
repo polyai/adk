@@ -135,9 +135,8 @@ def _format_gist_choice(g: dict) -> str:
 class AgentStudioCLI:
     """CLI Interface for Agent Studio."""
 
-    @classmethod
+    @staticmethod
     def _branch_name_completer(
-        cls,
         prefix: str,
         action: Any = None,
         parser: Any = None,
@@ -147,7 +146,7 @@ class AgentStudioCLI:
         """Return deletable branch names for argcomplete tab-completion."""
         try:
             base_path = getattr(parsed_args, "path", None) or os.getcwd()
-            project = cls.read_project_config(base_path)
+            project = AgentStudioCLI.read_project_config(base_path)
             if project is None:
                 return []
             _, branches = project.get_branches()
@@ -565,7 +564,7 @@ class AgentStudioCLI:
             help="Base path to the project. Defaults to current working directory.",
         )
 
-        review_subparsers = review_parser.add_subparsers(dest="review_subcommand")
+        review_subparsers = review_parser.add_subparsers(dest="review_subcommand", required=True)
 
         review_create_parser = review_subparsers.add_parser(
             "create",
@@ -683,7 +682,7 @@ class AgentStudioCLI:
         )
         branch_switch_parser.add_argument(
             "branch_name", nargs="?", help="Name of the branch to switch to."
-        )
+        ).completer = cls._branch_name_completer
         branch_switch_parser.add_argument(
             "--format",
             action="store_true",
