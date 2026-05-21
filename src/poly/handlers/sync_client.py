@@ -936,13 +936,13 @@ class SyncClientHandler:
         if not language_data:
             return {DefaultLanguage: {}, AdditionalLanguage: {}}
 
-        default_code = language_data.get("defaultLanguage", "en-GB")
-        default_languages = {
-            default_code: DefaultLanguage(
+        default_code = language_data.get("defaultLanguage")
+        default_languages = {}
+        if default_code:
+            default_languages[default_code] = DefaultLanguage(
                 resource_id=default_code,
                 name=default_code,
             )
-        }
         additional_languages = {}
         for lang_id, lang in (
             language_data.get("additionalLanguages", {}).get("entities", {}).items()
