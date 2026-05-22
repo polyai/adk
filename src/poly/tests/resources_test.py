@@ -3730,6 +3730,104 @@ class FunctionStepTests(unittest.TestCase):
             self.assertIsNotNone(result.function_id)
             self.assertRegex(result.function_id, r"^FUNCTION-[a-f0-9]{8}$")
 
+    def test_read_local_resource_conditions_have_bare_child_step_id(self):
+        """Conditions extracted from goto_step calls should use bare step IDs
+        without the flow name prefix."""
+        code_with_goto = (
+            "from _gen import *  # <AUTO GENERATED>\n\n\n"
+            "def my_func(conv: Conversation, flow: Flow):\n"
+            '    flow.goto_step("Target Step", "Step reached")\n'
+        )
+        step_yaml = (
+            "step_type: default_step\n"
+            "name: Target Step\n"
+            "conditions: []\n"
+            "extracted_entities: []\n"
+            "prompt: Some prompt\n"
+        )
+
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="test_flow",
+                resource_name="Test Flow",
+                resource_type=FlowConfig,
+                file_path="flows/test_flow/flow_config.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+            ),
+            ResourceMapping(
+                resource_id="Test Flow_FLOW_STEPS-abc",
+                resource_name="Target Step",
+                resource_type=FlowStep,
+                file_path="flows/test_flow/steps/target_step.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+            ),
+        ]
+
+        with mock_read_from_file({
+            "flows/test_flow/function_steps/my_func.py": code_with_goto,
+            "flows/test_flow/steps/target_step.yaml": step_yaml,
+        }):
+            result = FunctionStep.read_local_resource(
+                file_path="flows/test_flow/function_steps/my_func.py",
+                resource_id="Test Flow_my_func",
+                resource_name="my_func",
+                resource_mappings=resource_mappings,
+                known_latency_control={},
+            )
+
+        self.assertEqual(len(result.conditions), 1)
+        condition = result.conditions[0]
+        self.assertEqual(condition.name, "Step reached")
+        self.assertEqual(condition.child_step, "FLOW_STEPS-abc")
+        self.assertFalse(
+            condition.child_step.startswith("Test Flow_"),
+            "child_step should not contain the flow name prefix",
+        )
+
+    def test_read_local_resource_condition_child_step_is_function_step(self):
+        """Conditions pointing to FunctionStep children should also use bare step IDs."""
+        code_with_goto = (
+            "from _gen import *  # <AUTO GENERATED>\n\n\n"
+            "def router(conv: Conversation, flow: Flow):\n"
+            '    flow.goto_step("other_handler", "Route to handler")\n'
+        )
+
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="test_flow",
+                resource_name="Test Flow",
+                resource_type=FlowConfig,
+                file_path="flows/test_flow/flow_config.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+            ),
+            ResourceMapping(
+                resource_id="Test Flow_FUNCTION_STEPS-def",
+                resource_name="other_handler",
+                resource_type=FunctionStep,
+                file_path="flows/test_flow/function_steps/other_handler.py",
+                resource_prefix=None,
+                flow_name="Test Flow",
+            ),
+        ]
+
+        with mock_read_from_file(code_with_goto):
+            result = FunctionStep.read_local_resource(
+                file_path="flows/test_flow/function_steps/router.py",
+                resource_id="Test Flow_router",
+                resource_name="router",
+                resource_mappings=resource_mappings,
+                known_latency_control={},
+            )
+
+        self.assertEqual(len(result.conditions), 1)
+        condition = result.conditions[0]
+        self.assertEqual(condition.name, "Route to handler")
+        self.assertEqual(condition.child_step, "FUNCTION_STEPS-def")
+        self.assertEqual(condition.condition_type, ConditionType.FUNCTION_STEP)
+
 
 class ExperimentalConfigTests(unittest.TestCase):
     def test_validate_experimental_config(self):
