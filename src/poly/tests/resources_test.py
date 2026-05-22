@@ -60,6 +60,7 @@ from poly.resources.resource import (
     ResourceMapping,
     _parse_multi_resource_path,
 )
+from poly.resources.resource_utils import extract_go_to_flows, extract_go_to_steps
 from poly.resources.safety_filters import (
     ChatSafetyFilters,
     GeneralSafetyFilters,
@@ -6986,6 +6987,119 @@ class ParseMultiResourcePathTests(unittest.TestCase):
 
         self.assertEqual(yaml_path, "D:\\data\\entities.yaml")
         self.assertEqual(segments, ["entities", "customer_name"])
+
+
+class ExtractGoToStepsTests(unittest.TestCase):
+    """Tests for extract_go_to_steps regex extraction."""
+
+    def test_single_arg_double_quotes(self):
+        """Single step name in double quotes returns (name, None)."""
+        code = 'flow.goto_step("my_step")'
+        self.assertEqual(extract_go_to_steps(code), [("my_step", None)])
+
+    def test_single_arg_single_quotes(self):
+        """Single step name in single quotes returns (name, None)."""
+        code = "flow.goto_step('my_step')"
+        self.assertEqual(extract_go_to_steps(code), [("my_step", None)])
+
+    def test_two_args_double_quotes(self):
+        """Step and condition in double quotes returns both."""
+        code = 'flow.goto_step("my_step", "my_cond")'
+        self.assertEqual(extract_go_to_steps(code), [("my_step", "my_cond")])
+
+    def test_two_args_single_quotes(self):
+        """Step and condition in single quotes returns both."""
+        code = "flow.goto_step('my_step', 'my_cond')"
+        self.assertEqual(extract_go_to_steps(code), [("my_step", "my_cond")])
+
+    def test_mixed_quotes_double_step_single_condition(self):
+        """Double-quoted step with single-quoted condition."""
+        code = """flow.goto_step("my_step", 'my_cond')"""
+        self.assertEqual(extract_go_to_steps(code), [("my_step", "my_cond")])
+
+    def test_mixed_quotes_single_step_double_condition(self):
+        """Single-quoted step with double-quoted condition."""
+        code = """flow.goto_step('my_step', "my_cond")"""
+        self.assertEqual(extract_go_to_steps(code), [("my_step", "my_cond")])
+
+    def test_multiple_calls(self):
+        """Multiple goto_step calls are all extracted."""
+        code = (
+            'flow.goto_step("step_a")\n'
+            'flow.goto_step("step_b", "cond_b")\n'
+            "flow.goto_step('step_c')\n"
+        )
+        self.assertEqual(
+            extract_go_to_steps(code),
+            [("step_a", None), ("step_b", "cond_b"), ("step_c", None)],
+        )
+
+    def test_no_matches_returns_empty_list(self):
+        """Code with no goto_step calls returns an empty list."""
+        code = "x = 1\nprint(x)"
+        self.assertEqual(extract_go_to_steps(code), [])
+
+    def test_whitespace_around_comma(self):
+        """Extra whitespace around comma and inside parens is tolerated."""
+        code = 'flow.goto_step(  "step" ,  "cond"  )'
+        result = extract_go_to_steps(code)
+        self.assertEqual(result, [("step", "cond")])
+
+    def test_whitespace_after_opening_paren(self):
+        """Whitespace after opening paren for single arg."""
+        code = 'flow.goto_step(   "step"   )'
+        result = extract_go_to_steps(code)
+        self.assertEqual(result, [("step", None)])
+
+    def test_escaped_quotes_in_step_name(self):
+        """Escaped quotes within the step name string are preserved."""
+        code = r'flow.goto_step("Don\'t stop")'
+        result = extract_go_to_steps(code)
+        self.assertEqual(result, [("Don\\'t stop", None)])
+
+    def test_escaped_quotes_in_double_quoted_string(self):
+        """Escaped double quotes within a double-quoted string."""
+        code = r'flow.goto_step("say \"hello\"")'
+        result = extract_go_to_steps(code)
+        self.assertEqual(result, [('say \\"hello\\"', None)])
+
+    def test_step_name_with_spaces(self):
+        """Step names with spaces are extracted correctly."""
+        code = 'flow.goto_step("Step One", "Label Two")'
+        self.assertEqual(extract_go_to_steps(code), [("Step One", "Label Two")])
+
+
+class ExtractGoToFlowsTests(unittest.TestCase):
+    """Tests for extract_go_to_flows regex extraction."""
+
+    def test_single_flow_double_quotes(self):
+        """Single flow name in double quotes."""
+        code = 'conv.goto_flow("billing_flow")'
+        self.assertEqual(extract_go_to_flows(code), ["billing_flow"])
+
+    def test_single_flow_single_quotes(self):
+        """Single flow name in single quotes."""
+        code = "conv.goto_flow('billing_flow')"
+        self.assertEqual(extract_go_to_flows(code), ["billing_flow"])
+
+    def test_multiple_flows(self):
+        """Multiple goto_flow calls are all extracted."""
+        code = (
+            'conv.goto_flow("flow_a")\n'
+            "conv.goto_flow('flow_b')\n"
+            'conv.goto_flow("flow_c")\n'
+        )
+        self.assertEqual(extract_go_to_flows(code), ["flow_a", "flow_b", "flow_c"])
+
+    def test_no_matches_returns_empty_list(self):
+        """Code with no goto_flow calls returns an empty list."""
+        code = "x = 1\nconv.some_other_method('test')"
+        self.assertEqual(extract_go_to_flows(code), [])
+
+    def test_flow_name_with_spaces(self):
+        """Flow names with spaces are extracted correctly."""
+        code = 'conv.goto_flow("My Flow Name")'
+        self.assertEqual(extract_go_to_flows(code), ["My Flow Name"])
 
 
 if __name__ == "__main__":

@@ -1476,6 +1476,16 @@ class AgentStudioProject:
                 )
                 post_push_deleted_resources.setdefault(FlowStep, {})[dummy.resource_id] = dummy
 
+        # The backend auto-creates conditions from goto_step() calls in function step
+        # code. To avoid duplicate condition labels, create new FunctionSteps with stub
+        # code, let our explicit conditions be created, then update with the real code.
+        for resource_id, resource in list(new_resources.get(FunctionStep, {}).items()):
+            if isinstance(resource, FunctionStep) and resource.conditions:
+                stub = copy.deepcopy(resource)
+                stub.code = f"def {resource.name}(conv: Conversation, flow: Flow):\n    pass\n"
+                new_resources[FunctionStep][resource_id] = stub
+                updated_resources.setdefault(FunctionStep, {})[resource_id] = resource
+
         # Deleting flow config deletes all its steps/functions, so we don't need to
         for flow_config_id in deleted_resources.get(FlowConfig, {}):
             for resource_type in [FlowStep, Function, FunctionStep]:
@@ -2053,6 +2063,7 @@ class AgentStudioProject:
             additional_kwargs["known_function_id"] = None
             additional_kwargs["known_position"] = None
             additional_kwargs["known_latency_control"] = {}
+            additional_kwargs["known_conditions"] = []
 
             if original_resource:
                 if not isinstance(original_resource, FunctionStep):
@@ -2062,6 +2073,7 @@ class AgentStudioProject:
                 additional_kwargs["known_function_id"] = original_resource.function_id
                 additional_kwargs["known_position"] = original_resource.position
                 additional_kwargs["known_latency_control"] = original_resource.latency_control
+                additional_kwargs["known_conditions"] = original_resource.conditions
 
         try:
             resource = resource_class.read_local_resource(
