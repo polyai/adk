@@ -9,7 +9,7 @@ import requests
 from google.protobuf.message import Message
 
 from poly.handlers.platform_api import PlatformAPIHandler
-from poly.handlers.sdk import SourcererAPIError
+from poly.handlers.sdk import SourcererAPIError, SourcererSDK
 from poly.handlers.sync_client import SyncClientHandler
 from poly.resources import BaseResource, Resource
 
@@ -90,12 +90,15 @@ class AgentStudioInterface:
         account_id: Optional[str] = None,
         project_id: Optional[str] = None,
         branch_id: Optional[str] = None,
+        sdk_class: Optional[type[SourcererSDK]] = None,
     ):
         self.region = region
         self.account_id = account_id
         self.project_id = project_id
         if region and account_id and project_id:
-            self.sync_client = SyncClientHandler(region, account_id, project_id, branch_id)
+            self.sync_client = SyncClientHandler(
+                region, account_id, project_id, branch_id, sdk_class=sdk_class
+            )
 
     @staticmethod
     def get_accessible_regions() -> list[str]:
