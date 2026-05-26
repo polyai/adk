@@ -115,6 +115,11 @@
     "URL": "https://github.com/executablebooks/mdurl"
   },
   {
+    "License": "BSD-3-Clause",
+    "Name": "networkx",
+    "URL": "https://networkx.org/"
+  },
+  {
     "License": "BSD License",
     "Name": "nodeenv",
     "URL": "https://github.com/ekalinin/nodeenv"
