@@ -480,6 +480,12 @@ class AgentStudioCLI:
             help="Email to use for metadata creation for push",
             default=None,
         )
+        push_parser.add_argument(
+            "--clean-flows",
+            action="store_true",
+            help="Re-layout all flows from scratch and push updated positions.",
+            default=False,
+        )
 
         # STATUS
         status_parser = subparsers.add_parser(
@@ -1211,6 +1217,7 @@ class AgentStudioCLI:
                     args.from_projection,
                     output_json=args.json,
                     output_commands=args.output_json_commands,
+                    clean_flows=args.clean_flows,
                 )
 
             elif args.command == "status":
@@ -1916,6 +1923,7 @@ class AgentStudioCLI:
         from_projection: str = None,
         output_json: bool = False,
         output_commands: bool = False,
+        clean_flows: bool = False,
     ) -> None:
         """Push the project configuration to the Agent Studio."""
         project = cls._load_project(base_path, output_json=output_json)
@@ -1937,6 +1945,7 @@ class AgentStudioCLI:
             format=format,
             email=email,
             projection_json=projection_json,
+            clean_flows=clean_flows,
         )
         new_branch_name = None
         if original_branch_id != project.branch_id:

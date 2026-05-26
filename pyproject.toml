@@ -94,6 +94,7 @@ ignore_packages = [
     "rpds-py",
     "urllib3",
     "wcwidth",
+    "networkx",
 ]
 
 [tool.semantic_release]
@@ -133,6 +134,7 @@ dependencies = [
     "ruff>=0.14.0",
     "ty",
     "argcomplete>=3.0.0",
+    "networkx>=3.0",
 ]
 
 [project.license]

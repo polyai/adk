@@ -520,8 +520,36 @@ class SyncClientHandler:
 
             for step_id, step in flow_data.get("steps", {}).get("entities", {}).items():
                 local_resource_id = f"{flow_data['name']}_{step_id}"
+                is_function_step = step.get("type") == "function_step"
+                conditions = [
+                    Condition(
+                        resource_id=condition_data["id"],
+                        name=condition_data["config"]["value"]["details"]["label"],
+                        condition_type=condition_data["config"]["$case"],
+                        description=condition_data["config"]["value"]["details"].get(
+                            "description", ""
+                        ),
+                        required_entities=condition_data["config"]["value"]["details"].get(
+                            "requiredEntities", []
+                        ),
+                        child_step=condition_data["config"]["value"].get("childStepId", ""),
+                        step_id=step_id,
+                        flow_id=flow_id,
+                        ingress=condition_data["config"]["value"]["details"].get(
+                            "ingressPosition", "top"
+                        ),
+                        position=condition_data["config"]["value"]["details"].get(
+                            "position", {"x": 0.0, "y": 0.0}
+                        ),
+                        exit_flow_position=condition_data["config"]["value"].get(
+                            "exitFlowPosition", None
+                        ),
+                        parent_is_no_code_step=not is_function_step,
+                    )
+                    for condition_data in step.get("conditions", [])
+                ]
 
-                if step.get("type") == "function_step":
+                if is_function_step:
                     function = step.get("function", {})
                     resources.setdefault(FunctionStep, {})[local_resource_id] = FunctionStep(
                         resource_id=local_resource_id,
@@ -536,6 +564,7 @@ class SyncClientHandler:
                         ),
                         parameters=[],
                         function_id=function.get("id", ""),
+                        conditions=conditions,
                     )
                     continue
 
@@ -581,32 +610,7 @@ class SyncClientHandler:
                         flow_id=flow_id,
                     ),
                     prompt=step.get("prompt", ""),
-                    conditions=[
-                        Condition(
-                            resource_id=condition_data["id"],
-                            name=condition_data["config"]["value"]["details"]["label"],
-                            condition_type=condition_data["config"]["$case"],
-                            description=condition_data["config"]["value"]["details"].get(
-                                "description", ""
-                            ),
-                            required_entities=condition_data["config"]["value"]["details"].get(
-                                "requiredEntities", []
-                            ),
-                            child_step=condition_data["config"]["value"].get("childStepId", ""),
-                            step_id=step_id,
-                            flow_id=flow_id,
-                            ingress=condition_data["config"]["value"]["details"].get(
-                                "ingressPosition", "top"
-                            ),
-                            position=condition_data["config"]["value"]["details"].get(
-                                "position", {"x": 0.0, "y": 0.0}
-                            ),
-                            exit_flow_position=condition_data["config"]["value"].get(
-                                "exitFlowPosition", None
-                            ),
-                        )
-                        for condition_data in step.get("conditions", [])
-                    ],
+                    conditions=conditions,
                     position=step.get("position"),
                     extracted_entities=extracted_entities,
                 )
@@ -935,6 +939,7 @@ class SyncClientHandler:
         # If variable references will change, we should update the variable first so
         # it isn't pruned by the backend.
         Variable,
+        Condition,
     ]
 
     def queue_resources(
@@ -1047,6 +1052,35 @@ class SyncClientHandler:
         logger.info(f"Queued {len(commands)} commands")
         logger.debug(f"Commands: {commands!r}")
         return commands
+
+    def queue_command(
+        self,
+        command_type: str,
+        proto: object,
+        email: Optional[str] = None,
+    ) -> Command:
+        """Queue a single command by type and proto payload.
+
+        Args:
+            command_type: The command type string (e.g. "move_flow_components").
+            proto: The protobuf message for this command type.
+            email: Email to use for metadata creation.
+
+        Returns:
+            The queued Command.
+        """
+        metadata = self.sdk.create_metadata()
+        if email:
+            metadata.created_by = email
+        command = Command(
+            type=command_type,
+            command_id=str(uuid.uuid4()),
+            metadata=metadata,
+            **{command_type: proto},
+        )
+        self.sdk.add_command_to_queue(command)
+        logger.info(f"Queued command: {command_type}")
+        return command
 
     def send_queued_commands(self) -> bool:
         """Send all queued commands as a batch and clear the queue.
