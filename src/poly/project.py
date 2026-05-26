@@ -22,6 +22,7 @@ import poly.utils as utils
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
+from poly.handlers.protobuf.flows_pb2 import MoveFlowComponents
 from poly.migration_utils import (
     MigrationFlag,
     get_all_migration_flags,
@@ -66,7 +67,6 @@ from poly.resources import (
     VoiceSafetyFilters,
     VoiceStylePrompt,
 )
-from poly.handlers.protobuf.flows_pb2 import MoveFlowComponents
 from poly.resources.flow_layout_utils import clean_flow_positions
 from poly.resources.resource import _parse_multi_resource_path
 from poly.utils import compute_variable_references

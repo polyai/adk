@@ -34,6 +34,7 @@ from poly.resources.channel_settings import (
 )
 from poly.resources.entities import Entity, EntityType
 from poly.resources.experimental_config import ExperimentalConfig
+from poly.resources.flow_layout_utils import assign_flow_positions
 from poly.resources.flows import (
     ASRBiasing,
     Condition,
@@ -52,7 +53,6 @@ from poly.resources.function import (
     FunctionType,
 )
 from poly.resources.handoff import Handoff
-from poly.resources.flow_layout_utils import assign_flow_positions
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation

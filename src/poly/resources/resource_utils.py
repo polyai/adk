@@ -549,6 +549,7 @@ def convert_keys_to_snake_case(dict_obj: dict) -> dict:
     """Convert config keys to snake_case for consistency."""
     return {to_snake_case(k): v for k, v in dict_obj.items()}
 
+
 def extract_go_to_steps(code: str) -> list[tuple[str, Optional[str]]]:
     """Extract goto_step calls, returning (step_name, condition_name) tuples."""
     pattern = re.compile(
@@ -564,6 +565,7 @@ def extract_go_to_steps(code: str) -> list[tuple[str, Optional[str]]]:
         condition_name = m.group(3) or m.group(4)
         results.append((step_name, condition_name))
     return results
+
 
 def extract_go_to_flows(code: str) -> list[str]:
     pattern = re.compile(
