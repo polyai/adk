@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import math
 import re
 from typing import TYPE_CHECKING
 
@@ -17,17 +18,29 @@ if TYPE_CHECKING:
 STEP_WIDTH = 500.0
 STEP_HEIGHT = 145.0
 FUNC_STEP_WIDTH = 300.0
-EXIT_NODE_WIDTH = 100.0
-EXIT_NODE_HEIGHT = 40.0
-RANK_SEP = 100.0
+FUNC_STEP_HEIGHT = 60.0
+EXIT_NODE_WIDTH = 140.0
+EXIT_NODE_HEIGHT = 48.0
+RANK_SEP = 200.0
 NODE_SEP = 200.0
-LINE_HEIGHT = 20.0
-CHARS_PER_LINE = 65.0
-STEP_PADDING = 80.0
+LINE_HEIGHT = 21.0
+CHARS_PER_LINE = 66.0
+CARD_PADDING = 32.0
+ENTITY_CHIP_HEIGHT = 24.0
+ENTITY_CHIP_MIN_WIDTH = 80.0
+ENTITY_CHIP_GAP = 8.0
+ENTITY_SECTION_HEADER = 40.0
 LABEL_CHAR_WIDTH = 7.0
 LABEL_PADDING = 20.0
+LABEL_ICON_WIDTH = 25.0
+CONDITION_LABEL_OFFSET_Y = 100.0
 
 _FLOW_FUNC_REF_RE = re.compile(r"\{\{ft:([^}]+)\}\}")
+
+
+def _node_width(node: "BaseFlowStep") -> float:
+    """Return the rendered width for a node based on its step type."""
+    return FUNC_STEP_WIDTH if node.step_type == StepType.FUNCTION_STEP else STEP_WIDTH
 
 
 def _build_flow_func_targets(flow_functions: list) -> dict[str, list[str]]:
@@ -47,17 +60,22 @@ def _build_flow_func_targets(flow_functions: list) -> dict[str, list[str]]:
     return targets
 
 
+def _resolve_node(
+    name_or_id: str,
+    by_name: dict[str, "BaseFlowStep"],
+    by_id: dict[str, "BaseFlowStep"],
+) -> "BaseFlowStep | None":
+    """Look up a node by name first, then by ID."""
+    return by_name.get(name_or_id) or by_id.get(name_or_id)
+
+
 def _build_graph(
     nodes: list["BaseFlowStep"],
     flow_functions: list | None = None,
 ) -> tuple[nx.DiGraph, set[str]]:
     """Build a directed graph from flow nodes."""
-    node_by_name: dict[str, "BaseFlowStep"] = {}
-    node_by_id: dict[str, "BaseFlowStep"] = {}
-    for n in nodes:
-        node_by_name[n.name] = n
-        node_by_id[n.step_id] = n
-
+    node_by_name = {n.name: n for n in nodes}
+    node_by_id = {n.step_id: n for n in nodes}
     func_targets = _build_flow_func_targets(flow_functions or [])
 
     G = nx.DiGraph()
@@ -70,7 +88,7 @@ def _build_graph(
         if hasattr(node, "conditions") and node.conditions:
             for cond in node.conditions:
                 if cond.child_step:
-                    target = node_by_name.get(cond.child_step) or node_by_id.get(cond.child_step)
+                    target = _resolve_node(cond.child_step, node_by_name, node_by_id)
                     if target:
                         G.add_edge(node.step_id, target.step_id)
                 elif cond.condition_type.value == "exit_flow_condition":
@@ -83,7 +101,7 @@ def _build_graph(
         if prompt and func_targets:
             for match in _FLOW_FUNC_REF_RE.finditer(prompt):
                 for target_name in func_targets.get(match.group(1), []):
-                    target = node_by_name.get(target_name) or node_by_id.get(target_name)
+                    target = _resolve_node(target_name, node_by_name, node_by_id)
                     if target and not G.has_edge(node.step_id, target.step_id):
                         G.add_edge(node.step_id, target.step_id)
 
@@ -133,14 +151,23 @@ def _estimate_step_height(node: "BaseFlowStep") -> float:
     """Estimate rendered card height from prompt length."""
     prompt = getattr(node, "prompt", None)
     if not prompt:
-        return STEP_HEIGHT
+        return FUNC_STEP_HEIGHT
+
     line_count = 0
     for line in prompt.splitlines():
-        line_count += max(1, len(line) / CHARS_PER_LINE)
+        line_count += max(1, math.ceil(len(line) / CHARS_PER_LINE))
+    height = STEP_HEIGHT + line_count * LINE_HEIGHT
+
     if node.step_type == StepType.DEFAULT_STEP:
-        # If extracted entities exist, add extra line for
-        line_count += 1 + len(node.extracted_entities) // 5
-    return line_count * LINE_HEIGHT + STEP_PADDING + STEP_HEIGHT
+        entity_count = len(node.extracted_entities)
+        if entity_count > 0:
+            chips_per_row = max(
+                1, int((STEP_WIDTH - CARD_PADDING) / (ENTITY_CHIP_MIN_WIDTH + ENTITY_CHIP_GAP))
+            )
+            entity_rows = math.ceil(entity_count / chips_per_row)
+            height += ENTITY_SECTION_HEADER + entity_rows * (ENTITY_CHIP_HEIGHT + ENTITY_CHIP_GAP)
+
+    return height
 
 
 def _compute_positions(
@@ -154,8 +181,7 @@ def _compute_positions(
 
     for layer in sorted(layer_lists):
         node_ids = layer_lists[layer]
-        n = len(node_ids)
-        if n == 0:
+        if not node_ids:
             continue
 
         max_h = 0.0
@@ -170,13 +196,12 @@ def _compute_positions(
                 h = _estimate_step_height(node) if node else STEP_HEIGHT
                 max_h = max(max_h, h)
 
-        total_width = sum(widths) + NODE_SEP * (n - 1)
+        total_width = sum(widths) + NODE_SEP * (len(node_ids) - 1)
         x = -total_width / 2.0
 
         for i, nid in enumerate(node_ids):
-            w = widths[i]
             positions[nid] = {"x": round(x, 1), "y": round(y, 1)}
-            x += w + NODE_SEP
+            x += widths[i] + NODE_SEP
 
         y += max_h + RANK_SEP
 
@@ -195,12 +220,9 @@ def _compute_positions(
 def assign_flow_positions(
     nodes: list["BaseFlowStep"],
     start_node_id: str,
-    x_start: float = 0.0,
-    y_start: float = 0.0,
-    x_gap: float = 600.0,
-    y_gap: float = 500.0,
     flow_functions: list | None = None,
     clean: bool = False,
+    **_kwargs: object,
 ) -> None:
     """Assign positions to flow nodes using hierarchical layout.
 
@@ -210,10 +232,6 @@ def assign_flow_positions(
     Args:
         nodes: Flow step objects to position (FlowStep and FunctionStep).
         start_node_id: The step_id of the flow's start step.
-        x_start: Unused, kept for backwards compatibility.
-        y_start: Unused, kept for backwards compatibility.
-        x_gap: Unused, kept for backwards compatibility.
-        y_gap: Unused, kept for backwards compatibility.
         flow_functions: Optional list of flow Function objects whose code
             is used to resolve {{ft:func}} prompt references into edges.
         clean: If True, clear all positions and recompute from scratch.
@@ -266,8 +284,7 @@ def _place_new_nodes(
     flow_functions: list | None = None,
 ) -> None:
     """Place new nodes relative to their parents' existing positions."""
-    G, exit_node_ids = _build_graph(all_nodes, flow_functions)
-
+    G, _ = _build_graph(all_nodes, flow_functions)
     node_by_id = {n.step_id: n for n in all_nodes}
 
     for node in new_nodes:
@@ -308,31 +325,15 @@ def _place_new_nodes(
             node.position = {"x": round(x, 1), "y": round(y, 1)}
 
 
-LABEL_ICON_WIDTH = 25.0
-
-
 def _estimate_label_width(text: str, has_icon: bool = False) -> float:
     """Estimate the rendered width of a condition label."""
     return len(text) * LABEL_CHAR_WIDTH + LABEL_PADDING + (LABEL_ICON_WIDTH if has_icon else 0)
 
 
 def _assign_condition_positions(nodes: list["BaseFlowStep"]) -> None:
-    """Assign label positions for conditions, avoiding overlap with nodes."""
-    node_by_name: dict[str, "BaseFlowStep"] = {n.name: n for n in nodes}
-    node_by_id: dict[str, "BaseFlowStep"] = {n.step_id: n for n in nodes}
-
-    node_boxes = []
-    for n in nodes:
-        if n.position:
-            h = _estimate_step_height(n) if hasattr(n, "prompt") else STEP_HEIGHT
-            node_boxes.append((n.position["x"], n.position["y"], STEP_WIDTH, h))
-
-    def _overlaps_node(x: float, y: float) -> bool:
-        pad = 20.0
-        for bx, by, bw, bh in node_boxes:
-            if bx - pad <= x <= bx + bw + pad and by - pad <= y <= by + bh + pad:
-                return True
-        return False
+    """Assign label positions for conditions."""
+    node_by_name = {n.name: n for n in nodes}
+    node_by_id = {n.step_id: n for n in nodes}
 
     for node in nodes:
         if not hasattr(node, "conditions") or not node.conditions:
@@ -345,40 +346,27 @@ def _assign_condition_positions(nodes: list["BaseFlowStep"]) -> None:
                 continue
 
             if condition.child_step:
-                child = node_by_name.get(condition.child_step) or node_by_id.get(
-                    condition.child_step
-                )
-                if child and child.position:
-                    has_icon = node.step_type != StepType.FUNCTION_STEP
-                    label_offset = _estimate_label_width(condition.name, has_icon) / 2
-                    is_back_edge = child.position["y"] <= node.position["y"]
-                    if is_back_edge:
-                        parent_w = (
-                            FUNC_STEP_WIDTH
-                            if node.step_type == StepType.FUNCTION_STEP
-                            else STEP_WIDTH
-                        )
-                        condition.ingress = "bottom"
-                        condition.position = {
-                            "x": node.position["x"] + parent_w + 50,
-                            "y": node.position["y"],
-                        }
-                    else:
-                        parent_w = (
-                            FUNC_STEP_WIDTH
-                            if node.step_type == StepType.FUNCTION_STEP
-                            else STEP_WIDTH
-                        )
-                        mid_x = node.position["x"] + parent_w / 2 - label_offset
-                        mid_y = (node.position["y"] + child.position["y"]) / 2
-                        if _overlaps_node(node.position["x"] + parent_w / 2, mid_y):
-                            parent_h = (
-                                _estimate_step_height(node)
-                                if hasattr(node, "prompt")
-                                else STEP_HEIGHT
-                            )
-                            mid_y = node.position["y"] + parent_h + 20
-                        condition.position = {"x": mid_x, "y": mid_y}
+                child = _resolve_node(condition.child_step, node_by_name, node_by_id)
+                if not child or not child.position:
+                    continue
+
+                has_icon = node.step_type != StepType.FUNCTION_STEP
+                label_offset = _estimate_label_width(condition.name, has_icon) / 2
+                is_back_edge = child.position["y"] <= node.position["y"]
+
+                if is_back_edge:
+                    condition.ingress = "bottom"
+                    condition.position = {
+                        "x": node.position["x"] + _node_width(node) + 50,
+                        "y": node.position["y"],
+                    }
+                else:
+                    child_w = _node_width(child)
+                    condition.position = {
+                        "x": child.position["x"] + child_w / 2 - label_offset,
+                        "y": child.position["y"] - CONDITION_LABEL_OFFSET_Y,
+                    }
+
             elif condition.exit_flow_position:
                 label_offset = _estimate_label_width(condition.name) / 2
                 condition.position = {
