@@ -7553,7 +7553,8 @@ class FlowLayoutTests(unittest.TestCase):
 
         cond = a.conditions[0]
         self.assertTrue(cond.position)
-        self.assertAlmostEqual(cond.position["y"], (a.position["y"] + b.position["y"]) / 2)
+        self.assertGreater(cond.position["y"], a.position["y"])
+        self.assertLess(cond.position["y"], b.position["y"])
 
     def test_back_edge_label_beside_parent(self):
         """Back-edge condition labels are placed beside the parent, not on top."""
@@ -7584,14 +7585,9 @@ class FlowLayoutTests(unittest.TestCase):
 
         cond = a.conditions[0]
         self.assertTrue(cond.exit_flow_position)
-        self.assertAlmostEqual(
-            cond.position["x"],
-            (a.position["x"] + cond.exit_flow_position["x"]) / 2,
-        )
-        self.assertAlmostEqual(
-            cond.position["y"],
-            (a.position["y"] + cond.exit_flow_position["y"]) / 2,
-        )
+        self.assertTrue(cond.position)
+        self.assertGreater(cond.position["y"], a.position["y"])
+        self.assertLess(cond.position["y"], cond.exit_flow_position["y"])
 
     def test_function_step_with_conditions(self):
         """FunctionStep with conditions creates edges to targets."""

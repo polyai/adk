@@ -6,7 +6,10 @@ Copyright PolyAI Limited
 import re
 from typing import TYPE_CHECKING
 
-from poly.resources.resource_utils import remove_comments_from_code
+import networkx as nx
+
+from poly.resources.flows import StepType
+from poly.resources.resource_utils import extract_go_to_steps, remove_comments_from_code
 
 if TYPE_CHECKING:
     from poly.resources.flows import BaseFlowStep
@@ -19,13 +22,10 @@ EXIT_NODE_HEIGHT = 40.0
 RANK_SEP = 100.0
 NODE_SEP = 200.0
 LINE_HEIGHT = 20.0
-CHARS_PER_LINE = 45.0
+CHARS_PER_LINE = 65.0
 STEP_PADDING = 80.0
-
-_GOTO_STEP_RE = re.compile(
-    r'flow\.goto_step\(\s*"((?:[^"\\]|\\.)*)"'
-    r"|flow\.goto_step\(\s*'((?:[^'\\]|\\.)*)'",
-)
+LABEL_CHAR_WIDTH = 7.0
+LABEL_PADDING = 20.0
 
 _FLOW_FUNC_REF_RE = re.compile(r"\{\{ft:([^}]+)\}\}")
 
@@ -38,7 +38,7 @@ def _build_flow_func_targets(flow_functions: list) -> dict[str, list[str]]:
         if not code:
             continue
         clean = remove_comments_from_code(code)
-        step_names = [m.group(1) or m.group(2) for m in _GOTO_STEP_RE.finditer(clean)]
+        step_names = [step for step, _ in extract_go_to_steps(clean)]
         if step_names:
             targets[func.name] = step_names
             resource_id = getattr(func, "resource_id", None)
@@ -47,11 +47,11 @@ def _build_flow_func_targets(flow_functions: list) -> dict[str, list[str]]:
     return targets
 
 
-def _build_adjacency(
+def _build_graph(
     nodes: list["BaseFlowStep"],
     flow_functions: list | None = None,
-) -> tuple[dict[str, list[str]], set[str]]:
-    """Build adjacency list and collect exit-flow condition IDs."""
+) -> tuple[nx.DiGraph, set[str]]:
+    """Build a directed graph from flow nodes."""
     node_by_name: dict[str, "BaseFlowStep"] = {}
     node_by_id: dict[str, "BaseFlowStep"] = {}
     for n in nodes:
@@ -60,8 +60,11 @@ def _build_adjacency(
 
     func_targets = _build_flow_func_targets(flow_functions or [])
 
-    adj: dict[str, list[str]] = {n.step_id: [] for n in nodes}
+    G = nx.DiGraph()
     exit_node_ids: set[str] = set()
+
+    for n in nodes:
+        G.add_node(n.step_id)
 
     for node in nodes:
         if hasattr(node, "conditions") and node.conditions:
@@ -69,11 +72,11 @@ def _build_adjacency(
                 if cond.child_step:
                     target = node_by_name.get(cond.child_step) or node_by_id.get(cond.child_step)
                     if target:
-                        adj[node.step_id].append(target.step_id)
+                        G.add_edge(node.step_id, target.step_id)
                 elif cond.condition_type.value == "exit_flow_condition":
                     exit_id = f"{node.step_id}:exit:{cond.resource_id}"
-                    adj.setdefault(node.step_id, []).append(exit_id)
-                    adj[exit_id] = []
+                    G.add_node(exit_id)
+                    G.add_edge(node.step_id, exit_id)
                     exit_node_ids.add(exit_id)
 
         prompt = getattr(node, "prompt", None)
@@ -81,46 +84,35 @@ def _build_adjacency(
             for match in _FLOW_FUNC_REF_RE.finditer(prompt):
                 for target_name in func_targets.get(match.group(1), []):
                     target = node_by_name.get(target_name) or node_by_id.get(target_name)
-                    if target and target.step_id not in adj.get(node.step_id, []):
-                        adj[node.step_id].append(target.step_id)
+                    if target and not G.has_edge(node.step_id, target.step_id):
+                        G.add_edge(node.step_id, target.step_id)
 
-    return adj, exit_node_ids
+    return G, exit_node_ids
 
 
-def _assign_layers(adj: dict[str, list[str]], start_node_id: str) -> dict[str, int]:
-    """BFS layer assignment from start node. Back-edges are skipped."""
-    layers: dict[str, int] = {start_node_id: 0}
-    queue = [start_node_id]
-    while queue:
-        current = queue.pop(0)
-        for child in adj.get(current, []):
-            if child not in layers:
-                layers[child] = layers[current] + 1
-                queue.append(child)
+def _assign_layers(G: nx.DiGraph, start_node_id: str) -> dict[str, int]:
+    """BFS layer assignment using networkx."""
+    layers: dict[str, int] = {}
+    for depth, layer_nodes in enumerate(nx.bfs_layers(G, start_node_id)):
+        for nid in layer_nodes:
+            layers[nid] = depth
 
-    all_ids = set(adj.keys())
-    if len(layers) < len(all_ids):
-        max_layer = max(layers.values()) + 1
-        for nid in all_ids:
+    if len(layers) < len(G):
+        max_layer = max(layers.values(), default=-1) + 1
+        for nid in G.nodes:
             if nid not in layers:
                 layers[nid] = max_layer
     return layers
 
 
 def _order_within_layers(
+    G: nx.DiGraph,
     layers: dict[str, int],
-    adj: dict[str, list[str]],
 ) -> dict[int, list[str]]:
     """Order nodes within each layer using barycenter heuristic."""
     layer_lists: dict[int, list[str]] = {}
     for nid, layer in layers.items():
         layer_lists.setdefault(layer, []).append(nid)
-
-    parents: dict[str, list[str]] = {nid: [] for nid in layers}
-    for src, targets in adj.items():
-        for tgt in targets:
-            if tgt in parents and layers.get(src, -1) < layers.get(tgt, -1):
-                parents[tgt].append(src)
 
     for layer in sorted(layer_lists):
         if layer == 0:
@@ -128,7 +120,8 @@ def _order_within_layers(
         prev_order = {nid: idx for idx, nid in enumerate(layer_lists[layer - 1])}
 
         def barycenter(nid: str) -> float:
-            p = [prev_order[pid] for pid in parents.get(nid, []) if pid in prev_order]
+            preds = [p for p in G.predecessors(nid) if layers.get(p, -1) < layers.get(nid, -1)]
+            p = [prev_order[pid] for pid in preds if pid in prev_order]
             return sum(p) / len(p) if p else float("inf")
 
         layer_lists[layer].sort(key=barycenter)
@@ -144,7 +137,10 @@ def _estimate_step_height(node: "BaseFlowStep") -> float:
     line_count = 0
     for line in prompt.splitlines():
         line_count += max(1, len(line) / CHARS_PER_LINE)
-    return max(STEP_HEIGHT, line_count * LINE_HEIGHT + STEP_PADDING)
+    if node.step_type == StepType.DEFAULT_STEP:
+        # If extracted entities exist, add extra line for
+        line_count += 1 + len(node.extracted_entities) // 5
+    return line_count * LINE_HEIGHT + STEP_PADDING + STEP_HEIGHT
 
 
 def _compute_positions(
@@ -190,7 +186,7 @@ def _compute_positions(
         for nid, pos in positions.items():
             if nid in exit_node_ids:
                 pos["x"] = round(pos["x"] + exit_offset, 1)
-            elif node_map.get(nid) and not hasattr(node_map[nid], "prompt"):
+            elif node_map.get(nid) and node_map[nid].step_type == StepType.FUNCTION_STEP:
                 pos["x"] = round(pos["x"] + func_offset, 1)
 
     return positions
@@ -208,9 +204,8 @@ def assign_flow_positions(
 ) -> None:
     """Assign positions to flow nodes using hierarchical layout.
 
-    Uses a simplified Sugiyama algorithm (BFS layers, barycenter ordering)
-    matching GLOT's dagre-based layout.  Exit-flow conditions are laid out
-    as separate small nodes one layer below their parent step.
+    Uses networkx for graph structure and BFS layer assignment, with
+    barycenter heuristic for node ordering within layers.
 
     Args:
         nodes: Flow step objects to position (FlowStep and FunctionStep).
@@ -243,9 +238,9 @@ def assign_flow_positions(
 
     if clean:
         node_map = {n.step_id: n for n in nodes}
-        adj, exit_node_ids = _build_adjacency(nodes, flow_functions)
-        layers = _assign_layers(adj, start_node_id)
-        layer_lists = _order_within_layers(layers, adj)
+        G, exit_node_ids = _build_graph(nodes, flow_functions)
+        layers = _assign_layers(G, start_node_id)
+        layer_lists = _order_within_layers(G, layers)
         positions = _compute_positions(layer_lists, exit_node_ids, node_map)
 
         for node in nodes:
@@ -271,19 +266,15 @@ def _place_new_nodes(
     flow_functions: list | None = None,
 ) -> None:
     """Place new nodes relative to their parents' existing positions."""
-    adj, exit_node_ids = _build_adjacency(all_nodes, flow_functions)
+    G, exit_node_ids = _build_graph(all_nodes, flow_functions)
 
     node_by_id = {n.step_id: n for n in all_nodes}
-    parents: dict[str, list[str]] = {n.step_id: [] for n in all_nodes}
-    for src, targets in adj.items():
-        for tgt in targets:
-            if tgt in parents:
-                parents[tgt].append(src)
 
     for node in new_nodes:
-        parent_ids = parents.get(node.step_id, [])
         positioned_parents = [
-            node_by_id[pid] for pid in parent_ids if pid in node_by_id and node_by_id[pid].position
+            node_by_id[pid]
+            for pid in G.predecessors(node.step_id)
+            if pid in node_by_id and node_by_id[pid].position
         ]
 
         if positioned_parents:
@@ -295,8 +286,8 @@ def _place_new_nodes(
             )
 
             sibling_xs = []
-            for pid in parent_ids:
-                for child_id in adj.get(pid, []):
+            for parent in positioned_parents:
+                for child_id in G.successors(parent.step_id):
                     child = node_by_id.get(child_id)
                     if child and child.position and child.step_id != node.step_id:
                         sibling_xs.append(child.position["x"])
@@ -315,6 +306,14 @@ def _place_new_nodes(
             all_y = [n.position["y"] for n in all_nodes if n.position]
             y = min(all_y) if all_y else 0.0
             node.position = {"x": round(x, 1), "y": round(y, 1)}
+
+
+LABEL_ICON_WIDTH = 25.0
+
+
+def _estimate_label_width(text: str, has_icon: bool = False) -> float:
+    """Estimate the rendered width of a condition label."""
+    return len(text) * LABEL_CHAR_WIDTH + LABEL_PADDING + (LABEL_ICON_WIDTH if has_icon else 0)
 
 
 def _assign_condition_positions(nodes: list["BaseFlowStep"]) -> None:
@@ -350,20 +349,40 @@ def _assign_condition_positions(nodes: list["BaseFlowStep"]) -> None:
                     condition.child_step
                 )
                 if child and child.position:
+                    has_icon = node.step_type != StepType.FUNCTION_STEP
+                    label_offset = _estimate_label_width(condition.name, has_icon) / 2
                     is_back_edge = child.position["y"] <= node.position["y"]
                     if is_back_edge:
+                        parent_w = (
+                            FUNC_STEP_WIDTH
+                            if node.step_type == StepType.FUNCTION_STEP
+                            else STEP_WIDTH
+                        )
+                        condition.ingress = "bottom"
                         condition.position = {
-                            "x": node.position["x"] + STEP_WIDTH + 50,
+                            "x": node.position["x"] + parent_w + 50,
                             "y": node.position["y"],
                         }
                     else:
-                        mid_x = (node.position["x"] + child.position["x"]) / 2
+                        parent_w = (
+                            FUNC_STEP_WIDTH
+                            if node.step_type == StepType.FUNCTION_STEP
+                            else STEP_WIDTH
+                        )
+                        mid_x = node.position["x"] + parent_w / 2 - label_offset
                         mid_y = (node.position["y"] + child.position["y"]) / 2
-                        if _overlaps_node(mid_x, mid_y):
-                            mid_x = node.position["x"] + STEP_WIDTH + 50
+                        if _overlaps_node(node.position["x"] + parent_w / 2, mid_y):
+                            parent_h = (
+                                _estimate_step_height(node)
+                                if hasattr(node, "prompt")
+                                else STEP_HEIGHT
+                            )
+                            mid_y = node.position["y"] + parent_h + 20
                         condition.position = {"x": mid_x, "y": mid_y}
             elif condition.exit_flow_position:
+                label_offset = _estimate_label_width(condition.name) / 2
                 condition.position = {
-                    "x": (node.position["x"] + condition.exit_flow_position["x"]) / 2,
+                    "x": (node.position["x"] + condition.exit_flow_position["x"]) / 2
+                    - label_offset,
                     "y": (node.position["y"] + condition.exit_flow_position["y"]) / 2,
                 }
