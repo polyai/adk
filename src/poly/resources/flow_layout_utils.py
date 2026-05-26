@@ -9,11 +9,23 @@ from typing import TYPE_CHECKING
 
 import networkx as nx
 
-from poly.resources.flows import StepType
+from poly.handlers.protobuf.flows_pb2 import (
+    FlowPositionDetail,
+    FlowStepPositionDetails,
+    FunctionStepConditionPositionDetail,
+    FunctionStepExitFlowPositionDetail,
+    FunctionStepPositionDetail,
+    MoveFlowComponents,
+    NoCodeStepConditionPositionDetail,
+    NoCodeStepExitFlowPositionDetail,
+    NoCodeStepPositionDetail,
+    StepPosition,
+)
+from poly.resources.flows import ConditionType, StepType
 from poly.resources.resource_utils import extract_go_to_steps, remove_comments_from_code
 
 if TYPE_CHECKING:
-    from poly.resources.flows import BaseFlowStep
+    from poly.resources.flows import BaseFlowStep, Condition
 
 STEP_WIDTH = 500.0
 STEP_HEIGHT = 145.0
@@ -374,3 +386,93 @@ def _assign_condition_positions(nodes: list["BaseFlowStep"]) -> None:
                     - label_offset,
                     "y": (node.position["y"] + condition.exit_flow_position["y"]) / 2,
                 }
+
+
+def _pos(xy: dict[str, float]) -> StepPosition:
+    """Build a StepPosition proto from an {x, y} dict."""
+    return StepPosition(x=xy.get("x", 0.0), y=xy.get("y", 0.0))
+
+
+def _step_position_detail(node: "BaseFlowStep") -> FlowPositionDetail:
+    """Build a FlowPositionDetail for a step node."""
+    pos = _pos(node.position)
+    if node.step_type == StepType.FUNCTION_STEP:
+        return FlowPositionDetail(
+            function_step=FunctionStepPositionDetail(step_id=node.step_id, new_position=pos)
+        )
+    if node.step_type == StepType.ADVANCED_STEP:
+        return FlowPositionDetail(
+            flow_step=FlowStepPositionDetails(step_id=node.step_id, new_position=pos)
+        )
+    return FlowPositionDetail(
+        no_code_step=NoCodeStepPositionDetail(step_id=node.step_id, new_position=pos)
+    )
+
+
+def _condition_position_detail(
+    node: "BaseFlowStep",
+    condition: "Condition",
+) -> FlowPositionDetail | None:
+    """Build a FlowPositionDetail for a condition label."""
+    if not condition.position:
+        return None
+    pos = _pos(condition.position)
+    is_no_code = condition.parent_is_no_code_step
+
+    if condition.condition_type == ConditionType.EXIT_FLOW:
+        exit_pos = _pos(condition.exit_flow_position) if condition.exit_flow_position else pos
+        if is_no_code:
+            return FlowPositionDetail(
+                no_code_step_condition_exit_flow=NoCodeStepExitFlowPositionDetail(
+                    step_id=node.step_id, condition_id=condition.resource_id, new_position=exit_pos
+                )
+            )
+        return FlowPositionDetail(
+            function_step_condition_exit_flow=FunctionStepExitFlowPositionDetail(
+                step_id=node.step_id, condition_id=condition.resource_id, new_position=exit_pos
+            )
+        )
+
+    if is_no_code:
+        return FlowPositionDetail(
+            no_code_step_condition=NoCodeStepConditionPositionDetail(
+                step_id=node.step_id, condition_id=condition.resource_id, new_position=pos
+            )
+        )
+    return FlowPositionDetail(
+        function_step_condition=FunctionStepConditionPositionDetail(
+            step_id=node.step_id, condition_id=condition.resource_id, new_position=pos
+        )
+    )
+
+
+def build_move_commands(flow_id: str, nodes: list["BaseFlowStep"]) -> MoveFlowComponents:
+    """Build a MoveFlowComponents proto for all positioned components in a flow."""
+    details: list[FlowPositionDetail] = []
+
+    for node in nodes:
+        if node.position:
+            details.append(_step_position_detail(node))
+
+        if not hasattr(node, "conditions") or not node.conditions:
+            continue
+        for cond in node.conditions:
+            detail = _condition_position_detail(node, cond)
+            if detail:
+                details.append(detail)
+
+    return MoveFlowComponents(flow_id=flow_id, position_details=details)
+
+
+def clean_flow_positions(
+    flow_id: str,
+    start_step_id: str,
+    flow_steps: list["BaseFlowStep"],
+    flow_functions: list | None = None,
+) -> MoveFlowComponents | None:
+    """Re-layout a flow from scratch and return a MoveFlowComponents proto."""
+    if not flow_steps:
+        return None
+    assign_flow_positions(flow_steps, start_step_id, flow_functions=flow_functions, clean=True)
+    move_proto = build_move_commands(flow_id, flow_steps)
+    return move_proto if move_proto.position_details else None

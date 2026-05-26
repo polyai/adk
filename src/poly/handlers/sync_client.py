@@ -1053,6 +1053,35 @@ class SyncClientHandler:
         logger.debug(f"Commands: {commands!r}")
         return commands
 
+    def queue_command(
+        self,
+        command_type: str,
+        proto: object,
+        email: Optional[str] = None,
+    ) -> Command:
+        """Queue a single command by type and proto payload.
+
+        Args:
+            command_type: The command type string (e.g. "move_flow_components").
+            proto: The protobuf message for this command type.
+            email: Email to use for metadata creation.
+
+        Returns:
+            The queued Command.
+        """
+        metadata = self.sdk.create_metadata()
+        if email:
+            metadata.created_by = email
+        command = Command(
+            type=command_type,
+            command_id=str(uuid.uuid4()),
+            metadata=metadata,
+            **{command_type: proto},
+        )
+        self.sdk.add_command_to_queue(command)
+        logger.info(f"Queued command: {command_type}")
+        return command
+
     def send_queued_commands(self) -> bool:
         """Send all queued commands as a batch and clear the queue.
 

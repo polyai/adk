@@ -66,7 +66,8 @@ from poly.resources import (
     VoiceSafetyFilters,
     VoiceStylePrompt,
 )
-from poly.resources.flow_layout_utils import assign_flow_positions
+from poly.handlers.protobuf.flows_pb2 import MoveFlowComponents
+from poly.resources.flow_layout_utils import clean_flow_positions
 from poly.resources.resource import _parse_multi_resource_path
 from poly.utils import compute_variable_references
 
@@ -1015,16 +1016,9 @@ class AgentStudioProject:
         updated_resources: ResourceMap,
         deleted_resources: ResourceMap,
         email: Optional[str] = None,
+        clean_flows: bool = False,
     ) -> list[Message]:
         """Stage commands for the project."""
-
-        # Assign positions to new flows
-        new_resources, updated_resources = self._assign_flow_positions(
-            new_resources,
-            updated_resources,
-            new_state,
-        )
-
         # Group flow resources together
         # Creating flow config, group all new steps/functions under it and remove from
         # new resources
@@ -1039,6 +1033,27 @@ class AgentStudioProject:
         deleted_resources = push_changes.main.deleted
         pre_changes = push_changes.pre
         post_changes = push_changes.post
+
+        new_flow_ids = set(new_resources.get(FlowConfig, {}).keys())
+        changed_flow_ids: set[str] = set()
+        for resource_map in [new_resources, updated_resources, deleted_resources]:
+            for step in list(resource_map.get(FlowStep, {}).values()) + list(
+                resource_map.get(FunctionStep, {}).values()
+            ):
+                if isinstance(step, BaseFlowStep):
+                    changed_flow_ids.add(step.flow_id)
+            for flow_id in resource_map.get(FlowConfig, {}).keys():
+                changed_flow_ids.add(flow_id)
+
+        move_protos: list[MoveFlowComponents] = []
+        for flow_id, flow_config in new_state.get(FlowConfig, {}).items():
+            if not isinstance(flow_config, FlowConfig):
+                continue
+            is_new = flow_id in new_flow_ids
+            if is_new or (clean_flows and flow_id in changed_flow_ids):
+                move_proto = self._clean_flow_positions(new_state, flow_id, flow_config)
+                if move_proto and not is_new:
+                    move_protos.append(move_proto)
 
         # Queue new/updated/deleted resources
         commands = []
@@ -1072,6 +1087,13 @@ class AgentStudioProject:
                 )
             )
 
+        # Queue move_flow_components for existing flows that were re-laid out
+        for move_proto in move_protos:
+            command = self.api_handler.queue_command(
+                "move_flow_components", move_proto, email=email
+            )
+            commands.append(command)
+
         return commands
 
     def push_project(
@@ -1082,6 +1104,7 @@ class AgentStudioProject:
         format=False,
         email=None,
         projection_json: Optional[dict[str, Any]] = None,
+        clean_flows: bool = False,
     ) -> tuple[bool, str, list[Message]]:
         """Push the project configuration to the Agent Studio Interactor.
 
@@ -1203,7 +1226,12 @@ class AgentStudioProject:
                 return False, f"Validation errors detected:\n{error_messages}", []
 
         commands = self._stage_commands(
-            new_state, new_resources, updated_resources, deleted_resources, email=email
+            new_state,
+            new_resources,
+            updated_resources,
+            deleted_resources,
+            email=email,
+            clean_flows=clean_flows,
         )
         if not dry_run:
             success = self.api_handler.send_queued_commands()
@@ -1235,70 +1263,26 @@ class AgentStudioProject:
         return True, "Resources pushed successfully.", commands
 
     @staticmethod
-    def _assign_flow_positions(
-        new_resources: ResourceMap,
-        updated_resources: ResourceMap,
+    def _clean_flow_positions(
         new_state: ResourceMap,
-    ) -> ResourceUpdatePair:
-        """Assign positions to flows with new/updated steps."""
-        for flow_config in new_resources.get(FlowConfig, {}).values():
-            if not isinstance(flow_config, FlowConfig):
-                raise TypeError(f"Flow config is not a FlowConfig: {flow_config}")
-            flow_steps = [
-                step
-                for step in (
-                    list(new_resources.get(FlowStep, {}).values())
-                    + list(new_resources.get(FunctionStep, {}).values())
-                )
-                if isinstance(step, BaseFlowStep) and step.flow_id == flow_config.resource_id
-            ]
-            flow_functions = [
-                func
-                for func in new_resources.get(Function, {}).values()
-                if getattr(func, "flow_id", None) == flow_config.resource_id
-            ]
-            assign_flow_positions(
-                flow_steps,
-                flow_config.start_step,
-                flow_functions=flow_functions,
-                clean=True,
+        flow_id: str,
+        flow_config: FlowConfig,
+    ) -> MoveFlowComponents | None:
+        """Re-layout a single flow and return a MoveFlowComponents proto."""
+        flow_steps = [
+            step
+            for step in (
+                list(new_state.get(FlowStep, {}).values())
+                + list(new_state.get(FunctionStep, {}).values())
             )
-
-        # Assign positions to flows with new/updated steps
-        updated_flow_ids = set()
-        for flow_step in (
-            list(new_resources.get(FlowStep, {}).values())
-            + list(updated_resources.get(FlowStep, {}).values())
-            + list(new_resources.get(FunctionStep, {}).values())
-            + list(updated_resources.get(FunctionStep, {}).values())
-        ):
-            if not isinstance(flow_step, BaseFlowStep):
-                raise TypeError(f"Flow step is not a FlowStep: {flow_step}")
-            updated_flow_ids.add(flow_step.flow_id)
-
-        for updated_flow_id in updated_flow_ids:
-            flow_config = new_state.get(FlowConfig, {}).get(updated_flow_id)
-            if not flow_config:
-                raise ValueError(f"Flow config not found for flow id: {updated_flow_id}")
-            if not isinstance(flow_config, FlowConfig):
-                raise TypeError(f"Flow config is not a FlowConfig: {flow_config}")
-            flow_steps = [
-                step
-                for step in (
-                    list(new_state.get(FlowStep, {}).values())
-                    + list(new_state.get(FunctionStep, {}).values())
-                )
-                if isinstance(step, BaseFlowStep) and step.flow_id == updated_flow_id
-            ]
-            flow_functions = [
-                func
-                for func in new_state.get(Function, {}).values()
-                if getattr(func, "flow_id", None) == updated_flow_id
-            ]
-
-            assign_flow_positions(flow_steps, flow_config.start_step, flow_functions=flow_functions)
-
-        return new_resources, updated_resources
+            if isinstance(step, BaseFlowStep) and step.flow_id == flow_id
+        ]
+        flow_functions = [
+            func
+            for func in new_state.get(Function, {}).values()
+            if getattr(func, "flow_id", None) == flow_id
+        ]
+        return clean_flow_positions(flow_id, flow_config.start_step, flow_steps, flow_functions)
 
     @staticmethod
     def _get_updated_subresources(
