@@ -1013,7 +1013,6 @@ class AgentStudioProject:
         new_resources: ResourceMap,
         updated_resources: ResourceMap,
         deleted_resources: ResourceMap,
-        email: Optional[str] = None,
     ) -> list[Message]:
         """Stage commands for the project."""
 
@@ -1047,7 +1046,6 @@ class AgentStudioProject:
                     new_resources=pre_changes.new,
                     deleted_resources=pre_changes.deleted,
                     updated_resources=pre_changes.updated,
-                    email=email,
                 )
             )
 
@@ -1057,7 +1055,6 @@ class AgentStudioProject:
                     new_resources=new_resources,
                     deleted_resources=deleted_resources,
                     updated_resources=updated_resources,
-                    email=email,
                 )
             )
 
@@ -1067,7 +1064,6 @@ class AgentStudioProject:
                     new_resources=post_changes.new,
                     deleted_resources=post_changes.deleted,
                     updated_resources=post_changes.updated,
-                    email=email,
                 )
             )
 
@@ -1079,7 +1075,6 @@ class AgentStudioProject:
         skip_validation=False,
         dry_run=False,
         format=False,
-        email=None,
         projection_json: Optional[dict[str, Any]] = None,
     ) -> tuple[bool, str, list[Message]]:
         """Push the project configuration to the Agent Studio Interactor.
@@ -1091,8 +1086,6 @@ class AgentStudioProject:
             format (bool): If True, format the resource before saving.
             projection_json (dict[str, Any]): A dictionary containing the projection
                 If provided, the projection will be used instead of fetching it from the API.
-            email (str): Email to use for metadata creation.
-                If None, use the email of the current user.
 
         Returns:
             Tuple[bool, str, list[Message]]:
@@ -1202,7 +1195,7 @@ class AgentStudioProject:
                 return False, f"Validation errors detected:\n{error_messages}", []
 
         commands = self._stage_commands(
-            new_state, new_resources, updated_resources, deleted_resources, email=email
+            new_state, new_resources, updated_resources, deleted_resources
         )
         if not dry_run:
             success = self.api_handler.send_queued_commands()
@@ -2767,12 +2760,8 @@ class AgentStudioProject:
             self.switch_branch("main", force=True)
         return True
 
-    def sync_ids_with_sandbox(self, email: str = None) -> bool:
+    def sync_ids_with_sandbox(self) -> bool:
         """Sync ids of resources in sandbox into current branch
-
-        Args:
-            email (str): Email to use for metadata creation.
-                If None, use the email of the current user.
 
         Returns:
             bool: True if the sync was successful, False otherwise
@@ -2871,9 +2860,7 @@ class AgentStudioProject:
         if not (updated_resources or new_resources or deleted_resources):
             return True
 
-        self._stage_commands(
-            new_state, new_resources, updated_resources, deleted_resources, email=email
-        )
+        self._stage_commands(new_state, new_resources, updated_resources, deleted_resources)
         success = self.api_handler.send_queued_commands()
 
         self.branch_id = self.api_handler.branch_id

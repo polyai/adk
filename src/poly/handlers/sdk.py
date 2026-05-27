@@ -80,14 +80,16 @@ class SourcererSDK:
 
         # Initialize session with auth headers
         correlation_id = f"adk-{uuid.uuid4()}"
+        self.email = os.environ.get("ADK_COMMAND_USER_OVERRIDE")
         self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "Content-Type": "application/json",
-                "X-API-KEY": retrieve_api_key(self.region),
-                "X-PolyAI-Correlation-Id": correlation_id,
-            }
-        )
+        headers = {
+            "Content-Type": "application/json",
+            "X-API-KEY": retrieve_api_key(self.region),
+            "X-PolyAI-Correlation-Id": correlation_id,
+        }
+        if self.email:
+            headers["X-PolyAI-Email"] = self.email
+        self.session.headers.update(headers)
 
         # Cache for projection and sequence number
         self._projection_cache: Optional[dict[str, Any]] = None
@@ -111,7 +113,7 @@ class SourcererSDK:
         from .protobuf.commands_pb2 import Metadata
 
         metadata = Metadata()
-        metadata.created_by = "sdk-user"
+        metadata.created_by = self.email or "sdk-user"
 
         # Set current timestamp
         timestamp = Timestamp()
@@ -555,6 +557,8 @@ class SourcererSDK:
                 "X-PolyAI-Correlation-Id": correlation_id,
                 "Content-Type": "application/octet-stream",
             }
+            if self.email:
+                headers["X-PolyAI-Email"] = self.email
 
             logger.info(f"Sending to URL: {self._get_command_batch_url()}")
 

@@ -942,7 +942,6 @@ class SyncClientHandler:
         deleted_resources: dict[type[BaseResource], dict[str, BaseResource]],
         new_resources: dict[type[BaseResource], dict[str, BaseResource]],
         updated_resources: dict[type[BaseResource], dict[str, BaseResource]],
-        email: Optional[str] = None,
     ) -> list[Command]:
         """Queue multiple resources for the specific project.
 
@@ -955,14 +954,11 @@ class SyncClientHandler:
             deleted_resources (dict[type[BaseResource], dict[str, BaseResource]]): Resources to delete
             new_resources (dict[type[BaseResource], dict[str, BaseResource]]): New resources to upload
             updated_resources (dict[type[BaseResource], dict[str, BaseResource]]): Updated resources to upload
-            email (str): Email to use for metadata creation.
 
         Returns:
             list[Command]: A list of queued Command protobuf messages.
         """
         metadata = self.sdk.create_metadata()
-        if email:
-            metadata.created_by = email
 
         commands = []
 

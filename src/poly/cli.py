@@ -474,13 +474,6 @@ class AgentStudioCLI:
             help=SUPPRESS,
             default=False,
         )
-        push_parser.add_argument(
-            "--email",
-            type=str,
-            help="Email to use for metadata creation for push",
-            default=None,
-        )
-
         # STATUS
         status_parser = subparsers.add_parser(
             "status",
@@ -1207,7 +1200,6 @@ class AgentStudioCLI:
                     args.skip_validation,
                     args.dry_run,
                     args.format,
-                    args.email,
                     args.from_projection,
                     output_json=args.json,
                     output_commands=args.output_json_commands,
@@ -1912,7 +1904,6 @@ class AgentStudioCLI:
         skip_validation: bool = False,
         dry_run: bool = False,
         format: bool = False,
-        email: Optional[str] = None,
         from_projection: str = None,
         output_json: bool = False,
         output_commands: bool = False,
@@ -1935,7 +1926,6 @@ class AgentStudioCLI:
             skip_validation=skip_validation,
             dry_run=dry_run,
             format=format,
-            email=email,
             projection_json=projection_json,
         )
         new_branch_name = None
@@ -2439,7 +2429,6 @@ class AgentStudioCLI:
                 skip_validation=True,
                 dry_run=False,
                 format=False,
-                email=None,
             )
 
     @classmethod
@@ -3110,7 +3099,6 @@ class AgentStudioCLI:
                 skip_validation=False,
                 dry_run=False,
                 format=False,
-                email=None,
             )
             if output == "No changes detected":
                 push_success = True  # Not an error if there are no changes to push

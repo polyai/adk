@@ -234,7 +234,6 @@ class AgentStudioInterface:
         updated_resources: dict[type[BaseResource], dict[str, BaseResource]],
         dry_run: bool = False,
         queue_pushes: bool = False,
-        email: Optional[str] = None,
     ) -> bool:
         """Upload multiple resources for the specific project.
 
@@ -245,8 +244,6 @@ class AgentStudioInterface:
             dry_run (bool): If True, only log the upload actions without actually
                 uploading
             queue_pushes (bool): If True, queue the resources for pushing.
-            email (str): Email to use for metadata creation.
-                If None, use the email of the current user.
 
         Returns:
             bool: True if the resources were pushed successfully, False otherwise
@@ -255,7 +252,6 @@ class AgentStudioInterface:
             deleted_resources=deleted_resources,
             new_resources=new_resources,
             updated_resources=updated_resources,
-            email=email,
         )
 
         if queue_pushes:
@@ -272,7 +268,6 @@ class AgentStudioInterface:
         deleted_resources: dict[type[BaseResource], dict[str, BaseResource]],
         new_resources: dict[type[BaseResource], dict[str, BaseResource]],
         updated_resources: dict[type[BaseResource], dict[str, BaseResource]],
-        email: Optional[str] = None,
     ) -> list[Message]:
         """Queue multiple resources for the specific project.
 
@@ -280,8 +275,6 @@ class AgentStudioInterface:
             deleted_resources (dict[type[BaseResource], dict[str, BaseResource]]): Resources to delete
             new_resources (dict[type[BaseResource], dict[str, BaseResource]]): New resources to upload
             updated_resources (dict[type[BaseResource], dict[str, BaseResource]]): Updated resources to upload
-            email (str): Email to use for metadata creation.
-                If None, use the email of the current user.
 
         Returns:
             list[Message]: A list of queued Command protobuf messages.
@@ -291,7 +284,6 @@ class AgentStudioInterface:
                 deleted_resources=deleted_resources,
                 new_resources=new_resources,
                 updated_resources=updated_resources,
-                email=email,
             )
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
