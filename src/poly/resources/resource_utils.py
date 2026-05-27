@@ -7,7 +7,6 @@ import ast
 import functools
 import hashlib
 import inspect
-import langcodes
 import json
 import logging
 import os
@@ -19,6 +18,7 @@ from enum import Enum
 from io import StringIO
 from typing import TYPE_CHECKING, Optional
 
+import langcodes
 import ruamel.yaml as yaml
 
 logger = logging.getLogger(__name__)

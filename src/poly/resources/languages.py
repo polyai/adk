@@ -9,6 +9,7 @@ from typing import ClassVar
 
 from google.protobuf.message import Message
 
+import poly.resources.resource_utils as utils
 from poly.handlers.protobuf.languages_pb2 import (
     Languages_AddLanguage,
     Languages_DeleteLanguage,
@@ -19,8 +20,6 @@ from poly.resources.resource import (
     ResourceMapping,
     _parse_multi_resource_path,
 )
-
-import poly.resources.resource_utils as utils
 
 LANGUAGES_FILE = os.path.join("agent_settings", "languages.yaml")
 EMPTY_LANGUAGES = {"default_language": None, "additional_languages": []}

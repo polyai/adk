@@ -53,6 +53,10 @@ from poly.resources.function import (
 )
 from poly.resources.handoff import Handoff
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
+from poly.resources.languages import (
+    AdditionalLanguage,
+    DefaultLanguage,
+)
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation
 from poly.resources.resource import (
@@ -72,12 +76,8 @@ from poly.resources.topic import (
     Topic,
 )
 from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
-from poly.resources.variable import Variable
-from poly.resources.languages import (
-    AdditionalLanguage,
-    DefaultLanguage,
-)
 from poly.resources.translations import Translation
+from poly.resources.variable import Variable
 from poly.resources.variant_attributes import Variant, VariantAttribute
 from poly.tests.testing_utils import mock_read_from_file, mock_variant_attributes_file
 

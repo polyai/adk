@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 
 from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
-from poly.utils import retrieve_api_key, any_credentials_exist
+from poly.utils import any_credentials_exist, retrieve_api_key
 
 logger = logging.getLogger(__name__)
 ACCOUNTS_URL = "/adk/v1/accounts"
