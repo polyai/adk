@@ -3,10 +3,11 @@
 Copyright PolyAI Limited
 """
 
-from dataclasses import dataclass
 import os
+from dataclasses import dataclass
 from typing import ClassVar, Optional
 
+import poly.resources.resource_utils as utils
 from poly.handlers.protobuf.translations_pb2 import (
     LanguageHubTranslations_Create,
     LanguageHubTranslations_Delete,
@@ -14,11 +15,8 @@ from poly.handlers.protobuf.translations_pb2 import (
     LocalizedText,
     UpdateEntry,
 )
-
-from poly.resources.resource import MultiResourceYamlResource, ResourceMapping
 from poly.resources.languages import AdditionalLanguage, DefaultLanguage
-
-import poly.resources.resource_utils as utils
+from poly.resources.resource import MultiResourceYamlResource, ResourceMapping
 
 
 @dataclass
@@ -114,6 +112,9 @@ class Translation(MultiResourceYamlResource):
                     raise ValueError(
                         f"Missing translations for configured languages: {sorted(missing)}."
                     )
+                extra = set(self.translations.keys()) - configured_languages
+                if extra:
+                    raise ValueError(f"Translation for language not configured: {sorted(extra)}.")
 
     @staticmethod
     def discover_resources(base_path):
