@@ -657,13 +657,16 @@ def print_conversations(
         conversations: List of conversation summary dicts.
         url_builder: Optional callable(conversation_id) -> str that returns a Studio URL.
     """
+    show_variant = any(c.get("variantId") for c in conversations)
+
     table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
     table.add_column("Conversation ID", style="bold yellow", no_wrap=True)
     table.add_column("Started", no_wrap=True)
     table.add_column("Duration", no_wrap=True, justify="right")
     table.add_column("From", no_wrap=True)
     table.add_column("Channel", no_wrap=True)
-    table.add_column("Variant", no_wrap=True)
+    if show_variant:
+        table.add_column("Variant", no_wrap=True)
     table.add_column("Handoff", no_wrap=True)
     table.add_column("Summary", overflow="fold")
 
@@ -674,7 +677,6 @@ def print_conversations(
         duration = _format_duration(c.get("duration"))
         from_number = c.get("fromNumber") or "—"
         channel = c.get("channel") or "—"
-        variant = c.get("variantId") or "—"
         handoff = ""
         if c.get("handoff"):
             dest = c.get("handoffDestination") or ""
@@ -688,16 +690,11 @@ def print_conversations(
         else:
             cid_display = cid
 
-        table.add_row(
-            cid_display,
-            started,
-            duration,
-            from_number,
-            channel,
-            variant,
-            handoff,
-            summary,
-        )
+        row = [cid_display, started, duration, from_number, channel]
+        if show_variant:
+            row.append(c.get("variantId") or "—")
+        row.extend([handoff, summary])
+        table.add_row(*row)
 
     console.print(table)
 
