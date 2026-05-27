@@ -651,3 +651,65 @@ class AgentStudioInterface:
             str: The newly created PAT token
         """
         return PlatformAPIHandler.create_pat_internal(region, jwt_token, name)
+
+    @staticmethod
+    def list_conversations(
+        region: str,
+        project_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        """List conversations for a project.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            limit: Max number of conversations to return.
+            offset: Number of conversations to skip.
+
+        Returns:
+            dict: The API response with conversations, count, limit, offset.
+        """
+        return PlatformAPIHandler.list_conversations(region, project_id, limit, offset)
+
+    @staticmethod
+    def get_conversation(
+        region: str,
+        project_id: str,
+        conversation_id: str,
+    ) -> dict:
+        """Get a conversation by ID.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            conversation_id: The conversation ID.
+
+        Returns:
+            dict: The conversation detail response.
+        """
+        return PlatformAPIHandler.get_conversation(region, project_id, conversation_id)
+
+    @staticmethod
+    def get_conversation_audio(
+        region: str,
+        project_id: str,
+        conversation_id: str,
+        direction: str = "combined",
+        redacted: bool = False,
+    ) -> bytes:
+        """Get audio recording for a conversation.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            conversation_id: The conversation ID.
+            direction: Audio direction — combined, user, or agent.
+            redacted: Whether to return redacted audio.
+
+        Returns:
+            bytes: The raw WAV audio data.
+        """
+        return PlatformAPIHandler.get_conversation_audio(
+            region, project_id, conversation_id, direction, redacted
+        )

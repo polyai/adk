@@ -40,6 +40,8 @@ from poly.output.console import (
     info,
     plain,
     print_branches,
+    print_conversations,
+    print_conversation_detail,
     print_diff,
     print_file_list,
     print_status,
@@ -1147,6 +1149,112 @@ class AgentStudioCLI:
             help="Show what would be rolled back without actually rolling back. Displays the target deployment and reverted deployments.",
         )
 
+        # CONVERSATIONS
+        conversations_path_parent = ArgumentParser(add_help=False)
+        conversations_path_parent.add_argument(
+            "--path",
+            type=str,
+            default=os.getcwd(),
+            help="Base path to the project. Defaults to current working directory.",
+        )
+
+        conversations_parser = subparsers.add_parser(
+            "conversations",
+            parents=[verbose_parent],
+            help="List and inspect conversations.",
+            description=(
+                "List and inspect conversations for the project.\n\n"
+                "Examples:\n"
+                "  poly conversations list\n"
+                "  poly conversations get <conversation_id>\n"
+                "  poly conversations get-audio <conversation_id> -o recording.wav\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+
+        conversations_subparsers = conversations_parser.add_subparsers(
+            dest="conversations_subcommand", required=True
+        )
+
+        conv_list_parser = conversations_subparsers.add_parser(
+            "list",
+            parents=[conversations_path_parent, json_parent, verbose_parent],
+            help="List conversations for the project.",
+            description=(
+                "List conversations for the project.\n\n"
+                "Examples:\n"
+                "  poly conversations list\n"
+                "  poly conversations list --limit 20 --offset 10\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        conv_list_parser.add_argument(
+            "--limit",
+            type=int,
+            default=50,
+            help="Max number of conversations to return. Defaults to 50.",
+        )
+        conv_list_parser.add_argument(
+            "--offset",
+            type=int,
+            default=0,
+            help="Number of conversations to skip. Defaults to 0.",
+        )
+
+        conv_get_parser = conversations_subparsers.add_parser(
+            "get",
+            parents=[conversations_path_parent, json_parent, verbose_parent],
+            help="Get details for a specific conversation.",
+            description=(
+                "Get detailed information for a conversation including turns.\n\n"
+                "Examples:\n"
+                "  poly conversations get <conversation_id>\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        conv_get_parser.add_argument(
+            "conversation_id",
+            type=str,
+            help="The conversation ID.",
+        )
+
+        conv_audio_parser = conversations_subparsers.add_parser(
+            "get-audio",
+            parents=[conversations_path_parent, json_parent, verbose_parent],
+            help="Download audio recording for a conversation.",
+            description=(
+                "Download the audio recording for a conversation as a WAV file.\n\n"
+                "Examples:\n"
+                "  poly conversations get-audio <conversation_id>\n"
+                "  poly conversations get-audio <conversation_id> --direction user\n"
+                "  poly conversations get-audio <conversation_id> --redacted -o redacted.wav\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        conv_audio_parser.add_argument(
+            "conversation_id",
+            type=str,
+            help="The conversation ID.",
+        )
+        conv_audio_parser.add_argument(
+            "--direction",
+            type=str,
+            default="combined",
+            choices=["combined", "user", "agent"],
+            help="Audio direction. Defaults to combined.",
+        )
+        conv_audio_parser.add_argument(
+            "--redacted",
+            action="store_true",
+            help="Download redacted audio.",
+        )
+        conv_audio_parser.add_argument(
+            "-o",
+            "--output",
+            type=str,
+            help="Output file path. Defaults to <conversation_id>.wav.",
+        )
+
         return parser
 
     @classmethod
@@ -1366,6 +1474,30 @@ class AgentStudioCLI:
                         force=args.force,
                         output_json=args.json,
                         dry_run=args.dry_run,
+                    )
+
+            elif args.command == "conversations":
+                if args.conversations_subcommand == "list":
+                    cls.conversations_list(
+                        args.path,
+                        args.limit,
+                        args.offset,
+                        output_json=args.json,
+                    )
+                elif args.conversations_subcommand == "get":
+                    cls.conversations_get(
+                        args.path,
+                        args.conversation_id,
+                        output_json=args.json,
+                    )
+                elif args.conversations_subcommand == "get-audio":
+                    cls.conversations_get_audio(
+                        args.path,
+                        args.conversation_id,
+                        direction=args.direction,
+                        redacted=args.redacted,
+                        output_path=args.output,
+                        output_json=args.json,
                     )
 
             elif args.command == "start":
@@ -3898,6 +4030,119 @@ class AgentStudioCLI:
             else:
                 error(f"Failed to rollback deployment: {e}")
             sys.exit(1)
+
+    # ── conversations ────────────────────────────────────────────────
+
+    @classmethod
+    def conversations_list(
+        cls,
+        base_path: str,
+        limit: int = 50,
+        offset: int = 0,
+        output_json: bool = False,
+    ) -> None:
+        """List conversations for the project.
+
+        Args:
+            base_path: Base path for the project.
+            limit: Max number of conversations to return.
+            offset: Number of conversations to skip.
+            output_json: If True, emit machine-readable JSON.
+        """
+        project = cls._load_project(base_path, output_json=output_json)
+        result = AgentStudioInterface.list_conversations(
+            region=project.region,
+            project_id=project.project_id,
+            limit=limit,
+            offset=offset,
+        )
+        conversations = result.get("conversations", [])
+
+        if output_json:
+            json_print(result)
+        else:
+            if not conversations:
+                info("No conversations found.")
+                return
+            print_conversations(conversations, url_builder=project.get_conversation_url)
+
+    @classmethod
+    def conversations_get(
+        cls,
+        base_path: str,
+        conversation_id: str,
+        output_json: bool = False,
+    ) -> None:
+        """Get details for a specific conversation.
+
+        Args:
+            base_path: Base path for the project.
+            conversation_id: The conversation ID to look up.
+            output_json: If True, emit machine-readable JSON.
+        """
+        project = cls._load_project(base_path, output_json=output_json)
+        conversation = AgentStudioInterface.get_conversation(
+            region=project.region,
+            project_id=project.project_id,
+            conversation_id=conversation_id,
+        )
+
+        if output_json:
+            json_print(conversation)
+        else:
+            studio_url = project.get_conversation_url(conversation_id)
+            print_conversation_detail(conversation, studio_url=studio_url)
+
+    @classmethod
+    def conversations_get_audio(
+        cls,
+        base_path: str,
+        conversation_id: str,
+        direction: str = "combined",
+        redacted: bool = False,
+        output_path: Optional[str] = None,
+        output_json: bool = False,
+    ) -> None:
+        """Download audio recording for a conversation.
+
+        Args:
+            base_path: Base path for the project.
+            conversation_id: The conversation ID.
+            direction: Audio direction — combined, user, or agent.
+            redacted: Whether to download redacted audio.
+            output_path: Output file path. Defaults to <conversation_id>.wav.
+            output_json: If True, emit machine-readable JSON.
+        """
+        project = cls._load_project(base_path, output_json=output_json)
+        audio_data = AgentStudioInterface.get_conversation_audio(
+            region=project.region,
+            project_id=project.project_id,
+            conversation_id=conversation_id,
+            direction=direction,
+            redacted=redacted,
+        )
+
+        if output_path is None:
+            output_path = f"{conversation_id}.wav"
+
+        with open(output_path, "wb") as f:
+            f.write(audio_data)
+
+        size_bytes = len(audio_data)
+        if output_json:
+            json_print(
+                {
+                    "success": True,
+                    "conversation_id": conversation_id,
+                    "direction": direction,
+                    "redacted": redacted,
+                    "output_path": output_path,
+                    "size_bytes": size_bytes,
+                }
+            )
+        else:
+            size_mb = size_bytes / 1_000_000
+            success(f"Audio saved to {output_path} ({size_mb:.1f} MB)")
 
     @classmethod
     def start(cls, base_path: str) -> None:
