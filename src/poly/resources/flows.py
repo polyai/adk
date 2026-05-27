@@ -7,7 +7,7 @@ import os
 import re
 import uuid
 from abc import ABC
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum
 from functools import cached_property
 from typing import Optional
@@ -351,8 +351,11 @@ class FlowStep(BaseFlowStep, YamlResource):
             self.dtmf_config = None
 
         self.extracted_entities = extracted_entities or []
+        condition_names = {f.name for f in fields(Condition) if f.init}
         self.conditions = [
-            Condition(**condition) if not isinstance(condition, Condition) else condition
+            Condition(**{k: v for k, v in condition.items() if k in condition_names})
+            if not isinstance(condition, Condition)
+            else condition
             for condition in (conditions or [])
         ]
         self.prompt = prompt
