@@ -7326,7 +7326,7 @@ class TranslationTests(unittest.TestCase):
         t.validate(resource_mappings=mappings)
 
     def test_validate_extra_language_ok(self):
-        """validate passes when translation has languages beyond what's configured."""
+        """Validate raises when translation has languages beyond what's configured."""
         t = Translation(
             resource_id="tn-1",
             name="greeting",
@@ -7342,7 +7342,11 @@ class TranslationTests(unittest.TestCase):
                 resource_prefix=None,
             ),
         ]
-        t.validate(resource_mappings=mappings)
+        with self.assertRaises(ValueError) as cm:
+            t.validate(resource_mappings=mappings)
+        self.assertIn("Translation for language not configured", str(cm.exception))
+        self.assertIn("de-DE", str(cm.exception))
+        self.assertIn("fr-FR", str(cm.exception))
 
     def test_validate_no_resource_mappings_skips_language_check(self):
         """validate without resource_mappings only does basic checks."""
