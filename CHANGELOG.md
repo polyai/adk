@@ -1,6 +1,116 @@
 # CHANGELOG
 
 
+## v0.21.1 (2026-05-21)
+
+### Bug Fixes
+
+- Add tab-completion for branch switch and misc CLI fixes
+  ([#159](https://github.com/polyai/adk/pull/159),
+  [`91c68bb`](https://github.com/polyai/adk/commit/91c68bb8d10c749d958bbd358c1541381102201f))
+
+## Summary
+
+Adds tab-completion support for `poly branch switch` and fixes related CLI issues.
+
+## Motivation
+
+Branch names weren't being tab-completed on the `switch` subcommand, making it harder to quickly
+  switch branches. The `_branch_name_completer` was also a classmethod which caused issues with
+  argcomplete's expected function signature.
+
+## Changes
+
+- Changed `_branch_name_completer` from `@classmethod` to `@staticmethod` (argcomplete expects a
+  plain callable, not a bound method) - Attached `.completer` to the `branch_name` argument on
+  `branch switch` for tab-completion - Made `review` subcommand `required=True` so it shows help
+  instead of silently doing nothing
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.21.0 (2026-05-21)
+
+### Chores
+
+- Update experimental config schema ([#155](https://github.com/polyai/adk/pull/155),
+  [`dd3717c`](https://github.com/polyai/adk/commit/dd3717c8642dafb8645461e96cb8002d2f906b37))
+
+## Summary Update experimental config
+
+## Motivation Get new features
+
+## Changes Update to latest
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+### Features
+
+- Add poly login command for multi-region auth ([#158](https://github.com/polyai/adk/pull/158),
+  [`d9b5cc5`](https://github.com/polyai/adk/commit/d9b5cc569b87f4255273142f67c6a6462700c0dd))
+
+## Summary
+
+Add a new `poly login` command that allows existing enterprise users to authenticate against any
+  region, alongside the existing `poly start` flow for free-tier users.
+
+## Motivation
+
+Enterprise clients need to authenticate against their specific region (us-1, uk-1, euw-1) rather
+  than the default studio region. Previously only `poly start` existed, which was hardcoded to the
+  studio region.
+
+## Changes
+
+- Add `poly login` command with `--region` flag and interactive region selector - Extract
+  `_authenticate_and_save_key` helper from `start` to share auth logic between `start` and `login` -
+  Add `REGION_TO_AUTH_DETAILS` mapping in `Auth0Handler` with per-region base URLs and client IDs -
+  Validate region in auth methods with clear error messages - `make_request` now takes `base_url`
+  directly instead of resolving region internally - Hide dev/staging regions from interactive prompt
+  (still accessible via `--region` flag) - Guard against `None` PAT from API response
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly login`) - [x] Tested against a live
+  Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
 ## v0.20.4 (2026-05-19)
 
 ### Performance Improvements
