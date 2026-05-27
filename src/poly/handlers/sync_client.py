@@ -12,6 +12,7 @@ from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.protobuf.handoff_pb2 import Handoff_SetDefault
 from poly.handlers.sdk import SourcererAPIError, SourcererSDK
 from poly.resources import (
+    AdditionalLanguage,
     ApiIntegration,
     ApiIntegrationEnvironments,
     ApiIntegrationOperation,
@@ -22,6 +23,7 @@ from poly.resources import (
     ChatSafetyFilters,
     ChatStylePrompt,
     Condition,
+    DefaultLanguage,
     DTMFConfig,
     Entity,
     ExperimentalConfig,
@@ -47,6 +49,7 @@ from poly.resources import (
     SMSTemplate,
     Topic,
     TranscriptCorrection,
+    Translation,
     Variable,
     Variant,
     VariantAttribute,
@@ -54,9 +57,6 @@ from poly.resources import (
     VoiceGreeting,
     VoiceSafetyFilters,
     VoiceStylePrompt,
-    Translation,
-    AdditionalLanguage,
-    DefaultLanguage,
 )
 
 logger = logging.getLogger(__name__)
@@ -627,7 +627,9 @@ class SyncClientHandler:
             .get("entities", {})
         )
         config_id, config_data = (
-            next(iter(experimental_configs.items()), {}) if experimental_configs else {}
+            next(iter(experimental_configs.items()), ("default", {}))
+            if experimental_configs
+            else ("default", {})
         )
         # Only get the first experimental config
         return {
