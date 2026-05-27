@@ -1227,7 +1227,7 @@ class AgentStudioCLI:
 
         conv_audio_parser = conversations_subparsers.add_parser(
             "get-audio",
-            parents=[conversations_path_parent, verbose_parent],
+            parents=[conversations_path_parent, json_parent, verbose_parent],
             help="Download audio recording for a conversation.",
             description=(
                 "Download the audio recording for a conversation as a WAV file.\n\n"
@@ -1505,6 +1505,7 @@ class AgentStudioCLI:
                         direction=args.direction,
                         redacted=args.redacted,
                         output_path=args.output,
+                        output_json=args.json,
                     )
 
             elif args.command == "start":
@@ -4112,6 +4113,7 @@ class AgentStudioCLI:
         direction: str = "combined",
         redacted: bool = False,
         output_path: Optional[str] = None,
+        output_json: bool = False,
     ) -> None:
         """Download audio recording for a conversation.
 
@@ -4121,8 +4123,9 @@ class AgentStudioCLI:
             direction: Audio direction — combined, user, or agent.
             redacted: Whether to download redacted audio.
             output_path: Output file path. Defaults to <conversation_id>.wav.
+            output_json: If True, emit machine-readable JSON.
         """
-        project = cls._load_project(base_path)
+        project = cls._load_project(base_path, output_json=output_json)
         audio_data = AgentStudioInterface.get_conversation_audio(
             region=project.region,
             project_id=project.project_id,
@@ -4137,8 +4140,21 @@ class AgentStudioCLI:
         with open(output_path, "wb") as f:
             f.write(audio_data)
 
-        size_mb = len(audio_data) / 1_000_000
-        success(f"Audio saved to {output_path} ({size_mb:.1f} MB)")
+        size_bytes = len(audio_data)
+        if output_json:
+            json_print(
+                {
+                    "success": True,
+                    "conversation_id": conversation_id,
+                    "direction": direction,
+                    "redacted": redacted,
+                    "output_path": output_path,
+                    "size_bytes": size_bytes,
+                }
+            )
+        else:
+            size_mb = size_bytes / 1_000_000
+            success(f"Audio saved to {output_path} ({size_mb:.1f} MB)")
 
     @classmethod
     def start(cls, base_path: str) -> None:
