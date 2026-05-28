@@ -777,20 +777,22 @@ class TransitionFunction_CreateTransitionFunction(_message.Message):
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., parameters: _Optional[_Iterable[_Union[_functions_pb2.FunctionParameterUpdate, _Mapping]]] = ..., code: _Optional[str] = ..., errors: _Optional[_Iterable[_Union[_functions_pb2.FunctionError, _Mapping]]] = ..., latency_control: _Optional[_Union[_functions_pb2.FunctionCreateLatencyControl, _Mapping]] = ..., references: _Optional[_Union[TransitionFunctionReferences, _Mapping]] = ..., archived: bool = ...) -> None: ...
 
 class TransitionFunction_UpdateTransitionFunction(_message.Message):
-    __slots__ = ("id", "name", "description", "parameters", "code", "errors")
+    __slots__ = ("id", "name", "description", "parameters", "code", "errors", "references")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
     PARAMETERS_FIELD_NUMBER: _ClassVar[int]
     CODE_FIELD_NUMBER: _ClassVar[int]
     ERRORS_FIELD_NUMBER: _ClassVar[int]
+    REFERENCES_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     description: str
     parameters: _functions_pb2.ParametersUpdate
     code: str
     errors: _functions_pb2.ErrorsUpdate
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., parameters: _Optional[_Union[_functions_pb2.ParametersUpdate, _Mapping]] = ..., code: _Optional[str] = ..., errors: _Optional[_Union[_functions_pb2.ErrorsUpdate, _Mapping]] = ...) -> None: ...
+    references: TransitionFunctionReferences
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., parameters: _Optional[_Union[_functions_pb2.ParametersUpdate, _Mapping]] = ..., code: _Optional[str] = ..., errors: _Optional[_Union[_functions_pb2.ErrorsUpdate, _Mapping]] = ..., references: _Optional[_Union[TransitionFunctionReferences, _Mapping]] = ...) -> None: ...
 
 class CreateNoCodeStep(_message.Message):
     __slots__ = ("flow_id", "step_id", "name", "prompt", "position", "references")

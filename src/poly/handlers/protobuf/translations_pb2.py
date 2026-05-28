@@ -15,25 +15,51 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12translations.proto\x12\x0ctranslations\x1a\x1fgoogle/protobuf/timestamp.proto\"P\n\rLocalizedText\x12\x15\n\rlanguage_code\x18\x01 \x01(\t\x12\x0c\n\x04text\x18\x02 \x01(\t\x12\x1a\n\x12is_auto_translated\x18\x03 \x01(\x08\"\x9a\x02\n\x10TranslationEntry\x12\n\n\x02id\x18\x01 \x01(\t\x12\x17\n\x0ftranslation_key\x18\x02 \x01(\t\x12\x31\n\x0ctranslations\x18\x03 \x03(\x0b\x32\x1b.translations.LocalizedText\x12.\n\ncreated_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x33\n\nupdated_at\x18\x05 \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x00\x88\x01\x01\x12\x12\n\ncreated_by\x18\x06 \x01(\t\x12\x17\n\nupdated_by\x18\x07 \x01(\tH\x01\x88\x01\x01\x42\r\n\x0b_updated_atB\r\n\x0b_updated_by\"D\n\x0cTranslations\x12\x34\n\x0ctranslations\x18\x01 \x03(\x0b\x32\x1e.translations.TranslationEntry\"x\n\x0bUpdateEntry\x12\x15\n\rlanguage_code\x18\x01 \x01(\t\x12\x11\n\x04text\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x1f\n\x12is_auto_translated\x18\x03 \x01(\x08H\x01\x88\x01\x01\x42\x07\n\x05_textB\x15\n\x13_is_auto_translated\"x\n\x1eLanguageHubTranslations_Create\x12\n\n\x02id\x18\x01 \x01(\t\x12\x17\n\x0ftranslation_key\x18\x02 \x01(\t\x12\x31\n\x0ctranslations\x18\x03 \x03(\x0b\x32\x1b.translations.LocalizedText\"\x8f\x01\n\x1eLanguageHubTranslations_Update\x12\n\n\x02id\x18\x01 \x01(\t\x12\x1c\n\x0ftranslation_key\x18\x02 \x01(\tH\x00\x88\x01\x01\x12/\n\x0ctranslations\x18\x03 \x03(\x0b\x32\x19.translations.UpdateEntryB\x12\n\x10_translation_key\",\n\x1eLanguageHubTranslations_Delete\x12\n\n\x02id\x18\x01 \x01(\tb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x12translations.proto\x12\x0ctranslations\x1a\x1fgoogle/protobuf/timestamp.proto\"P\n\rLocalizedText\x12\x15\n\rlanguage_code\x18\x01 \x01(\t\x12\x0c\n\x04text\x18\x02 \x01(\t\x12\x1a\n\x12is_auto_translated\x18\x03 \x01(\x08\"\xfe\x05\n\x15TranslationReferences\x12?\n\x06topics\x18\x01 \x03(\x0b\x32/.translations.TranslationReferences.TopicsEntry\x12\x39\n\x03sms\x18\x02 \x03(\x0b\x32,.translations.TranslationReferences.SmsEntry\x12\x45\n\tgreetings\x18\x03 \x03(\x0b\x32\x32.translations.TranslationReferences.GreetingsEntry\x12X\n\x13\x64isclaimer_messages\x18\x04 \x03(\x0b\x32;.translations.TranslationReferences.DisclaimerMessagesEntry\x12\x45\n\tbehaviour\x18\x05 \x03(\x0b\x32\x32.translations.TranslationReferences.BehaviourEntry\x12P\n\x0f\x64\x65lay_responses\x18\x06 \x03(\x0b\x32\x37.translations.TranslationReferences.DelayResponsesEntry\x1a-\n\x0bTopicsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a*\n\x08SmsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a\x30\n\x0eGreetingsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a\x39\n\x17\x44isclaimerMessagesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a\x30\n\x0e\x42\x65haviourEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a\x35\n\x13\x44\x65layResponsesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\"\xe7\x02\n\x10TranslationEntry\x12\n\n\x02id\x18\x01 \x01(\t\x12\x17\n\x0ftranslation_key\x18\x02 \x01(\t\x12\x31\n\x0ctranslations\x18\x03 \x03(\x0b\x32\x1b.translations.LocalizedText\x12.\n\ncreated_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x33\n\nupdated_at\x18\x05 \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x00\x88\x01\x01\x12\x12\n\ncreated_by\x18\x06 \x01(\t\x12\x17\n\nupdated_by\x18\x07 \x01(\tH\x01\x88\x01\x01\x12<\n\nreferences\x18\x08 \x01(\x0b\x32#.translations.TranslationReferencesH\x02\x88\x01\x01\x42\r\n\x0b_updated_atB\r\n\x0b_updated_byB\r\n\x0b_references\"D\n\x0cTranslations\x12\x34\n\x0ctranslations\x18\x01 \x03(\x0b\x32\x1e.translations.TranslationEntry\"x\n\x0bUpdateEntry\x12\x15\n\rlanguage_code\x18\x01 \x01(\t\x12\x11\n\x04text\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x1f\n\x12is_auto_translated\x18\x03 \x01(\x08H\x01\x88\x01\x01\x42\x07\n\x05_textB\x15\n\x13_is_auto_translated\"x\n\x1eLanguageHubTranslations_Create\x12\n\n\x02id\x18\x01 \x01(\t\x12\x17\n\x0ftranslation_key\x18\x02 \x01(\t\x12\x31\n\x0ctranslations\x18\x03 \x03(\x0b\x32\x1b.translations.LocalizedText\"\x8f\x01\n\x1eLanguageHubTranslations_Update\x12\n\n\x02id\x18\x01 \x01(\t\x12\x1c\n\x0ftranslation_key\x18\x02 \x01(\tH\x00\x88\x01\x01\x12/\n\x0ctranslations\x18\x03 \x03(\x0b\x32\x19.translations.UpdateEntryB\x12\n\x10_translation_key\",\n\x1eLanguageHubTranslations_Delete\x12\n\n\x02id\x18\x01 \x01(\tb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'translations_pb2', _globals)
 if _descriptor._USE_C_DESCRIPTORS == False:
   DESCRIPTOR._options = None
+  _globals['_TRANSLATIONREFERENCES_TOPICSENTRY']._options = None
+  _globals['_TRANSLATIONREFERENCES_TOPICSENTRY']._serialized_options = b'8\001'
+  _globals['_TRANSLATIONREFERENCES_SMSENTRY']._options = None
+  _globals['_TRANSLATIONREFERENCES_SMSENTRY']._serialized_options = b'8\001'
+  _globals['_TRANSLATIONREFERENCES_GREETINGSENTRY']._options = None
+  _globals['_TRANSLATIONREFERENCES_GREETINGSENTRY']._serialized_options = b'8\001'
+  _globals['_TRANSLATIONREFERENCES_DISCLAIMERMESSAGESENTRY']._options = None
+  _globals['_TRANSLATIONREFERENCES_DISCLAIMERMESSAGESENTRY']._serialized_options = b'8\001'
+  _globals['_TRANSLATIONREFERENCES_BEHAVIOURENTRY']._options = None
+  _globals['_TRANSLATIONREFERENCES_BEHAVIOURENTRY']._serialized_options = b'8\001'
+  _globals['_TRANSLATIONREFERENCES_DELAYRESPONSESENTRY']._options = None
+  _globals['_TRANSLATIONREFERENCES_DELAYRESPONSESENTRY']._serialized_options = b'8\001'
   _globals['_LOCALIZEDTEXT']._serialized_start=69
   _globals['_LOCALIZEDTEXT']._serialized_end=149
-  _globals['_TRANSLATIONENTRY']._serialized_start=152
-  _globals['_TRANSLATIONENTRY']._serialized_end=434
-  _globals['_TRANSLATIONS']._serialized_start=436
-  _globals['_TRANSLATIONS']._serialized_end=504
-  _globals['_UPDATEENTRY']._serialized_start=506
-  _globals['_UPDATEENTRY']._serialized_end=626
-  _globals['_LANGUAGEHUBTRANSLATIONS_CREATE']._serialized_start=628
-  _globals['_LANGUAGEHUBTRANSLATIONS_CREATE']._serialized_end=748
-  _globals['_LANGUAGEHUBTRANSLATIONS_UPDATE']._serialized_start=751
-  _globals['_LANGUAGEHUBTRANSLATIONS_UPDATE']._serialized_end=894
-  _globals['_LANGUAGEHUBTRANSLATIONS_DELETE']._serialized_start=896
-  _globals['_LANGUAGEHUBTRANSLATIONS_DELETE']._serialized_end=940
+  _globals['_TRANSLATIONREFERENCES']._serialized_start=152
+  _globals['_TRANSLATIONREFERENCES']._serialized_end=918
+  _globals['_TRANSLATIONREFERENCES_TOPICSENTRY']._serialized_start=615
+  _globals['_TRANSLATIONREFERENCES_TOPICSENTRY']._serialized_end=660
+  _globals['_TRANSLATIONREFERENCES_SMSENTRY']._serialized_start=662
+  _globals['_TRANSLATIONREFERENCES_SMSENTRY']._serialized_end=704
+  _globals['_TRANSLATIONREFERENCES_GREETINGSENTRY']._serialized_start=706
+  _globals['_TRANSLATIONREFERENCES_GREETINGSENTRY']._serialized_end=754
+  _globals['_TRANSLATIONREFERENCES_DISCLAIMERMESSAGESENTRY']._serialized_start=756
+  _globals['_TRANSLATIONREFERENCES_DISCLAIMERMESSAGESENTRY']._serialized_end=813
+  _globals['_TRANSLATIONREFERENCES_BEHAVIOURENTRY']._serialized_start=815
+  _globals['_TRANSLATIONREFERENCES_BEHAVIOURENTRY']._serialized_end=863
+  _globals['_TRANSLATIONREFERENCES_DELAYRESPONSESENTRY']._serialized_start=865
+  _globals['_TRANSLATIONREFERENCES_DELAYRESPONSESENTRY']._serialized_end=918
+  _globals['_TRANSLATIONENTRY']._serialized_start=921
+  _globals['_TRANSLATIONENTRY']._serialized_end=1280
+  _globals['_TRANSLATIONS']._serialized_start=1282
+  _globals['_TRANSLATIONS']._serialized_end=1350
+  _globals['_UPDATEENTRY']._serialized_start=1352
+  _globals['_UPDATEENTRY']._serialized_end=1472
+  _globals['_LANGUAGEHUBTRANSLATIONS_CREATE']._serialized_start=1474
+  _globals['_LANGUAGEHUBTRANSLATIONS_CREATE']._serialized_end=1594
+  _globals['_LANGUAGEHUBTRANSLATIONS_UPDATE']._serialized_start=1597
+  _globals['_LANGUAGEHUBTRANSLATIONS_UPDATE']._serialized_end=1740
+  _globals['_LANGUAGEHUBTRANSLATIONS_DELETE']._serialized_start=1742
+  _globals['_LANGUAGEHUBTRANSLATIONS_DELETE']._serialized_end=1786
 # @@protoc_insertion_point(module_scope)
