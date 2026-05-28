@@ -21,7 +21,7 @@ pip install polyai-adk
 poly start                                          # self-serve sign-up, API key, and project in one go
 ```
 
-`poly start` is for self-serve accounts on [studio.poly.ai](https://studio.poly.ai). If your workspace is on an enterprise cluster (`us-1`, `euw-1`, `uk-1`), create your API key in the Agent Studio UI and export it instead — see [Getting started](get-started/get-started.md#manual-api-key-setup-enterprise-accounts).
+`poly start` is for self-serve accounts on [studio.poly.ai](https://studio.poly.ai). If your workspace is on an enterprise cluster (`us-1`, `euw-1`, `uk-1`), run `poly login --region <region>` instead — or export your API key manually. See [Getting started](get-started/get-started.md#enterprise-accounts-poly-login-or-manual-api-key).
 
 See [Getting started](get-started/get-started.md) for the full walkthrough, [Prerequisites](get-started/prerequisites.md) for local tool setup, and [First commands](get-started/first-commands.md) for a guide to `poly init` and the core CLI.
 
@@ -72,7 +72,7 @@ This documentation follows the developer journey:
 
 If you are new to the ADK, follow this order:
 
-1. follow **Getting started** — install the ADK, set up your API key (`poly start` for self-serve or manual export for enterprise), and create your first project
+1. follow **Getting started** — install the ADK, set up your API key (`poly start` for self-serve, `poly login` or a manual export for enterprise), and create your first project
 2. read **What is the PolyAI ADK?**
 3. use **First commands** — explore the core CLI commands
 4. continue to **Build an agent with the ADK**

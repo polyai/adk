@@ -28,6 +28,55 @@ poly push --help
 
 ## Core commands
 
+### `poly start`
+
+End-to-end onboarding for **self-serve** accounts on [studio.poly.ai](https://studio.poly.ai). `poly start` is hardcoded to the `studio` region — for enterprise clusters, use [`poly login`](#poly-login).
+
+`poly start`:
+
+1. Opens a browser window so you can sign up or sign in to a self-serve workspace.
+2. Generates an API key (or reuses your existing one) and writes it to `~/.poly/credentials.json` under the `studio` region.
+3. Optionally creates a new Agent Studio project and pulls it down locally.
+
+If the ADK detects an existing API key in the credential file or environment, `poly start` skips authentication and goes straight to project creation.
+
+Examples:
+
+~~~bash
+poly start
+poly start --base-path /path/to/projects
+~~~
+
+| Flag | Description |
+|---|---|
+| `--base-path` | Base path to initialize the project in. Defaults to the current working directory. |
+
+### `poly login`
+
+Sign in to an existing Agent Studio account (self-serve **or** enterprise) and save API key credentials for the CLI.
+
+`poly login`:
+
+1. Prompts for a region if `--region` is not supplied.
+2. Opens a browser window for sign-in via the Auth0 device authorization flow.
+3. Fetches or creates an API key for your user and saves it to `~/.poly/credentials.json` under the chosen region.
+
+Run `poly login` once per region you need access to — credentials for multiple regions are stored side by side.
+
+Examples:
+
+~~~bash
+poly login
+poly login --region us-1
+poly login --region euw-1
+poly login --region uk-1
+poly login --region studio
+~~~
+
+| Flag | Description |
+|---|---|
+| `--region` | Region to log in to. If omitted, you are prompted to pick one. Choices match the standard region list. |
+
 ### `poly project`
 
 Manage Agent Studio projects.
