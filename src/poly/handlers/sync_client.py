@@ -54,6 +54,7 @@ from poly.resources import (
     VoiceGreeting,
     VoiceSafetyFilters,
     VoiceStylePrompt,
+    TestCase,
 )
 
 logger = logging.getLogger(__name__)
@@ -139,6 +140,7 @@ class SyncClientHandler:
             **cls._read_asr_settings_from_projection(projection),
             GeneralSafetyFilters: cls._read_safety_filters_from_projection(projection),
             ApiIntegration: cls._read_api_integrations_from_projection(projection),
+            TestCase: cls._read_test_cases_from_projection(projection),
         }  # ty:ignore[invalid-return-type]
 
     def pull_deployment_resources(
@@ -901,6 +903,24 @@ class SyncClientHandler:
             )
 
         return api_integrations
+
+    def _read_test_cases_from_projection(
+        projection: dict,
+    ) -> dict[type[Resource], dict[str, Resource]]:
+        test_cases = {}
+        for test_case_id, test_case_data in (
+            projection.get("testing", {}).get("testCases", {}).get("entities", {}).items()
+        ):
+            test_cases[test_case_id] = TestCase(
+                resource_id=test_case_id,
+                name=test_case_data.get("name", ""),
+                scenario=test_case_data.get("scenario", ""),
+                variant=test_case_data.get("variantId", ""),
+                language=test_case_data.get("language", ""),
+                channel=test_case_data.get("channel", ""),
+                tags=test_case_data.get("tags", []),
+            )
+        return test_cases
 
     # Types that should be created first
     # as they are referenced by other resources

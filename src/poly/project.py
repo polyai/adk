@@ -65,6 +65,7 @@ from poly.resources import (
     VoiceGreeting,
     VoiceSafetyFilters,
     VoiceStylePrompt,
+    TestCase,
 )
 from poly.resources.resource import _parse_multi_resource_path
 from poly.utils import compute_variable_references
@@ -106,6 +107,7 @@ RESOURCE_NAME_TO_CLASS: dict[str, type[Resource]] = {
     "asr_settings": AsrSettings,
     "phrase_filtering": PhraseFilter,
     "pronunciations": Pronunciation,
+    "test_cases": TestCase,
 }
 
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
