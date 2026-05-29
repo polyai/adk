@@ -60,6 +60,7 @@ from poly.resources.resource import (
     ResourceMapping,
     _parse_multi_resource_path,
 )
+from poly.resources.resource_utils import extract_go_to_flows, extract_go_to_steps
 from poly.resources.safety_filters import (
     ChatSafetyFilters,
     GeneralSafetyFilters,
@@ -3751,6 +3752,173 @@ class FunctionStepTests(unittest.TestCase):
             self.assertIsNotNone(result.function_id)
             self.assertRegex(result.function_id, r"^FUNCTION-[a-f0-9]{8}$")
 
+    def test_read_local_resource_conditions_have_bare_child_step_id(self):
+        """Conditions extracted from goto_step calls should use bare step IDs
+        without the flow name prefix."""
+        code_with_goto = (
+            "from _gen import *  # <AUTO GENERATED>\n\n\n"
+            "def my_func(conv: Conversation, flow: Flow):\n"
+            '    flow.goto_step("Target Step", "Step reached")\n'
+        )
+        step_yaml = (
+            "step_type: default_step\n"
+            "name: Target Step\n"
+            "conditions: []\n"
+            "extracted_entities: []\n"
+            "prompt: Some prompt\n"
+        )
+
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="test_flow",
+                resource_name="Test Flow",
+                resource_type=FlowConfig,
+                file_path="flows/test_flow/flow_config.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+            ),
+            ResourceMapping(
+                resource_id="Test Flow_FLOW_STEPS-abc",
+                resource_name="Target Step",
+                resource_type=FlowStep,
+                file_path="flows/test_flow/steps/target_step.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+            ),
+        ]
+
+        with mock_read_from_file({
+            "flows/test_flow/function_steps/my_func.py": code_with_goto,
+            "flows/test_flow/steps/target_step.yaml": step_yaml,
+        }):
+            result = FunctionStep.read_local_resource(
+                file_path="flows/test_flow/function_steps/my_func.py",
+                resource_id="Test Flow_my_func",
+                resource_name="my_func",
+                resource_mappings=resource_mappings,
+                known_latency_control={},
+            )
+
+        self.assertEqual(len(result.conditions), 1)
+        condition = result.conditions[0]
+        self.assertEqual(condition.name, "Step reached")
+        self.assertEqual(condition.child_step, "FLOW_STEPS-abc")
+        self.assertFalse(
+            condition.child_step.startswith("Test Flow_"),
+            "child_step should not contain the flow name prefix",
+        )
+
+    def test_read_local_resource_condition_child_step_is_function_step(self):
+        """Conditions pointing to FunctionStep children should also use bare step IDs."""
+        code_with_goto = (
+            "from _gen import *  # <AUTO GENERATED>\n\n\n"
+            "def router(conv: Conversation, flow: Flow):\n"
+            '    flow.goto_step("other_handler", "Route to handler")\n'
+        )
+
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="test_flow",
+                resource_name="Test Flow",
+                resource_type=FlowConfig,
+                file_path="flows/test_flow/flow_config.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+            ),
+            ResourceMapping(
+                resource_id="Test Flow_FUNCTION_STEPS-def",
+                resource_name="other_handler",
+                resource_type=FunctionStep,
+                file_path="flows/test_flow/function_steps/other_handler.py",
+                resource_prefix=None,
+                flow_name="Test Flow",
+            ),
+        ]
+
+        with mock_read_from_file(code_with_goto):
+            result = FunctionStep.read_local_resource(
+                file_path="flows/test_flow/function_steps/router.py",
+                resource_id="Test Flow_router",
+                resource_name="router",
+                resource_mappings=resource_mappings,
+                known_latency_control={},
+            )
+
+        self.assertEqual(len(result.conditions), 1)
+        condition = result.conditions[0]
+        self.assertEqual(condition.name, "Route to handler")
+        self.assertEqual(condition.child_step, "FUNCTION_STEPS-def")
+        self.assertEqual(condition.condition_type, ConditionType.FUNCTION_STEP)
+
+    def test_read_local_resource_exit_flow_condition(self):
+        """read_local_resource should extract an exit_flow condition from conv.exit_flow()."""
+        code = (
+            "from _gen import *  # <AUTO GENERATED>\n\n\n"
+            "def my_func(conv: Conversation, flow: Flow):\n"
+            "    if not conv.state.ok:\n"
+            "        conv.exit_flow()\n"
+            "        return\n"
+            '    flow.goto_step("Target Step", "Step reached")\n'
+        )
+        step_yaml = (
+            "step_type: default_step\n"
+            "name: Target Step\n"
+            "conditions: []\n"
+            "extracted_entities: []\n"
+            "prompt: Some prompt\n"
+        )
+
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="test_flow",
+                resource_name="Test Flow",
+                resource_type=FlowConfig,
+                file_path="flows/test_flow/flow_config.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+            ),
+            ResourceMapping(
+                resource_id="Test Flow_FLOW_STEPS-abc",
+                resource_name="Target Step",
+                resource_type=FlowStep,
+                file_path="flows/test_flow/steps/target_step.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+            ),
+        ]
+
+        with mock_read_from_file({
+            "flows/test_flow/function_steps/my_func.py": code,
+            "flows/test_flow/steps/target_step.yaml": step_yaml,
+        }):
+            result = FunctionStep.read_local_resource(
+                file_path="flows/test_flow/function_steps/my_func.py",
+                resource_id="Test Flow_my_func",
+                resource_name="my_func",
+                resource_mappings=resource_mappings,
+                known_latency_control={},
+            )
+
+        self.assertEqual(len(result.conditions), 2)
+
+        step_cond = next(
+            c for c in result.conditions if c.condition_type != ConditionType.EXIT_FLOW
+        )
+        self.assertEqual(step_cond.name, "Step reached")
+        self.assertEqual(step_cond.condition_type, ConditionType.NO_CODE_STEP)
+        self.assertEqual(step_cond.child_step, "FLOW_STEPS-abc")
+        self.assertEqual(step_cond.step_id, "my_func")
+        self.assertEqual(step_cond.flow_id, "test_flow")
+
+        exit_cond = next(
+            c for c in result.conditions if c.condition_type == ConditionType.EXIT_FLOW
+        )
+        self.assertEqual(exit_cond.name, "Exit flow")
+        self.assertEqual(exit_cond.condition_type, ConditionType.EXIT_FLOW)
+        self.assertEqual(exit_cond.child_step, "")
+        self.assertEqual(exit_cond.step_id, "my_func")
+        self.assertEqual(exit_cond.flow_id, "test_flow")
+
 
 class ExperimentalConfigTests(unittest.TestCase):
     def test_validate_experimental_config(self):
@@ -7008,6 +7176,119 @@ class ParseMultiResourcePathTests(unittest.TestCase):
 
         self.assertEqual(yaml_path, "D:\\data\\entities.yaml")
         self.assertEqual(segments, ["entities", "customer_name"])
+
+
+class ExtractGoToStepsTests(unittest.TestCase):
+    """Tests for extract_go_to_steps regex extraction."""
+
+    def test_single_arg_double_quotes(self):
+        """Single step name in double quotes returns (name, None)."""
+        code = 'flow.goto_step("my_step")'
+        self.assertEqual(extract_go_to_steps(code), [("my_step", None)])
+
+    def test_single_arg_single_quotes(self):
+        """Single step name in single quotes returns (name, None)."""
+        code = "flow.goto_step('my_step')"
+        self.assertEqual(extract_go_to_steps(code), [("my_step", None)])
+
+    def test_two_args_double_quotes(self):
+        """Step and condition in double quotes returns both."""
+        code = 'flow.goto_step("my_step", "my_cond")'
+        self.assertEqual(extract_go_to_steps(code), [("my_step", "my_cond")])
+
+    def test_two_args_single_quotes(self):
+        """Step and condition in single quotes returns both."""
+        code = "flow.goto_step('my_step', 'my_cond')"
+        self.assertEqual(extract_go_to_steps(code), [("my_step", "my_cond")])
+
+    def test_mixed_quotes_double_step_single_condition(self):
+        """Double-quoted step with single-quoted condition."""
+        code = """flow.goto_step("my_step", 'my_cond')"""
+        self.assertEqual(extract_go_to_steps(code), [("my_step", "my_cond")])
+
+    def test_mixed_quotes_single_step_double_condition(self):
+        """Single-quoted step with double-quoted condition."""
+        code = """flow.goto_step('my_step', "my_cond")"""
+        self.assertEqual(extract_go_to_steps(code), [("my_step", "my_cond")])
+
+    def test_multiple_calls(self):
+        """Multiple goto_step calls are all extracted."""
+        code = (
+            'flow.goto_step("step_a")\n'
+            'flow.goto_step("step_b", "cond_b")\n'
+            "flow.goto_step('step_c')\n"
+        )
+        self.assertEqual(
+            extract_go_to_steps(code),
+            [("step_a", None), ("step_b", "cond_b"), ("step_c", None)],
+        )
+
+    def test_no_matches_returns_empty_list(self):
+        """Code with no goto_step calls returns an empty list."""
+        code = "x = 1\nprint(x)"
+        self.assertEqual(extract_go_to_steps(code), [])
+
+    def test_whitespace_around_comma(self):
+        """Extra whitespace around comma and inside parens is tolerated."""
+        code = 'flow.goto_step(  "step" ,  "cond"  )'
+        result = extract_go_to_steps(code)
+        self.assertEqual(result, [("step", "cond")])
+
+    def test_whitespace_after_opening_paren(self):
+        """Whitespace after opening paren for single arg."""
+        code = 'flow.goto_step(   "step"   )'
+        result = extract_go_to_steps(code)
+        self.assertEqual(result, [("step", None)])
+
+    def test_escaped_quotes_in_step_name(self):
+        """Escaped quotes within the step name string are preserved."""
+        code = r'flow.goto_step("Don\'t stop")'
+        result = extract_go_to_steps(code)
+        self.assertEqual(result, [("Don\\'t stop", None)])
+
+    def test_escaped_quotes_in_double_quoted_string(self):
+        """Escaped double quotes within a double-quoted string."""
+        code = r'flow.goto_step("say \"hello\"")'
+        result = extract_go_to_steps(code)
+        self.assertEqual(result, [('say \\"hello\\"', None)])
+
+    def test_step_name_with_spaces(self):
+        """Step names with spaces are extracted correctly."""
+        code = 'flow.goto_step("Step One", "Label Two")'
+        self.assertEqual(extract_go_to_steps(code), [("Step One", "Label Two")])
+
+
+class ExtractGoToFlowsTests(unittest.TestCase):
+    """Tests for extract_go_to_flows regex extraction."""
+
+    def test_single_flow_double_quotes(self):
+        """Single flow name in double quotes."""
+        code = 'conv.goto_flow("billing_flow")'
+        self.assertEqual(extract_go_to_flows(code), ["billing_flow"])
+
+    def test_single_flow_single_quotes(self):
+        """Single flow name in single quotes."""
+        code = "conv.goto_flow('billing_flow')"
+        self.assertEqual(extract_go_to_flows(code), ["billing_flow"])
+
+    def test_multiple_flows(self):
+        """Multiple goto_flow calls are all extracted."""
+        code = (
+            'conv.goto_flow("flow_a")\n'
+            "conv.goto_flow('flow_b')\n"
+            'conv.goto_flow("flow_c")\n'
+        )
+        self.assertEqual(extract_go_to_flows(code), ["flow_a", "flow_b", "flow_c"])
+
+    def test_no_matches_returns_empty_list(self):
+        """Code with no goto_flow calls returns an empty list."""
+        code = "x = 1\nconv.some_other_method('test')"
+        self.assertEqual(extract_go_to_flows(code), [])
+
+    def test_flow_name_with_spaces(self):
+        """Flow names with spaces are extracted correctly."""
+        code = 'conv.goto_flow("My Flow Name")'
+        self.assertEqual(extract_go_to_flows(code), ["My Flow Name"])
 
 
 if __name__ == "__main__":
