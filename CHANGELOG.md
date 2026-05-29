@@ -1,6 +1,94 @@
 # CHANGELOG
 
 
+## v0.22.2 (2026-05-28)
+
+### Bug Fixes
+
+- Defer API key lookup until first SourcererSDK HTTP request
+  ([#164](https://github.com/polyai/adk/pull/164),
+  [`a90be40`](https://github.com/polyai/adk/commit/a90be407bfcc0c88abfed460910d39c6deaaea84))
+
+## Summary
+
+Lazy-initialize the `SourcererSDK` HTTP session so `retrieve_api_key()` runs on the first API
+  request, not during `__init__`.
+
+## Motivation
+
+Offline CLI workflows (`poly pull --from-projection`, `poly push --dry-run --output-json-commands`)
+  still construct `SyncClientHandler` / `SourcererSDK` even when no HTTP calls are made. Resolving
+  credentials in `__init__` caused those flows to fail when `POLY_ADK_KEY` was unset.
+
+## Changes
+
+- Add a lazy `session` property on `SourcererSDK` that builds the `requests.Session` and auth
+  headers on first use - Remove eager session creation and `retrieve_api_key()` from
+  `SourcererSDK.__init__`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Manual checks:
+
+- [x] `poly push --from-projection - < proj.json --json --dry-run --output-json-commands` works
+  without `POLY_ADK_KEY` when `branch_id` is set in `project.yaml` - [x] `poly push` still
+  authenticates and sends when API key is configured - [x] `poly pull` / branch operations still
+  work with a valid API key
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass (pre-commit on commit) - [ ] `pytest` passes -
+  [x] No breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit
+  messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+
+
+## v0.22.1 (2026-05-27)
+
+### Bug Fixes
+
+- Allow disabled non-standard adjectives in personality settings
+  ([#163](https://github.com/polyai/adk/pull/163),
+  [`1976948`](https://github.com/polyai/adk/commit/19769489ce2d4296cd0e0450f3fc46c27d071a4f))
+
+## Summary
+
+Fixes personality validation to only reject *enabled* invalid adjectives, and filters out
+  non-allowed adjectives from the update proto payload.
+
+## Motivation
+
+The platform can return adjectives not in the local allowed set (e.g. deprecated or new adjectives).
+  Previously, having any such adjective in the local YAML — even disabled — would block pushes. Now
+  disabled non-standard adjectives pass validation and are silently excluded from the update.
+
+## Changes
+
+- `validate()` now only raises on invalid adjectives that are enabled (`True`) -
+  `build_update_proto()` filters the adjectives dict to only include allowed keys - Updated error
+  message to clarify "Enabled adjectives" - Added tests for disabled invalid adjective validation
+  and proto filtering
+
+## Test plan
+
+- [x] Added/updated unit tests (`SettingsPersonalityTests`) - [ ] Manual CLI testing (`poly
+  <command>`) - [ ] Tested against a live Agent Studio project
+
+Replicates https://github.com/PolyAI-LDN/local_agent_studio/pull/141
+
+Made with [Cursor](https://cursor.com)
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+
+
 ## v0.22.0 (2026-05-27)
 
 ### Features
