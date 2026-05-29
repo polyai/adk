@@ -29,6 +29,7 @@ from poly.migration_utils import (
     run_migrations,
 )
 from poly.resources import (
+    AdditionalLanguage,
     ApiIntegration,
     AsrSettings,
     BaseFlowStep,
@@ -36,6 +37,7 @@ from poly.resources import (
     ChatSafetyFilters,
     ChatStylePrompt,
     Condition,
+    DefaultLanguage,
     Entity,
     ExperimentalConfig,
     FlowConfig,
@@ -59,6 +61,7 @@ from poly.resources import (
     TestCase,
     Topic,
     TranscriptCorrection,
+    Translation,
     Variable,
     Variant,
     VariantAttribute,
@@ -108,6 +111,9 @@ RESOURCE_NAME_TO_CLASS: dict[str, type[Resource]] = {
     "phrase_filtering": PhraseFilter,
     "pronunciations": Pronunciation,
     "test_cases": TestCase,
+    "translations": Translation,
+    "default_language": DefaultLanguage,
+    "additional_languages": AdditionalLanguage,
 }
 
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]

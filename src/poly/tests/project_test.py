@@ -34,6 +34,7 @@ from poly.resources import (
     Topic,
     TestCase,
     TranscriptCorrection,
+    Translation,
     Variable,
     VariantAttribute,
     VoiceDisclaimerMessage,
@@ -352,6 +353,20 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
             [
                 os.path.join(TEST_DIR, "tests", "greeting_flow_test.yaml"),
                 os.path.join(TEST_DIR, "tests", "webchat_smoke_test.yaml"),
+            ]
+        )
+
+        # Find Translations
+        self.assertEqual(len(local_resources[Translation]), 2)
+        self.assertCountEqual(
+            local_resources[Translation],
+            [
+                os.path.join(
+                    TEST_DIR, "config", "translations.yaml", "translations", "greeting"
+                ),
+                os.path.join(
+                    TEST_DIR, "config", "translations.yaml", "translations", "farewell"
+                ),
             ],
         )
 

@@ -1,6 +1,212 @@
 # CHANGELOG
 
 
+## v0.23.0 (2026-05-29)
+
+### Documentation
+
+- Add poly conversations list/get/get-audio ([#167](https://github.com/polyai/adk/pull/167),
+  [`4ac9f8b`](https://github.com/polyai/adk/commit/4ac9f8b9389670386d5b508835ba0c11c6069061))
+
+## Summary
+
+This relates to PR #161
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Allow disabled non-standard adjectives in personality settings
+  ([#168](https://github.com/polyai/adk/pull/168),
+  [`8982e41`](https://github.com/polyai/adk/commit/8982e41cbc6b4f1751f42ca96495b523147196da))
+
+## Summary
+
+This relates to PR #163
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Clarify poly start is self-serve only; document poly login for enterprise
+  ([#166](https://github.com/polyai/adk/pull/166),
+  [`69ac46c`](https://github.com/polyai/adk/commit/69ac46cf57e6adc47e950dffd8e4326a78a57626))
+
+## Summary
+
+Following Harry's flag in #agent-development-kit that the May 15 getting-started rewrite was
+  misleading for enterprise users: \`poly start\` is hardcoded to \`region=\"studio\"\` and only
+  works against the PLG cluster.
+
+This PR splits the auth setup path:
+
+- **Self-serve accounts** ([studio.poly.ai](https://studio.poly.ai)) — \`poly start\` (unchanged) -
+  **Enterprise accounts** (\`us-1\`, \`euw-1\`, \`uk-1\`) — \`poly login --region <region>\` is the
+  recommended browser-based path; manual API key export is the fallback
+
+### Pages changed - **get-started.md** — Step 2 split into self-serve / enterprise; \`poly login\`
+  documented as recommended enterprise path, manual export as fallback; "Already have an agent"
+  example covers all three flows - **prerequisites.md** — enterprise bullet mentions \`poly login\`;
+  checklist updated; fixed a stale anchor - **index.md** — landing-page snippet and recommended path
+  mention \`poly login\` - **reference/cli.md** — added missing \`### poly start\` and \`### poly
+  login\` entries (neither command was documented before)
+
+## Test plan - [x] \`mkdocs build --strict\` — no warnings, all cross-page anchors resolve - [ ]
+  Mintlify-side fix shipped in parallel
+
+### Features
+
+- Translations ([#152](https://github.com/polyai/adk/pull/152),
+  [`49ffdb8`](https://github.com/polyai/adk/commit/49ffdb8b9a0c697d7858f9dbd28fd05161cfdcb1))
+
+## Summary
+
+Add Translations and Languages as new resource types, enabling pull/push/status/diff workflows for
+  language configuration and translation strings.
+
+## Motivation
+
+Agent Studio projects need to manage language settings (default + additional languages) and
+  translation strings locally. Previously these were not tracked by the CLI, so changes had to be
+  made directly in the platform.
+
+## Changes
+
+- **New `Translation` resource** — `MultiResourceYamlResource` stored in `config/translations.yaml`,
+  with create/update/delete proto support - **New `DefaultLanguage` and `AdditionalLanguage`
+  resources** — two `MultiResourceYamlResource` subclasses sharing `agent_settings/languages.yaml`
+  with a flat YAML structure (`default_language: en-GB`, `additional_languages: [fr-FR]`) -
+  **`resource_key` ClassVar on `MultiResourceYamlResource`** — replaces hardcoded `"name"` in
+  `_find_matching()`, fixing duplicate-on-pull bugs for resources that use a different YAML key
+  (e.g. `KeyphraseBoosting` uses `"keyphrase"`) - **Cross-resource validation** — `DefaultLanguage`
+  and `AdditionalLanguage` validate no duplicate language codes; `Translation.validate()` checks
+  translations exist for all configured languages - **BCP 47 validation** on language codes via
+  `langcodes` library - **Updated protos** — regenerated protobuf files - **Registered new resource
+  types** in `RESOURCE_NAME_TO_CLASS`, `__init__.py`, and `sync_client.py` - **Removed
+  `KeyphraseBoosting._find_matching` override** — now handled by `resource_key` -
+  **`variant_attributes.py`** — `discover_resources` uses `resource_key` instead of hardcoded
+  `"name"` for consistency
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+
+## v0.22.2 (2026-05-28)
+
+### Bug Fixes
+
+- Defer API key lookup until first SourcererSDK HTTP request
+  ([#164](https://github.com/polyai/adk/pull/164),
+  [`a90be40`](https://github.com/polyai/adk/commit/a90be407bfcc0c88abfed460910d39c6deaaea84))
+
+## Summary
+
+Lazy-initialize the `SourcererSDK` HTTP session so `retrieve_api_key()` runs on the first API
+  request, not during `__init__`.
+
+## Motivation
+
+Offline CLI workflows (`poly pull --from-projection`, `poly push --dry-run --output-json-commands`)
+  still construct `SyncClientHandler` / `SourcererSDK` even when no HTTP calls are made. Resolving
+  credentials in `__init__` caused those flows to fail when `POLY_ADK_KEY` was unset.
+
+## Changes
+
+- Add a lazy `session` property on `SourcererSDK` that builds the `requests.Session` and auth
+  headers on first use - Remove eager session creation and `retrieve_api_key()` from
+  `SourcererSDK.__init__`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Manual checks:
+
+- [x] `poly push --from-projection - < proj.json --json --dry-run --output-json-commands` works
+  without `POLY_ADK_KEY` when `branch_id` is set in `project.yaml` - [x] `poly push` still
+  authenticates and sends when API key is configured - [x] `poly pull` / branch operations still
+  work with a valid API key
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass (pre-commit on commit) - [ ] `pytest` passes -
+  [x] No breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit
+  messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+
+
 ## v0.22.1 (2026-05-27)
 
 ### Bug Fixes

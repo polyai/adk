@@ -390,6 +390,7 @@ class ResourceReferenceTests(unittest.TestCase):
             "- {{fn:global_function_id}}\n"
             "- {{entity:entity_id}}\n"
             "- {{vrbl:customer_name}}\n"
+            "- {{tn:translation_key}}\n"
             "Provide the latest weather and news updates."
         )
 
@@ -402,6 +403,7 @@ class ResourceReferenceTests(unittest.TestCase):
             "global_functions": {"global_function_id": True},
             "entities": {"entity_id": True},
             "variables": {"customer_name": True},
+            "translations": {"translation_key": True},
         }
         self.assertEqual(references, expected_references)
 
@@ -437,6 +439,7 @@ class ResourceReferenceTests(unittest.TestCase):
             "handoff": {},
             "transition_functions": {},
             "global_functions": {},
+            "translations": {},
             "variables": {},
         }
         self.assertEqual(no_references, expected)

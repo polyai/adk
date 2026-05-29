@@ -12,6 +12,7 @@ from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.protobuf.handoff_pb2 import Handoff_SetDefault
 from poly.handlers.sdk import SourcererAPIError, SourcererSDK
 from poly.resources import (
+    AdditionalLanguage,
     ApiIntegration,
     ApiIntegrationEnvironments,
     ApiIntegrationOperation,
@@ -22,6 +23,7 @@ from poly.resources import (
     ChatSafetyFilters,
     ChatStylePrompt,
     Condition,
+    DefaultLanguage,
     DTMFConfig,
     Entity,
     ExperimentalConfig,
@@ -52,6 +54,7 @@ from poly.resources import (
     TestCaseTags,
     Topic,
     TranscriptCorrection,
+    Translation,
     Variable,
     Variant,
     VariantAttribute,
@@ -141,10 +144,12 @@ class SyncClientHandler:
             Pronunciation: cls._read_pronunciations_from_projection(projection),
             KeyphraseBoosting: cls._read_keyphrase_boosting_from_projection(projection),
             TranscriptCorrection: cls._read_transcript_corrections_from_projection(projection),
-            **cls._read_asr_settings_from_projection(projection),
+            AsrSettings: cls._read_asr_settings_from_projection(projection),
             GeneralSafetyFilters: cls._read_safety_filters_from_projection(projection),
             ApiIntegration: cls._read_api_integrations_from_projection(projection),
             TestCase: cls._read_test_cases_from_projection(projection),
+            Translation: cls._read_translations_from_projection(projection),
+            **cls._read_languages_from_projection(projection),
         }  # ty:ignore[invalid-return-type]
 
     def pull_deployment_resources(
@@ -628,7 +633,9 @@ class SyncClientHandler:
             .get("entities", {})
         )
         config_id, config_data = (
-            next(iter(experimental_configs.items()), {}) if experimental_configs else {}
+            next(iter(experimental_configs.items()), ("default", {}))
+            if experimental_configs
+            else ("default", {})
         )
         # Only get the first experimental config
         return {
@@ -842,7 +849,7 @@ class SyncClientHandler:
     @staticmethod
     def _read_asr_settings_from_projection(
         projection: dict,
-    ) -> dict[type[Resource], dict[str, Resource]]:
+    ) -> dict[str, AsrSettings]:
         asr_settings_data = projection.get("channels", {}).get("voice", {}).get("asrSettings", {})
         if not asr_settings_data:
             return {}
@@ -855,14 +862,12 @@ class SyncClientHandler:
         )
 
         return {
-            AsrSettings: {
-                "asr_settings": AsrSettings(
-                    resource_id="asr_settings",
-                    name="asr_settings",
-                    barge_in=barge_in,
-                    interaction_style=interaction_style,
-                )
-            }
+            "asr_settings": AsrSettings(
+                resource_id="asr_settings",
+                name="asr_settings",
+                barge_in=barge_in,
+                interaction_style=interaction_style,
+            )
         }
 
     @staticmethod
@@ -884,7 +889,7 @@ class SyncClientHandler:
     @staticmethod
     def _read_api_integrations_from_projection(
         projection: dict,
-    ) -> dict[type[Resource], dict[str, Resource]]:
+    ) -> dict[str, ApiIntegration]:
         api_integrations = {}
         for integration_id, integration_data in (
             projection.get("apiIntegrations", {})
@@ -954,6 +959,58 @@ class SyncClientHandler:
                 tags=tags,
             )
         return test_cases
+
+    @staticmethod
+    def _read_translations_from_projection(
+        projection: dict,
+    ) -> dict[str, Translation]:
+        translations_data = (
+            projection.get("translations", {}).get("translations", {}).get("entities", {})
+        )
+        if not translations_data:
+            return {}
+
+        translations = {}
+        for translation_id, translation_data in translations_data.items():
+            translations[translation_id] = Translation(
+                resource_id=translation_id,
+                name=translation_data.get("translationKey", ""),
+                translations={
+                    translation.get("languageCode"): translation.get("text", "")
+                    for translation in translation_data.get("translations", [])
+                },
+            )
+
+        return translations
+
+    @staticmethod
+    def _read_languages_from_projection(
+        projection: dict,
+    ) -> dict[type[Resource], dict[str, Resource]]:
+        language_data = projection.get("languages", {})
+        if not language_data:
+            return {DefaultLanguage: {}, AdditionalLanguage: {}}
+
+        default_code = language_data.get("defaultLanguage")
+        default_languages = {}
+        if default_code:
+            default_languages[default_code] = DefaultLanguage(
+                resource_id=default_code,
+                name=default_code,
+            )
+        additional_languages = {}
+        for lang_id, lang in (
+            language_data.get("additionalLanguages", {}).get("entities", {}).items()
+        ):
+            code = lang.get("code")
+            additional_languages[lang_id] = AdditionalLanguage(
+                resource_id=lang_id,
+                name=code,
+            )
+        return {
+            DefaultLanguage: default_languages,
+            AdditionalLanguage: additional_languages,
+        }
 
     # Types that should be created first
     # as they are referenced by other resources

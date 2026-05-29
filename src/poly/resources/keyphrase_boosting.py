@@ -25,6 +25,7 @@ class KeyphraseBoosting(MultiResourceYamlResource):
     keyphrase: str
     level: str
     top_level_name: ClassVar[str] = "keyphrases"
+    resource_key: ClassVar[str] = "keyphrase"
 
     def __init__(
         self,
@@ -99,13 +100,6 @@ class KeyphraseBoosting(MultiResourceYamlResource):
             )
 
     @staticmethod
-    def _find_matching(yaml_list, resource_clean_name) -> Optional[dict]:
-        for r in yaml_list:
-            if utils.clean_name(r.get("keyphrase") or "", lowercase=False) == resource_clean_name:
-                return r
-        return None
-
-    @staticmethod
     def discover_resources(base_path: str) -> list[str]:
         # Must match file_path: voice/speech_recognition/keyphrase_boosting.yaml
         # Also check legacy path: speech_recognition/keyphrase_boosting.yaml
@@ -124,7 +118,7 @@ class KeyphraseBoosting(MultiResourceYamlResource):
         keyphrases: list[dict] = yaml_dict.get("keyphrases", []) if yaml_dict else []
 
         for kp in keyphrases:
-            name = kp.get("keyphrase")
+            name = kp.get(KeyphraseBoosting.resource_key)
             if not name:
                 continue
             path_safe_name = utils.clean_name(name, lowercase=False)

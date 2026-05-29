@@ -12,6 +12,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 <account>/<project>/
 ├── _gen/                               # Generated stubs - do not edit
 ├── agent_settings/                     # Agent identity and behavior
+│   ├── languages.yaml                  # Optional
 │   ├── personality.yaml
 │   ├── role.yaml
 │   ├── rules.txt
@@ -22,6 +23,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │   ├── entities.yaml                   # Optional
 │   ├── handoffs.yaml                   # Optional
 │   ├── sms_templates.yaml              # Optional
+│   ├── translations.yaml              # Optional
 │   └── variant_attributes.yaml         # Optional
 ├── voice/                              # Voice channel settings
 │   ├── configuration.yaml              # Greeting, disclaimer, style prompt
@@ -127,4 +129,6 @@ Resource-specific documentation is available via `poly docs {resource} [resource
 - [Speech Recognition](speech_recognition.md) - ASR settings, keyphrase boosting, transcript corrections
 - [Response Control](response_control.md) - pronunciations, phrase filters
 - [Safety Filters](safety_filters.md) - content moderation settings (violence, hate, sexual, self-harm)
+- [Languages](languages.md) - default and additional language configuration
+- [Translations](translations.md) - localized text strings per language
 - [Experimental Config](experimental_config.md) - feature flags

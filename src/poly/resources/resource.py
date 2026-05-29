@@ -435,6 +435,7 @@ class MultiResourceYamlResource(YamlResource, ABC):
     _singleton: ClassVar[bool] = False
 
     top_level_name: ClassVar[str]
+    resource_key: ClassVar[str] = "name"
 
     @classmethod
     def _get_top_level_data(cls, true_file_path: str) -> dict:
@@ -493,13 +494,14 @@ class MultiResourceYamlResource(YamlResource, ABC):
             )
         return utils.dump_yaml(matching_resource)
 
-    @staticmethod
-    def _find_matching(yaml_list, resource_clean_name) -> Optional[dict]:
+    @classmethod
+    def _find_matching(cls, yaml_list, resource_clean_name) -> Optional[dict]:
         return next(
             (
                 r
                 for r in yaml_list
-                if utils.clean_name(r.get("name") or "", lowercase=False) == resource_clean_name
+                if utils.clean_name(r.get(cls.resource_key) or "", lowercase=False)
+                == resource_clean_name
             ),
             None,
         )

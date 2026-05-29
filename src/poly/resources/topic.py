@@ -21,7 +21,7 @@ FUNCTION_REGEX = re.compile(r"{{fn:([\w-]+)}}")
 FLOW_FUNCTION_REGEX = re.compile(r"{{ft:([\w-]+)}}")
 
 
-TOPIC_REFERENCES = ["global_functions", "sms", "handoff", "attributes", "variables"]
+TOPIC_REFERENCES = ["global_functions", "sms", "handoff", "attributes", "variables", "translations"]
 
 
 @dataclass

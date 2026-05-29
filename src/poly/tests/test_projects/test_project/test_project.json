@@ -1185,6 +1185,30 @@
         "variant": null,
         "language": "en-GB"
       }
+    },
+    "translations": {
+      "TN-greeting": {
+        "resource_id": "TN-greeting",
+        "name": "greeting",
+        "translations": {"en-GB": "Hello, how can I help you?", "fr-FR": "Bonjour, comment puis-je vous aider?"}
+      },
+      "TN-farewell": {
+        "resource_id": "TN-farewell",
+        "name": "farewell",
+        "translations": {"en-GB": "Goodbye", "fr-FR": "Au revoir"}
+      }
+    },
+    "default_language": {
+      "en-GB": {
+        "resource_id": "en-GB",
+        "name": "en-GB"
+      }
+    },
+    "additional_languages": {
+      "fr-FR": {
+        "resource_id": "fr-FR",
+        "name": "fr-FR"
+      }
     }
   },
   "file_structure_info": {},
