@@ -1,6 +1,7 @@
 name: Webchat smoke test
 scenario: Say hello on webchat.
 channel: webchat
+language: en-GB
 tags:
 - smoke
 prompt_assertions:

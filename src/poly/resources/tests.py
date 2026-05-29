@@ -188,10 +188,10 @@ class TestCase(YamlResource):
     name: str
     scenario: str
     channel: str
+    language: str
     assertions: TestCaseAssertion = None
     tags: TestCaseTags = None
     variant: Optional[str] = None
-    language: Optional[str] = None
 
     def __init__(
         self,
@@ -200,10 +200,10 @@ class TestCase(YamlResource):
         name: str,
         scenario: str,
         channel: str,
+        language: str,
         assertions: TestCaseAssertion | dict,
         tags: TestCaseTags | dict,
         variant: Optional[str] = None,
-        language: Optional[str] = None,
     ):
         self.resource_id = resource_id
         self.name = name
@@ -231,10 +231,9 @@ class TestCase(YamlResource):
             "scenario": self.scenario,
             "channel": INTERNAL_TO_CHANNEL.get(self.channel, self.channel),
         }
+        output["language"] = self.language
         if self.variant:
             output["variant"] = self.variant
-        if self.language:
-            output["language"] = self.language
 
         if tags_list := self.tags.tags:
             output["tags"] = tags_list
@@ -279,10 +278,10 @@ class TestCase(YamlResource):
             name=resolved_name,
             scenario=yaml_dict.get("scenario"),
             channel=CHANNEL_TO_INTERNAL.get(channel, channel),
+            language=yaml_dict.get("language", ""),
             assertions=test_case_assertion,
             tags=test_case_tags,
             variant=yaml_dict.get("variant"),
-            language=yaml_dict.get("language"),
         )
 
     @classmethod
@@ -363,6 +362,9 @@ class TestCase(YamlResource):
         if not self.scenario:
             raise ValueError("Scenario is required")
 
+        if not self.language:
+            raise ValueError("Language is required")
+
         # Variant is valid if exists
         if self.variant:
             if not next(
@@ -374,8 +376,6 @@ class TestCase(YamlResource):
                 None,
             ):
                 raise ValueError(f"Variant {self.variant} not found")
-
-        # TODO: Language is configured language (Once translations is merged)
 
     def get_new_updated_deleted_subresources(
         self, old_resource: Optional["TestCase"] = None

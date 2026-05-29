@@ -19,7 +19,7 @@ Each test case has these fields:
 - **channel** (string): Channel to run on — `voice` or `webchat`.
 - **tags** (list, optional): Labels for grouping and filtering tests.
 - **variant** (string, optional): Variant name to run the test against.
-- **language** (string, optional): Language code for the test run, e.g. `en-GB`.
+- **language** (string): Language code for the test run, e.g. `en-GB`.
 - **prompt_assertions** (list, optional): Expected behaviours in the agent's response.
 - **function_call_assertions** (list, optional): Expected function calls and argument values.
 

@@ -6998,6 +6998,7 @@ class TestCaseTests(unittest.TestCase):
         yaml_dict = test_case.to_yaml_dict()
         self.assertEqual(yaml_dict["name"], "Greeting flow test")
         self.assertEqual(yaml_dict["channel"], "voice")
+        self.assertEqual(yaml_dict["language"], "en-GB")
         self.assertEqual(yaml_dict["tags"], ["booking", "smoke"])
         self.assertEqual(
             yaml_dict["function_call_assertions"][0]["arguments"][0]["parameter_name"],
@@ -7009,6 +7010,7 @@ class TestCaseTests(unittest.TestCase):
         )
         self.assertEqual(restored.name, test_case.name)
         self.assertEqual(restored.channel, test_case.channel)
+        self.assertEqual(restored.language, test_case.language)
         self.assertEqual(restored.assertions.prompts, test_case.assertions.prompts)
         self.assertEqual(
             restored.assertions.function_calls[0].arguments[0].expected_value,
@@ -7063,12 +7065,13 @@ class TestCaseTests(unittest.TestCase):
         )
         self.assertEqual(test_case.name, "Greeting flow test")
         self.assertEqual(test_case.channel, "chat.polyai")
+        self.assertEqual(test_case.language, "en-GB")
         self.assertEqual(test_case.tags.tags, ["booking", "smoke"])
 
     def test_read_local_resource_filename_mismatch_raises(self):
         file_path = os.path.join("tests", "greeting_flow_test.yaml")
         with mock_read_from_file(
-            {file_path: "name: Wrong name\nscenario: Test\nchannel: voice\n"}
+            {file_path: "name: Wrong name\nscenario: Test\nchannel: voice\nlanguage: en-GB\n"}
         ):
             with self.assertRaises(ValueError) as cm:
                 TestCase.read_local_resource(
@@ -7088,6 +7091,7 @@ class TestCaseTests(unittest.TestCase):
                 name="Invalid channel",
                 scenario="Test scenario",
                 channel="invalid",
+                language="en-GB",
                 assertions=TestCaseAssertion(
                     resource_id="TEST-invalid",
                     name="assertions",
@@ -7104,6 +7108,7 @@ class TestCaseTests(unittest.TestCase):
                 name="Missing scenario",
                 scenario="",
                 channel="chat.polyai",
+                language="en-GB",
                 assertions=TestCaseAssertion(
                     resource_id="TEST-missing-scenario",
                     name="assertions",
@@ -7115,6 +7120,25 @@ class TestCaseTests(unittest.TestCase):
                 ),
             ).validate()
         self.assertIn("Scenario is required", str(cm.exception))
+
+        with self.assertRaises(ValueError) as cm:
+            TestCase(
+                resource_id="TEST-missing-language",
+                name="Missing language",
+                scenario="Test scenario",
+                channel="chat.polyai",
+                language="",
+                assertions=TestCaseAssertion(
+                    resource_id="TEST-missing-language",
+                    name="assertions",
+                    prompts=[],
+                    function_calls=[],
+                ),
+                tags=TestCaseTags(
+                    resource_id="TEST-missing-language", name="tags", tags=[]
+                ),
+            ).validate()
+        self.assertIn("Language is required", str(cm.exception))
 
     def test_get_new_updated_deleted_subresources(self):
         test_case = self._sample_test_case()
