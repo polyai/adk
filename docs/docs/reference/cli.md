@@ -30,7 +30,7 @@ poly push --help
 
 ### `poly start`
 
-End-to-end onboarding for **self-serve** accounts on [studio.poly.ai](https://studio.poly.ai). `poly start` is hardcoded to the `studio` region — for enterprise clusters, use [`poly login`](#poly-login).
+End-to-end onboarding for **self-serve** accounts on [studio.poly.ai](https://studio.poly.ai). `poly start` is hardcoded to the `studio` region — for any other region, use [`poly login`](#poly-login).
 
 `poly start`:
 
@@ -38,7 +38,7 @@ End-to-end onboarding for **self-serve** accounts on [studio.poly.ai](https://st
 2. Generates an API key (or reuses your existing one) and writes it to `~/.poly/credentials.json` under the `studio` region.
 3. Optionally creates a new Agent Studio project and pulls it down locally.
 
-If the ADK detects an existing API key in the credential file or environment, `poly start` skips authentication and goes straight to project creation.
+If the ADK detects an existing API key in the credential file or environment, `poly start` asks whether to use it. Accept and the command skips ahead to the project-creation prompt; decline and it runs the full sign-in flow.
 
 Examples:
 
@@ -53,7 +53,7 @@ poly start --base-path /path/to/projects
 
 ### `poly login`
 
-Sign in to an existing Agent Studio account (self-serve **or** enterprise) and save API key credentials for the CLI.
+Sign in to an existing Agent Studio account and save API key credentials for the CLI. Works against any region — including `studio`, which makes `poly login --region studio` a viable alternative to `poly start` for self-serve users on a new machine who already have an account and don't need to create a project.
 
 `poly login`:
 
@@ -61,7 +61,7 @@ Sign in to an existing Agent Studio account (self-serve **or** enterprise) and s
 2. Opens a browser window for sign-in via the Auth0 device authorization flow.
 3. Fetches or creates an API key for your user and saves it to `~/.poly/credentials.json` under the chosen region.
 
-Run `poly login` once per region you need access to — credentials for multiple regions are stored side by side.
+Run `poly login` once per region you need access to — credentials for multiple regions are stored side by side in the credential file.
 
 Examples:
 

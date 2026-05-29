@@ -67,7 +67,7 @@ poly start
 3. **Create a project** — optionally creates a new Agent Studio project and pulls it down locally so you can start editing immediately.
 
 !!! tip "Already have a self-serve account?"
-    If `poly start` detects an existing API key (from the credential file or an environment variable), it skips authentication and goes straight to project creation.
+    If `poly start` detects an existing API key (from the credential file or an environment variable), it asks whether to keep using it — accept and you skip straight to the project creation step. Decline and it runs the full sign-in flow again.
 
 ### Enterprise accounts — `poly login` or manual API key { #enterprise-accounts-poly-login-or-manual-api-key }
 
