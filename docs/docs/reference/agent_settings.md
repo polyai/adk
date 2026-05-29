@@ -89,6 +89,10 @@ Allowed adjective values are:
 
 If `Other` is set to `true`, no other adjective can be selected.
 
+!!! info "Non-standard adjectives"
+
+    The platform may return adjectives not in the local allowed set (for example, deprecated or newly added adjectives). Validation only fails for adjectives that are **enabled** (`true`) and not in the allowed set. Disabled (`false`) non-standard adjectives pass validation and are silently excluded from the update payload when pushing.
+
 ### `custom`
 
 The `custom` field is a free-text description of the personality.
