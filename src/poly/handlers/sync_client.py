@@ -55,6 +55,10 @@ from poly.resources import (
     VoiceSafetyFilters,
     VoiceStylePrompt,
     TestCase,
+    TestCaseAssertion,
+    TestCaseTags,
+    FunctionCallAssertion,
+    FunctionCallArgumentAssertion,
 )
 
 logger = logging.getLogger(__name__)
@@ -911,6 +915,34 @@ class SyncClientHandler:
         for test_case_id, test_case_data in (
             projection.get("testing", {}).get("testCases", {}).get("entities", {}).items()
         ):
+            prompt_assertions = []
+            function_assertions = []
+            for assertion in test_case_data.get("assertions", []):
+                assertion_payload = assertion.get("payload", {})
+                if assertion_payload.get("$case") == "prompt":
+                    prompt_assertions.append(assertion_payload.get("value").get("value"))
+                elif assertion_payload.get("$case") == "functionCall":
+                    assertion_value = assertion_payload.get("value", {})
+                    arguments = [
+                        FunctionCallArgumentAssertion(
+                            parameter_name=arg,
+                            expected_value=arg_values.get("expectedValue"),
+                            value_type=arg_values.get("valueType"),
+                        )
+                        for arg, arg_values in assertion_value.get("arguments").items()
+                    ]
+                    function_assertions.append(
+                        FunctionCallAssertion(name=assertion_value.get("name"), arguments=arguments)
+                    )
+            assertions = TestCaseAssertion(
+                resource_id=test_case_id,
+                name="assertions",
+                prompts=prompt_assertions,
+                function_calls=function_assertions,
+            )
+            tags = TestCaseTags(
+                resource_id=test_case_id, name="tags", tags=test_case_data.get("tags", [])
+            )
             test_cases[test_case_id] = TestCase(
                 resource_id=test_case_id,
                 name=test_case_data.get("name", ""),
@@ -918,7 +950,8 @@ class SyncClientHandler:
                 variant=test_case_data.get("variantId", ""),
                 language=test_case_data.get("language", ""),
                 channel=test_case_data.get("channel", ""),
-                tags=test_case_data.get("tags", []),
+                assertions=assertions,
+                tags=tags,
             )
         return test_cases
 

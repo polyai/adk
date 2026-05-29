@@ -65,4 +65,10 @@ from poly.resources.topic import Topic
 from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
 from poly.resources.variable import Variable
 from poly.resources.variant_attributes import Variant, VariantAttribute
-from poly.resources.tests import TestCase
+from poly.resources.tests import (
+    TestCase,
+    TestCaseAssertion,
+    TestCaseTags,
+    FunctionCallAssertion,
+    FunctionCallArgumentAssertion,
+)
