@@ -1124,6 +1124,67 @@
           "self_harm": {"enabled": true, "precision": "MEDIUM"}
         }
       }
+    },
+    "test_cases": {
+      "TEST-greeting_flow": {
+        "resource_id": "TEST-greeting_flow",
+        "name": "Greeting flow test",
+        "scenario": "Ask for help with booking.",
+        "channel": "chat.polyai",
+        "assertions": {
+          "resource_id": "TEST-greeting_flow",
+          "name": "assertions",
+          "prompts": [
+            "The agent offers to help with booking"
+          ],
+          "function_calls": [
+            {
+              "name": "test_function",
+              "arguments": [
+                {
+                  "parameter_name": "param1",
+                  "expected_value": "hello",
+                  "value_type": "string",
+                  "assertion_type": "equals"
+                }
+              ]
+            }
+          ]
+        },
+        "tags": {
+          "resource_id": "TEST-greeting_flow",
+          "name": "tags",
+          "tags": [
+            "booking",
+            "smoke"
+          ]
+        },
+        "variant": null,
+        "language": "en-GB"
+      },
+      "TEST-webchat_smoke": {
+        "resource_id": "TEST-webchat_smoke",
+        "name": "Webchat smoke test",
+        "scenario": "Say hello on webchat.",
+        "channel": "webchat.polyai",
+        "assertions": {
+          "resource_id": "TEST-webchat_smoke",
+          "name": "assertions",
+          "prompts": [
+            "The agent greets the user"
+          ],
+          "function_calls": []
+        },
+        "tags": {
+          "resource_id": "TEST-webchat_smoke",
+          "name": "tags",
+          "tags": [
+            "smoke"
+          ]
+        },
+        "variant": null,
+        "language": null
+      }
     }
   },
   "file_structure_info": {},

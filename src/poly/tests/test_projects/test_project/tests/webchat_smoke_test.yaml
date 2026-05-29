@@ -1,0 +1,7 @@
+name: Webchat smoke test
+scenario: Say hello on webchat.
+channel: webchat
+tags:
+- smoke
+prompt_assertions:
+- The agent greets the user

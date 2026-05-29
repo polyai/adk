@@ -88,6 +88,8 @@ class FunctionCallAssertion:
 class TestCaseAssertion(SubResource):
     """Dataclass representing a Prompt Assertion"""
 
+    __test__ = False
+
     prompts: list[str] = field(default_factory=list)
     function_calls: list[FunctionCallAssertion] = field(default_factory=list)
 
@@ -152,6 +154,8 @@ class TestCaseAssertion(SubResource):
 class TestCaseTags(SubResource):
     """Dataclass representing a Test Case Tags"""
 
+    __test__ = False
+
     tags: list[str] = field(default_factory=list)
 
     @property
@@ -178,6 +182,8 @@ class TestCaseTags(SubResource):
 @dataclass
 class TestCase(YamlResource):
     """Dataclass representing an Agent Studio Test"""
+
+    __test__ = False
 
     name: str
     scenario: str

@@ -51,6 +51,7 @@ from poly.resources.function import (
     FunctionParameters,
     FunctionType,
 )
+
 from poly.resources.handoff import Handoff
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.phrase_filter import PhraseFilter
@@ -72,6 +73,13 @@ from poly.resources.topic import (
     Topic,
 )
 from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
+from poly.resources.tests import (
+    FunctionCallArgumentAssertion,
+    FunctionCallAssertion,
+    TestCase,
+    TestCaseAssertion,
+    TestCaseTags,
+)
 from poly.resources.variable import Variable
 from poly.resources.variant_attributes import Variant, VariantAttribute
 from poly.tests.testing_utils import mock_read_from_file, mock_variant_attributes_file
@@ -6949,6 +6957,191 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertIn("full", error)
         self.assertIn("hate", error)
 
+
+class TestCaseTests(unittest.TestCase):
+    """Tests for TestCase and related assertion resources."""
+
+    def _sample_test_case(self) -> TestCase:
+        resource_id = "TEST-greeting_flow"
+        return TestCase(
+            resource_id=resource_id,
+            name="Greeting flow test",
+            scenario="Ask for help with booking.",
+            channel="chat.polyai",
+            assertions=TestCaseAssertion(
+                resource_id=resource_id,
+                name="assertions",
+                prompts=["The agent offers to help with booking"],
+                function_calls=[
+                    FunctionCallAssertion(
+                        name="test_function",
+                        arguments=[
+                            FunctionCallArgumentAssertion(
+                                parameter_name="param1",
+                                expected_value="hello",
+                                value_type="string",
+                            )
+                        ],
+                    )
+                ],
+            ),
+            tags=TestCaseTags(
+                resource_id=resource_id,
+                name="tags",
+                tags=["booking", "smoke"],
+            ),
+            language="en-GB",
+        )
+
+    def test_to_yaml_dict_from_yaml_dict_roundtrip(self):
+        test_case = self._sample_test_case()
+        yaml_dict = test_case.to_yaml_dict()
+        self.assertEqual(yaml_dict["name"], "Greeting flow test")
+        self.assertEqual(yaml_dict["channel"], "voice")
+        self.assertEqual(yaml_dict["tags"], ["booking", "smoke"])
+        self.assertEqual(
+            yaml_dict["function_call_assertions"][0]["arguments"][0]["parameter_name"],
+            "param1",
+        )
+
+        restored = TestCase.from_yaml_dict(
+            yaml_dict, resource_id="TEST-greeting_flow", name="Greeting flow test"
+        )
+        self.assertEqual(restored.name, test_case.name)
+        self.assertEqual(restored.channel, test_case.channel)
+        self.assertEqual(restored.assertions.prompts, test_case.assertions.prompts)
+        self.assertEqual(
+            restored.assertions.function_calls[0].arguments[0].expected_value,
+            "hello",
+        )
+
+    def test_file_path_and_command_type(self):
+        test_case = self._sample_test_case()
+        self.assertEqual(test_case.file_path, os.path.join("tests", "greeting_flow_test.yaml"))
+        self.assertEqual(test_case.command_type, "test_case")
+        self.assertEqual(test_case.assertions.update_command_type, "set_test_case_assertions")
+        self.assertEqual(test_case.tags.update_command_type, "set_test_case_tags")
+
+    def test_build_protos(self):
+        test_case = self._sample_test_case()
+        create = test_case.build_create_proto()
+        update = test_case.build_update_proto()
+        delete = test_case.build_delete_proto()
+        self.assertEqual(create.id, "TEST-greeting_flow")
+        self.assertEqual(create.channel, "chat.polyai")
+        self.assertEqual(create.language, "en-GB")
+        self.assertEqual(update.scenario, "Ask for help with booking.")
+        self.assertEqual(delete.id, "TEST-greeting_flow")
+
+        assertions_proto = test_case.assertions.build_update_proto()
+        self.assertEqual(assertions_proto.id, "TEST-greeting_flow")
+        self.assertEqual(len(assertions_proto.assertions), 2)
+        prompt_assertion = assertions_proto.assertions[0].prompt
+        self.assertEqual(prompt_assertion.value, "The agent offers to help with booking")
+        function_call = assertions_proto.assertions[1].function_call
+        self.assertEqual(function_call.name, "test_function")
+        arg = function_call.arguments["param1"]
+        self.assertEqual(arg.value_type, "string")
+        self.assertEqual(arg.assertion_type, "equals")
+        self.assertEqual(arg.expected_value, "hello")
+
+        tags_proto = test_case.tags.build_update_proto()
+        self.assertEqual(tags_proto.tags, ["booking", "smoke"])
+
+    def test_read_local_resource(self):
+        file_path = os.path.join(
+            os.path.dirname(__file__),
+            "test_projects",
+            "test_project",
+            "tests",
+            "greeting_flow_test.yaml",
+        )
+        test_case = TestCase.read_local_resource(
+            file_path=file_path,
+            resource_id="TEST-greeting_flow",
+            resource_name="Greeting flow test",
+        )
+        self.assertEqual(test_case.name, "Greeting flow test")
+        self.assertEqual(test_case.channel, "chat.polyai")
+        self.assertEqual(test_case.tags.tags, ["booking", "smoke"])
+
+    def test_read_local_resource_filename_mismatch_raises(self):
+        file_path = os.path.join("tests", "greeting_flow_test.yaml")
+        with mock_read_from_file(
+            {file_path: "name: Wrong name\nscenario: Test\nchannel: voice\n"}
+        ):
+            with self.assertRaises(ValueError) as cm:
+                TestCase.read_local_resource(
+                    file_path=file_path,
+                    resource_id="TEST-greeting_flow",
+                    resource_name="Wrong name",
+                )
+        self.assertIn("does not match expected filename", str(cm.exception))
+
+    def test_validate(self):
+        test_case = self._sample_test_case()
+        test_case.validate()
+
+        with self.assertRaises(ValueError) as cm:
+            TestCase(
+                resource_id="TEST-invalid",
+                name="Invalid channel",
+                scenario="Test scenario",
+                channel="invalid",
+                assertions=TestCaseAssertion(
+                    resource_id="TEST-invalid",
+                    name="assertions",
+                    prompts=[],
+                    function_calls=[],
+                ),
+                tags=TestCaseTags(resource_id="TEST-invalid", name="tags", tags=[]),
+            ).validate()
+        self.assertIn("Invalid channel", str(cm.exception))
+
+        with self.assertRaises(ValueError) as cm:
+            TestCase(
+                resource_id="TEST-missing-scenario",
+                name="Missing scenario",
+                scenario="",
+                channel="chat.polyai",
+                assertions=TestCaseAssertion(
+                    resource_id="TEST-missing-scenario",
+                    name="assertions",
+                    prompts=[],
+                    function_calls=[],
+                ),
+                tags=TestCaseTags(
+                    resource_id="TEST-missing-scenario", name="tags", tags=[]
+                ),
+            ).validate()
+        self.assertIn("Scenario is required", str(cm.exception))
+
+    def test_get_new_updated_deleted_subresources(self):
+        test_case = self._sample_test_case()
+        new, updated, deleted = test_case.get_new_updated_deleted_subresources()
+        self.assertEqual(new, [])
+        self.assertEqual(deleted, [])
+        self.assertEqual(len(updated), 2)
+
+        unchanged, updated_after_edit, deleted_after_edit = (
+            test_case.get_new_updated_deleted_subresources(old_resource=test_case)
+        )
+        self.assertEqual(unchanged, [])
+        self.assertEqual(updated_after_edit, [])
+        self.assertEqual(deleted_after_edit, [])
+
+    def test_discover_resources(self):
+        base_path = os.path.join(
+            os.path.dirname(__file__), "test_projects", "test_project"
+        )
+        discovered = TestCase.discover_resources(base_path)
+        self.assertCountEqual(
+            discovered,
+            [
+                os.path.join(base_path, "tests", "greeting_flow_test.yaml"),
+                os.path.join(base_path, "tests", "webchat_smoke_test.yaml"),
+            ],
+        )
 
 class ParseMultiResourcePathTests(unittest.TestCase):
     """Tests for _parse_multi_resource_path including Windows drive-letter handling."""
