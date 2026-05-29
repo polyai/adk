@@ -151,6 +151,7 @@ class SMSTemplate(MultiResourceYamlResource):
                 topics={},
                 flow_steps={},
                 variables={},
+                translations={},
             ),
             active=True,
         )
@@ -164,7 +165,7 @@ class SMSTemplate(MultiResourceYamlResource):
             raise ValueError("Env phone numbers are required")
 
         references = utils.get_references_from_prompt(
-            self.text, ["variables"], raise_on_invalid=True
+            self.text, ["variables", "translations"], raise_on_invalid=True
         )
         valid, invalid_references = utils.validate_references(references, resource_mappings)
         if not valid:

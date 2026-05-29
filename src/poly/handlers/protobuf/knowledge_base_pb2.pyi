@@ -13,7 +13,7 @@ class ExampleQueries(_message.Message):
     def __init__(self, queries: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class TopicReferences(_message.Message):
-    __slots__ = ("sms", "handoff", "attributes", "global_functions", "variables")
+    __slots__ = ("sms", "handoff", "attributes", "global_functions", "variables", "translations")
     class SmsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -49,17 +49,26 @@ class TopicReferences(_message.Message):
         key: str
         value: bool
         def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    class TranslationsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
     SMS_FIELD_NUMBER: _ClassVar[int]
     HANDOFF_FIELD_NUMBER: _ClassVar[int]
     ATTRIBUTES_FIELD_NUMBER: _ClassVar[int]
     GLOBAL_FUNCTIONS_FIELD_NUMBER: _ClassVar[int]
     VARIABLES_FIELD_NUMBER: _ClassVar[int]
+    TRANSLATIONS_FIELD_NUMBER: _ClassVar[int]
     sms: _containers.ScalarMap[str, bool]
     handoff: _containers.ScalarMap[str, bool]
     attributes: _containers.ScalarMap[str, bool]
     global_functions: _containers.ScalarMap[str, bool]
     variables: _containers.ScalarMap[str, bool]
-    def __init__(self, sms: _Optional[_Mapping[str, bool]] = ..., handoff: _Optional[_Mapping[str, bool]] = ..., attributes: _Optional[_Mapping[str, bool]] = ..., global_functions: _Optional[_Mapping[str, bool]] = ..., variables: _Optional[_Mapping[str, bool]] = ...) -> None: ...
+    translations: _containers.ScalarMap[str, bool]
+    def __init__(self, sms: _Optional[_Mapping[str, bool]] = ..., handoff: _Optional[_Mapping[str, bool]] = ..., attributes: _Optional[_Mapping[str, bool]] = ..., global_functions: _Optional[_Mapping[str, bool]] = ..., variables: _Optional[_Mapping[str, bool]] = ..., translations: _Optional[_Mapping[str, bool]] = ...) -> None: ...
 
 class KnowledgeBase(_message.Message):
     __slots__ = ("topics", "embedding_model")
@@ -168,3 +177,9 @@ class ImportMetadata(_message.Message):
     import_timestamp: str
     file_name: str
     def __init__(self, total_topics: _Optional[int] = ..., import_timestamp: _Optional[str] = ..., file_name: _Optional[str] = ...) -> None: ...
+
+class KnowledgeBase_SetEmbeddingModel(_message.Message):
+    __slots__ = ("embedding_model",)
+    EMBEDDING_MODEL_FIELD_NUMBER: _ClassVar[int]
+    embedding_model: str
+    def __init__(self, embedding_model: _Optional[str] = ...) -> None: ...

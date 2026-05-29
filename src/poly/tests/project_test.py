@@ -33,6 +33,7 @@ from poly.resources import (
     SMSTemplate,
     Topic,
     TranscriptCorrection,
+    Translation,
     Variable,
     VariantAttribute,
     VoiceDisclaimerMessage,
@@ -342,6 +343,20 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
         self.assertEqual(
             local_resources[AsrSettings],
             [os.path.join(TEST_DIR, speech_recognition_path, "asr_settings.yaml")],
+        )
+
+        # Find Translations
+        self.assertEqual(len(local_resources[Translation]), 2)
+        self.assertCountEqual(
+            local_resources[Translation],
+            [
+                os.path.join(
+                    TEST_DIR, "config", "translations.yaml", "translations", "greeting"
+                ),
+                os.path.join(
+                    TEST_DIR, "config", "translations.yaml", "translations", "farewell"
+                ),
+            ],
         )
 
     def test_discover_local_resources_empty_project(self):

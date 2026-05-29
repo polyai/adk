@@ -1,0 +1,9 @@
+translations:
+- name: greeting
+  translations:
+    en-GB: Hello, how can I help you?
+    fr-FR: Bonjour, comment puis-je vous aider?
+- name: farewell
+  translations:
+    en-GB: Goodbye
+    fr-FR: Au revoir
