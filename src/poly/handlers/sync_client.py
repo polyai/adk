@@ -28,6 +28,8 @@ from poly.resources import (
     FlowConfig,
     FlowStep,
     Function,
+    FunctionCallArgumentAssertion,
+    FunctionCallAssertion,
     FunctionDelayResponse,
     FunctionLatencyControl,
     FunctionParameters,
@@ -45,6 +47,9 @@ from poly.resources import (
     SettingsRole,
     SettingsRules,
     SMSTemplate,
+    TestCase,
+    TestCaseAssertion,
+    TestCaseTags,
     Topic,
     TranscriptCorrection,
     Variable,
@@ -54,11 +59,6 @@ from poly.resources import (
     VoiceGreeting,
     VoiceSafetyFilters,
     VoiceStylePrompt,
-    TestCase,
-    TestCaseAssertion,
-    TestCaseTags,
-    FunctionCallAssertion,
-    FunctionCallArgumentAssertion,
 )
 
 logger = logging.getLogger(__name__)

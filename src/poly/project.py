@@ -56,6 +56,7 @@ from poly.resources import (
     SMSTemplate,
     StepType,
     SubResource,
+    TestCase,
     Topic,
     TranscriptCorrection,
     Variable,
@@ -65,7 +66,6 @@ from poly.resources import (
     VoiceGreeting,
     VoiceSafetyFilters,
     VoiceStylePrompt,
-    TestCase,
 )
 from poly.resources.resource import _parse_multi_resource_path
 from poly.utils import compute_variable_references

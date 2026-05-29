@@ -4,26 +4,31 @@ Copyright PolyAI Limited
 """
 
 import os
-
 from dataclasses import dataclass, field
 from typing import Optional
 
-from poly.resources.resource import ResourceMapping, YamlResource, SubResource
-from poly.resources.variant_attributes import Variant
 import poly.resources.resource_utils as utils
 
 # import uuid
 from poly.handlers.protobuf.testing_pb2 import (
     Create_TestCase,
-    Update_TestCase,
     Delete_TestCase,
+    PromptAssertion,
     SetTestCaseAssertions,
     SetTestCaseTags,
-    TestCaseAssertion as TestCaseAssertionProto,
-    PromptAssertion,
+    Update_TestCase,
+)
+from poly.handlers.protobuf.testing_pb2 import (
     FunctionCallAssertion as FunctionCallAssertionProto,
+)
+from poly.handlers.protobuf.testing_pb2 import (
     FunctionCallAssertionArgument as FunctionCallAssertionArgumentProto,
 )
+from poly.handlers.protobuf.testing_pb2 import (
+    TestCaseAssertion as TestCaseAssertionProto,
+)
+from poly.resources.resource import ResourceMapping, SubResource, YamlResource
+from poly.resources.variant_attributes import Variant
 
 INTERNAL_TO_CHANNEL = {
     "chat.polyai": "voice",
