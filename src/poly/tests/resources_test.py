@@ -1709,7 +1709,16 @@ class SettingsPersonalityTests(unittest.TestCase):
         )
         with self.assertRaises(ValueError) as cm:
             invalid_personality.validate()
-        self.assertIn("Adjectives must be from the allowed set:", str(cm.exception))
+        self.assertIn("Enabled adjectives must be from the allowed set:", str(cm.exception))
+
+        # Test with disabled invalid adjective (valid — only enabled adjectives are checked)
+        personality_with_disabled_invalid = SettingsPersonality(
+            resource_id="personality_123",
+            name="personality",
+            adjectives={"Polite": True, "InvalidAdjective": False},
+            custom="",
+        )
+        self.assertIsNone(personality_with_disabled_invalid.validate())
 
         # Test with custom and 'Other' selected (valid case)
         valid_personality = SettingsPersonality(
@@ -1733,6 +1742,19 @@ class SettingsPersonalityTests(unittest.TestCase):
             "Invalid reference type: global_functions is not a valid reference type for this resource. Valid references are: ['attributes', 'variables']",
             str(cm.exception),
         )
+
+    def test_build_update_proto_filters_invalid_adjectives(self):
+        """Test that build_update_proto excludes non-allowed adjectives from the payload."""
+        personality = SettingsPersonality(
+            resource_id="personality_123",
+            name="personality",
+            adjectives={"Polite": True, "InvalidAdjective": False, "Calm": True},
+            custom="",
+        )
+        proto = personality.build_update_proto()
+        adjective_values = proto.adjectives.values
+        self.assertEqual(adjective_values, {"Polite": True, "Calm": True})
+        self.assertNotIn("InvalidAdjective", adjective_values)
 
     def test_read_local_resource(self):
         """Test reading a personality from a YAML file."""

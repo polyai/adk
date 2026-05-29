@@ -46,6 +46,24 @@ class SourcererSDK:
         "studio": "https://api.studio.poly.ai/adk/v1",
     }
 
+    _session: requests.Session = None
+
+    @property
+    def session(self) -> requests.Session:
+        if self._session is None:
+            session = requests.Session()
+            correlation_id = f"adk-{uuid.uuid4()}"
+            headers = {
+                "Content-Type": "application/json",
+                "X-API-KEY": retrieve_api_key(self.region),
+                "X-PolyAI-Correlation-Id": correlation_id,
+            }
+            if self.email:
+                headers["X-PolyAI-Email"] = self.email
+            session.headers.update(headers)
+            self._session = session
+        return self._session
+
     def __init__(
         self,
         region: str,
@@ -79,17 +97,7 @@ class SourcererSDK:
             self.base_url = self.ENVIRONMENT_URLS[region]
 
         # Initialize session with auth headers
-        correlation_id = f"adk-{uuid.uuid4()}"
         self.email = os.environ.get("ADK_COMMAND_USER_OVERRIDE")
-        self.session = requests.Session()
-        headers = {
-            "Content-Type": "application/json",
-            "X-API-KEY": retrieve_api_key(self.region),
-            "X-PolyAI-Correlation-Id": correlation_id,
-        }
-        if self.email:
-            headers["X-PolyAI-Email"] = self.email
-        self.session.headers.update(headers)
 
         # Cache for projection and sequence number
         self._projection_cache: Optional[dict[str, Any]] = None

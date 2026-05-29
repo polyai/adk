@@ -1,6 +1,192 @@
 # CHANGELOG
 
 
+## v0.22.2 (2026-05-28)
+
+### Bug Fixes
+
+- Defer API key lookup until first SourcererSDK HTTP request
+  ([#164](https://github.com/polyai/adk/pull/164),
+  [`a90be40`](https://github.com/polyai/adk/commit/a90be407bfcc0c88abfed460910d39c6deaaea84))
+
+## Summary
+
+Lazy-initialize the `SourcererSDK` HTTP session so `retrieve_api_key()` runs on the first API
+  request, not during `__init__`.
+
+## Motivation
+
+Offline CLI workflows (`poly pull --from-projection`, `poly push --dry-run --output-json-commands`)
+  still construct `SyncClientHandler` / `SourcererSDK` even when no HTTP calls are made. Resolving
+  credentials in `__init__` caused those flows to fail when `POLY_ADK_KEY` was unset.
+
+## Changes
+
+- Add a lazy `session` property on `SourcererSDK` that builds the `requests.Session` and auth
+  headers on first use - Remove eager session creation and `retrieve_api_key()` from
+  `SourcererSDK.__init__`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Manual checks:
+
+- [x] `poly push --from-projection - < proj.json --json --dry-run --output-json-commands` works
+  without `POLY_ADK_KEY` when `branch_id` is set in `project.yaml` - [x] `poly push` still
+  authenticates and sends when API key is configured - [x] `poly pull` / branch operations still
+  work with a valid API key
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass (pre-commit on commit) - [ ] `pytest` passes -
+  [x] No breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit
+  messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+
+
+## v0.22.1 (2026-05-27)
+
+### Bug Fixes
+
+- Allow disabled non-standard adjectives in personality settings
+  ([#163](https://github.com/polyai/adk/pull/163),
+  [`1976948`](https://github.com/polyai/adk/commit/19769489ce2d4296cd0e0450f3fc46c27d071a4f))
+
+## Summary
+
+Fixes personality validation to only reject *enabled* invalid adjectives, and filters out
+  non-allowed adjectives from the update proto payload.
+
+## Motivation
+
+The platform can return adjectives not in the local allowed set (e.g. deprecated or new adjectives).
+  Previously, having any such adjective in the local YAML — even disabled — would block pushes. Now
+  disabled non-standard adjectives pass validation and are silently excluded from the update.
+
+## Changes
+
+- `validate()` now only raises on invalid adjectives that are enabled (`True`) -
+  `build_update_proto()` filters the adjectives dict to only include allowed keys - Updated error
+  message to clarify "Enabled adjectives" - Added tests for disabled invalid adjective validation
+  and proto filtering
+
+## Test plan
+
+- [x] Added/updated unit tests (`SettingsPersonalityTests`) - [ ] Manual CLI testing (`poly
+  <command>`) - [ ] Tested against a live Agent Studio project
+
+Replicates https://github.com/PolyAI-LDN/local_agent_studio/pull/141
+
+Made with [Cursor](https://cursor.com)
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+
+
+## v0.22.0 (2026-05-27)
+
+### Features
+
+- Add poly conversations list/get/get-audio ([#161](https://github.com/polyai/adk/pull/161),
+  [`3806a19`](https://github.com/polyai/adk/commit/3806a1998686a6fb2c1cf5c20008d1d8c1034d29))
+
+## Summary
+
+Adds `poly conversations list`, `poly conversations get`, and `poly conversations get-audio`
+  commands that use the public Conversations API to list, inspect, and download conversations
+
+## Motivation
+
+Enables users to browse and debug conversations directly from the CLI without needing to open Agent
+  Studio in a browser.
+
+Closes #DEVP-181
+
+## Changes
+
+- Added `CONVERSATIONS_URL`, `CONVERSATION_URL`, `CONVERSATION_AUDIO_URL` endpoint constants and
+  three new static methods (`list_conversations`, `get_conversation`, `get_conversation_audio`) to
+  `PlatformAPIHandler` - Added corresponding passthrough methods to `AgentStudioInterface` - Added
+  `conversations` command group to the CLI parser with `list`, `get`, and `get-audio` subcommands -
+  Added `print_conversations` (table view) and `print_conversation_detail` (detailed view with
+  turns) to console output - Conversation IDs are rendered as clickable Agent Studio links (same
+  pattern as `poly chat`) - `shortSummary` JSON string is parsed to extract only the heading -
+  `get-audio` downloads WAV binary directly (bypasses `make_request` JSON parsing) - All three
+  subcommands support `--json` for machine-readable output (except `get-audio`)
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`poly conversations list` <img width="978" height="103" alt="Screenshot 2026-05-27 at 16 36 35"
+  src="https://github.com/user-attachments/assets/f3a9aae2-fa66-488b-8d67-17ef8a5affac" />
+
+`poly conversations get` <img width="971" height="399" alt="Screenshot 2026-05-27 at 16 37 06"
+  src="https://github.com/user-attachments/assets/d76b7677-b27c-4f15-a14b-b04d099f2e65" />
+
+`poly conversations get-audio` <img width="928" height="36" alt="Screenshot 2026-05-27 at 16 37 28"
+  src="https://github.com/user-attachments/assets/6f729da0-4c2d-4902-9f69-2b0a9d7319cb" />
+
+### Refactoring
+
+- Replace email param threading with POLY_ADK_EMAIL env var
+  ([#156](https://github.com/polyai/adk/pull/156),
+  [`63312ef`](https://github.com/polyai/adk/commit/63312efa5824325b44ce9d66c4becd7c0edc6fe9))
+
+## Summary
+
+Replace the `email` parameter that was threaded through the entire call chain (CLI -> project ->
+  interface -> sync_client -> SDK) with a single `ADK_COMMAND_USER_OVERRIDE` environment variable
+  read once in `SourcererSDK.__init__`.
+
+## Motivation
+
+The email was being passed as a parameter through 5 layers of function calls just to set a header
+  and metadata field. Using an env var simplifies the API, removes parameter plumbing, and ensures
+  the email header is consistently included on all API requests (including merges, which previously
+  didn't get it).
+
+## Changes
+
+- Read `ADK_COMMAND_USER_OVERRIDE` env var in `SourcererSDK.__init__`, set on session headers and
+  `send_command_batch` headers - Use `self.email` as default `created_by` in `create_metadata()` -
+  Remove `email` param from `queue_resources`, `send_queued_commands`, `send_command_batch`,
+  `_stage_commands`, `push_project`, `sync_ids_with_sandbox` - Remove `--email` CLI flag from push
+  command - Remove `email` param from `AgentStudioInterface.queue_resources` and `upload_resources`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.21.1 (2026-05-21)
 
 ### Bug Fixes
