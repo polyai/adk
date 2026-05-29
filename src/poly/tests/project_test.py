@@ -351,8 +351,8 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
         self.assertCountEqual(
             local_resources[TestCase],
             [
-                os.path.join(TEST_DIR, "tests", "greeting_flow_test.yaml"),
-                os.path.join(TEST_DIR, "tests", "webchat_smoke_test.yaml"),
+                os.path.join(TEST_DIR, "test_suite", "greeting_flow_test.yaml"),
+                os.path.join(TEST_DIR, "test_suite", "webchat_smoke_test.yaml"),
             ]
         )
 

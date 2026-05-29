@@ -8,7 +8,7 @@ Tests are simulated conversations used to validate agent behaviour in Agent Stud
 
 `tests/`. One file per test case: `tests/{test_name}.yaml`.
 
-File names are cleaned to lowercase snake_case. For example, a test named `"Greeting flow test"` is stored as `tests/greeting_flow_test.yaml`.
+File names are cleaned to lowercase snake_case. For example, a test named `"Greeting flow test"` is stored as `test_suite/greeting_flow_test.yaml`.
 
 ## Structure
 

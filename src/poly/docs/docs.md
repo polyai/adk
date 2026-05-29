@@ -23,7 +23,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │   ├── entities.yaml                   # Optional
 │   ├── handoffs.yaml                   # Optional
 │   ├── sms_templates.yaml              # Optional
-│   ├── translations.yaml              # Optional
+│   ├── translations.yaml               # Optional
 │   └── variant_attributes.yaml         # Optional
 ├── voice/                              # Voice channel settings
 │   ├── configuration.yaml              # Greeting, disclaimer, style prompt
@@ -48,12 +48,12 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │       └── functions/
 │           └── {function_name}.py
 ├── functions/                          # Global functions (shared across flows)
-│   ├── start_function.py              # Optional - runs at call start
-│   ├── end_function.py                # Optional - runs at call end
+│   ├── start_function.py               # Optional - runs at call start
+│   ├── end_function.py                 # Optional - runs at call end
 │   └── {function_name}.py
 ├── topics/                             # Knowledge base topics
 │   └── {topic_name}.yaml
-├── tests/                              # Optional - simulated conversation tests
+├── test_suite/                         # Optional - simulated conversation tests
 │   └── {test_name}.yaml
 └── project.yaml                        # Project metadata (region, account_id, project_id)
 ```

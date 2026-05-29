@@ -77,7 +77,7 @@ from poly.resources.topic import (
     Topic,
 )
 from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
-from poly.resources.tests import (
+from poly.resources.test_suite import (
     FunctionCallArgumentAssertion,
     FunctionCallAssertion,
     TestCase,
@@ -7116,7 +7116,7 @@ class TestCaseTests(unittest.TestCase):
 
     def test_file_path_and_command_type(self):
         test_case = self._sample_test_case()
-        self.assertEqual(test_case.file_path, os.path.join("tests", "greeting_flow_test.yaml"))
+        self.assertEqual(test_case.file_path, os.path.join("test_suite", "greeting_flow_test.yaml"))
         self.assertEqual(test_case.command_type, "test_case")
         self.assertEqual(test_case.assertions.update_command_type, "set_test_case_assertions")
         self.assertEqual(test_case.tags.update_command_type, "set_test_case_tags")
@@ -7152,7 +7152,7 @@ class TestCaseTests(unittest.TestCase):
             os.path.dirname(__file__),
             "test_projects",
             "test_project",
-            "tests",
+            "test_suite",
             "greeting_flow_test.yaml",
         )
         test_case = TestCase.read_local_resource(
@@ -7166,7 +7166,7 @@ class TestCaseTests(unittest.TestCase):
         self.assertEqual(test_case.tags.tags, ["booking", "smoke"])
 
     def test_read_local_resource_filename_mismatch_raises(self):
-        file_path = os.path.join("tests", "greeting_flow_test.yaml")
+        file_path = os.path.join("test_suite", "greeting_flow_test.yaml")
         with mock_read_from_file(
             {file_path: "name: Wrong name\nscenario: Test\nchannel: voice\nlanguage: en-GB\n"}
         ):
@@ -7259,8 +7259,8 @@ class TestCaseTests(unittest.TestCase):
         self.assertCountEqual(
             discovered,
             [
-                os.path.join(base_path, "tests", "greeting_flow_test.yaml"),
-                os.path.join(base_path, "tests", "webchat_smoke_test.yaml"),
+                os.path.join(base_path, "test_suite", "greeting_flow_test.yaml"),
+                os.path.join(base_path, "test_suite", "webchat_smoke_test.yaml"),
             ],
         )
 

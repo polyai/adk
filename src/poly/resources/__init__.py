@@ -62,7 +62,7 @@ from poly.resources.safety_filters import (
     VoiceSafetyFilters,
 )
 from poly.resources.sms import SMSTemplate
-from poly.resources.tests import (
+from poly.resources.test_suite import (
     FunctionCallArgumentAssertion,
     FunctionCallAssertion,
     TestCase,

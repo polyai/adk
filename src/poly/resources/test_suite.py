@@ -223,7 +223,7 @@ class TestCase(YamlResource):
     @property
     def file_path(self) -> str:
         file_name = f"{utils.clean_name(self.name)}.yaml"
-        return os.path.join("tests", file_name)
+        return os.path.join("test_suite", file_name)
 
     def to_yaml_dict(self) -> dict:
         output = {
@@ -343,7 +343,7 @@ class TestCase(YamlResource):
     @classmethod
     def discover_resources(cls, base_path: str) -> list[str]:
         """Discover resources of this type in the given base path."""
-        tests_path = os.path.join(base_path, "tests")
+        tests_path = os.path.join(base_path, "test_suite")
         if not os.path.exists(tests_path):
             return []
         return [
