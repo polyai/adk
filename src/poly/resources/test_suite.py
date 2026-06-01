@@ -377,6 +377,23 @@ class TestCase(YamlResource):
             ):
                 raise ValueError(f"Variant {self.variant} not found")
 
+        # Function name is valid
+        known_global_functions = {
+            resource.resource_name
+            for resource in resource_mappings or []
+            if resource.resource_prefix == "fn"
+        }
+        for function_call in self.assertions.function_calls:
+            if not function_call.name:
+                raise ValueError("Function call assertion must have a name")
+            if function_call.name not in known_global_functions:
+                raise ValueError(f"Unknown function in assertion: {function_call.name}")
+            for argument in function_call.arguments:
+                if argument.value_type not in ALLOWED_TYPES:
+                    raise ValueError(
+                        f"Invalid value type for function call assertion argument: {argument.value_type}"
+                    )
+
     def get_new_updated_deleted_subresources(
         self, old_resource: Optional["TestCase"] = None
     ) -> tuple[list[SubResource], list[SubResource], list[SubResource]]:
