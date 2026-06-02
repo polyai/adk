@@ -96,6 +96,11 @@
   },
   {
     "License": "MIT License",
+    "Name": "langcodes",
+    "URL": "https://github.com/georgkrause/langcodes"
+  },
+  {
+    "License": "MIT License",
     "Name": "licensecheck",
     "URL": "https://github.com/FHPythonUtils/LicenseCheck"
   },

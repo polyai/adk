@@ -15,7 +15,7 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x14knowledge_base.proto\x12\x0eknowledge_base\x1a\x1fgoogle/protobuf/timestamp.proto\"!\n\x0e\x45xampleQueries\x12\x0f\n\x07queries\x18\x01 \x03(\t\"\xd8\x04\n\x0fTopicReferences\x12\x35\n\x03sms\x18\x01 \x03(\x0b\x32(.knowledge_base.TopicReferences.SmsEntry\x12=\n\x07handoff\x18\x02 \x03(\x0b\x32,.knowledge_base.TopicReferences.HandoffEntry\x12\x43\n\nattributes\x18\x03 \x03(\x0b\x32/.knowledge_base.TopicReferences.AttributesEntry\x12N\n\x10global_functions\x18\x04 \x03(\x0b\x32\x34.knowledge_base.TopicReferences.GlobalFunctionsEntry\x12\x41\n\tvariables\x18\x05 \x03(\x0b\x32..knowledge_base.TopicReferences.VariablesEntry\x1a*\n\x08SmsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a.\n\x0cHandoffEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a\x31\n\x0f\x41ttributesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a\x36\n\x14GlobalFunctionsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a\x30\n\x0eVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\"\\\n\rKnowledgeBase\x12\x32\n\x06topics\x18\x01 \x03(\x0b\x32\".knowledge_base.KnowledgeBaseTopic\x12\x17\n\x0f\x65mbedding_model\x18\x02 \x01(\t\"\xec\x02\n\x12KnowledgeBaseTopic\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x03 \x01(\t\x12\x0f\n\x07\x61\x63tions\x18\x04 \x01(\t\x12\x37\n\x0f\x65xample_queries\x18\x05 \x01(\x0b\x32\x1e.knowledge_base.ExampleQueries\x12\x33\n\nreferences\x18\x06 \x01(\x0b\x32\x1f.knowledge_base.TopicReferences\x12.\n\ncreated_at\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\ncreated_by\x18\x08 \x01(\t\x12.\n\nupdated_at\x18\t \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\nupdated_by\x18\n \x01(\t\x12\x16\n\tis_active\x18\x0b \x01(\x08H\x00\x88\x01\x01\x42\x0c\n\n_is_active\"\xeb\x01\n\x19KnowledgeBase_CreateTopic\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x03 \x01(\t\x12\x0f\n\x07\x61\x63tions\x18\x04 \x01(\t\x12\x37\n\x0f\x65xample_queries\x18\x06 \x01(\x0b\x32\x1e.knowledge_base.ExampleQueries\x12\x33\n\nreferences\x18\x07 \x01(\x0b\x32\x1f.knowledge_base.TopicReferences\x12\x16\n\tis_active\x18\x08 \x01(\x08H\x00\x88\x01\x01\x42\x0c\n\n_is_active\"\xc8\x02\n\x19KnowledgeBase_UpdateTopic\x12\n\n\x02id\x18\x01 \x01(\t\x12\x11\n\x04name\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x14\n\x07\x63ontent\x18\x03 \x01(\tH\x01\x88\x01\x01\x12\x14\n\x07\x61\x63tions\x18\x04 \x01(\tH\x02\x88\x01\x01\x12<\n\x0f\x65xample_queries\x18\x05 \x01(\x0b\x32\x1e.knowledge_base.ExampleQueriesH\x03\x88\x01\x01\x12\x38\n\nreferences\x18\x06 \x01(\x0b\x32\x1f.knowledge_base.TopicReferencesH\x04\x88\x01\x01\x12\x16\n\tis_active\x18\x07 \x01(\x08H\x05\x88\x01\x01\x42\x07\n\x05_nameB\n\n\x08_contentB\n\n\x08_actionsB\x12\n\x10_example_queriesB\r\n\x0b_referencesB\x0c\n\n_is_active\"\'\n\x19KnowledgeBase_DeleteTopic\x12\n\n\x02id\x18\x01 \x01(\t\"@\n\x1fKnowledgeBase_ToggleTopicStatus\x12\n\n\x02id\x18\x01 \x01(\t\x12\x11\n\tis_active\x18\x02 \x01(\x08\"\x89\x02\n\x1aKnowledgeBase_ImportTopics\x12:\n\x07\x63reated\x18\x01 \x03(\x0b\x32).knowledge_base.KnowledgeBase_CreateTopic\x12:\n\x07updated\x18\x02 \x03(\x0b\x32).knowledge_base.KnowledgeBase_UpdateTopic\x12\x0f\n\x07\x64\x65leted\x18\x03 \x03(\t\x12\x13\n\x06source\x18\x04 \x01(\tH\x00\x88\x01\x01\x12\x35\n\x08metadata\x18\x05 \x01(\x0b\x32\x1e.knowledge_base.ImportMetadataH\x01\x88\x01\x01\x42\t\n\x07_sourceB\x0b\n\t_metadata\"f\n\x0eImportMetadata\x12\x14\n\x0ctotal_topics\x18\x01 \x01(\x05\x12\x18\n\x10import_timestamp\x18\x02 \x01(\t\x12\x16\n\tfile_name\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\x0c\n\n_file_nameb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x14knowledge_base.proto\x12\x0eknowledge_base\x1a\x1fgoogle/protobuf/timestamp.proto\"!\n\x0e\x45xampleQueries\x12\x0f\n\x07queries\x18\x01 \x03(\t\"\xd6\x05\n\x0fTopicReferences\x12\x35\n\x03sms\x18\x01 \x03(\x0b\x32(.knowledge_base.TopicReferences.SmsEntry\x12=\n\x07handoff\x18\x02 \x03(\x0b\x32,.knowledge_base.TopicReferences.HandoffEntry\x12\x43\n\nattributes\x18\x03 \x03(\x0b\x32/.knowledge_base.TopicReferences.AttributesEntry\x12N\n\x10global_functions\x18\x04 \x03(\x0b\x32\x34.knowledge_base.TopicReferences.GlobalFunctionsEntry\x12\x41\n\tvariables\x18\x05 \x03(\x0b\x32..knowledge_base.TopicReferences.VariablesEntry\x12G\n\x0ctranslations\x18\x06 \x03(\x0b\x32\x31.knowledge_base.TopicReferences.TranslationsEntry\x1a*\n\x08SmsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a.\n\x0cHandoffEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a\x31\n\x0f\x41ttributesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a\x36\n\x14GlobalFunctionsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a\x30\n\x0eVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a\x33\n\x11TranslationsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\"\\\n\rKnowledgeBase\x12\x32\n\x06topics\x18\x01 \x03(\x0b\x32\".knowledge_base.KnowledgeBaseTopic\x12\x17\n\x0f\x65mbedding_model\x18\x02 \x01(\t\"\xec\x02\n\x12KnowledgeBaseTopic\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x03 \x01(\t\x12\x0f\n\x07\x61\x63tions\x18\x04 \x01(\t\x12\x37\n\x0f\x65xample_queries\x18\x05 \x01(\x0b\x32\x1e.knowledge_base.ExampleQueries\x12\x33\n\nreferences\x18\x06 \x01(\x0b\x32\x1f.knowledge_base.TopicReferences\x12.\n\ncreated_at\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\ncreated_by\x18\x08 \x01(\t\x12.\n\nupdated_at\x18\t \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\nupdated_by\x18\n \x01(\t\x12\x16\n\tis_active\x18\x0b \x01(\x08H\x00\x88\x01\x01\x42\x0c\n\n_is_active\"\xeb\x01\n\x19KnowledgeBase_CreateTopic\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0f\n\x07\x63ontent\x18\x03 \x01(\t\x12\x0f\n\x07\x61\x63tions\x18\x04 \x01(\t\x12\x37\n\x0f\x65xample_queries\x18\x06 \x01(\x0b\x32\x1e.knowledge_base.ExampleQueries\x12\x33\n\nreferences\x18\x07 \x01(\x0b\x32\x1f.knowledge_base.TopicReferences\x12\x16\n\tis_active\x18\x08 \x01(\x08H\x00\x88\x01\x01\x42\x0c\n\n_is_active\"\xc8\x02\n\x19KnowledgeBase_UpdateTopic\x12\n\n\x02id\x18\x01 \x01(\t\x12\x11\n\x04name\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x14\n\x07\x63ontent\x18\x03 \x01(\tH\x01\x88\x01\x01\x12\x14\n\x07\x61\x63tions\x18\x04 \x01(\tH\x02\x88\x01\x01\x12<\n\x0f\x65xample_queries\x18\x05 \x01(\x0b\x32\x1e.knowledge_base.ExampleQueriesH\x03\x88\x01\x01\x12\x38\n\nreferences\x18\x06 \x01(\x0b\x32\x1f.knowledge_base.TopicReferencesH\x04\x88\x01\x01\x12\x16\n\tis_active\x18\x07 \x01(\x08H\x05\x88\x01\x01\x42\x07\n\x05_nameB\n\n\x08_contentB\n\n\x08_actionsB\x12\n\x10_example_queriesB\r\n\x0b_referencesB\x0c\n\n_is_active\"\'\n\x19KnowledgeBase_DeleteTopic\x12\n\n\x02id\x18\x01 \x01(\t\"@\n\x1fKnowledgeBase_ToggleTopicStatus\x12\n\n\x02id\x18\x01 \x01(\t\x12\x11\n\tis_active\x18\x02 \x01(\x08\"\x89\x02\n\x1aKnowledgeBase_ImportTopics\x12:\n\x07\x63reated\x18\x01 \x03(\x0b\x32).knowledge_base.KnowledgeBase_CreateTopic\x12:\n\x07updated\x18\x02 \x03(\x0b\x32).knowledge_base.KnowledgeBase_UpdateTopic\x12\x0f\n\x07\x64\x65leted\x18\x03 \x03(\t\x12\x13\n\x06source\x18\x04 \x01(\tH\x00\x88\x01\x01\x12\x35\n\x08metadata\x18\x05 \x01(\x0b\x32\x1e.knowledge_base.ImportMetadataH\x01\x88\x01\x01\x42\t\n\x07_sourceB\x0b\n\t_metadata\"f\n\x0eImportMetadata\x12\x14\n\x0ctotal_topics\x18\x01 \x01(\x05\x12\x18\n\x10import_timestamp\x18\x02 \x01(\t\x12\x16\n\tfile_name\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\x0c\n\n_file_name\":\n\x1fKnowledgeBase_SetEmbeddingModel\x12\x17\n\x0f\x65mbedding_model\x18\x01 \x01(\tb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -32,34 +32,40 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _globals['_TOPICREFERENCES_GLOBALFUNCTIONSENTRY']._serialized_options = b'8\001'
   _globals['_TOPICREFERENCES_VARIABLESENTRY']._options = None
   _globals['_TOPICREFERENCES_VARIABLESENTRY']._serialized_options = b'8\001'
+  _globals['_TOPICREFERENCES_TRANSLATIONSENTRY']._options = None
+  _globals['_TOPICREFERENCES_TRANSLATIONSENTRY']._serialized_options = b'8\001'
   _globals['_EXAMPLEQUERIES']._serialized_start=73
   _globals['_EXAMPLEQUERIES']._serialized_end=106
   _globals['_TOPICREFERENCES']._serialized_start=109
-  _globals['_TOPICREFERENCES']._serialized_end=709
-  _globals['_TOPICREFERENCES_SMSENTRY']._serialized_start=462
-  _globals['_TOPICREFERENCES_SMSENTRY']._serialized_end=504
-  _globals['_TOPICREFERENCES_HANDOFFENTRY']._serialized_start=506
-  _globals['_TOPICREFERENCES_HANDOFFENTRY']._serialized_end=552
-  _globals['_TOPICREFERENCES_ATTRIBUTESENTRY']._serialized_start=554
-  _globals['_TOPICREFERENCES_ATTRIBUTESENTRY']._serialized_end=603
-  _globals['_TOPICREFERENCES_GLOBALFUNCTIONSENTRY']._serialized_start=605
-  _globals['_TOPICREFERENCES_GLOBALFUNCTIONSENTRY']._serialized_end=659
-  _globals['_TOPICREFERENCES_VARIABLESENTRY']._serialized_start=661
-  _globals['_TOPICREFERENCES_VARIABLESENTRY']._serialized_end=709
-  _globals['_KNOWLEDGEBASE']._serialized_start=711
-  _globals['_KNOWLEDGEBASE']._serialized_end=803
-  _globals['_KNOWLEDGEBASETOPIC']._serialized_start=806
-  _globals['_KNOWLEDGEBASETOPIC']._serialized_end=1170
-  _globals['_KNOWLEDGEBASE_CREATETOPIC']._serialized_start=1173
-  _globals['_KNOWLEDGEBASE_CREATETOPIC']._serialized_end=1408
-  _globals['_KNOWLEDGEBASE_UPDATETOPIC']._serialized_start=1411
-  _globals['_KNOWLEDGEBASE_UPDATETOPIC']._serialized_end=1739
-  _globals['_KNOWLEDGEBASE_DELETETOPIC']._serialized_start=1741
-  _globals['_KNOWLEDGEBASE_DELETETOPIC']._serialized_end=1780
-  _globals['_KNOWLEDGEBASE_TOGGLETOPICSTATUS']._serialized_start=1782
-  _globals['_KNOWLEDGEBASE_TOGGLETOPICSTATUS']._serialized_end=1846
-  _globals['_KNOWLEDGEBASE_IMPORTTOPICS']._serialized_start=1849
-  _globals['_KNOWLEDGEBASE_IMPORTTOPICS']._serialized_end=2114
-  _globals['_IMPORTMETADATA']._serialized_start=2116
-  _globals['_IMPORTMETADATA']._serialized_end=2218
+  _globals['_TOPICREFERENCES']._serialized_end=835
+  _globals['_TOPICREFERENCES_SMSENTRY']._serialized_start=535
+  _globals['_TOPICREFERENCES_SMSENTRY']._serialized_end=577
+  _globals['_TOPICREFERENCES_HANDOFFENTRY']._serialized_start=579
+  _globals['_TOPICREFERENCES_HANDOFFENTRY']._serialized_end=625
+  _globals['_TOPICREFERENCES_ATTRIBUTESENTRY']._serialized_start=627
+  _globals['_TOPICREFERENCES_ATTRIBUTESENTRY']._serialized_end=676
+  _globals['_TOPICREFERENCES_GLOBALFUNCTIONSENTRY']._serialized_start=678
+  _globals['_TOPICREFERENCES_GLOBALFUNCTIONSENTRY']._serialized_end=732
+  _globals['_TOPICREFERENCES_VARIABLESENTRY']._serialized_start=734
+  _globals['_TOPICREFERENCES_VARIABLESENTRY']._serialized_end=782
+  _globals['_TOPICREFERENCES_TRANSLATIONSENTRY']._serialized_start=784
+  _globals['_TOPICREFERENCES_TRANSLATIONSENTRY']._serialized_end=835
+  _globals['_KNOWLEDGEBASE']._serialized_start=837
+  _globals['_KNOWLEDGEBASE']._serialized_end=929
+  _globals['_KNOWLEDGEBASETOPIC']._serialized_start=932
+  _globals['_KNOWLEDGEBASETOPIC']._serialized_end=1296
+  _globals['_KNOWLEDGEBASE_CREATETOPIC']._serialized_start=1299
+  _globals['_KNOWLEDGEBASE_CREATETOPIC']._serialized_end=1534
+  _globals['_KNOWLEDGEBASE_UPDATETOPIC']._serialized_start=1537
+  _globals['_KNOWLEDGEBASE_UPDATETOPIC']._serialized_end=1865
+  _globals['_KNOWLEDGEBASE_DELETETOPIC']._serialized_start=1867
+  _globals['_KNOWLEDGEBASE_DELETETOPIC']._serialized_end=1906
+  _globals['_KNOWLEDGEBASE_TOGGLETOPICSTATUS']._serialized_start=1908
+  _globals['_KNOWLEDGEBASE_TOGGLETOPICSTATUS']._serialized_end=1972
+  _globals['_KNOWLEDGEBASE_IMPORTTOPICS']._serialized_start=1975
+  _globals['_KNOWLEDGEBASE_IMPORTTOPICS']._serialized_end=2240
+  _globals['_IMPORTMETADATA']._serialized_start=2242
+  _globals['_IMPORTMETADATA']._serialized_end=2344
+  _globals['_KNOWLEDGEBASE_SETEMBEDDINGMODEL']._serialized_start=2346
+  _globals['_KNOWLEDGEBASE_SETEMBEDDINGMODEL']._serialized_end=2404
 # @@protoc_insertion_point(module_scope)
