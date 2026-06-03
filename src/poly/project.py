@@ -2151,6 +2151,8 @@ class AgentStudioProject:
                         resource_utils.get_flow_name_from_path(file_path),
                     )
 
+                    # Default Language will only be modified, but name must
+                    # be read from file
                     if resource_type == DefaultLanguage:
                         resource = self.read_local_resource(
                             ResourceMapping(
