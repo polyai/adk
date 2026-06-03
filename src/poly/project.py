@@ -2146,15 +2146,34 @@ class AgentStudioProject:
                     if not resource_info:
                         raise ValueError(f"Resource info not found for {file_path}")
 
+                    resource_name = resource_info["resource_name"]
+                    flow_name = flow_paths_to_names.get(
+                        resource_utils.get_flow_name_from_path(file_path),
+                    )
+
+                    if resource_type == DefaultLanguage:
+                        resource = self.read_local_resource(
+                            ResourceMapping(
+                                resource_id=resource_info["resource_id"],
+                                resource_type=resource_type,
+                                resource_name=resource_name,
+                                file_path=file_path,
+                                flow_name=flow_name,
+                                resource_prefix=resource_type.get_resource_prefix(
+                                    file_path=file_path
+                                ),
+                            ),
+                            resource_mappings=[],
+                        )
+                        resource_name = resource.name
+
                     kept_resource_mappings.append(
                         ResourceMapping(
                             resource_id=resource_info["resource_id"],
                             resource_type=resource_type,
-                            resource_name=resource_info["resource_name"],
+                            resource_name=resource_name,
                             file_path=file_path,
-                            flow_name=flow_paths_to_names.get(
-                                resource_utils.get_flow_name_from_path(file_path),
-                            ),
+                            flow_name=flow_name,
                             resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
                         )
                     )
