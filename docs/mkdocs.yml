@@ -122,6 +122,7 @@ nav:
           - Voice settings: reference/voice_settings.md
           - Chat settings: reference/chat_settings.md
           - Safety filters: reference/safety_filters.md
+          - Languages: reference/languages.md
           - Experimental config: reference/experimental_config.md
 
       - Project resources:
@@ -133,6 +134,7 @@ nav:
           - Variants: reference/variants.md
           - Handoffs: reference/handoffs.md
           - SMS templates: reference/sms.md
+          - Translations: reference/translations.md
 
       - Voice controls:
           - Speech recognition: reference/speech_recognition.md
