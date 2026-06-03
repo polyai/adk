@@ -938,7 +938,7 @@ class SyncClientHandler:
         if not language_data:
             return {DefaultLanguage: {}, AdditionalLanguage: {}}
 
-        default_code = language_data.get("defaultLanguage")
+        default_code = language_data.get("defaultLanguageCode")
         default_languages = {}
         if default_code:
             default_languages[default_code] = DefaultLanguage(

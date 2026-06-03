@@ -1,6 +1,49 @@
 # CHANGELOG
 
 
+## v0.23.1 (2026-06-03)
+
+### Bug Fixes
+
+- Default language mapping name + projection key for translations
+  ([#169](https://github.com/polyai/adk/pull/169),
+  [`15526b1`](https://github.com/polyai/adk/commit/15526b180e9846d7f59a7e44bf39c099d3e14ee1))
+
+## Summary
+
+Fixes two bugs that broke translation validation when the default language is changed locally.
+
+## Motivation
+
+Translation validation cross-references configured languages via ResourceMappings. When the default
+  language was changed locally, the ResourceMapping still had the old language code (cached from
+  pull), so translations appeared to be missing entries for the new language. Separately, the
+  projection reader used the wrong key to extract the default language code from the API response.
+
+## Changes
+
+- Re-read default language name from disk for kept resources so the ResourceMapping reflects the
+  current value - Fix projection key `defaultLanguage` → `defaultLanguageCode` in
+  `SyncClientHandler._read_languages_from_projection`
+
+## Test strategy
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (662 tests) - [x] Manual
+  CLI testing (`poly <command>`) - [x] Tested against a live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.23.0 (2026-05-29)
 
 ### Documentation
