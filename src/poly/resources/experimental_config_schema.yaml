@@ -1426,6 +1426,21 @@ components:
               type: string
               description: The name of the secret stored in the secrets service to use for authentication. The secret value will be added to the header or query parameter specified.
           required: []
+        payload_template:
+          type: object
+          description: >
+            Custom payload template that controls the JSON body sent to the webhook URL.
+            If omitted, the default deployment payload is sent as-is.
+            String values may contain {{field}} placeholders (e.g. {{project_id}}) 
+            that are substituted with the corresponding deployment event field. 
+            Available fields: deployment_id, account_id, project_id,
+            client_env, artifact_version, deployment_type, timestamp, user.
+            Note: Use the special {{payload}} value to inject the entire deployment payload
+            object at a specific position in the template (e.g. for GitHub repository_dispatch
+            which requires nesting under client_payload). 
+            When {{payload}} is not used, the deployment payload fields are merged at the top 
+            level of the rendered result.
+          additionalProperties: true
 
     webhooks:
       type: object
