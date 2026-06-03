@@ -6,7 +6,7 @@ Tests are simulated conversations used to validate agent behaviour in Agent Stud
 
 ## Location
 
-`tests/`. One file per test case: `tests/{test_name}.yaml`.
+`test_suite/`. One file per test case: `test_suite/{test_name}.yaml`.
 
 File names are cleaned to lowercase snake_case. For example, a test named `"Greeting flow test"` is stored as `test_suite/greeting_flow_test.yaml`.
 
@@ -56,7 +56,7 @@ Function call assertions verify that the agent invoked a specific function with 
 
 Each function call assertion has:
 
-- **name**: Function name (global function name, not resource ID).
+- **name**: Function name - must be a valid global function in the project.
 - **arguments**: List of parameter assertions, each with:
   - **parameter_name**: Function parameter to check.
   - **expected_value**: Expected value for that parameter.
@@ -73,6 +73,16 @@ Each function call assertion has:
 
 - The `name` field is the canonical test name and can contain spaces and mixed case.
 - The filename must match the cleaned version of `name` — a mismatch raises a validation error on `pull` or `push`.
+
+## Validation
+
+On `push`, each test case is validated:
+
+- **channel** must be `voice` or `webchat`.
+- **scenario** is required (cannot be empty).
+- **language** is required and must match a configured project language (default or additional).
+- **variant**, if specified, must match an existing variant in the project.
+- **function_call_assertions**: each function name must match a global function in the project, and each argument's `value_type` must be one of `string`, `integer`, `number`, or `boolean`.
 
 ## Best practices
 

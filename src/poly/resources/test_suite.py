@@ -27,6 +27,7 @@ from poly.handlers.protobuf.testing_pb2 import (
 from poly.handlers.protobuf.testing_pb2 import (
     TestCaseAssertion as TestCaseAssertionProto,
 )
+from poly.resources.languages import AdditionalLanguage, DefaultLanguage
 from poly.resources.resource import ResourceMapping, SubResource, YamlResource
 from poly.resources.variant_attributes import Variant
 
@@ -365,6 +366,17 @@ class TestCase(YamlResource):
         if not self.language:
             raise ValueError("Language is required")
 
+        configured_languages = {
+            m.resource_name
+            for m in resource_mappings or []
+            if m.resource_type in (DefaultLanguage, AdditionalLanguage)
+        }
+        if configured_languages and self.language not in configured_languages:
+            raise ValueError(
+                f"Language '{self.language}' is not configured. "
+                f"Available languages: {sorted(configured_languages)}"
+            )
+
         # Variant is valid if exists
         if self.variant:
             if not next(
@@ -386,7 +398,7 @@ class TestCase(YamlResource):
         for function_call in self.assertions.function_calls:
             if not function_call.name:
                 raise ValueError("Function call assertion must have a name")
-            if function_call.name not in known_global_functions:
+            if known_global_functions and function_call.name not in known_global_functions:
                 raise ValueError(f"Unknown function in assertion: {function_call.name}")
             for argument in function_call.arguments:
                 if argument.value_type not in ALLOWED_TYPES:

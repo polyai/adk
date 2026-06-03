@@ -7237,6 +7237,45 @@ class TestCaseTests(unittest.TestCase):
             ).validate()
         self.assertIn("Language is required", str(cm.exception))
 
+        fn_mapping = ResourceMapping(
+            resource_id="fn-test",
+            resource_name="test_function",
+            resource_type=Function,
+            resource_prefix="fn",
+            file_path=None,
+            flow_name=None,
+        )
+
+        with self.assertRaises(ValueError) as cm:
+            self._sample_test_case().validate(
+                resource_mappings=[
+                    fn_mapping,
+                    ResourceMapping(
+                        resource_id="lang-en",
+                        resource_name="en-US",
+                        resource_type=DefaultLanguage,
+                        resource_prefix=None,
+                        file_path=None,
+                        flow_name=None,
+                    ),
+                ]
+            )
+        self.assertIn("not configured", str(cm.exception))
+
+        self._sample_test_case().validate(
+            resource_mappings=[
+                fn_mapping,
+                ResourceMapping(
+                    resource_id="lang-en",
+                    resource_name="en-GB",
+                    resource_type=DefaultLanguage,
+                    resource_prefix=None,
+                    file_path=None,
+                    flow_name=None,
+                ),
+            ]
+        )
+
     def test_get_new_updated_deleted_subresources(self):
         test_case = self._sample_test_case()
         new, updated, deleted = test_case.get_new_updated_deleted_subresources()
