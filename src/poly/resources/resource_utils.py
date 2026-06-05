@@ -189,6 +189,9 @@ _REFERENCE_PATTERN = re.compile(r"\{\{(\w+):([^}]+)\}\}")
 # Regex to find variable names defined in function code via conv.state.<name>
 CONV_STATE_DOT_NAME = re.compile(r"(?<![\w.])conv\.state\.([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()")
 
+# End colon search regex
+COLON_REGEX = re.compile(r":\s*(#.*)?\s*$")
+
 
 def remove_comments_from_code(code: str) -> str:
     """Return code without comments"""
@@ -387,6 +390,9 @@ def _format_def_line(line: str) -> str:
     # remove comma after last parameter
     line = re.sub(r",\):$", "):", line)
 
+    # PEP 8: two spaces before inline comment
+    line = re.sub(r" #", "  #", line)
+
     return line + "\n"
 
 
@@ -425,14 +431,14 @@ def restore_function_def_line(file_content: str, file_name: str) -> str:
     end_line = None
     for j in range(i, len(lines)):
         header_lines.append(lines[j])
-        if lines[j].rstrip().endswith(":"):
+        if COLON_REGEX.search(lines[j]):
             end_line = j
             break
 
     if end_line is None:
         return file_content
 
-    one_line_header = " ".join(header_lines)
+    one_line_header = " ".join(h.strip() for h in header_lines)
     formatted_one_line_header = _format_def_line(one_line_header)
 
     return "".join(lines[:i]) + formatted_one_line_header + "".join(lines[end_line + 1 :])
