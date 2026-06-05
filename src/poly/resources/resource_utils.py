@@ -749,3 +749,25 @@ def assign_flow_node_position(
             "y": y_start,
         }
         return node.position["x"]
+
+
+_WEBCHAT_CONFIG_TYPES: list[str] = [
+    "ChatGreeting",
+    "ChatSafetyFilters",
+    "ChatStylePrompt",
+]
+
+
+def validate_webchat_siblings(
+    self_type: type, resource_mappings: list["ResourceMapping"] | None
+) -> None:
+    """Raise if some but not all webchat config resources are present."""
+    if not resource_mappings:
+        return
+    sibling_names = [n for n in _WEBCHAT_CONFIG_TYPES if n != self_type.__name__]
+    present_types = {rm.resource_type.__name__ for rm in resource_mappings}
+    missing = [n for n in sibling_names if n not in present_types]
+    if missing:
+        raise ValueError(
+            f"Webchat config resources must all be present together. Missing: {', '.join(missing)}."
+        )
