@@ -369,6 +369,21 @@ def test_code(
         restored = resource_utils.restore_function_def_line(code_multi_colon, "test_code")
         self.assertEqual(restored, expected_code_multi_colon)
 
+    def test_restore_function_def_line_comment_with_hash_in_body(self):
+        """Test that a # inside the comment text is not double-spaced."""
+        code = (
+            "def test_code(\n"
+            "    conv: Conversation\n"
+            "):  # see issue #123\n"
+            "    pass\n"
+        )
+        expected = (
+            "def test_code(conv: Conversation):  # see issue #123\n"
+            "    pass\n"
+        )
+        restored = resource_utils.restore_function_def_line(code, "test_code")
+        self.assertEqual(restored, expected)
+
     def test_get_diff(self):
         """Test getting diff between strings"""
         original = "line1\nline2\nline3"
