@@ -333,6 +333,56 @@ def test_code(
         restored_code = resource_utils.restore_function_def_line(invalid_code, "test_code")
         self.assertEqual(restored_code, invalid_code)
 
+    def test_restore_function_def_line_with_inline_comment(self):
+        """Test that inline comments after the colon don't break header detection."""
+        code = (
+            "def test_code(\n"
+            "    conv: Conversation, flow: Flow\n"
+            "):  # custom inline comment\n"
+            '    """Stub..."""\n'
+            "    pass\n"
+            "\n"
+            "def other_func(card) -> set:\n"
+            "    return card.number[:6]\n"
+        )
+        expected_code = (
+            "def test_code(conv: Conversation, flow: Flow):  # custom inline comment\n"
+            '    """Stub..."""\n'
+            "    pass\n"
+            "\n"
+            "def other_func(card) -> set:\n"
+            "    return card.number[:6]\n"
+        )
+        restored = resource_utils.restore_function_def_line(code, "test_code")
+        self.assertEqual(restored, expected_code)
+        # Comments with multiple colons should also be preserved on the def line.
+        code_multi_colon = (
+            "def test_code(\n"
+            "    conv: Conversation\n"
+            "):  # note: this is important: do not remove\n"
+            "    pass\n"
+        )
+        expected_code_multi_colon = (
+            "def test_code(conv: Conversation):  # note: this is important: do not remove\n"
+            "    pass\n"
+        )
+        restored = resource_utils.restore_function_def_line(code_multi_colon, "test_code")
+        self.assertEqual(restored, expected_code_multi_colon)
+
+    def test_restore_function_def_line_comment_with_hash_in_body(self):
+        """Test that a # inside the comment text is not double-spaced."""
+        code = (
+            "def test_code(\n"
+            "    conv: Conversation\n"
+            "):  # see issue #123\n"
+            "    pass\n"
+        )
+        expected = (
+            "def test_code(conv: Conversation):  # see issue #123\n"
+            "    pass\n"
+        )
+        restored = resource_utils.restore_function_def_line(code, "test_code")
+        self.assertEqual(restored, expected)
 
     def test_get_diff(self):
         """Test getting diff between strings"""

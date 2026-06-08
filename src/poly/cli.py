@@ -1722,7 +1722,7 @@ class AgentStudioCLI:
                 return
             project_name = project_name.strip()
 
-        if not project_id and region != "studio":
+        if not project_id and region != "studio" and not output_json:
             project_id = questionary.text(
                 "Enter project ID (leave empty to let the platform generate one):",
                 validate=lambda val: (
