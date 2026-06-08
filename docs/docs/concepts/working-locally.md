@@ -76,6 +76,7 @@ A typical project structure looks like this:
 ├── flows/                              # Optional - flow definitions
 ├── functions/                          # Global functions
 ├── topics/                             # Knowledge base topics
+├── test_suite/                         # Optional - simulated conversation tests
 └── project.yaml                        # Project metadata
 ~~~
 
