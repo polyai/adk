@@ -1101,6 +1101,20 @@ class SyncClientHandler:
         logger.debug(f"Commands: {commands!r}")
         return commands
 
+    def queue_command(self, command: Command) -> None:
+        """Add a single command to the queue.
+        Sets the command ID and metadata before adding to the queue.
+
+        Args:
+            command (Command): The Command protobuf message to add to the queue.
+        """
+        command.metadata.CopyFrom(self.sdk.create_metadata())
+        command.command_id = str(uuid.uuid4())
+        self.sdk.add_command_to_queue(command)
+        logger.info("Queued command")
+        logger.debug(f"Command: {command!r}")
+        return command
+
     def send_queued_commands(self) -> bool:
         """Send all queued commands as a batch and clear the queue.
 
