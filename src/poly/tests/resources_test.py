@@ -7,6 +7,8 @@ import os
 import unittest
 
 import yaml
+
+import poly.resources.resource_utils as resource_utils
 from jsonschema import ValidationError
 
 from poly.handlers.sync_client import SyncClientHandler
@@ -3764,13 +3766,7 @@ class ExperimentalConfigTests(unittest.TestCase):
         experimental_config = ExperimentalConfig(
             resource_id="experimental-config-123",
             name="experimental_config",
-            config={
-                "asr": {
-                    "provider": "fakegram",
-                    "model": "nova-2",
-                    "language": "en"
-                }
-            }
+            config={"asr": {"provider": "fakegram", "model": "nova-2", "language": "en"}},
         )
         with self.assertRaises(ValidationError) as cm:
             experimental_config.validate()
@@ -7834,6 +7830,85 @@ class AdditionalLanguageTests(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             lang.validate(resource_mappings=mappings)
         self.assertIn("Duplicate language code", str(cm.exception))
+
+
+class ValidateWebchatSiblingsTests(unittest.TestCase):
+    """Tests for validate_webchat_siblings in resource_utils."""
+
+    def _make_mapping(self, resource_type: type) -> ResourceMapping:
+        """Create a minimal ResourceMapping with the given resource_type."""
+        return ResourceMapping(
+            resource_id="fake-id",
+            resource_type=resource_type,
+            resource_name="fake",
+            file_path=None,
+            flow_name=None,
+            resource_prefix=None,
+        )
+
+    def test_all_three_present_no_error(self):
+        """No error when all webchat config types are present."""
+        mappings = [
+            self._make_mapping(ChatGreeting),
+            self._make_mapping(ChatSafetyFilters),
+            self._make_mapping(ChatStylePrompt),
+        ]
+        # Should not raise
+        resource_utils.validate_webchat_siblings(ChatGreeting, mappings)
+
+    def test_none_present_no_error(self):
+        """No error when resource_mappings is empty."""
+        resource_utils.validate_webchat_siblings(ChatGreeting, [])
+
+    def test_resource_mappings_none_no_error(self):
+        """No error when resource_mappings is None."""
+        resource_utils.validate_webchat_siblings(ChatGreeting, None)
+
+    def test_only_chat_greeting_raises(self):
+        """ValueError when only ChatGreeting is present, missing the other two."""
+        mappings = [self._make_mapping(ChatGreeting)]
+        with self.assertRaises(ValueError) as cm:
+            resource_utils.validate_webchat_siblings(ChatGreeting, mappings)
+        self.assertIn("ChatSafetyFilters", str(cm.exception))
+        self.assertIn("ChatStylePrompt", str(cm.exception))
+
+    def test_only_chat_safety_filters_raises(self):
+        """ValueError when only ChatSafetyFilters is present."""
+        mappings = [self._make_mapping(ChatSafetyFilters)]
+        with self.assertRaises(ValueError) as cm:
+            resource_utils.validate_webchat_siblings(ChatSafetyFilters, mappings)
+        self.assertIn("ChatGreeting", str(cm.exception))
+        self.assertIn("ChatStylePrompt", str(cm.exception))
+
+    def test_only_chat_style_prompt_raises(self):
+        """ValueError when only ChatStylePrompt is present."""
+        mappings = [self._make_mapping(ChatStylePrompt)]
+        with self.assertRaises(ValueError) as cm:
+            resource_utils.validate_webchat_siblings(ChatStylePrompt, mappings)
+        self.assertIn("ChatGreeting", str(cm.exception))
+        self.assertIn("ChatSafetyFilters", str(cm.exception))
+
+    def test_two_of_three_raises_listing_missing_one(self):
+        """ValueError listing only the single missing type when two are present."""
+        mappings = [
+            self._make_mapping(ChatGreeting),
+            self._make_mapping(ChatSafetyFilters),
+        ]
+        with self.assertRaises(ValueError) as cm:
+            resource_utils.validate_webchat_siblings(ChatGreeting, mappings)
+        msg = str(cm.exception)
+        self.assertIn("ChatStylePrompt", msg)
+        # The two present types should not appear in the missing list
+        self.assertNotIn("ChatGreeting", msg.split("Missing:")[1])
+        self.assertNotIn("ChatSafetyFilters", msg.split("Missing:")[1])
+
+    def test_unrelated_mappings_only_raises(self):
+        """ValueError when only unrelated types are in mappings (siblings missing)."""
+        mappings = [self._make_mapping(Entity)]
+        with self.assertRaises(ValueError) as cm:
+            resource_utils.validate_webchat_siblings(ChatGreeting, mappings)
+        self.assertIn("ChatSafetyFilters", str(cm.exception))
+        self.assertIn("ChatStylePrompt", str(cm.exception))
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ from poly.project import AgentStudioProject
 from poly.resources import (
     AsrSettings,
     ChatGreeting,
+    ChatSafetyFilters,
     ChatStylePrompt,
     Entity,
     ExperimentalConfig,
@@ -1675,6 +1676,49 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         self.assertIn("CONDITION-cond-1", cleaned_new.get(Condition, {}))
         # And removed from updated
         self.assertNotIn("CONDITION-cond-1", cleaned_updated.get(Condition, {}))
+
+    def test_clean_resources_before_push_webchat_enables_channel_and_moves_to_updates(self):
+        """New webchat configs should enable the channel and be moved to pre-push updates."""
+        greeting = ChatGreeting(
+            resource_id="chat-greeting-1",
+            name="greeting",
+            welcome_message="Hello",
+            language_code="en-GB",
+        )
+        safety = ChatSafetyFilters(
+            resource_id="chat-safety-1",
+            name="safety_filters",
+            enabled=True,
+            categories={
+                "violence": {"enabled": True, "precision": "MEDIUM"},
+                "hate": {"enabled": True, "precision": "MEDIUM"},
+                "sexual": {"enabled": True, "precision": "MEDIUM"},
+                "self_harm": {"enabled": True, "precision": "MEDIUM"},
+            },
+        )
+        style = ChatStylePrompt(
+            resource_id="chat-style-1",
+            name="style_prompt",
+            prompt="Be helpful",
+        )
+        new_resources = {
+            ChatGreeting: {"chat-greeting-1": greeting},
+            ChatSafetyFilters: {"chat-safety-1": safety},
+            ChatStylePrompt: {"chat-style-1": style},
+        }
+
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            push_changes = self.project._clean_resources_before_push(
+                {}, new_resources, {}, {}
+            )
+            mock_api.queue_command.assert_called_once()
+
+        self.assertNotIn(ChatGreeting, push_changes.main.new)
+        self.assertNotIn(ChatSafetyFilters, push_changes.main.new)
+        self.assertNotIn(ChatStylePrompt, push_changes.main.new)
+        self.assertIn(ChatGreeting, push_changes.pre.updated)
+        self.assertIn(ChatSafetyFilters, push_changes.pre.updated)
+        self.assertIn(ChatStylePrompt, push_changes.pre.updated)
 
 
 class PushProjectTest(unittest.TestCase):

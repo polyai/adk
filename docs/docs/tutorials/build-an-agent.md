@@ -113,7 +113,9 @@ Resource-specific documentation is available in the reference section:
 [variables](../reference/variables.md),
 [speech recognition](../reference/speech_recognition.md),
 [response control](../reference/response_control.md),
-[safety filters](../reference/safety_filters.md), and
+[safety filters](../reference/safety_filters.md),
+[languages](../reference/languages.md),
+[translations](../reference/translations.md), and
 [experimental config](../reference/experimental_config.md).
 
 ### Step 5 - Customize the agent
@@ -167,6 +169,10 @@ Configure [content safety filtering](../reference/safety_filters.md) at the proj
 #### Handoffs, SMS, and variants
 
 Define [escalation paths](../reference/handoffs.md), [SMS templates](../reference/sms.md), and [per-variant configuration](../reference/variants.md).
+
+#### Languages and translations
+
+Configure [supported languages](../reference/languages.md) and [localized text strings](../reference/translations.md) for multilingual agents.
 
 #### ASR and response control
 

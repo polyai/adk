@@ -1,6 +1,175 @@
 # CHANGELOG
 
 
+## v0.23.3 (2026-06-08)
+
+### Bug Fixes
+
+- Skip interactive project_id prompt when --output-json is set
+  ([#175](https://github.com/polyai/adk/pull/175),
+  [`d8f5eca`](https://github.com/polyai/adk/commit/d8f5eca2b66591dea405f76bb83c239f774f4446))
+
+## Summary
+
+Skip the interactive `project_id` prompt during `poly create` when `--json` is passed, since JSON
+  output mode is non-interactive.
+
+## Motivation
+
+When using `poly create --json`, the CLI shouldn't prompt for interactive input — it should let the
+  platform generate the project ID automatically.
+
+## Changes
+
+- Added `and not output_json` guard to the `project_id` prompt condition in `cli.py`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly create --json`) - [ ] Tested against
+  a live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.23.2 (2026-06-08)
+
+### Bug Fixes
+
+- Restore_function_def_line collapsing body when header has inline comment
+  ([#174](https://github.com/polyai/adk/pull/174),
+  [`6bba9bc`](https://github.com/polyai/adk/commit/6bba9bc992ebe79213bece45b85087eb6e510154))
+
+## Summary
+
+Fix a bug where `restore_function_def_line` collapsed the function body and subsequent functions
+  onto a single line when the function header contained an inline comment (e.g. `): # pragma: no
+  cover`).
+
+## Motivation
+
+The end-of-header detection used `line.rstrip().endswith(":")`, which failed on lines like `): #
+  pragma: no cover` — the colon is mid-line, not at the end. The loop overshot past the real header,
+  collecting body lines and subsequent functions, then joined them all into one line.
+
+## Changes
+
+- Use a regex (`:\s*(#.*)?\s*$`) to detect the header-ending colon, ignoring trailing comments and
+  whitespace - Strip trailing newlines from header lines before joining to avoid embedded `\n` in
+  the joined string - Ensure two spaces before inline comments in `_format_def_line` (PEP 8) - Add
+  tests for inline comment preservation and subsequent function integrity
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+**Before (broken):** ```python def card_utils(conv: Conversation, flow: Flow): # pragma: no cover —
+  platform import stub """Stub...""" pass def get_card_keywords(card) -> set: ban = card.number[:6]
+  ```
+
+**After (fixed):** ```python def card_utils(conv: Conversation, flow: Flow): # pragma: no cover
+  """Stub...""" pass
+
+def get_card_keywords(card) -> set: ban = card.number[:6] ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Documentation
+
+- Feat: translations ([#170](https://github.com/polyai/adk/pull/170),
+  [`57c7909`](https://github.com/polyai/adk/commit/57c7909bd4a22e2ffde0b98b6b0b342551d6e864))
+
+## Summary
+
+Relates to PR #152
+
+## Motivation
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+---------
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+
+## v0.23.1 (2026-06-03)
+
+### Bug Fixes
+
+- Default language mapping name + projection key for translations
+  ([#169](https://github.com/polyai/adk/pull/169),
+  [`15526b1`](https://github.com/polyai/adk/commit/15526b180e9846d7f59a7e44bf39c099d3e14ee1))
+
+## Summary
+
+Fixes two bugs that broke translation validation when the default language is changed locally.
+
+## Motivation
+
+Translation validation cross-references configured languages via ResourceMappings. When the default
+  language was changed locally, the ResourceMapping still had the old language code (cached from
+  pull), so translations appeared to be missing entries for the new language. Separately, the
+  projection reader used the wrong key to extract the default language code from the API response.
+
+## Changes
+
+- Re-read default language name from disk for kept resources so the ResourceMapping reflects the
+  current value - Fix projection key `defaultLanguage` → `defaultLanguageCode` in
+  `SyncClientHandler._read_languages_from_projection`
+
+## Test strategy
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (662 tests) - [x] Manual
+  CLI testing (`poly <command>`) - [x] Tested against a live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.23.0 (2026-05-29)
 
 ### Documentation
