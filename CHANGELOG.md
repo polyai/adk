@@ -1,6 +1,46 @@
 # CHANGELOG
 
 
+## v0.25.1 (2026-06-09)
+
+### Bug Fixes
+
+- Simplify pronunciation position assignment ([#176](https://github.com/polyai/adk/pull/176),
+  [`85a4ae6`](https://github.com/polyai/adk/commit/85a4ae68c4cbc41eb62971242c7958246322859d))
+
+## Summary
+
+Simplifies pronunciation position assignment by removing the workaround for unreliable API position
+  data and using the iteration index directly.
+
+## Motivation
+
+The previous code had a `FIXME` noting a Sourcerer SDK bug where multiple entities could share
+  position 0. The workaround logic (`position if position == index else index + 1`) was brittle and
+  unnecessary — since API positions are unreliable, we should just use the order items are returned
+  in.
+
+## Changes
+
+- Removed the `FIXME` comment and position workaround in `_read_pronunciations_from_projection` -
+  Position is now set directly from the iteration `index`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.25.0 (2026-06-08)
 
 ### Features
