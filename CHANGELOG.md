@@ -1,6 +1,65 @@
 # CHANGELOG
 
 
+## v0.25.3 (2026-06-09)
+
+### Bug Fixes
+
+- Persist new test case prompt_assertions and tags on push
+  ([#177](https://github.com/polyai/adk/pull/177),
+  [`6c0f5e1`](https://github.com/polyai/adk/commit/6c0f5e153a7569e209558f79977402d1ede652b4))
+
+## Summary
+
+A newly-created `TestCase` was pushed with its base fields only — its `prompt_assertions` and `tags`
+  were silently dropped, so a `push` → `pull` round-trip lost them (the case came back with a
+  `scenario` but no `prompt_assertions`).
+
+## Motivation
+
+Surfaced in Glot, which authors `test_suite/*.yaml` cases, pushes, then runs them: after the
+  projection round-trip the cases came back assertion-less, so the runner skipped them. The cases
+  only "stuck" on a *second* push, once the case already existed.
+
+Root cause: `TestCase.get_new_updated_deleted_subresources` returns its assertions and tags in the
+  **`updated`** bucket even for a brand-new case — they have no create proto and are only settable
+  via `set_test_case_assertions` / `set_test_case_tags`. But
+  `AgentStudioProject._get_updated_subresources` only forwarded the **`new`** bucket for
+  newly-created resources, so the `set_test_case_assertions` / `set_test_case_tags` commands were
+  never emitted. The case landed in the projection with no assertions; pull
+  (`_read_test_cases_from_projection`) faithfully reconstructed an assertion-less case.
+
+<!-- no tracking issue -->
+
+## Changes
+
+- `_get_updated_subresources`: for newly-created resources, forward the `updated` and `deleted`
+  sub-resources too, not just `new`. Creates are already ordered before updates, so
+  `Create_TestCase` is followed by `set_test_case_assertions` / `set_test_case_tags`. - This also
+  fixes the same latent drop for a new `Function`'s non-default `latency_control`, which is bucketed
+  identically. - Adds `GetUpdatedSubresourcesTest.test_new_test_case_emits_assertions_and_tags`
+  asserting a brand-new `TestCase` emits its assertions/tags in the `updated` change-set.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+> Couldn't run `pytest` locally (a `ruamel` namespace-package quirk in my env); the new test targets
+  the exact buckets and CI exercises it.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes _(verified via CI — see
+  note above)_ - [x] No breaking changes to the `poly` CLI interface (or migration path documented)
+  - [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Before: a freshly-authored `test_suite/<name>.yaml` round-trips (push→pull) with its `scenario` but
+  **no `prompt_assertions`**. After: assertions and tags survive the round-trip.
+
+
 ## v0.25.2 (2026-06-09)
 
 ### Bug Fixes
