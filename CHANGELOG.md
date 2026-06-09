@@ -1,6 +1,274 @@
 # CHANGELOG
 
 
+## v0.25.1 (2026-06-09)
+
+### Bug Fixes
+
+- Simplify pronunciation position assignment ([#176](https://github.com/polyai/adk/pull/176),
+  [`85a4ae6`](https://github.com/polyai/adk/commit/85a4ae68c4cbc41eb62971242c7958246322859d))
+
+## Summary
+
+Simplifies pronunciation position assignment by removing the workaround for unreliable API position
+  data and using the iteration index directly.
+
+## Motivation
+
+The previous code had a `FIXME` noting a Sourcerer SDK bug where multiple entities could share
+  position 0. The workaround logic (`position if position == index else index + 1`) was brittle and
+  unnecessary — since API positions are unreliable, we should just use the order items are returned
+  in.
+
+## Changes
+
+- Removed the `FIXME` comment and position workaround in `_read_pronunciations_from_projection` -
+  Position is now set directly from the iteration `index`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.25.0 (2026-06-08)
+
+### Features
+
+- Add Agent Studio test suite support ([#165](https://github.com/polyai/adk/pull/165),
+  [`56e7eac`](https://github.com/polyai/adk/commit/56e7eac6778424699e65acf0843118c9d70512f8))
+
+## Summary
+
+Adds local ADK support for Agent Studio test cases, including YAML resources under `test_suite/`,
+  protobuf sync commands, pull/push integration, documentation, and unit tests.
+
+## Motivation
+
+Agent Studio now supports simulated conversation tests with prompt and function-call assertions. The
+  ADK needs to read, write, validate, and sync these resources locally so projects can manage tests
+  alongside other agent configuration.
+
+## Changes
+
+- Add `TestCase`, `TestCaseAssertion`, `TestCaseTags`, and function-call assertion types in
+  `src/poly/resources/test_suite.py` - Register test cases in project resource mapping and sync
+  client projection parsing - Update protobuf bindings (including new `testing_pb2`) and command
+  types for create/update/delete/assertions/tags - Add `tests.md` documentation and link it from the
+  main docs index - Add unit tests in `resources_test.py` and project discovery coverage in
+  `project_test.py` - Add sample test cases to the test project
+  (`test_suite/greeting_flow_test.yaml`, `test_suite/webchat_smoke_test.yaml`) - Set `__test__ =
+  False` on resource classes to avoid pytest collection warnings - Validate test case `language`
+  against configured project languages (default + additional) - Validate function call assertion
+  names against known global functions
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+```yaml name: Test Weather flow
+
+scenario: Ask for the weather for berlin.
+
+channel: voice
+
+language: es-ES
+
+tags: - weather prompt_assertions: - It gives the weather - It gives the weather for Berlin
+  function_call_assertions: - name: get_weather arguments: - parameter_name: city expected_value:
+  Berlin value_type: string ```
+
+
+## v0.24.0 (2026-06-08)
+
+### Features
+
+- Webchat config validation and push support ([#173](https://github.com/polyai/adk/pull/173),
+  [`93e52a0`](https://github.com/polyai/adk/commit/93e52a095c317f5326f55ad713877a5ab0dfe805))
+
+## Summary
+
+- Add all-or-nothing validation for webchat config resources (ChatGreeting, ChatSafetyFilters,
+  ChatStylePrompt) - On push, new webchat configs enable the webchat channel and are sent as updates
+  instead of creates - Add `queue_command` to SyncClientHandler and AgentStudioInterface for queuing
+  individual commands
+
+## Motivation
+
+Previously, to enable webchat you had to do it manually on the platform — it couldn't be done
+  through ADK. This change allows ADK to enable the webchat channel automatically when webchat
+  configs are pushed, and validates that all three config types are present together.
+
+## Changes
+
+- `resource_utils.validate_webchat_siblings()` — validates all three webchat types are present when
+  any one is - `ChatGreeting`, `ChatSafetyFilters`, `ChatStylePrompt` — override `validate()` to
+  call sibling check - `SyncClientHandler.queue_command()` / `AgentStudioInterface.queue_command()`
+  — queue a single command - `utils.create_command_webchat_channel_update_status()` — create
+  enable/disable channel command - `project._clean_resources_before_push()` — move new webchat
+  configs to pre-push updates and queue enable command
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.23.3 (2026-06-08)
+
+### Bug Fixes
+
+- Skip interactive project_id prompt when --output-json is set
+  ([#175](https://github.com/polyai/adk/pull/175),
+  [`d8f5eca`](https://github.com/polyai/adk/commit/d8f5eca2b66591dea405f76bb83c239f774f4446))
+
+## Summary
+
+Skip the interactive `project_id` prompt during `poly create` when `--json` is passed, since JSON
+  output mode is non-interactive.
+
+## Motivation
+
+When using `poly create --json`, the CLI shouldn't prompt for interactive input — it should let the
+  platform generate the project ID automatically.
+
+## Changes
+
+- Added `and not output_json` guard to the `project_id` prompt condition in `cli.py`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly create --json`) - [ ] Tested against
+  a live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.23.2 (2026-06-08)
+
+### Bug Fixes
+
+- Restore_function_def_line collapsing body when header has inline comment
+  ([#174](https://github.com/polyai/adk/pull/174),
+  [`6bba9bc`](https://github.com/polyai/adk/commit/6bba9bc992ebe79213bece45b85087eb6e510154))
+
+## Summary
+
+Fix a bug where `restore_function_def_line` collapsed the function body and subsequent functions
+  onto a single line when the function header contained an inline comment (e.g. `): # pragma: no
+  cover`).
+
+## Motivation
+
+The end-of-header detection used `line.rstrip().endswith(":")`, which failed on lines like `): #
+  pragma: no cover` — the colon is mid-line, not at the end. The loop overshot past the real header,
+  collecting body lines and subsequent functions, then joined them all into one line.
+
+## Changes
+
+- Use a regex (`:\s*(#.*)?\s*$`) to detect the header-ending colon, ignoring trailing comments and
+  whitespace - Strip trailing newlines from header lines before joining to avoid embedded `\n` in
+  the joined string - Ensure two spaces before inline comments in `_format_def_line` (PEP 8) - Add
+  tests for inline comment preservation and subsequent function integrity
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+**Before (broken):** ```python def card_utils(conv: Conversation, flow: Flow): # pragma: no cover —
+  platform import stub """Stub...""" pass def get_card_keywords(card) -> set: ban = card.number[:6]
+  ```
+
+**After (fixed):** ```python def card_utils(conv: Conversation, flow: Flow): # pragma: no cover
+  """Stub...""" pass
+
+def get_card_keywords(card) -> set: ban = card.number[:6] ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Documentation
+
+- Feat: translations ([#170](https://github.com/polyai/adk/pull/170),
+  [`57c7909`](https://github.com/polyai/adk/commit/57c7909bd4a22e2ffde0b98b6b0b342551d6e864))
+
+## Summary
+
+Relates to PR #152
+
+## Motivation
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+---------
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+
 ## v0.23.1 (2026-06-03)
 
 ### Bug Fixes

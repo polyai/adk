@@ -345,6 +345,17 @@ class AgentStudioInterface:
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
+    def queue_command(self, command: Message) -> None:
+        """Queue a single command for the specific project.
+
+        Args:
+            command (Message): The Command protobuf message to queue
+        """
+        try:
+            self.sync_client.queue_command(command)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
     def send_queued_commands(self) -> bool:
         """Send all queued commands as a batch and clear the queue.
 

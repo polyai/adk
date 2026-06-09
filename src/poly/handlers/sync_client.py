@@ -30,6 +30,8 @@ from poly.resources import (
     FlowConfig,
     FlowStep,
     Function,
+    FunctionCallArgumentAssertion,
+    FunctionCallAssertion,
     FunctionDelayResponse,
     FunctionLatencyControl,
     FunctionParameters,
@@ -47,6 +49,9 @@ from poly.resources import (
     SettingsRole,
     SettingsRules,
     SMSTemplate,
+    TestCase,
+    TestCaseAssertion,
+    TestCaseTags,
     Topic,
     TranscriptCorrection,
     Translation,
@@ -142,6 +147,7 @@ class SyncClientHandler:
             AsrSettings: cls._read_asr_settings_from_projection(projection),
             GeneralSafetyFilters: cls._read_safety_filters_from_projection(projection),
             ApiIntegration: cls._read_api_integrations_from_projection(projection),
+            TestCase: cls._read_test_cases_from_projection(projection),
             Translation: cls._read_translations_from_projection(projection),
             **cls._read_languages_from_projection(projection),
         }  # ty:ignore[invalid-return-type]
@@ -776,10 +782,6 @@ class SyncClientHandler:
             .get("entities", {})
             .items()
         ):
-            # FIXME: Sourcerer SDK bug
-            # Sometimes, even if the dict has multiple elements
-            # They are all at position 0.
-            position = pronunciation_data.get("position") or index
             pronunciations[pronunciation_id] = Pronunciation(
                 resource_id=pronunciation_id,
                 name=pronunciation_data.get("name", ""),
@@ -788,7 +790,7 @@ class SyncClientHandler:
                 case_sensitive=pronunciation_data.get("caseSensitive", False),
                 language_code=pronunciation_data.get("languageCode", ""),
                 description=pronunciation_data.get("description", ""),
-                position=position if position == index else index + 1,
+                position=index,  # Positions returned by API are not reliable, so we set them based on the order they are returned in
             )
             index += 1
         return pronunciations
@@ -906,6 +908,53 @@ class SyncClientHandler:
             )
 
         return api_integrations
+
+    def _read_test_cases_from_projection(
+        projection: dict,
+    ) -> dict[type[Resource], dict[str, Resource]]:
+        test_cases = {}
+        for test_case_id, test_case_data in (
+            projection.get("testing", {}).get("testCases", {}).get("entities", {}).items()
+        ):
+            prompt_assertions = []
+            function_assertions = []
+            for assertion in test_case_data.get("assertions", []):
+                assertion_payload = assertion.get("payload", {})
+                if assertion_payload.get("$case") == "prompt":
+                    prompt_assertions.append(assertion_payload.get("value").get("value"))
+                elif assertion_payload.get("$case") == "functionCall":
+                    assertion_value = assertion_payload.get("value", {})
+                    arguments = [
+                        FunctionCallArgumentAssertion(
+                            parameter_name=arg,
+                            expected_value=arg_values.get("expectedValue"),
+                            value_type=arg_values.get("valueType"),
+                        )
+                        for arg, arg_values in assertion_value.get("arguments").items()
+                    ]
+                    function_assertions.append(
+                        FunctionCallAssertion(name=assertion_value.get("name"), arguments=arguments)
+                    )
+            assertions = TestCaseAssertion(
+                resource_id=test_case_id,
+                name="assertions",
+                prompts=prompt_assertions,
+                function_calls=function_assertions,
+            )
+            tags = TestCaseTags(
+                resource_id=test_case_id, name="tags", tags=test_case_data.get("tags", [])
+            )
+            test_cases[test_case_id] = TestCase(
+                resource_id=test_case_id,
+                name=test_case_data.get("name", ""),
+                scenario=test_case_data.get("scenario", ""),
+                variant=test_case_data.get("variantId", ""),
+                language=test_case_data.get("language", ""),
+                channel=test_case_data.get("channel", ""),
+                assertions=assertions,
+                tags=tags,
+            )
+        return test_cases
 
     @staticmethod
     def _read_translations_from_projection(
@@ -1100,6 +1149,20 @@ class SyncClientHandler:
         logger.info(f"Queued {len(commands)} commands")
         logger.debug(f"Commands: {commands!r}")
         return commands
+
+    def queue_command(self, command: Command) -> None:
+        """Add a single command to the queue.
+        Sets the command ID and metadata before adding to the queue.
+
+        Args:
+            command (Command): The Command protobuf message to add to the queue.
+        """
+        command.metadata.CopyFrom(self.sdk.create_metadata())
+        command.command_id = str(uuid.uuid4())
+        self.sdk.add_command_to_queue(command)
+        logger.info("Queued command")
+        logger.debug(f"Command: {command!r}")
+        return command
 
     def send_queued_commands(self) -> bool:
         """Send all queued commands as a batch and clear the queue.

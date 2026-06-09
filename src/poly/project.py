@@ -58,6 +58,7 @@ from poly.resources import (
     SMSTemplate,
     StepType,
     SubResource,
+    TestCase,
     Topic,
     TranscriptCorrection,
     Translation,
@@ -109,6 +110,7 @@ RESOURCE_NAME_TO_CLASS: dict[str, type[Resource]] = {
     "asr_settings": AsrSettings,
     "phrase_filtering": PhraseFilter,
     "pronunciations": Pronunciation,
+    "test_cases": TestCase,
     "translations": Translation,
     "default_language": DefaultLanguage,
     "additional_languages": AdditionalLanguage,
@@ -1376,6 +1378,23 @@ class AgentStudioProject:
         post_push_new_resources: ResourceMap = {}
         post_push_updated_resources: ResourceMap = {}
         post_push_deleted_resources: ResourceMap = {}
+
+        # If we are creating any Webchat config, instead enable Webchat and set
+        # the configs as update
+        if (
+            ChatGreeting in new_resources
+            or ChatSafetyFilters in new_resources
+            or ChatStylePrompt in new_resources
+        ):
+            self.api_handler.queue_command(
+                utils.create_command_webchat_channel_update_status(enabled=True)
+            )
+            # Move any Webchat config in new resources to updated resources
+            for resource_type in [ChatGreeting, ChatSafetyFilters, ChatStylePrompt]:
+                for resource_id, resource in new_resources.get(resource_type, {}).items():
+                    pre_push_updated_resources.setdefault(resource_type, {})[resource_id] = resource
+                if resource_type in new_resources:
+                    new_resources.pop(resource_type)
 
         # When a function is deleted the backend prunes that function ID from all
         # variable references. If the deleted function was the variable's only reference,

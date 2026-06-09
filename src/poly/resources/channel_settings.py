@@ -253,6 +253,11 @@ class ChatGreeting(ChannelGreeting):
     channel_type: ClassVar[ChannelType] = ChannelType.WEB_CHAT
     channel_subpath: ClassVar[str] = "chat"
 
+    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+        """Validate the chat greeting resource."""
+        super().validate(resource_mappings=resource_mappings, **kwargs)
+        utils.validate_webchat_siblings(type(self), resource_mappings)
+
 
 @dataclass
 class ChannelStylePrompt(MultiResourceYamlResource):
@@ -343,3 +348,8 @@ class ChatStylePrompt(ChannelStylePrompt):
 
     channel_type: ClassVar[ChannelType] = ChannelType.WEB_CHAT
     channel_subpath: ClassVar[str] = "chat"
+
+    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+        """Validate the chat style prompt resource."""
+        super().validate(resource_mappings=resource_mappings, **kwargs)
+        utils.validate_webchat_siblings(type(self), resource_mappings)

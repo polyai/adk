@@ -15,6 +15,7 @@ from poly.handlers.protobuf.content_filter_settings_pb2 import (
     AzureContentFilterCategory,
     ContentFilterSettings_UpdateContentFilterSettings,
 )
+import poly.resources.resource_utils as utils
 from poly.resources.resource import ResourceMapping, YamlResource
 
 PRECISION_MAPPING = {"LOOSE": "lenient", "MEDIUM": "medium", "STRICT": "strict"}
@@ -327,3 +328,8 @@ class ChatSafetyFilters(ChannelSafetyFilters):
 
     channel_type: ClassVar[ChannelType] = ChannelType.WEB_CHAT
     channel_subpath: ClassVar[str] = "chat"
+
+    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+        """Validate the chat safety filters resource."""
+        super().validate(resource_mappings=resource_mappings, **kwargs)
+        utils.validate_webchat_siblings(type(self), resource_mappings)
