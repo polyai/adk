@@ -782,10 +782,6 @@ class SyncClientHandler:
             .get("entities", {})
             .items()
         ):
-            # FIXME: Sourcerer SDK bug
-            # Sometimes, even if the dict has multiple elements
-            # They are all at position 0.
-            position = pronunciation_data.get("position") or index
             pronunciations[pronunciation_id] = Pronunciation(
                 resource_id=pronunciation_id,
                 name=pronunciation_data.get("name", ""),
@@ -794,7 +790,7 @@ class SyncClientHandler:
                 case_sensitive=pronunciation_data.get("caseSensitive", False),
                 language_code=pronunciation_data.get("languageCode", ""),
                 description=pronunciation_data.get("description", ""),
-                position=position if position == index else index + 1,
+                position=index,  # Positions returned by API are not reliable, so we set them based on the order they are returned in
             )
             index += 1
         return pronunciations
