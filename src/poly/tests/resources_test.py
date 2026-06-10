@@ -7272,6 +7272,40 @@ class TestCaseTests(unittest.TestCase):
             ]
         )
 
+    def _case_with_assertions(self, prompts, function_calls=None) -> TestCase:
+        return TestCase(
+            resource_id="TEST-assertions",
+            name="Assertion presence",
+            scenario="Test scenario",
+            channel="chat.polyai",
+            language="en-GB",
+            assertions=TestCaseAssertion(
+                resource_id="TEST-assertions",
+                name="assertions",
+                prompts=prompts,
+                function_calls=function_calls or [],
+            ),
+            tags=TestCaseTags(resource_id="TEST-assertions", name="tags", tags=[]),
+        )
+
+    def test_validate_requires_at_least_one_assertion(self):
+        with self.assertRaises(ValueError) as cm:
+            self._case_with_assertions(prompts=[]).validate()
+        self.assertIn("at least one assertion", str(cm.exception))
+
+        # Whitespace-only prompt assertions do not count.
+        with self.assertRaises(ValueError) as cm:
+            self._case_with_assertions(prompts=["   ", ""]).validate()
+        self.assertIn("at least one assertion", str(cm.exception))
+
+        self._case_with_assertions(prompts=["The agent offers to help"]).validate()
+
+        # Function-call assertions alone are sufficient.
+        self._case_with_assertions(
+            prompts=[],
+            function_calls=[FunctionCallAssertion(name="test_function", arguments=[])],
+        ).validate()
+
     def test_get_new_updated_deleted_subresources(self):
         test_case = self._sample_test_case()
         new, updated, deleted = test_case.get_new_updated_deleted_subresources()
