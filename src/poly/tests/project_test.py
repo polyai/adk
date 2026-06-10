@@ -33,6 +33,9 @@ from poly.resources import (
     SettingsRules,
     SMSTemplate,
     Topic,
+    TestCase,
+    TestCaseAssertion,
+    TestCaseTags,
     TranscriptCorrection,
     Translation,
     Variable,
@@ -344,6 +347,16 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
         self.assertEqual(
             local_resources[AsrSettings],
             [os.path.join(TEST_DIR, speech_recognition_path, "asr_settings.yaml")],
+        )
+
+        # Find test cases
+        self.assertEqual(len(local_resources[TestCase]), 2)
+        self.assertCountEqual(
+            local_resources[TestCase],
+            [
+                os.path.join(TEST_DIR, "test_suite", "greeting_flow_test.yaml"),
+                os.path.join(TEST_DIR, "test_suite", "webchat_smoke_test.yaml"),
+            ]
         )
 
         # Find Translations
@@ -3195,6 +3208,52 @@ class DocsTest(unittest.TestCase):
     def test_load_docs(self):
         """Test loading a docs file"""
         AgentStudioProject.load_docs("docs")
+
+
+class GetUpdatedSubresourcesTest(unittest.TestCase):
+    """A new resource's update-only sub-resources (e.g. TestCase assertions/tags)
+    must be forwarded on create, not just `new` ones."""
+
+    @staticmethod
+    def _new_test_case() -> TestCase:
+        rid = "TEST-greeting_flow"
+        return TestCase(
+            resource_id=rid,
+            name="Greeting flow test",
+            scenario="Ask for help with booking.",
+            channel="chat.polyai",
+            language="en-GB",
+            assertions=TestCaseAssertion(
+                resource_id=rid,
+                name="assertions",
+                prompts=["The agent offers to help with booking"],
+                function_calls=[],
+            ),
+            tags=TestCaseTags(resource_id=rid, name="tags", tags=["booking"]),
+        )
+
+    def test_new_test_case_emits_assertions_and_tags(self):
+        test_case = self._new_test_case()
+
+        change_set = AgentStudioProject._get_updated_subresources(
+            new_resources={TestCase: {test_case.resource_id: test_case}},
+            updated_resources={},
+            original_resources={},
+        )
+
+        # The assertions/tags of a brand-new case must be emitted as updates
+        # (set_test_case_assertions / set_test_case_tags), not silently dropped.
+        self.assertIn(TestCaseAssertion, change_set.updated)
+        self.assertIn(test_case.resource_id, change_set.updated[TestCaseAssertion])
+        self.assertEqual(
+            change_set.updated[TestCaseAssertion][test_case.resource_id].prompts,
+            ["The agent offers to help with booking"],
+        )
+        self.assertIn(TestCaseTags, change_set.updated)
+        self.assertEqual(
+            change_set.updated[TestCaseTags][test_case.resource_id].tags,
+            ["booking"],
+        )
 
 
 if __name__ == "__main__":

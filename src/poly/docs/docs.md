@@ -23,7 +23,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │   ├── entities.yaml                   # Optional
 │   ├── handoffs.yaml                   # Optional
 │   ├── sms_templates.yaml              # Optional
-│   ├── translations.yaml              # Optional
+│   ├── translations.yaml               # Optional
 │   └── variant_attributes.yaml         # Optional
 ├── voice/                              # Voice channel settings
 │   ├── configuration.yaml              # Greeting, disclaimer, style prompt
@@ -48,11 +48,13 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 │       └── functions/
 │           └── {function_name}.py
 ├── functions/                          # Global functions (shared across flows)
-│   ├── start_function.py              # Optional - runs at call start
-│   ├── end_function.py                # Optional - runs at call end
+│   ├── start_function.py               # Optional - runs at call start
+│   ├── end_function.py                 # Optional - runs at call end
 │   └── {function_name}.py
 ├── topics/                             # Knowledge base topics
 │   └── {topic_name}.yaml
+├── test_suite/                         # Optional - simulated conversation tests
+│   └── {test_name}.yaml
 └── project.yaml                        # Project metadata (region, account_id, project_id)
 ```
 
@@ -117,6 +119,7 @@ Resource-specific documentation is available via `poly docs {resource} [resource
 - [Flows](flows.md) - multistep processes with steps, functions, conditions
 - [Functions](functions.md) - global and flow functions, decorators, state, metrics
 - [Topics](topics.md) - knowledge base for RAG
+- [Tests](tests.md) - simulated conversation test cases
 - [API Integrations](api_integrations.md) — external HTTP API definitions
 - [Entities](entities.md) - structured data collection
 - [Handoffs](handoffs.md) - SIP call transfers

@@ -1,0 +1,15 @@
+name: Greeting flow test
+scenario: Ask for help with booking.
+channel: voice
+language: en-GB
+tags:
+- booking
+- smoke
+prompt_assertions:
+- The agent offers to help with booking
+function_call_assertions:
+- name: test_function
+  arguments:
+  - parameter_name: param1
+    expected_value: hello
+    value_type: string

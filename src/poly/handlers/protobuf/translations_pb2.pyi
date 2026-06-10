@@ -17,7 +17,7 @@ class LocalizedText(_message.Message):
     def __init__(self, language_code: _Optional[str] = ..., text: _Optional[str] = ..., is_auto_translated: bool = ...) -> None: ...
 
 class TranslationReferences(_message.Message):
-    __slots__ = ("topics", "sms", "greetings", "disclaimer_messages", "behaviour")
+    __slots__ = ("topics", "sms", "greetings", "disclaimer_messages", "behaviour", "delay_responses")
     class TopicsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -53,17 +53,26 @@ class TranslationReferences(_message.Message):
         key: str
         value: bool
         def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    class DelayResponsesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
     TOPICS_FIELD_NUMBER: _ClassVar[int]
     SMS_FIELD_NUMBER: _ClassVar[int]
     GREETINGS_FIELD_NUMBER: _ClassVar[int]
     DISCLAIMER_MESSAGES_FIELD_NUMBER: _ClassVar[int]
     BEHAVIOUR_FIELD_NUMBER: _ClassVar[int]
+    DELAY_RESPONSES_FIELD_NUMBER: _ClassVar[int]
     topics: _containers.ScalarMap[str, bool]
     sms: _containers.ScalarMap[str, bool]
     greetings: _containers.ScalarMap[str, bool]
     disclaimer_messages: _containers.ScalarMap[str, bool]
     behaviour: _containers.ScalarMap[str, bool]
-    def __init__(self, topics: _Optional[_Mapping[str, bool]] = ..., sms: _Optional[_Mapping[str, bool]] = ..., greetings: _Optional[_Mapping[str, bool]] = ..., disclaimer_messages: _Optional[_Mapping[str, bool]] = ..., behaviour: _Optional[_Mapping[str, bool]] = ...) -> None: ...
+    delay_responses: _containers.ScalarMap[str, bool]
+    def __init__(self, topics: _Optional[_Mapping[str, bool]] = ..., sms: _Optional[_Mapping[str, bool]] = ..., greetings: _Optional[_Mapping[str, bool]] = ..., disclaimer_messages: _Optional[_Mapping[str, bool]] = ..., behaviour: _Optional[_Mapping[str, bool]] = ..., delay_responses: _Optional[_Mapping[str, bool]] = ...) -> None: ...
 
 class TranslationEntry(_message.Message):
     __slots__ = ("id", "translation_key", "translations", "created_at", "updated_at", "created_by", "updated_by", "references")

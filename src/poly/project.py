@@ -58,6 +58,7 @@ from poly.resources import (
     SMSTemplate,
     StepType,
     SubResource,
+    TestCase,
     Topic,
     TranscriptCorrection,
     Translation,
@@ -109,6 +110,7 @@ RESOURCE_NAME_TO_CLASS: dict[str, type[Resource]] = {
     "asr_settings": AsrSettings,
     "phrase_filtering": PhraseFilter,
     "pronunciations": Pronunciation,
+    "test_cases": TestCase,
     "translations": Translation,
     "default_language": DefaultLanguage,
     "additional_languages": AdditionalLanguage,
@@ -1320,6 +1322,17 @@ class AgentStudioProject:
                 )
                 for sub_resource in new:
                     new_subresources.setdefault(type(sub_resource), {})[
+                        sub_resource.resource_id
+                    ] = sub_resource
+                # A new parent can carry update-only sub-resources — e.g. a TestCase's
+                # prompt_assertions/tags, applied via set_test_case_assertions (no create
+                # proto). Forward updated + deleted too, or they're dropped on create.
+                for sub_resource in updated:
+                    updated_subresources.setdefault(type(sub_resource), {})[
+                        sub_resource.resource_id
+                    ] = sub_resource
+                for sub_resource in deleted:
+                    deleted_subresources.setdefault(type(sub_resource), {})[
                         sub_resource.resource_id
                     ] = sub_resource
 

@@ -37,7 +37,7 @@ class FunctionError(_message.Message):
     def __init__(self, lineno: _Optional[int] = ..., message: _Optional[str] = ..., text: _Optional[str] = ...) -> None: ...
 
 class FunctionDelayResponseReferences(_message.Message):
-    __slots__ = ("variables",)
+    __slots__ = ("variables", "translations")
     class VariablesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -45,9 +45,18 @@ class FunctionDelayResponseReferences(_message.Message):
         key: str
         value: bool
         def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    class TranslationsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
     VARIABLES_FIELD_NUMBER: _ClassVar[int]
+    TRANSLATIONS_FIELD_NUMBER: _ClassVar[int]
     variables: _containers.ScalarMap[str, bool]
-    def __init__(self, variables: _Optional[_Mapping[str, bool]] = ...) -> None: ...
+    translations: _containers.ScalarMap[str, bool]
+    def __init__(self, variables: _Optional[_Mapping[str, bool]] = ..., translations: _Optional[_Mapping[str, bool]] = ...) -> None: ...
 
 class FunctionDelayResponse(_message.Message):
     __slots__ = ("id", "message", "duration", "created_at", "created_by", "updated_at", "updated_by", "references")
