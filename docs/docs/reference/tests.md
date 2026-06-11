@@ -9,11 +9,7 @@ description: Write and manage simulated conversation test cases in the PolyAI AD
 Agent Studio test cases are simulated conversations that run your agent end-to-end in the sandbox environment. They are managed locally as YAML files under <code>test_suite/</code> and pushed to Agent Studio with <code>poly push</code>.
 </p>
 
-Each test case describes a scenario for a simulated user and a set of assertions to evaluate against the resulting conversation. Tests run inside Agent Studio against the pushed branch — the ADK does not execute them locally.
-
-!!! warning "There is no local runtime"
-
-    The ADK does not execute your agent on your local machine. There is no `poly serve` command or local simulator. All agent execution happens inside Agent Studio's sandbox environment. To test runtime behavior, push your changes and use `poly chat`, or test interactively through Agent Studio.
+Each test case describes a scenario for a simulated user and a set of assertions to evaluate against the resulting conversation. Then, the tests run inside Agent Studio against the pushed branch.
 
 ## Where tests fit in the workflow
 
