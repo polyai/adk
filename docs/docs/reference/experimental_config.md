@@ -216,6 +216,62 @@ Example:
 }
 ~~~
 
+### Webhooks
+
+Configure webhook behavior for deployment events, including custom payload templates.
+
+#### `payload_template`
+
+The `payload_template` field controls the JSON body sent to a webhook URL. If omitted, the default deployment payload is sent as-is.
+
+| Field | Type | Description |
+|---|---|---|
+| `payload_template` | object | Custom payload template. String values may contain `{{field}}` placeholders that are substituted with deployment event fields. |
+
+**Available placeholder fields:**
+
+- `deployment_id`
+- `account_id`
+- `project_id`
+- `client_env`
+- `artifact_version`
+- `deployment_type`
+- `timestamp`
+- `user`
+
+**Special placeholder:**
+
+Use `{{payload}}` to inject the entire deployment payload object at a specific position in the template — for example, when a webhook receiver (such as GitHub's `repository_dispatch`) requires nesting under a specific key like `client_payload`.
+
+When `{{payload}}` is not present in the template, the deployment payload fields are merged at the top level of the rendered result.
+
+Example — GitHub `repository_dispatch`:
+
+~~~json
+{
+  "webhooks": {
+    "payload_template": {
+      "event_type": "deployment-{{client_env}}",
+      "client_payload": "{{payload}}"
+    }
+  }
+}
+~~~
+
+Example — flat template with individual fields:
+
+~~~json
+{
+  "webhooks": {
+    "payload_template": {
+      "env": "{{client_env}}",
+      "version": "{{artifact_version}}",
+      "deployed_by": "{{user}}"
+    }
+  }
+}
+~~~
+
 ### `include_kb_functions_in_flows`
 
 Controls whether knowledge base (KB) functions from retrieved RAG topics are shown to the model inside flows.
