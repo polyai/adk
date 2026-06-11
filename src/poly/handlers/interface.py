@@ -234,7 +234,6 @@ class AgentStudioInterface:
         updated_resources: dict[type[BaseResource], dict[str, BaseResource]],
         dry_run: bool = False,
         queue_pushes: bool = False,
-        email: Optional[str] = None,
     ) -> bool:
         """Upload multiple resources for the specific project.
 
@@ -245,8 +244,6 @@ class AgentStudioInterface:
             dry_run (bool): If True, only log the upload actions without actually
                 uploading
             queue_pushes (bool): If True, queue the resources for pushing.
-            email (str): Email to use for metadata creation.
-                If None, use the email of the current user.
 
         Returns:
             bool: True if the resources were pushed successfully, False otherwise
@@ -255,7 +252,6 @@ class AgentStudioInterface:
             deleted_resources=deleted_resources,
             new_resources=new_resources,
             updated_resources=updated_resources,
-            email=email,
         )
 
         if queue_pushes:
@@ -272,7 +268,6 @@ class AgentStudioInterface:
         deleted_resources: dict[type[BaseResource], dict[str, BaseResource]],
         new_resources: dict[type[BaseResource], dict[str, BaseResource]],
         updated_resources: dict[type[BaseResource], dict[str, BaseResource]],
-        email: Optional[str] = None,
     ) -> list[Message]:
         """Queue multiple resources for the specific project.
 
@@ -280,8 +275,6 @@ class AgentStudioInterface:
             deleted_resources (dict[type[BaseResource], dict[str, BaseResource]]): Resources to delete
             new_resources (dict[type[BaseResource], dict[str, BaseResource]]): New resources to upload
             updated_resources (dict[type[BaseResource], dict[str, BaseResource]]): Updated resources to upload
-            email (str): Email to use for metadata creation.
-                If None, use the email of the current user.
 
         Returns:
             list[Message]: A list of queued Command protobuf messages.
@@ -291,8 +284,18 @@ class AgentStudioInterface:
                 deleted_resources=deleted_resources,
                 new_resources=new_resources,
                 updated_resources=updated_resources,
-                email=email,
             )
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def queue_command(self, command: Message) -> None:
+        """Queue a single command for the specific project.
+
+        Args:
+            command (Message): The Command protobuf message to queue
+        """
+        try:
+            self.sync_client.queue_command(command)
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
@@ -659,3 +662,65 @@ class AgentStudioInterface:
             str: The newly created PAT token
         """
         return PlatformAPIHandler.create_pat_internal(region, jwt_token, name)
+
+    @staticmethod
+    def list_conversations(
+        region: str,
+        project_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        """List conversations for a project.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            limit: Max number of conversations to return.
+            offset: Number of conversations to skip.
+
+        Returns:
+            dict: The API response with conversations, count, limit, offset.
+        """
+        return PlatformAPIHandler.list_conversations(region, project_id, limit, offset)
+
+    @staticmethod
+    def get_conversation(
+        region: str,
+        project_id: str,
+        conversation_id: str,
+    ) -> dict:
+        """Get a conversation by ID.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            conversation_id: The conversation ID.
+
+        Returns:
+            dict: The conversation detail response.
+        """
+        return PlatformAPIHandler.get_conversation(region, project_id, conversation_id)
+
+    @staticmethod
+    def get_conversation_audio(
+        region: str,
+        project_id: str,
+        conversation_id: str,
+        direction: str = "combined",
+        redacted: bool = False,
+    ) -> bytes:
+        """Get audio recording for a conversation.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            conversation_id: The conversation ID.
+            direction: Audio direction — combined, user, or agent.
+            redacted: Whether to return redacted audio.
+
+        Returns:
+            bytes: The raw WAV audio data.
+        """
+        return PlatformAPIHandler.get_conversation_audio(
+            region, project_id, conversation_id, direction, redacted
+        )

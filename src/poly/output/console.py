@@ -8,6 +8,7 @@ Copyright PolyAI Limited
 import json
 import os
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -608,6 +609,172 @@ def print_deployment_show(
         label = "Reverted deployments" if is_rollback else "Included deployments"
         console.print(f"[label]{label} ({count}):[/label]")
         print_deployments(included_deployments, {})
+
+
+# ── Conversations ────────────────────────────────────────────────────
+
+
+def _format_iso_timestamp(ts: str) -> str:
+    """Format an ISO 8601 timestamp into a compact local-time string."""
+    try:
+        dt = datetime.fromisoformat(ts).astimezone()
+        return dt.strftime("%d %b %y %H:%M %Z")
+    except (TypeError, ValueError):
+        return ts
+
+
+def _extract_summary_heading(short_summary: Any) -> str:
+    """Extract the heading from a shortSummary field (may be a JSON string, dict, or plain string)."""
+    if not short_summary:
+        return "—"
+    if isinstance(short_summary, dict):
+        return short_summary.get("heading") or "—"
+    text = str(short_summary)
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            return parsed.get("heading") or "—"
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return text
+
+
+def _format_duration(seconds: int | None) -> str:
+    """Format duration in seconds to a human-readable string."""
+    if seconds is None:
+        return "—"
+    m, s = divmod(seconds, 60)
+    return f"{m}m{s:02d}s" if m else f"{s}s"
+
+
+def print_conversations(
+    conversations: list[dict[str, Any]],
+    url_builder: Callable[[str], str] | None = None,
+) -> None:
+    """Print a table of conversation summaries.
+
+    Args:
+        conversations: List of conversation summary dicts.
+        url_builder: Optional callable(conversation_id) -> str that returns a Studio URL.
+    """
+    show_variant = any(c.get("variantId") for c in conversations)
+
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Conversation ID", style="bold yellow", no_wrap=True)
+    table.add_column("Started", no_wrap=True)
+    table.add_column("Duration", no_wrap=True, justify="right")
+    table.add_column("From", no_wrap=True)
+    table.add_column("Channel", no_wrap=True)
+    if show_variant:
+        table.add_column("Variant", no_wrap=True)
+    table.add_column("Handoff", no_wrap=True)
+    table.add_column("Summary", overflow="fold")
+
+    for c in conversations:
+        started = c.get("startedAt") or "—"
+        if started != "—":
+            started = _format_iso_timestamp(started)
+        duration = _format_duration(c.get("duration"))
+        from_number = c.get("fromNumber") or "—"
+        channel = c.get("channel") or "—"
+        handoff = ""
+        if c.get("handoff"):
+            dest = c.get("handoffDestination") or ""
+            handoff = f"[yellow]{dest}[/yellow]" if dest else "[yellow]yes[/yellow]"
+        summary = _extract_summary_heading(c.get("shortSummary"))
+
+        cid = c.get("conversationId", "—")
+        if url_builder and cid != "—":
+            url = url_builder(cid)
+            cid_display = f"[link={url}]{cid}[/link]"
+        else:
+            cid_display = cid
+
+        row = [cid_display, started, duration, from_number, channel]
+        if show_variant:
+            row.append(c.get("variantId") or "—")
+        row.extend([handoff, summary])
+        table.add_row(*row)
+
+    console.print(table)
+
+
+def print_conversation_detail(conversation: dict[str, Any], studio_url: str | None = None) -> None:
+    """Print detailed conversation information including turns.
+
+    Args:
+        conversation: The conversation detail dict from the API.
+        studio_url: Optional Agent Studio URL for the conversation.
+    """
+    cid = conversation.get("conversationId", "—")
+    if studio_url:
+        cid_display = f"[link={studio_url}]{cid}[/link]"
+    else:
+        cid_display = cid
+    console.print(f"[bold]Conversation[/bold] [yellow]{cid_display}[/yellow]")
+    console.print()
+
+    fields = [
+        ("Channel", "channel"),
+        ("Direction", "direction"),
+        ("Language", "language"),
+        ("From", "fromNumber"),
+        ("To", "toNumber"),
+        ("Started", "startedAt"),
+        ("Finished", "finishedAt"),
+        ("Duration", None),
+        ("In Progress", "inProgress"),
+        ("Variant", "variantId"),
+        ("Deployment", "deploymentId"),
+    ]
+    for label, key in fields:
+        if key is None:
+            val = _format_duration(conversation.get("duration"))
+        else:
+            val = conversation.get(key)
+            if val is None:
+                continue
+            if isinstance(val, bool):
+                val = "yes" if val else "no"
+            elif key in ("startedAt", "finishedAt"):
+                val = _format_iso_timestamp(str(val))
+            else:
+                val = str(val)
+        console.print(f"  [bold]{label}:[/bold] {val}")
+
+    if conversation.get("handoff"):
+        dest = conversation.get("handoffDestination") or "—"
+        reason = conversation.get("handoffReason") or "—"
+        console.print(f"  [bold]Handoff:[/bold] {dest} ({reason})")
+
+    tags = conversation.get("tags")
+    if tags:
+        console.print(f"  [bold]Tags:[/bold] {', '.join(tags)}")
+
+    score = conversation.get("polyScore")
+    if score is not None:
+        console.print(f"  [bold]PolyScore:[/bold] {score}")
+
+    summary_heading = _extract_summary_heading(conversation.get("shortSummary"))
+    if summary_heading != "—":
+        console.print(f"\n  [bold]Summary:[/bold] {summary_heading}")
+
+    note = conversation.get("note")
+    if note:
+        console.print(f"  [bold]Note:[/bold] {note}")
+
+    turns = conversation.get("turns")
+    if turns:
+        console.print(f"\n[bold]Turns ({len(turns)}):[/bold]")
+        for turn in turns:
+            user_input = turn.get("user_input", "")
+            agent_response = turn.get("agent_response", "")
+            if user_input:
+                console.print(f"  [green]user:[/green] {user_input}")
+            if agent_response:
+                console.print(f"  [cyan]agent:[/cyan] {agent_response}")
+
+    console.print()
 
 
 # ── Error handling ───────────────────────────────────────────────────

@@ -16,6 +16,7 @@ from poly.project import AgentStudioProject
 from poly.resources import (
     AsrSettings,
     ChatGreeting,
+    ChatSafetyFilters,
     ChatStylePrompt,
     Entity,
     ExperimentalConfig,
@@ -32,7 +33,11 @@ from poly.resources import (
     SettingsRules,
     SMSTemplate,
     Topic,
+    TestCase,
+    TestCaseAssertion,
+    TestCaseTags,
     TranscriptCorrection,
+    Translation,
     Variable,
     VariantAttribute,
     VoiceDisclaimerMessage,
@@ -342,6 +347,30 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
         self.assertEqual(
             local_resources[AsrSettings],
             [os.path.join(TEST_DIR, speech_recognition_path, "asr_settings.yaml")],
+        )
+
+        # Find test cases
+        self.assertEqual(len(local_resources[TestCase]), 2)
+        self.assertCountEqual(
+            local_resources[TestCase],
+            [
+                os.path.join(TEST_DIR, "test_suite", "greeting_flow_test.yaml"),
+                os.path.join(TEST_DIR, "test_suite", "webchat_smoke_test.yaml"),
+            ]
+        )
+
+        # Find Translations
+        self.assertEqual(len(local_resources[Translation]), 2)
+        self.assertCountEqual(
+            local_resources[Translation],
+            [
+                os.path.join(
+                    TEST_DIR, "config", "translations.yaml", "translations", "greeting"
+                ),
+                os.path.join(
+                    TEST_DIR, "config", "translations.yaml", "translations", "farewell"
+                ),
+            ],
         )
 
     def test_discover_local_resources_empty_project(self):
@@ -1649,6 +1678,49 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         self.assertIn("CONDITION-cond-1", cleaned_new.get(Condition, {}))
         # And removed from updated
         self.assertNotIn("CONDITION-cond-1", cleaned_updated.get(Condition, {}))
+
+    def test_clean_resources_before_push_webchat_enables_channel_and_moves_to_updates(self):
+        """New webchat configs should enable the channel and be moved to pre-push updates."""
+        greeting = ChatGreeting(
+            resource_id="chat-greeting-1",
+            name="greeting",
+            welcome_message="Hello",
+            language_code="en-GB",
+        )
+        safety = ChatSafetyFilters(
+            resource_id="chat-safety-1",
+            name="safety_filters",
+            enabled=True,
+            categories={
+                "violence": {"enabled": True, "precision": "MEDIUM"},
+                "hate": {"enabled": True, "precision": "MEDIUM"},
+                "sexual": {"enabled": True, "precision": "MEDIUM"},
+                "self_harm": {"enabled": True, "precision": "MEDIUM"},
+            },
+        )
+        style = ChatStylePrompt(
+            resource_id="chat-style-1",
+            name="style_prompt",
+            prompt="Be helpful",
+        )
+        new_resources = {
+            ChatGreeting: {"chat-greeting-1": greeting},
+            ChatSafetyFilters: {"chat-safety-1": safety},
+            ChatStylePrompt: {"chat-style-1": style},
+        }
+
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            push_changes = self.project._clean_resources_before_push(
+                {}, new_resources, {}, {}
+            )
+            mock_api.queue_command.assert_called_once()
+
+        self.assertNotIn(ChatGreeting, push_changes.main.new)
+        self.assertNotIn(ChatSafetyFilters, push_changes.main.new)
+        self.assertNotIn(ChatStylePrompt, push_changes.main.new)
+        self.assertIn(ChatGreeting, push_changes.pre.updated)
+        self.assertIn(ChatSafetyFilters, push_changes.pre.updated)
+        self.assertIn(ChatStylePrompt, push_changes.pre.updated)
 
 
 class PushProjectTest(unittest.TestCase):
@@ -3136,6 +3208,52 @@ class DocsTest(unittest.TestCase):
     def test_load_docs(self):
         """Test loading a docs file"""
         AgentStudioProject.load_docs("docs")
+
+
+class GetUpdatedSubresourcesTest(unittest.TestCase):
+    """A new resource's update-only sub-resources (e.g. TestCase assertions/tags)
+    must be forwarded on create, not just `new` ones."""
+
+    @staticmethod
+    def _new_test_case() -> TestCase:
+        rid = "TEST-greeting_flow"
+        return TestCase(
+            resource_id=rid,
+            name="Greeting flow test",
+            scenario="Ask for help with booking.",
+            channel="chat.polyai",
+            language="en-GB",
+            assertions=TestCaseAssertion(
+                resource_id=rid,
+                name="assertions",
+                prompts=["The agent offers to help with booking"],
+                function_calls=[],
+            ),
+            tags=TestCaseTags(resource_id=rid, name="tags", tags=["booking"]),
+        )
+
+    def test_new_test_case_emits_assertions_and_tags(self):
+        test_case = self._new_test_case()
+
+        change_set = AgentStudioProject._get_updated_subresources(
+            new_resources={TestCase: {test_case.resource_id: test_case}},
+            updated_resources={},
+            original_resources={},
+        )
+
+        # The assertions/tags of a brand-new case must be emitted as updates
+        # (set_test_case_assertions / set_test_case_tags), not silently dropped.
+        self.assertIn(TestCaseAssertion, change_set.updated)
+        self.assertIn(test_case.resource_id, change_set.updated[TestCaseAssertion])
+        self.assertEqual(
+            change_set.updated[TestCaseAssertion][test_case.resource_id].prompts,
+            ["The agent offers to help with booking"],
+        )
+        self.assertIn(TestCaseTags, change_set.updated)
+        self.assertEqual(
+            change_set.updated[TestCaseTags][test_case.resource_id].tags,
+            ["booking"],
+        )
 
 
 if __name__ == "__main__":

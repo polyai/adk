@@ -45,6 +45,7 @@ from poly.resources.handoff import (
     HandoffSipConfig,
 )
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
+from poly.resources.languages import AdditionalLanguage, DefaultLanguage
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation
 from poly.resources.resource import (
@@ -61,7 +62,15 @@ from poly.resources.safety_filters import (
     VoiceSafetyFilters,
 )
 from poly.resources.sms import SMSTemplate
+from poly.resources.test_suite import (
+    FunctionCallArgumentAssertion,
+    FunctionCallAssertion,
+    TestCase,
+    TestCaseAssertion,
+    TestCaseTags,
+)
 from poly.resources.topic import Topic
 from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
+from poly.resources.translations import Translation
 from poly.resources.variable import Variable
 from poly.resources.variant_attributes import Variant, VariantAttribute

@@ -4,11 +4,27 @@ from google.protobuf import duration_pb2 as _duration_pb2
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from google.protobuf import struct_pb2 as _struct_pb2
 from google.protobuf.internal import containers as _containers
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Mapping, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
+
+class GuardrailName(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    GUARDRAIL_NAME_UNSPECIFIED: _ClassVar[GuardrailName]
+    GUARDRAIL_NAME_JAILBREAK_DEFENCE: _ClassVar[GuardrailName]
+    GUARDRAIL_NAME_HALLUCINATION_CONTROL: _ClassVar[GuardrailName]
+    GUARDRAIL_NAME_AI_IDENTITY: _ClassVar[GuardrailName]
+    GUARDRAIL_NAME_EMERGENCY_ESCALATION: _ClassVar[GuardrailName]
+    GUARDRAIL_NAME_TOOL_CALL_INTEGRITY: _ClassVar[GuardrailName]
+GUARDRAIL_NAME_UNSPECIFIED: GuardrailName
+GUARDRAIL_NAME_JAILBREAK_DEFENCE: GuardrailName
+GUARDRAIL_NAME_HALLUCINATION_CONTROL: GuardrailName
+GUARDRAIL_NAME_AI_IDENTITY: GuardrailName
+GUARDRAIL_NAME_EMERGENCY_ESCALATION: GuardrailName
+GUARDRAIL_NAME_TOOL_CALL_INTEGRITY: GuardrailName
 
 class CoreArtifact(_message.Message):
     __slots__ = ("name", "last_updated", "functions_deployment", "conversation_limits", "voice", "asr", "model", "assistant_config", "knowledge_base", "functions", "start_function", "handoffs", "voice_tuning_settings", "sms_templates", "flows", "intro_message", "stop_keywords", "variants", "variant_attributes", "end_function", "deployed_voices", "entities", "api_integrations", "variables", "disclaimers", "agent_voices", "multilingual_agent_settings", "multilingual_translations", "channels", "integrations")
@@ -259,7 +275,7 @@ class Model(_message.Message):
     def __init__(self, provider_model_id: _Optional[str] = ..., config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class AssistantConfig(_message.Message):
-    __slots__ = ("updated_at", "updated_by", "default_handoff_id", "model_id", "voice_id", "config", "asr_id", "tts_rules", "content_filter", "barge_in_config", "latency_config", "asr_keyphrases", "asr_corrections", "languages")
+    __slots__ = ("updated_at", "updated_by", "default_handoff_id", "model_id", "voice_id", "config", "asr_id", "tts_rules", "content_filter", "barge_in_config", "latency_config", "asr_keyphrases", "asr_corrections", "languages", "guardrails")
     UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
     UPDATED_BY_FIELD_NUMBER: _ClassVar[int]
     DEFAULT_HANDOFF_ID_FIELD_NUMBER: _ClassVar[int]
@@ -274,6 +290,7 @@ class AssistantConfig(_message.Message):
     ASR_KEYPHRASES_FIELD_NUMBER: _ClassVar[int]
     ASR_CORRECTIONS_FIELD_NUMBER: _ClassVar[int]
     LANGUAGES_FIELD_NUMBER: _ClassVar[int]
+    GUARDRAILS_FIELD_NUMBER: _ClassVar[int]
     updated_at: _timestamp_pb2.Timestamp
     updated_by: str
     default_handoff_id: str
@@ -288,7 +305,16 @@ class AssistantConfig(_message.Message):
     asr_keyphrases: _containers.RepeatedCompositeFieldContainer[AsrKeyphrase]
     asr_corrections: _containers.RepeatedCompositeFieldContainer[AsrCorrection]
     languages: Languages
-    def __init__(self, updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., default_handoff_id: _Optional[str] = ..., model_id: _Optional[str] = ..., voice_id: _Optional[str] = ..., config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., asr_id: _Optional[str] = ..., tts_rules: _Optional[_Iterable[_Union[TTSRule, _Mapping]]] = ..., content_filter: _Optional[_Union[ContentFilter, _Mapping]] = ..., barge_in_config: _Optional[_Union[BargeInConfig, _Mapping]] = ..., latency_config: _Optional[_Union[LatencyConfig, _Mapping]] = ..., asr_keyphrases: _Optional[_Iterable[_Union[AsrKeyphrase, _Mapping]]] = ..., asr_corrections: _Optional[_Iterable[_Union[AsrCorrection, _Mapping]]] = ..., languages: _Optional[_Union[Languages, _Mapping]] = ...) -> None: ...
+    guardrails: _containers.RepeatedCompositeFieldContainer[Guardrail]
+    def __init__(self, updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., default_handoff_id: _Optional[str] = ..., model_id: _Optional[str] = ..., voice_id: _Optional[str] = ..., config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., asr_id: _Optional[str] = ..., tts_rules: _Optional[_Iterable[_Union[TTSRule, _Mapping]]] = ..., content_filter: _Optional[_Union[ContentFilter, _Mapping]] = ..., barge_in_config: _Optional[_Union[BargeInConfig, _Mapping]] = ..., latency_config: _Optional[_Union[LatencyConfig, _Mapping]] = ..., asr_keyphrases: _Optional[_Iterable[_Union[AsrKeyphrase, _Mapping]]] = ..., asr_corrections: _Optional[_Iterable[_Union[AsrCorrection, _Mapping]]] = ..., languages: _Optional[_Union[Languages, _Mapping]] = ..., guardrails: _Optional[_Iterable[_Union[Guardrail, _Mapping]]] = ...) -> None: ...
+
+class Guardrail(_message.Message):
+    __slots__ = ("name", "enabled")
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    name: GuardrailName
+    enabled: bool
+    def __init__(self, name: _Optional[_Union[GuardrailName, str]] = ..., enabled: bool = ...) -> None: ...
 
 class Rules(_message.Message):
     __slots__ = ("behaviour", "system_prompt", "functions", "handoffs", "sms_templates", "variant_attributes")
@@ -765,10 +791,16 @@ class LatencyConfig(_message.Message):
     def __init__(self, interaction_type: _Optional[str] = ...) -> None: ...
 
 class BargeInConfig(_message.Message):
-    __slots__ = ("enabled",)
+    __slots__ = ("enabled", "allowed_first_turn", "max_per_call", "min_speech_duration")
     ENABLED_FIELD_NUMBER: _ClassVar[int]
+    ALLOWED_FIRST_TURN_FIELD_NUMBER: _ClassVar[int]
+    MAX_PER_CALL_FIELD_NUMBER: _ClassVar[int]
+    MIN_SPEECH_DURATION_FIELD_NUMBER: _ClassVar[int]
     enabled: bool
-    def __init__(self, enabled: bool = ...) -> None: ...
+    allowed_first_turn: bool
+    max_per_call: int
+    min_speech_duration: _duration_pb2.Duration
+    def __init__(self, enabled: bool = ..., allowed_first_turn: bool = ..., max_per_call: _Optional[int] = ..., min_speech_duration: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ...) -> None: ...
 
 class StopKeywords(_message.Message):
     __slots__ = ("id", "created_by", "created_at", "updated_by", "updated_at", "title", "description", "regular_expressions", "say_phrase", "function_id", "language_code")
@@ -1002,30 +1034,40 @@ class StylePrompt(_message.Message):
     def __init__(self, prompt: _Optional[str] = ...) -> None: ...
 
 class ChannelConfig(_message.Message):
-    __slots__ = ("model_id", "style_prompt", "greeting", "safety_filters")
+    __slots__ = ("model_id", "style_prompt", "greeting", "safety_filters", "temperature")
     MODEL_ID_FIELD_NUMBER: _ClassVar[int]
     STYLE_PROMPT_FIELD_NUMBER: _ClassVar[int]
     GREETING_FIELD_NUMBER: _ClassVar[int]
     SAFETY_FILTERS_FIELD_NUMBER: _ClassVar[int]
+    TEMPERATURE_FIELD_NUMBER: _ClassVar[int]
     model_id: str
     style_prompt: StylePrompt
     greeting: Greeting
     safety_filters: ContentFilter
-    def __init__(self, model_id: _Optional[str] = ..., style_prompt: _Optional[_Union[StylePrompt, _Mapping]] = ..., greeting: _Optional[_Union[Greeting, _Mapping]] = ..., safety_filters: _Optional[_Union[ContentFilter, _Mapping]] = ...) -> None: ...
+    temperature: float
+    def __init__(self, model_id: _Optional[str] = ..., style_prompt: _Optional[_Union[StylePrompt, _Mapping]] = ..., greeting: _Optional[_Union[Greeting, _Mapping]] = ..., safety_filters: _Optional[_Union[ContentFilter, _Mapping]] = ..., temperature: _Optional[float] = ...) -> None: ...
 
 class VoiceChannel(_message.Message):
-    __slots__ = ("enabled", "config", "barge_in_config", "latency_config", "disclaimer")
+    __slots__ = ("enabled", "config", "barge_in_config", "latency_config", "disclaimer", "vad_config", "audioEnhancement", "silenceFillerUtterances", "asrConfig")
     ENABLED_FIELD_NUMBER: _ClassVar[int]
     CONFIG_FIELD_NUMBER: _ClassVar[int]
     BARGE_IN_CONFIG_FIELD_NUMBER: _ClassVar[int]
     LATENCY_CONFIG_FIELD_NUMBER: _ClassVar[int]
     DISCLAIMER_FIELD_NUMBER: _ClassVar[int]
+    VAD_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    AUDIOENHANCEMENT_FIELD_NUMBER: _ClassVar[int]
+    SILENCEFILLERUTTERANCES_FIELD_NUMBER: _ClassVar[int]
+    ASRCONFIG_FIELD_NUMBER: _ClassVar[int]
     enabled: bool
     config: ChannelConfig
     barge_in_config: BargeInConfig
     latency_config: LatencyConfig
     disclaimer: IntroMessage
-    def __init__(self, enabled: bool = ..., config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., barge_in_config: _Optional[_Union[BargeInConfig, _Mapping]] = ..., latency_config: _Optional[_Union[LatencyConfig, _Mapping]] = ..., disclaimer: _Optional[_Union[IntroMessage, _Mapping]] = ...) -> None: ...
+    vad_config: VADConfig
+    audioEnhancement: AudioEnhancement
+    silenceFillerUtterances: FillerUtterances
+    asrConfig: Asr
+    def __init__(self, enabled: bool = ..., config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., barge_in_config: _Optional[_Union[BargeInConfig, _Mapping]] = ..., latency_config: _Optional[_Union[LatencyConfig, _Mapping]] = ..., disclaimer: _Optional[_Union[IntroMessage, _Mapping]] = ..., vad_config: _Optional[_Union[VADConfig, _Mapping]] = ..., audioEnhancement: _Optional[_Union[AudioEnhancement, _Mapping]] = ..., silenceFillerUtterances: _Optional[_Union[FillerUtterances, _Mapping]] = ..., asrConfig: _Optional[_Union[Asr, _Mapping]] = ...) -> None: ...
 
 class WebChatChannel(_message.Message):
     __slots__ = ("enabled", "config")
@@ -1042,3 +1084,58 @@ class Channels(_message.Message):
     voice: VoiceChannel
     web_chat: WebChatChannel
     def __init__(self, voice: _Optional[_Union[VoiceChannel, _Mapping]] = ..., web_chat: _Optional[_Union[WebChatChannel, _Mapping]] = ...) -> None: ...
+
+class AudioEnhancement(_message.Message):
+    __slots__ = ("ai_coustics",)
+    AI_COUSTICS_FIELD_NUMBER: _ClassVar[int]
+    ai_coustics: AICousticsEnhancement
+    def __init__(self, ai_coustics: _Optional[_Union[AICousticsEnhancement, _Mapping]] = ...) -> None: ...
+
+class AICousticsEnhancement(_message.Message):
+    __slots__ = ("enabled", "model_quality_tier", "noiseReduction", "voiceGain", "noiseGate")
+    class QualityTier(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+        __slots__ = ()
+        QUALITY_TIER_UNSPECIFIED: _ClassVar[AICousticsEnhancement.QualityTier]
+        QUALITY_TIER_STANDARD: _ClassVar[AICousticsEnhancement.QualityTier]
+        QUALITY_TIER_HIGH: _ClassVar[AICousticsEnhancement.QualityTier]
+        QUALITY_TIER_FAST: _ClassVar[AICousticsEnhancement.QualityTier]
+    QUALITY_TIER_UNSPECIFIED: AICousticsEnhancement.QualityTier
+    QUALITY_TIER_STANDARD: AICousticsEnhancement.QualityTier
+    QUALITY_TIER_HIGH: AICousticsEnhancement.QualityTier
+    QUALITY_TIER_FAST: AICousticsEnhancement.QualityTier
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    MODEL_QUALITY_TIER_FIELD_NUMBER: _ClassVar[int]
+    NOISEREDUCTION_FIELD_NUMBER: _ClassVar[int]
+    VOICEGAIN_FIELD_NUMBER: _ClassVar[int]
+    NOISEGATE_FIELD_NUMBER: _ClassVar[int]
+    enabled: bool
+    model_quality_tier: AICousticsEnhancement.QualityTier
+    noiseReduction: float
+    voiceGain: float
+    noiseGate: bool
+    def __init__(self, enabled: bool = ..., model_quality_tier: _Optional[_Union[AICousticsEnhancement.QualityTier, str]] = ..., noiseReduction: _Optional[float] = ..., voiceGain: _Optional[float] = ..., noiseGate: bool = ...) -> None: ...
+
+class VADConfig(_message.Message):
+    __slots__ = ("speech_end_window",)
+    SPEECH_END_WINDOW_FIELD_NUMBER: _ClassVar[int]
+    speech_end_window: _duration_pb2.Duration
+    def __init__(self, speech_end_window: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ...) -> None: ...
+
+class FillerUtterances(_message.Message):
+    __slots__ = ("enabled", "utterances", "initial_interval", "interval", "randomize")
+    class Utterance(_message.Message):
+        __slots__ = ("message",)
+        MESSAGE_FIELD_NUMBER: _ClassVar[int]
+        message: str
+        def __init__(self, message: _Optional[str] = ...) -> None: ...
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    UTTERANCES_FIELD_NUMBER: _ClassVar[int]
+    INITIAL_INTERVAL_FIELD_NUMBER: _ClassVar[int]
+    INTERVAL_FIELD_NUMBER: _ClassVar[int]
+    RANDOMIZE_FIELD_NUMBER: _ClassVar[int]
+    enabled: bool
+    utterances: _containers.RepeatedCompositeFieldContainer[FillerUtterances.Utterance]
+    initial_interval: _duration_pb2.Duration
+    interval: _duration_pb2.Duration
+    randomize: bool
+    def __init__(self, enabled: bool = ..., utterances: _Optional[_Iterable[_Union[FillerUtterances.Utterance, _Mapping]]] = ..., initial_interval: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ..., interval: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ..., randomize: bool = ...) -> None: ...

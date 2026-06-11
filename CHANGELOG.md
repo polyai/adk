@@ -1,6 +1,1009 @@
 # CHANGELOG
 
 
+## v0.25.3 (2026-06-09)
+
+### Bug Fixes
+
+- Persist new test case prompt_assertions and tags on push
+  ([#177](https://github.com/polyai/adk/pull/177),
+  [`6c0f5e1`](https://github.com/polyai/adk/commit/6c0f5e153a7569e209558f79977402d1ede652b4))
+
+## Summary
+
+A newly-created `TestCase` was pushed with its base fields only — its `prompt_assertions` and `tags`
+  were silently dropped, so a `push` → `pull` round-trip lost them (the case came back with a
+  `scenario` but no `prompt_assertions`).
+
+## Motivation
+
+Surfaced in Glot, which authors `test_suite/*.yaml` cases, pushes, then runs them: after the
+  projection round-trip the cases came back assertion-less, so the runner skipped them. The cases
+  only "stuck" on a *second* push, once the case already existed.
+
+Root cause: `TestCase.get_new_updated_deleted_subresources` returns its assertions and tags in the
+  **`updated`** bucket even for a brand-new case — they have no create proto and are only settable
+  via `set_test_case_assertions` / `set_test_case_tags`. But
+  `AgentStudioProject._get_updated_subresources` only forwarded the **`new`** bucket for
+  newly-created resources, so the `set_test_case_assertions` / `set_test_case_tags` commands were
+  never emitted. The case landed in the projection with no assertions; pull
+  (`_read_test_cases_from_projection`) faithfully reconstructed an assertion-less case.
+
+<!-- no tracking issue -->
+
+## Changes
+
+- `_get_updated_subresources`: for newly-created resources, forward the `updated` and `deleted`
+  sub-resources too, not just `new`. Creates are already ordered before updates, so
+  `Create_TestCase` is followed by `set_test_case_assertions` / `set_test_case_tags`. - This also
+  fixes the same latent drop for a new `Function`'s non-default `latency_control`, which is bucketed
+  identically. - Adds `GetUpdatedSubresourcesTest.test_new_test_case_emits_assertions_and_tags`
+  asserting a brand-new `TestCase` emits its assertions/tags in the `updated` change-set.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+> Couldn't run `pytest` locally (a `ruamel` namespace-package quirk in my env); the new test targets
+  the exact buckets and CI exercises it.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes _(verified via CI — see
+  note above)_ - [x] No breaking changes to the `poly` CLI interface (or migration path documented)
+  - [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Before: a freshly-authored `test_suite/<name>.yaml` round-trips (push→pull) with its `scenario` but
+  **no `prompt_assertions`**. After: assertions and tags survive the round-trip.
+
+
+## v0.25.2 (2026-06-09)
+
+### Bug Fixes
+
+- **experimental-config**: Add payload ([#171](https://github.com/polyai/adk/pull/171),
+  [`3386677`](https://github.com/polyai/adk/commit/33866777adb80732640cf2260397dedd1f4bbff2))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+
+## v0.25.1 (2026-06-09)
+
+### Bug Fixes
+
+- Simplify pronunciation position assignment ([#176](https://github.com/polyai/adk/pull/176),
+  [`85a4ae6`](https://github.com/polyai/adk/commit/85a4ae68c4cbc41eb62971242c7958246322859d))
+
+## Summary
+
+Simplifies pronunciation position assignment by removing the workaround for unreliable API position
+  data and using the iteration index directly.
+
+## Motivation
+
+The previous code had a `FIXME` noting a Sourcerer SDK bug where multiple entities could share
+  position 0. The workaround logic (`position if position == index else index + 1`) was brittle and
+  unnecessary — since API positions are unreliable, we should just use the order items are returned
+  in.
+
+## Changes
+
+- Removed the `FIXME` comment and position workaround in `_read_pronunciations_from_projection` -
+  Position is now set directly from the iteration `index`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.25.0 (2026-06-08)
+
+### Features
+
+- Add Agent Studio test suite support ([#165](https://github.com/polyai/adk/pull/165),
+  [`56e7eac`](https://github.com/polyai/adk/commit/56e7eac6778424699e65acf0843118c9d70512f8))
+
+## Summary
+
+Adds local ADK support for Agent Studio test cases, including YAML resources under `test_suite/`,
+  protobuf sync commands, pull/push integration, documentation, and unit tests.
+
+## Motivation
+
+Agent Studio now supports simulated conversation tests with prompt and function-call assertions. The
+  ADK needs to read, write, validate, and sync these resources locally so projects can manage tests
+  alongside other agent configuration.
+
+## Changes
+
+- Add `TestCase`, `TestCaseAssertion`, `TestCaseTags`, and function-call assertion types in
+  `src/poly/resources/test_suite.py` - Register test cases in project resource mapping and sync
+  client projection parsing - Update protobuf bindings (including new `testing_pb2`) and command
+  types for create/update/delete/assertions/tags - Add `tests.md` documentation and link it from the
+  main docs index - Add unit tests in `resources_test.py` and project discovery coverage in
+  `project_test.py` - Add sample test cases to the test project
+  (`test_suite/greeting_flow_test.yaml`, `test_suite/webchat_smoke_test.yaml`) - Set `__test__ =
+  False` on resource classes to avoid pytest collection warnings - Validate test case `language`
+  against configured project languages (default + additional) - Validate function call assertion
+  names against known global functions
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+```yaml name: Test Weather flow
+
+scenario: Ask for the weather for berlin.
+
+channel: voice
+
+language: es-ES
+
+tags: - weather prompt_assertions: - It gives the weather - It gives the weather for Berlin
+  function_call_assertions: - name: get_weather arguments: - parameter_name: city expected_value:
+  Berlin value_type: string ```
+
+
+## v0.24.0 (2026-06-08)
+
+### Features
+
+- Webchat config validation and push support ([#173](https://github.com/polyai/adk/pull/173),
+  [`93e52a0`](https://github.com/polyai/adk/commit/93e52a095c317f5326f55ad713877a5ab0dfe805))
+
+## Summary
+
+- Add all-or-nothing validation for webchat config resources (ChatGreeting, ChatSafetyFilters,
+  ChatStylePrompt) - On push, new webchat configs enable the webchat channel and are sent as updates
+  instead of creates - Add `queue_command` to SyncClientHandler and AgentStudioInterface for queuing
+  individual commands
+
+## Motivation
+
+Previously, to enable webchat you had to do it manually on the platform — it couldn't be done
+  through ADK. This change allows ADK to enable the webchat channel automatically when webchat
+  configs are pushed, and validates that all three config types are present together.
+
+## Changes
+
+- `resource_utils.validate_webchat_siblings()` — validates all three webchat types are present when
+  any one is - `ChatGreeting`, `ChatSafetyFilters`, `ChatStylePrompt` — override `validate()` to
+  call sibling check - `SyncClientHandler.queue_command()` / `AgentStudioInterface.queue_command()`
+  — queue a single command - `utils.create_command_webchat_channel_update_status()` — create
+  enable/disable channel command - `project._clean_resources_before_push()` — move new webchat
+  configs to pre-push updates and queue enable command
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.23.3 (2026-06-08)
+
+### Bug Fixes
+
+- Skip interactive project_id prompt when --output-json is set
+  ([#175](https://github.com/polyai/adk/pull/175),
+  [`d8f5eca`](https://github.com/polyai/adk/commit/d8f5eca2b66591dea405f76bb83c239f774f4446))
+
+## Summary
+
+Skip the interactive `project_id` prompt during `poly create` when `--json` is passed, since JSON
+  output mode is non-interactive.
+
+## Motivation
+
+When using `poly create --json`, the CLI shouldn't prompt for interactive input — it should let the
+  platform generate the project ID automatically.
+
+## Changes
+
+- Added `and not output_json` guard to the `project_id` prompt condition in `cli.py`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly create --json`) - [ ] Tested against
+  a live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.23.2 (2026-06-08)
+
+### Bug Fixes
+
+- Restore_function_def_line collapsing body when header has inline comment
+  ([#174](https://github.com/polyai/adk/pull/174),
+  [`6bba9bc`](https://github.com/polyai/adk/commit/6bba9bc992ebe79213bece45b85087eb6e510154))
+
+## Summary
+
+Fix a bug where `restore_function_def_line` collapsed the function body and subsequent functions
+  onto a single line when the function header contained an inline comment (e.g. `): # pragma: no
+  cover`).
+
+## Motivation
+
+The end-of-header detection used `line.rstrip().endswith(":")`, which failed on lines like `): #
+  pragma: no cover` — the colon is mid-line, not at the end. The loop overshot past the real header,
+  collecting body lines and subsequent functions, then joined them all into one line.
+
+## Changes
+
+- Use a regex (`:\s*(#.*)?\s*$`) to detect the header-ending colon, ignoring trailing comments and
+  whitespace - Strip trailing newlines from header lines before joining to avoid embedded `\n` in
+  the joined string - Ensure two spaces before inline comments in `_format_def_line` (PEP 8) - Add
+  tests for inline comment preservation and subsequent function integrity
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+**Before (broken):** ```python def card_utils(conv: Conversation, flow: Flow): # pragma: no cover —
+  platform import stub """Stub...""" pass def get_card_keywords(card) -> set: ban = card.number[:6]
+  ```
+
+**After (fixed):** ```python def card_utils(conv: Conversation, flow: Flow): # pragma: no cover
+  """Stub...""" pass
+
+def get_card_keywords(card) -> set: ban = card.number[:6] ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Documentation
+
+- Feat: translations ([#170](https://github.com/polyai/adk/pull/170),
+  [`57c7909`](https://github.com/polyai/adk/commit/57c7909bd4a22e2ffde0b98b6b0b342551d6e864))
+
+## Summary
+
+Relates to PR #152
+
+## Motivation
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+---------
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+
+## v0.23.1 (2026-06-03)
+
+### Bug Fixes
+
+- Default language mapping name + projection key for translations
+  ([#169](https://github.com/polyai/adk/pull/169),
+  [`15526b1`](https://github.com/polyai/adk/commit/15526b180e9846d7f59a7e44bf39c099d3e14ee1))
+
+## Summary
+
+Fixes two bugs that broke translation validation when the default language is changed locally.
+
+## Motivation
+
+Translation validation cross-references configured languages via ResourceMappings. When the default
+  language was changed locally, the ResourceMapping still had the old language code (cached from
+  pull), so translations appeared to be missing entries for the new language. Separately, the
+  projection reader used the wrong key to extract the default language code from the API response.
+
+## Changes
+
+- Re-read default language name from disk for kept resources so the ResourceMapping reflects the
+  current value - Fix projection key `defaultLanguage` → `defaultLanguageCode` in
+  `SyncClientHandler._read_languages_from_projection`
+
+## Test strategy
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (662 tests) - [x] Manual
+  CLI testing (`poly <command>`) - [x] Tested against a live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.23.0 (2026-05-29)
+
+### Documentation
+
+- Add poly conversations list/get/get-audio ([#167](https://github.com/polyai/adk/pull/167),
+  [`4ac9f8b`](https://github.com/polyai/adk/commit/4ac9f8b9389670386d5b508835ba0c11c6069061))
+
+## Summary
+
+This relates to PR #161
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Allow disabled non-standard adjectives in personality settings
+  ([#168](https://github.com/polyai/adk/pull/168),
+  [`8982e41`](https://github.com/polyai/adk/commit/8982e41cbc6b4f1751f42ca96495b523147196da))
+
+## Summary
+
+This relates to PR #163
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Clarify poly start is self-serve only; document poly login for enterprise
+  ([#166](https://github.com/polyai/adk/pull/166),
+  [`69ac46c`](https://github.com/polyai/adk/commit/69ac46cf57e6adc47e950dffd8e4326a78a57626))
+
+## Summary
+
+Following Harry's flag in #agent-development-kit that the May 15 getting-started rewrite was
+  misleading for enterprise users: \`poly start\` is hardcoded to \`region=\"studio\"\` and only
+  works against the PLG cluster.
+
+This PR splits the auth setup path:
+
+- **Self-serve accounts** ([studio.poly.ai](https://studio.poly.ai)) — \`poly start\` (unchanged) -
+  **Enterprise accounts** (\`us-1\`, \`euw-1\`, \`uk-1\`) — \`poly login --region <region>\` is the
+  recommended browser-based path; manual API key export is the fallback
+
+### Pages changed - **get-started.md** — Step 2 split into self-serve / enterprise; \`poly login\`
+  documented as recommended enterprise path, manual export as fallback; "Already have an agent"
+  example covers all three flows - **prerequisites.md** — enterprise bullet mentions \`poly login\`;
+  checklist updated; fixed a stale anchor - **index.md** — landing-page snippet and recommended path
+  mention \`poly login\` - **reference/cli.md** — added missing \`### poly start\` and \`### poly
+  login\` entries (neither command was documented before)
+
+## Test plan - [x] \`mkdocs build --strict\` — no warnings, all cross-page anchors resolve - [ ]
+  Mintlify-side fix shipped in parallel
+
+### Features
+
+- Translations ([#152](https://github.com/polyai/adk/pull/152),
+  [`49ffdb8`](https://github.com/polyai/adk/commit/49ffdb8b9a0c697d7858f9dbd28fd05161cfdcb1))
+
+## Summary
+
+Add Translations and Languages as new resource types, enabling pull/push/status/diff workflows for
+  language configuration and translation strings.
+
+## Motivation
+
+Agent Studio projects need to manage language settings (default + additional languages) and
+  translation strings locally. Previously these were not tracked by the CLI, so changes had to be
+  made directly in the platform.
+
+## Changes
+
+- **New `Translation` resource** — `MultiResourceYamlResource` stored in `config/translations.yaml`,
+  with create/update/delete proto support - **New `DefaultLanguage` and `AdditionalLanguage`
+  resources** — two `MultiResourceYamlResource` subclasses sharing `agent_settings/languages.yaml`
+  with a flat YAML structure (`default_language: en-GB`, `additional_languages: [fr-FR]`) -
+  **`resource_key` ClassVar on `MultiResourceYamlResource`** — replaces hardcoded `"name"` in
+  `_find_matching()`, fixing duplicate-on-pull bugs for resources that use a different YAML key
+  (e.g. `KeyphraseBoosting` uses `"keyphrase"`) - **Cross-resource validation** — `DefaultLanguage`
+  and `AdditionalLanguage` validate no duplicate language codes; `Translation.validate()` checks
+  translations exist for all configured languages - **BCP 47 validation** on language codes via
+  `langcodes` library - **Updated protos** — regenerated protobuf files - **Registered new resource
+  types** in `RESOURCE_NAME_TO_CLASS`, `__init__.py`, and `sync_client.py` - **Removed
+  `KeyphraseBoosting._find_matching` override** — now handled by `resource_key` -
+  **`variant_attributes.py`** — `discover_resources` uses `resource_key` instead of hardcoded
+  `"name"` for consistency
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+
+## v0.22.2 (2026-05-28)
+
+### Bug Fixes
+
+- Defer API key lookup until first SourcererSDK HTTP request
+  ([#164](https://github.com/polyai/adk/pull/164),
+  [`a90be40`](https://github.com/polyai/adk/commit/a90be407bfcc0c88abfed460910d39c6deaaea84))
+
+## Summary
+
+Lazy-initialize the `SourcererSDK` HTTP session so `retrieve_api_key()` runs on the first API
+  request, not during `__init__`.
+
+## Motivation
+
+Offline CLI workflows (`poly pull --from-projection`, `poly push --dry-run --output-json-commands`)
+  still construct `SyncClientHandler` / `SourcererSDK` even when no HTTP calls are made. Resolving
+  credentials in `__init__` caused those flows to fail when `POLY_ADK_KEY` was unset.
+
+## Changes
+
+- Add a lazy `session` property on `SourcererSDK` that builds the `requests.Session` and auth
+  headers on first use - Remove eager session creation and `retrieve_api_key()` from
+  `SourcererSDK.__init__`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Manual checks:
+
+- [x] `poly push --from-projection - < proj.json --json --dry-run --output-json-commands` works
+  without `POLY_ADK_KEY` when `branch_id` is set in `project.yaml` - [x] `poly push` still
+  authenticates and sends when API key is configured - [x] `poly pull` / branch operations still
+  work with a valid API key
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass (pre-commit on commit) - [ ] `pytest` passes -
+  [x] No breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit
+  messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+
+
+## v0.22.1 (2026-05-27)
+
+### Bug Fixes
+
+- Allow disabled non-standard adjectives in personality settings
+  ([#163](https://github.com/polyai/adk/pull/163),
+  [`1976948`](https://github.com/polyai/adk/commit/19769489ce2d4296cd0e0450f3fc46c27d071a4f))
+
+## Summary
+
+Fixes personality validation to only reject *enabled* invalid adjectives, and filters out
+  non-allowed adjectives from the update proto payload.
+
+## Motivation
+
+The platform can return adjectives not in the local allowed set (e.g. deprecated or new adjectives).
+  Previously, having any such adjective in the local YAML — even disabled — would block pushes. Now
+  disabled non-standard adjectives pass validation and are silently excluded from the update.
+
+## Changes
+
+- `validate()` now only raises on invalid adjectives that are enabled (`True`) -
+  `build_update_proto()` filters the adjectives dict to only include allowed keys - Updated error
+  message to clarify "Enabled adjectives" - Added tests for disabled invalid adjective validation
+  and proto filtering
+
+## Test plan
+
+- [x] Added/updated unit tests (`SettingsPersonalityTests`) - [ ] Manual CLI testing (`poly
+  <command>`) - [ ] Tested against a live Agent Studio project
+
+Replicates https://github.com/PolyAI-LDN/local_agent_studio/pull/141
+
+Made with [Cursor](https://cursor.com)
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+
+
+## v0.22.0 (2026-05-27)
+
+### Features
+
+- Add poly conversations list/get/get-audio ([#161](https://github.com/polyai/adk/pull/161),
+  [`3806a19`](https://github.com/polyai/adk/commit/3806a1998686a6fb2c1cf5c20008d1d8c1034d29))
+
+## Summary
+
+Adds `poly conversations list`, `poly conversations get`, and `poly conversations get-audio`
+  commands that use the public Conversations API to list, inspect, and download conversations
+
+## Motivation
+
+Enables users to browse and debug conversations directly from the CLI without needing to open Agent
+  Studio in a browser.
+
+Closes #DEVP-181
+
+## Changes
+
+- Added `CONVERSATIONS_URL`, `CONVERSATION_URL`, `CONVERSATION_AUDIO_URL` endpoint constants and
+  three new static methods (`list_conversations`, `get_conversation`, `get_conversation_audio`) to
+  `PlatformAPIHandler` - Added corresponding passthrough methods to `AgentStudioInterface` - Added
+  `conversations` command group to the CLI parser with `list`, `get`, and `get-audio` subcommands -
+  Added `print_conversations` (table view) and `print_conversation_detail` (detailed view with
+  turns) to console output - Conversation IDs are rendered as clickable Agent Studio links (same
+  pattern as `poly chat`) - `shortSummary` JSON string is parsed to extract only the heading -
+  `get-audio` downloads WAV binary directly (bypasses `make_request` JSON parsing) - All three
+  subcommands support `--json` for machine-readable output (except `get-audio`)
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`poly conversations list` <img width="978" height="103" alt="Screenshot 2026-05-27 at 16 36 35"
+  src="https://github.com/user-attachments/assets/f3a9aae2-fa66-488b-8d67-17ef8a5affac" />
+
+`poly conversations get` <img width="971" height="399" alt="Screenshot 2026-05-27 at 16 37 06"
+  src="https://github.com/user-attachments/assets/d76b7677-b27c-4f15-a14b-b04d099f2e65" />
+
+`poly conversations get-audio` <img width="928" height="36" alt="Screenshot 2026-05-27 at 16 37 28"
+  src="https://github.com/user-attachments/assets/6f729da0-4c2d-4902-9f69-2b0a9d7319cb" />
+
+### Refactoring
+
+- Replace email param threading with POLY_ADK_EMAIL env var
+  ([#156](https://github.com/polyai/adk/pull/156),
+  [`63312ef`](https://github.com/polyai/adk/commit/63312efa5824325b44ce9d66c4becd7c0edc6fe9))
+
+## Summary
+
+Replace the `email` parameter that was threaded through the entire call chain (CLI -> project ->
+  interface -> sync_client -> SDK) with a single `ADK_COMMAND_USER_OVERRIDE` environment variable
+  read once in `SourcererSDK.__init__`.
+
+## Motivation
+
+The email was being passed as a parameter through 5 layers of function calls just to set a header
+  and metadata field. Using an env var simplifies the API, removes parameter plumbing, and ensures
+  the email header is consistently included on all API requests (including merges, which previously
+  didn't get it).
+
+## Changes
+
+- Read `ADK_COMMAND_USER_OVERRIDE` env var in `SourcererSDK.__init__`, set on session headers and
+  `send_command_batch` headers - Use `self.email` as default `created_by` in `create_metadata()` -
+  Remove `email` param from `queue_resources`, `send_queued_commands`, `send_command_batch`,
+  `_stage_commands`, `push_project`, `sync_ids_with_sandbox` - Remove `--email` CLI flag from push
+  command - Remove `email` param from `AgentStudioInterface.queue_resources` and `upload_resources`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.21.1 (2026-05-21)
+
+### Bug Fixes
+
+- Add tab-completion for branch switch and misc CLI fixes
+  ([#159](https://github.com/polyai/adk/pull/159),
+  [`91c68bb`](https://github.com/polyai/adk/commit/91c68bb8d10c749d958bbd358c1541381102201f))
+
+## Summary
+
+Adds tab-completion support for `poly branch switch` and fixes related CLI issues.
+
+## Motivation
+
+Branch names weren't being tab-completed on the `switch` subcommand, making it harder to quickly
+  switch branches. The `_branch_name_completer` was also a classmethod which caused issues with
+  argcomplete's expected function signature.
+
+## Changes
+
+- Changed `_branch_name_completer` from `@classmethod` to `@staticmethod` (argcomplete expects a
+  plain callable, not a bound method) - Attached `.completer` to the `branch_name` argument on
+  `branch switch` for tab-completion - Made `review` subcommand `required=True` so it shows help
+  instead of silently doing nothing
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.21.0 (2026-05-21)
+
+### Chores
+
+- Update experimental config schema ([#155](https://github.com/polyai/adk/pull/155),
+  [`dd3717c`](https://github.com/polyai/adk/commit/dd3717c8642dafb8645461e96cb8002d2f906b37))
+
+## Summary Update experimental config
+
+## Motivation Get new features
+
+## Changes Update to latest
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+### Features
+
+- Add poly login command for multi-region auth ([#158](https://github.com/polyai/adk/pull/158),
+  [`d9b5cc5`](https://github.com/polyai/adk/commit/d9b5cc569b87f4255273142f67c6a6462700c0dd))
+
+## Summary
+
+Add a new `poly login` command that allows existing enterprise users to authenticate against any
+  region, alongside the existing `poly start` flow for free-tier users.
+
+## Motivation
+
+Enterprise clients need to authenticate against their specific region (us-1, uk-1, euw-1) rather
+  than the default studio region. Previously only `poly start` existed, which was hardcoded to the
+  studio region.
+
+## Changes
+
+- Add `poly login` command with `--region` flag and interactive region selector - Extract
+  `_authenticate_and_save_key` helper from `start` to share auth logic between `start` and `login` -
+  Add `REGION_TO_AUTH_DETAILS` mapping in `Auth0Handler` with per-region base URLs and client IDs -
+  Validate region in auth methods with clear error messages - `make_request` now takes `base_url`
+  directly instead of resolving region internally - Hide dev/staging regions from interactive prompt
+  (still accessible via `--region` flag) - Guard against `None` PAT from API response
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly login`) - [x] Tested against a live
+  Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+## v0.20.4 (2026-05-19)
+
+### Performance Improvements
+
+- Speed up read_local_resource by eliminating redundant YAML parsing
+  ([#139](https://github.com/polyai/adk/pull/139),
+  [`3cbc449`](https://github.com/polyai/adk/commit/3cbc44965db3300cafac0eb26370398f35a39e4f))
+
+## Summary
+
+Optimizes `read_local_resource` by eliminating redundant YAML parse/dump cycles and caching repeated
+  `ast.parse` calls. Reduces `poly diff` / `poly status` / `poly push` time by ~15% across all
+  projects.
+
+## Motivation
+
+Profiling `poly diff` on large projects revealed two bottlenecks in `read_local_resource`, which is
+  called for every resource during diff, status, and push operations: - **YAML double-parse (67% of
+  time):** `from_pretty` would load YAML → transform → dump back to string, then
+  `read_local_resource` would immediately re-parse that string - **Redundant `ast.parse` (8% of
+  time):** `_get_target_function` re-parsed the same Python source multiple times per Function
+  resource
+
+## Changes
+
+- Add `from_pretty_dict` to base `YamlResource` as a standardized dict→dict transform hook (mirrors
+  existing `to_pretty_dict`), wired into `read_local_resource` for a single-parse path - Override
+  `from_pretty_dict` in FlowStep, FlowConfig, VariantAttribute, PhraseFilter for their name→ID
+  transformations - Base `read_local_resource` now does: `read_from_file` → string regex →
+  `load_yaml` → `from_pretty_dict` → `from_yaml_dict` (one YAML parse, zero dumps) - Subclasses that
+  need YAML transforms in `from_pretty` (for `read_to_raw` callers) override it with: `load_yaml` →
+  `from_pretty_dict` → `dump_yaml` - Add `@lru_cache` to `Function._get_target_function` to avoid
+  redundant `ast.parse` calls - Simplify `Pronunciation.read_local_resource` to pass the dict
+  directly instead of dump→re-parse - Simplify `Topic.read_local_resource` to use `super()` and
+  validate after
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly diff`) - [x] Tested against a live
+  Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+All 608 existing tests pass. Profiled and benchmarked across 43 projects.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Benchmarks
+
+Benchmarked `poly diff` (no local changes) across 43 projects:
+
+| Metric | Before | After | Change | |--------|--------|-------|--------| | **Total time (43
+  projects)** | 27.56s | 23.55s | **-14.5%** | | Largest project | 4.38s | 3.06s | **-30%** |
+
+Per-resource improvements (profiled on largest project):
+
+| Metric | Before | After | Change | |--------|--------|-------|--------| | `load_yaml` calls | 954
+  | 642 | -33% | | `dump_yaml` calls | 570 | 0 | -100% | | `ast.parse` calls | 1,896 | 805 | -58% |
+  | Total function calls | 18.8M | 10.3M | -45% |
+
+Savings scale with project size. Small projects (~0.2s) are dominated by import time; large projects
+  (1s+) see 20-30% improvement.
+
+
+## v0.20.3 (2026-05-19)
+
+### Bug Fixes
+
+- Use dynamic key for experimental config ([#154](https://github.com/polyai/adk/pull/154),
+  [`e57a8ef`](https://github.com/polyai/adk/commit/e57a8efc00e2fb701db3c90f82d9ba209788daaf))
+
+## Summary
+
+Stop hardcoding `"default"` as the experimental config key — use the actual key from the projection
+  dict instead.
+
+## Motivation
+
+Projects with a non-default experimental config identifier fail because
+  `_read_experimental_config_from_projection` always looks up `"default"`. This dynamically reads
+  the first config entry.
+
+## Changes
+
+- Read the first key-value pair from the experimental configs dict instead of hardcoding `"default"`
+  - Use the actual config ID as both the dict key and `resource_id`
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.20.2 (2026-05-18)
+
+### Bug Fixes
+
+- Correct merge_branch return type annotations in project.py
+  ([#153](https://github.com/polyai/adk/pull/153),
+  [`1ff1b59`](https://github.com/polyai/adk/commit/1ff1b59464bf1a3ace5fbbcfa8e174ff06803900))
+
+## Summary
+
+Fixes the return type annotation on `AgentStudioProject.merge_branch()` to match the actual return
+  type from the handler layer.
+
+## Motivation
+
+The `project.py` method declared `list[str]` for the conflicts and errors return values, but the
+  handlers (`interface.py`, `sync_client.py`) correctly return `list[dict[str, str]]`. This mismatch
+  could mislead type checkers and developers.
+
+## Changes
+
+- Updated `merge_branch` return type from `tuple[bool, list[str], list[str]]` to `tuple[bool,
+  list[dict[str, str]], list[dict[str, str]]]` - Updated docstring to match
+
+## Test strategy
+
+- [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.20.1 (2026-05-15)
 
 ### Bug Fixes

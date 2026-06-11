@@ -53,6 +53,7 @@ A typical project structure looks like this:
 <account>/<project>/
 ├── _gen/                               # Generated stubs - do not edit
 ├── agent_settings/                     # Agent identity and behavior
+│   ├── languages.yaml                  # Optional
 │   ├── personality.yaml
 │   ├── role.yaml
 │   ├── rules.txt
@@ -62,6 +63,7 @@ A typical project structure looks like this:
 │   ├── entities.yaml                   # Optional
 │   ├── handoffs.yaml                   # Optional
 │   ├── sms_templates.yaml              # Optional
+│   ├── translations.yaml               # Optional
 │   └── variant_attributes.yaml         # Optional
 ├── voice/                              # Voice channel settings
 │   ├── configuration.yaml

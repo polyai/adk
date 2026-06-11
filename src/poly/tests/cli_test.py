@@ -216,7 +216,6 @@ class BranchCreateFromEnvTest(unittest.TestCase):
             skip_validation=True,
             dry_run=False,
             format=False,
-            email=None,
         )
 
     def test_branch_create_env_pulls_from_specified_env(self):
@@ -235,7 +234,6 @@ class BranchCreateFromEnvTest(unittest.TestCase):
             skip_validation=True,
             dry_run=False,
             format=False,
-            email=None,
         )
 
     def test_branch_create_env_raises_when_live_deployment_missing(self):
@@ -981,7 +979,6 @@ class ChatCommandTest(unittest.TestCase):
             skip_validation=False,
             dry_run=False,
             format=False,
-            email=None,
         )
         self.proj.create_chat_session.assert_called_once()
 
@@ -2422,3 +2419,125 @@ class CreateProjectTest(unittest.TestCase):
             "Hello, how can I help you?",
             None,
         )
+
+
+class ConversationsCommandTest(unittest.TestCase):
+    """Tests for the conversations list/get/get-audio CLI commands."""
+
+    SAMPLE_CONVERSATIONS = {
+        "conversations": [
+            {
+                "conversationId": "KA-123",
+                "startedAt": "2026-05-26T10:00:00+00:00",
+                "duration": 90,
+                "channel": "VOICE-SIP",
+                "variantId": "Voice",
+                "handoff": False,
+                "shortSummary": '{"heading": "Test call", "content": "Details here"}',
+            }
+        ],
+        "count": 1,
+        "limit": 50,
+        "offset": 0,
+    }
+
+    SAMPLE_DETAIL = {
+        "conversationId": "KA-123",
+        "channel": "VOICE-SIP",
+        "startedAt": "2026-05-26T10:00:00+00:00",
+        "duration": 90,
+        "turns": [
+            {"user_input": "", "agent_response": "Hello!"},
+            {"user_input": "Hi", "agent_response": "How can I help?"},
+        ],
+    }
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli.AgentStudioCLI._load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.region = "us-1"
+        self.proj.project_id = "test-project"
+        self.proj.get_conversation_url.return_value = "https://studio.us.poly.ai/conv"
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.cli.AgentStudioInterface.list_conversations")
+    @patch("poly.cli.print_conversations")
+    def test_list_calls_api_with_params(self, mock_print, mock_api):
+        """conversations list passes limit/offset to the API."""
+        mock_api.return_value = self.SAMPLE_CONVERSATIONS
+
+        AgentStudioCLI.conversations_list(TEST_DIR, limit=20, offset=5)
+
+        mock_api.assert_called_once_with(
+            region="us-1", project_id="test-project", limit=20, offset=5
+        )
+        mock_print.assert_called_once()
+
+    @patch("poly.cli.AgentStudioInterface.list_conversations")
+    @patch("poly.cli.json_print")
+    def test_list_json_outputs_raw_response(self, mock_json, mock_api):
+        """conversations list --json outputs the full API response."""
+        mock_api.return_value = self.SAMPLE_CONVERSATIONS
+
+        AgentStudioCLI.conversations_list(TEST_DIR, output_json=True)
+
+        mock_json.assert_called_once_with(self.SAMPLE_CONVERSATIONS)
+
+    @patch("poly.cli.AgentStudioInterface.list_conversations")
+    @patch("poly.cli.info")
+    def test_list_empty_shows_info(self, mock_info, mock_api):
+        """conversations list with no results shows info message."""
+        mock_api.return_value = {"conversations": [], "count": 0, "limit": 50, "offset": 0}
+
+        AgentStudioCLI.conversations_list(TEST_DIR)
+
+        mock_info.assert_called_once()
+
+    @patch("poly.cli.AgentStudioInterface.get_conversation")
+    @patch("poly.cli.print_conversation_detail")
+    def test_get_calls_api_and_prints(self, mock_print, mock_api):
+        """conversations get calls API with conversation_id and prints detail."""
+        mock_api.return_value = self.SAMPLE_DETAIL
+
+        AgentStudioCLI.conversations_get(TEST_DIR, "KA-123")
+
+        mock_api.assert_called_once_with(
+            region="us-1", project_id="test-project", conversation_id="KA-123"
+        )
+        mock_print.assert_called_once()
+        self.assertEqual(mock_print.call_args[1]["studio_url"], "https://studio.us.poly.ai/conv")
+
+    @patch("poly.cli.AgentStudioInterface.get_conversation")
+    @patch("poly.cli.json_print")
+    def test_get_json_outputs_raw_response(self, mock_json, mock_api):
+        """conversations get --json outputs the full API response."""
+        mock_api.return_value = self.SAMPLE_DETAIL
+
+        AgentStudioCLI.conversations_get(TEST_DIR, "KA-123", output_json=True)
+
+        mock_json.assert_called_once_with(self.SAMPLE_DETAIL)
+
+    @patch("builtins.open", create=True)
+    @patch("poly.cli.AgentStudioInterface.get_conversation_audio")
+    @patch("poly.cli.success")
+    def test_get_audio_writes_file(self, mock_success, mock_api, mock_open):
+        """conversations get-audio downloads and writes a WAV file."""
+        mock_open.return_value.__enter__ = MagicMock()
+        mock_open.return_value.__exit__ = MagicMock(return_value=False)
+        mock_api.return_value = b"\x00" * 2_000_000
+
+        AgentStudioCLI.conversations_get_audio(TEST_DIR, "KA-123", output_path="/tmp/test.wav")
+
+        mock_api.assert_called_once_with(
+            region="us-1",
+            project_id="test-project",
+            conversation_id="KA-123",
+            direction="combined",
+            redacted=False,
+        )
+        mock_success.assert_called_once()
+        self.assertIn("2.0 MB", mock_success.call_args[0][0])

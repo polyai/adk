@@ -7,13 +7,20 @@ import ast
 import difflib
 import importlib.resources
 import inspect
+import json
 import logging
 import os
 import re
-import json
 from typing import Callable, Optional
 
 from poly.resources import Function, FunctionStep, Resource, ResourceMapping
+
+from poly.handlers.protobuf.commands_pb2 import Command
+from poly.handlers.protobuf.channels_pb2 import (
+    Channel_UpdateStatus,
+    WebChatChannel_UpdateStatus,
+    ChannelStatus,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -509,3 +516,17 @@ def compute_variable_references(
         for var_id in variable_references:
             var_refs.setdefault(var_id, {}).setdefault(field_name, {})[fn_id] = True
     return var_refs
+
+
+def create_command_webchat_channel_update_status(enabled: bool) -> Command:
+    """Create a Channel_UpdateStatus command with the given status."""
+    if enabled:
+        status = ChannelStatus.CREATED
+    else:
+        status = ChannelStatus.NOT_CREATED
+    return Command(
+        type="channel_update_status",
+        channel_update_status=Channel_UpdateStatus(
+            webchat=WebChatChannel_UpdateStatus(status=status),
+        ),
+    )

@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import requests
 
 from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
-from poly.utils import retrieve_api_key, any_credentials_exist
+from poly.utils import any_credentials_exist, retrieve_api_key
 
 logger = logging.getLogger(__name__)
 ACCOUNTS_URL = "/adk/v1/accounts"
@@ -29,6 +29,9 @@ CHAT_END_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/chat/{conver
 # These use public APIs not /adk endpoints
 PROMOTE_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/promote"
 ROLLBACK_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/rollback"
+CONVERSATIONS_URL = "/v1/agents/{project_id}/conversations"
+CONVERSATION_URL = "/v1/agents/{project_id}/conversations/{conversation_id}"
+CONVERSATION_AUDIO_URL = "/v1/agents/{project_id}/conversations/{conversation_id}/audio"
 
 
 class PlatformAPIHandler:
@@ -625,3 +628,94 @@ class PlatformAPIHandler:
             use_jupiter_api=True,
         )
         return response.get("key")
+
+    @staticmethod
+    def list_conversations(
+        region: str,
+        project_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> dict:
+        """List conversations for a project.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            limit: Max number of conversations to return.
+            offset: Number of conversations to skip.
+
+        Returns:
+            dict: The API response with conversations, count, limit, offset.
+        """
+        endpoint = CONVERSATIONS_URL.format(project_id=project_id)
+        return PlatformAPIHandler.make_request(
+            region, endpoint, "GET", params={"limit": limit, "offset": offset}
+        )
+
+    @staticmethod
+    def get_conversation(
+        region: str,
+        project_id: str,
+        conversation_id: str,
+    ) -> dict:
+        """Get a conversation by ID.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            conversation_id: The conversation ID.
+
+        Returns:
+            dict: The conversation detail response.
+        """
+        endpoint = CONVERSATION_URL.format(project_id=project_id, conversation_id=conversation_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")
+
+    @staticmethod
+    def get_conversation_audio(
+        region: str,
+        project_id: str,
+        conversation_id: str,
+        direction: str = "combined",
+        redacted: bool = False,
+    ) -> bytes:
+        """Get audio recording for a conversation.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            conversation_id: The conversation ID.
+            direction: Audio direction — combined, user, or agent.
+            redacted: Whether to return redacted audio.
+
+        Returns:
+            bytes: The raw WAV audio data.
+        """
+        endpoint = CONVERSATION_AUDIO_URL.format(
+            project_id=project_id, conversation_id=conversation_id
+        )
+        url = PlatformAPIHandler.get_base_url(region) + endpoint
+        correlation_id = f"adk-{uuid.uuid4()}"
+        headers = {
+            "X-API-KEY": retrieve_api_key(region),
+            "X-PolyAI-Correlation-Id": correlation_id,
+        }
+        params = {"direction": direction, "redacted": str(redacted).lower()}
+
+        logger.info(f"Making GET request to {url}")
+        response = requests.get(url, headers=headers, params=params, allow_redirects=False)
+
+        logger.debug(
+            f"Request/response url={url!r}"
+            f" status_code={response.status_code!r} content_length={len(response.content)}"
+        )
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError:
+            logger.debug(
+                f"Error in request status_code={response.status_code!r} response={response.text!r}"
+            )
+            raise
+
+        return response.content

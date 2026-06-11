@@ -12,6 +12,7 @@ from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.protobuf.handoff_pb2 import Handoff_SetDefault
 from poly.handlers.sdk import SourcererAPIError, SourcererSDK
 from poly.resources import (
+    AdditionalLanguage,
     ApiIntegration,
     ApiIntegrationEnvironments,
     ApiIntegrationOperation,
@@ -22,12 +23,15 @@ from poly.resources import (
     ChatSafetyFilters,
     ChatStylePrompt,
     Condition,
+    DefaultLanguage,
     DTMFConfig,
     Entity,
     ExperimentalConfig,
     FlowConfig,
     FlowStep,
     Function,
+    FunctionCallArgumentAssertion,
+    FunctionCallAssertion,
     FunctionDelayResponse,
     FunctionLatencyControl,
     FunctionParameters,
@@ -45,8 +49,12 @@ from poly.resources import (
     SettingsRole,
     SettingsRules,
     SMSTemplate,
+    TestCase,
+    TestCaseAssertion,
+    TestCaseTags,
     Topic,
     TranscriptCorrection,
+    Translation,
     Variable,
     Variant,
     VariantAttribute,
@@ -136,9 +144,12 @@ class SyncClientHandler:
             Pronunciation: cls._read_pronunciations_from_projection(projection),
             KeyphraseBoosting: cls._read_keyphrase_boosting_from_projection(projection),
             TranscriptCorrection: cls._read_transcript_corrections_from_projection(projection),
-            **cls._read_asr_settings_from_projection(projection),
+            AsrSettings: cls._read_asr_settings_from_projection(projection),
             GeneralSafetyFilters: cls._read_safety_filters_from_projection(projection),
             ApiIntegration: cls._read_api_integrations_from_projection(projection),
+            TestCase: cls._read_test_cases_from_projection(projection),
+            Translation: cls._read_translations_from_projection(projection),
+            **cls._read_languages_from_projection(projection),
         }  # ty:ignore[invalid-return-type]
 
     def pull_deployment_resources(
@@ -621,13 +632,17 @@ class SyncClientHandler:
             .get("experimentalConfigs", {})
             .get("entities", {})
         )
-        # Only get the default experimental config
-        default_experimental_config = experimental_configs.get("default", {})
+        config_id, config_data = (
+            next(iter(experimental_configs.items()), ("default", {}))
+            if experimental_configs
+            else ("default", {})
+        )
+        # Only get the first experimental config
         return {
-            "default": ExperimentalConfig(
-                resource_id="default",
+            config_id: ExperimentalConfig(
+                resource_id=config_id,
                 name="experimental_config",
-                config=default_experimental_config.get("features", {}),
+                config=config_data.get("features", {}),
             )
         }
 
@@ -767,10 +782,6 @@ class SyncClientHandler:
             .get("entities", {})
             .items()
         ):
-            # FIXME: Sourcerer SDK bug
-            # Sometimes, even if the dict has multiple elements
-            # They are all at position 0.
-            position = pronunciation_data.get("position") or index
             pronunciations[pronunciation_id] = Pronunciation(
                 resource_id=pronunciation_id,
                 name=pronunciation_data.get("name", ""),
@@ -779,7 +790,7 @@ class SyncClientHandler:
                 case_sensitive=pronunciation_data.get("caseSensitive", False),
                 language_code=pronunciation_data.get("languageCode", ""),
                 description=pronunciation_data.get("description", ""),
-                position=position if position == index else index + 1,
+                position=index,  # Positions returned by API are not reliable, so we set them based on the order they are returned in
             )
             index += 1
         return pronunciations
@@ -834,7 +845,7 @@ class SyncClientHandler:
     @staticmethod
     def _read_asr_settings_from_projection(
         projection: dict,
-    ) -> dict[type[Resource], dict[str, Resource]]:
+    ) -> dict[str, AsrSettings]:
         asr_settings_data = projection.get("channels", {}).get("voice", {}).get("asrSettings", {})
         if not asr_settings_data:
             return {}
@@ -847,14 +858,12 @@ class SyncClientHandler:
         )
 
         return {
-            AsrSettings: {
-                "asr_settings": AsrSettings(
-                    resource_id="asr_settings",
-                    name="asr_settings",
-                    barge_in=barge_in,
-                    interaction_style=interaction_style,
-                )
-            }
+            "asr_settings": AsrSettings(
+                resource_id="asr_settings",
+                name="asr_settings",
+                barge_in=barge_in,
+                interaction_style=interaction_style,
+            )
         }
 
     @staticmethod
@@ -876,7 +885,7 @@ class SyncClientHandler:
     @staticmethod
     def _read_api_integrations_from_projection(
         projection: dict,
-    ) -> dict[type[Resource], dict[str, Resource]]:
+    ) -> dict[str, ApiIntegration]:
         api_integrations = {}
         for integration_id, integration_data in (
             projection.get("apiIntegrations", {})
@@ -899,6 +908,105 @@ class SyncClientHandler:
             )
 
         return api_integrations
+
+    def _read_test_cases_from_projection(
+        projection: dict,
+    ) -> dict[type[Resource], dict[str, Resource]]:
+        test_cases = {}
+        for test_case_id, test_case_data in (
+            projection.get("testing", {}).get("testCases", {}).get("entities", {}).items()
+        ):
+            prompt_assertions = []
+            function_assertions = []
+            for assertion in test_case_data.get("assertions", []):
+                assertion_payload = assertion.get("payload", {})
+                if assertion_payload.get("$case") == "prompt":
+                    prompt_assertions.append(assertion_payload.get("value").get("value"))
+                elif assertion_payload.get("$case") == "functionCall":
+                    assertion_value = assertion_payload.get("value", {})
+                    arguments = [
+                        FunctionCallArgumentAssertion(
+                            parameter_name=arg,
+                            expected_value=arg_values.get("expectedValue"),
+                            value_type=arg_values.get("valueType"),
+                        )
+                        for arg, arg_values in assertion_value.get("arguments").items()
+                    ]
+                    function_assertions.append(
+                        FunctionCallAssertion(name=assertion_value.get("name"), arguments=arguments)
+                    )
+            assertions = TestCaseAssertion(
+                resource_id=test_case_id,
+                name="assertions",
+                prompts=prompt_assertions,
+                function_calls=function_assertions,
+            )
+            tags = TestCaseTags(
+                resource_id=test_case_id, name="tags", tags=test_case_data.get("tags", [])
+            )
+            test_cases[test_case_id] = TestCase(
+                resource_id=test_case_id,
+                name=test_case_data.get("name", ""),
+                scenario=test_case_data.get("scenario", ""),
+                variant=test_case_data.get("variantId", ""),
+                language=test_case_data.get("language", ""),
+                channel=test_case_data.get("channel", ""),
+                assertions=assertions,
+                tags=tags,
+            )
+        return test_cases
+
+    @staticmethod
+    def _read_translations_from_projection(
+        projection: dict,
+    ) -> dict[str, Translation]:
+        translations_data = (
+            projection.get("translations", {}).get("translations", {}).get("entities", {})
+        )
+        if not translations_data:
+            return {}
+
+        translations = {}
+        for translation_id, translation_data in translations_data.items():
+            translations[translation_id] = Translation(
+                resource_id=translation_id,
+                name=translation_data.get("translationKey", ""),
+                translations={
+                    translation.get("languageCode"): translation.get("text", "")
+                    for translation in translation_data.get("translations", [])
+                },
+            )
+
+        return translations
+
+    @staticmethod
+    def _read_languages_from_projection(
+        projection: dict,
+    ) -> dict[type[Resource], dict[str, Resource]]:
+        language_data = projection.get("languages", {})
+        if not language_data:
+            return {DefaultLanguage: {}, AdditionalLanguage: {}}
+
+        default_code = language_data.get("defaultLanguageCode")
+        default_languages = {}
+        if default_code:
+            default_languages[default_code] = DefaultLanguage(
+                resource_id=default_code,
+                name=default_code,
+            )
+        additional_languages = {}
+        for lang_id, lang in (
+            language_data.get("additionalLanguages", {}).get("entities", {}).items()
+        ):
+            code = lang.get("code")
+            additional_languages[lang_id] = AdditionalLanguage(
+                resource_id=lang_id,
+                name=code,
+            )
+        return {
+            DefaultLanguage: default_languages,
+            AdditionalLanguage: additional_languages,
+        }
 
     # Types that should be created first
     # as they are referenced by other resources
@@ -940,7 +1048,6 @@ class SyncClientHandler:
         deleted_resources: dict[type[BaseResource], dict[str, BaseResource]],
         new_resources: dict[type[BaseResource], dict[str, BaseResource]],
         updated_resources: dict[type[BaseResource], dict[str, BaseResource]],
-        email: Optional[str] = None,
     ) -> list[Command]:
         """Queue multiple resources for the specific project.
 
@@ -953,14 +1060,11 @@ class SyncClientHandler:
             deleted_resources (dict[type[BaseResource], dict[str, BaseResource]]): Resources to delete
             new_resources (dict[type[BaseResource], dict[str, BaseResource]]): New resources to upload
             updated_resources (dict[type[BaseResource], dict[str, BaseResource]]): Updated resources to upload
-            email (str): Email to use for metadata creation.
 
         Returns:
             list[Command]: A list of queued Command protobuf messages.
         """
         metadata = self.sdk.create_metadata()
-        if email:
-            metadata.created_by = email
 
         commands = []
 
@@ -1045,6 +1149,20 @@ class SyncClientHandler:
         logger.info(f"Queued {len(commands)} commands")
         logger.debug(f"Commands: {commands!r}")
         return commands
+
+    def queue_command(self, command: Command) -> None:
+        """Add a single command to the queue.
+        Sets the command ID and metadata before adding to the queue.
+
+        Args:
+            command (Command): The Command protobuf message to add to the queue.
+        """
+        command.metadata.CopyFrom(self.sdk.create_metadata())
+        command.command_id = str(uuid.uuid4())
+        self.sdk.add_command_to_queue(command)
+        logger.info("Queued command")
+        logger.debug(f"Command: {command!r}")
+        return command
 
     def send_queued_commands(self) -> bool:
         """Send all queued commands as a batch and clear the queue.

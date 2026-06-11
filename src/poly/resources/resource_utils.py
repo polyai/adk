@@ -18,6 +18,7 @@ from enum import Enum
 from io import StringIO
 from typing import TYPE_CHECKING, Optional
 
+import langcodes
 import ruamel.yaml as yaml
 
 logger = logging.getLogger(__name__)
@@ -173,6 +174,7 @@ REFERENCES_PREFIX_MAP = {
     "global_functions": "fn",
     "entities": "entity",
     "variables": "vrbl",
+    "translations": "tn",
 }
 REFERENCES_PREFIX_MAP_REGEX = {
     reference: re.compile(rf"{{{{{prefix}:([\w-]+)}}}}")
@@ -186,6 +188,9 @@ _REFERENCE_PATTERN = re.compile(r"\{\{(\w+):([^}]+)\}\}")
 
 # Regex to find variable names defined in function code via conv.state.<name>
 CONV_STATE_DOT_NAME = re.compile(r"(?<![\w.])conv\.state\.([a-zA-Z_][a-zA-Z0-9_]*)\b(?!\s*\()")
+
+# Detects the header-ending colon on a def line, ignoring trailing comments
+HEADER_END_COLON_RE = re.compile(r":\s*(#.*)?\s*$")
 
 
 def remove_comments_from_code(code: str) -> str:
@@ -385,6 +390,9 @@ def _format_def_line(line: str) -> str:
     # remove comma after last parameter
     line = re.sub(r",\):$", "):", line)
 
+    # PEP 8: two spaces before inline comment (only the comment-starting #)
+    line = re.sub(r"\)\s*:\s*#", "):  #", line)
+
     return line + "\n"
 
 
@@ -423,14 +431,14 @@ def restore_function_def_line(file_content: str, file_name: str) -> str:
     end_line = None
     for j in range(i, len(lines)):
         header_lines.append(lines[j])
-        if lines[j].rstrip().endswith(":"):
+        if HEADER_END_COLON_RE.search(lines[j]):
             end_line = j
             break
 
     if end_line is None:
         return file_content
 
-    one_line_header = " ".join(header_lines)
+    one_line_header = " ".join(h.strip() for h in header_lines)
     formatted_one_line_header = _format_def_line(one_line_header)
 
     return "".join(lines[:i]) + formatted_one_line_header + "".join(lines[end_line + 1 :])
@@ -549,6 +557,11 @@ def to_snake_case(s: str) -> str:
 def convert_keys_to_snake_case(dict_obj: dict) -> dict:
     """Convert config keys to snake_case for consistency."""
     return {to_snake_case(k): v for k, v in dict_obj.items()}
+
+
+def is_valid_language_code(code: str) -> bool:
+    """Check if the given code is a valid BCP 47 language code."""
+    return langcodes.tag_is_valid(code)
 
 
 def assign_flow_positions(
@@ -742,3 +755,25 @@ def assign_flow_node_position(
             "y": y_start,
         }
         return node.position["x"]
+
+
+_WEBCHAT_CONFIG_TYPES: list[str] = [
+    "ChatGreeting",
+    "ChatSafetyFilters",
+    "ChatStylePrompt",
+]
+
+
+def validate_webchat_siblings(
+    self_type: type, resource_mappings: list["ResourceMapping"] | None
+) -> None:
+    """Raise if some but not all webchat config resources are present."""
+    if not resource_mappings:
+        return
+    sibling_names = [n for n in _WEBCHAT_CONFIG_TYPES if n != self_type.__name__]
+    present_types = {rm.resource_type.__name__ for rm in resource_mappings}
+    missing = [n for n in sibling_names if n not in present_types]
+    if missing:
+        raise ValueError(
+            f"Webchat config resources must all be present together. Missing: {', '.join(missing)}."
+        )

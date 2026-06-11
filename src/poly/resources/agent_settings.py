@@ -21,7 +21,14 @@ from poly.resources.resource import (
     YamlResource,
 )
 
-ALLOWED_BEHAVIOUR_REFERENCES = ["global_functions", "sms", "handoff", "attributes", "variables"]
+ALLOWED_BEHAVIOUR_REFERENCES = [
+    "global_functions",
+    "sms",
+    "handoff",
+    "attributes",
+    "variables",
+    "translations",
+]
 ALLOWED_ADJECTIVES = {
     "Polite",
     "Calm",
@@ -78,9 +85,11 @@ class SettingsPersonality(YamlResource):
             raise ValueError("Other adjective can only be set if no other adjectives are selected.")
 
         # Adjectives must be from the allowed set
-        if not set(self.adjectives.keys()).issubset(ALLOWED_ADJECTIVES):
+        if any(
+            enabled and adj not in ALLOWED_ADJECTIVES for adj, enabled in self.adjectives.items()
+        ):
             raise ValueError(
-                f"Adjectives must be from the allowed set: {', '.join(ALLOWED_ADJECTIVES)}"
+                f"Enabled adjectives must be from the allowed set: {', '.join(ALLOWED_ADJECTIVES)}"
             )
 
         references = utils.get_references_from_prompt(
@@ -95,7 +104,11 @@ class SettingsPersonality(YamlResource):
 
         return Personality_UpdatePersonality(
             adjectives={
-                "values": self.adjectives,
+                "values": {
+                    adj: enabled
+                    for adj, enabled in self.adjectives.items()
+                    if adj in ALLOWED_ADJECTIVES
+                },
             },
             custom=self.custom,
         )
@@ -250,9 +263,9 @@ class SettingsRules(Resource):
         """Replace resource IDs with resource names in the provided contents."""
         return utils.replace_resource_ids_with_names(contents, resource_mappings or [])
 
-    @staticmethod
+    @classmethod
     def from_pretty(
-        contents: str, resource_mappings: list[ResourceMapping] = None, **kwargs
+        cls, contents: str, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> str:
         """Replace resource names with resource IDs in the provided contents."""
         return utils.replace_resource_names_with_ids(contents, resource_mappings or [])

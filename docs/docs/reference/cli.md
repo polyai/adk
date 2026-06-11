@@ -28,6 +28,55 @@ poly push --help
 
 ## Core commands
 
+### `poly start`
+
+End-to-end onboarding for **self-serve** accounts on [studio.poly.ai](https://studio.poly.ai). `poly start` is hardcoded to the `studio` region — for any other region, use [`poly login`](#poly-login).
+
+`poly start`:
+
+1. Opens a browser window so you can sign up or sign in to a self-serve workspace.
+2. Generates an API key (or reuses your existing one) and writes it to `~/.poly/credentials.json` under the `studio` region.
+3. Optionally creates a new Agent Studio project and pulls it down locally.
+
+If the ADK detects an existing API key in the credential file or environment, `poly start` asks whether to use it. Accept and the command skips ahead to the project-creation prompt; decline and it runs the full sign-in flow.
+
+Examples:
+
+~~~bash
+poly start
+poly start --base-path /path/to/projects
+~~~
+
+| Flag | Description |
+|---|---|
+| `--base-path` | Base path to initialize the project in. Defaults to the current working directory. |
+
+### `poly login`
+
+Sign in to an existing Agent Studio account and save API key credentials for the CLI. Works against any region — including `studio`, which makes `poly login --region studio` a viable alternative to `poly start` for self-serve users on a new machine who already have an account and don't need to create a project.
+
+`poly login`:
+
+1. Prompts for a region if `--region` is not supplied.
+2. Opens a browser window for sign-in via the Auth0 device authorization flow.
+3. Fetches or creates an API key for your user and saves it to `~/.poly/credentials.json` under the chosen region.
+
+Run `poly login` once per region you need access to — credentials for multiple regions are stored side by side in the credential file.
+
+Examples:
+
+~~~bash
+poly login
+poly login --region us-1
+poly login --region euw-1
+poly login --region uk-1
+poly login --region studio
+~~~
+
+| Flag | Description |
+|---|---|
+| `--region` | Region to log in to. If omitted, you are prompted to pick one. Choices match the standard region list. |
+
 ### `poly project`
 
 Manage Agent Studio projects.
@@ -427,6 +476,76 @@ Use language flags to specify the expected input and output language when chatti
 | `--state` | Show state changes in output. |
 | `--metadata` | Show all metadata (equivalent to `--functions --flows --state`). |
 
+### `poly conversations`
+
+List and inspect conversations for the project using the public Conversations API.
+
+`poly conversations` requires a subcommand: `list`, `get`, or `get-audio`.
+
+Examples:
+
+~~~bash
+poly conversations list
+poly conversations get <conversation_id>
+poly conversations get-audio <conversation_id> -o recording.wav
+~~~
+
+#### `poly conversations list`
+
+List conversations for the project.
+
+~~~bash
+poly conversations list
+poly conversations list --limit 20 --offset 10
+poly conversations list --json
+~~~
+
+| Flag | Description |
+|---|---|
+| `--limit` | Max number of conversations to return. Defaults to `50`. |
+| `--offset` | Number of conversations to skip. Defaults to `0`. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+The default table view shows conversation ID (rendered as a clickable Agent Studio link), start time, duration, caller number, channel, variant (when present), handoff status, and a short summary heading.
+
+#### `poly conversations get`
+
+Get detailed information for a specific conversation, including all turns.
+
+~~~bash
+poly conversations get <conversation_id>
+poly conversations get <conversation_id> --json
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `conversation_id` | The conversation ID to look up. Required. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+The default output shows conversation metadata (channel, language, duration, timestamps, handoff, tags, PolyScore, summary, note) followed by a turn-by-turn transcript.
+
+#### `poly conversations get-audio`
+
+Download the audio recording for a conversation as a WAV file.
+
+~~~bash
+poly conversations get-audio <conversation_id>
+poly conversations get-audio <conversation_id> --direction user
+poly conversations get-audio <conversation_id> --redacted -o redacted.wav
+poly conversations get-audio <conversation_id> --json
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `conversation_id` | The conversation ID. Required. |
+| `--direction` | Audio track to download. Choices: `combined`, `user`, `agent`. Defaults to `combined`. |
+| `--redacted` | Download the redacted version of the audio. |
+| `-o`, `--output` | Output file path. Defaults to `<conversation_id>.wav`. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a JSON summary on stdout instead of the success message (audio is still written to disk). |
+
 ### `poly docs`
 
 Output resource documentation.
@@ -557,6 +676,9 @@ poly deployments show abc123def --json
 poly deployments list --json
 poly deployments promote --from <id> --to pre-release --force --json
 poly deployments rollback --to <id> --force --json
+poly conversations list --json
+poly conversations get <conversation_id> --json
+poly conversations get-audio <conversation_id> --json
 ~~~
 
 When `--json` is used:
@@ -598,6 +720,9 @@ The exact fields vary by command. Common fields include:
 | `poly deployments show --json` | `success`, `deployment`, `active_deployment_hashes`, `included_deployments`, `is_rollback` |
 | `poly deployments promote --json` | `success`, `from_hash`, `to_env`, `message`, `included_deployments`; `dry_run` when `--dry-run` is used |
 | `poly deployments rollback --json` | `success`, `target_hash`, `message`, `reverted_deployments`; `dry_run` when `--dry-run` is used |
+| `poly conversations list --json` | `conversations`, `count`, `limit`, `offset` |
+| `poly conversations get --json` | full conversation detail object |
+| `poly conversations get-audio --json` | `success`, `conversation_id`, `direction`, `redacted`, `output_path`, `size_bytes` |
 
 For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
 
@@ -643,6 +768,21 @@ When `--json` is used with `poly chat`, the command emits a single JSON object w
 - `turns[0]` is always the agent greeting, with `"input": null`.
 - If `--push` is also supplied, the output includes a `push` key: `{ "push": { "success": true, "message": "..." } }`.
 - If `--functions`, `--flows`, or `--state` are also set, the relevant metadata fields are included in each turn.
+
+#### `poly conversations get-audio --json` output shape
+
+When `--json` is used with `poly conversations get-audio`, the audio is still written to disk and the command emits a JSON summary:
+
+~~~json
+{
+  "success": true,
+  "conversation_id": "KA-123",
+  "direction": "combined",
+  "redacted": false,
+  "output_path": "KA-123.wav",
+  "size_bytes": 2000000
+}
+~~~
 
 #### `poly deployments promote --json` output shape
 
@@ -712,8 +852,9 @@ A typical CLI workflow looks like this:
 7. push with `poly push`
 8. optionally review with `poly review`
 9. test or chat with the agent using `poly chat`
-10. merge the branch with `poly branch merge '<message>'`
-11. promote to pre-release or live with `poly deployments promote`
+10. browse and debug conversations with `poly conversations list` and `poly conversations get`
+11. merge the branch with `poly branch merge '<message>'`
+12. promote to pre-release or live with `poly deployments promote`
 
 !!! info "Run commands from the project folder"
 

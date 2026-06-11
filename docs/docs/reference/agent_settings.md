@@ -21,6 +21,7 @@ Agent settings live under:
 
 ~~~text
 agent_settings/
+├── languages.yaml                  # Optional
 ├── personality.yaml
 ├── role.yaml
 ├── rules.txt
@@ -49,6 +50,12 @@ agent_settings/
     ---
 
     Provides plain-text instructions the agent should follow on every turn.
+
+-   **Languages**
+
+    ---
+
+    Configures the default language and any additional languages the agent supports.
 
 -   **Safety filters**
 
@@ -88,6 +95,10 @@ Allowed adjective values are:
 - `Other`
 
 If `Other` is set to `true`, no other adjective can be selected.
+
+!!! info "Non-standard adjectives"
+
+    The platform may return adjectives not in the local allowed set (for example, deprecated or newly added adjectives). Validation only fails for adjectives that are **enabled** (`true`) and not in the allowed set. Disabled (`false`) non-standard adjectives pass validation and are silently excluded from the update payload when pushing.
 
 ### `custom`
 
@@ -203,6 +214,12 @@ That kind of logic belongs in flows and Python functions.
 - concise instructions that apply broadly
 - deterministic logic handled in code or flow transitions
 
+## Languages
+
+The optional `languages.yaml` file configures which languages the agent supports. When present, it defines the default language and any additional languages.
+
+See the [Languages reference](./languages.md) for full field descriptions, validation rules, and examples.
+
 ## Safety filters
 
 The `safety_filters.yaml` file configures project-level content safety filtering. It controls whether harmful content is filtered across all channels by default.
@@ -226,6 +243,20 @@ See the [Safety filters reference](./safety_filters.md) for field descriptions, 
 
     Learn how referenced global functions are defined and used.
     [Open functions](./functions.md)
+
+-   **Languages**
+
+    ---
+
+    Configure default and additional language settings for the agent.
+    [Open languages](./languages.md)
+
+-   **Translations**
+
+    ---
+
+    Define localized text strings per language.
+    [Open translations](./translations.md)
 
 -   **Safety filters**
 

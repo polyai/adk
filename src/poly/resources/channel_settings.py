@@ -80,7 +80,7 @@ class VoiceDisclaimerMessage(MultiResourceYamlResource):
         """Validate the disclaimer message resource."""
 
         references = utils.get_references_from_prompt(
-            self.message, ["attributes", "variables"], raise_on_invalid=True
+            self.message, ["attributes", "variables", "translations"], raise_on_invalid=True
         )
         valid, invalid_references = utils.validate_references(references, resource_mappings)
         if not valid:
@@ -183,7 +183,7 @@ class ChannelGreeting(MultiResourceYamlResource):
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         """Validate the greeting resource."""
         references = utils.get_references_from_prompt(
-            self.welcome_message, ["attributes", "variables"], raise_on_invalid=True
+            self.welcome_message, ["attributes", "variables", "translations"], raise_on_invalid=True
         )
         valid, invalid_references = utils.validate_references(references, resource_mappings)
         if not valid:
@@ -252,6 +252,11 @@ class ChatGreeting(ChannelGreeting):
 
     channel_type: ClassVar[ChannelType] = ChannelType.WEB_CHAT
     channel_subpath: ClassVar[str] = "chat"
+
+    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+        """Validate the chat greeting resource."""
+        super().validate(resource_mappings=resource_mappings, **kwargs)
+        utils.validate_webchat_siblings(type(self), resource_mappings)
 
 
 @dataclass
@@ -343,3 +348,8 @@ class ChatStylePrompt(ChannelStylePrompt):
 
     channel_type: ClassVar[ChannelType] = ChannelType.WEB_CHAT
     channel_subpath: ClassVar[str] = "chat"
+
+    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+        """Validate the chat style prompt resource."""
+        super().validate(resource_mappings=resource_mappings, **kwargs)
+        utils.validate_webchat_siblings(type(self), resource_mappings)

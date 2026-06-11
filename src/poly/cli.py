@@ -40,6 +40,8 @@ from poly.output.console import (
     info,
     plain,
     print_branches,
+    print_conversations,
+    print_conversation_detail,
     print_diff,
     print_file_list,
     print_status,
@@ -135,9 +137,8 @@ def _format_gist_choice(g: dict) -> str:
 class AgentStudioCLI:
     """CLI Interface for Agent Studio."""
 
-    @classmethod
+    @staticmethod
     def _branch_name_completer(
-        cls,
         prefix: str,
         action: Any = None,
         parser: Any = None,
@@ -147,7 +148,7 @@ class AgentStudioCLI:
         """Return deletable branch names for argcomplete tab-completion."""
         try:
             base_path = getattr(parsed_args, "path", None) or os.getcwd()
-            project = cls.read_project_config(base_path)
+            project = AgentStudioCLI.read_project_config(base_path)
             if project is None:
                 return []
             _, branches = project.get_branches()
@@ -225,13 +226,16 @@ class AgentStudioCLI:
             help="Write output to FILE_PATH instead of stdout.",
         )
 
-        # Start
+        # Start (new free-tier users)
         start_parser = subparsers.add_parser(
             "start",
             parents=[verbose_parent, debug_parent],
             help="Get started with PolyAI Agent Studio",
             description=(
-                "Create a new Agent Studio Account, set up API key and create a first project with a single command.\n\n"
+                "Create a new Agent Studio account, set up your API key, and create a first project"
+                " with a single command.\n\n"
+                "Examples:\n"
+                "  poly start\n"
             ),
         )
         start_parser.add_argument(
@@ -239,6 +243,30 @@ class AgentStudioCLI:
             type=str,
             default=os.getcwd(),
             help="Base path to initialize the project. Defaults to current working directory.",
+        )
+
+        # Login (existing enterprise users)
+        login_parser = subparsers.add_parser(
+            "login",
+            parents=[verbose_parent, debug_parent],
+            help="Log in to an existing Agent Studio account",
+            description=(
+                "Log in to your existing Agent Studio account and save API key credentials"
+                " for CLI access.\n\n"
+                "This command will open a browser window for you to authenticate and authorize"
+                " the CLI. After successful authentication, the necessary API key credentials"
+                " will be saved to a local credential file for future CLI commands.\n\n"
+                "Examples:\n"
+                "  poly login\n"
+                "  poly login --region us-1\n"
+            ),
+        )
+        login_parser.add_argument(
+            "--region",
+            type=str,
+            choices=REGIONS,
+            default=None,
+            help="Region to log in to. If omitted, you will be prompted to select one.",
         )
 
         # INIT
@@ -448,13 +476,6 @@ class AgentStudioCLI:
             help=SUPPRESS,
             default=False,
         )
-        push_parser.add_argument(
-            "--email",
-            type=str,
-            help="Email to use for metadata creation for push",
-            default=None,
-        )
-
         # STATUS
         status_parser = subparsers.add_parser(
             "status",
@@ -565,7 +586,7 @@ class AgentStudioCLI:
             help="Base path to the project. Defaults to current working directory.",
         )
 
-        review_subparsers = review_parser.add_subparsers(dest="review_subcommand")
+        review_subparsers = review_parser.add_subparsers(dest="review_subcommand", required=True)
 
         review_create_parser = review_subparsers.add_parser(
             "create",
@@ -683,7 +704,7 @@ class AgentStudioCLI:
         )
         branch_switch_parser.add_argument(
             "branch_name", nargs="?", help="Name of the branch to switch to."
-        )
+        ).completer = cls._branch_name_completer
         branch_switch_parser.add_argument(
             "--format",
             action="store_true",
@@ -1128,6 +1149,112 @@ class AgentStudioCLI:
             help="Show what would be rolled back without actually rolling back. Displays the target deployment and reverted deployments.",
         )
 
+        # CONVERSATIONS
+        conversations_path_parent = ArgumentParser(add_help=False)
+        conversations_path_parent.add_argument(
+            "--path",
+            type=str,
+            default=os.getcwd(),
+            help="Base path to the project. Defaults to current working directory.",
+        )
+
+        conversations_parser = subparsers.add_parser(
+            "conversations",
+            parents=[verbose_parent],
+            help="List and inspect conversations.",
+            description=(
+                "List and inspect conversations for the project.\n\n"
+                "Examples:\n"
+                "  poly conversations list\n"
+                "  poly conversations get <conversation_id>\n"
+                "  poly conversations get-audio <conversation_id> -o recording.wav\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+
+        conversations_subparsers = conversations_parser.add_subparsers(
+            dest="conversations_subcommand", required=True
+        )
+
+        conv_list_parser = conversations_subparsers.add_parser(
+            "list",
+            parents=[conversations_path_parent, json_parent, verbose_parent],
+            help="List conversations for the project.",
+            description=(
+                "List conversations for the project.\n\n"
+                "Examples:\n"
+                "  poly conversations list\n"
+                "  poly conversations list --limit 20 --offset 10\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        conv_list_parser.add_argument(
+            "--limit",
+            type=int,
+            default=50,
+            help="Max number of conversations to return. Defaults to 50.",
+        )
+        conv_list_parser.add_argument(
+            "--offset",
+            type=int,
+            default=0,
+            help="Number of conversations to skip. Defaults to 0.",
+        )
+
+        conv_get_parser = conversations_subparsers.add_parser(
+            "get",
+            parents=[conversations_path_parent, json_parent, verbose_parent],
+            help="Get details for a specific conversation.",
+            description=(
+                "Get detailed information for a conversation including turns.\n\n"
+                "Examples:\n"
+                "  poly conversations get <conversation_id>\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        conv_get_parser.add_argument(
+            "conversation_id",
+            type=str,
+            help="The conversation ID.",
+        )
+
+        conv_audio_parser = conversations_subparsers.add_parser(
+            "get-audio",
+            parents=[conversations_path_parent, json_parent, verbose_parent],
+            help="Download audio recording for a conversation.",
+            description=(
+                "Download the audio recording for a conversation as a WAV file.\n\n"
+                "Examples:\n"
+                "  poly conversations get-audio <conversation_id>\n"
+                "  poly conversations get-audio <conversation_id> --direction user\n"
+                "  poly conversations get-audio <conversation_id> --redacted -o redacted.wav\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        conv_audio_parser.add_argument(
+            "conversation_id",
+            type=str,
+            help="The conversation ID.",
+        )
+        conv_audio_parser.add_argument(
+            "--direction",
+            type=str,
+            default="combined",
+            choices=["combined", "user", "agent"],
+            help="Audio direction. Defaults to combined.",
+        )
+        conv_audio_parser.add_argument(
+            "--redacted",
+            action="store_true",
+            help="Download redacted audio.",
+        )
+        conv_audio_parser.add_argument(
+            "-o",
+            "--output",
+            type=str,
+            help="Output file path. Defaults to <conversation_id>.wav.",
+        )
+
         return parser
 
     @classmethod
@@ -1181,7 +1308,6 @@ class AgentStudioCLI:
                     args.skip_validation,
                     args.dry_run,
                     args.format,
-                    args.email,
                     args.from_projection,
                     output_json=args.json,
                     output_commands=args.output_json_commands,
@@ -1350,10 +1476,35 @@ class AgentStudioCLI:
                         dry_run=args.dry_run,
                     )
 
+            elif args.command == "conversations":
+                if args.conversations_subcommand == "list":
+                    cls.conversations_list(
+                        args.path,
+                        args.limit,
+                        args.offset,
+                        output_json=args.json,
+                    )
+                elif args.conversations_subcommand == "get":
+                    cls.conversations_get(
+                        args.path,
+                        args.conversation_id,
+                        output_json=args.json,
+                    )
+                elif args.conversations_subcommand == "get-audio":
+                    cls.conversations_get_audio(
+                        args.path,
+                        args.conversation_id,
+                        direction=args.direction,
+                        redacted=args.redacted,
+                        output_path=args.output,
+                        output_json=args.json,
+                    )
+
             elif args.command == "start":
-                cls.start(
-                    base_path=args.base_path,
-                )
+                cls.start(base_path=args.base_path)
+
+            elif args.command == "login":
+                cls.login(region=args.region)
 
         except Exception as e:
             if hasattr(args, "json") and args.json:
@@ -1571,7 +1722,7 @@ class AgentStudioCLI:
                 return
             project_name = project_name.strip()
 
-        if not project_id and region != "studio":
+        if not project_id and region != "studio" and not output_json:
             project_id = questionary.text(
                 "Enter project ID (leave empty to let the platform generate one):",
                 validate=lambda val: (
@@ -1885,7 +2036,6 @@ class AgentStudioCLI:
         skip_validation: bool = False,
         dry_run: bool = False,
         format: bool = False,
-        email: Optional[str] = None,
         from_projection: str = None,
         output_json: bool = False,
         output_commands: bool = False,
@@ -1908,7 +2058,6 @@ class AgentStudioCLI:
             skip_validation=skip_validation,
             dry_run=dry_run,
             format=format,
-            email=email,
             projection_json=projection_json,
         )
         new_branch_name = None
@@ -2412,7 +2561,6 @@ class AgentStudioCLI:
                 skip_validation=True,
                 dry_run=False,
                 format=False,
-                email=None,
             )
 
     @classmethod
@@ -3083,7 +3231,6 @@ class AgentStudioCLI:
                 skip_validation=False,
                 dry_run=False,
                 format=False,
-                email=None,
             )
             if output == "No changes detected":
                 push_success = True  # Not an error if there are no changes to push
@@ -3884,12 +4031,126 @@ class AgentStudioCLI:
                 error(f"Failed to rollback deployment: {e}")
             sys.exit(1)
 
+    # ── conversations ────────────────────────────────────────────────
+
+    @classmethod
+    def conversations_list(
+        cls,
+        base_path: str,
+        limit: int = 50,
+        offset: int = 0,
+        output_json: bool = False,
+    ) -> None:
+        """List conversations for the project.
+
+        Args:
+            base_path: Base path for the project.
+            limit: Max number of conversations to return.
+            offset: Number of conversations to skip.
+            output_json: If True, emit machine-readable JSON.
+        """
+        project = cls._load_project(base_path, output_json=output_json)
+        result = AgentStudioInterface.list_conversations(
+            region=project.region,
+            project_id=project.project_id,
+            limit=limit,
+            offset=offset,
+        )
+        conversations = result.get("conversations", [])
+
+        if output_json:
+            json_print(result)
+        else:
+            if not conversations:
+                info("No conversations found.")
+                return
+            print_conversations(conversations, url_builder=project.get_conversation_url)
+
+    @classmethod
+    def conversations_get(
+        cls,
+        base_path: str,
+        conversation_id: str,
+        output_json: bool = False,
+    ) -> None:
+        """Get details for a specific conversation.
+
+        Args:
+            base_path: Base path for the project.
+            conversation_id: The conversation ID to look up.
+            output_json: If True, emit machine-readable JSON.
+        """
+        project = cls._load_project(base_path, output_json=output_json)
+        conversation = AgentStudioInterface.get_conversation(
+            region=project.region,
+            project_id=project.project_id,
+            conversation_id=conversation_id,
+        )
+
+        if output_json:
+            json_print(conversation)
+        else:
+            studio_url = project.get_conversation_url(conversation_id)
+            print_conversation_detail(conversation, studio_url=studio_url)
+
+    @classmethod
+    def conversations_get_audio(
+        cls,
+        base_path: str,
+        conversation_id: str,
+        direction: str = "combined",
+        redacted: bool = False,
+        output_path: Optional[str] = None,
+        output_json: bool = False,
+    ) -> None:
+        """Download audio recording for a conversation.
+
+        Args:
+            base_path: Base path for the project.
+            conversation_id: The conversation ID.
+            direction: Audio direction — combined, user, or agent.
+            redacted: Whether to download redacted audio.
+            output_path: Output file path. Defaults to <conversation_id>.wav.
+            output_json: If True, emit machine-readable JSON.
+        """
+        project = cls._load_project(base_path, output_json=output_json)
+        audio_data = AgentStudioInterface.get_conversation_audio(
+            region=project.region,
+            project_id=project.project_id,
+            conversation_id=conversation_id,
+            direction=direction,
+            redacted=redacted,
+        )
+
+        if output_path is None:
+            output_path = f"{conversation_id}.wav"
+
+        with open(output_path, "wb") as f:
+            f.write(audio_data)
+
+        size_bytes = len(audio_data)
+        if output_json:
+            json_print(
+                {
+                    "success": True,
+                    "conversation_id": conversation_id,
+                    "direction": direction,
+                    "redacted": redacted,
+                    "output_path": output_path,
+                    "size_bytes": size_bytes,
+                }
+            )
+        else:
+            size_mb = size_bytes / 1_000_000
+            success(f"Audio saved to {output_path} ({size_mb:.1f} MB)")
+
     @classmethod
     def start(cls, base_path: str) -> None:
-        """Authenticate via device flow, obtain a JWT, and initialise a project."""
+        """Create an Agent Studio account, set up API key, and create a first project."""
         print_welcome_message()
         plain(
-            "This will guide you through setting up your API key and creating a new project in Agent Studio."
+            "This will guide you through setting up your API key"
+            " and creating a new project in Agent Studio."
         )
         questionary.press_any_key_to_continue("Press any key to continue...").ask()
 
@@ -3914,54 +4175,29 @@ class AgentStudioCLI:
                     info("You can create a new project later by running 'poly project create'")
                 return
 
-        # --- 2. Create account/signin via device flow ---
-        jwt_access_token = cls._signin()
+        # --- 2. Sign in via device flow ---
+        jwt_access_token = cls._signin("studio")
 
+        # --- 3. Authorise and save API key ---
+        cls._authenticate_and_save_key(jwt_access_token, region="studio")
+
+        # --- 4. Wait for the new PAT to become active (needed for project creation) ---
         api_handler = AgentStudioInterface()
-
-        # --- 3. Authorise user  ---
-        info("Setting up your account...")
-        api_handler.authorise(region="studio", jwt_token=jwt_access_token)
-
-        # --- 4. Generate PAT token ---
-        info("Fetching API key...")
-        user_pats = api_handler.get_pats(region="studio", jwt_token=jwt_access_token)
-        if user_pats:
-            pat = user_pats[0].get("key")
-            os.environ["POLY_ADK_KEY"] = pat
-            success(f"Found existing API Token: {mask_api_key(pat)}")
-        else:
-            info("No existing API key found in your account.")
-            ctx = console.status("[info]Creating a new API key...[/info]")
-            with ctx:
-                pat = api_handler.create_pat(
-                    region="studio", jwt_token=jwt_access_token, name="adk-key"
+        with console.status("[info]Verifying API key is active...[/info]"):
+            for _ in range(20):
+                try:
+                    api_handler.get_accounts(region="studio")
+                    break
+                except Exception:
+                    time.sleep(1)
+            else:
+                error(
+                    "API key was created but is not active yet."
+                    " Please wait a moment and try 'poly project create'."
                 )
-                os.environ["POLY_ADK_KEY"] = pat
+                return
 
-                attempts = 0
-                # After creating a new PAT, there may be a short delay before it's active.
-                # Poll the accounts endpoint until it works or we hit a timeout.
-                while attempts < 10:
-                    try:
-                        api_handler.get_accounts(region="studio")
-                        break
-                    except Exception:
-                        attempts += 1
-                        time.sleep(1)
-                else:
-                    error(
-                        "API key was created but is not active yet. Please wait a moment and try again."
-                    )
-                    sys.exit(1)
-
-            success(f"Created a new API Key: {mask_api_key(pat)}")
-
-        save_api_key_credential_file(pat, region="studio")
-        plain("API key has been saved to your credential file for future use.")
-        info(f"Credential file path: {CREDENTIALS_FILE_PATH}")
-        plain("")
-
+        # --- 5. Optionally create a project ---
         create_project = questionary.confirm(
             "Would you like to create a new project in Agent Studio now?",
             auto_enter=False,
@@ -3973,12 +4209,71 @@ class AgentStudioCLI:
             info("You can create a new project later by running 'poly project create'")
 
     @classmethod
-    def _signin(cls) -> str:
+    def login(cls, region: str | None = None) -> None:
+        """Log in to an existing Agent Studio account and save API key credentials."""
+        print_welcome_message()
+        plain(
+            "This will guide you through logging in to your Agent Studio account"
+            " and setting up your API key for use with the ADK."
+        )
+        questionary.press_any_key_to_continue("Press any key to continue...").ask()
+
+        if region is None:
+            region = questionary.select(
+                "Select your region:",
+                choices=[
+                    questionary.Choice("Studio", value="studio"),
+                    questionary.Choice("US (us-1) — Enterprise", value="us-1"),
+                    questionary.Choice("UK (uk-1) — Enterprise", value="uk-1"),
+                    questionary.Choice("EU West (euw-1) — Enterprise", value="euw-1"),
+                ],
+                default="studio",
+            ).ask()
+
+        jwt_access_token = cls._signin(region)
+        cls._authenticate_and_save_key(jwt_access_token, region=region)
+        success("Logged in successfully!")
+
+    @classmethod
+    def _authenticate_and_save_key(cls, jwt_access_token: str, region: str) -> None:
+        """Authorise the user, fetch or create a PAT, and save it to the credential file."""
+        api_handler = AgentStudioInterface()
+
+        info("Setting up your account...")
+        api_handler.authorise(region=region, jwt_token=jwt_access_token)
+
+        info("Fetching API key...")
+        user_pats = api_handler.get_pats(region=region, jwt_token=jwt_access_token)
+        if user_pats:
+            pat = user_pats[0].get("key")
+            if not pat:
+                error("API key not found in account data. Please contact support.")
+                sys.exit(1)
+            os.environ["POLY_ADK_KEY"] = pat
+            success(f"Found existing API Token: {mask_api_key(pat)}")
+        else:
+            info("No existing API key found in your account.")
+            ctx = console.status("[info]Creating a new API key...[/info]")
+            with ctx:
+                pat = api_handler.create_pat(
+                    region=region, jwt_token=jwt_access_token, name="adk-key"
+                )
+                os.environ["POLY_ADK_KEY"] = pat
+
+            success(f"Created a new API Key: {mask_api_key(pat)}")
+
+        save_api_key_credential_file(pat, region=region)
+        plain("API key has been saved to your credential file for future use.")
+        info(f"Credential file path: {CREDENTIALS_FILE_PATH}")
+        plain("")
+
+    @classmethod
+    def _signin(cls, region: str) -> str:
         """Sign in via the Auth0 device authorization flow and return a JWT access token."""
         auth0_handler = Auth0Handler()
 
         try:
-            device_response = auth0_handler.request_device_code()
+            device_response = auth0_handler.request_device_code(region)
         except Exception as e:
             error(f"Failed to start authorization: {e}")
             sys.exit(1)
@@ -4001,7 +4296,7 @@ class AgentStudioCLI:
             while not access_token:
                 time.sleep(interval)
                 try:
-                    token_response = auth0_handler.poll_device_token(device_code)
+                    token_response = auth0_handler.poll_device_token(region, device_code)
                     access_token = token_response.get("access_token")
                 except requests.HTTPError as e:
                     try:

@@ -29,6 +29,7 @@ from poly.migration_utils import (
     run_migrations,
 )
 from poly.resources import (
+    AdditionalLanguage,
     ApiIntegration,
     AsrSettings,
     BaseFlowStep,
@@ -36,6 +37,7 @@ from poly.resources import (
     ChatSafetyFilters,
     ChatStylePrompt,
     Condition,
+    DefaultLanguage,
     Entity,
     ExperimentalConfig,
     FlowConfig,
@@ -56,8 +58,10 @@ from poly.resources import (
     SMSTemplate,
     StepType,
     SubResource,
+    TestCase,
     Topic,
     TranscriptCorrection,
+    Translation,
     Variable,
     Variant,
     VariantAttribute,
@@ -106,6 +110,10 @@ RESOURCE_NAME_TO_CLASS: dict[str, type[Resource]] = {
     "asr_settings": AsrSettings,
     "phrase_filtering": PhraseFilter,
     "pronunciations": Pronunciation,
+    "test_cases": TestCase,
+    "translations": Translation,
+    "default_language": DefaultLanguage,
+    "additional_languages": AdditionalLanguage,
 }
 
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
@@ -1013,7 +1021,6 @@ class AgentStudioProject:
         new_resources: ResourceMap,
         updated_resources: ResourceMap,
         deleted_resources: ResourceMap,
-        email: Optional[str] = None,
     ) -> list[Message]:
         """Stage commands for the project."""
 
@@ -1047,7 +1054,6 @@ class AgentStudioProject:
                     new_resources=pre_changes.new,
                     deleted_resources=pre_changes.deleted,
                     updated_resources=pre_changes.updated,
-                    email=email,
                 )
             )
 
@@ -1057,7 +1063,6 @@ class AgentStudioProject:
                     new_resources=new_resources,
                     deleted_resources=deleted_resources,
                     updated_resources=updated_resources,
-                    email=email,
                 )
             )
 
@@ -1067,7 +1072,6 @@ class AgentStudioProject:
                     new_resources=post_changes.new,
                     deleted_resources=post_changes.deleted,
                     updated_resources=post_changes.updated,
-                    email=email,
                 )
             )
 
@@ -1079,7 +1083,6 @@ class AgentStudioProject:
         skip_validation=False,
         dry_run=False,
         format=False,
-        email=None,
         projection_json: Optional[dict[str, Any]] = None,
     ) -> tuple[bool, str, list[Message]]:
         """Push the project configuration to the Agent Studio Interactor.
@@ -1091,8 +1094,6 @@ class AgentStudioProject:
             format (bool): If True, format the resource before saving.
             projection_json (dict[str, Any]): A dictionary containing the projection
                 If provided, the projection will be used instead of fetching it from the API.
-            email (str): Email to use for metadata creation.
-                If None, use the email of the current user.
 
         Returns:
             Tuple[bool, str, list[Message]]:
@@ -1202,7 +1203,7 @@ class AgentStudioProject:
                 return False, f"Validation errors detected:\n{error_messages}", []
 
         commands = self._stage_commands(
-            new_state, new_resources, updated_resources, deleted_resources, email=email
+            new_state, new_resources, updated_resources, deleted_resources
         )
         if not dry_run:
             success = self.api_handler.send_queued_commands()
@@ -1323,6 +1324,17 @@ class AgentStudioProject:
                     new_subresources.setdefault(type(sub_resource), {})[
                         sub_resource.resource_id
                     ] = sub_resource
+                # A new parent can carry update-only sub-resources — e.g. a TestCase's
+                # prompt_assertions/tags, applied via set_test_case_assertions (no create
+                # proto). Forward updated + deleted too, or they're dropped on create.
+                for sub_resource in updated:
+                    updated_subresources.setdefault(type(sub_resource), {})[
+                        sub_resource.resource_id
+                    ] = sub_resource
+                for sub_resource in deleted:
+                    deleted_subresources.setdefault(type(sub_resource), {})[
+                        sub_resource.resource_id
+                    ] = sub_resource
 
         return SubResourceChangeSet(
             new=new_subresources,
@@ -1377,6 +1389,23 @@ class AgentStudioProject:
         post_push_new_resources: ResourceMap = {}
         post_push_updated_resources: ResourceMap = {}
         post_push_deleted_resources: ResourceMap = {}
+
+        # If we are creating any Webchat config, instead enable Webchat and set
+        # the configs as update
+        if (
+            ChatGreeting in new_resources
+            or ChatSafetyFilters in new_resources
+            or ChatStylePrompt in new_resources
+        ):
+            self.api_handler.queue_command(
+                utils.create_command_webchat_channel_update_status(enabled=True)
+            )
+            # Move any Webchat config in new resources to updated resources
+            for resource_type in [ChatGreeting, ChatSafetyFilters, ChatStylePrompt]:
+                for resource_id, resource in new_resources.get(resource_type, {}).items():
+                    pre_push_updated_resources.setdefault(resource_type, {})[resource_id] = resource
+                if resource_type in new_resources:
+                    new_resources.pop(resource_type)
 
         # When a function is deleted the backend prunes that function ID from all
         # variable references. If the deleted function was the variable's only reference,
@@ -2147,15 +2176,36 @@ class AgentStudioProject:
                     if not resource_info:
                         raise ValueError(f"Resource info not found for {file_path}")
 
+                    resource_name = resource_info["resource_name"]
+                    flow_name = flow_paths_to_names.get(
+                        resource_utils.get_flow_name_from_path(file_path),
+                    )
+
+                    # Default Language will only be modified, but name must
+                    # be read from file
+                    if resource_type == DefaultLanguage:
+                        resource = self.read_local_resource(
+                            ResourceMapping(
+                                resource_id=resource_info["resource_id"],
+                                resource_type=resource_type,
+                                resource_name=resource_name,
+                                file_path=file_path,
+                                flow_name=flow_name,
+                                resource_prefix=resource_type.get_resource_prefix(
+                                    file_path=file_path
+                                ),
+                            ),
+                            resource_mappings=[],
+                        )
+                        resource_name = resource.name
+
                     kept_resource_mappings.append(
                         ResourceMapping(
                             resource_id=resource_info["resource_id"],
                             resource_type=resource_type,
-                            resource_name=resource_info["resource_name"],
+                            resource_name=resource_name,
                             file_path=file_path,
-                            flow_name=flow_paths_to_names.get(
-                                resource_utils.get_flow_name_from_path(file_path),
-                            ),
+                            flow_name=flow_name,
                             resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
                         )
                     )
@@ -2700,7 +2750,7 @@ class AgentStudioProject:
 
     def merge_branch(
         self, message: str, conflict_resolutions: list[dict[str, Any]] = None
-    ) -> tuple[bool, list[str], list[str]]:
+    ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
         """Merge the current branch into main in the project.
 
         Args:
@@ -2713,8 +2763,8 @@ class AgentStudioProject:
 
         Returns:
             bool: True if the merge was successful, False otherwise
-            list[str]: A list of conflict paths if the merge failed, empty list if successful
-            list[str]: A list of error messages if the merge failed, empty list if successful
+            list[dict[str, str]]: A list of conflicts
+            list[dict[str, str]]: A list of errors
         """
         branches = self.api_handler.get_branches()
         if self.branch_id not in branches.values():
@@ -2767,12 +2817,8 @@ class AgentStudioProject:
             self.switch_branch("main", force=True)
         return True
 
-    def sync_ids_with_sandbox(self, email: str = None) -> bool:
+    def sync_ids_with_sandbox(self) -> bool:
         """Sync ids of resources in sandbox into current branch
-
-        Args:
-            email (str): Email to use for metadata creation.
-                If None, use the email of the current user.
 
         Returns:
             bool: True if the sync was successful, False otherwise
@@ -2871,9 +2917,7 @@ class AgentStudioProject:
         if not (updated_resources or new_resources or deleted_resources):
             return True
 
-        self._stage_commands(
-            new_state, new_resources, updated_resources, deleted_resources, email=email
-        )
+        self._stage_commands(new_state, new_resources, updated_resources, deleted_resources)
         success = self.api_handler.send_queued_commands()
 
         self.branch_id = self.api_handler.branch_id
