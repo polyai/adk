@@ -76,6 +76,7 @@ A typical project structure looks like this:
 ├── flows/                              # Optional - flow definitions
 ├── functions/                          # Global functions
 ├── topics/                             # Knowledge base topics
+├── test_suite/                         # Optional - simulated conversation tests
 └── project.yaml                        # Project metadata
 ~~~
 
@@ -139,6 +140,13 @@ These references let settings, prompts, and behaviors point to resources by name
 
     Review the main ADK commands and their purpose.
     [Open CLI reference](../reference/cli.md)
+
+-   **Tests**
+
+    ---
+
+    Write simulated conversation test cases under `test_suite/`.
+    [Open tests](../reference/tests.md)
 
 -   **Multi-user workflows and guardrails**
 
