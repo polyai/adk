@@ -141,6 +141,13 @@ These references let settings, prompts, and behaviors point to resources by name
     Review the main ADK commands and their purpose.
     [Open CLI reference](../reference/cli.md)
 
+-   **Tests**
+
+    ---
+
+    Write simulated conversation test cases under `test_suite/`.
+    [Open tests](../reference/tests.md)
+
 -   **Multi-user workflows and guardrails**
 
     ---
