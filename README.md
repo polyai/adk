@@ -243,7 +243,7 @@ poly docs --output doc_file.md
 
 ## Bugs & Feature Requests
 
-Please report bugs or request features via the [GitHub Issues](https://github.com/PolyAI-LDN/adk/issues) page.
+Please report bugs or request features via the [GitHub Issues](https://github.com/PolyAI/adk/issues) page.
 
 ## Contributing
 
