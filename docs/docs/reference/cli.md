@@ -878,12 +878,12 @@ A typical CLI workflow looks like this:
     Conflict resolution, `--interactive` flow, and `--resolutions` JSON for `poly branch merge`.
     [Open branch merging](./branch_merge.md)
 
--   **Testing**
+-   **Tests**
 
     ---
 
-    Learn how to run tests for the project.
-    [Open testing](./testing.md)
+    Write and manage simulated conversation tests in `test_suite/`.
+    [Open tests](./tests.md)
 
 -   **Working locally**
 

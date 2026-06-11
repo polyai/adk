@@ -1,6 +1,6 @@
 ---
 title: Tests
-description: Write and manage Agent Studio simulated conversation test cases in the PolyAI ADK.
+description: Write and manage simulated conversation test cases in the PolyAI ADK, and understand how testing fits into the local workflow.
 ---
 
 # Tests
@@ -10,6 +10,36 @@ Agent Studio test cases are simulated conversations that run your agent end-to-e
 </p>
 
 Each test case describes a scenario for a simulated user and a set of assertions to evaluate against the resulting conversation. Tests run inside Agent Studio against the pushed branch — the ADK does not execute them locally.
+
+!!! warning "There is no local runtime"
+
+    The ADK does not execute your agent on your local machine. There is no `poly serve` command or local simulator. All agent execution happens inside Agent Studio's sandbox environment. To test runtime behavior, push your changes and use `poly chat`, or test interactively through Agent Studio.
+
+## Where tests fit in the workflow
+
+Tests sit between validation and merge in the standard [CLI working pattern](./cli.md#working-pattern). Edit locally, validate with `poly validate`, push, then run the suite from Agent Studio or chat against the branch with `poly chat`.
+
+<div class="grid cards" markdown>
+
+-   **Validation**
+
+    ---
+
+    Use `poly validate` to check project configuration before pushing.
+
+-   **Simulated conversations**
+
+    ---
+
+    Define test cases under `test_suite/` and run them in Agent Studio.
+
+-   **Interactive review**
+
+    ---
+
+    Use `poly chat` and Agent Studio to spot-check behavior on the pushed branch.
+
+</div>
 
 ## Location
 
@@ -145,25 +175,37 @@ Test cases follow the standard ADK lifecycle:
 
     Tests are pushed to the current branch and run against that branch's agent. Use a branch per scenario when iterating on flows or topics so test results map cleanly to the change under review.
 
+## What to cover
+
+Good coverage of a project usually includes:
+
+- the happy path of every flow and major topic
+- key error paths — missing booking, invalid input, unavailable slot
+- function call shape — confirm the agent calls the right function with the right arguments for each branch of logic
+- state transitions across turns — confirm later turns reference earlier user input
+- behavior on the channels your project actually ships on (voice, webchat, or both)
+
 ## Best practices
 
 - write `scenario` as a short, concrete user goal — "Ask to cancel a booking with reference ABC123" — not a script
 - prefer prompt assertions for behavior, function call assertions for integration correctness
 - keep each test case focused on one outcome; split combined scenarios into multiple files
 - use `tags` consistently (`smoke`, `regression`, `<flow_name>`) so suites can be filtered in Agent Studio
-- cover error paths — a missing booking, an invalid phone number — not only success
+- cover error paths, not only success cases
 - add a webchat and a voice variant of any critical path that runs on both channels
+- validate as part of the normal edit loop, not just before merge
+- combine the suite with `poly chat` and interactive review in Agent Studio when behavior depends on the full conversation flow
 
 ## Related pages
 
 <div class="grid cards" markdown>
 
--   **Testing**
+-   **CLI reference**
 
     ---
 
-    How tests fit alongside `poly validate` and `poly chat` in the local workflow.
-    [Open testing](./testing.md)
+    `poly validate`, `poly push`, and `poly chat` — the commands used in the test workflow.
+    [Open CLI reference](./cli.md)
 
 -   **Functions**
 
@@ -186,11 +228,11 @@ Test cases follow the standard ADK lifecycle:
     Configure the languages a test case can target.
     [Open languages](./languages.md)
 
--   **CLI reference**
+-   **Working locally**
 
     ---
 
-    `poly validate` and `poly push` commands used in the test workflow.
-    [Open CLI reference](./cli.md)
+    How tests fit into the daily edit / validate / push loop.
+    [Open working locally](../concepts/working-locally.md)
 
 </div>
