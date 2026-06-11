@@ -1324,6 +1324,17 @@ class AgentStudioProject:
                     new_subresources.setdefault(type(sub_resource), {})[
                         sub_resource.resource_id
                     ] = sub_resource
+                # A new parent can carry update-only sub-resources — e.g. a TestCase's
+                # prompt_assertions/tags, applied via set_test_case_assertions (no create
+                # proto). Forward updated + deleted too, or they're dropped on create.
+                for sub_resource in updated:
+                    updated_subresources.setdefault(type(sub_resource), {})[
+                        sub_resource.resource_id
+                    ] = sub_resource
+                for sub_resource in deleted:
+                    deleted_subresources.setdefault(type(sub_resource), {})[
+                        sub_resource.resource_id
+                    ] = sub_resource
 
         return SubResourceChangeSet(
             new=new_subresources,
