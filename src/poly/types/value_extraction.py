@@ -2,21 +2,19 @@
 # flake8: noqa
 # ruff: noqa
 # type: ignore
-__all__ = ["Address"]
+
+
+__all__ = ["ExtractionError", "Address"]
+
+
+class ExtractionError(Exception):
+    """Error in retrieving extracted values from the conversation."""
+
+    def __init__(self, message: str): ...
 
 
 class Address:
-    """
-    Represents a structured address.
-
-    Attributes:
-        street_number: The street number.
-        street_name: The street name.
-        city: The city name.
-        state: The state name.
-        postcode: The zip code or postal code.
-        country: The country name.
-    """
+    """Represents a structured address."""
 
     street_number: str | None
     street_name: str | None
