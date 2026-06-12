@@ -5,7 +5,7 @@
 
 
 from typing import Any
-from runtime.conversation import Conversation
+from .conversation import Conversation
 
 
 __all__ = ["Transition", "StepTransition", "FlowFunctionExecutor", "Flow"]

@@ -5,9 +5,9 @@
 
 
 from typing import Literal
-import runtime.value_extraction_types as extraction_types
-from runtime.history import AgentResponse, UserInput
-from runtime.value_extraction import Address
+from .value_extraction_types import EntityConfig
+from .history import AgentResponse, UserInput
+from .value_extraction import Address
 
 
 __all__ = ["Utils"]
@@ -62,9 +62,7 @@ class Utils:
     ) -> str | dict:
         """[Opt-in Feature] 🚧"""
 
-    def validate_entity(
-        self, value: str, entity_config: extraction_types.EntityConfig
-    ) -> _EntityValidationResponse:
+    def validate_entity(self, value: str, entity_config: EntityConfig) -> _EntityValidationResponse:
         """Validate an entity value against its configuration."""
 
     def get_secret(self, secret_name: str) -> str | dict:

@@ -324,21 +324,55 @@ def _collect_import_stmts(stmts: list[ast.stmt]) -> list[ast.stmt]:
     return result
 
 
+def _expand_module_import(module: str, alias: str, body_text: str) -> str | None:
+    """Convert ``import runtime.X as Y`` to ``from .X import A, B, C``.
+
+    Scans *body_text* for ``Y.name`` references and emits a relative
+    ``from`` import for each attribute used.  Also rewrites those
+    ``Y.name`` references in body_text to just ``name``.
+    Returns (import_line, new_body_text) or None if no attributes are found.
+    """
+    import re as _re
+
+    pattern = _re.compile(r"(?<![a-zA-Z0-9_.])" + _re.escape(alias) + r"\.(\w+)")
+    names = sorted(set(m.group(1) for m in pattern.finditer(body_text)))
+    if not names:
+        return None, body_text
+    # Relativize: runtime.foo -> .foo
+    rel_module = "." + module.split(".", 1)[1] if "." in module else module
+    import_line = f"from {rel_module} import {', '.join(names)}"
+    # Rewrite body: extraction_types.EntityConfig -> EntityConfig
+    new_body = pattern.sub(r"\1", body_text)
+    return import_line, new_body
+
+
+def _relativize_module(module: str) -> str:
+    """Convert ``runtime.X`` or ``utils.X`` to ``.X`` for relative imports."""
+    if module.startswith(("runtime.", "utils.")):
+        return "." + module.split(".", 1)[1]
+    return module
+
+
 def _extract_imports(tree: ast.Module, source_path: Path) -> list[str]:
     """Extract imports needed for the stub.
 
     Includes:
     - typing imports
-    - runtime.* imports (excluding internal modules and private names)
-    - stdlib/pydantic imports used in type annotations (enum, datetime, etc.)
+    - runtime.* imports (relativized to .X)
+    - stdlib/pydantic imports used in type annotations
     - imports from ``if TYPE_CHECKING:`` blocks (promoted to unconditional)
+
+    ``import runtime.X as Y`` forms are tagged for deferred expansion
+    (needs body_text to resolve which attributes are used).
     """
     imports = []
     for stmt in _collect_import_stmts(tree.body):
         if isinstance(stmt, ast.Import):
             for alias in stmt.names:
                 if alias.name.startswith("runtime"):
-                    imports.append(ast.unparse(stmt))
+                    imports.append(
+                        ("module_alias", alias.name, alias.asname or alias.name.rsplit(".", 1)[-1])
+                    )
                 elif alias.name in _ALLOWED_STDLIB_MODULES:
                     imports.append(ast.unparse(stmt))
         elif isinstance(stmt, ast.ImportFrom):
@@ -357,10 +391,11 @@ def _extract_imports(tree: ast.Module, source_path: Path) -> list[str]:
                 public_names = _filter_import_names(stmt.names)
                 if not public_names:
                     continue
+                rel_module = _relativize_module(stmt.module)
                 filtered = ast.ImportFrom(
-                    module=stmt.module,
+                    module=rel_module,
                     names=public_names,
-                    level=stmt.level,
+                    level=0 if rel_module.startswith(".") else stmt.level,
                 )
                 imports.append(ast.unparse(filtered))
     return imports
@@ -476,7 +511,22 @@ def generate_stub(source_path: Path) -> str:
         body_parts.append("\n".join(assignments_after))
     body_text = "\n".join(body_parts)
 
-    imports = _prune_imports(candidate_imports, body_text)
+    # Resolve deferred module-alias imports and rewrite body references.
+    resolved_imports = []
+    for item in candidate_imports:
+        if isinstance(item, tuple) and item[0] == "module_alias":
+            _, module, alias = item
+            import_line, body_text = _expand_module_import(module, alias, body_text)
+            if import_line:
+                resolved_imports.append(import_line)
+        else:
+            resolved_imports.append(item)
+
+    imports = _prune_imports(resolved_imports, body_text)
+
+    # Rebuild body_parts from (possibly rewritten) body_text
+    # Split back into sections for assembly
+    all_body_lines = body_text.split("\n") if body_text.strip() else []
 
     # Assemble final stub
     parts = [STUB_HEADER]
@@ -488,14 +538,8 @@ def generate_stub(source_path: Path) -> str:
         items = ", ".join(f'"{name}"' for name in all_list)
         parts.append(f"\n__all__ = [{items}]")
 
-    if assignments_before:
-        parts.append("\n".join(assignments_before))
-
-    if classes:
-        parts.append("\n\n".join(classes))
-
-    if assignments_after:
-        parts.append("\n".join(assignments_after))
+    if all_body_lines:
+        parts.append("\n".join(all_body_lines))
 
     return "\n\n".join(parts) + "\n"
 
