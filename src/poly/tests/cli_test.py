@@ -2421,6 +2421,203 @@ class CreateProjectTest(unittest.TestCase):
         )
 
 
+class DeleteProjectTest(unittest.TestCase):
+    """Tests for the delete project command."""
+
+    @patch("poly.cli.AgentStudioInterface")
+    def test_non_interactive_delete_with_force_succeeds(self, mock_iface_cls):
+        """delete project with all args and force=True skips confirmation and deletes."""
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_agents.return_value = {"proj-123": "My Project"}
+
+        AgentStudioCLI.delete_project(
+            region="us-1",
+            account_id="acc-456",
+            project_id="proj-123",
+            force=True,
+            output_json=False,
+        )
+
+        mock_iface.delete_project.assert_called_once_with("us-1", "proj-123")
+
+    @patch("poly.cli.AgentStudioInterface")
+    def test_json_mode_requires_all_args(self, mock_iface_cls):
+        """delete project --json without all args exits with error."""
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.delete_project(
+                region="us-1",
+                account_id=None,
+                project_id=None,
+                force=False,
+                output_json=True,
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_iface_cls.return_value.delete_project.assert_not_called()
+
+    @patch("poly.cli.AgentStudioInterface")
+    @patch("poly.cli.questionary")
+    def test_interactive_confirm_false_cancels_delete(self, mock_q, mock_iface_cls):
+        """delete project returns early when user declines confirmation prompt."""
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_agents.return_value = {"proj-123": "My Project"}
+        mock_q.confirm.return_value.ask.return_value = False
+
+        AgentStudioCLI.delete_project(
+            region="us-1",
+            account_id="acc-456",
+            project_id="proj-123",
+            force=False,
+            output_json=False,
+        )
+
+        mock_iface.delete_project.assert_not_called()
+
+    @patch("poly.cli.AgentStudioInterface")
+    def test_api_failure_surfaces_error(self, mock_iface_cls):
+        """delete project exits with error when the API call fails."""
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_agents.return_value = {"proj-123": "My Project"}
+        mock_iface.delete_project.side_effect = RuntimeError("Server exploded")
+
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.delete_project(
+                region="us-1",
+                account_id="acc-456",
+                project_id="proj-123",
+                force=True,
+                output_json=False,
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_iface.delete_project.assert_called_once()
+
+    @patch("poly.cli.json_print")
+    @patch("poly.cli.AgentStudioInterface")
+    def test_json_mode_outputs_success_payload(self, mock_iface_cls, mock_json_print):
+        """delete project --json outputs success JSON with agent_id."""
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_agents.return_value = {"proj-123": "My Project"}
+
+        AgentStudioCLI.delete_project(
+            region="us-1",
+            account_id="acc-456",
+            project_id="proj-123",
+            force=True,
+            output_json=True,
+        )
+
+        mock_iface.delete_project.assert_called_once_with("us-1", "proj-123")
+        mock_json_print.assert_called_with({"success": True, "agent_id": "proj-123"})
+
+
+class DuplicateProjectTest(unittest.TestCase):
+    """Tests for the duplicate project command."""
+
+    @patch("poly.cli.AgentStudioInterface")
+    def test_non_interactive_duplicate_with_all_args_succeeds(self, mock_iface_cls):
+        """duplicate project with all args provided creates the duplicate."""
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_agents.return_value = {"proj-123": "My Project"}
+        mock_iface.duplicate_project.return_value = {"id": "proj-copy", "name": "My Copy"}
+
+        AgentStudioCLI.duplicate_project(
+            region="us-1",
+            account_id="acc-456",
+            project_id="proj-123",
+            new_name="My Copy",
+            new_project_id="proj-copy",
+            output_json=False,
+        )
+
+        mock_iface.duplicate_project.assert_called_once_with(
+            "us-1", "proj-123", "My Copy", "proj-copy"
+        )
+
+    @patch("poly.cli.AgentStudioInterface")
+    def test_json_mode_requires_all_args_including_name(self, mock_iface_cls):
+        """duplicate project --json without --name exits with error."""
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.duplicate_project(
+                region="us-1",
+                account_id="acc-456",
+                project_id="proj-123",
+                new_name=None,
+                output_json=True,
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_iface_cls.return_value.duplicate_project.assert_not_called()
+
+    @patch("poly.cli.AgentStudioInterface")
+    @patch("poly.cli.questionary")
+    def test_interactive_flow_prompts_for_name_and_id(self, mock_q, mock_iface_cls):
+        """duplicate project without name/id prompts user for both."""
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_agents.return_value = {"proj-123": "My Project"}
+        mock_iface.duplicate_project.return_value = {"id": "proj-dup", "name": "My Project (copy)"}
+
+        # First text prompt: project name. Second: project id.
+        mock_q.text.return_value.ask.side_effect = ["My Project (copy)", "proj-dup"]
+
+        AgentStudioCLI.duplicate_project(
+            region="us-1",
+            account_id="acc-456",
+            project_id="proj-123",
+            new_name=None,
+            new_project_id=None,
+            output_json=False,
+        )
+
+        mock_iface.duplicate_project.assert_called_once_with(
+            "us-1", "proj-123", "My Project (copy)", "proj-dup"
+        )
+
+    @patch("poly.cli.AgentStudioInterface")
+    def test_api_failure_surfaces_error(self, mock_iface_cls):
+        """duplicate project exits with error when the API call fails."""
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_agents.return_value = {"proj-123": "My Project"}
+        mock_iface.duplicate_project.side_effect = RuntimeError("Timeout")
+
+        with self.assertRaises(SystemExit) as ctx:
+            AgentStudioCLI.duplicate_project(
+                region="us-1",
+                account_id="acc-456",
+                project_id="proj-123",
+                new_name="Copy",
+                new_project_id="proj-copy",
+                output_json=False,
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_iface.duplicate_project.assert_called_once()
+
+    @patch("poly.cli.json_print")
+    @patch("poly.cli.AgentStudioInterface")
+    def test_json_mode_outputs_success_payload(self, mock_iface_cls, mock_json_print):
+        """duplicate project --json outputs success JSON with agent_id and agent_name."""
+        mock_iface = mock_iface_cls.return_value
+        mock_iface.get_agents.return_value = {"proj-123": "My Project"}
+        mock_iface.duplicate_project.return_value = {"id": "proj-dup", "name": "Dup Name"}
+
+        AgentStudioCLI.duplicate_project(
+            region="us-1",
+            account_id="acc-456",
+            project_id="proj-123",
+            new_name="Dup Name",
+            new_project_id="proj-dup",
+            output_json=True,
+        )
+
+        mock_iface.duplicate_project.assert_called_once_with(
+            "us-1", "proj-123", "Dup Name", "proj-dup"
+        )
+        mock_json_print.assert_called_with(
+            {"success": True, "agent_id": "proj-dup", "agent_name": "Dup Name"}
+        )
+
+
 class ConversationsCommandTest(unittest.TestCase):
     """Tests for the conversations list/get/get-audio CLI commands."""
 

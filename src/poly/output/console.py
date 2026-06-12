@@ -109,6 +109,29 @@ def print_diff(diff: str) -> None:
     console.print(Syntax(diff, "diff", theme="ansi_dark", line_numbers=False))
 
 
+def print_agents(agents: list[dict[str, Any]]) -> None:
+    """Print a table of agents.
+
+    Args:
+        agents: List of agent record dicts from the API.
+    """
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Agent ID", style="bold yellow", no_wrap=True)
+    table.add_column("Name", no_wrap=True)
+    table.add_column("Updated", no_wrap=True)
+    table.add_column("Branches", justify="right", no_wrap=True)
+    for agent in agents:
+        updated = _format_iso_timestamp(agent.get("updatedAt", ""))
+        branches = str(agent.get("branchCount", 0))
+        table.add_row(
+            agent.get("agentId", "—"),
+            agent.get("agentName", "—"),
+            updated,
+            branches,
+        )
+    console.print(table)
+
+
 def print_branches(branches: dict[str, str] | list[str], current_branch: str | None) -> None:
     """Print branch list with current branch highlighted."""
     console.print("[label]Branches:[/label]")
