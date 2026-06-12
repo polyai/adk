@@ -197,6 +197,27 @@ def create_import_file_contents() -> str:
     return header + all_line + _gen_import_statements()
 
 
+def _copy_types_tree(pkg: importlib.resources.abc.Traversable, dest_dir: str) -> None:
+    """Recursively copy .py stub files from a package into *dest_dir*.
+
+    Creates subdirectories as needed and rewrites ``runtime.``/``utils.``
+    imports to relative form.
+    """
+    os.makedirs(dest_dir, exist_ok=True)
+    for resource in sorted(pkg.iterdir(), key=lambda r: r.name):
+        name = resource.name
+        if name == "__pycache__":
+            continue
+        if resource.is_dir():
+            _copy_types_tree(resource, os.path.join(dest_dir, name))
+            continue
+        if not name.endswith(".py") or (name.startswith("_") and name != "__init__.py"):
+            continue
+        source = _relativize_stub_imports(resource.read_text(encoding="utf-8"))
+        with open(os.path.join(dest_dir, name), "w", encoding="utf-8") as f:
+            f.write(source)
+
+
 def save_imports(base_path: str) -> None:
     """Save the _gen package: __init__.py and importable stub .py files."""
     gen_dir = os.path.join(base_path, "_gen")
@@ -207,15 +228,9 @@ def save_imports(base_path: str) -> None:
         if fname.endswith(".pyi"):
             os.remove(os.path.join(gen_dir, fname))
 
-    # Copy type files into _gen/ with relativized cross-package references
+    # Copy type files (including subdirectories) into _gen/
     pkg = importlib.resources.files(_TYPES_PACKAGE)
-    for resource in sorted(pkg.iterdir(), key=lambda r: r.name):
-        name = resource.name
-        if not name.endswith(".py") or name.startswith("_"):
-            continue
-        source = _relativize_stub_imports(resource.read_text(encoding="utf-8"))
-        with open(os.path.join(gen_dir, name), "w", encoding="utf-8") as f:
-            f.write(source)
+    _copy_types_tree(pkg, gen_dir)
 
     # Collect all type names for __all__
     all_names = [n for names in _load_file_class_maps().values() for n in names]
