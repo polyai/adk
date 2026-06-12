@@ -26,7 +26,7 @@ class ExperimentalConfig(Resource):
 
     @property
     def raw(self) -> str:
-        return json.dumps(self.config, indent=2, sort_keys=True)
+        return json.dumps(self.config, indent=2, sort_keys=True, ensure_ascii=False)
 
     @staticmethod
     def format_resource(content: str, file_name: str = None, **kwargs) -> str:

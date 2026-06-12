@@ -515,7 +515,7 @@ def format_json(json_content: str) -> str:
     """
     try:
         data = json.loads(json_content)
-        return json.dumps(data, indent=2, sort_keys=True) + "\n"
+        return json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
     except Exception:
         return json_content
 
