@@ -499,6 +499,24 @@ components:
       description: Configure DTMF behavior, including disabling speech recognition for DTMF-only steps
       additionalProperties: false
       properties:
+        global:
+          type: object
+          description: Global DTMF config applied to every turn. Step-level DTMF takes precedence when enabled.
+          additionalProperties: false
+          properties:
+            is_enabled:
+              type: boolean
+              description: Whether global DTMF collection is enabled
+            max_digits:
+              type: integer
+              description: Maximum number of DTMF digits to collect
+              minimum: 0
+            end_key:
+              type: string
+              description: Key that signals the end of DTMF input (e.g. "#")
+            collect_while_agent_speaking:
+              type: boolean
+              description: Whether to collect DTMF digits while the agent is speaking
         flow_overrides:
           type: object
           description: Flow-specific DTMF configuration overrides. Each key should be a flow name.
