@@ -66,6 +66,7 @@ from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
     _parse_multi_resource_path,
+    check_yaml_field_types,
 )
 from poly.resources.safety_filters import (
     ChatSafetyFilters,
@@ -7208,9 +7209,7 @@ class TestCaseTests(unittest.TestCase):
                     prompts=[],
                     function_calls=[],
                 ),
-                tags=TestCaseTags(
-                    resource_id="TEST-missing-scenario", name="tags", tags=[]
-                ),
+                tags=TestCaseTags(resource_id="TEST-missing-scenario", name="tags", tags=[]),
             ).validate()
         self.assertIn("Scenario is required", str(cm.exception))
 
@@ -7227,9 +7226,7 @@ class TestCaseTests(unittest.TestCase):
                     prompts=[],
                     function_calls=[],
                 ),
-                tags=TestCaseTags(
-                    resource_id="TEST-missing-language", name="tags", tags=[]
-                ),
+                tags=TestCaseTags(resource_id="TEST-missing-language", name="tags", tags=[]),
             ).validate()
         self.assertIn("Language is required", str(cm.exception))
 
@@ -7287,9 +7284,7 @@ class TestCaseTests(unittest.TestCase):
         self.assertEqual(deleted_after_edit, [])
 
     def test_discover_resources(self):
-        base_path = os.path.join(
-            os.path.dirname(__file__), "test_projects", "test_project"
-        )
+        base_path = os.path.join(os.path.dirname(__file__), "test_projects", "test_project")
         discovered = TestCase.discover_resources(base_path)
         self.assertCountEqual(
             discovered,
@@ -7298,6 +7293,7 @@ class TestCaseTests(unittest.TestCase):
                 os.path.join(base_path, "test_suite", "webchat_smoke_test.yaml"),
             ],
         )
+
 
 class ParseMultiResourcePathTests(unittest.TestCase):
     """Tests for _parse_multi_resource_path including Windows drive-letter handling."""
@@ -7682,9 +7678,7 @@ class DefaultLanguageTests(unittest.TestCase):
         from poly.handlers.protobuf.commands_pb2 import Command
 
         lang = DefaultLanguage(resource_id="en-US", name="en-US")
-        self.assertEqual(
-            lang.update_command_type, "languages_update_default_language"
-        )
+        self.assertEqual(lang.update_command_type, "languages_update_default_language")
         Command(**{lang.update_command_type: lang.build_update_proto()})
 
     def test_validate_duplicate_with_additional_raises(self):
@@ -7919,6 +7913,99 @@ class ValidateWebchatSiblingsTests(unittest.TestCase):
             resource_utils.validate_webchat_siblings(ChatGreeting, mappings)
         self.assertIn("ChatSafetyFilters", str(cm.exception))
         self.assertIn("ChatStylePrompt", str(cm.exception))
+
+
+class CheckYamlFieldTypesTest(unittest.TestCase):
+    """Tests for the check_yaml_field_types YAML colon-space footgun guard."""
+
+    def test_str_field_with_dict_raises(self):
+        """A str field that got a dict (colon-space misparse) should raise."""
+        topic = Topic(
+            resource_id="TOPIC-1",
+            name="test",
+            actions={"bad key": "value"},
+            content="fine",
+            example_queries=[],
+        )
+        with self.assertRaises(ValueError) as ctx:
+            check_yaml_field_types(topic)
+        self.assertIn("actions", str(ctx.exception))
+        self.assertIn("should be a string but got a dict", str(ctx.exception))
+
+    def test_list_str_field_with_dict_item_raises(self):
+        """A list[str] field containing a dict item should raise."""
+        topic = Topic(
+            resource_id="TOPIC-1",
+            name="test",
+            actions="fine",
+            content="fine",
+            example_queries=["good", {"bad key": "value"}],
+        )
+        with self.assertRaises(ValueError) as ctx:
+            check_yaml_field_types(topic)
+        self.assertIn("example_queries[1]", str(ctx.exception))
+        self.assertIn("should be a string but got a dict", str(ctx.exception))
+
+    def test_nested_dataclass_field_checked(self):
+        """Nested dataclass str fields should be recursively validated."""
+        assertion = TestCaseAssertion(
+            resource_id="TC-1",
+            name="assertions",
+            prompts=["fine", {"the outcome: either": "a specific time"}],
+            function_calls=[],
+        )
+        test_case = TestCase(
+            resource_id="TC-1",
+            name="test",
+            scenario="test scenario",
+            channel="chat.polyai",
+            language="en-GB",
+            assertions=assertion,
+            tags=TestCaseTags(resource_id="TC-1", name="tags", tags=[]),
+        )
+        with self.assertRaises(ValueError) as ctx:
+            check_yaml_field_types(test_case)
+        self.assertIn("assertions.prompts[1]", str(ctx.exception))
+
+    def test_valid_resource_passes(self):
+        """A correctly typed resource should not raise."""
+        topic = Topic(
+            resource_id="TOPIC-1",
+            name="test",
+            actions="do something",
+            content="some content",
+            example_queries=["query 1", "query 2"],
+        )
+        check_yaml_field_types(topic)
+
+    def test_optional_str_field_none_passes(self):
+        """Optional[str] fields with None should not raise."""
+        test_case = TestCase(
+            resource_id="TC-1",
+            name="test",
+            scenario="test scenario",
+            channel="chat.polyai",
+            language="en-GB",
+            assertions=TestCaseAssertion(
+                resource_id="TC-1", name="assertions", prompts=[], function_calls=[]
+            ),
+            tags=TestCaseTags(resource_id="TC-1", name="tags", tags=[]),
+            variant=None,
+        )
+        check_yaml_field_types(test_case)
+
+    def test_error_message_includes_hint(self):
+        """The error message should guide the user to quote the YAML value."""
+        personality = SettingsPersonality(
+            resource_id="P-1",
+            name="personality",
+            custom={"the tone: friendly": "and warm"},
+            adjectives={},
+        )
+        with self.assertRaises(ValueError) as ctx:
+            check_yaml_field_types(personality)
+        self.assertIn("unquoted", str(ctx.exception))
+        self.assertIn("colon", str(ctx.exception))
 
 
 if __name__ == "__main__":

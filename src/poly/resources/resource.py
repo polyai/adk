@@ -4,13 +4,52 @@ Copyright PolyAI Limited
 """
 
 import os
+import types
+import typing
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, fields as dc_fields, is_dataclass
 from typing import ClassVar, Optional
 
 from google.protobuf.message import Message
 
 import poly.resources.resource_utils as utils
+
+_YAML_TYPE_HINT = (
+    "A YAML value was likely parsed as the wrong type. "
+    "Check for an unquoted mid-sentence colon or a leading [ { * & ? and quote the value."
+)
+
+
+def _unwrap_optional(hint: type) -> type:
+    """Strip Optional[X] / X | None down to X."""
+    origin = typing.get_origin(hint)
+    if origin is typing.Union or origin is types.UnionType:
+        args = [a for a in typing.get_args(hint) if a is not type(None)]
+        if len(args) == 1:
+            return args[0]
+    return hint
+
+
+def check_yaml_field_types(instance: object, _path: str = "") -> None:
+    """Validate that str and list[str] fields weren't parsed as dicts by YAML."""
+    hints = typing.get_type_hints(type(instance))
+    for f in dc_fields(instance):
+        value = getattr(instance, f.name)
+        if value is None:
+            continue
+        hint = _unwrap_optional(hints.get(f.name, type(None)))
+        field_path = f"{_path}.{f.name}" if _path else f.name
+
+        if hint is str and isinstance(value, dict):
+            raise ValueError(f"'{field_path}' should be a string but got a dict. {_YAML_TYPE_HINT}")
+        if typing.get_origin(hint) is list and typing.get_args(hint) == (str,):
+            for i, item in enumerate(value):
+                if isinstance(item, dict):
+                    raise ValueError(
+                        f"'{field_path}[{i}]' should be a string but got a dict. {_YAML_TYPE_HINT}"
+                    )
+        if is_dataclass(value) and not isinstance(value, type):
+            check_yaml_field_types(value, field_path)
 
 
 @dataclass
@@ -363,13 +402,15 @@ class YamlResource(Resource, ABC):
             file_path=file_path,
             **kwargs,
         )
-        return cls.from_yaml_dict(
+        instance = cls.from_yaml_dict(
             yaml_dict,
             resource_id=resource_id,
             name=resource_name,
             resource_mappings=resource_mappings,
             **kwargs,
         )
+        check_yaml_field_types(instance)
+        return instance
 
     @abstractmethod
     def to_yaml_dict(self) -> dict:
