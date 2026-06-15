@@ -5,6 +5,7 @@
 
 
 from typing import Any, Literal, NewType
+import requests
 from .external_events import GenericExternalEvent, SMSReceived
 from .agentic_dial import AgenticDialData
 from .entity_validator import EntityValidationResult

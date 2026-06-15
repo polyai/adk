@@ -2,21 +2,20 @@
 # flake8: noqa
 # ruff: noqa
 # type: ignore
-from typing import Any
+
 
 from ..integration import Integration
+import requests
+
 
 __all__ = ["Tripleseat"]
 
 
 class Tripleseat(Integration):
-    """Tripleseat integration class for proxying requests to the Tripleseat API"""
+    """Tripleseat integration class for proxying requests to the Tripleseat API with"""
 
-    integration_id: str
-    integration_name: str
-
-    def get_bookings(self) -> Any:
-        """Get bookings from Tripleseat."""
+    def get_bookings(self) -> requests.Response:
+        """Example method for getting bookings from Tripleseat"""
 
     def create_lead(
         self,
@@ -27,5 +26,5 @@ class Tripleseat(Integration):
         phone_number: str | None = ...,
         location_id: str | None = ...,
         additional_fields: dict | None = ...,
-    ) -> Any:
-        """Create a lead in Tripleseat."""
+    ) -> requests.Response:
+        """Create a lead in Tripleseat using the proxy request method"""

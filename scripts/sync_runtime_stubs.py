@@ -44,6 +44,12 @@ STUB_FILES = [
     "agentic_dial.py",
     "emails.py",
     "entity_validator.py",
+    "integrations/__init__.py",
+    "integrations/integration.py",
+    "integrations/integrations.py",
+    "integrations/available_integrations/__init__.py",
+    "integrations/available_integrations/opentable.py",
+    "integrations/available_integrations/tripleseat.py",
 ]
 
 
@@ -303,6 +309,7 @@ _ALLOWED_STDLIB_MODULES = frozenset(
         "datetime",
         "enum",
         "re",
+        "requests",
         "typing",
         "pydantic",
     }
@@ -324,13 +331,18 @@ def _collect_import_stmts(stmts: list[ast.stmt]) -> list[ast.stmt]:
     return result
 
 
-def _expand_module_import(module: str, alias: str, body_text: str) -> str | None:
+def _expand_module_import(
+    module: str,
+    alias: str,
+    body_text: str,
+    source_rel: str,
+) -> tuple[str | None, str]:
     """Convert ``import runtime.X as Y`` to ``from .X import A, B, C``.
 
     Scans *body_text* for ``Y.name`` references and emits a relative
     ``from`` import for each attribute used.  Also rewrites those
     ``Y.name`` references in body_text to just ``name``.
-    Returns (import_line, new_body_text) or None if no attributes are found.
+    Returns (import_line, new_body_text).
     """
     import re as _re
 
@@ -338,32 +350,49 @@ def _expand_module_import(module: str, alias: str, body_text: str) -> str | None
     names = sorted(set(m.group(1) for m in pattern.finditer(body_text)))
     if not names:
         return None, body_text
-    # Relativize: runtime.foo -> .foo
-    rel_module = "." + module.split(".", 1)[1] if "." in module else module
+    rel_module = _relativize_module(module, source_rel)
     import_line = f"from {rel_module} import {', '.join(names)}"
-    # Rewrite body: extraction_types.EntityConfig -> EntityConfig
     new_body = pattern.sub(r"\1", body_text)
     return import_line, new_body
 
 
-def _relativize_module(module: str) -> str:
-    """Convert ``runtime.X`` or ``utils.X`` to ``.X`` for relative imports."""
-    if module.startswith(("runtime.", "utils.")):
-        return "." + module.split(".", 1)[1]
-    return module
+def _relativize_module(module: str, source_rel: str) -> str:
+    """Convert an absolute ``runtime.X.Y`` import to a relative one.
+
+    *source_rel* is the source file path relative to the runtime root
+    (e.g. ``"integrations/integrations.py"``).  The function computes the
+    correct number of leading dots based on shared package depth.
+    """
+    if not module.startswith(("runtime.", "utils.")):
+        return module
+
+    # Strip the root package prefix (runtime. or utils.)
+    mod_tail = module.split(".", 1)[1]  # e.g. "integrations.integration"
+    mod_parts = mod_tail.split(".")  # ["integrations", "integration"]
+
+    # Package path of the source file (e.g. "integrations/integrations.py" -> ["integrations"])
+    source_pkg = list(Path(source_rel).parent.parts)  # [] for top-level files
+
+    # Find how many leading segments are shared
+    common = 0
+    for a, b in zip(source_pkg, mod_parts):
+        if a == b:
+            common += 1
+        else:
+            break
+
+    # Number of levels to go up from source package
+    ups = len(source_pkg) - common
+    dots = "." * (ups + 1)  # +1 for the base relative dot
+    remainder = ".".join(mod_parts[common:])
+    return f"{dots}{remainder}" if remainder else dots
 
 
-def _extract_imports(tree: ast.Module, source_path: Path) -> list[str]:
+def _extract_imports(tree: ast.Module, source_rel: str) -> list[str]:
     """Extract imports needed for the stub.
 
-    Includes:
-    - typing imports
-    - runtime.* imports (relativized to .X)
-    - stdlib/pydantic imports used in type annotations
-    - imports from ``if TYPE_CHECKING:`` blocks (promoted to unconditional)
-
-    ``import runtime.X as Y`` forms are tagged for deferred expansion
-    (needs body_text to resolve which attributes are used).
+    *source_rel* is the file path relative to the runtime root
+    (e.g. ``"conversation.py"`` or ``"integrations/integrations.py"``).
     """
     imports = []
     for stmt in _collect_import_stmts(tree.body):
@@ -391,7 +420,7 @@ def _extract_imports(tree: ast.Module, source_path: Path) -> list[str]:
                 public_names = _filter_import_names(stmt.names)
                 if not public_names:
                     continue
-                rel_module = _relativize_module(stmt.module)
+                rel_module = _relativize_module(stmt.module, source_rel)
                 filtered = ast.ImportFrom(
                     module=rel_module,
                     names=public_names,
@@ -449,12 +478,16 @@ def _prune_imports(import_lines: list[str], body_text: str) -> list[str]:
     return pruned
 
 
-def generate_stub(source_path: Path) -> str:
-    """Generate a stub file from a runtime source file."""
+def generate_stub(source_path: Path, source_rel: str) -> str:
+    """Generate a stub file from a runtime source file.
+
+    *source_rel* is the file path relative to the runtime root
+    (e.g. ``"conversation.py"`` or ``"integrations/integrations.py"``).
+    """
     source = source_path.read_text()
     tree = ast.parse(source)
 
-    candidate_imports = _extract_imports(tree, source_path)
+    candidate_imports = _extract_imports(tree, source_rel)
     all_list = _get_all_list(tree)
 
     classes = []
@@ -471,6 +504,8 @@ def generate_stub(source_path: Path) -> str:
         line = None
         if isinstance(stmt, ast.Assign):
             for target in stmt.targets:
+                if isinstance(target, ast.Name) and target.id == "__all__":
+                    continue
                 if isinstance(target, ast.Name) and not _has_private_name(target.id):
                     line = ast.unparse(stmt)
         elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
@@ -516,13 +551,17 @@ def generate_stub(source_path: Path) -> str:
     for item in candidate_imports:
         if isinstance(item, tuple) and item[0] == "module_alias":
             _, module, alias = item
-            import_line, body_text = _expand_module_import(module, alias, body_text)
+            import_line, body_text = _expand_module_import(module, alias, body_text, source_rel)
             if import_line:
                 resolved_imports.append(import_line)
         else:
             resolved_imports.append(item)
 
-    imports = _prune_imports(resolved_imports, body_text)
+    # Include __all__ names in pruning context so re-export imports survive
+    prune_context = body_text
+    if all_list:
+        prune_context += "\n" + " ".join(all_list)
+    imports = _prune_imports(resolved_imports, prune_context)
 
     # Rebuild body_parts from (possibly rewritten) body_text
     # Split back into sections for assembly
@@ -567,12 +606,18 @@ def main() -> None:
     updated = 0
     for filename in STUB_FILES:
         source = runtime_path / filename
+        dest = STUB_DIR / filename
+        dest.parent.mkdir(parents=True, exist_ok=True)
+
         if not source.exists():
-            print(f"  SKIP {filename} (not found in runtime)")
+            if filename.endswith("__init__.py"):
+                dest.write_text("# Copyright PolyAI Limited\n")
+                print(f"  OK   {filename} (empty __init__.py)")
+            else:
+                print(f"  SKIP {filename} (not found in runtime)")
             continue
 
-        stub_content = generate_stub(source)
-        dest = STUB_DIR / filename
+        stub_content = generate_stub(source, filename)
         dest.write_text(stub_content)
         print(f"  OK   {filename}")
         updated += 1

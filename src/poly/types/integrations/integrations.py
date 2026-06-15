@@ -2,10 +2,13 @@
 # flake8: noqa
 # ruff: noqa
 # type: ignore
-from typing import Any
 
+
+import requests
 from .available_integrations.opentable import OpenTable
 from .available_integrations.tripleseat import Tripleseat
+from ..log_utils import ConversationLogger
+
 
 __all__ = ["Integrations"]
 
@@ -18,7 +21,7 @@ class Integrations:
 
     def __init__(
         self,
-        log: Any,
+        log: ConversationLogger,
         paragon_connection_ids: dict[str, str] | None = ...,
         paragon_project_id: str | None = ...,
         integration_token: str | None = ...,
@@ -30,6 +33,6 @@ class Integrations:
         http_method: str,
         headers: dict[str, str] | None = ...,
         params: dict[str, str] | None = ...,
-        body: dict[str, Any] | None = ...,
-    ) -> Any:
-        """General method to proxy request through Paragon."""
+        body: dict[str, any] | None = ...,
+    ) -> requests.Response:
+        """General method if custom integration class is not built to proxy"""
