@@ -1,6 +1,71 @@
 # CHANGELOG
 
 
+## v0.25.8 (2026-06-15)
+
+### Bug Fixes
+
+- **languages**: Correct update command field for default_language
+  ([#190](https://github.com/polyai/adk/pull/190),
+  [`ee9fceb`](https://github.com/polyai/adk/commit/ee9fcebf5698d9fd1f641e0d8ebe76dcaf8cf691))
+
+## Summary
+
+Fixes a bug where changing a project's `default_language` via `push` always returned `422 — Protocol
+  message Command has no "update_languages_update_default_language" field`. `DefaultLanguage` now
+  emits the correct `languages_update_default_language` Command field.
+
+## Motivation
+
+Tracking: https://linear.app/poly-ai/issue/ORCH-309
+
+Surfaced from Glot eval runs (lead-qualification, restaurant-booking,
+  multilingual-payment-reminder): authoring an agent in a primary language other than the template
+  default (`en-GB`) sent every build into a `languages.yaml` rewrite loop, because the
+  default-language update could never push. Adding a locale to `additional_languages` worked;
+  changing the default did not.
+
+Root cause: `DefaultLanguage.command_type` already returns the full Command field name
+  `languages_update_default_language`, but the base `update_command_type` derives the field as
+  `f"update_{command_type}"`, producing the nonexistent `update_languages_update_default_language`.
+  `sync_client` then builds `Command(**{update_type: build_update_proto()})` with that bad name and
+  the proto rejects it. The payload (`Languages_UpdateDefaultLanguage`) was always correct — only
+  the field name was wrong. `AdditionalLanguage` already overrides `create_/delete_command_type` for
+  the same reason; `DefaultLanguage` was missing the matching `update_command_type` override.
+
+## Changes
+
+- `DefaultLanguage`: override `update_command_type` to return `languages_update_default_language`
+  (no `update_` prefix), mirroring `AdditionalLanguage`. - Add
+  `test_update_command_type_is_a_real_command_field`: asserts the field name and constructs the
+  `Command` the way `sync_client` does, so a future regression fails loudly.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New test verified to **fail** without the fix (`update_languages_update_default_language !=
+  languages_update_default_language`) and **pass** with it.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (683 passed) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow [conventional commits](https://www.conventionalcommits.org/) (`fix:` → patch)
+
+## Screenshots / Logs
+
+Without the fix: ``` FAILED
+  ...::DefaultLanguageTests::test_update_command_type_is_a_real_command_field AssertionError:
+  'update_languages_update_default_language' != 'languages_update_default_language' ```
+
+With the fix: ``` 683 passed, 22 warnings, 30 subtests passed in 9.28s ruff check . -> All checks
+  passed! ```
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+
 ## v0.25.7 (2026-06-12)
 
 ### Bug Fixes
