@@ -43,6 +43,11 @@ def check_yaml_field_types(instance: object, _path: str = "") -> None:
         if hint is str and isinstance(value, dict):
             raise ValueError(f"'{field_path}' should be a string but got a dict. {_YAML_TYPE_HINT}")
         if typing.get_origin(hint) is list and typing.get_args(hint) == (str,):
+            if not isinstance(value, list):
+                raise ValueError(
+                    f"'{field_path}' should be a list of strings but got "
+                    f"{type(value).__name__}. {_YAML_TYPE_HINT}"
+                )
             for i, item in enumerate(value):
                 if isinstance(item, dict):
                     raise ValueError(

@@ -7994,6 +7994,28 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
         )
         check_yaml_field_types(test_case)
 
+    def test_list_str_field_with_dict_value_raises(self):
+        """A list[str] field that got a dict instead of a list should raise."""
+        assertion = TestCaseAssertion(
+            resource_id="TC-1",
+            name="assertions",
+            prompts={"assertions": ["It responds with a nice message"]},
+            function_calls=[],
+        )
+        test_case = TestCase(
+            resource_id="TC-1",
+            name="test",
+            scenario="test scenario",
+            channel="chat.polyai",
+            language="en-GB",
+            assertions=assertion,
+            tags=TestCaseTags(resource_id="TC-1", name="tags", tags=[]),
+        )
+        with self.assertRaises(ValueError) as ctx:
+            check_yaml_field_types(test_case)
+        self.assertIn("assertions.prompts", str(ctx.exception))
+        self.assertIn("list of strings", str(ctx.exception))
+
     def test_error_message_includes_hint(self):
         """The error message should guide the user to quote the YAML value."""
         personality = SettingsPersonality(
