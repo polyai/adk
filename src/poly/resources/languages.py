@@ -76,6 +76,10 @@ class DefaultLanguage(MultiResourceYamlResource):
     def command_type(self) -> str:
         return "languages_update_default_language"
 
+    @property
+    def update_command_type(self) -> str:
+        return "languages_update_default_language"
+
     def build_update_proto(self) -> Languages_UpdateDefaultLanguage:
         return Languages_UpdateDefaultLanguage(language_code=self.name)
 

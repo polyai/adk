@@ -7677,6 +7677,16 @@ class DefaultLanguageTests(unittest.TestCase):
         proto = lang.build_update_proto()
         self.assertEqual(proto.language_code, "en-GB")
 
+    def test_update_command_type_is_a_real_command_field(self):
+        """update_command_type names a real Command field, not the double-prefixed one."""
+        from poly.handlers.protobuf.commands_pb2 import Command
+
+        lang = DefaultLanguage(resource_id="en-US", name="en-US")
+        self.assertEqual(
+            lang.update_command_type, "languages_update_default_language"
+        )
+        Command(**{lang.update_command_type: lang.build_update_proto()})
+
     def test_validate_duplicate_with_additional_raises(self):
         """validate raises when default language code also appears in additional languages."""
         lang = DefaultLanguage(resource_id="en-GB", name="en-GB")
