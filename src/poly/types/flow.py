@@ -2,51 +2,36 @@
 # flake8: noqa
 # ruff: noqa
 # type: ignore
-
-
+from .conversation import Conversation as Conversation
 from typing import Any
-from .conversation import Conversation
 
 
-__all__ = ["Transition", "StepTransition", "FlowFunctionExecutor", "Flow"]
-
-
+@dataclass
 class Transition:
-    """A flow transition triggered by a function"""
+    exit_flow: bool = ...
+    goto_flow: str | None = ...
+    goto_step: str | None = ...
 
-    exit_flow: bool
-    goto_flow: str | None
-    goto_step: str | None
-
-    def __init__(
-        self, exit_flow: bool = ..., goto_flow: str | None = ..., goto_step: str | None = ...
-    ) -> None: ...
     @classmethod
-    def from_dict(cls, d: dict) -> Transition:
-        """Construct from dict"""
-
-    def is_noop(self) -> bool:
-        """Check if this transition does nothing"""
+    def from_dict(cls, d: dict) -> Transition: ...
+    def is_noop(self) -> bool: ...
 
 
+@dataclass
 class StepTransition:
-    """Mutable object to trigger step transitions"""
-
-    goto_step: str | None
-
-    def __init__(self, goto_step: str | None = ...) -> None: ...
+    goto_step: str | None = ...
 
 
 class FlowFunctionExecutor(dict):
-    """Flow function executor"""
+    conv: Any
+    flow: Any
 
-    def __init__(self, conv: Conversation, flow: Flow): ...
-    def __getattr__(self, name: str) -> Any:
-        """Dynamically import and return a function when accessed via dot notation."""
+    def __init__(self, conv: Conversation, flow: Flow) -> None: ...
+    def __getattr__(self, name: str) -> Any: ...
 
 
 class Flow:
-    """Object for working within flows"""
+    function_dir: Any
 
     def __init__(
         self,
@@ -54,16 +39,9 @@ class Flow:
         step_transition: StepTransition,
         conv: Conversation,
         function_dir: str,
-    ):
-        """init"""
-
+    ) -> None: ...
     @property
-    def current_step(self) -> str:
-        """The name of the step we're currently in"""
-
+    def current_step(self) -> str: ...
     @property
-    def functions(self) -> FlowFunctionExecutor:
-        """The functions available to the flow"""
-
-    def goto_step(self, step_name: str, label: str | None = ...):
-        """Trigger a transition to a different step"""
+    def functions(self) -> FlowFunctionExecutor: ...
+    def goto_step(self, step_name: str, label: str | None = None): ...

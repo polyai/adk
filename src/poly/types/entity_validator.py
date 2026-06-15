@@ -2,30 +2,18 @@
 # flake8: noqa
 # ruff: noqa
 # type: ignore
-
-
 from .value_extraction_types import EntityType
 
 
-__all__ = ["EntityValidationResult"]
-
-
+@dataclass
 class EntityValidationResult:
-    """Entity validation result"""
-
     id: str
     name: str
     valid: bool
     value: str
     type: EntityType
-    error: str | None
+    error: str | None = ...
 
-    def __init__(
-        self, id: str, name: str, valid: bool, value: str, type: EntityType, error: str | None = ...
-    ) -> None: ...
-    def to_dict(self) -> dict:
-        """Convert to dict"""
-
+    def to_dict(self) -> dict: ...
     @classmethod
-    def from_dict(cls, d: dict) -> EntityValidationResult:
-        """Convert from dict"""
+    def from_dict(cls, d: dict) -> EntityValidationResult: ...

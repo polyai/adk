@@ -2,20 +2,13 @@
 # flake8: noqa
 # ruff: noqa
 # type: ignore
-
-
-from typing import Literal
-from .value_extraction_types import EntityConfig
-from .history import AgentResponse, UserInput
-from .value_extraction import Address
-
-
-__all__ = ["Utils"]
+from . import value_extraction_types as extraction_types
+from .history import AgentResponse as AgentResponse, UserInput as UserInput
+from .value_extraction import Address as Address, _EntityValidationResponse
+from typing import Any, Literal
 
 
 class Utils:
-    """Utility class for the conv object."""
-
     def __init__(
         self,
         account_id: str,
@@ -26,26 +19,40 @@ class Utils:
         language: str,
         history: list[UserInput | AgentResponse],
         transcript_alternatives: list[str],
-        vpc_enabled: bool = ...,
-        correlation_id: str | None = ...,
-    ): ...
-    def extract_address(self, addresses: list[Address] | None = ..., country: str = ...) -> Address:
-        """[Opt-in Feature] 🚧"""
+        vpc_enabled: bool = False,
+        correlation_id: str | None = None,
+    ) -> None: ...
 
+    EntityType: Any
+    NumericType: Any
+    NumericConfig: Any
+    QuantityConfig: Any
+    CurrencyConfig: Any
+    NameConfig: Any
+    FreeTextConfig: Any
+    AlphanumericConfig: Any
+    DateConfig: Any
+    EmailConfig: Any
+    TimeConfig: Any
+    PhoneNumberConfig: Any
+    EnumConfig: Any
+    EntityConfig: Any
+
+    def extract_address(
+        self, addresses: list[Address] | None = None, country: str = "US"
+    ) -> Address: ...
     def extract_city(
         self,
-        city_spellings: list[str] | None = ...,
-        states: list[str] | None = ...,
-        country: str = ...,
-    ) -> Address:
-        """[Opt-in Feature] 🚧"""
-
+        city_spellings: list[str] | None = None,
+        states: list[str] | None = None,
+        country: str = "US",
+    ) -> Address: ...
     def prompt_llm(
         self,
         prompt: str,
         *,
-        show_history: bool = ...,
-        return_json: bool = ...,
+        show_history: bool = False,
+        return_json: bool = False,
         model: Literal[
             "gpt-4o",
             "gpt-4o-mini",
@@ -58,12 +65,9 @@ class Utils:
             "gpt-5-chat",
             "claude-sonnet-4",
             "claude-3.5-haiku",
-        ] = ...,
-    ) -> str | dict:
-        """[Opt-in Feature] 🚧"""
-
-    def validate_entity(self, value: str, entity_config: EntityConfig) -> _EntityValidationResponse:
-        """Validate an entity value against its configuration."""
-
-    def get_secret(self, secret_name: str) -> str | dict:
-        """Get secret value"""
+        ] = "gpt-4o",
+    ) -> str | dict: ...
+    def validate_entity(
+        self, value: str, entity_config: extraction_types.EntityConfig
+    ) -> _EntityValidationResponse: ...
+    def get_secret(self, secret_name: str) -> str | dict: ...
