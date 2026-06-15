@@ -65,6 +65,7 @@ from poly.resources.pronunciation import Pronunciation
 from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
+    _matches_scalar,
     _parse_multi_resource_path,
     check_yaml_field_types,
 )
@@ -7930,7 +7931,7 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             check_yaml_field_types(topic)
         self.assertIn("actions", str(ctx.exception))
-        self.assertIn("should be a string but got a dict", str(ctx.exception))
+        self.assertIn("should be str but got dict", str(ctx.exception))
 
     def test_list_str_field_with_dict_item_raises(self):
         """A list[str] field containing a dict item should raise."""
@@ -7944,7 +7945,7 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             check_yaml_field_types(topic)
         self.assertIn("example_queries[1]", str(ctx.exception))
-        self.assertIn("should be a string but got a dict", str(ctx.exception))
+        self.assertIn("should be str but got dict", str(ctx.exception))
 
     def test_nested_dataclass_field_checked(self):
         """Nested dataclass str fields should be recursively validated."""
@@ -8014,20 +8015,86 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             check_yaml_field_types(test_case)
         self.assertIn("assertions.prompts", str(ctx.exception))
-        self.assertIn("list of strings", str(ctx.exception))
+        self.assertIn("list of str", str(ctx.exception))
 
-    def test_error_message_includes_hint(self):
-        """The error message should guide the user to quote the YAML value."""
+    def test_str_field_with_bool_raises(self):
+        """A str field that got a bool (yes/no auto-cast) should raise."""
+        topic = Topic(
+            resource_id="TOPIC-1",
+            name="test",
+            actions=True,
+            content="fine",
+            example_queries=[],
+        )
+        with self.assertRaises(ValueError) as ctx:
+            check_yaml_field_types(topic)
+        self.assertIn("actions", str(ctx.exception))
+        self.assertIn("bool", str(ctx.exception))
+
+    def test_str_field_with_int_raises(self):
+        """A str field that got an int (bare number) should raise."""
+        topic = Topic(
+            resource_id="TOPIC-1",
+            name="test",
+            actions=42,
+            content="fine",
+            example_queries=[],
+        )
+        with self.assertRaises(ValueError) as ctx:
+            check_yaml_field_types(topic)
+        self.assertIn("actions", str(ctx.exception))
+        self.assertIn("int", str(ctx.exception))
+
+    def test_list_str_field_with_bool_item_raises(self):
+        """A list[str] field containing a bool item should raise."""
+        topic = Topic(
+            resource_id="TOPIC-1",
+            name="test",
+            actions="fine",
+            content="fine",
+            example_queries=["good", True],
+        )
+        with self.assertRaises(ValueError) as ctx:
+            check_yaml_field_types(topic)
+        self.assertIn("example_queries[1]", str(ctx.exception))
+        self.assertIn("bool", str(ctx.exception))
+
+    def test_dict_value_wrong_type_raises(self):
+        """A dict[str, bool] field with a str value instead of bool should raise."""
         personality = SettingsPersonality(
             resource_id="P-1",
             name="personality",
-            custom={"the tone: friendly": "and warm"},
-            adjectives={},
+            custom="fine",
+            adjectives={"Polite": "sure"},
         )
         with self.assertRaises(ValueError) as ctx:
             check_yaml_field_types(personality)
-        self.assertIn("unquoted", str(ctx.exception))
-        self.assertIn("colon", str(ctx.exception))
+        self.assertIn("adjectives", str(ctx.exception))
+        self.assertIn("should be bool but got str", str(ctx.exception))
+
+    def test_dict_valid_types_passes(self):
+        """A dict[str, bool] field with correct types should not raise."""
+        personality = SettingsPersonality(
+            resource_id="P-1",
+            name="personality",
+            custom="fine",
+            adjectives={"Polite": True, "Calm": False},
+        )
+        check_yaml_field_types(personality)
+
+    def test_int_accepted_for_float_field(self):
+        """int values should be accepted where float is expected (YAML parses 500 as int)."""
+        self.assertTrue(_matches_scalar(42, float))
+        self.assertTrue(_matches_scalar(3.14, float))
+
+    def test_bool_rejected_for_int_field(self):
+        """bool should not pass as int even though bool is a subclass of int in Python."""
+        self.assertFalse(_matches_scalar(True, int))
+        self.assertFalse(_matches_scalar(False, int))
+
+    def test_bool_rejected_for_float_field(self):
+        """bool should not pass as float either."""
+        self.assertFalse(_matches_scalar(True, float))
 
 
 if __name__ == "__main__":

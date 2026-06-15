@@ -14,11 +14,6 @@ from google.protobuf.message import Message
 
 import poly.resources.resource_utils as utils
 
-_YAML_TYPE_HINT = (
-    "A YAML value was likely parsed as the wrong type. "
-    "Check for an unquoted mid-sentence colon or a leading [ { * & ? and quote the value."
-)
-
 
 def _unwrap_optional(hint: type) -> type:
     """Strip Optional[X] / X | None down to X."""
@@ -30,8 +25,25 @@ def _unwrap_optional(hint: type) -> type:
     return hint
 
 
+_SCALAR_TYPES = (str, int, float, bool)
+
+
+def _matches_scalar(value: object, expected: type) -> bool:
+    """Check if a value matches a scalar type, with YAML-aware compatibility.
+
+    bool is excluded from int/float checks because YAML's yes/no auto-cast
+    should not silently pass as a number. int is accepted for float because
+    YAML parses 500 as int but 500.0 as float — both are valid numerics.
+    """
+    if expected is float:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if expected is int:
+        return isinstance(value, int) and not isinstance(value, bool)
+    return isinstance(value, expected)
+
+
 def check_yaml_field_types(instance: object, _path: str = "") -> None:
-    """Validate that str and list[str] fields weren't parsed as dicts by YAML."""
+    """Validate that scalar and list[scalar] fields have the correct type after YAML parsing."""
     hints = typing.get_type_hints(type(instance))
     for f in dc_fields(instance):
         value = getattr(instance, f.name)
@@ -40,18 +52,37 @@ def check_yaml_field_types(instance: object, _path: str = "") -> None:
         hint = _unwrap_optional(hints.get(f.name, type(None)))
         field_path = f"{_path}.{f.name}" if _path else f.name
 
-        if hint is str and isinstance(value, dict):
-            raise ValueError(f"'{field_path}' should be a string but got a dict. {_YAML_TYPE_HINT}")
-        if typing.get_origin(hint) is list and typing.get_args(hint) == (str,):
+        if hint in _SCALAR_TYPES and not _matches_scalar(value, hint):
+            raise ValueError(
+                f"'{field_path}' should be {hint.__name__} but got {type(value).__name__}."
+            )
+        list_args = typing.get_args(hint) if typing.get_origin(hint) is list else ()
+        if list_args and list_args[0] in _SCALAR_TYPES:
+            expected_item_type = list_args[0]
             if not isinstance(value, list):
                 raise ValueError(
-                    f"'{field_path}' should be a list of strings but got "
-                    f"{type(value).__name__}. {_YAML_TYPE_HINT}"
+                    f"'{field_path}' should be a list of {expected_item_type.__name__} "
+                    f"but got {type(value).__name__}."
                 )
             for i, item in enumerate(value):
-                if isinstance(item, dict):
+                if not _matches_scalar(item, expected_item_type):
                     raise ValueError(
-                        f"'{field_path}[{i}]' should be a string but got a dict. {_YAML_TYPE_HINT}"
+                        f"'{field_path}[{i}]' should be {expected_item_type.__name__} "
+                        f"but got {type(item).__name__}."
+                    )
+        dict_args = typing.get_args(hint) if typing.get_origin(hint) is dict else ()
+        if len(dict_args) == 2 and isinstance(value, dict):
+            key_type, val_type = dict_args
+            for k, v in value.items():
+                if key_type in _SCALAR_TYPES and not _matches_scalar(k, key_type):
+                    raise ValueError(
+                        f"'{field_path}' has key {k!r} which should be {key_type.__name__} "
+                        f"but got {type(k).__name__}."
+                    )
+                if val_type in _SCALAR_TYPES and not _matches_scalar(v, val_type):
+                    raise ValueError(
+                        f"'{field_path}[{k!r}]' should be {val_type.__name__} "
+                        f"but got {type(v).__name__}."
                     )
         if is_dataclass(value) and not isinstance(value, type):
             check_yaml_field_types(value, field_path)
