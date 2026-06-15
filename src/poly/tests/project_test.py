@@ -7,6 +7,7 @@ Copyright PolyAI Limited
 
 import json
 import os
+import tempfile
 import unittest
 from copy import deepcopy
 from unittest.mock import MagicMock, patch
@@ -3279,7 +3280,7 @@ class GetUpdatedSubresourcesTest(unittest.TestCase):
 class ReadLocalResourceErrorTest(unittest.TestCase):
     """read_local_resource should attach file + cause context to read errors."""
 
-    def _mapping(self):
+    def _function_mapping(self):
         return ResourceMapping(
             resource_id="FUNCTION-broken",
             resource_type=Function,
@@ -3289,27 +3290,33 @@ class ReadLocalResourceErrorTest(unittest.TestCase):
             resource_prefix="fn",
         )
 
-    def test_typeerror_adds_yaml_scalar_hint(self):
-        """A TypeError (the unquoted-scalar footgun) is wrapped with the cause."""
+    def test_malformed_yaml_adds_scalar_hint(self):
+        """A real unquoted-scalar YAML file surfaces the cause through the read path."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
-        mapping = self._mapping()
-        with patch.object(
-            Function,
-            "read_local_resource",
-            side_effect=TypeError("bad argument type for built-in operation"),
-        ):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            file_path = os.path.join(tmp_dir, "broken.yaml")
+            with open(file_path, "w", encoding="utf-8") as f:
+                # An unquoted mid-sentence colon — ruamel reads it as a mapping.
+                f.write("name: broken\nactions: do this: then that\n")
+            mapping = ResourceMapping(
+                resource_id="TOPIC-broken",
+                resource_type=Topic,
+                resource_name="broken",
+                file_path=file_path,
+                flow_name=None,
+                resource_prefix="topic",
+            )
             with self.assertRaises(ValueError) as ctx:
                 project.read_local_resource(resource=mapping, resource_mappings=[mapping])
         message = str(ctx.exception)
-        self.assertIn(mapping.file_path, message)
-        self.assertIn("bad argument type for built-in operation", message)
+        self.assertIn(file_path, message)
         self.assertIn("unquoted", message)
         self.assertIn("quote the value", message)
 
-    def test_non_typeerror_keeps_plain_wrapping(self):
+    def test_non_yaml_error_keeps_plain_wrapping(self):
         """Other errors keep the plain message — no spurious YAML hint."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
-        mapping = self._mapping()
+        mapping = self._function_mapping()
         with patch.object(
             Function,
             "read_local_resource",

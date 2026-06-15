@@ -2104,18 +2104,6 @@ class AgentStudioProject:
             raise FileNotFoundError(
                 f"File not found for resource {resource.resource_name} at {resource.file_path}"
             ) from e
-        except TypeError as e:
-            # A TypeError here almost always means a YAML value parsed as the
-            # wrong type: an unquoted string with a mid-sentence colon parses as a
-            # mapping, a leading [ { * & ? as a sequence/anchor/alias. The raw
-            # CPython message (e.g. "bad argument type for built-in operation")
-            # names no field, so add the likely cause.
-            raise ValueError(
-                f"Error reading resource {resource.resource_name} at "
-                f"{resource.file_path}: {str(e)}. A YAML value is likely unquoted "
-                f"and parsed as the wrong type — check for an unquoted mid-sentence "
-                f"colon or a leading [ {{ * & ? and quote the value."
-            ) from e
         except Exception as e:
             raise ValueError(
                 f"Error reading resource {resource.resource_name} at {resource.file_path}: {str(e)}"

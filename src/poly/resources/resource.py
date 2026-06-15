@@ -355,7 +355,7 @@ class YamlResource(Resource, ABC):
         try:
             yaml_dict = utils.load_yaml(contents) or {}
         except Exception as e:
-            raise ValueError(f"Error loading YAML file: {file_path}") from e
+            raise ValueError(f"Error loading YAML file {file_path}: {e}") from e
         yaml_dict = cls.from_pretty_dict(
             yaml_dict,
             resource_mappings=resource_mappings,

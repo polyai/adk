@@ -137,15 +137,17 @@ class MergeUtilsTests(unittest.TestCase):
         updated = "keep\nversion A\nkeep"
         incoming = "keep\nversion B\nkeep"
         result = utils.merge_strings(original, updated, incoming)
-        expected = "\n".join([
-            "keep",
-            "<<<<<<<",
-            "version A",
-            "=======",
-            "version B",
-            ">>>>>>>",
-            "keep",
-        ])
+        expected = "\n".join(
+            [
+                "keep",
+                "<<<<<<<",
+                "version A",
+                "=======",
+                "version B",
+                ">>>>>>>",
+                "keep",
+            ]
+        )
         self.assertEqual(result, expected)
 
     def test_merge_strings_with_trailing_newlines(self):
@@ -289,7 +291,6 @@ def test_code(
             restored_code,
         )
 
-
         with_docstring_code = """import random
 def test_code(
     conv: Conversation,
@@ -371,16 +372,8 @@ def test_code(
 
     def test_restore_function_def_line_comment_with_hash_in_body(self):
         """Test that a # inside the comment text is not double-spaced."""
-        code = (
-            "def test_code(\n"
-            "    conv: Conversation\n"
-            "):  # see issue #123\n"
-            "    pass\n"
-        )
-        expected = (
-            "def test_code(conv: Conversation):  # see issue #123\n"
-            "    pass\n"
-        )
+        code = "def test_code(\n    conv: Conversation\n):  # see issue #123\n    pass\n"
+        expected = "def test_code(conv: Conversation):  # see issue #123\n    pass\n"
         restored = resource_utils.restore_function_def_line(code, "test_code")
         self.assertEqual(restored, expected)
 
@@ -407,10 +400,14 @@ class StringUtilsTests(unittest.TestCase):
         self.assertEqual(cleaned_name, "this_is_a_test_name_with_special_chars")
 
         allow_uppercase = "ThisIsATestName"
-        self.assertEqual(resource_utils.clean_name(allow_uppercase, lowercase=False), "ThisIsATestName")
+        self.assertEqual(
+            resource_utils.clean_name(allow_uppercase, lowercase=False), "ThisIsATestName"
+        )
 
         allow_non_english = "こんにちは"
-        self.assertEqual(resource_utils.clean_name(allow_non_english, lowercase=False), "こんにちは")
+        self.assertEqual(
+            resource_utils.clean_name(allow_non_english, lowercase=False), "こんにちは"
+        )
 
     def test_to_snake_case(self):
         camel_case = "ThisIsATestName"
@@ -547,9 +544,7 @@ class ValidateReferencesTests(unittest.TestCase):
         self.assertTrue(valid)
         self.assertEqual(invalid, [])
 
-        valid, invalid = resource_utils.validate_references(
-            {"attributes": {}, "variables": {}}, []
-        )
+        valid, invalid = resource_utils.validate_references({"attributes": {}, "variables": {}}, [])
         self.assertTrue(valid)
         self.assertEqual(invalid, [])
 
@@ -918,6 +913,35 @@ class FlowUtilsTests(unittest.TestCase):
         self.assertIsNone(flow_name_none)
 
     # TODO: Test assigning positions to flow steps
+
+
+class LoadYamlErrorTests(unittest.TestCase):
+    """load_yaml should turn opaque parse failures into an actionable hint."""
+
+    def assert_scalar_hint(self, content):
+        with self.assertRaises(ValueError) as ctx:
+            resource_utils.load_yaml(content)
+        message = str(ctx.exception)
+        self.assertIn("unquoted", message)
+        self.assertIn("quote the value", message)
+
+    def test_unquoted_mid_sentence_colon(self):
+        # Reads as `mapping values are not allowed here`.
+        self.assert_scalar_hint("name: foo\noutcome: either press 1: or press 2")
+
+    def test_leading_open_bracket(self):
+        # Reads as an unterminated flow sequence.
+        self.assert_scalar_hint("outcome: [press 1 or press 2")
+
+    def test_unknown_alias(self):
+        # A leading * reads as an alias to an undefined anchor.
+        self.assert_scalar_hint("outcome: *press")
+
+    def test_valid_yaml_still_parses(self):
+        self.assertEqual(
+            resource_utils.load_yaml("name: foo\noutcome: press 1 or press 2"),
+            {"name": "foo", "outcome": "press 1 or press 2"},
+        )
 
 
 if __name__ == "__main__":

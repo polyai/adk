@@ -132,7 +132,17 @@ def load_yaml(content):
     Returns:
         Parsed YAML data.
     """
-    return _yaml_loader.load(content)
+    try:
+        return _yaml_loader.load(content)
+    except (yaml.YAMLError, TypeError) as e:
+        # An unquoted scalar parsed as the wrong type: a mid-sentence colon reads
+        # as a mapping, a leading [ { * & ? as a sequence/anchor/alias. The raw
+        # message names no field, so point at the likely cause.
+        raise ValueError(
+            f"{e}. A YAML value is likely unquoted and parsed as the wrong type "
+            f"— check for an unquoted mid-sentence colon or a leading [ {{ * & ? "
+            f"and quote the value."
+        ) from e
 
 
 def get_diff(original: str, updated: str) -> str:
