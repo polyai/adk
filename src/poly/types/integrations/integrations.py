@@ -2,6 +2,8 @@
 # flake8: noqa
 # ruff: noqa
 # type: ignore
+__all__ = ["Integrations"]
+
 import requests
 from .available_integrations.opentable import OpenTable as OpenTable
 from .available_integrations.tripleseat import Tripleseat as Tripleseat

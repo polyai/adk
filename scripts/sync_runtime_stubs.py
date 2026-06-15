@@ -16,6 +16,7 @@ Default runtime path: ../genai_lambda_runtime/python/runtime
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -30,17 +31,6 @@ STUB_HEADER = """\
 # ruff: noqa
 # type: ignore
 """
-
-# Files to exclude from the output — internal implementation details
-# that aren't part of the user-facing API.
-_EXCLUDE_FILES = frozenset(
-    {
-        "llm_client.pyi",
-        "state_utils.pyi",
-        "analytics.pyi",
-        "integration_utils.pyi",
-    }
-)
 
 # Regex patterns for import rewriting
 _FROM_RUNTIME_RE = re.compile(r"^from runtime\.(\S+)", re.MULTILINE)
@@ -106,7 +96,45 @@ def _relativize_imports(source: str, rel_path: str) -> str:
     return source
 
 
-def _postprocess(source: str, rel_path: str) -> str:
+def _load_imports_json(python_root: Path) -> dict[str, list[str]]:
+    """Load imports.json and return a mapping of stub rel_path → __all__ names.
+
+    *python_root* is the ``python/`` directory containing both ``runtime/``
+    and ``utils/`` alongside ``assets/imports.json``.
+
+    The keys in imports.json use ``runtime/X.py`` or ``utils/X.py`` form;
+    we strip the top-level package prefix to get the stub-relative path.
+    """
+    imports_file = python_root / "assets" / "imports.json"
+    if not imports_file.exists():
+        return {}
+    with open(imports_file, encoding="utf-8") as f:
+        raw = json.load(f)
+    result: dict[str, list[str]] = {}
+    for key, names in raw.items():
+        # "runtime/conversation.py" -> "conversation.py"
+        # "utils/secret_vault.py"   -> "secret_vault.py"
+        rel = key.split("/", 1)[1] if "/" in key else key
+        result.setdefault(rel, []).extend(names)
+    return result
+
+
+def _source_files_from_imports_json(python_root: Path) -> list[Path]:
+    """Return the list of source files referenced in imports.json."""
+    imports_file = python_root / "assets" / "imports.json"
+    if not imports_file.exists():
+        return []
+    with open(imports_file, encoding="utf-8") as f:
+        raw = json.load(f)
+    files = []
+    for key in raw:
+        source = python_root / key
+        if source.exists():
+            files.append(source)
+    return files
+
+
+def _postprocess(source: str, rel_path: str, all_names: list[str] | None = None) -> str:
     """Apply all post-processing to a stubgen output file."""
     # Drop imports we don't want
     source = _DROP_IMPORT_RE.sub("", source)
@@ -126,6 +154,10 @@ def _postprocess(source: str, rel_path: str) -> str:
             source = "from typing import Any\n" + source
     # Relativize imports
     source = _relativize_imports(source, rel_path)
+    # Inject __all__ from imports.json
+    if all_names:
+        all_line = "__all__ = " + repr(all_names) + "\n\n"
+        source = all_line + source
     # Add header
     source = STUB_HEADER + source
     return source
@@ -134,61 +166,62 @@ def _postprocess(source: str, rel_path: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sync runtime type stubs using stubgen")
     parser.add_argument(
-        "--runtime-path",
+        "--python-root",
         type=Path,
-        default=Path(__file__).resolve().parent.parent.parent
-        / "genai_lambda_runtime"
-        / "python"
-        / "runtime",
-        help="Path to the genai_lambda_runtime/python/runtime directory",
+        default=Path(__file__).resolve().parent.parent.parent / "genai_lambda_runtime" / "python",
+        help="Path to the genai_lambda_runtime/python directory",
     )
     args = parser.parse_args()
 
-    runtime_path: Path = args.runtime_path
-    if not runtime_path.is_dir():
-        print(f"Error: runtime path not found: {runtime_path}", file=sys.stderr)
+    python_root: Path = args.python_root
+    if not python_root.is_dir():
+        print(f"Error: python root not found: {python_root}", file=sys.stderr)
         sys.exit(1)
 
-    # Run stubgen into a temp directory
+    # imports.json drives which files to stub and their __all__
+    imports_map = _load_imports_json(python_root)
+    source_files = _source_files_from_imports_json(python_root)
+    if not source_files:
+        print("Error: no source files found via imports.json", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"Found {len(source_files)} source files in imports.json")
+
+    # Run stubgen on all source files at once
     with tempfile.TemporaryDirectory() as tmpdir:
-        result = subprocess.run(
-            ["uv", "run", "stubgen", str(runtime_path), "-o", tmpdir],
-            capture_output=True,
-            text=True,
-        )
+        cmd = ["uv", "run", "stubgen", "-o", tmpdir] + [str(f) for f in source_files]
+        result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             print(f"stubgen failed:\n{result.stderr}", file=sys.stderr)
             sys.exit(1)
         print(result.stdout.strip())
 
-        # Find the generated stubs (stubgen nests under the source structure)
-        stub_root = Path(tmpdir) / "python" / "runtime"
-        if not stub_root.is_dir():
-            # Try without python/ prefix
-            stub_root = Path(tmpdir) / "runtime"
-        if not stub_root.is_dir():
-            print(f"Error: no stubs found under {tmpdir}", file=sys.stderr)
-            sys.exit(1)
-
-        # Copy and post-process each stub
+        # stubgen nests output under the source tree structure;
+        # find the common root (python/) and process each package separately
+        tmpdir_path = Path(tmpdir)
         updated = 0
-        for pyi_file in sorted(stub_root.rglob("*.pyi")):
-            rel = pyi_file.relative_to(stub_root)
 
-            if rel.name in _EXCLUDE_FILES:
-                print(f"  SKIP {rel} (internal)")
+        # Process each top-level package (runtime/, utils/) that has stubs
+        for pkg in ("runtime", "utils"):
+            stub_pkg = tmpdir_path / "python" / pkg
+            if not stub_pkg.is_dir():
+                stub_pkg = tmpdir_path / pkg
+            if not stub_pkg.is_dir():
                 continue
 
-            source = pyi_file.read_text(encoding="utf-8")
-            # rel_path as string with .py extension for import relativizing
-            rel_str = str(rel.with_suffix(".py"))
-            processed = _postprocess(source, rel_str)
+            for pyi_file in sorted(stub_pkg.rglob("*.pyi")):
+                rel = pyi_file.relative_to(stub_pkg)
+                rel_py = str(rel.with_suffix(".py"))
 
-            dest = STUB_DIR / rel.with_suffix(".py")
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(processed, encoding="utf-8")
-            print(f"  OK   {rel.with_suffix('.py')}")
-            updated += 1
+                source = pyi_file.read_text(encoding="utf-8")
+                all_names = imports_map.get(rel_py)
+                processed = _postprocess(source, rel_py, all_names)
+
+                dest = STUB_DIR / rel.with_suffix(".py")
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                dest.write_text(processed, encoding="utf-8")
+                print(f"  OK   {rel.with_suffix('.py')}")
+                updated += 1
 
     print(f"\nSynced {updated} stub files to {STUB_DIR}")
 

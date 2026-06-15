@@ -2,6 +2,8 @@
 # flake8: noqa
 # ruff: noqa
 # type: ignore
+__all__ = ["Integration"]
+
 import requests
 from ..log_utils import ConversationLogger as ConversationLogger
 

@@ -2,6 +2,8 @@
 # flake8: noqa
 # ruff: noqa
 # type: ignore
+__all__ = ["OpenTable"]
+
 import requests
 from ..integration import Integration
 

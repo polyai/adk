@@ -2,6 +2,8 @@
 # flake8: noqa
 # ruff: noqa
 # type: ignore
+__all__ = ["Attachment"]
+
 from typing import Any
 import typing
 

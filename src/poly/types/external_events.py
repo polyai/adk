@@ -2,6 +2,8 @@
 # flake8: noqa
 # ruff: noqa
 # type: ignore
+__all__ = ["ExternalEvents", "SMSReceived"]
+
 import abc
 from dataclasses import dataclass
 

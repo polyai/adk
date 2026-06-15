@@ -2,6 +2,9 @@
 # flake8: noqa
 # ruff: noqa
 # type: ignore
+__all__ = ["ConversationLogger"]
+
+
 class ConversationLogger:
     def __init__(self) -> None: ...
     def info(self, content: str, is_pii: bool = False, **kwargs): ...
