@@ -1,12 +1,8 @@
 # Copyright PolyAI Limited
-# flake8: noqa
-# ruff: noqa
-# type: ignore
 __all__ = ["Attachment"]
 
 from typing import Any
 import typing
-
 
 class Attachment:
     content_url: Any
@@ -14,7 +10,6 @@ class Attachment:
     title: Any
     preview_image_url: Any
     call_to_action: Any
-
     def __init__(
         self,
         content_url: str,

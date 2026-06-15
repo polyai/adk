@@ -7,10 +7,9 @@ import os
 import unittest
 
 import yaml
-
-import poly.resources.resource_utils as resource_utils
 from jsonschema import ValidationError
 
+import poly.resources.resource_utils as resource_utils
 from poly.handlers.sync_client import SyncClientHandler
 from poly.resources.agent_settings import (
     SettingsPersonality,
@@ -53,7 +52,6 @@ from poly.resources.function import (
     FunctionParameters,
     FunctionType,
 )
-
 from poly.resources.handoff import Handoff
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.languages import (
@@ -74,11 +72,6 @@ from poly.resources.safety_filters import (
     VoiceSafetyFilters,
 )
 from poly.resources.sms import EnvPhoneNumbers, SMSTemplate
-from poly.resources.topic import (
-    FUNCTION_REGEX,
-    Topic,
-)
-from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
 from poly.resources.test_suite import (
     FunctionCallArgumentAssertion,
     FunctionCallAssertion,
@@ -86,6 +79,11 @@ from poly.resources.test_suite import (
     TestCaseAssertion,
     TestCaseTags,
 )
+from poly.resources.topic import (
+    FUNCTION_REGEX,
+    Topic,
+)
+from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
 from poly.resources.translations import Translation
 from poly.resources.variable import Variable
 from poly.resources.variant_attributes import Variant, VariantAttribute

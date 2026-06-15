@@ -1,7 +1,4 @@
 # Copyright PolyAI Limited
-# flake8: noqa
-# ruff: noqa
-# type: ignore
 __all__ = [
     "SMSIntegrationNotFound",
     "SMSMissingAssistantAccess",
@@ -27,7 +24,6 @@ __all__ = [
     "Conversation",
     "MetricEvent",
     "FunctionExecutor",
-    "ApiIntegrations",
     "ApiExecutor",
     "Integrations",
 ]
@@ -50,24 +46,18 @@ from .sms import (
 from .webchat import WebchatInterface
 from typing import Any, Literal
 
-
 def best_effort_substitute(prompt: str, variables: dict) -> str: ...
-
 
 class SMSIntegrationNotFound(Exception):
     def __init__(self, secret_name: str, integration: str) -> None: ...
 
-
 class SMSMissingAssistantAccess(Exception):
     def __init__(self, secret_name: str, assistant_id: str, integration: str) -> None: ...
 
-
 class MissingTemplate(Exception): ...
-
 
 class MissingHandoff(Exception):
     def __init__(self, handoff_destination: str) -> None: ...
-
 
 class TTSVoice:
     def __init__(self, provider: str, provider_voice_id: str, config: dict = {}) -> None: ...
@@ -77,10 +67,8 @@ class TTSVoice:
     def provider_voice_id(self) -> str: ...
     def to_dict(self): ...
 
-
 class CustomVoice(TTSVoice):
     def __init__(self, provider: str, provider_voice_id: str, **kwargs) -> None: ...
-
 
 class ElevenLabsVoice(TTSVoice):
     def __init__(
@@ -105,7 +93,6 @@ class ElevenLabsVoice(TTSVoice):
     @property
     def speed(self) -> float | None: ...
 
-
 class RimeVoice(TTSVoice):
     def __init__(
         self,
@@ -116,16 +103,13 @@ class RimeVoice(TTSVoice):
     @property
     def speech_alpha(self) -> float | None: ...
 
-
 EmotionKindValue: Any
 EmotionIntensityValue: Any
-
 
 class EmotionKind:
     ANGER: Any
     POSITIVITY: Any
     SURPRISE: Any
-
 
 class EmotionIntensity:
     LOWEST: Any
@@ -133,16 +117,13 @@ class EmotionIntensity:
     HIGH: Any
     HIGHEST: Any
 
-
 class Emotion:
     kind: Any
     intensity: Any
-
     def __init__(
         self, kind: EmotionKindValue | None = None, intensity: EmotionIntensityValue | None = None
     ) -> None: ...
     def to_dict(self) -> dict: ...
-
 
 class CartesiaVoice(TTSVoice):
     def __init__(
@@ -165,7 +146,6 @@ class CartesiaVoice(TTSVoice):
     def emotion(self) -> str | None: ...
     @property
     def language(self) -> str | None: ...
-
 
 class PlayHTVoice(TTSVoice):
     def __init__(
@@ -198,7 +178,6 @@ class PlayHTVoice(TTSVoice):
     @property
     def temperature(self) -> float | None: ...
 
-
 class MinimaxVoice(TTSVoice):
     def __init__(
         self,
@@ -221,7 +200,6 @@ class MinimaxVoice(TTSVoice):
     @property
     def emotion(self) -> str | None: ...
 
-
 class HumeVoice(TTSVoice):
     def __init__(
         self,
@@ -232,14 +210,12 @@ class HumeVoice(TTSVoice):
         provider: Literal["CUSTOM_VOICE", "HUME_AI"] | None = "CUSTOM_VOICE",
     ) -> None: ...
 
-
 class GoogleVoice(TTSVoice):
     def __init__(
         self, provider_voice_id: str, gender: Literal["male", "female", "neutral"] | None = None
     ) -> None: ...
     @property
     def gender(self) -> str | None: ...
-
 
 VoiceType = (
     CustomVoice
@@ -253,7 +229,6 @@ VoiceType = (
 )
 SupportedLanguageCodes: Any
 
-
 class VoiceWeighting:
     def __init__(self, voice: VoiceType, weight: float | None = None) -> None: ...
     @property
@@ -261,41 +236,33 @@ class VoiceWeighting:
     @property
     def weight(self) -> float | None: ...
 
-
 @dataclass
 class FlowTransition:
     goto_flow: str | None = ...
     exit_flow: bool = ...
 
-
 class Variant(dict):
     __getattr__: Any
-
 
 class Entities(dict):
     __getattr__: Any
 
-
 @dataclass
 class HandoffConfig:
-    sip_type: HandoffMethod
+    sip_type: Any
     sip_config: dict = field(default_factory=dict)
     sip_headers: dict = field(default_factory=dict)
-
     @classmethod
     def from_dict(cls, d: dict): ...
-
 
 @dataclass
 class Handoff:
     handoff: HandoffConfig
     reason: str | None
     destination: str | None = ...
-
     @classmethod
     def from_dict(cls, d: dict): ...
     def to_response(self) -> dict: ...
-
 
 @dataclass
 class ApiIntegrationData:
@@ -303,17 +270,14 @@ class ApiIntegrationData:
     name: str
     environments: dict[str, dict[str, str]]
     operations: list[dict[str, str]]
-
     def to_dict(self) -> dict[str, Any]: ...
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ApiIntegrationData: ...
-
 
 @dataclass
 class ASRBiasing:
     keywords: list[str] | None = ...
     custom_biases: dict[str, float] | None = ...
-
 
 class State(dict):
     def __getattr__(self, key: str) -> Any | None: ...
@@ -321,10 +285,8 @@ class State(dict):
     def __deepcopy__(self, memo): ...
     def __reduce__(self): ...
 
-
 class ReadOnlyDict(dict):
     def __readonly__(self, *args, **kwargs) -> None: ...
-
     __setitem__ = __readonly__
     __delitem__ = __readonly__
     clear = __readonly__
@@ -332,9 +294,7 @@ class ReadOnlyDict(dict):
     popitem = __readonly__
     setdefault = __readonly__
     update = __readonly__
-
     def __init__(self, *args, **kwargs) -> None: ...
-
 
 class TranslationReplacementProxy:
     def __init__(
@@ -342,40 +302,30 @@ class TranslationReplacementProxy:
     ) -> None: ...
     def __getattr__(self, name): ...
 
-
 class RealtimeConfig(ReadOnlyDict):
     def __init__(self, **kwargs) -> None: ...
-
 
 @dataclass
 class MetricEvent:
     name: str
     value: float | str | int | None
 
-
 class FunctionExecutor(dict):
     conv: Any
-
     def __init__(self, conv: Conversation) -> None: ...
     def __getattr__(self, name: str) -> Any: ...
-
 
 class ApiExecutor:
     conv: Any
     api_integrations: Any
-
-    def __init__(
-        self, conv: Conversation, api_integrations: ApiIntegrations | None = None
-    ) -> None: ...
+    def __init__(self, conv: Conversation, api_integrations: Any | None = None) -> None: ...
     def __getattr__(self, name: str) -> Any: ...
-
 
 class Conversation:
     utils: Any
     memory: Any
     log: Any
     agentic_dial: Any
-
     def __init__(
         self,
         call_sid: str,
@@ -552,7 +502,6 @@ class Conversation:
         route: str | None = None,
     ): ...
     def discard_recording(self) -> None: ...
-
 
 def retrieve_sms_credentials(
     secret_name: str, secret_dict: dict[str, Any], project_id: str, integration: str

@@ -4,7 +4,6 @@
 # type: ignore
 from dataclasses import dataclass
 
-
 @dataclass
 class OutgoingEmail:
     to: str

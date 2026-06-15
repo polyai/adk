@@ -1,53 +1,41 @@
 # Copyright PolyAI Limited
-# flake8: noqa
-# ruff: noqa
-# type: ignore
 __all__ = ["AgenticDial", "Destination", "Destinations"]
 
 from typing import Any
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 
-
 @dataclass
 class Destination:
     name: str
     phone_number: str
     sip_headers: dict[str, str] = field(default_factory=dict)
-
     @classmethod
     def from_dict(cls, data: dict) -> Destination: ...
     def to_dict(self) -> dict: ...
 
-
 @dataclass
 class AgenticDialConfig:
     destinations: list[Destination] = field(default_factory=list)
-
     @classmethod
     def from_dict(cls, data: dict) -> AgenticDialConfig: ...
-
 
 @dataclass
 class AgenticDialData:
     config: AgenticDialConfig = field(default_factory=AgenticDialConfig)
     active_dial_destinations: list[str] = field(default_factory=list)
     dial_id: str | None = ...
-
     @classmethod
     def from_dict(cls, data: dict) -> AgenticDialData: ...
-
 
 @dataclass
 class MessageToParent:
     content: str
 
-
 @dataclass
 class MessageToChild:
     destination: str
     content: str
-
 
 class Destinations:
     def __init__(self, destinations: list[Destination]) -> None: ...
@@ -58,10 +46,8 @@ class Destinations:
     ) -> None: ...
     def clear(self) -> None: ...
 
-
 class AgenticDial:
     destinations: Any
-
     def __init__(self, data: AgenticDialData | None) -> None: ...
     @property
     def active_destinations(self) -> list[str]: ...

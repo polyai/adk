@@ -26,6 +26,10 @@ exclude = [
 "poly.docs" = [
     "*.md",
 ]
+"poly.types" = [
+    "*.pyi",
+    "**/*.pyi",
+]
 
 [tool.ruff]
 target-version = "py312"

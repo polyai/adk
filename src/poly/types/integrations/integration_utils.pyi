@@ -9,7 +9,6 @@ VALID_HTTP_METHODS: Any
 PROXY_BASE_URL: str
 DEFAULT_REQUEST_TIMEOUT_SECONDS: int
 
-
 def proxy_integration_request_to_paragon(
     paragon_connection_id: str,
     paragon_project_id: str,

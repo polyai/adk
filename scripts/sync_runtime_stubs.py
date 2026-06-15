@@ -16,6 +16,7 @@ Default runtime path: ../genai_lambda_runtime/python/runtime
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import subprocess
@@ -27,9 +28,6 @@ STUB_DIR = Path(__file__).resolve().parent.parent / "src" / "poly" / "types"
 
 STUB_HEADER = """\
 # Copyright PolyAI Limited
-# flake8: noqa
-# ruff: noqa
-# type: ignore
 """
 
 # Regex patterns for import rewriting
@@ -42,6 +40,8 @@ _DROP_IMPORT_RE = re.compile(
 )
 # _typeshed.Incomplete -> Any
 _INCOMPLETE_RE = re.compile(r"\bIncomplete\b")
+# Types from dropped imports that should become Any
+_UNRESOLVABLE_TYPES = re.compile(r"\bHandoffMethod\b|\bApiIntegrations\b")
 
 
 def _relativize_imports(source: str, rel_path: str) -> str:
@@ -134,30 +134,54 @@ def _source_files_from_imports_json(python_root: Path) -> list[Path]:
     return files
 
 
+def _ensure_any_imported(source: str) -> str:
+    """Add ``Any`` to the typing import if not already present."""
+    if "from typing import" in source:
+        return re.sub(
+            r"from typing import (.+)",
+            lambda m: f"from typing import {m.group(1)}"
+            if "Any" in m.group(1)
+            else f"from typing import Any, {m.group(1)}",
+            source,
+            count=1,
+        )
+    return "from typing import Any\n" + source
+
+
 def _postprocess(source: str, rel_path: str, all_names: list[str] | None = None) -> str:
     """Apply all post-processing to a stubgen output file."""
-    # Drop imports we don't want
+    # Drop imports from modules we don't ship
     source = _DROP_IMPORT_RE.sub("", source)
-    # Replace Incomplete with Any
-    if _INCOMPLETE_RE.search(source):
-        source = _INCOMPLETE_RE.sub("Any", source)
-        if "from typing import" in source:
-            source = re.sub(
-                r"from typing import (.+)",
-                lambda m: f"from typing import {m.group(1)}"
-                if "Any" in m.group(1)
-                else f"from typing import Any, {m.group(1)}",
-                source,
-                count=1,
-            )
-        else:
-            source = "from typing import Any\n" + source
-    # Relativize imports
+    # Replace unresolvable types and Incomplete with Any
+    needs_any = False
+    for pattern in (_INCOMPLETE_RE, _UNRESOLVABLE_TYPES):
+        if pattern.search(source):
+            source = pattern.sub("Any", source)
+            needs_any = True
+    if needs_any:
+        source = _ensure_any_imported(source)
+    # Relativize runtime/utils imports
     source = _relativize_imports(source, rel_path)
-    # Inject __all__ from imports.json
+    # Inject __all__ from imports.json, filtered to names available in the stub
     if all_names:
-        all_line = "__all__ = " + repr(all_names) + "\n\n"
-        source = all_line + source
+        tree = ast.parse(source)
+        available: set[str] = set()
+        for node in ast.iter_child_nodes(tree):
+            if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+                available.add(node.name)
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        available.add(target.id)
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                available.add(node.target.id)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    available.add(alias.asname or alias.name)
+        filtered = [n for n in all_names if n in available]
+        if filtered:
+            all_line = "__all__ = " + repr(filtered) + "\n\n"
+            source = all_line + source
     # Add header
     source = STUB_HEADER + source
     return source
@@ -211,16 +235,17 @@ def main() -> None:
 
             for pyi_file in sorted(stub_pkg.rglob("*.pyi")):
                 rel = pyi_file.relative_to(stub_pkg)
+                # imports_map keys use .py paths
                 rel_py = str(rel.with_suffix(".py"))
 
                 source = pyi_file.read_text(encoding="utf-8")
                 all_names = imports_map.get(rel_py)
                 processed = _postprocess(source, rel_py, all_names)
 
-                dest = STUB_DIR / rel.with_suffix(".py")
+                dest = STUB_DIR / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 dest.write_text(processed, encoding="utf-8")
-                print(f"  OK   {rel.with_suffix('.py')}")
+                print(f"  OK   {rel}")
                 updated += 1
 
     print(f"\nSynced {updated} stub files to {STUB_DIR}")

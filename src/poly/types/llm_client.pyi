@@ -5,10 +5,8 @@
 from dataclasses import dataclass
 from typing import Literal
 
-
 class ChatCompletionError(Exception):
     def __init__(self, message: str) -> None: ...
-
 
 @dataclass
 class _InferenceConfig:
@@ -17,12 +15,10 @@ class _InferenceConfig:
     max_tokens: int | None = ...
     response_format: dict | None = ...
 
-
 @dataclass
 class _ModelPromptEvent:
     content: str
     type: Literal["prompt"] = ...
-
 
 @dataclass
 class _ChatCompletionRequest:
@@ -31,11 +27,9 @@ class _ChatCompletionRequest:
     inference_config: _InferenceConfig
     events: list[_ModelPromptEvent]
 
-
 @dataclass
 class _ChatCompletionResponse:
     content: str
-
 
 class _LLMClient:
     def __init__(

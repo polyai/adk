@@ -1,14 +1,10 @@
 # Copyright PolyAI Limited
-# flake8: noqa
-# ruff: noqa
-# type: ignore
 __all__ = ["Utils"]
 
 from . import value_extraction_types as extraction_types
 from .history import AgentResponse as AgentResponse, UserInput as UserInput
 from .value_extraction import Address as Address, _EntityValidationResponse
 from typing import Any, Literal
-
 
 class Utils:
     def __init__(
@@ -24,7 +20,6 @@ class Utils:
         vpc_enabled: bool = False,
         correlation_id: str | None = None,
     ) -> None: ...
-
     EntityType: Any
     NumericType: Any
     NumericConfig: Any
@@ -39,7 +34,6 @@ class Utils:
     PhoneNumberConfig: Any
     EnumConfig: Any
     EntityConfig: Any
-
     def extract_address(
         self, addresses: list[Address] | None = None, country: str = "US"
     ) -> Address: ...

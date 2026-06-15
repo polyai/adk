@@ -1,9 +1,5 @@
 # Copyright PolyAI Limited
-# flake8: noqa
-# ruff: noqa
-# type: ignore
 __all__ = ["AgentResponse", "UserInput"]
-
 
 class UserInput:
     def __init__(self, text: str) -> None: ...
@@ -14,7 +10,6 @@ class UserInput:
     def __eq__(self, other): ...
     def to_dict(self) -> dict[str, str]: ...
     def to_string(self) -> str: ...
-
 
 class AgentResponse:
     def __init__(self, text: str) -> None: ...

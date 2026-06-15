@@ -8,7 +8,6 @@ from enum import StrEnum
 from pydantic import BaseModel
 from typing import Literal
 
-
 class EntityType(StrEnum):
     ADDRESS = "address"
     ALPHANUMERIC = "alphanumeric"
@@ -23,20 +22,16 @@ class EntityType(StrEnum):
     NAME = "name"
     FREE_TEXT = "free_text"
 
-
 class NumericType(StrEnum):
     INT = "int"
     FLOAT = "float"
-
 
 class BaseRangeConfig(BaseModel):
     min_inclusive: float | None
     max_inclusive: float | None
 
-
 class NonNegativeMaxRangeConfig(BaseRangeConfig):
     def validate_max(cls, v): ...
-
 
 class NumericConfig(BaseRangeConfig):
     entity_type: Literal["numeric"]
@@ -44,13 +39,11 @@ class NumericConfig(BaseRangeConfig):
 
     def validate_min_max(cls, v, values): ...
 
-
 class QuantityConfig(NonNegativeMaxRangeConfig):
     entity_type: Literal["quantity"]
     min_inclusive: int | None
     max_inclusive: int | None
     numeric_type: NumericType
-
 
 class CurrencyConfig(NonNegativeMaxRangeConfig):
     entity_type: Literal["currency"]
@@ -58,14 +51,11 @@ class CurrencyConfig(NonNegativeMaxRangeConfig):
     max_inclusive: float | None
     numeric_type: NumericType
 
-
 class NameConfig(BaseModel):
     entity_type: Literal["name"]
 
-
 class FreeTextConfig(BaseModel):
     entity_type: Literal["free_text"]
-
 
 class AlphanumericConfig(BaseModel):
     custom_regex: str
@@ -76,7 +66,6 @@ class AlphanumericConfig(BaseModel):
     def validate_capturing_group(cls, v): ...
     def get_compiled_regex(self) -> re.Pattern: ...
 
-
 class DateConfig(BaseModel):
     entity_type: Literal["date"]
     day_first: bool | None
@@ -86,12 +75,10 @@ class DateConfig(BaseModel):
     def parse_dates(cls, v, values): ...
     def validate_dates(cls, v, values): ...
 
-
 class EmailConfig(AlphanumericConfig):
     custom_regex: str
     entity_type: Literal["email"]
     capturing_group: int | None
-
 
 class TimeConfig(BaseModel):
     entity_type: Literal["time"]
@@ -104,20 +91,17 @@ class TimeConfig(BaseModel):
     def validate_times(cls, v, values): ...
     def validate_time_pivot(cls, v, values): ...
 
-
 class PhoneNumberConfig(BaseModel):
     entity_type: Literal["phone_number"]
     regions: set[str] | None
 
     def validate_regions(cls, v): ...
 
-
 class EnumConfig(BaseModel):
     entity_type: Literal["enum"]
     allowed_vals: set[str] | None
 
     def validate_allowed_vals(cls, v): ...
-
 
 EntityConfig = (
     NumericConfig

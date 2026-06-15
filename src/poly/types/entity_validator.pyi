@@ -5,7 +5,6 @@
 from dataclasses import dataclass
 from .value_extraction_types import EntityType
 
-
 @dataclass
 class EntityValidationResult:
     id: str

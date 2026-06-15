@@ -1,15 +1,10 @@
 # Copyright PolyAI Limited
-# flake8: noqa
-# ruff: noqa
-# type: ignore
 __all__ = ["ExternalEvents", "SMSReceived"]
 
 import abc
 from dataclasses import dataclass
 
-
 class Event(abc.ABC): ...
-
 
 @dataclass
 class GenericExternalEvent(Event):
@@ -18,17 +13,14 @@ class GenericExternalEvent(Event):
     created_at: str | None = ...
     data: str | None = ...
     content_type: str | None = ...
-
     @classmethod
     def from_dict(cls, d: dict): ...
-
 
 @dataclass
 class SMSReceived(Event):
     from_number: str
     to_number: str
     text: str
-
 
 class ExternalEvents:
     def __init__(self, sms_received: list[SMSReceived]) -> None: ...
