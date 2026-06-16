@@ -9,13 +9,13 @@ from typing import ClassVar, Optional
 
 from google.protobuf.message import Message
 
+import poly.resources.resource_utils as utils
 from poly.handlers.protobuf.channels_pb2 import Channel_UpdateSafetyFilters, ChannelType
 from poly.handlers.protobuf.content_filter_settings_pb2 import (
     AzureContentFilter,
     AzureContentFilterCategory,
     ContentFilterSettings_UpdateContentFilterSettings,
 )
-import poly.resources.resource_utils as utils
 from poly.resources.resource import ResourceMapping, YamlResource
 
 PRECISION_MAPPING = {"LOOSE": "lenient", "MEDIUM": "medium", "STRICT": "strict"}

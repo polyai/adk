@@ -7,10 +7,9 @@ import os
 import unittest
 
 import yaml
-
-import poly.resources.resource_utils as resource_utils
 from jsonschema import ValidationError
 
+import poly.resources.resource_utils as resource_utils
 from poly.handlers.sync_client import SyncClientHandler
 from poly.resources.agent_settings import (
     SettingsPersonality,
@@ -53,7 +52,6 @@ from poly.resources.function import (
     FunctionParameters,
     FunctionType,
 )
-
 from poly.resources.handoff import Handoff
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.languages import (
@@ -65,9 +63,7 @@ from poly.resources.pronunciation import Pronunciation
 from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
-    _matches_scalar,
     _parse_multi_resource_path,
-    check_yaml_field_types,
 )
 from poly.resources.safety_filters import (
     ChatSafetyFilters,
@@ -76,11 +72,6 @@ from poly.resources.safety_filters import (
     VoiceSafetyFilters,
 )
 from poly.resources.sms import EnvPhoneNumbers, SMSTemplate
-from poly.resources.topic import (
-    FUNCTION_REGEX,
-    Topic,
-)
-from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
 from poly.resources.test_suite import (
     FunctionCallArgumentAssertion,
     FunctionCallAssertion,
@@ -88,6 +79,11 @@ from poly.resources.test_suite import (
     TestCaseAssertion,
     TestCaseTags,
 )
+from poly.resources.topic import (
+    FUNCTION_REGEX,
+    Topic,
+)
+from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
 from poly.resources.translations import Translation
 from poly.resources.variable import Variable
 from poly.resources.variant_attributes import Variant, VariantAttribute
@@ -7929,7 +7925,7 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
             example_queries=[],
         )
         with self.assertRaises(ValueError) as ctx:
-            check_yaml_field_types(topic)
+            resource_utils.check_yaml_field_types(topic)
         self.assertIn("actions", str(ctx.exception))
         self.assertIn("should be str but got dict", str(ctx.exception))
 
@@ -7943,7 +7939,7 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
             example_queries=["good", {"bad key": "value"}],
         )
         with self.assertRaises(ValueError) as ctx:
-            check_yaml_field_types(topic)
+            resource_utils.check_yaml_field_types(topic)
         self.assertIn("example_queries[1]", str(ctx.exception))
         self.assertIn("should be str but got dict", str(ctx.exception))
 
@@ -7965,7 +7961,7 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
             tags=TestCaseTags(resource_id="TC-1", name="tags", tags=[]),
         )
         with self.assertRaises(ValueError) as ctx:
-            check_yaml_field_types(test_case)
+            resource_utils.check_yaml_field_types(test_case)
         self.assertIn("assertions.prompts[1]", str(ctx.exception))
 
     def test_valid_resource_passes(self):
@@ -7977,7 +7973,7 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
             content="some content",
             example_queries=["query 1", "query 2"],
         )
-        check_yaml_field_types(topic)
+        resource_utils.check_yaml_field_types(topic)
 
     def test_optional_str_field_none_passes(self):
         """Optional[str] fields with None should not raise."""
@@ -7993,7 +7989,7 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
             tags=TestCaseTags(resource_id="TC-1", name="tags", tags=[]),
             variant=None,
         )
-        check_yaml_field_types(test_case)
+        resource_utils.check_yaml_field_types(test_case)
 
     def test_list_str_field_with_dict_value_raises(self):
         """A list[str] field that got a dict instead of a list should raise."""
@@ -8013,7 +8009,7 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
             tags=TestCaseTags(resource_id="TC-1", name="tags", tags=[]),
         )
         with self.assertRaises(ValueError) as ctx:
-            check_yaml_field_types(test_case)
+            resource_utils.check_yaml_field_types(test_case)
         self.assertIn("assertions.prompts", str(ctx.exception))
         self.assertIn("list of str", str(ctx.exception))
 
@@ -8027,7 +8023,7 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
             example_queries=[],
         )
         with self.assertRaises(ValueError) as ctx:
-            check_yaml_field_types(topic)
+            resource_utils.check_yaml_field_types(topic)
         self.assertIn("actions", str(ctx.exception))
         self.assertIn("bool", str(ctx.exception))
 
@@ -8041,7 +8037,7 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
             example_queries=[],
         )
         with self.assertRaises(ValueError) as ctx:
-            check_yaml_field_types(topic)
+            resource_utils.check_yaml_field_types(topic)
         self.assertIn("actions", str(ctx.exception))
         self.assertIn("int", str(ctx.exception))
 
@@ -8055,7 +8051,7 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
             example_queries=["good", True],
         )
         with self.assertRaises(ValueError) as ctx:
-            check_yaml_field_types(topic)
+            resource_utils.check_yaml_field_types(topic)
         self.assertIn("example_queries[1]", str(ctx.exception))
         self.assertIn("bool", str(ctx.exception))
 
@@ -8068,7 +8064,7 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
             adjectives={"Polite": "sure"},
         )
         with self.assertRaises(ValueError) as ctx:
-            check_yaml_field_types(personality)
+            resource_utils.check_yaml_field_types(personality)
         self.assertIn("adjectives", str(ctx.exception))
         self.assertIn("should be bool but got str", str(ctx.exception))
 
@@ -8080,21 +8076,38 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
             custom="fine",
             adjectives={"Polite": True, "Calm": False},
         )
-        check_yaml_field_types(personality)
+        resource_utils.check_yaml_field_types(personality)
 
     def test_int_accepted_for_float_field(self):
         """int values should be accepted where float is expected (YAML parses 500 as int)."""
-        self.assertTrue(_matches_scalar(42, float))
-        self.assertTrue(_matches_scalar(3.14, float))
+        self.assertTrue(resource_utils._matches_scalar(42, float))
+        self.assertTrue(resource_utils._matches_scalar(3.14, float))
 
     def test_bool_rejected_for_int_field(self):
         """bool should not pass as int even though bool is a subclass of int in Python."""
-        self.assertFalse(_matches_scalar(True, int))
-        self.assertFalse(_matches_scalar(False, int))
+        self.assertFalse(resource_utils._matches_scalar(True, int))
+        self.assertFalse(resource_utils._matches_scalar(False, int))
 
     def test_bool_rejected_for_float_field(self):
         """bool should not pass as float either."""
-        self.assertFalse(_matches_scalar(True, float))
+        self.assertFalse(resource_utils._matches_scalar(True, float))
+        self.assertFalse(resource_utils._matches_scalar(False, float))
+
+    def test_none_on_optional_field_passes(self):
+        """None in an Optional[str] field should not raise."""
+        test_case = TestCase(
+            resource_id="TC-1",
+            name="test",
+            scenario="test scenario",
+            channel="chat.polyai",
+            language="en-GB",
+            assertions=TestCaseAssertion(
+                resource_id="TC-1", name="assertions", prompts=[], function_calls=[]
+            ),
+            tags=TestCaseTags(resource_id="TC-1", name="tags", tags=[]),
+            variant=None,
+        )
+        resource_utils.check_yaml_field_types(test_case)
 
 
 if __name__ == "__main__":

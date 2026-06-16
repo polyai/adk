@@ -17,7 +17,6 @@ from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
     _parse_multi_resource_path,
-    check_yaml_field_types,
 )
 
 
@@ -149,7 +148,7 @@ class Pronunciation(MultiResourceYamlResource):
         instance = cls.from_yaml_dict(
             yaml_dict, resource_id=resource_id, name="", position=position, **kwargs
         )
-        check_yaml_field_types(instance)
+        utils.check_yaml_field_types(instance)
         return instance
 
     @property

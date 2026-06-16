@@ -55,7 +55,6 @@ from poly.resources.resource import (
     ResourceMapping,
     SubResource,
     YamlResource,
-    check_yaml_field_types,
 )
 
 FUNCTION_REGEX = re.compile(r"{{f[nt]:([\w-]+)}}")
@@ -646,7 +645,7 @@ class FlowStep(BaseFlowStep, YamlResource):
             known_position=known_position,
             resource_mappings=resource_mappings,
         )
-        check_yaml_field_types(instance)
+        utils.check_yaml_field_types(instance)
         return instance
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
