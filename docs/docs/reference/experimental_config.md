@@ -108,6 +108,32 @@ The following sections describe notable feature areas available in the schema.
 
 Configure audio enhancement processing applied to the incoming audio stream before speech recognition. Three providers are available: `ai-coustics`, `dolby`, and `krisp`.
 
+#### `ai-coustics` VAD
+
+The `ai-coustics` enhancer supports a `vad` (voice activity detection) sub-object for tuning how speech is detected in the audio stream.
+
+| Field | Type | Description | Default | Range |
+|---|---|---|---|---|
+| `sensitivity` | number | Energy threshold for speech detection. Energy threshold = 10^(-sensitivity). Higher values detect quieter speech. | `6.0` | 1.0 – 15.0 |
+| `speech_hold_duration` | number | How long the VAD continues to report speech after the audio signal no longer contains speech (in seconds). Useful for bridging short pauses. | `0.03` | ≥ 0.0 |
+| `minimum_speech_duration` | number | How long speech must be present before the VAD considers it speech (in seconds). Helps filter out short non-speech sounds like clicks or coughs. | `0.0` | 0.0 – 1.0 |
+
+Example:
+
+~~~json
+{
+  "audio_enhancement": {
+    "ai-coustics": {
+      "vad": {
+        "sensitivity": 6.0,
+        "speech_hold_duration": 0.03,
+        "minimum_speech_duration": 0.0
+      }
+    }
+  }
+}
+~~~
+
 #### `krisp`
 
 Krisp provides noise cancellation and voice isolation. Settings include:
@@ -130,6 +156,63 @@ Example:
       "frame_duration_ms": 20,
       "timeout_ms": 100
     }
+  }
+}
+~~~
+
+### Barge-in
+
+The barge-in section supports additional fields to control how interrupted speech is handled and displayed.
+
+#### Interruption granularity
+
+`interruption_granularity` controls where the split happens in agent speech when the user barges in.
+
+| Value | Behavior |
+|---|---|
+| `"word"` | Audio-timing split at the word boundary. |
+| `"sentence"` | Drop the interrupted sentence. |
+| `"sentence_keep"` | Keep the interrupted sentence. |
+| `"chunk"` | Drop the entire TTS chunk. |
+
+#### Interruption display
+
+`interruption_display` controls how interrupted text appears in Agent Studio `msg.Text` (and in LLM context if `interruption_display_llm` is not set).
+
+| Value | Behavior |
+|---|---|
+| `"ellipsis"` | Append `"..."` to the said portion. |
+| `"tags"` | Wrap the unsaid portion in `<interrupted>` XML tags. |
+| `"strip"` | Drop unsaid text silently. |
+| `"none"` | Keep the full text unchanged. |
+| `"barge"` | Append a `"[BARGE IN]"` marker. |
+
+#### `interruption_display_llm`
+
+An optional LLM-specific override for interrupted text display. Accepts the same values as `interruption_display`. When absent, inherits from `interruption_display`.
+
+#### `truncate_interrupted_utterances`
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `truncate_interrupted_utterances` | boolean | `false` | When `true`, function-output utterances on interrupted turns are truncated to only the said (heard) portion, dropping unsaid text. Useful when TTS utterances are attached to function outputs and should reflect what the caller actually heard. |
+
+#### `annotate_interrupted_function_calls`
+
+| Field | Type | Description |
+|---|---|---|
+| `annotate_interrupted_function_calls` | boolean | When `true`, function call results on interrupted turns are annotated with said/unsaid context so the LLM can judge whether the initiating question was fully communicated. Defaults to `false`. |
+
+Example:
+
+~~~json
+{
+  "barge_in": {
+    "interruption_granularity": "sentence",
+    "interruption_display": "ellipsis",
+    "interruption_display_llm": "tags",
+    "truncate_interrupted_utterances": true,
+    "annotate_interrupted_function_calls": false
   }
 }
 ~~~
@@ -168,6 +251,24 @@ Example:
         }
       }
     }
+  }
+}
+~~~
+
+### Language switching
+
+Configure automatic language switching behavior.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `explicit_only` | boolean | `false` | When `true`, the agent only switches language when the user explicitly asks. When `false` (default), the agent may also switch spontaneously based on detected language in the transcription. |
+
+Example:
+
+~~~json
+{
+  "language_switching": {
+    "explicit_only": true
   }
 }
 ~~~
@@ -212,6 +313,28 @@ Example:
     "transcription": {
       "set_transcriber_language": true
     }
+  }
+}
+~~~
+
+### Prompts
+
+The `prompts` section supports channel-specific and language-related decorator overrides.
+
+| Field | Type | Description |
+|---|---|---|
+| `webchat_decorator` | string | Optional webchat-specific decorator for the `webchat.polyai` channel. |
+| `sms_decorator` | string | Optional SMS-specific decorator for the `sms.polyai` channel. |
+| `voice_decorator` | string | Optional voice-specific decorator for `chat.polyai` or `sip.polyai` channels. |
+| `language_switching_instructions` | string | Optional instructions for language switching behaviour. Must contain a `{available_languages}` placeholder. |
+
+Example:
+
+~~~json
+{
+  "prompts": {
+    "sms_decorator": "Keep responses brief and suitable for SMS.",
+    "language_switching_instructions": "You may switch to any of the following languages if the user requests it: {available_languages}."
   }
 }
 ~~~
