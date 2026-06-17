@@ -1,6 +1,65 @@
 # CHANGELOG
 
 
+## v0.25.9 (2026-06-17)
+
+### Bug Fixes
+
+- Add dataclass-aware YAML field type validation at parse time
+  ([#192](https://github.com/polyai/adk/pull/192),
+  [`c871f34`](https://github.com/polyai/adk/commit/c871f34fbc94ee284587d6efc35d96f9521e1d19))
+
+## Summary
+
+Adds automatic type validation for YAML resource fields at parse time, catching the colon-space
+  footgun where unquoted strings silently parse as dicts.
+
+## Motivation
+
+YAML values with unquoted mid-sentence colons (e.g., `the outcome: either a time slot or...`)
+  silently parse as dicts instead of strings. This causes opaque `TypeError: bad argument type for
+  built-in operation` from protobuf C code at push time — with no hint about which field or file
+  caused it. A confirmed case in `prompt_assertions` burned ~7 push attempts before the user found
+  the cause.
+
+Supersedes #191 — moves the detection from `project.py`'s generic error handler down to the YAML
+  resource layer with field-level precision.
+
+## Changes
+
+- Add `check_yaml_field_types()` in `resource.py` using `dataclasses.fields()` +
+  `typing.get_type_hints()` to introspect declared types and validate `str` / `list[str]` fields
+  aren't dicts - Recurses into nested dataclass fields (catches e.g. `TestCaseAssertion.prompts`
+  inside `TestCase`) - Hook into `YamlResource.read_local_resource` — all YAML resources get the
+  check automatically - Hook into `FlowStep` and `Pronunciation` overriding `read_local_resource`
+  methods - 6 unit tests covering str→dict, list[str]→dict, nested recursion, valid passthrough,
+  Optional[str] None, and error message content
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Example error output for the confirmed bug (test case with unquoted colon in prompt assertion):
+
+``` ValueError: Error reading resource test_booking at test_suite/test_booking.yaml:
+  'assertions.prompts[1]' should be a string but got a dict. ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.25.8 (2026-06-15)
 
 ### Bug Fixes
