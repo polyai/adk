@@ -1,6 +1,68 @@
 # CHANGELOG
 
 
+## v0.25.10 (2026-06-17)
+
+### Bug Fixes
+
+- [docs] bottom-panel loop-backs across docs ([#193](https://github.com/polyai/adk/pull/193),
+  [`0f56d55`](https://github.com/polyai/adk/commit/0f56d55369116d32ac04d3e91e7e3d66637404b1))
+
+## Summary
+
+- Replace backward-pointing "Related" / "Next steps" card links with forward-pointing ones across 6
+  pages so every bottom panel guides readers deeper into the docs - Fix `examples/index.md` which
+  listed no actual examples — now links to all 3 example pages - Fix `reference/branch_merge.md`
+  which was a complete navigation dead-end (all 4 links backward)
+
+## Pages changed
+
+| Page | Problem | Fix | |------|---------|-----| | `get-started/what-is-the-adk` | 2 of 3 links
+  loop back to `get-started` | Points forward to walkthrough, prerequisites, first-commands | |
+  `get-started/prerequisites` | Only link goes back to `get-started` | Points forward to
+  `first-commands` | | `tutorials/build-an-agent` | Links back to walkthrough video | Points forward
+  to restaurant-booking tutorial + core concepts | | `examples/index` | No example links; 2 of 3
+  links backward | Lists all 3 example pages | | `reference/tooling` | Both links backward | Points
+  forward to agent_settings, flows, functions | | `reference/branch_merge` | All 4 links backward
+  (dead end) | Points forward to tests, tooling + keeps multi-user cross-ref |
+
+## Test plan
+
+- [ ] Run `mkdocs serve` locally and verify bottom-panel "Previous/Next" navigation follows sidebar
+  order - [ ] Click through all changed card links and confirm they resolve correctly - [ ] Verify
+  no broken links introduced
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
+
+- Bump experimental config schema ([#194](https://github.com/polyai/adk/pull/194),
+  [`2c2de51`](https://github.com/polyai/adk/commit/2c2de51ab638aca69ddbd1adc43d50c5ddfda23a))
+
+## Summary Bump experimental schema to latest version
+
+## Motivation
+
+Keeps up to date
+
+## Changes
+
+- Add latests changes
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.25.9 (2026-06-17)
 
 ### Bug Fixes
