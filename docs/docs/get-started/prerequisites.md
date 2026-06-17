@@ -51,11 +51,11 @@ Before continuing, confirm:
 
 <div class="grid cards" markdown>
 
--   **Getting started**
+-   **First commands**
 
     ---
 
-    Install the ADK, sign in, and create your first project.
-    [Open getting started](./get-started.md)
+    Initialize a project, pull configuration, and push your first change.
+    [Open first commands](./first-commands.md)
 
 </div>

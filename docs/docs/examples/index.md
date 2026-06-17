@@ -7,25 +7,25 @@ Small, focused examples that can be copied and adapted when building with the **
 
 <div class="grid cards" markdown>
 
--   **Concepts**
+-   **Confirm caller ID before SMS**
 
     ---
 
-    Learn how a feature or workflow works before applying it.
-    [Open core concepts](../concepts/working-locally.md)
+    Validate the caller's identity before sending an SMS confirmation.
+    [Open example](./confirm-caller-id-before-sms.md)
 
--   **Reference**
-
-    ---
-
-    Look up exact fields, structures, and command behavior.
-    [Open CLI reference](../reference/cli.md)
-
--   **Tutorials**
+-   **Venue-specific goodbye**
 
     ---
 
-    Follow a complete workflow from start to finish.
-    [Open tutorials](../tutorials/build-an-agent.md)
+    Customize the agent's closing message based on variant attributes.
+    [Open example](./venue-specific-goodbye.md)
+
+-   **SMS link with transfer fallback**
+
+    ---
+
+    Send an SMS with a link and fall back to a live transfer if it fails.
+    [Open example](./sms-or-transfer-fallback.md)
 
 </div>

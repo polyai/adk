@@ -471,6 +471,22 @@ At that point, the agent is live.
 
 <div class="grid cards" markdown>
 
+-   **Restaurant booking agent**
+
+    ---
+
+    Apply the workflow to a real-world example with flows, functions, and variants.
+
+    [Open restaurant booking tutorial](./restaurant-booking-agent.md)
+
+-   **Core concepts**
+
+    ---
+
+    Understand resource architecture, local development patterns, and team workflows.
+
+    [Open core concepts](../concepts/working-locally.md)
+
 -   **CLI reference**
 
     ---
@@ -478,13 +494,5 @@ At that point, the agent is live.
     Explore the available ADK commands and options.
 
     [Open CLI reference](../reference/cli.md)
-
--   **Walkthrough video**
-
-    ---
-
-    See the workflow demonstrated in video form.
-
-    [Open the walkthrough video](../get-started/walkthrough-video.md)
 
 </div>

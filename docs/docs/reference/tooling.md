@@ -103,22 +103,29 @@ Tooling slots into the standard [CLI workflow](./cli.md#working-pattern): pull o
 
     Faster editing and generation are valuable, but project review, validation, and testing still matter.
 
-## Related pages
+## Next steps
 
 <div class="grid cards" markdown>
 
--   **Getting started**
+-   **Agent settings reference**
 
     ---
 
-    Install the ADK and set up your environment.
-    [Open getting started](../get-started/get-started.md)
+    Configure personality, role, and rules that define agent behavior.
+    [Open agent settings](./agent_settings.md)
 
--   **CLI reference**
+-   **Flows reference**
 
     ---
 
-    Review the commands that drive the local workflow.
-    [Open CLI reference](./cli.md)
+    Build conversation flows with prompts, transitions, and entities.
+    [Open flows reference](./flows.md)
+
+-   **Functions reference**
+
+    ---
+
+    Write Python functions the agent calls at runtime.
+    [Open functions reference](./functions.md)
 
 </div>

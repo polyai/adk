@@ -143,19 +143,19 @@ The web UI surfaces the same conflicts as the CLI and lets you resolve them in t
 
 <div class="grid cards" markdown>
 
--   **CLI reference**
+-   **Tests**
 
     ---
 
-    Full surface of every `poly` command, including `poly branch` and its sibling subcommands.
-    [Open CLI reference](./cli.md)
+    Validate agent behavior with conversation tests before merging.
+    [Open tests reference](./tests.md)
 
--   **Working locally**
+-   **Tooling**
 
     ---
 
-    Where branching fits into the daily edit/push/test loop.
-    [Open working locally](../concepts/working-locally.md)
+    IDE extensions and AI coding tools that integrate with the ADK workflow.
+    [Open tooling](./tooling.md)
 
 -   **Multi-user workflows and guardrails**
 
@@ -163,12 +163,5 @@ The web UI surfaces the same conflicts as the CLI and lets you resolve them in t
 
     How branches, merges, and validation interact across a team.
     [Open multi-user workflows](../concepts/multi-user-and-guardrails.md)
-
--   **Build an agent tutorial**
-
-    ---
-
-    Walks through a feature-branch workflow end-to-end.
-    [Open the tutorial](../tutorials/build-an-agent.md)
 
 </div>

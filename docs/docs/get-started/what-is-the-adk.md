@@ -45,25 +45,25 @@ It preserves the same guardrails as Agent Studio, so developers cannot push chan
 
 <div class="grid cards" markdown>
 
--   **Not sure where to start?**
-
-    ---
-
-    Build a working agent from your website in minutes, then pull it into the ADK.
-    [Open getting started guide](./get-started.md)
-
--   **Install the ADK**
-
-    ---
-
-    Install the ADK and get your first project running.
-    [Open getting started](./get-started.md)
-
 -   **Watch the walkthrough**
 
     ---
 
     See a practical demonstration of the ADK in use.
     [Open the walkthrough video](./walkthrough-video.md)
+
+-   **Install prerequisites**
+
+    ---
+
+    Set up uv, Git, and your API key before running your first commands.
+    [Open prerequisites](./prerequisites.md)
+
+-   **Run your first commands**
+
+    ---
+
+    Initialize a project, pull configuration, and push your first change.
+    [Open first commands](./first-commands.md)
 
 </div>
