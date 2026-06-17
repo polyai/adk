@@ -635,7 +635,7 @@ class FlowStep(BaseFlowStep, YamlResource):
         # Get file name from file_path
         file_name = os.path.splitext(os.path.basename(file_path))[0]
 
-        return cls.from_yaml_dict(
+        instance = cls.from_yaml_dict(
             yaml_dict,
             resource_id=resource_id,
             file_name=file_name,
@@ -645,6 +645,8 @@ class FlowStep(BaseFlowStep, YamlResource):
             known_position=known_position,
             resource_mappings=resource_mappings,
         )
+        utils.check_yaml_field_types(instance)
+        return instance
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs):
         """Validate the flow step resource."""

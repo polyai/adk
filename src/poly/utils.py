@@ -13,14 +13,13 @@ import os
 import re
 from typing import Callable, Optional
 
-from poly.resources import Function, FunctionStep, Resource, ResourceMapping
-
-from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.protobuf.channels_pb2 import (
     Channel_UpdateStatus,
-    WebChatChannel_UpdateStatus,
     ChannelStatus,
+    WebChatChannel_UpdateStatus,
 )
+from poly.handlers.protobuf.commands_pb2 import Command
+from poly.resources import Function, FunctionStep, Resource, ResourceMapping
 
 logger = logging.getLogger(__name__)
 

@@ -363,13 +363,15 @@ class YamlResource(Resource, ABC):
             file_path=file_path,
             **kwargs,
         )
-        return cls.from_yaml_dict(
+        instance = cls.from_yaml_dict(
             yaml_dict,
             resource_id=resource_id,
             name=resource_name,
             resource_mappings=resource_mappings,
             **kwargs,
         )
+        utils.check_yaml_field_types(instance)
+        return instance
 
     @abstractmethod
     def to_yaml_dict(self) -> dict:

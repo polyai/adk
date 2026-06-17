@@ -145,9 +145,11 @@ class Pronunciation(MultiResourceYamlResource):
                 f"Resource with name {resource_clean_name} not found in {true_file_path}"
             )
 
-        return cls.from_yaml_dict(
+        instance = cls.from_yaml_dict(
             yaml_dict, resource_id=resource_id, name="", position=position, **kwargs
         )
+        utils.check_yaml_field_types(instance)
+        return instance
 
     @property
     def command_type(self) -> str:
