@@ -168,10 +168,9 @@ class VariantAttribute(MultiResourceYamlResource):
         self.mappings = mappings
 
     def to_yaml_dict(self) -> dict:
-        clean_mapping = {key: value.strip() for key, value in self.mappings.items()}
         return {
             "name": self.name,
-            "values": clean_mapping,
+            "values": dict(self.mappings),
         }
 
     @property
