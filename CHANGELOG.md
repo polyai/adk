@@ -1,6 +1,47 @@
 # CHANGELOG
 
 
+## v0.25.11 (2026-06-19)
+
+### Bug Fixes
+
+- Strip strings at YamlResource base level to eliminate phantom diffs
+  ([#195](https://github.com/polyai/adk/pull/195),
+  [`57a0904`](https://github.com/polyai/adk/commit/57a09045cd1025afa82bcfe62f61b47428eade60))
+
+## Summary
+
+Eliminates phantom `|-` → `|` diffs that persist after `ad push` by stripping whitespace from all
+  string values at the `YamlResource` base class level, matching the platform's Zod `.trim()`
+  behavior.
+
+## Motivation
+
+After pushing, `ad diff` shows spurious changes like `content: |-` → `content: |` because the
+  platform trims all string fields but local YAML files can retain trailing newlines. This causes
+  false `is_modified()` hash mismatches and confusing diff output.
+
+## Changes
+
+- Add `_strip_strings()` recursive helper in `resource.py` and wire it into `YamlResource.raw`,
+  `compute_hash`, and `to_pretty` - Remove redundant per-resource `.strip()` calls from
+  `to_yaml_dict` in `flows.py` and `variant_attributes.py`
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.25.10 (2026-06-17)
 
 ### Bug Fixes
