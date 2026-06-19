@@ -62,6 +62,7 @@ from poly.output.console import (
 from poly.output.json_output import json_print, commands_to_dicts
 from poly.handlers.github_api_handler import GitHubAPIHandler
 from poly.handlers.auth0_handler import Auth0Handler
+from poly.handlers.platform_api import PlatformAPIHandler
 from poly.handlers.interface import (
     REGIONS,
     AgentStudioInterface,
@@ -1255,6 +1256,85 @@ class AgentStudioCLI:
             help="Output file path. Defaults to <conversation_id>.wav.",
         )
 
+        # --- integrations get/apply ---
+        integrations_parser = subparsers.add_parser(
+            "integrations",
+            help="Manage integrations for the project.",
+            description=(
+                "Manage messaging handoff integrations (non-versioned, updates live).\n\n"
+                "Examples:\n"
+                "  poly integrations get cxone-chat\n"
+                "  poly integrations apply cxone-chat -f integrations/cxone-chat.yaml\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        integrations_sub = integrations_parser.add_subparsers(
+            dest="integrations_subcommand", required=True
+        )
+
+        integrations_sub.add_parser(
+            "list",
+            parents=[json_parent, verbose_parent],
+            help="List available integration types.",
+        )
+
+        integrations_get_parser = integrations_sub.add_parser(
+            "get",
+            parents=[json_parent, verbose_parent],
+            help="Fetch a messaging handoff integration.",
+        )
+        integrations_get_parser.add_argument(
+            "integration_name",
+            type=str,
+            help="Integration name (e.g. cxone-chat)",
+        )
+        integrations_get_parser.add_argument(
+            "-p",
+            "--path",
+            type=str,
+            default=".",
+            help="Path to the project directory (default: current directory)",
+        )
+        integrations_get_parser.add_argument(
+            "-o",
+            "--output",
+            type=str,
+            choices=["table", "yaml"],
+            default="table",
+            help="Output format (default: table)",
+        )
+
+        integrations_apply_parser = integrations_sub.add_parser(
+            "apply",
+            parents=[json_parent, verbose_parent],
+            help="Apply a messaging handoff integration (LIVE).",
+        )
+        integrations_apply_parser.add_argument(
+            "integration_name",
+            type=str,
+            help="Integration name (e.g. cxone-chat)",
+        )
+        integrations_apply_parser.add_argument(
+            "-f",
+            "--file",
+            type=str,
+            required=True,
+            help="Path to the YAML file to apply",
+        )
+        integrations_apply_parser.add_argument(
+            "-p",
+            "--path",
+            type=str,
+            default=".",
+            help="Path to the project directory (default: current directory)",
+        )
+        integrations_apply_parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            default=False,
+            help="Show diff without applying changes",
+        )
+
         return parser
 
     @classmethod
@@ -1500,6 +1580,22 @@ class AgentStudioCLI:
                         output_json=args.json,
                     )
 
+            elif args.command == "integrations":
+                if args.integrations_subcommand == "list":
+                    cls.list_integrations(args.json)
+                elif args.integrations_subcommand == "get":
+                    cls.get_integration(
+                        args.path, args.integration_name, args.json, output=args.output
+                    )
+                elif args.integrations_subcommand == "apply":
+                    cls.apply_integration(
+                        args.path,
+                        args.integration_name,
+                        args.file,
+                        args.json,
+                        dry_run=args.dry_run,
+                    )
+
             elif args.command == "start":
                 cls.start(base_path=args.base_path)
 
@@ -1522,6 +1618,232 @@ class AgentStudioCLI:
         """
         script = argcomplete.shellcode(["poly", "adk"], shell=shell)
         print(script)
+
+    @classmethod
+    def _get_variant_mappings(
+        cls, project: AgentStudioProject
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """Get variant ID/name mappings from the project's projection.
+
+        Args:
+            project: The loaded project
+
+        Returns:
+            (variant_id_to_name, variant_name_to_id)
+        """
+        from poly.resources.variant_attributes import Variant
+
+        resources, _ = project.api_handler.pull_resources()
+        variant_id_to_name: dict[str, str] = {}
+        variant_name_to_id: dict[str, str] = {}
+        for resource in resources.get(Variant, {}).values():
+            variant_id_to_name[resource.resource_id] = resource.name
+            variant_name_to_id[resource.name] = resource.resource_id
+        return variant_id_to_name, variant_name_to_id
+
+    @classmethod
+    def list_integrations(cls, output_json: bool = False) -> None:
+        """List available integration types."""
+        from poly.resources.messaging_integration import INTEGRATION_TYPES
+
+        if output_json:
+            json_print(list(INTEGRATION_TYPES.keys()))
+            return
+
+        for slug, meta in INTEGRATION_TYPES.items():
+            console.print(f"  [bold]{slug}[/bold]  {meta['description']}")
+
+    @classmethod
+    def get_integration(
+        cls,
+        base_path: str,
+        integration_name: str,
+        output_json: bool = False,
+        output: str = "table",
+    ) -> None:
+        """Fetch a messaging handoff integration.
+
+        Args:
+            base_path: Path to the project directory
+            integration_name: The local integration name (e.g. "cxone-chat")
+            output_json: If True, output raw JSON instead of YAML
+            output: Output format — "table" or "yaml"
+        """
+        from poly.resources.messaging_integration import (
+            LOCAL_NAME_TO_API_TYPE,
+            api_response_to_yaml,
+        )
+
+        api_type = LOCAL_NAME_TO_API_TYPE.get(integration_name)
+        if not api_type:
+            error(
+                f"Unknown integration '{integration_name}'. "
+                f"Known integrations: {', '.join(LOCAL_NAME_TO_API_TYPE)}"
+            )
+            sys.exit(1)
+
+        project = cls.read_project_config(base_path)
+        if not project:
+            error("No project found. Run from within a project directory.")
+            sys.exit(1)
+
+        if output != "yaml":
+            info(f"Fetching {integration_name} from {project.account_id}/{project.project_id}...")
+        response = PlatformAPIHandler.get_messaging_integration(
+            region=project.region,
+            account_id=project.account_id,
+            project_id=project.project_id,
+            integration_type=api_type,
+        )
+        if response is None:
+            error(f"No {integration_name} integration found for this project.")
+            sys.exit(1)
+
+        if output_json:
+            json_print(response)
+            return
+
+        variant_id_to_name, _ = cls._get_variant_mappings(project)
+        yaml_data = api_response_to_yaml(response, variant_id_to_name)
+
+        if output == "yaml":
+            print(yaml_data, end="")
+            return
+
+        import yaml as _yaml
+        from rich.table import Table
+
+        data = _yaml.safe_load(yaml_data)
+        credential_sets = data.get("credential_sets", {})
+
+        all_fields: list[str] = []
+        for cred_values in credential_sets.values():
+            for k in cred_values:
+                if k not in all_fields:
+                    all_fields.append(k)
+
+        table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+        table.add_column("Variant", style="bold yellow", no_wrap=True)
+        table.add_column("Credential Set", no_wrap=True)
+        table.add_column("Default", no_wrap=True, justify="center")
+        for field in all_fields:
+            table.add_column(field, no_wrap=True)
+
+        for v in data.get("variants", []):
+            default = "[green]✓[/green]" if v.get("is_default") else ""
+            cred_name = v["credential_set"]
+            cred = credential_sets.get(cred_name, {})
+            table.add_row(
+                v["name"],
+                cred_name,
+                default,
+                *[str(cred.get(f, "")) for f in all_fields],
+            )
+
+        console.print()
+        console.print(table)
+
+    @classmethod
+    def apply_integration(
+        cls,
+        base_path: str,
+        integration_name: str,
+        file_path: str,
+        output_json: bool = False,
+        dry_run: bool = False,
+    ) -> None:
+        """Apply a messaging handoff integration YAML file to the platform.
+
+        Args:
+            base_path: Path to the project directory
+            integration_name: The local integration name (e.g. "cxone-chat")
+            file_path: Path to the YAML file to apply
+            output_json: If True, output JSON result
+            dry_run: If True, show diff only without applying
+        """
+        from poly.resources.messaging_integration import (
+            LOCAL_NAME_TO_API_TYPE,
+            api_response_to_yaml,
+            yaml_to_api_payload,
+        )
+        from poly.resources.resource_utils import get_diff
+
+        api_type = LOCAL_NAME_TO_API_TYPE.get(integration_name)
+        if not api_type:
+            error(
+                f"Unknown integration '{integration_name}'. "
+                f"Known integrations: {', '.join(LOCAL_NAME_TO_API_TYPE)}"
+            )
+            sys.exit(1)
+
+        if not os.path.exists(file_path):
+            error(f"File not found: {file_path}")
+            sys.exit(1)
+
+        project = cls.read_project_config(base_path)
+        if not project:
+            error("No project found. Run from within a project directory.")
+            sys.exit(1)
+
+        with open(file_path, encoding="utf-8") as f:
+            yaml_content = f.read()
+
+        variant_id_to_name, variant_name_to_id = cls._get_variant_mappings(project)
+
+        try:
+            payload = yaml_to_api_payload(yaml_content, variant_name_to_id)
+        except (ValueError, KeyError) as e:
+            error(f"Invalid YAML: {e}")
+            sys.exit(1)
+
+        # Fetch current config and show diff
+        current_response = PlatformAPIHandler.get_messaging_integration(
+            region=project.region,
+            account_id=project.account_id,
+            project_id=project.project_id,
+            integration_type=api_type,
+        )
+        current_yaml = (
+            api_response_to_yaml(current_response, variant_id_to_name) if current_response else ""
+        )
+        new_yaml = api_response_to_yaml(payload, variant_id_to_name)
+        diff = get_diff(current_yaml, new_yaml)
+
+        if not diff:
+            info("No changes detected.")
+            return
+
+        print_diff(diff)
+
+        if dry_run:
+            return
+
+        warning(
+            f"This will update the LIVE {integration_name} integration "
+            f"for {project.account_id}/{project.project_id} ({project.region})."
+        )
+        confirm = input("Continue? [y/N]: ").strip().lower()
+        if confirm != "y":
+            info("Aborted.")
+            return
+
+        info(f"Applying {integration_name}...")
+        try:
+            result = PlatformAPIHandler.put_messaging_integration(
+                region=project.region,
+                account_id=project.account_id,
+                project_id=project.project_id,
+                integration_type=api_type,
+                data=payload,
+            )
+        except requests.HTTPError as e:
+            error(f"Failed to apply: {e}")
+            sys.exit(1)
+
+        if output_json:
+            json_print({"success": True, "response": result})
+        else:
+            success(f"Successfully applied {integration_name}.")
 
     @classmethod
     def main(cls, sys_args=None):

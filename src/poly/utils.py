@@ -105,6 +105,60 @@ def retrieve_api_key(region: str) -> str:
     return api_key
 
 
+def load_polyctx_token(region: str) -> str:
+    """Load a polyctx OAuth token for the given region.
+
+    Reads from ~/.polyctx/token-platform-{region}. If the token is expired
+    or missing, runs ``polyctx profile {region}`` to refresh it.
+
+    Args:
+        region: The region name (e.g. "us-1", "euw-1")
+
+    Returns:
+        The access token string
+
+    Raises:
+        ValueError: If the token cannot be loaded
+    """
+    import subprocess
+    from datetime import UTC, datetime, timedelta
+
+    polyctx_region = "us-1-staging" if region == "staging" else region
+    token_path = os.path.expanduser(f"~/.polyctx/token-platform-{region}")
+
+    if not os.path.exists(token_path):
+        subprocess.run(
+            ["/bin/zsh", "-i", "-c", f"polyctx profile {polyctx_region}"],
+            check=True,
+            timeout=60,
+        )
+
+    def _read_token() -> dict:
+        with open(token_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    token_data = _read_token()
+
+    if "expires_at" not in token_data:
+        raise ValueError("expires_at not found in polyctx token file")
+
+    from dateutil.parser import isoparse
+
+    expires_at = isoparse(token_data["expires_at"])
+    if expires_at <= datetime.now(UTC) + timedelta(minutes=1):
+        subprocess.run(
+            ["/bin/zsh", "-i", "-c", f"polyctx profile {polyctx_region}"],
+            check=True,
+            timeout=60,
+        )
+        token_data = _read_token()
+
+    if "access_token" not in token_data:
+        raise ValueError("access_token not found in polyctx token file")
+
+    return token_data["access_token"]
+
+
 def any_credentials_exist() -> bool:
     """Check if any API key credentials are available via environment variables or credential file."""
     if os.getenv(_API_KEY_ENV_VAR):

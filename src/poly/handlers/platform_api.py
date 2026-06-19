@@ -557,6 +557,19 @@ class PlatformAPIHandler:
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=body)
 
     @staticmethod
+    def _jupiter_headers(region: str) -> dict[str, str]:
+        """Build auth headers for Jupiter API using a polyctx OAuth token."""
+        from poly.utils import load_polyctx_token
+
+        token = load_polyctx_token(region)
+        correlation_id = f"adk-{uuid.uuid4()}"
+        return {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "X-PolyAI-Correlation-Id": correlation_id,
+        }
+
+    @staticmethod
     def authorise(region: str, jwt_token: str) -> dict:
         """Authorise the user via JWT, creating their account if needed.
 
@@ -628,6 +641,67 @@ class PlatformAPIHandler:
             use_jupiter_api=True,
         )
         return response.get("key")
+
+    @staticmethod
+    def get_messaging_integration(
+        region: str,
+        account_id: str,
+        project_id: str,
+        integration_type: str,
+    ) -> ty.Optional[dict]:
+        """Fetch a messaging handoff integration config from the Jupiter API.
+
+        Args:
+            region: The region name
+            account_id: The account ID
+            project_id: The project ID
+            integration_type: The API integration type (e.g. "nice")
+
+        Returns:
+            dict | None: The integration config, or None if not found
+        """
+        endpoint = (
+            f"/jupiter/v2/accounts/{account_id}/projects/{project_id}"
+            f"/messaging-handoff-integrations/{integration_type}"
+        )
+        headers = PlatformAPIHandler._jupiter_headers(region)
+        try:
+            return PlatformAPIHandler.make_request(
+                region, endpoint, "GET", headers=headers, use_jupiter_api=True
+            )
+        except requests.HTTPError as e:
+            if hasattr(e, "response") and e.response is not None and e.response.status_code == 404:
+                return None
+            raise
+
+    @staticmethod
+    def put_messaging_integration(
+        region: str,
+        account_id: str,
+        project_id: str,
+        integration_type: str,
+        data: dict,
+    ) -> dict:
+        """Update a messaging handoff integration config via the Jupiter API.
+
+        Args:
+            region: The region name
+            account_id: The account ID
+            project_id: The project ID
+            integration_type: The API integration type (e.g. "nice")
+            data: The full integration payload
+
+        Returns:
+            dict: The API response
+        """
+        endpoint = (
+            f"/jupiter/v2/accounts/{account_id}/projects/{project_id}"
+            f"/messaging-handoff-integrations/{integration_type}"
+        )
+        headers = PlatformAPIHandler._jupiter_headers(region)
+        return PlatformAPIHandler.make_request(
+            region, endpoint, "PUT", data=data, headers=headers, use_jupiter_api=True
+        )
 
     @staticmethod
     def list_conversations(
