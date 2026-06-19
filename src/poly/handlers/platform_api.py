@@ -103,6 +103,7 @@ class PlatformAPIHandler:
                 "X-API-KEY": retrieve_api_key(region),
                 "X-PolyAI-Correlation-Id": correlation_id,
                 "Content-Type": "application/json",
+                "X-Poly-Source": "adk",
             }
 
         logger.info(f"Making {method} request to {url}")
@@ -572,6 +573,7 @@ class PlatformAPIHandler:
             "Authorization": f"Bearer {jwt_token}",
             "Content-Type": "application/json",
             "X-PolyAI-Correlation-Id": correlation_id,
+            "X-Poly-Source": "adk",
         }
 
         return PlatformAPIHandler.make_request(
@@ -594,6 +596,7 @@ class PlatformAPIHandler:
             "Authorization": f"Bearer {jwt_token}",
             "Content-Type": "application/json",
             "X-PolyAI-Correlation-Id": correlation_id,
+            "X-Poly-Source": "adk",
         }
 
         return PlatformAPIHandler.make_request(
@@ -617,6 +620,7 @@ class PlatformAPIHandler:
             "Authorization": f"Bearer {jwt_token}",
             "Content-Type": "application/json",
             "X-PolyAI-Correlation-Id": correlation_id,
+            "X-Poly-Source": "adk",
         }
 
         response = PlatformAPIHandler.make_request(
@@ -699,6 +703,7 @@ class PlatformAPIHandler:
         headers = {
             "X-API-KEY": retrieve_api_key(region),
             "X-PolyAI-Correlation-Id": correlation_id,
+            "X-Poly-Source": "adk",
         }
         params = {"direction": direction, "redacted": str(redacted).lower()}
 

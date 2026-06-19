@@ -57,6 +57,7 @@ class SourcererSDK:
                 "Content-Type": "application/json",
                 "X-API-KEY": retrieve_api_key(self.region),
                 "X-PolyAI-Correlation-Id": correlation_id,
+                "X-Poly-Source": "adk",
             }
             if self.email:
                 headers["X-PolyAI-Email"] = self.email
