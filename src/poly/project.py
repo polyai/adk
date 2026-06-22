@@ -2546,6 +2546,14 @@ class AgentStudioProject:
             environment=environment,
         )
 
+    @property
+    def studio_base_url(self) -> str:
+        """Base Agent Studio URL for this project's region."""
+        region_link_map = {"uk-1": "uk", "euw-1": "eu", "us-1": "us", "studio": ""}
+        short = region_link_map.get(self.region, self.region)
+        domain = f"studio.{short}.poly.ai" if short else "studio.poly.ai"
+        return f"https://{domain}/{self.account_id}/{self.project_id}"
+
     def get_conversation_url(self, conversation_id: str) -> str:
         """Build the Studio URL for a conversation.
 
@@ -2555,13 +2563,7 @@ class AgentStudioProject:
         Returns:
             str: The URL of the conversation.
         """
-        region_link_map = {"uk-1": "uk", "euw-1": "eu", "us-1": "us"}
-        short = region_link_map.get(self.region, self.region)
-        return (
-            f"https://studio.{short}.poly.ai"
-            f"/{self.account_id}/{self.project_id}"
-            f"/conversations/{conversation_id}"
-        )
+        return f"{self.studio_base_url}/conversations/{conversation_id}"
 
     def _make_resource_mappings(self, resources: ResourceMap) -> list[ResourceMapping]:
         resource_mappings: list[ResourceMapping] = []

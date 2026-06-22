@@ -246,6 +246,23 @@ class AgentStudioCLI:
             help="Base path to initialize the project. Defaults to current working directory.",
         )
 
+        # STUDIO (open project in Agent Studio web UI)
+        studio_parser = subparsers.add_parser(
+            "studio",
+            parents=[verbose_parent, json_parent],
+            help="Open the current project in Agent Studio (web).",
+            description=(
+                "Open the project in the Agent Studio web application using the default browser."
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        studio_parser.add_argument(
+            "--path",
+            type=str,
+            default=os.getcwd(),
+            help="Base path to the project. Defaults to current working directory.",
+        )
+
         # Login (existing enterprise users)
         login_parser = subparsers.add_parser(
             "login",
@@ -1634,6 +1651,9 @@ class AgentStudioCLI:
                         output_json=args.json,
                     )
 
+            elif args.command == "studio":
+                cls.open_agent_studio(base_path=args.path, output_json=args.json)
+
             elif args.command == "start":
                 cls.start(base_path=args.base_path)
 
@@ -1763,6 +1783,17 @@ class AgentStudioCLI:
             return None
         # Recurse into parent directory
         return cls.read_project_config(parent_path)
+
+    @classmethod
+    def open_agent_studio(cls, base_path: str = "", output_json: bool = False) -> None:
+        """Open the current project in the Agent Studio web UI."""
+        project = cls._load_project(base_path or os.getcwd(), output_json=output_json)
+        url = project.studio_base_url
+        if output_json:
+            json_print({"url": url})
+        else:
+            info(f"Opening {url}")
+            webbrowser.open(url)
 
     @classmethod
     def create_project(
