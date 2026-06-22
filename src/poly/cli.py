@@ -39,6 +39,7 @@ from poly.output.console import (
     handle_exception,
     info,
     plain,
+    print_agents,
     print_branches,
     print_conversations,
     print_conversation_detail,
@@ -324,12 +325,39 @@ class AgentStudioCLI:
             description=(
                 "Manage Agent Studio projects.\n\n"
                 "Examples:\n"
+                "  poly project list\n"
                 "  poly project create\n"
-                "  poly project create --region us-1 --account_id my-account --name my-project\n"
+                "  poly project delete\n"
+                "  poly project duplicate\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
         project_subparsers = project_parser.add_subparsers(dest="project_subcommand", required=True)
+
+        # PROJECT LIST
+        project_list_parser = project_subparsers.add_parser(
+            "list",
+            parents=[verbose_parent, json_parent, debug_parent],
+            help="List Agent Studio projects in an account.",
+            description=(
+                "List Agent Studio projects in an account.\n\n"
+                "Examples:\n"
+                "  poly project list\n"
+                "  poly project list --region us-1 --account_id my-account\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        project_list_parser.add_argument(
+            "--region",
+            type=str,
+            choices=REGIONS,
+            help="Region for the Agent Studio project.",
+        )
+        project_list_parser.add_argument(
+            "--account_id",
+            type=str,
+            help="Account ID for the Agent Studio project.",
+        )
 
         # PROJECT CREATE
         project_create_parser = project_subparsers.add_parser(
@@ -385,6 +413,89 @@ class AgentStudioCLI:
             type=str,
             dest="voice_id",
             help="Voice ID for the agent. Defaults to a region-specific voice.",
+        )
+
+        # PROJECT DELETE
+        project_delete_parser = project_subparsers.add_parser(
+            "delete",
+            parents=[verbose_parent, json_parent, debug_parent],
+            help="Delete an Agent Studio project.",
+            description=(
+                "Delete an Agent Studio project.\n\n"
+                "Examples:\n"
+                "  poly project delete\n"
+                "  poly project delete --region us-1 --account_id my-account"
+                " --project_id my-project\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        project_delete_parser.add_argument(
+            "--region",
+            type=str,
+            choices=REGIONS,
+            help="Region for the Agent Studio project.",
+        )
+        project_delete_parser.add_argument(
+            "--account_id",
+            type=str,
+            help="Account ID for the Agent Studio project.",
+        )
+        project_delete_parser.add_argument(
+            "--project_id",
+            type=str,
+            help="Project ID to delete.",
+        )
+        project_delete_parser.add_argument(
+            "--force",
+            "-f",
+            action="store_true",
+            default=False,
+            help="Skip the confirmation prompt.",
+        )
+
+        # PROJECT DUPLICATE
+        project_duplicate_parser = project_subparsers.add_parser(
+            "duplicate",
+            parents=[verbose_parent, json_parent, debug_parent],
+            help="Duplicate an Agent Studio project.",
+            description=(
+                "Duplicate an Agent Studio project.\n\n"
+                "Examples:\n"
+                "  poly project duplicate\n"
+                "  poly project duplicate --region us-1 --account_id my-account"
+                " --project_id my-project --name my-copy\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        project_duplicate_parser.add_argument(
+            "--region",
+            type=str,
+            choices=REGIONS,
+            help="Region for the Agent Studio project.",
+        )
+        project_duplicate_parser.add_argument(
+            "--account_id",
+            type=str,
+            help="Account ID for the Agent Studio project.",
+        )
+        project_duplicate_parser.add_argument(
+            "--project_id",
+            type=str,
+            help="Project ID to duplicate.",
+        )
+        project_duplicate_parser.add_argument(
+            "--name",
+            type=str,
+            dest="new_name",
+            help="Name for the duplicated project.",
+        )
+        project_duplicate_parser.add_argument(
+            "--id",
+            "--new_project_id",
+            type=str,
+            dest="new_project_id",
+            help="Optional unique slug/ID for the new project."
+            " If not provided the platform will generate one.",
         )
 
         # PULL
@@ -1279,7 +1390,13 @@ class AgentStudioCLI:
                 )
 
             elif args.command == "project":
-                if args.project_subcommand == "create":
+                if args.project_subcommand == "list":
+                    cls.list_projects(
+                        region=args.region,
+                        account_id=args.account_id,
+                        output_json=args.json,
+                    )
+                elif args.project_subcommand == "create":
                     cls.create_project(
                         args.base_path,
                         region=args.region,
@@ -1288,6 +1405,23 @@ class AgentStudioCLI:
                         project_id=args.project_id,
                         greeting=args.greeting,
                         voice_id=args.voice_id,
+                        output_json=args.json,
+                    )
+                elif args.project_subcommand == "delete":
+                    cls.delete_project(
+                        region=args.region,
+                        account_id=args.account_id,
+                        project_id=args.project_id,
+                        force=args.force,
+                        output_json=args.json,
+                    )
+                elif args.project_subcommand == "duplicate":
+                    cls.duplicate_project(
+                        region=args.region,
+                        account_id=args.account_id,
+                        project_id=args.project_id,
+                        new_name=args.new_name,
+                        new_project_id=args.new_project_id,
                         output_json=args.json,
                     )
 
@@ -1774,6 +1908,422 @@ class AgentStudioCLI:
             project_id=project_id,
             output_json=output_json,
         )
+
+    @classmethod
+    def list_projects(
+        cls,
+        region: str = None,
+        account_id: str = None,
+        output_json: bool = False,
+    ) -> None:
+        """List Agent Studio projects in an account."""
+        if output_json and not (region and account_id):
+            json_print(
+                {
+                    "success": False,
+                    "error": "project list with --json requires --region and --account_id.",
+                }
+            )
+            sys.exit(1)
+
+        api_handler = AgentStudioInterface()
+
+        if not region:
+            with console.status("[info]Fetching available regions...[/info]"):
+                regions = api_handler.get_accessible_regions()
+            if not regions:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No accessible regions found for your API key.",
+                        }
+                    )
+                else:
+                    error("No accessible regions found for your API key.")
+                sys.exit(1)
+            if len(regions) == 1:
+                region = regions[0]
+                if not output_json:
+                    info(f"Auto-selected region [bold]{region}[/bold].")
+            else:
+                region = questionary.select("Select Region", choices=regions).ask()
+                if not region:
+                    return
+
+        if not account_id:
+            accounts = api_handler.get_accounts(region)
+            if not accounts:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No accounts found in the selected region.",
+                        }
+                    )
+                else:
+                    error("No accounts found in the selected region.")
+                sys.exit(1)
+            if len(accounts) == 1:
+                account_id, account_name = next(iter(accounts.items()))
+                if not output_json:
+                    info(f"Auto-selected account [bold]{account_name}[/bold].")
+            else:
+                account_choices = [
+                    questionary.Choice(title=f"{name} ({acc_id})", value=acc_id)
+                    for acc_id, name in accounts.items()
+                ]
+                account_id = questionary.select(
+                    "Select Account",
+                    choices=account_choices,
+                    use_search_filter=True,
+                    use_jk_keys=False,
+                ).ask()
+                if not account_id:
+                    if output_json:
+                        json_print({"success": False, "error": "No account selected."})
+                        sys.exit(1)
+                    warning("No account selected. Exiting.")
+                    return
+
+        with (
+            console.status("[info]Fetching agents...[/info]") if not output_json else nullcontext()
+        ):
+            agents = api_handler.list_agents(region, account_id)
+
+        if output_json:
+            json_print(
+                {
+                    "success": True,
+                    "agents": [
+                        {
+                            "agent_id": a.get("agentId"),
+                            "agent_name": a.get("agentName"),
+                            "updated_at": a.get("updatedAt"),
+                            "branch_count": a.get("branchCount"),
+                        }
+                        for a in agents
+                    ],
+                }
+            )
+        elif not agents:
+            warning("No agents found in this account.")
+        else:
+            print_agents(agents)
+
+    @classmethod
+    def delete_project(
+        cls,
+        region: str = None,
+        account_id: str = None,
+        project_id: str = None,
+        force: bool = False,
+        output_json: bool = False,
+    ) -> None:
+        """Delete an Agent Studio project."""
+        if output_json and not (region and account_id and project_id):
+            json_print(
+                {
+                    "success": False,
+                    "error": (
+                        "project delete with --json requires"
+                        " --region, --account_id, and --project_id."
+                    ),
+                }
+            )
+            sys.exit(1)
+
+        api_handler = AgentStudioInterface()
+
+        if not region:
+            with console.status("[info]Fetching available regions...[/info]"):
+                regions = api_handler.get_accessible_regions()
+            if not regions:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No accessible regions found for your API key.",
+                        }
+                    )
+                else:
+                    error("No accessible regions found for your API key.")
+                sys.exit(1)
+            if len(regions) == 1:
+                region = regions[0]
+                if not output_json:
+                    info(f"Auto-selected region [bold]{region}[/bold].")
+            else:
+                region = questionary.select("Select Region", choices=regions).ask()
+                if not region:
+                    warning("No region selected. Exiting.")
+                    return
+
+        if not account_id:
+            accounts = api_handler.get_accounts(region)
+            if not accounts:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No accounts found in the selected region.",
+                        }
+                    )
+                else:
+                    error("No accounts found in the selected region.")
+                sys.exit(1)
+            if len(accounts) == 1:
+                account_id, account_name = next(iter(accounts.items()))
+                if not output_json:
+                    info(f"Auto-selected account [bold]{account_name}[/bold].")
+            else:
+                account_choices = [
+                    questionary.Choice(title=f"{name} ({acc_id})", value=acc_id)
+                    for acc_id, name in accounts.items()
+                ]
+                account_id = questionary.select(
+                    "Select Account",
+                    choices=account_choices,
+                    use_search_filter=True,
+                    use_jk_keys=False,
+                ).ask()
+                if not account_id:
+                    if output_json:
+                        json_print({"success": False, "error": "No account selected."})
+                        sys.exit(1)
+                    warning("No account selected. Exiting.")
+                    return
+
+        if not project_id:
+            agents = api_handler.get_agents(region, account_id)
+            if not agents:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No agents found in the selected account.",
+                        }
+                    )
+                else:
+                    error("No agents found in the selected account.")
+                sys.exit(1)
+            agent_choices = [
+                questionary.Choice(title=f"{name} ({aid})", value=aid)
+                for aid, name in agents.items()
+            ]
+            project_id = questionary.select(
+                "Select Agent",
+                choices=agent_choices,
+                use_search_filter=True,
+                use_jk_keys=False,
+            ).ask()
+            if not project_id:
+                warning("No agent selected. Exiting.")
+                return
+            agent_name = agents.get(project_id)
+        else:
+            agents = api_handler.get_agents(region, account_id)
+            agent_name = agents.get(project_id)
+
+        display_name = f"{agent_name} ({project_id})" if agent_name else project_id
+
+        if not force and not output_json:
+            confirmed = questionary.confirm(
+                f"Are you sure you want to delete project '{display_name}'?"
+                " This action cannot be undone.",
+                default=False,
+                auto_enter=False,
+            ).ask()
+            if not confirmed:
+                warning("Aborted.")
+                return
+
+        ctx = (
+            console.status(f"[info]Deleting project [bold]{display_name}[/bold]...[/info]")
+            if not output_json
+            else nullcontext()
+        )
+
+        with ctx:
+            try:
+                api_handler.delete_project(region, project_id)
+            except Exception as e:
+                if output_json:
+                    json_print({"success": False, "error": str(e)})
+                else:
+                    error(f"Failed to delete project: {e}")
+                sys.exit(1)
+
+        if output_json:
+            json_print({"success": True, "agent_id": project_id})
+        else:
+            success(f"Deleted project [bold]{display_name}[/bold].")
+
+    @classmethod
+    def duplicate_project(
+        cls,
+        region: str = None,
+        account_id: str = None,
+        project_id: str = None,
+        new_name: str = None,
+        new_project_id: str = None,
+        output_json: bool = False,
+    ) -> None:
+        """Duplicate an Agent Studio project."""
+        if output_json and not (region and account_id and project_id and new_name):
+            json_print(
+                {
+                    "success": False,
+                    "error": (
+                        "project duplicate with --json requires"
+                        " --region, --account_id, --project_id, and --name."
+                    ),
+                }
+            )
+            sys.exit(1)
+
+        api_handler = AgentStudioInterface()
+
+        if not region:
+            with console.status("[info]Fetching available regions...[/info]"):
+                regions = api_handler.get_accessible_regions()
+            if not regions:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No accessible regions found for your API key.",
+                        }
+                    )
+                else:
+                    error("No accessible regions found for your API key.")
+                sys.exit(1)
+            if len(regions) == 1:
+                region = regions[0]
+                if not output_json:
+                    info(f"Auto-selected region [bold]{region}[/bold].")
+            else:
+                region = questionary.select("Select Region", choices=regions).ask()
+                if not region:
+                    warning("No region selected. Exiting.")
+                    return
+
+        if not account_id:
+            accounts = api_handler.get_accounts(region)
+            if not accounts:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No accounts found in the selected region.",
+                        }
+                    )
+                else:
+                    error("No accounts found in the selected region.")
+                sys.exit(1)
+            if len(accounts) == 1:
+                account_id, account_name = next(iter(accounts.items()))
+                if not output_json:
+                    info(f"Auto-selected account [bold]{account_name}[/bold].")
+            else:
+                account_choices = [
+                    questionary.Choice(title=f"{name} ({acc_id})", value=acc_id)
+                    for acc_id, name in accounts.items()
+                ]
+                account_id = questionary.select(
+                    "Select Account",
+                    choices=account_choices,
+                    use_search_filter=True,
+                    use_jk_keys=False,
+                ).ask()
+                if not account_id:
+                    if output_json:
+                        json_print({"success": False, "error": "No account selected."})
+                        sys.exit(1)
+                    warning("No account selected. Exiting.")
+                    return
+
+        if not project_id:
+            agents = api_handler.get_agents(region, account_id)
+            if not agents:
+                if output_json:
+                    json_print(
+                        {
+                            "success": False,
+                            "error": "No agents found in the selected account.",
+                        }
+                    )
+                else:
+                    error("No agents found in the selected account.")
+                sys.exit(1)
+            agent_choices = [
+                questionary.Choice(title=f"{name} ({aid})", value=aid)
+                for aid, name in agents.items()
+            ]
+            project_id = questionary.select(
+                "Select Agent",
+                choices=agent_choices,
+                use_search_filter=True,
+                use_jk_keys=False,
+            ).ask()
+            if not project_id:
+                warning("No agent selected. Exiting.")
+                return
+            agent_name = agents.get(project_id)
+        else:
+            agents = api_handler.get_agents(region, account_id)
+            agent_name = agents.get(project_id)
+
+        display_name = f"{agent_name} ({project_id})" if agent_name else project_id
+
+        if not new_name:
+            default_name = f"{agent_name} (copy)" if agent_name else ""
+            new_name = questionary.text(
+                "Enter name for the duplicated project:", default=default_name
+            ).ask()
+            if not new_name or not new_name.strip():
+                warning("No project name provided. Exiting.")
+                return
+            new_name = new_name.strip()
+
+        if not new_project_id:
+            new_project_id = questionary.text(
+                "Enter project ID for the duplicate (leave empty to auto-generate):",
+                validate=lambda val: (
+                    True
+                    if not val or re.fullmatch(r"[a-zA-Z0-9-]+", val)
+                    else "Project ID can only contain alphanumeric characters and dashes."
+                ),
+            ).ask()
+            if new_project_id is None:
+                return
+            new_project_id = new_project_id.strip() or None
+
+        ctx = (
+            console.status(f"[info]Duplicating project [bold]{display_name}[/bold]...[/info]")
+            if not output_json
+            else nullcontext()
+        )
+
+        with ctx:
+            try:
+                result = api_handler.duplicate_project(region, project_id, new_name, new_project_id)
+            except Exception as e:
+                if output_json:
+                    json_print({"success": False, "error": str(e)})
+                else:
+                    error(f"Failed to duplicate project: {e}")
+                sys.exit(1)
+
+        new_id = result.get("id")
+        new_display = result.get("name", new_name)
+
+        if output_json:
+            json_print({"success": True, "agent_id": new_id, "agent_name": new_display})
+        else:
+            success(
+                f"Duplicated [bold]{display_name}[/bold] → [bold]{new_display}[/bold] ({new_id})"
+            )
 
     @classmethod
     def init_project(

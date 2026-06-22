@@ -158,6 +158,63 @@ class AgentStudioInterface:
         )
 
     @staticmethod
+    def get_agents(region: str, account_id: str) -> dict[str, str]:
+        """Get agents for an account via the public Agents API.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+
+        Returns:
+            dict[str, str]: A dictionary mapping agent IDs (slugs) to agent names
+        """
+        return PlatformAPIHandler.get_agents(region, account_id)
+
+    @staticmethod
+    def list_agents(region: str, account_id: str) -> list[dict[str, Any]]:
+        """List agents for an account via the public Agents API.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+
+        Returns:
+            list[dict[str, Any]]: Raw agent records from the API.
+        """
+        return PlatformAPIHandler.list_agents(region, account_id)
+
+    @staticmethod
+    def delete_project(region: str, agent_id: str) -> None:
+        """Delete a project (agent).
+
+        Args:
+            region (str): The region name
+            agent_id (str): The agent ID (slug) to delete
+        """
+        PlatformAPIHandler.delete_project(region, agent_id)
+
+    @staticmethod
+    def duplicate_project(
+        region: str,
+        agent_id: str,
+        new_name: str,
+        new_id: str | None = None,
+    ) -> dict[str, str]:
+        """Duplicate a project (agent).
+
+        Args:
+            region (str): The region name
+            agent_id (str): The agent ID (slug) to duplicate
+            new_name (str): The display name for the new project
+            new_id (str | None): Optional slug/ID for the new project.
+                When omitted the platform generates one automatically.
+
+        Returns:
+            dict[str, str]: A dictionary with the new project's 'id' and 'name'
+        """
+        return PlatformAPIHandler.duplicate_project(region, agent_id, new_name, new_id)
+
+    @staticmethod
     def get_deployments(
         region: str, account_id: str, project_id: str, client_env: str = "sandbox"
     ) -> list[dict[str, Any]]:

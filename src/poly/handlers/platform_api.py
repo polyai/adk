@@ -32,6 +32,9 @@ ROLLBACK_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/rollback"
 CONVERSATIONS_URL = "/v1/agents/{project_id}/conversations"
 CONVERSATION_URL = "/v1/agents/{project_id}/conversations/{conversation_id}"
 CONVERSATION_AUDIO_URL = "/v1/agents/{project_id}/conversations/{conversation_id}/audio"
+LIST_AGENTS_URL = "/v1/accounts/{account_id}/agents"
+DELETE_AGENT_URL = "/v1/agents/{agent_id}"
+DUPLICATE_AGENT_URL = "/v1/agents/{agent_id}/duplicate"
 
 
 class PlatformAPIHandler:
@@ -130,6 +133,10 @@ class PlatformAPIHandler:
                 f"Error in request status_code={api_response.status_code!r} response={api_response.text!r}"
             )
             raise
+
+        if api_response.status_code == 204:
+            logger.info(f"Request to {url} successful (no content)")
+            return {}
 
         try:
             api_response = api_response.json()
@@ -272,6 +279,83 @@ class PlatformAPIHandler:
             "POST",
             data=data,
         )
+        return {"id": result.get("agentId"), "name": result.get("agentName")}
+
+    @staticmethod
+    def list_agents(region: str, account_id: str) -> list[dict[str, ty.Any]]:
+        """List agents for an account via the public Agents API.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+
+        Returns:
+            list[dict[str, Any]]: Raw agent records from the API.
+        """
+        endpoint = LIST_AGENTS_URL.format(account_id=account_id)
+        agents_data = PlatformAPIHandler.make_request(region, endpoint, "GET")
+        agents_list = (
+            agents_data if isinstance(agents_data, list) else agents_data.get("agents", [])
+        )
+
+        if not isinstance(agents_list, list):
+            raise ValueError("Expected a list of agents")
+
+        return agents_list
+
+    @staticmethod
+    def get_agents(region: str, account_id: str) -> dict[str, str]:
+        """Get agents for an account via the public Agents API.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+
+        Returns:
+            dict[str, str]: A dictionary mapping agent IDs (slugs) to agent names
+        """
+        agents = {}
+        for agent in PlatformAPIHandler.list_agents(region, account_id):
+            if agent.get("agentId") and agent.get("agentName"):
+                agents[agent["agentId"]] = agent["agentName"]
+        return agents
+
+    @staticmethod
+    def delete_project(region: str, agent_id: str) -> None:
+        """Delete a project (agent) via the Agents API.
+
+        Args:
+            region (str): The region name
+            agent_id (str): The agent ID (slug) to delete
+        """
+        endpoint = DELETE_AGENT_URL.format(agent_id=agent_id)
+        PlatformAPIHandler.make_request(region, endpoint, "DELETE")
+
+    @staticmethod
+    def duplicate_project(
+        region: str,
+        agent_id: str,
+        new_name: str,
+        new_id: str | None = None,
+    ) -> dict[str, str]:
+        """Duplicate a project (agent) via the Agents API.
+
+        Args:
+            region (str): The region name
+            agent_id (str): The agent ID (slug) to duplicate
+            new_name (str): The display name for the new project
+            new_id (str | None): Optional slug/ID for the new project.
+                When omitted the platform generates one automatically.
+
+        Returns:
+            dict[str, str]: A dictionary with the new project's 'id' and 'name'
+        """
+        endpoint = DUPLICATE_AGENT_URL.format(agent_id=agent_id)
+        data: dict[str, str] = {"newAgentName": new_name}
+        if new_id:
+            data["newAgentId"] = new_id
+
+        result = PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
         return {"id": result.get("agentId"), "name": result.get("agentName")}
 
     @staticmethod
