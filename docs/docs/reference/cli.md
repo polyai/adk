@@ -81,6 +81,29 @@ poly login --region studio
 
 Manage Agent Studio projects.
 
+#### `poly project list`
+
+List all Agent Studio projects (agents) in an account.
+
+Run with no arguments and `poly project list` walks you through interactive prompts for region and account. The output is a table showing Agent ID, Name, Updated, and branch count for each project.
+
+Examples:
+
+~~~bash
+poly project list
+poly project list --region us-1 --account_id my-account
+~~~
+
+| Flag | Description |
+|---|---|
+| `--region` | Region to list projects in. Choices match the standard region list. |
+| `--account_id` | Account ID to list projects for. |
+| `--json` | Print a single JSON object on stdout (machine-readable). Requires `--region` and `--account_id`. |
+
+!!! info "`--json` requires explicit flags for `poly project list`"
+
+    When using `poly project list --json`, you must supply `--region` and `--account_id` explicitly. Interactive prompts are not supported in JSON mode.
+
 #### `poly project create`
 
 Create a new Agent Studio project under an account, then initialize it locally.
@@ -119,13 +142,71 @@ poly project create --base-path /path/to/projects
 
     When using `poly project create --json`, you must supply `--region`, `--account_id`, and `--name` explicitly. Interactive prompts are not supported in JSON mode.
 
+#### `poly project delete`
+
+Delete an Agent Studio project.
+
+Run with no arguments and `poly project delete` walks you through interactive prompts for region, account, and project selection. By default, you are prompted to confirm before the delete proceeds.
+
+Examples:
+
+~~~bash
+poly project delete
+poly project delete --region us-1 --account_id my-account --project_id my-project
+poly project delete --region us-1 --account_id my-account --project_id my-project --force
+~~~
+
+| Flag | Description |
+|---|---|
+| `--region` | Region for the project. Choices match the standard region list. |
+| `--account_id` | Account ID the project belongs to. |
+| `--project_id` | ID of the project to delete. |
+| `--force`, `-f` | Skip the confirmation prompt. |
+| `--json` | Print a single JSON object on stdout (machine-readable). Requires `--region`, `--account_id`, and `--project_id`. Skips the confirmation prompt. |
+
+!!! info "`--json` requires explicit flags for `poly project delete`"
+
+    When using `poly project delete --json`, you must supply `--region`, `--account_id`, and `--project_id` explicitly. Interactive prompts are not supported in JSON mode.
+
+!!! warning "Deletion is permanent"
+
+    `poly project delete` cannot be undone. Use `--force` carefully.
+
+#### `poly project duplicate`
+
+Duplicate an existing Agent Studio project.
+
+Run with no arguments and `poly project duplicate` walks you through interactive prompts for region, account, source project, new project name, and optional new project ID.
+
+Examples:
+
+~~~bash
+poly project duplicate
+poly project duplicate --region us-1 --account_id my-account --project_id my-project --name my-copy
+poly project duplicate --region us-1 --account_id my-account --project_id my-project --name my-copy --id my-copy-id
+~~~
+
+| Flag | Description |
+|---|---|
+| `--region` | Region for the project. Choices match the standard region list. |
+| `--account_id` | Account ID the project belongs to. |
+| `--project_id` | ID of the project to duplicate. |
+| `--name` | Display name for the duplicated project. |
+| `--id`, `--new_project_id` | Optional slug/ID for the new project. If not provided, the platform generates one automatically. |
+| `--json` | Print a single JSON object on stdout (machine-readable). Requires `--region`, `--account_id`, `--project_id`, and `--name`. |
+
+!!! info "`--json` requires explicit flags for `poly project duplicate`"
+
+    When using `poly project duplicate --json`, you must supply `--region`, `--account_id`, `--project_id`, and `--name` explicitly. Interactive prompts are not supported in JSON mode.
+
 #### Error handling
 
 | Situation | Behaviour |
 |---|---|
-| `--json` used without `--region`, `--account_id`, or `--name` | Exits with `{ "success": false, "error": "..." }` |
+| `--json` used without required flags | Exits with `{ "success": false, "error": "..." }` |
 | No accessible regions found | Exits with an error |
 | No accounts found in the selected region | Exits with an error |
+| No projects found in the selected account | Exits with an error |
 | API error during project creation | Exits with an error; local init is not attempted |
 | No project ID returned by the API | Exits with an error; local init is not attempted |
 
@@ -669,7 +750,10 @@ poly branch delete my-feature --json
 poly branch merge 'Merge message' --json
 poly format --json
 poly init --region us-1 --account_id 123 --project_id my_project --json
+poly project list --region us-1 --account_id my-account --json
 poly project create --region us-1 --account_id my-account --name my-project --json
+poly project delete --region us-1 --account_id my-account --project_id my-project --force --json
+poly project duplicate --region us-1 --account_id my-account --project_id my-project --name my-copy --json
 poly chat --json -m 'Hello'
 poly chat --json --input-file ./script.txt
 poly deployments show abc123def --json
@@ -715,7 +799,10 @@ The exact fields vary by command. Common fields include:
 | `poly branch merge --json` | `success`; on conflict: `conflicts`, `errors` |
 | `poly format --json` | `success`, `check_only`, `format_errors`, `affected`, `ty_ran`, `ty_returncode`, `ty_timed_out` |
 | `poly init --json` | `success`, `root_path` |
+| `poly project list --json` | `success`, `agents` (array of `agent_id`, `agent_name`, `updated_at`, `branch_count`) |
 | `poly project create --json` | `success`, `root_path` (via init); on error: `success`, `error` |
+| `poly project delete --json` | `success`, `agent_id`; on error: `success`, `error` |
+| `poly project duplicate --json` | `success`, `agent_id`, `agent_name`; on error: `success`, `error` |
 | `poly chat --json` | `conversations` (array); optional `push` (when `--push` is used) |
 | `poly deployments show --json` | `success`, `deployment`, `active_deployment_hashes`, `included_deployments`, `is_rollback` |
 | `poly deployments promote --json` | `success`, `from_hash`, `to_env`, `message`, `included_deployments`; `dry_run` when `--dry-run` is used |
@@ -768,6 +855,41 @@ When `--json` is used with `poly chat`, the command emits a single JSON object w
 - `turns[0]` is always the agent greeting, with `"input": null`.
 - If `--push` is also supplied, the output includes a `push` key: `{ "push": { "success": true, "message": "..." } }`.
 - If `--functions`, `--flows`, or `--state` are also set, the relevant metadata fields are included in each turn.
+
+#### `poly project list --json` output shape
+
+~~~json
+{
+  "success": true,
+  "agents": [
+    {
+      "agent_id": "my-project",
+      "agent_name": "My Project",
+      "updated_at": "2024-01-15T10:30:00Z",
+      "branch_count": 2
+    }
+  ]
+}
+~~~
+
+#### `poly project delete --json` output shape
+
+~~~json
+{
+  "success": true,
+  "agent_id": "my-project"
+}
+~~~
+
+#### `poly project duplicate --json` output shape
+
+~~~json
+{
+  "success": true,
+  "agent_id": "my-project-copy",
+  "agent_name": "My Project (copy)"
+}
+~~~
 
 #### `poly conversations get-audio --json` output shape
 
