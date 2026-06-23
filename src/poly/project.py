@@ -2984,13 +2984,13 @@ class AgentStudioProject:
         Returns:
             list[TestCase]: The matched test cases.
         """
-        tests = self.resources.get(TestCase, {})
+        tests: dict[str, TestCase] = self.resources.get(TestCase, {})
         matched: list[TestCase] = []
         if all:
             matched = list(tests.values())
         elif tags:
             for test in tests.values():
-                if any(tag in test.tags for tag in tags):
+                if any(tag in test.tags.tags for tag in tags):
                     matched.append(test)
         elif files:
             for test in tests.values():

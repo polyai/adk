@@ -880,11 +880,23 @@ def handle_exception(exc: Exception) -> None:
     sys.exit(1)
 
 
+# TESTING
+
+
+_COMPACT_THRESHOLD = 20
+_RECENT_COUNT = 10
+
 _TEST_STATUS_STYLES = {
     "passed": ("Passed", "green"),
     "failed": ("Failed", "red"),
     "error": ("Error", "red"),
+    "errored": ("Error", "red"),
+    "timed_out": ("Timed Out", "red"),
 }
+
+_PENDING_STATUSES = {"pending", "running", "in_progress"}
+_FAILURE_STATUSES = {"failed", "error", "errored", "timed_out"}
+_ERROR_STATUSES = {"error", "errored", "timed_out"}
 
 
 def _build_test_table(
@@ -892,7 +904,7 @@ def _build_test_table(
     test_names: dict[str, str],
     finished: bool = False,
 ) -> Table:
-    """Build a Rich table for test run results."""
+    """Build a Rich table for test run results (full mode, ≤ 20 tests)."""
     table = Table(show_header=False, show_edge=False, pad_edge=False)
     table.add_column("test", no_wrap=True)
     table.add_column("status", no_wrap=True)
@@ -900,19 +912,116 @@ def _build_test_table(
         case_id = entry.get("testCaseId", "")
         name = test_names.get(case_id, case_id)
         status = entry.get("status", "pending")
-        if finished and status in ("pending", "running", "in_progress"):
+        if finished and status in _PENDING_STATUSES:
             status = "error"
-        label, style = _TEST_STATUS_STYLES.get(status, ("Pending...", "yellow"))
-        if status in ("pending", "running", "in_progress"):
+        label, style = _TEST_STATUS_STYLES.get(status, ("Pending", "yellow"))
+        if status in _PENDING_STATUSES:
             status_cell = Spinner(
                 "dots",
-                text=f"[{style}][{label}][/{style}]",
+                text=f"[{style}]{label}[/{style}]",
                 style=style,
             )
         else:
-            status_cell = Text(f"[{label}]", style=style)
+            status_cell = Text(f"{label}", style=style)
         table.add_row(name, status_cell)
     return table
+
+
+def _build_compact_display(
+    completed: list[dict],
+    total: int,
+    test_names: dict[str, str],
+) -> Group:
+    """Build the compact rolling display (> 20 tests)."""
+    done = len(completed)
+    passed = sum(1 for e in completed if e.get("status") not in _FAILURE_STATUSES)
+    failed = sum(1 for e in completed if e.get("status") in _FAILURE_STATUSES)
+    pending = total - done
+    header = Spinner(
+        "dots",
+        text=(
+            "Running tests: "
+            f"Passed: [green]{passed}[/green]  "
+            f"Failed: [red]{failed}[/red]  "
+            f"Pending: [yellow]{pending}[/yellow]"
+        ),
+        style="info",
+    )
+    recent = completed[-_RECENT_COUNT:]
+    lines: list[Text] = []
+    if len(completed) > _RECENT_COUNT:
+        lines.append(Text("  ...", style="dim"))
+    for entry in recent:
+        case_id = entry.get("testCaseId", "")
+        name = test_names.get(case_id, case_id)
+        status = entry.get("status", "")
+        if status in _FAILURE_STATUSES:
+            lines.append(Text(f"  ✗ {name}", style="red"))
+        else:
+            lines.append(Text(f"  ✓ {name}", style="green"))
+    return Group(header, *lines)
+
+
+def _print_test_failures(
+    merged: list[dict],
+    test_names: dict[str, str],
+) -> None:
+    """Print failed test details with assertion reasons."""
+    failures = [e for e in merged if e.get("status") == "failed"]
+    errors = [e for e in merged if e.get("status") in _ERROR_STATUSES]
+    if not failures and not errors:
+        return
+
+    if errors:
+        console.print()
+        console.print("[error]Errors:[/error]")
+        for entry in errors:
+            case_id = entry.get("testCaseId", "")
+            name = test_names.get(case_id, case_id)
+            console.print(f"  [red]✗ {name}[/red] - [muted]{entry.get('status')}[/muted]")
+            test_run_id = entry.get("testRunId", "")
+            conv_id = entry.get("rawConversation", {}).get("id", "")
+            console.print(f"    [muted]Test run ID: {test_run_id}[/muted]")
+            console.print(f"    [muted]Conversation ID: {conv_id}[/muted]")
+
+    if not failures:
+        return
+
+    console.print()
+    console.print("[error]Failed:[/error]")
+    for entry in failures:
+        case_id = entry.get("testCaseId", "")
+        name = test_names.get(case_id, case_id)
+        console.print(f"  [red]✗ {name}[/red]")
+
+        results = entry.get("results") or {}
+        prompt_assertions = results.get("prompt_assertion_results") or []
+        for assertion in prompt_assertions:
+            if assertion.get("is_pass"):
+                continue
+            prompt = assertion.get("prompt", "")
+            reason = assertion.get("reason", "")
+            console.print(f"    {prompt}")
+            console.print(f"    [muted]→ {reason}[/muted]")
+
+        function_assertions = results.get("function_call_failures") or []
+        for assertion in function_assertions:
+            if assertion.get("is_pass"):
+                continue
+            function_name = assertion.get("name", "")
+            failure_reason = assertion.get("failure_reason", "")
+            function_error = assertion.get("error", "")
+            console.print(f"    {function_name}()")
+            console.print(f"    [muted]→ {failure_reason}[/muted]")
+            if function_error:
+                console.print(f"    [muted]→ {function_error}[/muted]")
+
+        test_run_id = entry.get("testRunId", "")
+        conv_id = entry.get("rawConversation", {}).get("id", "")
+        console.print(f"    [muted]Test run ID: {test_run_id}[/muted]")
+        console.print(f"    [muted]Conversation ID: {conv_id}[/muted]")
+
+        console.print()
 
 
 def poll_test_run_live(
@@ -934,15 +1043,21 @@ def poll_test_run_live(
     """
     import time
 
+    total = len(matched_tests)
     test_names = {t.resource_id: t.name for t in matched_tests}
     pending_results = [{"testCaseId": t.resource_id, "status": "pending"} for t in matched_tests]
+    compact = total > _COMPACT_THRESHOLD
+
+    seen_done: set[str] = set()
+    completed_ordered: list[dict] = []
 
     merged = pending_results
-    with Live(
-        _build_test_table(merged, test_names),
-        console=console,
-        refresh_per_second=10,
-    ) as live:
+    initial = (
+        _build_compact_display([], total, test_names)
+        if compact
+        else _build_test_table(merged, test_names)
+    )
+    with Live(initial, console=console, refresh_per_second=10) as live:
         while True:
             time.sleep(poll_interval)
             result = get_test_run(test_run_id)
@@ -950,25 +1065,39 @@ def poll_test_run_live(
 
             actual_by_id = {r.get("testCaseId"): r for r in test_results}
             merged = [actual_by_id.get(p.get("testCaseId"), p) for p in pending_results]
-            live.update(_build_test_table(merged, test_names))
+
+            for entry in merged:
+                cid = entry.get("testCaseId", "")
+                st = entry.get("status", "pending")
+                if st not in _PENDING_STATUSES and cid not in seen_done:
+                    seen_done.add(cid)
+                    completed_ordered.append(entry)
+
+            if compact:
+                live.update(_build_compact_display(completed_ordered, total, test_names))
+            else:
+                live.update(_build_test_table(merged, test_names))
 
             status = result.get("status", "")
-            if status not in ("pending", "running", "in_progress"):
-                live.update(_build_test_table(merged, test_names, finished=True))
+            if status not in _PENDING_STATUSES:
+                if not compact:
+                    live.update(_build_test_table(merged, test_names, finished=True))
                 break
+
+    _print_test_failures(merged, test_names)
 
     passed = result.get("passedCount", 0)
     failed = result.get("failedCount", 0)
     error_count = result.get("errorCount", 0)
-    total = result.get("testCaseCount", len(matched_tests))
+    total_count = result.get("testCaseCount", total)
 
     if failed or error_count:
         error(
             f"Test run {result.get('status', 'unknown')}: "
-            f"{passed}/{total} passed, "
+            f"{passed}/{total_count} passed, "
             f"{failed} failed, {error_count} errors"
         )
     else:
-        success(f"Test run {result.get('status', 'unknown')}: {passed}/{total} passed")
+        success(f"Test run {result.get('status', 'unknown')}: {passed}/{total_count} passed")
 
     return result
