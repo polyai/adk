@@ -978,10 +978,11 @@ def _print_test_failures(
         for entry in errors:
             case_id = entry.get("testCaseId", "")
             name = test_names.get(case_id, case_id)
-            console.print(f"  [red]✗ {name}[/red] - [muted]{entry.get('status')}[/muted]")
-            test_run_id = entry.get("testRunId", "")
+            console.print(
+                f"  [red]✗ {name}[/red] [muted]({case_id})[/muted]"
+                f" - [muted]{entry.get('status')}[/muted]"
+            )
             conv_id = entry.get("rawConversation", {}).get("id", "")
-            console.print(f"    [muted]Test run ID: {test_run_id}[/muted]")
             console.print(f"    [muted]Conversation ID: {conv_id}[/muted]")
 
     if not failures:
@@ -992,7 +993,7 @@ def _print_test_failures(
     for entry in failures:
         case_id = entry.get("testCaseId", "")
         name = test_names.get(case_id, case_id)
-        console.print(f"  [red]✗ {name}[/red]")
+        console.print(f"  [red]✗ {name}[/red] [muted]({case_id})[/muted]")
 
         results = entry.get("results") or {}
         prompt_assertions = results.get("prompt_assertion_results") or []
@@ -1016,12 +1017,107 @@ def _print_test_failures(
             if function_error:
                 console.print(f"    [muted]→ {function_error}[/muted]")
 
-        test_run_id = entry.get("testRunId", "")
         conv_id = entry.get("rawConversation", {}).get("id", "")
-        console.print(f"    [muted]Test run ID: {test_run_id}[/muted]")
         console.print(f"    [muted]Conversation ID: {conv_id}[/muted]")
 
         console.print()
+
+
+def print_test_run_summary(result: dict) -> None:
+    """Print a summary of a test run."""
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column("key", style="label", no_wrap=True)
+    table.add_column("value")
+    table.add_row("Run ID", result.get("id", "—"))
+    table.add_row("Status", result.get("status", "—"))
+    table.add_row("Tests", str(result.get("testCaseCount", "—")))
+    table.add_row(
+        "Results",
+        f"[green]{result.get('passedCount', 0)} passed[/green], "
+        f"[red]{result.get('failedCount', 0)} failed[/red], "
+        f"[red]{result.get('errorCount', 0)} errors[/red]",
+    )
+    table.add_row("Started", result.get("startedAt", "—"))
+    table.add_row("Started By", result.get("startedBy", "—"))
+    console.print(table)
+
+    test_history = result.get("testHistory") or []
+    if not test_history:
+        return
+
+    console.print()
+    results_table = Table(
+        show_header=True,
+        header_style="bold",
+        box=None,
+        padding=(0, 1),
+    )
+    results_table.add_column("Test", no_wrap=True)
+    results_table.add_column("Status", no_wrap=True)
+    results_table.add_column("Test Case ID", style="muted", no_wrap=True)
+    for entry in test_history:
+        case_id = entry.get("testCaseId", "")
+        snapshot = entry.get("testCaseSnapshot") or {}
+        name = snapshot.get("name", case_id)
+        status = entry.get("status", "unknown")
+        _, style = _TEST_STATUS_STYLES.get(status, ("", "yellow"))
+        results_table.add_row(name, Text(status, style=style), case_id)
+    console.print(results_table)
+
+
+def print_test_detail(entry: dict) -> None:
+    """Print detailed results for a single test."""
+    snapshot = entry.get("testCaseSnapshot") or {}
+    name = snapshot.get("name", entry.get("testCaseId", "—"))
+    status = entry.get("status", "unknown")
+    _, style = _TEST_STATUS_STYLES.get(status, ("", "yellow"))
+
+    console.print(f"[bold]{name}[/bold] [{style}]{status}[/{style}]")
+    console.print()
+
+    results = entry.get("results") or {}
+
+    prompt_assertions = results.get("prompt_assertion_results") or []
+    if prompt_assertions:
+        console.print("[label]Assertions:[/label]")
+        for a in prompt_assertions:
+            passed = a.get("is_pass", False)
+            mark = "[green]✓[/green]" if passed else "[red]✗[/red]"
+            console.print(f"  {mark} {a.get('prompt', '')}")
+            reason = a.get("reason", "")
+            if reason:
+                console.print(f"    [muted]→ {reason}[/muted]")
+        console.print()
+
+    fn_failures = results.get("function_call_failures") or []
+    if fn_failures:
+        console.print("[label]Function Call Failures:[/label]")
+        for f in fn_failures:
+            console.print(f"  [red]✗ {f.get('name', '')}()[/red]")
+            if f.get("failure_reason"):
+                console.print(f"    [muted]→ {f['failure_reason']}[/muted]")
+            if f.get("error"):
+                console.print(f"    [muted]→ {f['error']}[/muted]")
+        console.print()
+
+    raw_conv = entry.get("rawConversation") or {}
+    turns = raw_conv.get("turns") or []
+    if turns:
+        console.print("[label]Conversation:[/label]")
+        for turn in turns:
+            user_input = turn.get("user_input", "")
+            agent_response = turn.get("agent_response", "")
+            if user_input:
+                console.print(f"  [cyan]User:[/cyan] {user_input}")
+            if agent_response:
+                console.print(f"  [yellow]Agent:[/yellow] {agent_response}")
+            fns = turn.get("function_calls") or []
+            for fn in fns:
+                fn_name = fn.get("name", "")
+                fn_args = fn.get("arguments") or {}
+                args_str = ", ".join(f"{k}={v}" for k, v in fn_args.items() if v)
+                console.print(f"  [muted]→ {fn_name}({args_str})[/muted]")
+            console.print()
 
 
 def poll_test_run_live(

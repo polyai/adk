@@ -40,6 +40,8 @@ from poly.output.console import (
     info,
     plain,
     poll_test_run_live,
+    print_test_run_summary,
+    print_test_detail,
     print_agents,
     print_branches,
     print_conversations,
@@ -1430,6 +1432,31 @@ class AgentStudioCLI:
             help="List the tests that would be run without triggering them.",
         )
 
+        test_get_parser = testing_subparsers.add_parser(
+            "get",
+            parents=[testing_path_parent, json_parent, verbose_parent, debug_parent],
+            help="Get test run results.",
+            description=(
+                "Get test run results.\n\n"
+                "Examples:\n"
+                "  poly test get <run_id>\n"
+                "  poly test get <run_id> <test_case_id>\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        test_get_parser.add_argument(
+            "run_id",
+            type=str,
+            help="The test run ID.",
+        )
+        test_get_parser.add_argument(
+            "test_case_id",
+            type=str,
+            nargs="?",
+            default=None,
+            help="Optional test case ID for detailed view.",
+        )
+
         return parser
 
     @classmethod
@@ -1715,6 +1742,13 @@ class AgentStudioCLI:
                         push=args.push,
                         output_json=args.json,
                         dry_run=args.dry_run,
+                    )
+                elif args.test_subcommand == "get":
+                    cls.testing_get(
+                        args.path,
+                        run_id=args.run_id,
+                        test_case_id=args.test_case_id,
+                        output_json=args.json,
                     )
 
         except Exception as e:
@@ -4864,6 +4898,46 @@ class AgentStudioCLI:
             return
 
         poll_test_run_live(project.get_test_run, test_run_id, matched)
+
+    @classmethod
+    def testing_get(
+        cls,
+        base_path: str,
+        run_id: str,
+        test_case_id: str = None,
+        output_json: bool = False,
+    ) -> None:
+        """Get test run results, optionally for a specific test case."""
+        project = cls._load_project(base_path)
+        result = project.get_test_run(run_id)
+
+        if output_json:
+            if test_case_id:
+                test_history = result.get("testHistory") or []
+                entry = next(
+                    (e for e in test_history if e.get("testCaseId") == test_case_id),
+                    None,
+                )
+                if not entry:
+                    json_print({"success": False, "error": f"Test case {test_case_id} not found"})
+                    sys.exit(1)
+                json_print({"success": True, "test": entry})
+            else:
+                json_print({"success": True, "test_run": result})
+            return
+
+        if test_case_id:
+            test_history = result.get("testHistory") or []
+            entry = next(
+                (e for e in test_history if e.get("testCaseId") == test_case_id),
+                None,
+            )
+            if not entry:
+                error(f"Test case {test_case_id} not found in run {run_id}")
+                sys.exit(1)
+            print_test_detail(entry)
+        else:
+            print_test_run_summary(result)
 
     @classmethod
     def start(cls, base_path: str) -> None:
