@@ -1,6 +1,38 @@
 # CHANGELOG
 
 
+## v0.28.1 (2026-06-23)
+
+### Bug Fixes
+
+- Bump experimental config schema with Raven ASR ([#200](https://github.com/polyai/adk/pull/200),
+  [`7921f50`](https://github.com/polyai/adk/commit/7921f50c1bc0da430fb900702b80825311e2aec0))
+
+## Summary
+
+Adds `raven` as a supported ASR engine in the experimental config schema.
+
+## Motivation
+
+The Raven Omni speech recognition engine needs to be a valid option in the experimental config
+  schema so projects using it pass validation.
+
+## Changes
+
+- Added `raven` to the ASR engine enum list - Added `raven: PolyAI Raven Omni speech recognition` to
+  the engine description enum - Added `raven: "raven-omni"` to the model documentation
+
+## Test strategy
+
+- [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.28.0 (2026-06-23)
 
 ### Features
