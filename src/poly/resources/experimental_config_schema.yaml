@@ -29,6 +29,7 @@ components:
         - fano
         - nemo
         - deepgram
+        - raven
 
     asr_common_config_properties:
       type: object
@@ -43,6 +44,7 @@ components:
             - riva: Riva in-house speech recognition engine
             - openai: OpenAI realtime API
             - deepgram: Deepgram cloud speech recognition
+            - raven: PolyAI Raven Omni speech recognition
         model:
           type: string
           minLength: 1
@@ -55,6 +57,7 @@ components:
               architecture, size, decoder type, and latency characteristics
             - openai: "gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"
             - deepgram: "nova-3", "nova-2"
+            - raven: "raven-omni"
         language:
           type: string
           minLength: 2
