@@ -164,6 +164,7 @@ class AgentStudioProject:
     last_updated: datetime
     branch_id: str = None
     project_name: Optional[str] = None
+    account_name: Optional[str] = None
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
@@ -205,6 +206,8 @@ class AgentStudioProject:
         }
         if self.project_name:
             config["project_name"] = self.project_name
+        if self.account_name:
+            config["account_name"] = self.account_name
         return config
 
     @classmethod
@@ -278,6 +281,7 @@ class AgentStudioProject:
             file_structure_info={},
             branch_id=status_dict.get("branch_id", "main"),
             project_name=config_dict.get("project_name") or status_dict.get("project_name"),
+            account_name=config_dict.get("account_name") or status_dict.get("account_name"),
             _not_loaded_resources=not_loaded_resources,
             _migration_flags=migration_flags,
         )
@@ -298,6 +302,7 @@ class AgentStudioProject:
             "file_structure_info": self.file_structure_info,
             "branch_id": self.branch_id,
             "project_name": self.project_name,
+            "account_name": self.account_name,
             "migration_flags": [flag.value for flag in self._migration_flags]
             if self._migration_flags
             else [],
@@ -323,6 +328,7 @@ class AgentStudioProject:
             file_structure_info=file_structure_info,
             branch_id=data.get("branch_id", "main"),
             project_name=data.get("project_name"),
+            account_name=data.get("account_name"),
             _migration_flags=migration_flags,
             _not_loaded_resources=not_loaded_resources,
         )
@@ -362,6 +368,7 @@ class AgentStudioProject:
         account_id: str,
         project_id: str,
         project_name: str = None,
+        account_name: str = None,
         format: bool = False,
         projection_json: Optional[dict[str, Any]] = None,
         on_save: Callable[[int, int], None] | None = None,
@@ -374,6 +381,7 @@ class AgentStudioProject:
             account_id (str): The account ID of the project
             project_id (str): The project ID
             project_name (str): The human-readable project name
+            account_name (str): The human-readable account/workspace name
             format (bool): If True, format resources after pulling
             projection_json (dict[str, Any]): A dictionary containing the projection
                 If provided, the projection will be used instead of fetching it from the API.
@@ -397,6 +405,7 @@ class AgentStudioProject:
             last_updated=datetime.now(),
             branch_id="main",
             project_name=project_name,
+            account_name=account_name,
             _migration_flags=get_all_migration_flags(),
         )
 
