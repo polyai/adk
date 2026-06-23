@@ -1,6 +1,48 @@
 # CHANGELOG
 
 
+## v0.28.0 (2026-06-23)
+
+### Features
+
+- Open agent studio from cli ([#199](https://github.com/polyai/adk/pull/199),
+  [`5ad2973`](https://github.com/polyai/adk/commit/5ad2973114767ab34c8826d54d9f4dfd0b0bb723))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. --> Adds a new command in the cli "poly studio"
+  to open agent studio in the web browser and takes the user to the specific workspace and project.
+  ## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. --> To make it easier for users to
+  access agent studio. Closes #<!-- issue number
+  -->[DEVP-326](https://linear.app/poly-ai/issue/DEVP-326)
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+- added new command "poly studio" - created new function to build studio base url
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+  https://www.loom.com/share/6804c76d2f554a97af38254167f91d10
+
+
 ## v0.27.0 (2026-06-22)
 
 ### Features
