@@ -406,6 +406,14 @@ class TestCase(YamlResource):
                         f"Invalid value type for function call assertion argument: {argument.value_type}"
                     )
 
+        # A case with no assertions cannot be evaluated — the runner silently skips it.
+        has_prompt_assertions = any(p and p.strip() for p in self.assertions.prompts)
+        if not has_prompt_assertions and not self.assertions.function_calls:
+            raise ValueError(
+                "Test case must have at least one assertion: add `prompt_assertions` "
+                "(or `function_call_assertions`) describing the expected behaviour"
+            )
+
     def get_new_updated_deleted_subresources(
         self, old_resource: Optional["TestCase"] = None
     ) -> tuple[list[SubResource], list[SubResource], list[SubResource]]:
