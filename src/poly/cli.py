@@ -57,6 +57,8 @@ from poly.output.console import (
     print_deployments,
     prompt_typed_edit,
     print_deployment_show,
+    print_ab_tests,
+    print_ab_test_detail,
     print_welcome_message,
     mask_api_key,
 )
@@ -1277,6 +1279,126 @@ class AgentStudioCLI:
             help="Show what would be rolled back without actually rolling back. Displays the target deployment and reverted deployments.",
         )
 
+        # A/B TESTS
+        ab_test_parser = deployments_subparsers.add_parser(
+            "ab-test",
+            parents=[verbose_parent],
+            help="Manage A/B tests for live deployments.",
+            description=(
+                "Manage A/B tests for live deployments.\n\n"
+                "Examples:\n"
+                "  poly deployments ab-test start --name 'v2 test'"
+                " --variant <deployment_id> --traffic 50\n"
+                "  poly deployments ab-test list\n"
+                "  poly deployments ab-test active\n"
+                "  poly deployments ab-test update --traffic 30\n"
+                "  poly deployments ab-test end\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        ab_test_subparsers = ab_test_parser.add_subparsers(dest="ab_test_subcommand", required=True)
+
+        ab_test_start_parser = ab_test_subparsers.add_parser(
+            "start",
+            parents=[deployments_path_parent, json_parent, verbose_parent],
+            help="Start a new A/B test.",
+            description=(
+                "Start a new A/B test against the current live deployment.\n\n"
+                "The variant must be a pre-release deployment. Traffic percentage\n"
+                "controls what fraction of calls route to the variant (0-100).\n\n"
+                "Examples:\n"
+                "  poly deployments ab-test start"
+                " --name 'v2 test' --variant <dep_id> --traffic 50\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        ab_test_start_parser.add_argument(
+            "--name",
+            "-n",
+            type=str,
+            default=None,
+            help="Name/label for the A/B test. If omitted, prompts interactively.",
+        )
+        ab_test_start_parser.add_argument(
+            "--variant",
+            type=str,
+            default=None,
+            help="Deployment ID of the variant (must be pre-release). If omitted, prompts interactively.",
+        )
+        ab_test_start_parser.add_argument(
+            "--traffic",
+            type=int,
+            default=None,
+            help="Percentage of traffic to route to the variant (0-100). Defaults to 50 interactively.",
+        )
+
+        ab_test_list_parser = ab_test_subparsers.add_parser(
+            "list",
+            parents=[deployments_path_parent, json_parent, verbose_parent],
+            help="List A/B tests for the project.",
+            description=(
+                "List A/B tests for the project.\n\n"
+                "Examples:\n"
+                "  poly deployments ab-test list\n"
+                "  poly deployments ab-test list --limit 20\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        ab_test_list_parser.add_argument(
+            "--limit",
+            type=int,
+            default=10,
+            help="Number of A/B tests to show. Defaults to 10.",
+        )
+
+        ab_test_subparsers.add_parser(
+            "active",
+            parents=[deployments_path_parent, json_parent, verbose_parent],
+            help="Show the currently active A/B test.",
+            description="Show the currently active A/B test, if any.",
+            formatter_class=RawTextHelpFormatter,
+        )
+
+        ab_test_update_parser = ab_test_subparsers.add_parser(
+            "update",
+            parents=[deployments_path_parent, json_parent, verbose_parent],
+            help="Update traffic percentage for an active A/B test.",
+            description=(
+                "Update the traffic split for the active A/B test.\n\n"
+                "Examples:\n"
+                "  poly deployments ab-test update --traffic 30\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        ab_test_update_parser.add_argument(
+            "--traffic",
+            type=int,
+            default=None,
+            help="New percentage of traffic to route to the variant (0-100). Prompts if omitted.",
+        )
+
+        ab_test_end_parser = ab_test_subparsers.add_parser(
+            "end",
+            parents=[deployments_path_parent, json_parent, verbose_parent],
+            help="End an active A/B test and choose a winner.",
+            description=(
+                "End the active A/B test and choose which deployment wins.\n\n"
+                "If --chosen-deployment-id is omitted, an interactive prompt\n"
+                "shows the control and variant deployments for selection.\n\n"
+                "Examples:\n"
+                "  poly deployments ab-test end"
+                " --chosen-deployment-id <dep_id>\n"
+                "  poly deployments ab-test end   # interactive\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        ab_test_end_parser.add_argument(
+            "--chosen-deployment-id",
+            type=str,
+            default=None,
+            help="Deployment ID to keep as the winner. If omitted, prompts interactively.",
+        )
+
         # CONVERSATIONS
         conversations_path_parent = ArgumentParser(add_help=False)
         conversations_path_parent.add_argument(
@@ -1626,6 +1748,35 @@ class AgentStudioCLI:
                         output_json=args.json,
                         dry_run=args.dry_run,
                     )
+                elif args.deployments_subcommand == "ab-test":
+                    if args.ab_test_subcommand == "start":
+                        cls.ab_test_start(
+                            args.path,
+                            args.name,
+                            args.variant,
+                            args.traffic,
+                            output_json=args.json,
+                        )
+                    elif args.ab_test_subcommand == "list":
+                        cls.ab_test_list(
+                            args.path,
+                            args.limit,
+                            output_json=args.json,
+                        )
+                    elif args.ab_test_subcommand == "active":
+                        cls.ab_test_active(args.path, output_json=args.json)
+                    elif args.ab_test_subcommand == "update":
+                        cls.ab_test_update(
+                            args.path,
+                            args.traffic,
+                            output_json=args.json,
+                        )
+                    elif args.ab_test_subcommand == "end":
+                        cls.ab_test_end(
+                            args.path,
+                            chosen_deployment_id=args.chosen_deployment_id,
+                            output_json=args.json,
+                        )
 
             elif args.command == "conversations":
                 if args.conversations_subcommand == "list":
@@ -4611,6 +4762,425 @@ class AgentStudioCLI:
             else:
                 error(f"Failed to rollback deployment: {e}")
             sys.exit(1)
+
+    # ── A/B tests ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _default_ab_test_name() -> str:
+        """Generate a default A/B test name matching the Agent Studio UI format."""
+        from datetime import datetime
+
+        now = datetime.now()
+        day = now.day
+        if 11 <= day <= 13:
+            suffix = "th"
+        else:
+            suffix = {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+        return f"{day}{suffix} {now.strftime('%B %Y')} Test {now.strftime('%H:%M')}"
+
+    @staticmethod
+    def _fetch_deployment_map(project: AgentStudioProject) -> dict[str, dict]:
+        """Build a deployment ID → deployment dict map for display enrichment."""
+        dep_map: dict[str, dict] = {}
+        try:
+            for env in ("live", "pre-release"):
+                deps, _ = project.get_deployments(client_env=env)
+                for dep in deps:
+                    if dep.get("id"):
+                        dep_map[dep["id"]] = dep
+        except Exception as e:
+            logger.debug("Failed to fetch deployments for A/B test display: %s", e)
+        return dep_map
+
+    @classmethod
+    def ab_test_start(
+        cls,
+        base_path: str,
+        name: str | None,
+        variant_deployment_id: str | None,
+        traffic_percentage: int | None,
+        output_json: bool = False,
+    ) -> None:
+        """Start a new A/B test."""
+        project = cls._load_project(base_path, output_json=output_json)
+
+        # -- name --
+        if name is None:
+            if output_json:
+                msg = "--name is required when using --json."
+                json_print({"success": False, "error": msg})
+                sys.exit(1)
+            default_name = cls._default_ab_test_name()
+            name = questionary.text("A/B test name:", default=default_name).ask()
+            if name is None:
+                warning("Aborted.")
+                sys.exit(0)
+
+        if not name.strip():
+            msg = "A/B test name is required and cannot be empty."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        # -- variant --
+        try:
+            pr_deployments, active_hashes = project.get_deployments(client_env="pre-release")
+        except Exception as e:
+            msg = f"Failed to fetch pre-release deployments: {e}"
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        live_version = active_hashes.get("live")
+
+        if variant_deployment_id is None:
+            if output_json:
+                msg = "--variant is required when using --json."
+                json_print({"success": False, "error": msg})
+                sys.exit(1)
+            eligible = [dep for dep in pr_deployments if dep.get("version_hash") != live_version]
+            if not eligible:
+                error(
+                    "No eligible pre-release deployments found."
+                    " All pre-release versions match the current live version."
+                )
+                sys.exit(1)
+            dep_choices = []
+            for dep in eligible:
+                dep_id = dep.get("id", "")
+                dep_hash = (dep.get("version_hash") or "")[:9]
+                dep_msg = (dep.get("deployment_metadata") or {}).get("deployment_message", "") or ""
+                label = f"{dep_hash}  {dep_msg}" if dep_msg else dep_hash
+                dep_choices.append(questionary.Choice(title=label, value=dep_id))
+            variant_deployment_id = questionary.select(
+                "Select pre-release deployment (variant):", choices=dep_choices
+            ).ask()
+            if not variant_deployment_id:
+                warning("Aborted.")
+                sys.exit(0)
+        elif live_version:
+            variant_version = None
+            for dep in pr_deployments:
+                if dep.get("id") == variant_deployment_id:
+                    variant_version = dep.get("version_hash")
+                    break
+            if variant_version and variant_version == live_version:
+                msg = (
+                    "Variant deployment has the same version as the current live deployment."
+                    " An A/B test requires different versions."
+                )
+                if output_json:
+                    json_print({"success": False, "error": msg})
+                else:
+                    error(msg)
+                sys.exit(1)
+
+        # -- traffic --
+        if traffic_percentage is None:
+            if output_json:
+                msg = "--traffic is required when using --json."
+                json_print({"success": False, "error": msg})
+                sys.exit(1)
+            traffic_input = questionary.text(
+                "Traffic percentage for variant (0-100):", default="50"
+            ).ask()
+            if traffic_input is None:
+                warning("Aborted.")
+                sys.exit(0)
+            try:
+                traffic_percentage = int(traffic_input)
+            except ValueError:
+                error("Traffic percentage must be an integer.")
+                sys.exit(1)
+
+        if not 0 <= traffic_percentage <= 100:
+            msg = "Traffic percentage must be an integer between 0 and 100."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        try:
+            result = project.create_ab_test(name.strip(), variant_deployment_id, traffic_percentage)
+            if output_json:
+                json_print({"success": True, "ab_test": result})
+            else:
+                success("A/B test started.")
+                dep_map = cls._fetch_deployment_map(project)
+                print_ab_test_detail(result, deployments=dep_map)
+        except requests.HTTPError as e:
+            body = {}
+            try:
+                body = e.response.json()
+            except Exception:
+                pass
+            msg = body.get("error") or f"Failed to start A/B test: {e}"
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+    @classmethod
+    def ab_test_list(
+        cls,
+        base_path: str,
+        limit: int = 10,
+        output_json: bool = False,
+    ) -> None:
+        """List A/B tests for the project."""
+        project = cls._load_project(base_path, output_json=output_json)
+        try:
+            ab_tests = project.list_ab_tests(limit=limit)
+            if output_json:
+                json_print({"success": True, "ab_tests": ab_tests})
+            else:
+                print_ab_tests(ab_tests)
+        except requests.HTTPError as e:
+            msg = f"Failed to list A/B tests: {e}"
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+    @classmethod
+    def ab_test_active(
+        cls,
+        base_path: str,
+        output_json: bool = False,
+    ) -> None:
+        """Show the currently active A/B test."""
+        project = cls._load_project(base_path, output_json=output_json)
+        try:
+            ab_test = project.get_active_ab_test()
+            if output_json:
+                json_print({"success": True, "ab_test": ab_test})
+            else:
+                dep_map = cls._fetch_deployment_map(project) if ab_test else {}
+                print_ab_test_detail(ab_test, deployments=dep_map)
+        except requests.HTTPError as e:
+            msg = f"Failed to get active A/B test: {e}"
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+    @classmethod
+    def ab_test_update(
+        cls,
+        base_path: str,
+        traffic_percentage: int | None,
+        output_json: bool = False,
+    ) -> None:
+        """Update traffic percentage for the active A/B test."""
+        project = cls._load_project(base_path, output_json=output_json)
+
+        try:
+            ab_test = project.get_active_ab_test()
+        except requests.HTTPError as e:
+            msg = f"Failed to fetch active A/B test: {e}"
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        if not ab_test:
+            msg = "No active A/B test found for this project."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        if traffic_percentage is None:
+            if output_json:
+                msg = "--traffic is required when using --json."
+                json_print({"success": False, "error": msg})
+                sys.exit(1)
+            current = str(ab_test.get("traffic_percentage", 50))
+            traffic_input = questionary.text(
+                "Traffic percentage for variant (0-100):", default=current
+            ).ask()
+            if traffic_input is None:
+                warning("Aborted.")
+                sys.exit(0)
+            try:
+                traffic_percentage = int(traffic_input)
+            except ValueError:
+                error("Traffic percentage must be an integer.")
+                sys.exit(1)
+
+        if not 0 <= traffic_percentage <= 100:
+            msg = "Traffic percentage must be an integer between 0 and 100."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        ab_test_id = ab_test["id"]
+        if traffic_percentage == ab_test.get("traffic_percentage"):
+            if output_json:
+                json_print({"success": True, "ab_test": ab_test, "unchanged": True})
+            else:
+                info(f"Traffic is already at {traffic_percentage}%. No update needed.")
+            return
+
+        try:
+            result = project.update_ab_test(ab_test_id, traffic_percentage)
+            if output_json:
+                json_print({"success": True, "ab_test": result})
+            else:
+                success(f"Traffic updated to {traffic_percentage}%.")
+                dep_map = cls._fetch_deployment_map(project)
+                print_ab_test_detail(result, deployments=dep_map)
+        except requests.HTTPError as e:
+            body = {}
+            try:
+                body = e.response.json()
+            except Exception:
+                pass
+            msg = body.get("error") or f"Failed to update A/B test: {e}"
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+    @classmethod
+    def ab_test_end(
+        cls,
+        base_path: str,
+        chosen_deployment_id: str | None = None,
+        output_json: bool = False,
+    ) -> None:
+        """End the active A/B test and choose the winning deployment."""
+        project = cls._load_project(base_path, output_json=output_json)
+
+        try:
+            ab_test = project.get_active_ab_test()
+        except requests.HTTPError as e:
+            msg = f"Failed to fetch active A/B test: {e}"
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        if not ab_test:
+            msg = "No active A/B test found for this project."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        ab_test_id = ab_test["id"]
+        ab_test_name = ab_test.get("name") or ab_test_id
+        control_id = ab_test.get("control_deployment_id", "unknown")
+        variant_id = ab_test.get("variant_deployment_id", "unknown")
+
+        dep_map = cls._fetch_deployment_map(project)
+
+        def _label(did: str) -> str:
+            dep = dep_map.get(did)
+            if not dep:
+                return did
+            h = (dep.get("version_hash") or "")[:9]
+            m = (dep.get("deployment_metadata") or {}).get("deployment_message", "") or ""
+            return f"{h}  {m}".strip() if h else did
+
+        control_label = _label(control_id)
+        variant_label = _label(variant_id)
+
+        if not output_json:
+            info(f"Active A/B test: [bold]{ab_test_name}[/bold]")
+
+        if not chosen_deployment_id:
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "error": "--chosen-deployment-id is required when using --json.",
+                    }
+                )
+                sys.exit(1)
+
+            choices = [
+                questionary.Choice(title=f"Control — {control_label}", value=control_id),
+                questionary.Choice(title=f"Variant — {variant_label}", value=variant_id),
+            ]
+            chosen_deployment_id = questionary.select(
+                "Choose the winning deployment:", choices=choices
+            ).ask()
+            if not chosen_deployment_id:
+                warning("Aborted.")
+                sys.exit(0)
+
+        winner_label = _label(chosen_deployment_id)
+        promote_variant = chosen_deployment_id == variant_id
+
+        try:
+            result = project.end_ab_test(ab_test_id, chosen_deployment_id)
+        except requests.HTTPError as e:
+            body = {}
+            try:
+                body = e.response.json()
+            except Exception:
+                pass
+            msg = body.get("error") or f"Failed to end A/B test: {e}"
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        if not output_json:
+            success(f"A/B test '{ab_test_name}' ended. Winner: {winner_label}")
+
+        promoted = False
+        if promote_variant:
+            if not output_json:
+                info("Promoting variant to live...")
+            try:
+                variant_dep = dep_map.get(variant_id, {})
+                variant_msg = (variant_dep.get("deployment_metadata") or {}).get(
+                    "deployment_message", ""
+                ) or ""
+                project.promote_deployment(variant_id, "live", message=variant_msg)
+                promoted = True
+                if not output_json:
+                    success("Variant promoted to live.")
+            except Exception as e:
+                if output_json:
+                    json_print(
+                        {
+                            "success": True,
+                            "ab_test": result,
+                            "promoted": False,
+                            "promote_error": str(e),
+                        }
+                    )
+                else:
+                    warning(f"A/B test ended but failed to promote variant to live: {e}")
+                return
+
+        if output_json:
+            json_print(
+                {
+                    "success": True,
+                    "ab_test": result,
+                    "promoted": promoted,
+                }
+            )
 
     # ── conversations ────────────────────────────────────────────────
 

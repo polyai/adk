@@ -2972,3 +2972,92 @@ class AgentStudioProject:
             message=message,
         )
         return True
+
+    # ── A/B tests ───────────────────────────────────────────────────
+
+    def create_ab_test(
+        self, name: str, variant_deployment_id: str, traffic_percentage: int
+    ) -> dict:
+        """Create a new A/B test for the project.
+
+        Args:
+            name: Display name for the test.
+            variant_deployment_id: ID of the pre-release variant deployment.
+            traffic_percentage: Percentage of traffic routed to variant (0-100).
+
+        Returns:
+            dict: The created A/B test record.
+        """
+        return self.api_handler.create_ab_test(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            name=name,
+            variant_deployment_id=variant_deployment_id,
+            traffic_percentage=traffic_percentage,
+        )
+
+    def list_ab_tests(self, limit: int | None = None) -> list[dict]:
+        """List A/B tests for the project.
+
+        Args:
+            limit: Maximum number of tests to return.
+
+        Returns:
+            list[dict]: A list of A/B test records.
+        """
+        result = self.api_handler.list_ab_tests(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            limit=limit,
+        )
+        return result.get("ab_tests", [])
+
+    def get_active_ab_test(self) -> dict:
+        """Get the active A/B test for the project.
+
+        Returns:
+            dict: The active A/B test record, or empty dict if none.
+        """
+        return self.api_handler.get_active_ab_test(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+        )
+
+    def end_ab_test(self, ab_test_id: str, chosen_deployment_id: str) -> dict:
+        """End an A/B test and choose a winner.
+
+        Args:
+            ab_test_id: The A/B test ID.
+            chosen_deployment_id: Deployment ID to keep (control or variant).
+
+        Returns:
+            dict: The ended A/B test record.
+        """
+        return self.api_handler.end_ab_test(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            ab_test_id=ab_test_id,
+            chosen_deployment_id=chosen_deployment_id,
+        )
+
+    def update_ab_test(self, ab_test_id: str, traffic_percentage: int) -> dict:
+        """Update traffic percentage for an A/B test.
+
+        Args:
+            ab_test_id: The A/B test ID.
+            traffic_percentage: New traffic percentage (0-100).
+
+        Returns:
+            dict: The updated A/B test record.
+        """
+        return self.api_handler.update_ab_test(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            ab_test_id=ab_test_id,
+            traffic_percentage=traffic_percentage,
+        )

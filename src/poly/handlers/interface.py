@@ -681,6 +681,118 @@ class AgentStudioInterface:
         return PlatformAPIHandler.rollback_deployment(region, project_id, deployment_id, message)
 
     @staticmethod
+    def create_ab_test(
+        region: str,
+        account_id: str,
+        project_id: str,
+        name: str,
+        variant_deployment_id: str,
+        traffic_percentage: int,
+    ) -> dict:
+        """Create a new A/B test.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            name: Display name for the A/B test.
+            variant_deployment_id: ID of the pre-release variant deployment.
+            traffic_percentage: Percentage of traffic routed to variant (0-100).
+
+        Returns:
+            dict: The created A/B test record.
+        """
+        return PlatformAPIHandler.create_ab_test(
+            region, account_id, project_id, name, variant_deployment_id, traffic_percentage
+        )
+
+    @staticmethod
+    def list_ab_tests(
+        region: str,
+        account_id: str,
+        project_id: str,
+        limit: Optional[int] = None,
+    ) -> dict:
+        """List A/B tests for a project.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            limit: Maximum number of tests to return.
+
+        Returns:
+            dict: Response containing an ``ab_tests`` list.
+        """
+        return PlatformAPIHandler.list_ab_tests(region, account_id, project_id, limit)
+
+    @staticmethod
+    def get_active_ab_test(
+        region: str,
+        account_id: str,
+        project_id: str,
+    ) -> dict:
+        """Get the active A/B test for a project.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+
+        Returns:
+            dict: The active A/B test record, or empty dict if none.
+        """
+        return PlatformAPIHandler.get_active_ab_test(region, account_id, project_id)
+
+    @staticmethod
+    def end_ab_test(
+        region: str,
+        account_id: str,
+        project_id: str,
+        ab_test_id: str,
+        chosen_deployment_id: str,
+    ) -> dict:
+        """End an A/B test and choose a winner.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            ab_test_id: The A/B test ID.
+            chosen_deployment_id: Deployment ID to keep (control or variant).
+
+        Returns:
+            dict: The ended A/B test record.
+        """
+        return PlatformAPIHandler.end_ab_test(
+            region, account_id, project_id, ab_test_id, chosen_deployment_id
+        )
+
+    @staticmethod
+    def update_ab_test(
+        region: str,
+        account_id: str,
+        project_id: str,
+        ab_test_id: str,
+        traffic_percentage: int,
+    ) -> dict:
+        """Update traffic percentage for an A/B test.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            ab_test_id: The A/B test ID.
+            traffic_percentage: New traffic percentage (0-100).
+
+        Returns:
+            dict: The updated A/B test record.
+        """
+        return PlatformAPIHandler.update_ab_test(
+            region, account_id, project_id, ab_test_id, traffic_percentage
+        )
+
+    @staticmethod
     def authorise(region: str, jwt_token: str) -> dict:
         """Authorise the user via JWT, creating their account if needed.
 
