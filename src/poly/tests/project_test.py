@@ -3076,18 +3076,21 @@ class PullProjectFromEnvTest(unittest.TestCase):
     def test_no_changes_produces_no_conflicts(self):
         """Pulling when the deployment matches local resources produces no conflicts."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        original_resources = deepcopy(project.resources)
         incoming_resources = deepcopy(project.resources)
         self.mock_get_remote.return_value = incoming_resources
 
         files_with_conflicts = project.pull_project_from_env(env="live")
 
         self.assertEqual(files_with_conflicts, [])
-        self.assertEqual(project.resources, incoming_resources)
-        self.mock_save_config.assert_called_once()
+        # Resources in memory are NOT updated — env pull only writes files
+        self.assertEqual(project.resources, original_resources)
+        self.mock_save_config.assert_not_called()
 
     def test_remote_modification_applied_to_disk(self):
         """A resource modified in the deployment snapshot is written to disk."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        original_resources = deepcopy(project.resources)
         incoming_resources = deepcopy(project.resources)
         func_id = "FUNCTION-test_function"
         modified_func = deepcopy(incoming_resources[Function][func_id])
@@ -3100,7 +3103,8 @@ class PullProjectFromEnvTest(unittest.TestCase):
         files_with_conflicts = project.pull_project_from_env(env="live")
 
         self.assertEqual(files_with_conflicts, [])
-        self.assertEqual(project.resources[Function][func_id].code, modified_func.code)
+        # In-memory resources unchanged; file was written to disk
+        self.assertEqual(project.resources, original_resources)
         self.assertTrue(self.mock_save_to_file.called or self.mock_resource_save.called)
 
     def test_new_remote_resource_written_locally(self):
@@ -3120,7 +3124,9 @@ class PullProjectFromEnvTest(unittest.TestCase):
         files_with_conflicts = project.pull_project_from_env(env="live")
 
         self.assertEqual(files_with_conflicts, [])
-        self.assertIn("TOPIC-live_only_topic", project.resources.get(Topic, {}))
+        # In-memory resources unchanged; new resource was written to disk only
+        self.assertNotIn("TOPIC-live_only_topic", project.resources.get(Topic, {}))
+        self.assertTrue(self.mock_resource_save.called)
 
     # ------------------------------------------------------------------
     # Force-overwrite semantics (always on for pull_project_from_env)
@@ -3129,6 +3135,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
     def test_local_changes_overwritten_without_conflicts(self):
         """Local modifications are silently overwritten — force is always True."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        original_resources = deepcopy(project.resources)
         incoming_resources = deepcopy(project.resources)
         func_id = "FUNCTION-test_function"
         incoming_resources[Function][func_id].code = (
@@ -3136,20 +3143,12 @@ class PullProjectFromEnvTest(unittest.TestCase):
         )
         self.mock_get_remote.return_value = incoming_resources
 
-        with mock_read_from_file(
-            {
-                os.path.join(
-                    TEST_DIR, "functions", "test_function.py"
-                ): 'from _gen import *  # <AUTO GENERATED>\n\ndef test_function(conv: Conversation):\n    return "Local diverged"\n'
-            }
-        ):
-            files_with_conflicts = project.pull_project_from_env(env="pre-release")
+        files_with_conflicts = project.pull_project_from_env(env="pre-release")
 
         self.assertEqual(files_with_conflicts, [])
-        self.assertEqual(
-            project.resources[Function][func_id].code,
-            incoming_resources[Function][func_id].code,
-        )
+        # In-memory resources unchanged; file overwritten on disk
+        self.assertEqual(project.resources, original_resources)
+        self.assertTrue(self.mock_resource_save.called)
 
     def test_locally_added_resource_deleted_when_absent_from_deployment(self):
         """A locally-added resource absent from the deployment is deleted."""
@@ -3163,20 +3162,21 @@ class PullProjectFromEnvTest(unittest.TestCase):
 
         self.assertEqual(files_with_conflicts, [])
         self.mock_os_remove.assert_called()
-        self.assertNotIn("TOPIC-Topic 1", project.resources.get(Topic, {}))
+        # In-memory resources unchanged; deletion only affects disk
+        self.assertIn("TOPIC-Topic 1", project.resources.get(Topic, {}))
 
     # ------------------------------------------------------------------
     # Side-effects: config + imports saved
     # ------------------------------------------------------------------
 
-    def test_save_config_and_imports_called_on_success(self):
-        """save_config and save_imports are always called after a successful pull."""
+    def test_save_config_not_called_and_imports_saved_on_success(self):
+        """save_config must NOT be called (env changes are local); save_imports is called."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         self.mock_get_remote.return_value = deepcopy(project.resources)
 
         project.pull_project_from_env(env="live")
 
-        self.mock_save_config.assert_called_once()
+        self.mock_save_config.assert_not_called()
         self.mock_save_imports.assert_called_once()
 
     def test_save_config_not_called_when_no_deployment(self):
