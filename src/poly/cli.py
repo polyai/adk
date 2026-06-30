@@ -1288,7 +1288,7 @@ class AgentStudioCLI:
                 "Manage A/B tests for live deployments.\n\n"
                 "Examples:\n"
                 "  poly deployments ab-test start --name 'v2 test'"
-                " --variant <deployment_id> --traffic 50\n"
+                " --variant-version <hash> --traffic 50\n"
                 "  poly deployments ab-test list\n"
                 "  poly deployments ab-test active\n"
                 "  poly deployments ab-test update --traffic 30\n"
