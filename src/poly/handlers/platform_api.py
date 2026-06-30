@@ -38,6 +38,8 @@ CONVERSATION_AUDIO_URL = "/v1/agents/{project_id}/conversations/{conversation_id
 LIST_AGENTS_URL = "/v1/accounts/{account_id}/agents"
 DELETE_AGENT_URL = "/v1/agents/{agent_id}"
 DUPLICATE_AGENT_URL = "/v1/agents/{agent_id}/duplicate"
+EXAMPLE_PROJECTS_URL = "/adk/v1/example-projects"
+EXAMPLE_PROJECT_URL = "/adk/v1/example-projects/{project_name}"
 
 
 class PlatformAPIHandler:
@@ -360,6 +362,35 @@ class PlatformAPIHandler:
 
         result = PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
         return {"id": result.get("agentId"), "name": result.get("agentName")}
+
+    @staticmethod
+    def list_example_projects(region: str) -> list[dict[str, ty.Any]]:
+        """List available example (template) projects.
+
+        Args:
+            region (str): The region name
+
+        Returns:
+            list[dict[str, Any]]: A list of example project summaries.
+        """
+        result = PlatformAPIHandler.make_request(region, EXAMPLE_PROJECTS_URL, "GET")
+        if isinstance(result, list):
+            return result
+        return result.get("projects", result.get("items", []))
+
+    @staticmethod
+    def get_example_project(region: str, project_name: str) -> dict[str, ty.Any]:
+        """Get a single example project by name, including its full projection.
+
+        Args:
+            region (str): The region name
+            project_name (str): The example project name
+
+        Returns:
+            dict[str, Any]: The example project data (usable as a projection).
+        """
+        endpoint = EXAMPLE_PROJECT_URL.format(project_name=project_name)
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")
 
     @staticmethod
     def get_deployments(

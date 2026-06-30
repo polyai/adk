@@ -215,6 +215,31 @@ class AgentStudioInterface:
         return PlatformAPIHandler.duplicate_project(region, agent_id, new_name, new_id)
 
     @staticmethod
+    def list_example_projects(region: str) -> list[dict[str, Any]]:
+        """List available example (template) projects.
+
+        Args:
+            region (str): The region name
+
+        Returns:
+            list[dict[str, Any]]: A list of example project summaries.
+        """
+        return PlatformAPIHandler.list_example_projects(region)
+
+    @staticmethod
+    def get_example_project(region: str, project_name: str) -> dict[str, Any]:
+        """Get a single example project by name, including its full projection.
+
+        Args:
+            region (str): The region name
+            project_name (str): The example project name
+
+        Returns:
+            dict[str, Any]: The example project data (usable as a projection).
+        """
+        return PlatformAPIHandler.get_example_project(region, project_name)
+
+    @staticmethod
     def get_deployments(
         region: str, account_id: str, project_id: str, client_env: str = "sandbox"
     ) -> list[dict[str, Any]]:

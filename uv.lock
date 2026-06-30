@@ -341,7 +341,7 @@ wheels = [
 
 [[package]]
 name = "polyai-adk"
-version = "0.23.1"
+version = "0.29.0"
 source = { editable = "." }
 dependencies = [
     { name = "argcomplete" },
