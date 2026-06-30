@@ -4956,26 +4956,13 @@ class AgentStudioCLI:
                 error(msg)
             sys.exit(1)
 
-        try:
-            result = project.create_ab_test(name.strip(), variant_deployment_id, traffic_percentage)
-            if output_json:
-                json_print({"success": True, "ab_test": result})
-            else:
-                success("A/B test started.")
-                dep_map = cls._fetch_deployment_map(project)
-                print_ab_test_detail(result, deployments=dep_map)
-        except requests.HTTPError as e:
-            body = {}
-            try:
-                body = e.response.json()
-            except Exception:
-                pass
-            msg = body.get("error") or f"Failed to start A/B test: {e}"
-            if output_json:
-                json_print({"success": False, "error": msg})
-            else:
-                error(msg)
-            sys.exit(1)
+        result = project.create_ab_test(name.strip(), variant_deployment_id, traffic_percentage)
+        if output_json:
+            json_print({"success": True, "ab_test": result})
+        else:
+            success("A/B test started.")
+            dep_map = cls._fetch_deployment_map(project)
+            print_ab_test_detail(result, deployments=dep_map)
 
     @classmethod
     def ab_test_list(
@@ -4986,20 +4973,12 @@ class AgentStudioCLI:
     ) -> None:
         """List A/B tests for the project."""
         project = cls._load_project(base_path, output_json=output_json)
-        try:
-            ab_tests = project.list_ab_tests(limit=limit)
-            if output_json:
-                json_print({"success": True, "ab_tests": ab_tests})
-            else:
-                dep_map = cls._fetch_deployment_map(project) if ab_tests else {}
-                print_ab_tests(ab_tests, deployments=dep_map)
-        except requests.HTTPError as e:
-            msg = f"Failed to list A/B tests: {e}"
-            if output_json:
-                json_print({"success": False, "error": msg})
-            else:
-                error(msg)
-            sys.exit(1)
+        ab_tests = project.list_ab_tests(limit=limit)
+        if output_json:
+            json_print({"success": True, "ab_tests": ab_tests})
+        else:
+            dep_map = cls._fetch_deployment_map(project) if ab_tests else {}
+            print_ab_tests(ab_tests, deployments=dep_map)
 
     @classmethod
     def ab_test_active(
@@ -5009,20 +4988,12 @@ class AgentStudioCLI:
     ) -> None:
         """Show the currently active A/B test."""
         project = cls._load_project(base_path, output_json=output_json)
-        try:
-            ab_test = project.get_active_ab_test()
-            if output_json:
-                json_print({"success": True, "ab_test": ab_test})
-            else:
-                dep_map = cls._fetch_deployment_map(project) if ab_test else {}
-                print_ab_test_detail(ab_test, deployments=dep_map)
-        except requests.HTTPError as e:
-            msg = f"Failed to get active A/B test: {e}"
-            if output_json:
-                json_print({"success": False, "error": msg})
-            else:
-                error(msg)
-            sys.exit(1)
+        ab_test = project.get_active_ab_test()
+        if output_json:
+            json_print({"success": True, "ab_test": ab_test})
+        else:
+            dep_map = cls._fetch_deployment_map(project) if ab_test else {}
+            print_ab_test_detail(ab_test, deployments=dep_map)
 
     @classmethod
     def ab_test_update(
@@ -5034,16 +5005,7 @@ class AgentStudioCLI:
         """Update traffic percentage for the active A/B test."""
         project = cls._load_project(base_path, output_json=output_json)
 
-        try:
-            ab_test = project.get_active_ab_test()
-        except requests.HTTPError as e:
-            msg = f"Failed to fetch active A/B test: {e}"
-            if output_json:
-                json_print({"success": False, "error": msg})
-            else:
-                error(msg)
-            sys.exit(1)
-
+        ab_test = project.get_active_ab_test()
         if not ab_test:
             msg = "No active A/B test found for this project."
             if output_json:
@@ -5086,26 +5048,13 @@ class AgentStudioCLI:
                 info(f"Traffic is already at {traffic_percentage}%. No update needed.")
             return
 
-        try:
-            result = project.update_ab_test(ab_test_id, traffic_percentage)
-            if output_json:
-                json_print({"success": True, "ab_test": result})
-            else:
-                success(f"Traffic updated to {traffic_percentage}%.")
-                dep_map = cls._fetch_deployment_map(project)
-                print_ab_test_detail(result, deployments=dep_map)
-        except requests.HTTPError as e:
-            body = {}
-            try:
-                body = e.response.json()
-            except Exception:
-                pass
-            msg = body.get("error") or f"Failed to update A/B test: {e}"
-            if output_json:
-                json_print({"success": False, "error": msg})
-            else:
-                error(msg)
-            sys.exit(1)
+        result = project.update_ab_test(ab_test_id, traffic_percentage)
+        if output_json:
+            json_print({"success": True, "ab_test": result})
+        else:
+            success(f"Traffic updated to {traffic_percentage}%.")
+            dep_map = cls._fetch_deployment_map(project)
+            print_ab_test_detail(result, deployments=dep_map)
 
     @classmethod
     def ab_test_end(
@@ -5117,16 +5066,7 @@ class AgentStudioCLI:
         """End the active A/B test and choose the winning deployment."""
         project = cls._load_project(base_path, output_json=output_json)
 
-        try:
-            ab_test = project.get_active_ab_test()
-        except requests.HTTPError as e:
-            msg = f"Failed to fetch active A/B test: {e}"
-            if output_json:
-                json_print({"success": False, "error": msg})
-            else:
-                error(msg)
-            sys.exit(1)
-
+        ab_test = project.get_active_ab_test()
         if not ab_test:
             msg = "No active A/B test found for this project."
             if output_json:
@@ -5191,20 +5131,7 @@ class AgentStudioCLI:
         winner_label = _label(chosen_deployment_id)
         promote_variant = chosen_deployment_id == variant_id
 
-        try:
-            result = project.end_ab_test(ab_test_id, chosen_deployment_id)
-        except requests.HTTPError as e:
-            body = {}
-            try:
-                body = e.response.json()
-            except Exception:
-                pass
-            msg = body.get("error") or f"Failed to end A/B test: {e}"
-            if output_json:
-                json_print({"success": False, "error": msg})
-            else:
-                error(msg)
-            sys.exit(1)
+        result = project.end_ab_test(ab_test_id, chosen_deployment_id)
 
         if not output_json:
             success(f"A/B test '{ab_test_name}' ended. Winner: {winner_label}")

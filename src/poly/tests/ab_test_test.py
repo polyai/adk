@@ -372,65 +372,21 @@ class ABTestStartTest(unittest.TestCase):
 
         self.proj.create_ab_test.assert_called_once_with("test", "dep-v", 100)
 
-    # -- HTTP errors --
+    # -- HTTP errors (propagated to top-level handler) --
 
-    @patch("poly.cli.json_print")
-    def test_start__http_409_json_extracts_error_message(self, mock_json):
-        """409 Conflict extracts error from response body in JSON mode."""
+    def test_start__http_error_propagates(self):
+        """HTTPError from create_ab_test propagates to the top-level handler."""
         self.proj.create_ab_test.side_effect = _make_http_error(
             409, {"error": "An A/B test is already active."}
         )
 
-        with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_start(
-                TEST_DIR,
-                name="test",
-                variant_version="variant111",
-                traffic_percentage=50,
-                output_json=True,
-            )
-
-        self.assertEqual(ctx.exception.code, 1)
-        payload = mock_json.call_args[0][0]
-        self.assertEqual(payload["error"], "An A/B test is already active.")
-
-    @patch("poly.cli.error")
-    def test_start__http_404_rich_extracts_error_message(self, mock_error):
-        """404 Not Found shows error from response body in rich mode."""
-        self.proj.create_ab_test.side_effect = _make_http_error(
-            404, {"error": "Deployment not found."}
-        )
-
-        with self.assertRaises(SystemExit) as ctx:
+        with self.assertRaises(requests.HTTPError):
             AgentStudioCLI.ab_test_start(
                 TEST_DIR,
                 name="test",
                 variant_version="variant111",
                 traffic_percentage=50,
             )
-
-        self.assertEqual(ctx.exception.code, 1)
-        mock_error.assert_called_once_with("Deployment not found.")
-
-    @patch("poly.cli.error")
-    def test_start__http_error_without_body_uses_fallback_message(self, mock_error):
-        """HTTPError with no JSON body uses the fallback message."""
-        response = MagicMock()
-        response.json.side_effect = ValueError("no json")
-        err = requests.HTTPError("500 Server Error", response=response)
-        err.response = response
-        self.proj.create_ab_test.side_effect = err
-
-        with self.assertRaises(SystemExit):
-            AgentStudioCLI.ab_test_start(
-                TEST_DIR,
-                name="test",
-                variant_version="variant111",
-                traffic_percentage=50,
-            )
-
-        msg = mock_error.call_args[0][0]
-        self.assertIn("Failed to start A/B test", msg)
 
 
 class ABTestListTest(unittest.TestCase):
@@ -487,28 +443,12 @@ class ABTestListTest(unittest.TestCase):
 
         self.proj.list_ab_tests.assert_called_once_with(limit=25)
 
-    @patch("poly.cli.error")
-    def test_list__http_error_rich(self, mock_error):
-        """HTTPError in rich mode prints error and exits."""
+    def test_list__http_error_propagates(self):
+        """HTTPError from list_ab_tests propagates to the top-level handler."""
         self.proj.list_ab_tests.side_effect = _make_http_error(500)
 
-        with self.assertRaises(SystemExit) as ctx:
+        with self.assertRaises(requests.HTTPError):
             AgentStudioCLI.ab_test_list(TEST_DIR)
-
-        self.assertEqual(ctx.exception.code, 1)
-        mock_error.assert_called_once()
-
-    @patch("poly.cli.json_print")
-    def test_list__http_error_json(self, mock_json):
-        """HTTPError in JSON mode emits error JSON and exits."""
-        self.proj.list_ab_tests.side_effect = _make_http_error(500)
-
-        with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_list(TEST_DIR, output_json=True)
-
-        self.assertEqual(ctx.exception.code, 1)
-        payload = mock_json.call_args[0][0]
-        self.assertFalse(payload["success"])
 
 
 class ABTestActiveTest(unittest.TestCase):
@@ -563,28 +503,12 @@ class ABTestActiveTest(unittest.TestCase):
         self.assertTrue(payload["success"])
         self.assertIsNone(payload["ab_test"])
 
-    @patch("poly.cli.error")
-    def test_active__http_error_rich(self, mock_error):
-        """HTTPError in rich mode prints error and exits."""
+    def test_active__http_error_propagates(self):
+        """HTTPError from get_active_ab_test propagates to the top-level handler."""
         self.proj.get_active_ab_test.side_effect = _make_http_error(500)
 
-        with self.assertRaises(SystemExit) as ctx:
+        with self.assertRaises(requests.HTTPError):
             AgentStudioCLI.ab_test_active(TEST_DIR)
-
-        self.assertEqual(ctx.exception.code, 1)
-        mock_error.assert_called_once()
-
-    @patch("poly.cli.json_print")
-    def test_active__http_error_json(self, mock_json):
-        """HTTPError in JSON mode emits error JSON and exits."""
-        self.proj.get_active_ab_test.side_effect = _make_http_error(500)
-
-        with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_active(TEST_DIR, output_json=True)
-
-        self.assertEqual(ctx.exception.code, 1)
-        payload = mock_json.call_args[0][0]
-        self.assertFalse(payload["success"])
 
 
 class ABTestUpdateTest(unittest.TestCase):
@@ -682,34 +606,14 @@ class ABTestUpdateTest(unittest.TestCase):
 
     # -- HTTP errors --
 
-    @patch("poly.cli.json_print")
-    def test_update__http_error_json_extracts_error(self, mock_json):
-        """HTTP error extracts error message from response body."""
+    def test_update__http_error_propagates(self):
+        """HTTPError from update_ab_test propagates to the top-level handler."""
         self.proj.update_ab_test.side_effect = _make_http_error(
             400, {"error": "Traffic percentage must be between 0 and 100"}
         )
 
-        with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_update(TEST_DIR, traffic_percentage=30, output_json=True)
-
-        self.assertEqual(ctx.exception.code, 1)
-        payload = mock_json.call_args[0][0]
-        self.assertIn("Traffic percentage", payload["error"])
-
-    @patch("poly.cli.error")
-    def test_update__http_error_without_body_uses_fallback(self, mock_error):
-        """HTTPError with no JSON body uses fallback message."""
-        response = MagicMock()
-        response.json.side_effect = ValueError("no json")
-        err = requests.HTTPError("500 Server Error", response=response)
-        err.response = response
-        self.proj.update_ab_test.side_effect = err
-
-        with self.assertRaises(SystemExit):
+        with self.assertRaises(requests.HTTPError):
             AgentStudioCLI.ab_test_update(TEST_DIR, traffic_percentage=30)
-
-        msg = mock_error.call_args[0][0]
-        self.assertIn("Failed to update A/B test", msg)
 
 
 class ABTestEndTest(unittest.TestCase):
@@ -871,48 +775,23 @@ class ABTestEndTest(unittest.TestCase):
         payload = mock_json.call_args[0][0]
         self.assertIn("No active", payload["error"])
 
-    # -- HTTPError fetching active test --
+    # -- HTTP errors (propagated to top-level handler) --
 
-    @patch("poly.cli.error")
-    def test_end__http_error_fetching_active_exits(self, mock_error):
-        """HTTPError when fetching active test exits."""
+    def test_end__http_error_fetching_active_propagates(self):
+        """HTTPError when fetching active test propagates to the top-level handler."""
         self.proj.get_active_ab_test.side_effect = _make_http_error(500)
 
-        with self.assertRaises(SystemExit) as ctx:
+        with self.assertRaises(requests.HTTPError):
             AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version=None)
 
-        self.assertEqual(ctx.exception.code, 1)
-        self.assertIn("Failed to fetch", mock_error.call_args[0][0])
-
-    # -- HTTP errors on end_ab_test --
-
-    @patch("poly.cli.json_print")
-    def test_end__http_409_json(self, mock_json):
-        """409 Conflict (already ended) extracts error from body."""
+    def test_end__http_error_ending_test_propagates(self):
+        """HTTPError from end_ab_test propagates to the top-level handler."""
         self.proj.end_ab_test.side_effect = _make_http_error(
             409, {"error": "A/B test already ended."}
         )
 
-        with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_end(
-                TEST_DIR, chosen_version="live00000", output_json=True
-            )
-
-        self.assertEqual(ctx.exception.code, 1)
-        payload = mock_json.call_args[0][0]
-        self.assertEqual(payload["error"], "A/B test already ended.")
-
-    @patch("poly.cli.error")
-    @patch("poly.cli.info")
-    def test_end__http_404_rich(self, mock_info, mock_error):
-        """404 Not Found shows error from response body."""
-        self.proj.end_ab_test.side_effect = _make_http_error(404, {"error": "A/B test not found."})
-
-        with self.assertRaises(SystemExit) as ctx:
+        with self.assertRaises(requests.HTTPError):
             AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version="live00000")
-
-        self.assertEqual(ctx.exception.code, 1)
-        mock_error.assert_called_once_with("A/B test not found.")
 
 
 if __name__ == "__main__":
