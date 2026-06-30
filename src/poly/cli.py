@@ -5149,7 +5149,8 @@ class AgentStudioCLI:
                 questionary.Choice(title=f"Variant — {variant_label}", value=variant_id),
             ]
             chosen_deployment_id = questionary.select(
-                "Choose the winning deployment:", choices=choices
+                "Choose the winning deployment (this version will receive all live traffic):",
+                choices=choices,
             ).ask()
             if not chosen_deployment_id:
                 warning("Aborted.")
