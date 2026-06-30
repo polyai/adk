@@ -1,6 +1,47 @@
 # CHANGELOG
 
 
+## v0.29.0 (2026-06-25)
+
+### Features
+
+- Update help info text and poly status ([#201](https://github.com/polyai/adk/pull/201),
+  [`0877164`](https://github.com/polyai/adk/commit/0877164d66f2d157dd28dc4ebef6bbbe202ab0e2))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. --> Updates the info text to remind the user
+  that they need to change directories to a project folder to continue. Also adds workspace and
+  project names to display during the poly status command. ## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #[DEVP-344](https://linear.app/poly-ai/issue/DEVP-344/update-help-text-and-poly-status)
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+- Updates help info text when no project configuration is found - Adds workspace and project names
+  to display when "poly status" command is used
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs https://www.loom.com/share/749c074bb76649d6ae6b6fe45abdeb10 <!-- Optional:
+  paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+
 ## v0.28.1 (2026-06-23)
 
 ### Bug Fixes

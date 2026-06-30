@@ -81,14 +81,16 @@ def print_status(
     project_id: str,
     last_updated: str,
     branch: str,
+    account_name: str = None,
+    project_name: str = None,
 ) -> None:
     """Print project status in a styled panel."""
     table = Table(show_header=False, box=None, padding=(0, 1))
     table.add_column("Key", style="label", no_wrap=True)
     table.add_column("Value")
     table.add_row("Region", region)
-    table.add_row("Account ID", account_id)
-    table.add_row("Project ID", project_id)
+    table.add_row("Workspace", f"{account_name} ({account_id})" if account_name else account_id)
+    table.add_row("Project", f"{project_name} ({project_id})" if project_name else project_id)
     table.add_row("Last Pulled", last_updated)
     table.add_row("Current Branch", branch)
 

@@ -1899,12 +1899,12 @@ class AgentStudioCLI:
                 json_print(
                     {
                         "success": False,
-                        "error": "No project configuration found. Run poly init to initialize a project.",
+                        "error": "No project configuration found. Run poly init to initialize a project, or change your directory to an existing workspace/project.",
                     }
                 )
                 sys.exit(1)
             error(
-                "No project configuration found. Run [bold]poly init[/bold] to initialize a project."
+                "No project configuration found. Run [bold]poly init[/bold] to initialize a project, or change your directory to an existing workspace/project."
             )
             sys.exit(1)
         return project
@@ -2552,6 +2552,7 @@ class AgentStudioCLI:
             else:
                 region = questionary.select("Select Region", choices=regions).ask()
 
+        account_name = None
         if not account_id:
             accounts = api_handler.get_accounts(region)
             if not accounts:
@@ -2592,6 +2593,9 @@ class AgentStudioCLI:
                     warning("No account selected. Exiting.")
                     return
                 account_name = accounts[account_id]
+        else:
+            accounts = api_handler.get_accounts(region)
+            account_name = accounts.get(account_id)
 
         if not project_id:
             projects = api_handler.get_projects(region, account_id)
@@ -2673,6 +2677,7 @@ class AgentStudioCLI:
                 account_id=account_id,
                 project_id=project_id,
                 project_name=project_name,
+                account_name=account_name,
                 format=format,
                 projection_json=projection_json,
                 on_save=on_save,
@@ -2695,6 +2700,9 @@ class AgentStudioCLI:
             json_print(json_output)
         else:
             success(f"Project initialized at {project.root_path}")
+            info(
+                f'Change your working directory to your project\'s directory to continue. "cd {project.root_path}"'
+            )
 
     @classmethod
     def pull(
@@ -2824,10 +2832,22 @@ class AgentStudioCLI:
         """Check the changed files of the project."""
         project = cls._load_project(base_path, output_json=output_json)
 
+        if not project.account_name:
+            try:
+                api_handler = AgentStudioInterface()
+                accounts = api_handler.get_accounts(project.region)
+                project.account_name = accounts.get(project.account_id)
+                if project.account_name:
+                    project.save_config()
+            except Exception:
+                logger.debug("Failed to fetch account name for status display", exc_info=True)
+
         files_with_conflicts, modified_files, new_files, deleted_files = project.project_status()
 
         if output_json:
             json_output = {
+                "account_name": project.account_name,
+                "project_name": project.project_name,
                 "files_with_conflicts": files_with_conflicts,
                 "modified_files": modified_files,
                 "new_files": new_files,
@@ -2844,6 +2864,8 @@ class AgentStudioCLI:
             project_id=project.project_id,
             last_updated=project.last_updated.isoformat(),
             branch=branch_info,
+            account_name=project.account_name,
+            project_name=project.project_name,
         )
 
         print_file_list("Files with merge conflicts", files_with_conflicts, "filename.conflict")
