@@ -644,15 +644,21 @@ def _ab_test_status(ab_test: dict[str, Any]) -> str:
     return "[bold green]active[/bold green]"
 
 
-def print_ab_tests(ab_tests: list[dict[str, Any]]) -> None:
+def print_ab_tests(
+    ab_tests: list[dict[str, Any]],
+    deployments: dict[str, dict[str, Any]] | None = None,
+) -> None:
     """Print a table of A/B tests.
 
     Args:
         ab_tests: List of A/B test records.
+        deployments: Optional mapping of deployment ID to deployment dict
+            for enriched display (version hash, message).
     """
     if not ab_tests:
         info("No A/B tests found.")
         return
+    deps = deployments or {}
     table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
     table.add_column("ID", style="bold yellow", no_wrap=True)
     table.add_column("Name", overflow="fold")
@@ -662,13 +668,15 @@ def print_ab_tests(ab_tests: list[dict[str, Any]]) -> None:
     table.add_column("Variant", no_wrap=True)
     table.add_column("Created", no_wrap=True)
     for t in ab_tests:
+        control_id = t.get("control_deployment_id") or "—"
+        variant_id = t.get("variant_deployment_id") or "—"
         table.add_row(
             t.get("id", "—"),
             t.get("name", "—"),
             _ab_test_status(t),
             str(t.get("traffic_percentage", "—")),
-            t.get("control_deployment_id") or "—",
-            t.get("variant_deployment_id") or "—",
+            _format_dep_label(deps.get(control_id), control_id),
+            _format_dep_label(deps.get(variant_id), variant_id),
             _format_iso_timestamp(t.get("created_at", "")),
         )
     console.print(table)

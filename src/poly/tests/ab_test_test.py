@@ -60,7 +60,7 @@ class ABTestStartTest(unittest.TestCase):
     def test_start__success_rich_output(self, mock_detail, mock_success):
         """Successful start prints success and detail in rich mode."""
         AgentStudioCLI.ab_test_start(
-            TEST_DIR, name="v2 test", variant_deployment_id="dep-v", traffic_percentage=50
+            TEST_DIR, name="v2 test", variant_version="variant111", traffic_percentage=50
         )
 
         self.proj.create_ab_test.assert_called_once_with("v2 test", "dep-v", 50)
@@ -73,7 +73,7 @@ class ABTestStartTest(unittest.TestCase):
         AgentStudioCLI.ab_test_start(
             TEST_DIR,
             name="v2 test",
-            variant_deployment_id="dep-v",
+            variant_version="variant111",
             traffic_percentage=50,
             output_json=True,
         )
@@ -88,7 +88,7 @@ class ABTestStartTest(unittest.TestCase):
         AgentStudioCLI.ab_test_start(
             TEST_DIR,
             name="  v2 test  ",
-            variant_deployment_id="dep-v",
+            variant_version="variant111",
             traffic_percentage=50,
             output_json=True,
         )
@@ -105,7 +105,7 @@ class ABTestStartTest(unittest.TestCase):
         mock_q.text.return_value.ask.side_effect = ["my test", "50"]
 
         AgentStudioCLI.ab_test_start(
-            TEST_DIR, name=None, variant_deployment_id="dep-v", traffic_percentage=None
+            TEST_DIR, name=None, variant_version="variant111", traffic_percentage=None
         )
 
         self.assertEqual(mock_q.text.call_count, 2)
@@ -135,7 +135,7 @@ class ABTestStartTest(unittest.TestCase):
         mock_q.select.return_value.ask.return_value = "dep-pr-1"
 
         AgentStudioCLI.ab_test_start(
-            TEST_DIR, name="test", variant_deployment_id=None, traffic_percentage=None
+            TEST_DIR, name="test", variant_version=None, traffic_percentage=None
         )
 
         self.proj.get_deployments.assert_any_call(client_env="pre-release")
@@ -154,7 +154,7 @@ class ABTestStartTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit) as ctx:
             AgentStudioCLI.ab_test_start(
-                TEST_DIR, name="test", variant_deployment_id="dep-v", traffic_percentage=50
+                TEST_DIR, name="test", variant_version="same_hash", traffic_percentage=50
             )
 
         self.assertEqual(ctx.exception.code, 1)
@@ -173,7 +173,7 @@ class ABTestStartTest(unittest.TestCase):
             AgentStudioCLI.ab_test_start(
                 TEST_DIR,
                 name="test",
-                variant_deployment_id="dep-v",
+                variant_version="same_hash",
                 traffic_percentage=50,
                 output_json=True,
             )
@@ -192,7 +192,7 @@ class ABTestStartTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit) as ctx:
             AgentStudioCLI.ab_test_start(
-                TEST_DIR, name="test", variant_deployment_id=None, traffic_percentage=50
+                TEST_DIR, name="test", variant_version=None, traffic_percentage=50
             )
 
         self.assertEqual(ctx.exception.code, 1)
@@ -205,7 +205,7 @@ class ABTestStartTest(unittest.TestCase):
             AgentStudioCLI.ab_test_start(
                 TEST_DIR,
                 name=None,
-                variant_deployment_id="dep-v",
+                variant_version="variant111",
                 traffic_percentage=50,
                 output_json=True,
             )
@@ -215,20 +215,20 @@ class ABTestStartTest(unittest.TestCase):
         self.assertIn("--name", payload["error"])
 
     @patch("poly.cli.json_print")
-    def test_start__json_mode_requires_variant(self, mock_json):
-        """JSON mode with variant=None exits with error."""
+    def test_start__json_mode_requires_variant_version(self, mock_json):
+        """JSON mode with variant_version=None exits with error."""
         with self.assertRaises(SystemExit) as ctx:
             AgentStudioCLI.ab_test_start(
                 TEST_DIR,
                 name="test",
-                variant_deployment_id=None,
+                variant_version=None,
                 traffic_percentage=50,
                 output_json=True,
             )
 
         self.assertEqual(ctx.exception.code, 1)
         payload = mock_json.call_args[0][0]
-        self.assertIn("--variant", payload["error"])
+        self.assertIn("--variant-version", payload["error"])
 
     @patch("poly.cli.json_print")
     def test_start__json_mode_requires_traffic(self, mock_json):
@@ -237,7 +237,7 @@ class ABTestStartTest(unittest.TestCase):
             AgentStudioCLI.ab_test_start(
                 TEST_DIR,
                 name="test",
-                variant_deployment_id="dep-v",
+                variant_version="variant111",
                 traffic_percentage=None,
                 output_json=True,
             )
@@ -254,7 +254,7 @@ class ABTestStartTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit) as ctx:
             AgentStudioCLI.ab_test_start(
-                TEST_DIR, name=None, variant_deployment_id="dep-v", traffic_percentage=None
+                TEST_DIR, name=None, variant_version="variant111", traffic_percentage=None
             )
 
         self.assertEqual(ctx.exception.code, 1)
@@ -267,7 +267,7 @@ class ABTestStartTest(unittest.TestCase):
         """Empty string name triggers error and sys.exit(1)."""
         with self.assertRaises(SystemExit) as ctx:
             AgentStudioCLI.ab_test_start(
-                TEST_DIR, name="", variant_deployment_id="dep-v", traffic_percentage=50
+                TEST_DIR, name="", variant_version="variant111", traffic_percentage=50
             )
 
         self.assertEqual(ctx.exception.code, 1)
@@ -280,7 +280,7 @@ class ABTestStartTest(unittest.TestCase):
         """Whitespace-only name triggers error and sys.exit(1)."""
         with self.assertRaises(SystemExit) as ctx:
             AgentStudioCLI.ab_test_start(
-                TEST_DIR, name="   ", variant_deployment_id="dep-v", traffic_percentage=50
+                TEST_DIR, name="   ", variant_version="variant111", traffic_percentage=50
             )
 
         self.assertEqual(ctx.exception.code, 1)
@@ -293,7 +293,7 @@ class ABTestStartTest(unittest.TestCase):
             AgentStudioCLI.ab_test_start(
                 TEST_DIR,
                 name="",
-                variant_deployment_id="dep-v",
+                variant_version="variant111",
                 traffic_percentage=50,
                 output_json=True,
             )
@@ -310,7 +310,7 @@ class ABTestStartTest(unittest.TestCase):
         """Negative traffic percentage triggers error and sys.exit(1)."""
         with self.assertRaises(SystemExit) as ctx:
             AgentStudioCLI.ab_test_start(
-                TEST_DIR, name="test", variant_deployment_id="dep-v", traffic_percentage=-1
+                TEST_DIR, name="test", variant_version="variant111", traffic_percentage=-1
             )
 
         self.assertEqual(ctx.exception.code, 1)
@@ -322,7 +322,7 @@ class ABTestStartTest(unittest.TestCase):
         """Traffic percentage > 100 triggers error and sys.exit(1)."""
         with self.assertRaises(SystemExit) as ctx:
             AgentStudioCLI.ab_test_start(
-                TEST_DIR, name="test", variant_deployment_id="dep-v", traffic_percentage=101
+                TEST_DIR, name="test", variant_version="variant111", traffic_percentage=101
             )
 
         self.assertEqual(ctx.exception.code, 1)
@@ -335,7 +335,7 @@ class ABTestStartTest(unittest.TestCase):
             AgentStudioCLI.ab_test_start(
                 TEST_DIR,
                 name="test",
-                variant_deployment_id="dep-v",
+                variant_version="variant111",
                 traffic_percentage=101,
                 output_json=True,
             )
@@ -352,7 +352,7 @@ class ABTestStartTest(unittest.TestCase):
         AgentStudioCLI.ab_test_start(
             TEST_DIR,
             name="test",
-            variant_deployment_id="dep-v",
+            variant_version="variant111",
             traffic_percentage=0,
             output_json=True,
         )
@@ -365,7 +365,7 @@ class ABTestStartTest(unittest.TestCase):
         AgentStudioCLI.ab_test_start(
             TEST_DIR,
             name="test",
-            variant_deployment_id="dep-v",
+            variant_version="variant111",
             traffic_percentage=100,
             output_json=True,
         )
@@ -385,7 +385,7 @@ class ABTestStartTest(unittest.TestCase):
             AgentStudioCLI.ab_test_start(
                 TEST_DIR,
                 name="test",
-                variant_deployment_id="dep-v",
+                variant_version="variant111",
                 traffic_percentage=50,
                 output_json=True,
             )
@@ -405,7 +405,7 @@ class ABTestStartTest(unittest.TestCase):
             AgentStudioCLI.ab_test_start(
                 TEST_DIR,
                 name="test",
-                variant_deployment_id="dep-v",
+                variant_version="variant111",
                 traffic_percentage=50,
             )
 
@@ -425,7 +425,7 @@ class ABTestStartTest(unittest.TestCase):
             AgentStudioCLI.ab_test_start(
                 TEST_DIR,
                 name="test",
-                variant_deployment_id="dep-v",
+                variant_version="variant111",
                 traffic_percentage=50,
             )
 
@@ -443,15 +443,19 @@ class ABTestListTest(unittest.TestCase):
         self.mock_load.return_value = self.proj
         self.addCleanup(patch.stopall)
 
+    @patch("poly.cli.AgentStudioCLI._fetch_deployment_map")
     @patch("poly.cli.print_ab_tests")
-    def test_list__success_rich_output(self, mock_print):
-        """Successful list calls print_ab_tests with results."""
+    def test_list__success_rich_output(self, mock_print, mock_dep_map):
+        """Successful list calls print_ab_tests with results and deployment map."""
         self.proj.list_ab_tests.return_value = [SAMPLE_AB_TEST]
+        mock_dep_map.return_value = {"dep-live": {"id": "dep-live"}}
 
         AgentStudioCLI.ab_test_list(TEST_DIR, limit=10)
 
         self.proj.list_ab_tests.assert_called_once_with(limit=10)
-        mock_print.assert_called_once_with([SAMPLE_AB_TEST])
+        mock_print.assert_called_once_with(
+            [SAMPLE_AB_TEST], deployments={"dep-live": {"id": "dep-live"}}
+        )
 
     @patch("poly.cli.json_print")
     def test_list__success_json_output(self, mock_json):
@@ -472,7 +476,7 @@ class ABTestListTest(unittest.TestCase):
 
         AgentStudioCLI.ab_test_list(TEST_DIR)
 
-        mock_print.assert_called_once_with([])
+        mock_print.assert_called_once_with([], deployments={})
 
     @patch("poly.cli.json_print")
     def test_list__limit_parameter_forwarded(self, mock_json):
@@ -720,10 +724,15 @@ class ABTestEndTest(unittest.TestCase):
         self.proj.get_deployments.return_value = (
             [
                 {
+                    "id": "dep-live",
+                    "version_hash": "live00000",
+                    "deployment_metadata": {"deployment_message": "v1 stable"},
+                },
+                {
                     "id": "dep-variant",
                     "version_hash": "variant111",
                     "deployment_metadata": {"deployment_message": "v2 candidate"},
-                }
+                },
             ],
             {},
         )
@@ -736,7 +745,7 @@ class ABTestEndTest(unittest.TestCase):
     @patch("poly.cli.info")
     def test_end__explicit_winner_rich_output(self, mock_info, mock_success):
         """Ending with control as winner prints success, no promotion."""
-        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_deployment_id="dep-live")
+        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version="live00000")
 
         self.proj.end_ab_test.assert_called_once_with("ab-001", "dep-live")
         mock_success.assert_called_once()
@@ -745,7 +754,7 @@ class ABTestEndTest(unittest.TestCase):
     @patch("poly.cli.json_print")
     def test_end__explicit_winner_json_output(self, mock_json):
         """Ending with control as winner emits JSON with promoted=False."""
-        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_deployment_id="dep-live", output_json=True)
+        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version="live00000", output_json=True)
 
         payload = mock_json.call_args[0][0]
         self.assertTrue(payload["success"])
@@ -757,7 +766,7 @@ class ABTestEndTest(unittest.TestCase):
     @patch("poly.cli.info")
     def test_end__variant_wins_promotes_to_live(self, mock_info, mock_success):
         """Choosing the variant promotes it to live."""
-        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_deployment_id="dep-variant")
+        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version="variant111")
 
         self.proj.end_ab_test.assert_called_once_with("ab-001", "dep-variant")
         self.proj.promote_deployment.assert_called_once_with(
@@ -768,7 +777,7 @@ class ABTestEndTest(unittest.TestCase):
     @patch("poly.cli.json_print")
     def test_end__variant_wins_json_includes_promoted(self, mock_json):
         """Variant win in JSON mode includes promoted=True."""
-        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_deployment_id="dep-variant", output_json=True)
+        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version="variant111", output_json=True)
 
         payload = mock_json.call_args[0][0]
         self.assertTrue(payload["success"])
@@ -781,24 +790,24 @@ class ABTestEndTest(unittest.TestCase):
         """If promotion fails after ending, warns but doesn't exit with error."""
         self.proj.promote_deployment.side_effect = Exception("promote failed")
 
-        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_deployment_id="dep-variant")
+        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version="variant111")
 
         self.proj.end_ab_test.assert_called_once()
         mock_warning.assert_called_once()
         self.assertIn("failed to promote", mock_warning.call_args[0][0])
 
-    # -- JSON mode without chosen_deployment_id --
+    # -- JSON mode without chosen_version --
 
     @patch("poly.cli.json_print")
-    def test_end__json_mode_without_chosen_id_exits_with_error(self, mock_json):
-        """JSON mode requires --chosen-deployment-id; omitting it exits with error."""
+    def test_end__json_mode_without_chosen_version_exits_with_error(self, mock_json):
+        """JSON mode requires --chosen-version; omitting it exits with error."""
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_deployment_id=None, output_json=True)
+            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version=None, output_json=True)
 
         self.assertEqual(ctx.exception.code, 1)
         payload = mock_json.call_args[0][0]
         self.assertFalse(payload["success"])
-        self.assertIn("--chosen-deployment-id", payload["error"])
+        self.assertIn("--chosen-version", payload["error"])
         self.proj.end_ab_test.assert_not_called()
 
     # -- Interactive prompt flow --
@@ -811,7 +820,7 @@ class ABTestEndTest(unittest.TestCase):
         mock_q.Choice = MagicMock(side_effect=lambda **kw: kw)
         mock_q.select.return_value.ask.return_value = "dep-variant"
 
-        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_deployment_id=None)
+        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version=None)
 
         self.proj.get_active_ab_test.assert_called_once()
         mock_q.select.assert_called_once()
@@ -828,7 +837,7 @@ class ABTestEndTest(unittest.TestCase):
         mock_q.select.return_value.ask.return_value = None
 
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_deployment_id=None)
+            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version=None)
 
         self.assertEqual(ctx.exception.code, 0)
         mock_warning.assert_called_once()
@@ -842,7 +851,7 @@ class ABTestEndTest(unittest.TestCase):
         self.proj.get_active_ab_test.return_value = None
 
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_deployment_id=None)
+            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version=None)
 
         self.assertEqual(ctx.exception.code, 1)
         self.assertIn("No active", mock_error.call_args[0][0])
@@ -854,7 +863,9 @@ class ABTestEndTest(unittest.TestCase):
         self.proj.get_active_ab_test.return_value = None
 
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_deployment_id="dep-live", output_json=True)
+            AgentStudioCLI.ab_test_end(
+                TEST_DIR, chosen_version="live00000", output_json=True
+            )
 
         self.assertEqual(ctx.exception.code, 1)
         payload = mock_json.call_args[0][0]
@@ -868,7 +879,7 @@ class ABTestEndTest(unittest.TestCase):
         self.proj.get_active_ab_test.side_effect = _make_http_error(500)
 
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_deployment_id=None)
+            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version=None)
 
         self.assertEqual(ctx.exception.code, 1)
         self.assertIn("Failed to fetch", mock_error.call_args[0][0])
@@ -883,7 +894,9 @@ class ABTestEndTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_deployment_id="dep-live", output_json=True)
+            AgentStudioCLI.ab_test_end(
+                TEST_DIR, chosen_version="live00000", output_json=True
+            )
 
         self.assertEqual(ctx.exception.code, 1)
         payload = mock_json.call_args[0][0]
@@ -896,7 +909,7 @@ class ABTestEndTest(unittest.TestCase):
         self.proj.end_ab_test.side_effect = _make_http_error(404, {"error": "A/B test not found."})
 
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_deployment_id="dep-live")
+            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version="live00000")
 
         self.assertEqual(ctx.exception.code, 1)
         mock_error.assert_called_once_with("A/B test not found.")

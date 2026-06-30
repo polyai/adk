@@ -1308,7 +1308,7 @@ class AgentStudioCLI:
                 "controls what fraction of calls route to the variant (0-100).\n\n"
                 "Examples:\n"
                 "  poly deployments ab-test start"
-                " --name 'v2 test' --variant <dep_id> --traffic 50\n"
+                " --name 'v2 test' --variant-version <hash> --traffic 50\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -1320,10 +1320,10 @@ class AgentStudioCLI:
             help="Name/label for the A/B test. If omitted, prompts interactively.",
         )
         ab_test_start_parser.add_argument(
-            "--variant",
+            "--variant-version",
             type=str,
             default=None,
-            help="Deployment ID of the variant (must be pre-release). If omitted, prompts interactively.",
+            help="Version hash of the pre-release variant. If omitted, prompts interactively.",
         )
         ab_test_start_parser.add_argument(
             "--traffic",
@@ -1383,20 +1383,20 @@ class AgentStudioCLI:
             help="End an active A/B test and choose a winner.",
             description=(
                 "End the active A/B test and choose which deployment wins.\n\n"
-                "If --chosen-deployment-id is omitted, an interactive prompt\n"
+                "If --chosen-version is omitted, an interactive prompt\n"
                 "shows the control and variant deployments for selection.\n\n"
                 "Examples:\n"
                 "  poly deployments ab-test end"
-                " --chosen-deployment-id <dep_id>\n"
+                " --chosen-version <hash>\n"
                 "  poly deployments ab-test end   # interactive\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
         ab_test_end_parser.add_argument(
-            "--chosen-deployment-id",
+            "--chosen-version",
             type=str,
             default=None,
-            help="Deployment ID to keep as the winner. If omitted, prompts interactively.",
+            help="Version hash of the deployment to keep as winner. If omitted, prompts interactively.",
         )
 
         # CONVERSATIONS
@@ -1753,7 +1753,7 @@ class AgentStudioCLI:
                         cls.ab_test_start(
                             args.path,
                             args.name,
-                            args.variant,
+                            args.variant_version,
                             args.traffic,
                             output_json=args.json,
                         )
@@ -1774,7 +1774,7 @@ class AgentStudioCLI:
                     elif args.ab_test_subcommand == "end":
                         cls.ab_test_end(
                             args.path,
-                            chosen_deployment_id=args.chosen_deployment_id,
+                            chosen_version=args.chosen_version,
                             output_json=args.json,
                         )
 
@@ -4792,12 +4792,32 @@ class AgentStudioCLI:
             logger.debug("Failed to fetch deployments for A/B test display: %s", e)
         return dep_map
 
+    @staticmethod
+    def _resolve_version_to_deployment_id(
+        version_hash: str,
+        deployments: list[dict],
+    ) -> str | None:
+        """Resolve a version hash (or prefix) to a deployment ID.
+
+        Args:
+            version_hash: Full or 9-char prefix of a version hash.
+            deployments: List of deployment dicts with 'id' and 'version_hash' keys.
+
+        Returns:
+            The deployment ID if exactly one match is found, else None.
+        """
+        prefix = version_hash[:9]
+        matches = [dep for dep in deployments if (dep.get("version_hash") or "")[:9] == prefix]
+        if len(matches) == 1:
+            return matches[0].get("id")
+        return None
+
     @classmethod
     def ab_test_start(
         cls,
         base_path: str,
         name: str | None,
-        variant_deployment_id: str | None,
+        variant_version: str | None,
         traffic_percentage: int | None,
         output_json: bool = False,
     ) -> None:
@@ -4837,9 +4857,9 @@ class AgentStudioCLI:
 
         live_version = active_hashes.get("live")
 
-        if variant_deployment_id is None:
+        if variant_version is None:
             if output_json:
-                msg = "--variant is required when using --json."
+                msg = "--variant-version is required when using --json."
                 json_print({"success": False, "error": msg})
                 sys.exit(1)
             eligible = [dep for dep in pr_deployments if dep.get("version_hash") != live_version]
@@ -4862,13 +4882,22 @@ class AgentStudioCLI:
             if not variant_deployment_id:
                 warning("Aborted.")
                 sys.exit(0)
-        elif live_version:
-            variant_version = None
-            for dep in pr_deployments:
-                if dep.get("id") == variant_deployment_id:
-                    variant_version = dep.get("version_hash")
-                    break
-            if variant_version and variant_version == live_version:
+        else:
+            variant_deployment_id = cls._resolve_version_to_deployment_id(
+                variant_version, pr_deployments
+            )
+            if not variant_deployment_id:
+                msg = f"No pre-release deployment found matching version '{variant_version}'."
+                if output_json:
+                    json_print({"success": False, "error": msg})
+                else:
+                    error(msg)
+                sys.exit(1)
+            matched_dep = next(
+                (d for d in pr_deployments if d.get("id") == variant_deployment_id), None
+            )
+            matched_version = matched_dep.get("version_hash") if matched_dep else None
+            if live_version and matched_version and matched_version == live_version:
                 msg = (
                     "Variant deployment has the same version as the current live deployment."
                     " An A/B test requires different versions."
@@ -4940,7 +4969,8 @@ class AgentStudioCLI:
             if output_json:
                 json_print({"success": True, "ab_tests": ab_tests})
             else:
-                print_ab_tests(ab_tests)
+                dep_map = cls._fetch_deployment_map(project) if ab_tests else {}
+                print_ab_tests(ab_tests, deployments=dep_map)
         except requests.HTTPError as e:
             msg = f"Failed to list A/B tests: {e}"
             if output_json:
@@ -5059,7 +5089,7 @@ class AgentStudioCLI:
     def ab_test_end(
         cls,
         base_path: str,
-        chosen_deployment_id: str | None = None,
+        chosen_version: str | None = None,
         output_json: bool = False,
     ) -> None:
         """End the active A/B test and choose the winning deployment."""
@@ -5104,12 +5134,12 @@ class AgentStudioCLI:
         if not output_json:
             info(f"Active A/B test: [bold]{ab_test_name}[/bold]")
 
-        if not chosen_deployment_id:
+        if not chosen_version:
             if output_json:
                 json_print(
                     {
                         "success": False,
-                        "error": "--chosen-deployment-id is required when using --json.",
+                        "error": "--chosen-version is required when using --json.",
                     }
                 )
                 sys.exit(1)
@@ -5124,6 +5154,16 @@ class AgentStudioCLI:
             if not chosen_deployment_id:
                 warning("Aborted.")
                 sys.exit(0)
+        else:
+            all_deps = list(dep_map.values())
+            chosen_deployment_id = cls._resolve_version_to_deployment_id(chosen_version, all_deps)
+            if not chosen_deployment_id:
+                msg = f"No deployment found matching version '{chosen_version}'."
+                if output_json:
+                    json_print({"success": False, "error": msg})
+                else:
+                    error(msg)
+                sys.exit(1)
 
         winner_label = _label(chosen_deployment_id)
         promote_variant = chosen_deployment_id == variant_id
