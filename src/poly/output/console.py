@@ -1230,7 +1230,17 @@ def poll_test_run_live(
 
             status = result.get("status", "")
             if status not in _PENDING_STATUSES:
-                if not compact:
+                for entry in merged:
+                    if entry.get("status") in _PENDING_STATUSES:
+                        entry["status"] = "error"
+                if compact:
+                    for entry in merged:
+                        cid = entry.get("testCaseId", "")
+                        if cid not in seen_done:
+                            seen_done.add(cid)
+                            completed_ordered.append(entry)
+                    live.update(_build_compact_display(completed_ordered, total, test_names))
+                else:
                     live.update(_build_test_table(merged, test_names, finished=True))
                 break
 
