@@ -9,6 +9,10 @@ on:
         description: "Tag to simulate release for (e.g. v0.31.0)"
         required: true
         type: string
+  # TODO: Remove before merging — temporary trigger for testing on this branch
+  push:
+    branches:
+      - ci/slack-release-notification
 
 permissions:
   contents: read
@@ -28,7 +32,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Resolve tag: release event > manual input > latest tag (for push trigger testing)
           current_tag="${{ github.event.release.tag_name || inputs.tag }}"
+          if [ -z "${current_tag}" ]; then
+            current_tag="$(git tag --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          fi
           echo "current_tag=${current_tag}" >> "$GITHUB_OUTPUT"
 
           # Find the tag immediately before current_tag
