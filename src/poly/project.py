@@ -1633,10 +1633,15 @@ class AgentStudioProject:
             updated_resources[FlowStep].pop(flow_step_id, None)
 
         # Add known attributes to any new variant to give it a default value
+        deleted_attribute_ids = set(deleted_resources.get(VariantAttribute, {}).keys())
         for variant in new_resources.get(Variant, {}).values():
             if not isinstance(variant, Variant):
                 raise TypeError(f"Variant is not a Variant: {variant}")
-            attribute_ids = list(self.resources.get(VariantAttribute, {}).keys())
+            attribute_ids = [
+                aid
+                for aid in self.resources.get(VariantAttribute, {}).keys()
+                if aid not in deleted_attribute_ids
+            ]
             variant.attribute_ids = attribute_ids
 
         # Only update the default variant if it's being enabled

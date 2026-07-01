@@ -38,6 +38,7 @@ from poly.resources import (
     Topic,
     TranscriptCorrection,
     Translation,
+    Variant,
     Variable,
     VariantAttribute,
     VoiceDisclaimerMessage,
@@ -1721,6 +1722,41 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         self.assertIn(ChatGreeting, push_changes.pre.updated)
         self.assertIn(ChatSafetyFilters, push_changes.pre.updated)
         self.assertIn(ChatStylePrompt, push_changes.pre.updated)
+
+    def test_new_variant_excludes_deleted_attribute_ids(self):
+        """New variants should not reference attributes that are being deleted."""
+        attr_keep = VariantAttribute(
+            resource_id="VARIANT_ATTRIBUTES-keep",
+            name="greeting_name",
+            mappings={"v1": "Hello"},
+        )
+        attr_delete = VariantAttribute(
+            resource_id="VARIANT_ATTRIBUTES-delete",
+            name="old_attribute",
+            mappings={"v1": "old_value"},
+        )
+        self.project.resources[VariantAttribute] = {
+            "VARIANT_ATTRIBUTES-keep": attr_keep,
+            "VARIANT_ATTRIBUTES-delete": attr_delete,
+        }
+
+        new_variant = Variant(
+            resource_id="VARIANTS-new",
+            name="New Variant",
+            is_default=False,
+        )
+
+        new_resources = {Variant: {"VARIANTS-new": new_variant}}
+        deleted_resources = {VariantAttribute: {"VARIANT_ATTRIBUTES-delete": attr_delete}}
+
+        self.project._clean_resources_before_push(
+            {},
+            new_resources,
+            {},
+            deleted_resources,
+        )
+
+        self.assertEqual(new_variant.attribute_ids, ["VARIANT_ATTRIBUTES-keep"])
 
 
 class PushProjectTest(unittest.TestCase):
