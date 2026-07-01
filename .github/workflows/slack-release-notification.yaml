@@ -1,0 +1,257 @@
+name: Slack Release Notification
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to simulate release for (e.g. v0.31.0)"
+        required: true
+        type: string
+
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  notify-slack:
+    name: Notify Slack
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Get release info
+        id: release-info
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Resolve tag: release event > manual input > latest tag (for push trigger testing)
+          current_tag="${{ github.event.release.tag_name || inputs.tag }}"
+          if [ -z "${current_tag}" ]; then
+            current_tag="$(git tag --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          fi
+          echo "current_tag=${current_tag}" >> "$GITHUB_OUTPUT"
+
+          # Skip patch releases (only notify on major/minor bumps)
+          patch="$(echo "${current_tag}" | grep -oP '\d+$')"
+          if [ "${patch}" != "0" ]; then
+            echo "Patch release (${current_tag}) — skipping notification"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Find the previous minor/major release (patch == 0)
+          previous_tag="$(git tag --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+\.0$' | grep -A1 "^${current_tag}$" | tail -1)"
+          if [ "${previous_tag}" = "${current_tag}" ]; then
+            previous_tag=""
+          fi
+          echo "previous_tag=${previous_tag}" >> "$GITHUB_OUTPUT"
+
+          if [ -z "${previous_tag}" ]; then
+            echo "No previous tag found, skipping notification"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Fetch release body — try event payload first, then GitHub API
+          if [ -n "${{ github.event.release.tag_name }}" ]; then
+            release_body="${{ github.event.release.body }}"
+            release_url="${{ github.event.release.html_url }}"
+          else
+            release_body="$(gh release view "${current_tag}" --json body --jq '.body' 2>/dev/null || echo "")"
+            release_url="$(gh release view "${current_tag}" --json htmlUrl --jq '.htmlUrl' 2>/dev/null || echo "")"
+          fi
+          release_url="${release_url:-${{ github.server_url }}/${{ github.repository }}}"
+
+          {
+            echo "release_body<<EOF"
+            echo "${release_body}"
+            echo "EOF"
+            echo "release_url=${release_url}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+      - name: Collect changes
+        if: steps.release-info.outputs.skip != 'true'
+        id: changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CURRENT_TAG: ${{ steps.release-info.outputs.current_tag }}
+          PREVIOUS_TAG: ${{ steps.release-info.outputs.previous_tag }}
+        run: |
+          # Get merged PRs between tags
+          pr_commits="$(git log "${PREVIOUS_TAG}..${CURRENT_TAG}" --oneline --grep='#' --pretty=format:'%s')"
+
+          # Extract PR numbers and fetch their titles/labels
+          pr_list=""
+          while IFS= read -r line; do
+            pr_num="$(echo "${line}" | grep -oP '#\d+' | head -1 | tr -d '#')"
+            if [ -n "${pr_num}" ]; then
+              repo_url="${{ github.server_url }}/${{ github.repository }}"
+              pr_info="$(gh pr view "${pr_num}" --json number,title,author --jq \
+                "\"- <${repo_url}/pull/\(.number)|#\(.number)> \(.title) (@\(.author.login))\"" \
+                2>/dev/null || true)"
+              if [ -n "${pr_info}" ]; then
+                pr_list="${pr_list}${pr_info}\n"
+              fi
+            fi
+          done <<< "${pr_commits}"
+
+          if [ -z "${pr_list}" ]; then
+            pr_list="- No PRs found for this release"
+          fi
+
+          # Extract the primary feat title from conventional commits (keep the prefix)
+          feat_title="$(git log "${PREVIOUS_TAG}..${CURRENT_TAG}" --pretty=format:'%s' \
+            | grep -m1 '^feat' \
+            | sed 's/ (#[0-9]*)$//' \
+            || true)"
+          if [ -z "${feat_title}" ]; then
+            feat_title="$(git log "${PREVIOUS_TAG}..${CURRENT_TAG}" --pretty=format:'%s' \
+              | grep -v '^chore(release)' \
+              | head -1 \
+              | sed 's/ (#[0-9]*)$//' \
+              || true)"
+          fi
+          feat_title="${feat_title:-New release}"
+
+          # Get the diff stat for context
+          diff_stat="$(git diff --stat "${PREVIOUS_TAG}..${CURRENT_TAG}" -- 'src/' | tail -1)"
+
+          {
+            echo "pr_list<<EOF"
+            echo -e "${pr_list}"
+            echo "EOF"
+            echo "diff_stat=${diff_stat}"
+            echo "feat_title=${feat_title}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate summary with Claude
+        if: steps.release-info.outputs.skip != 'true'
+        id: summary
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.CLAUDE_API_KEY }}
+          CURRENT_TAG: ${{ steps.release-info.outputs.current_tag }}
+          PREVIOUS_TAG: ${{ steps.release-info.outputs.previous_tag }}
+          PR_LIST: ${{ steps.changes.outputs.pr_list }}
+          DIFF_STAT: ${{ steps.changes.outputs.diff_stat }}
+          RELEASE_BODY: ${{ steps.release-info.outputs.release_body }}
+        run: |
+          # Build the prompt via jq to safely handle special characters in release body
+          request_body="$(jq -n \
+            --arg current_tag "${CURRENT_TAG}" \
+            --arg previous_tag "${PREVIOUS_TAG}" \
+            --arg diff_stat "${DIFF_STAT}" \
+            --arg release_body "${RELEASE_BODY}" \
+            --arg pr_list "${PR_LIST}" \
+            '{
+              "model": "claude-sonnet-4-6",
+              "max_tokens": 600,
+              "messages": [{
+                "role": "user",
+                "content": ("You are writing a Slack release summary for the PolyAI ADK CLI tool. Use Slack mrkdwn formatting.\n\nDiff stats: " + $diff_stat + "\n\nGitHub release body:\n" + $release_body + "\n\nPRs included:\n" + $pr_list + "\n\nWrite a summary of what changed in this release.\n\nRules:\n- Do NOT repeat the version number or release name — the header already shows it\n- Start with a 1-2 sentence overview\n- If the release adds new CLI commands, list each one with `backtick formatting` and a short description (one line per command). Include key flags.\n- If the release adds new resource types or config options, mention them briefly without listing every field\n- For bug fixes or minor changes, keep it to one sentence\n- Skip internal refactors, signature changes, and code cleanup — only mention user-facing changes\n- Be direct and professional, not marketing-speak or overly casual\n- Use Slack mrkdwn: *bold* for emphasis, `code` for commands/flags, bullet points with •")
+              }]
+            }')"
+
+          response="$(curl -s https://api.anthropic.com/v1/messages \
+            -H "content-type: application/json" \
+            -H "x-api-key: ${ANTHROPIC_API_KEY}" \
+            -H "anthropic-version: 2023-06-01" \
+            -d "${request_body}")"
+
+          summary="$(echo "${response}" | jq -r '.content[0].text // empty')"
+          if [ -z "${summary}" ]; then
+            error_msg="$(echo "${response}" | jq -r '.error.message // "unknown error"')"
+            echo "::warning::Claude API failed: ${error_msg}"
+            summary="See the release notes for details."
+          fi
+
+          {
+            echo "summary<<EOF"
+            echo "${summary}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build Slack payload
+        if: steps.release-info.outputs.skip != 'true'
+        env:
+          CURRENT_TAG: ${{ steps.release-info.outputs.current_tag }}
+          PREVIOUS_TAG: ${{ steps.release-info.outputs.previous_tag }}
+          TITLE: ${{ steps.changes.outputs.feat_title }}
+          SUMMARY: ${{ steps.summary.outputs.summary }}
+          PR_LIST: ${{ steps.changes.outputs.pr_list }}
+        run: |
+          # Truncate PR list if too long for Slack
+          pr_list_limited="${PR_LIST}"
+          if [ "${#pr_list_limited}" -gt 1500 ]; then
+            pr_list_limited="${pr_list_limited:0:1500}...\n_(truncated)_"
+          fi
+
+          jq -n \
+            --arg text "ADK Release (${CURRENT_TAG}): ${TITLE}" \
+            --arg tag "${CURRENT_TAG}" \
+            --arg prev_tag "${PREVIOUS_TAG}" \
+            --arg title "${TITLE}" \
+            --arg summary "${SUMMARY}" \
+            --arg pr_list "${pr_list_limited}" \
+            '{
+              text: $text,
+              blocks: [
+                {
+                  type: "header",
+                  text: {
+                    type: "plain_text",
+                    text: ("ADK Release (" + $tag + ") — " + $title),
+                    emoji: true
+                  }
+                },
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: $summary
+                  }
+                },
+                {
+                  type: "divider"
+                },
+                {
+                  type: "section",
+                  text: {
+                    type: "mrkdwn",
+                    text: ("*PRs included since " + $prev_tag + ":*\n" + $pr_list)
+                  }
+                },
+                {
+                  type: "context",
+                  elements: [
+                    {
+                      type: "mrkdwn",
+                      text: "Update with `pip install --upgrade polyai-adk`"
+                    }
+                  ]
+                }
+              ]
+            }' > slack-payload.json
+
+      - name: Send Slack notification
+        if: steps.release-info.outputs.skip != 'true'
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -z "${SLACK_WEBHOOK_URL}" ]; then
+            echo "::error::SLACK_WEBHOOK_URL secret is not configured"
+            exit 1
+          fi
+
+          curl --fail --show-error --silent \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --data @slack-payload.json \
+            "${SLACK_WEBHOOK_URL}"
