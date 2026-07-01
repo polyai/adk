@@ -47,6 +47,7 @@ from poly.resources import (
 from poly.resources.flows import (
     ASRBiasing,
     Condition,
+    ConditionType,
     DTMFConfig,
     StepType,
 )
@@ -1678,6 +1679,111 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         self.assertIn("CONDITION-cond-1", cleaned_new.get(Condition, {}))
         # And removed from updated
         self.assertNotIn("CONDITION-cond-1", cleaned_updated.get(Condition, {}))
+
+    def test_clean_resources_before_push_new_function_step_with_conditions_uses_stub_code(self):
+        """New FunctionSteps with conditions should be created with stub code,
+        then updated with real code in post-push to avoid duplicate condition labels
+        from the backend auto-creating conditions from goto_step calls."""
+        flow_config = FlowConfig(
+            resource_id="flow-123",
+            name="Test Flow",
+            description="A test flow",
+            start_step="step-1",
+        )
+        flow_step = FlowStep(
+            resource_id="Test Flow_step-1",
+            step_id="step-1",
+            name="Start Step",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.DEFAULT_STEP,
+            prompt="Hello",
+            position={"x": 0.0, "y": 0.0},
+            conditions=[],
+            extracted_entities=[],
+        )
+        self.project.resources.setdefault(FlowConfig, {})["flow-123"] = flow_config
+        self.project.resources.setdefault(FlowStep, {})["Test Flow_step-1"] = flow_step
+
+        real_code = (
+            "def fetch_data(conv: Conversation, flow: Flow):\n"
+            '    flow.goto_step("Start Step", "Data fetched")\n'
+        )
+        function_step = FunctionStep(
+            resource_id="Test Flow_func-step-1",
+            step_id="func-step-1",
+            name="fetch_data",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            code=real_code,
+            position={"x": 0.0, "y": 0.0},
+            function_id="FUNC-123",
+            conditions=[
+                Condition(
+                    resource_id="CONDITION-abc",
+                    name="Data fetched",
+                    condition_type=ConditionType.NO_CODE_STEP,
+                    step_id="func-step-1",
+                    flow_id="flow-123",
+                    child_step="step-1",
+                ),
+            ],
+        )
+
+        new_resources = {FunctionStep: {"Test Flow_func-step-1": function_step}}
+        updated_resources = {}
+        deleted_resources = {}
+
+        push_changes = self.project._clean_resources_before_push(
+            {},
+            new_resources,
+            updated_resources,
+            deleted_resources,
+        )
+        cleaned_new = push_changes.main.new
+        cleaned_updated = push_changes.main.updated
+
+        # Main push should create with stub code (no goto_step calls)
+        stub_step = cleaned_new[FunctionStep]["Test Flow_func-step-1"]
+        self.assertNotIn("goto_step", stub_step.code)
+        self.assertIn("def fetch_data", stub_step.code)
+
+        # Main push should also update with real code (updates run after creates)
+        self.assertIn(FunctionStep, cleaned_updated)
+        real_step = cleaned_updated[FunctionStep]["Test Flow_func-step-1"]
+        self.assertEqual(real_step.code, real_code)
+
+    def test_clean_resources_before_push_new_function_step_without_conditions_unchanged(self):
+        """New FunctionSteps without conditions should not be modified."""
+        function_step = FunctionStep(
+            resource_id="Test Flow_func-step-1",
+            step_id="func-step-1",
+            name="process_data",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            code="def process_data(conv: Conversation, flow: Flow):\n    pass\n",
+            position={"x": 0.0, "y": 0.0},
+            function_id="FUNC-123",
+            conditions=[],
+        )
+
+        new_resources = {FunctionStep: {"Test Flow_func-step-1": function_step}}
+        updated_resources = {}
+        deleted_resources = {}
+
+        push_changes = self.project._clean_resources_before_push(
+            {},
+            new_resources,
+            updated_resources,
+            deleted_resources,
+        )
+        cleaned_new = push_changes.main.new
+        post_push_updated = push_changes.post.updated
+
+        # Should be unchanged - no stub needed
+        result_step = cleaned_new[FunctionStep]["Test Flow_func-step-1"]
+        self.assertEqual(result_step.code, function_step.code)
+        self.assertNotIn(FunctionStep, post_push_updated)
 
     def test_clean_resources_before_push_webchat_enables_channel_and_moves_to_updates(self):
         """New webchat configs should enable the channel and be moved to pre-push updates."""

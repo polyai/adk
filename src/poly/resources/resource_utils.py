@@ -562,6 +562,31 @@ def convert_keys_to_snake_case(dict_obj: dict) -> dict:
     return {to_snake_case(k): v for k, v in dict_obj.items()}
 
 
+def extract_go_to_steps(code: str) -> list[tuple[str, Optional[str]]]:
+    """Extract goto_step calls, returning (step_name, condition_name) tuples."""
+    pattern = re.compile(
+        r"flow\.goto_step\(\s*"
+        r"""(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')"""
+        r"(?:\s*,\s*"
+        r"""(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')"""
+        r")?"
+    )
+    results: list[tuple[str, Optional[str]]] = []
+    for m in pattern.finditer(code):
+        step_name = m.group(1) or m.group(2)
+        condition_name = m.group(3) or m.group(4)
+        results.append((step_name, condition_name))
+    return results
+
+
+def extract_go_to_flows(code: str) -> list[str]:
+    pattern = re.compile(
+        r"conv\.goto_flow\(\s*"
+        r"""(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)')"""
+    )
+    return [m.group(1) or m.group(2) for m in pattern.finditer(code)]
+
+
 def is_valid_language_code(code: str) -> bool:
     """Check if the given code is a valid BCP 47 language code."""
     return langcodes.tag_is_valid(code)

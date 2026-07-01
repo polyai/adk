@@ -882,7 +882,7 @@
         "name": "process_payment",
         "step_type": "function_step",
         "description": "",
-        "code": "def process_payment(conv: Conversation, flow: Flow):\n    \"\"\"Process payment for the customer.\"\"\"\n    # Process payment logic here\n    conv.state.customer_name = \"John Doe\"\n    conv.state.payment_success = True\n    return \"Payment processed\"\n",
+        "code": "def process_payment(conv: Conversation, flow: Flow):\n    \"\"\"Process payment for the customer.\"\"\"\n    # Process payment logic here\n    conv.state.customer_name = \"John Doe\"\n    conv.state.payment_success = True\n    flow.goto_step(\"final_step\", \"Payment processed\")\n",
         "parameters": [],
         "latency_control": {},
         "function_type": "function_step",
@@ -890,7 +890,35 @@
         "position": {
           "x": 0.0,
           "y": 0.0
-        }
+        },
+        "conditions": [
+          {
+            "name": "Payment processed",
+            "description": "Payment was successful",
+            "required_entities": [],
+            "condition_type": "step_condition",
+            "child_step": "final_step",
+            "step_id": "process_payment",
+            "flow_id": "FLOW_CONFIG-test_flow",
+            "resource_id": "CONDITION-payment_processed",
+            "position": null,
+            "exit_flow_position": null,
+            "ingress": "top"
+          },
+          {
+            "name": "Payment failed",
+            "description": "Payment failed, exit flow",
+            "required_entities": [],
+            "condition_type": "exit_flow_condition",
+            "child_step": null,
+            "step_id": "process_payment",
+            "flow_id": "FLOW_CONFIG-test_flow",
+            "resource_id": "CONDITION-payment_failed",
+            "position": null,
+            "exit_flow_position": null,
+            "ingress": "top"
+          }
+        ]
       },
       "test_flow_process_data": {
         "resource_id": "test_flow_with_punctuation!_calculate_discount",
