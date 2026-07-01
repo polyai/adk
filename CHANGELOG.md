@@ -1,6 +1,71 @@
 # CHANGELOG
 
 
+## v0.31.0 (2026-07-01)
+
+### Features
+
+- Add CLI test commands (run, list, show) ([#202](https://github.com/polyai/adk/pull/202),
+  [`3c3e6ec`](https://github.com/polyai/adk/commit/3c3e6ec06b4ad6d150b29738d74d6a51303438ad))
+
+## Summary
+
+Adds a complete testing workflow to the CLI: trigger tests, watch results live, list past runs, and
+  inspect failures — all without leaving the terminal.
+
+## Motivation
+
+Running tests previously required switching to Agent Studio to see results. This brings the full
+  test lifecycle into the CLI: trigger, poll, list, and review results.
+
+## Changes
+
+- **`poly test run`**: trigger tests with live polling UI (every 5s), adaptive display (full table
+  for ≤20 tests, compact rolling view for >20), `--dry-run` to preview, `--dont-poll` to trigger and
+  exit, `--push` to push before running, `--files`/`--tag` for filtering (runs all tests by default)
+  - **`poly test list`**: list past test runs with status, pass/fail/error counts, branch, and
+  timestamps - **`poly test show <run_id>`**: inspect a completed test run with all results -
+  **`poly test show <run_id> <test_case_id>`**: drill into a single test — assertions, function call
+  failures, and conversation transcript - All commands support `--json` for machine-readable output
+  - Handle all API statuses: `pending`, `in_progress`, `passed`, `failed`, `errored`, `timed_out` -
+  Extract `resolve_tests()`, `get_test_run()`, `list_test_runs()`, and `trigger_tests()` on
+  `AgentStudioProject` - Add `print_test_run_list`, `print_test_run_summary`, `print_test_detail`,
+  and `poll_test_run_live` console helpers - Simplify `get_diffs()` and `revert_changes()`
+  signatures — replace `all_files`/`files` with a single `file_paths` param (defaults to all)
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (12 pre-existing
+  failures unrelated to this change) - [x] No breaking changes to the `poly` CLI interface (or
+  migration path documented) - [x] Commit messages follow [conventional
+  commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+### Running tests: With <20 tests (by tag) <img width="446" height="78" alt="Screenshot 2026-06-29
+  at 17 48 21" src="https://github.com/user-attachments/assets/c3e71fa7-b6fa-4a94-b51c-27de07f14b49"
+  /> With >20 tests (all tests) <img width="753" height="576" alt="Screenshot 2026-06-30 at 18 18
+  54" src="https://github.com/user-attachments/assets/f2450674-1a68-4069-b6f9-a3823e740981" />
+
+### View previous runs <img width="741" height="148" alt="Screenshot 2026-06-29 at 17 47 55"
+  src="https://github.com/user-attachments/assets/811abffb-b876-4945-95e5-37bc70c7f3b7" />
+
+### View test run <img width="786" height="360" alt="Screenshot 2026-06-29 at 17 47 50"
+  src="https://github.com/user-attachments/assets/b79dbbb3-2abc-44b8-a30c-f7c96befc0ed" />
+
+### View specific test in a run <img width="1268" height="310" alt="Screenshot 2026-06-29 at 17 47
+  41" src="https://github.com/user-attachments/assets/a2449f03-5b10-4d8b-8f22-f97d7460b165" />
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.30.0 (2026-06-30)
 
 ### Features
