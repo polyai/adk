@@ -164,6 +164,7 @@ class AgentStudioProject:
     last_updated: datetime
     branch_id: str = None
     project_name: Optional[str] = None
+    account_name: Optional[str] = None
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
@@ -205,6 +206,8 @@ class AgentStudioProject:
         }
         if self.project_name:
             config["project_name"] = self.project_name
+        if self.account_name:
+            config["account_name"] = self.account_name
         return config
 
     @classmethod
@@ -278,6 +281,7 @@ class AgentStudioProject:
             file_structure_info={},
             branch_id=status_dict.get("branch_id", "main"),
             project_name=config_dict.get("project_name") or status_dict.get("project_name"),
+            account_name=config_dict.get("account_name") or status_dict.get("account_name"),
             _not_loaded_resources=not_loaded_resources,
             _migration_flags=migration_flags,
         )
@@ -298,6 +302,7 @@ class AgentStudioProject:
             "file_structure_info": self.file_structure_info,
             "branch_id": self.branch_id,
             "project_name": self.project_name,
+            "account_name": self.account_name,
             "migration_flags": [flag.value for flag in self._migration_flags]
             if self._migration_flags
             else [],
@@ -323,6 +328,7 @@ class AgentStudioProject:
             file_structure_info=file_structure_info,
             branch_id=data.get("branch_id", "main"),
             project_name=data.get("project_name"),
+            account_name=data.get("account_name"),
             _migration_flags=migration_flags,
             _not_loaded_resources=not_loaded_resources,
         )
@@ -362,6 +368,7 @@ class AgentStudioProject:
         account_id: str,
         project_id: str,
         project_name: str = None,
+        account_name: str = None,
         format: bool = False,
         projection_json: Optional[dict[str, Any]] = None,
         on_save: Callable[[int, int], None] | None = None,
@@ -374,6 +381,7 @@ class AgentStudioProject:
             account_id (str): The account ID of the project
             project_id (str): The project ID
             project_name (str): The human-readable project name
+            account_name (str): The human-readable account/workspace name
             format (bool): If True, format resources after pulling
             projection_json (dict[str, Any]): A dictionary containing the projection
                 If provided, the projection will be used instead of fetching it from the API.
@@ -397,6 +405,7 @@ class AgentStudioProject:
             last_updated=datetime.now(),
             branch_id="main",
             project_name=project_name,
+            account_name=account_name,
             _migration_flags=get_all_migration_flags(),
         )
 
@@ -2546,6 +2555,14 @@ class AgentStudioProject:
             environment=environment,
         )
 
+    @property
+    def studio_base_url(self) -> str:
+        """Base Agent Studio URL for this project's region."""
+        region_link_map = {"uk-1": "uk", "euw-1": "eu", "us-1": "us", "studio": ""}
+        short = region_link_map.get(self.region, self.region)
+        domain = f"studio.{short}.poly.ai" if short else "studio.poly.ai"
+        return f"https://{domain}/{self.account_id}/{self.project_id}"
+
     def get_conversation_url(self, conversation_id: str) -> str:
         """Build the Studio URL for a conversation.
 
@@ -2555,13 +2572,7 @@ class AgentStudioProject:
         Returns:
             str: The URL of the conversation.
         """
-        region_link_map = {"uk-1": "uk", "euw-1": "eu", "us-1": "us"}
-        short = region_link_map.get(self.region, self.region)
-        return (
-            f"https://studio.{short}.poly.ai"
-            f"/{self.account_id}/{self.project_id}"
-            f"/conversations/{conversation_id}"
-        )
+        return f"{self.studio_base_url}/conversations/{conversation_id}"
 
     def _make_resource_mappings(self, resources: ResourceMap) -> list[ResourceMapping]:
         resource_mappings: list[ResourceMapping] = []
@@ -2971,6 +2982,8 @@ class AgentStudioProject:
         )
         return True
 
+    # ── Simulation tests ───────────────────────────────────────────────────
+
     def resolve_tests(self, files: list[str] = None, tags: list[str] = None) -> list["TestCase"]:
         """Resolve which tests match the given criteria.
 
@@ -3043,4 +3056,93 @@ class AgentStudioProject:
         """
         return self.api_handler.list_test_runs(
             self.region, self.project_id, limit, offset, branch_id=self.branch_id
+        )
+
+    # ── A/B tests ───────────────────────────────────────────────────
+
+    def create_ab_test(
+        self, name: str, variant_deployment_id: str, traffic_percentage: int
+    ) -> dict:
+        """Create a new A/B test for the project.
+
+        Args:
+            name: Display name for the test.
+            variant_deployment_id: ID of the pre-release variant deployment.
+            traffic_percentage: Percentage of traffic routed to variant (0-100).
+
+        Returns:
+            dict: The created A/B test record.
+        """
+        return self.api_handler.create_ab_test(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            name=name,
+            variant_deployment_id=variant_deployment_id,
+            traffic_percentage=traffic_percentage,
+        )
+
+    def list_ab_tests(self, limit: int | None = None) -> list[dict]:
+        """List A/B tests for the project.
+
+        Args:
+            limit: Maximum number of tests to return.
+
+        Returns:
+            list[dict]: A list of A/B test records.
+        """
+        result = self.api_handler.list_ab_tests(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            limit=limit,
+        )
+        return result.get("ab_tests", [])
+
+    def get_active_ab_test(self) -> dict:
+        """Get the active A/B test for the project.
+
+        Returns:
+            dict: The active A/B test record, or empty dict if none.
+        """
+        return self.api_handler.get_active_ab_test(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+        )
+
+    def end_ab_test(self, ab_test_id: str, chosen_deployment_id: str) -> dict:
+        """End an A/B test and choose a winner.
+
+        Args:
+            ab_test_id: The A/B test ID.
+            chosen_deployment_id: Deployment ID to keep (control or variant).
+
+        Returns:
+            dict: The ended A/B test record.
+        """
+        return self.api_handler.end_ab_test(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            ab_test_id=ab_test_id,
+            chosen_deployment_id=chosen_deployment_id,
+        )
+
+    def update_ab_test(self, ab_test_id: str, traffic_percentage: int) -> dict:
+        """Update traffic percentage for an A/B test.
+
+        Args:
+            ab_test_id: The A/B test ID.
+            traffic_percentage: New traffic percentage (0-100).
+
+        Returns:
+            dict: The updated A/B test record.
+        """
+        return self.api_handler.update_ab_test(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            ab_test_id=ab_test_id,
+            traffic_percentage=traffic_percentage,
         )

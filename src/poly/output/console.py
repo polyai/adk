@@ -83,14 +83,16 @@ def print_status(
     project_id: str,
     last_updated: str,
     branch: str,
+    account_name: str = None,
+    project_name: str = None,
 ) -> None:
     """Print project status in a styled panel."""
     table = Table(show_header=False, box=None, padding=(0, 1))
     table.add_column("Key", style="label", no_wrap=True)
     table.add_column("Value")
     table.add_row("Region", region)
-    table.add_row("Account ID", account_id)
-    table.add_row("Project ID", project_id)
+    table.add_row("Workspace", f"{account_name} ({account_id})" if account_name else account_id)
+    table.add_row("Project", f"{project_name} ({project_id})" if project_name else project_id)
     table.add_row("Last Pulled", last_updated)
     table.add_row("Current Branch", branch)
 
@@ -634,6 +636,120 @@ def print_deployment_show(
         label = "Reverted deployments" if is_rollback else "Included deployments"
         console.print(f"[label]{label} ({count}):[/label]")
         print_deployments(included_deployments, {})
+
+
+# ── A/B Tests ────────────────────────────────────────────────────────
+
+
+def _ab_test_status(ab_test: dict[str, Any]) -> str:
+    """Derive a styled status string from an A/B test record."""
+    if ab_test.get("ended_at"):
+        return "[dim]ended[/dim]"
+    return "[bold green]active[/bold green]"
+
+
+def print_ab_tests(
+    ab_tests: list[dict[str, Any]],
+    deployments: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    """Print a table of A/B tests.
+
+    Args:
+        ab_tests: List of A/B test records.
+        deployments: Optional mapping of deployment ID to deployment dict
+            for enriched display (version hash, message).
+    """
+    if not ab_tests:
+        info("No A/B tests found.")
+        return
+    deps = deployments or {}
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("ID", style="bold yellow", no_wrap=True)
+    table.add_column("Name", overflow="fold")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Traffic %", justify="right", no_wrap=True)
+    table.add_column("Control", no_wrap=True)
+    table.add_column("Variant", no_wrap=True)
+    table.add_column("Created", no_wrap=True)
+    for t in ab_tests:
+        control_id = t.get("control_deployment_id") or "—"
+        variant_id = t.get("variant_deployment_id") or "—"
+        table.add_row(
+            t.get("id", "—"),
+            t.get("name", "—"),
+            _ab_test_status(t),
+            str(t.get("traffic_percentage", "—")),
+            _format_dep_label(deps.get(control_id), control_id),
+            _format_dep_label(deps.get(variant_id), variant_id),
+            _format_iso_timestamp(t.get("created_at", "")),
+        )
+    console.print(table)
+
+
+def _format_dep_label(dep: dict[str, Any] | None, dep_id: str) -> str:
+    """Build a human-readable label for a deployment."""
+    if not dep:
+        return dep_id
+    version = (dep.get("version_hash") or "")[:9]
+    msg = (dep.get("deployment_metadata") or {}).get("deployment_message", "") or ""
+    if version and msg:
+        return f"{version}  [bold]{msg}[/bold]"
+    if version:
+        return version
+    return dep_id
+
+
+def print_ab_test_detail(
+    ab_test: dict[str, Any] | None,
+    deployments: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    """Print detailed information for a single A/B test.
+
+    Args:
+        ab_test: A single A/B test record, or None.
+        deployments: Optional mapping of deployment ID to deployment dict
+            for enriched display (version hash, message).
+    """
+    if not ab_test:
+        info("No active A/B test.")
+        return
+
+    deps = deployments or {}
+    traffic = ab_test.get("traffic_percentage", "—")
+    control_id = ab_test.get("control_deployment_id", "—")
+    variant_id = ab_test.get("variant_deployment_id", "—")
+    control_label = _format_dep_label(deps.get(control_id), control_id)
+    variant_label = _format_dep_label(deps.get(variant_id), variant_id)
+
+    if isinstance(traffic, int):
+        control_traffic = f"{100 - traffic}%"
+        variant_traffic = f"{traffic}%"
+    else:
+        control_traffic = "—"
+        variant_traffic = "—"
+
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column("Key", style="cyan", no_wrap=True)
+    table.add_column("Value")
+    table.add_row("Name", ab_test.get("name", "—"))
+    table.add_row("Status", _ab_test_status(ab_test))
+    table.add_row(
+        "Control",
+        f"[dim]({control_traffic} traffic)[/dim]  {control_label}",
+    )
+    table.add_row(
+        "Variant",
+        f"[dim]({variant_traffic} traffic)[/dim]  {variant_label}",
+    )
+    table.add_row("Created By", ab_test.get("created_by", "—"))
+    table.add_row("Created", _format_iso_timestamp(ab_test.get("created_at", "")))
+    if ab_test.get("ended_at"):
+        table.add_row("Ended", _format_iso_timestamp(ab_test["ended_at"]))
+    if ab_test.get("chosen_deployment_id"):
+        winner_id = ab_test["chosen_deployment_id"]
+        winner_label = _format_dep_label(deps.get(winner_id), winner_id)
+        table.add_row("Winner", winner_label)
+    console.print(Panel(table, title="[bold]A/B Test[/bold]", border_style="cyan"))
 
 
 # ── Conversations ────────────────────────────────────────────────────

@@ -26,6 +26,9 @@ DRAFT_CHAT_CONVERSATION_URL = (
     "/adk/v1/accounts/{account_id}/projects/{project_id}/draft/chat/{conversation_id}"
 )
 CHAT_END_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/chat/{conversation_id}/end"
+AB_TESTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests"
+AB_TEST_ACTIVE_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/active"
+AB_TEST_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/{ab_test_id}"
 # These use public APIs not /adk endpoints
 PROMOTE_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/promote"
 ROLLBACK_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/rollback"
@@ -644,6 +647,131 @@ class PlatformAPIHandler:
         endpoint = ROLLBACK_URL.format(project_id=project_id, deployment_id=deployment_id)
         body = {"deploymentMessage": message}
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=body)
+
+    @staticmethod
+    def create_ab_test(
+        region: str,
+        account_id: str,
+        project_id: str,
+        name: str,
+        variant_deployment_id: str,
+        traffic_percentage: int,
+    ) -> dict:
+        """Create a new A/B test.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            name: Display name for the A/B test.
+            variant_deployment_id: ID of the pre-release variant deployment.
+            traffic_percentage: Percentage of traffic routed to variant (0-100).
+
+        Returns:
+            dict: The created A/B test record.
+        """
+        endpoint = AB_TESTS_URL.format(account_id=account_id, project_id=project_id)
+        data = {
+            "name": name,
+            "variant_deployment_id": variant_deployment_id,
+            "traffic_percentage": traffic_percentage,
+        }
+        return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
+
+    @staticmethod
+    def list_ab_tests(
+        region: str,
+        account_id: str,
+        project_id: str,
+        limit: ty.Optional[int] = None,
+    ) -> dict:
+        """List A/B tests for a project.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            limit: Maximum number of tests to return.
+
+        Returns:
+            dict: Response containing an ``ab_tests`` list.
+        """
+        endpoint = AB_TESTS_URL.format(account_id=account_id, project_id=project_id)
+        params = {}
+        if limit is not None:
+            params["limit"] = limit
+        return PlatformAPIHandler.make_request(region, endpoint, "GET", params=params)
+
+    @staticmethod
+    def get_active_ab_test(
+        region: str,
+        account_id: str,
+        project_id: str,
+    ) -> dict:
+        """Get the active A/B test for a project.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+
+        Returns:
+            dict: The active A/B test record, or empty dict if none.
+        """
+        endpoint = AB_TEST_ACTIVE_URL.format(account_id=account_id, project_id=project_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")
+
+    @staticmethod
+    def end_ab_test(
+        region: str,
+        account_id: str,
+        project_id: str,
+        ab_test_id: str,
+        chosen_deployment_id: str,
+    ) -> dict:
+        """End an A/B test and choose a winner.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            ab_test_id: The A/B test ID.
+            chosen_deployment_id: Deployment ID to keep (control or variant).
+
+        Returns:
+            dict: The ended A/B test record.
+        """
+        endpoint = AB_TEST_URL.format(
+            account_id=account_id, project_id=project_id, ab_test_id=ab_test_id
+        )
+        data = {"chosen_deployment_id": chosen_deployment_id}
+        return PlatformAPIHandler.make_request(region, endpoint, "DELETE", data=data)
+
+    @staticmethod
+    def update_ab_test(
+        region: str,
+        account_id: str,
+        project_id: str,
+        ab_test_id: str,
+        traffic_percentage: int,
+    ) -> dict:
+        """Update traffic percentage for an A/B test.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            ab_test_id: The A/B test ID.
+            traffic_percentage: New traffic percentage (0-100).
+
+        Returns:
+            dict: The updated A/B test record.
+        """
+        endpoint = AB_TEST_URL.format(
+            account_id=account_id, project_id=project_id, ab_test_id=ab_test_id
+        )
+        data = {"traffic_percentage": traffic_percentage}
+        return PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=data)
 
     @staticmethod
     def authorise(region: str, jwt_token: str) -> dict:

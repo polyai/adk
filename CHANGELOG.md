@@ -1,6 +1,168 @@
 # CHANGELOG
 
 
+## v0.30.0 (2026-06-30)
+
+### Features
+
+- Add A/B test management to deployments CLI ([#203](https://github.com/polyai/adk/pull/203),
+  [`08461c5`](https://github.com/polyai/adk/commit/08461c56901a962f7449c03bacd71822001f686c))
+
+## Summary
+
+Adds `poly deployments ab-test {start|list|active|update|end}` subcommands for managing A/B tests
+  between live and pre-release deployments from the CLI.
+
+## Motivation
+
+A/B tests could previously only be managed through the Agent Studio UI. This adds full CLI support
+  so operators can start, monitor, adjust, and end A/B tests from the terminal or scripts.
+
+## Changes
+
+- API client (`platform_api.py`, `interface.py`): 5 new endpoints — create, list, get active, update
+  traffic, end test - Project model (`project.py`): convenience methods forwarding to the API layer
+  - CLI parser (`cli.py`): `ab-test` sub-subparser under `deployments` with `start`, `list`,
+  `active`, `update`, `end` - All flags (`--name`, `--variant`, `--traffic`) are optional
+  interactively and required with `--json` - `start` prompts for name (defaulting to UI datetime
+  format), pre-release variant picker, and traffic split - `start` validates the variant version
+  differs from the current live version - `update` and `end` auto-resolve the active test (only one
+  per project) - `end` promotes the variant to live if chosen as the winner - `end` shows
+  human-readable deployment labels (hash + message) instead of raw UUIDs - Console display
+  (`console.py`): `print_ab_tests` table and `print_ab_test_detail` panel with traffic splits,
+  version hashes, and deployment names - Status derived from `ended_at` field (no `status` column in
+  the backend model) - 57 new tests covering validation, interactive prompts, HTTP error mapping,
+  promotion flow
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+
+## v0.29.0 (2026-06-25)
+
+### Features
+
+- Update help info text and poly status ([#201](https://github.com/polyai/adk/pull/201),
+  [`0877164`](https://github.com/polyai/adk/commit/0877164d66f2d157dd28dc4ebef6bbbe202ab0e2))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. --> Updates the info text to remind the user
+  that they need to change directories to a project folder to continue. Also adds workspace and
+  project names to display during the poly status command. ## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #[DEVP-344](https://linear.app/poly-ai/issue/DEVP-344/update-help-text-and-poly-status)
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+- Updates help info text when no project configuration is found - Adds workspace and project names
+  to display when "poly status" command is used
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs https://www.loom.com/share/749c074bb76649d6ae6b6fe45abdeb10 <!-- Optional:
+  paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+
+## v0.28.1 (2026-06-23)
+
+### Bug Fixes
+
+- Bump experimental config schema with Raven ASR ([#200](https://github.com/polyai/adk/pull/200),
+  [`7921f50`](https://github.com/polyai/adk/commit/7921f50c1bc0da430fb900702b80825311e2aec0))
+
+## Summary
+
+Adds `raven` as a supported ASR engine in the experimental config schema.
+
+## Motivation
+
+The Raven Omni speech recognition engine needs to be a valid option in the experimental config
+  schema so projects using it pass validation.
+
+## Changes
+
+- Added `raven` to the ASR engine enum list - Added `raven: PolyAI Raven Omni speech recognition` to
+  the engine description enum - Added `raven: "raven-omni"` to the model documentation
+
+## Test strategy
+
+- [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
+## v0.28.0 (2026-06-23)
+
+### Features
+
+- Open agent studio from cli ([#199](https://github.com/polyai/adk/pull/199),
+  [`5ad2973`](https://github.com/polyai/adk/commit/5ad2973114767ab34c8826d54d9f4dfd0b0bb723))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. --> Adds a new command in the cli "poly studio"
+  to open agent studio in the web browser and takes the user to the specific workspace and project.
+  ## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. --> To make it easier for users to
+  access agent studio. Closes #<!-- issue number
+  -->[DEVP-326](https://linear.app/poly-ai/issue/DEVP-326)
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+- added new command "poly studio" - created new function to build studio base url
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+  https://www.loom.com/share/6804c76d2f554a97af38254167f91d10
+
+
 ## v0.27.0 (2026-06-22)
 
 ### Features
