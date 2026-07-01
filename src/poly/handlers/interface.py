@@ -184,19 +184,19 @@ class AgentStudioInterface:
         return PlatformAPIHandler.list_agents(region, account_id)
 
     @staticmethod
-    def delete_project(region: str, agent_id: str) -> None:
+    def delete_project(region: str, project_id: str) -> None:
         """Delete a project (agent).
 
         Args:
             region (str): The region name
-            agent_id (str): The agent ID (slug) to delete
+            project_id (str): The project ID (slug) to delete
         """
-        PlatformAPIHandler.delete_project(region, agent_id)
+        PlatformAPIHandler.delete_project(region, project_id)
 
     @staticmethod
     def duplicate_project(
         region: str,
-        agent_id: str,
+        project_id: str,
         new_name: str,
         new_id: str | None = None,
     ) -> dict[str, str]:
@@ -204,7 +204,7 @@ class AgentStudioInterface:
 
         Args:
             region (str): The region name
-            agent_id (str): The agent ID (slug) to duplicate
+            project_id (str): The project ID (slug) to duplicate
             new_name (str): The display name for the new project
             new_id (str | None): Optional slug/ID for the new project.
                 When omitted the platform generates one automatically.
@@ -212,7 +212,7 @@ class AgentStudioInterface:
         Returns:
             dict[str, str]: A dictionary with the new project's 'id' and 'name'
         """
-        return PlatformAPIHandler.duplicate_project(region, agent_id, new_name, new_id)
+        return PlatformAPIHandler.duplicate_project(region, project_id, new_name, new_id)
 
     @staticmethod
     def get_deployments(

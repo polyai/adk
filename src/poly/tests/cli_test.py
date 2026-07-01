@@ -2494,7 +2494,7 @@ class DeleteProjectTest(unittest.TestCase):
     @patch("poly.cli.json_print")
     @patch("poly.cli.AgentStudioInterface")
     def test_json_mode_outputs_success_payload(self, mock_iface_cls, mock_json_print):
-        """delete project --json outputs success JSON with agent_id."""
+        """delete project --json outputs success JSON with project_id."""
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_agents.return_value = {"proj-123": "My Project"}
 
@@ -2507,7 +2507,7 @@ class DeleteProjectTest(unittest.TestCase):
         )
 
         mock_iface.delete_project.assert_called_once_with("us-1", "proj-123")
-        mock_json_print.assert_called_with({"success": True, "agent_id": "proj-123"})
+        mock_json_print.assert_called_with({"success": True, "project_id": "proj-123"})
 
 
 class DuplicateProjectTest(unittest.TestCase):
@@ -2595,7 +2595,7 @@ class DuplicateProjectTest(unittest.TestCase):
     @patch("poly.cli.json_print")
     @patch("poly.cli.AgentStudioInterface")
     def test_json_mode_outputs_success_payload(self, mock_iface_cls, mock_json_print):
-        """duplicate project --json outputs success JSON with agent_id and agent_name."""
+        """duplicate project --json outputs success JSON with project_id and agent_name."""
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_agents.return_value = {"proj-123": "My Project"}
         mock_iface.duplicate_project.return_value = {"id": "proj-dup", "name": "Dup Name"}
@@ -2613,7 +2613,7 @@ class DuplicateProjectTest(unittest.TestCase):
             "us-1", "proj-123", "Dup Name", "proj-dup"
         )
         mock_json_print.assert_called_with(
-            {"success": True, "agent_id": "proj-dup", "agent_name": "Dup Name"}
+            {"success": True, "project_id": "proj-dup", "agent_name": "Dup Name"}
         )
 
 

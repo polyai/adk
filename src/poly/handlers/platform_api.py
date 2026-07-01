@@ -36,8 +36,8 @@ CONVERSATIONS_URL = "/v1/agents/{project_id}/conversations"
 CONVERSATION_URL = "/v1/agents/{project_id}/conversations/{conversation_id}"
 CONVERSATION_AUDIO_URL = "/v1/agents/{project_id}/conversations/{conversation_id}/audio"
 LIST_AGENTS_URL = "/v1/accounts/{account_id}/agents"
-DELETE_AGENT_URL = "/v1/agents/{agent_id}"
-DUPLICATE_AGENT_URL = "/v1/agents/{agent_id}/duplicate"
+DELETE_AGENT_URL = "/v1/agents/{project_id}"
+DUPLICATE_AGENT_URL = "/v1/agents/{project_id}/duplicate"
 TEST_RUNS_URL = "/v1/agents/{project_id}/testing/test-runs"
 TEST_RUN_URL = "/v1/agents/{project_id}/testing/test-runs/{test_run_id}"
 TEST_HISTORY_URL = "/v1/agents/{project_id}/testing/test-history"
@@ -328,20 +328,20 @@ class PlatformAPIHandler:
         return agents
 
     @staticmethod
-    def delete_project(region: str, agent_id: str) -> None:
+    def delete_project(region: str, project_id: str) -> None:
         """Delete a project (agent) via the Agents API.
 
         Args:
             region (str): The region name
-            agent_id (str): The agent ID (slug) to delete
+            project_id (str): The project ID (slug) to delete
         """
-        endpoint = DELETE_AGENT_URL.format(agent_id=agent_id)
+        endpoint = DELETE_AGENT_URL.format(project_id=project_id)
         PlatformAPIHandler.make_request(region, endpoint, "DELETE")
 
     @staticmethod
     def duplicate_project(
         region: str,
-        agent_id: str,
+        project_id: str,
         new_name: str,
         new_id: str | None = None,
     ) -> dict[str, str]:
@@ -349,7 +349,7 @@ class PlatformAPIHandler:
 
         Args:
             region (str): The region name
-            agent_id (str): The agent ID (slug) to duplicate
+            project_id (str): The project ID (slug) to duplicate
             new_name (str): The display name for the new project
             new_id (str | None): Optional slug/ID for the new project.
                 When omitted the platform generates one automatically.
@@ -357,7 +357,7 @@ class PlatformAPIHandler:
         Returns:
             dict[str, str]: A dictionary with the new project's 'id' and 'name'
         """
-        endpoint = DUPLICATE_AGENT_URL.format(agent_id=agent_id)
+        endpoint = DUPLICATE_AGENT_URL.format(project_id=project_id)
         data: dict[str, str] = {"newAgentName": new_name}
         if new_id:
             data["newAgentId"] = new_id

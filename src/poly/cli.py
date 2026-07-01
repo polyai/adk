@@ -2321,7 +2321,7 @@ class AgentStudioCLI:
                     "success": True,
                     "agents": [
                         {
-                            "agent_id": a.get("agentId"),
+                            "project_id": a.get("project_id"),
                             "agent_name": a.get("agentName"),
                             "updated_at": a.get("updatedAt"),
                             "branch_count": a.get("branchCount"),
@@ -2479,7 +2479,7 @@ class AgentStudioCLI:
                 sys.exit(1)
 
         if output_json:
-            json_print({"success": True, "agent_id": project_id})
+            json_print({"success": True, "project_id": project_id})
         else:
             success(f"Deleted project [bold]{display_name}[/bold].")
 
@@ -2643,7 +2643,7 @@ class AgentStudioCLI:
         new_display = result.get("name", new_name)
 
         if output_json:
-            json_print({"success": True, "agent_id": new_id, "agent_name": new_display})
+            json_print({"success": True, "project_id": new_id, "agent_name": new_display})
         else:
             success(
                 f"Duplicated [bold]{display_name}[/bold] → [bold]{new_display}[/bold] ({new_id})"
