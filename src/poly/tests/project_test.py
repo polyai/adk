@@ -628,7 +628,7 @@ class GetDiffsTest(unittest.TestCase):
 
     def test_get_diffs_no_changes(self):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
-        diffs = project.get_diffs(all_files=True)
+        diffs = project.get_diffs()
         self.assertEqual(diffs, {})
 
     def test_get_diffs_new_resource(self):
@@ -636,7 +636,7 @@ class GetDiffsTest(unittest.TestCase):
         # Remove a topic so it seems there's a new one
         project_data["resources"]["topics"].pop("TOPIC-Topic 1")
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
-        diffs = project.get_diffs(all_files=True)
+        diffs = project.get_diffs()
 
         topic_path = os.path.join("topics", "topic_1.yaml")
         self.assertIn(topic_path, diffs)
@@ -661,7 +661,7 @@ class GetDiffsTest(unittest.TestCase):
             "function_type": "global",
         }
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
-        diffs = project.get_diffs(all_files=True)
+        diffs = project.get_diffs()
 
         func_path = os.path.join(TEST_DIR, "functions", "extra_function.py")
         self.assertIn(func_path, diffs)
@@ -678,7 +678,7 @@ class GetDiffsTest(unittest.TestCase):
             'from _gen import *  # <AUTO GENERATED>\n\n@func_description(\'A test function for global use.\')\ndef test_function(conv: Conversation):\n    """A modified test function."""\n    return "Modified return value"\n'
         )
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
-        diffs = project.get_diffs(all_files=True)
+        diffs = project.get_diffs()
 
         func_path = os.path.join("functions", "test_function.py")
         self.assertIn(func_path, diffs)
@@ -705,7 +705,7 @@ class GetDiffsTest(unittest.TestCase):
             "function_type": "global",
         }
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
-        diffs = project.get_diffs(all_files=True)
+        diffs = project.get_diffs()
 
         topic_path = os.path.join("topics", "topic_1.yaml")
         func_path = os.path.join(TEST_DIR, "functions", "extra_function.py")
@@ -738,7 +738,7 @@ class GetDiffsTest(unittest.TestCase):
         }
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         requested_file = os.path.join(TEST_DIR, "topics", "topic_1.yaml")
-        diffs = project.get_diffs(files=[requested_file])
+        diffs = project.get_diffs(file_paths=[requested_file])
 
         # Topic diff
         topic_path = os.path.join("topics", "topic_1.yaml")
@@ -760,7 +760,7 @@ class GetDiffsTest(unittest.TestCase):
         ]
         step["extracted_entities"] = list(reversed(step["extracted_entities"]))
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
-        diffs = project.get_diffs(all_files=True)
+        diffs = project.get_diffs()
 
         step_path = os.path.join(
             "flows", "test_flow_with_punctuation!", "steps", "welcome_step.yaml"
@@ -3145,7 +3145,7 @@ class RevertChangesTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         target = project.all_resources[0].get_path(project.root_path)
 
-        reverted = project.revert_changes(files=[target])
+        reverted = project.revert_changes(file_paths=[target])
 
         self.assertEqual(reverted, [target])
 
@@ -3153,7 +3153,7 @@ class RevertChangesTest(unittest.TestCase):
         """revert_changes with a path that matches no resource returns an empty list."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
-        reverted = project.revert_changes(files=["/nonexistent/path/file.yaml"])
+        reverted = project.revert_changes(file_paths=["/nonexistent/path/file.yaml"])
 
         self.assertEqual(reverted, [])
 
@@ -3254,6 +3254,53 @@ class GetUpdatedSubresourcesTest(unittest.TestCase):
             change_set.updated[TestCaseTags][test_case.resource_id].tags,
             ["booking"],
         )
+
+
+class ResolveTestsTest(unittest.TestCase):
+    """Tests for AgentStudioProject.resolve_tests."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def test_default_returns_all_tests(self):
+        """No filters returns all test cases."""
+        result = self.project.resolve_tests()
+        self.assertEqual(len(result), 2)
+        names = {t.name for t in result}
+        self.assertEqual(names, {"Greeting flow test", "Webchat smoke test"})
+
+    def test_filter_by_single_tag(self):
+        """Filtering by a tag only present on one test returns that test."""
+        result = self.project.resolve_tests(tags=["booking"])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].name, "Greeting flow test")
+
+    def test_filter_by_shared_tag(self):
+        """Filtering by a tag shared across tests returns all matching tests."""
+        result = self.project.resolve_tests(tags=["smoke"])
+        self.assertEqual(len(result), 2)
+
+    def test_filter_by_multiple_tags_is_or(self):
+        """Passing multiple tags matches tests that have any of them."""
+        result = self.project.resolve_tests(tags=["booking", "smoke"])
+        self.assertEqual(len(result), 2)
+
+    def test_filter_by_file_path(self):
+        """Filtering by file_path matches the test with that path."""
+        target = self.project.resolve_tests()[0]
+        result = self.project.resolve_tests(files=[target.file_path])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].resource_id, target.resource_id)
+
+    def test_unmatched_tag_raises(self):
+        """A tag that matches nothing raises ValueError."""
+        with self.assertRaises(ValueError, msg="No tests found"):
+            self.project.resolve_tests(tags=["nonexistent"])
+
+    def test_unmatched_file_raises(self):
+        """A file path that matches nothing raises ValueError."""
+        with self.assertRaises(ValueError, msg="No tests found"):
+            self.project.resolve_tests(files=["no_such_test.yaml"])
 
 
 if __name__ == "__main__":
