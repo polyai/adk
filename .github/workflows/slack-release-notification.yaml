@@ -45,8 +45,8 @@ jobs:
             exit 0
           fi
 
-          # Find the tag immediately before current_tag
-          previous_tag="$(git tag --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' | grep -A1 "^${current_tag}$" | tail -1)"
+          # Find the previous minor/major release (patch == 0)
+          previous_tag="$(git tag --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+\.0$' | grep -A1 "^${current_tag}$" | tail -1)"
           if [ "${previous_tag}" = "${current_tag}" ]; then
             previous_tag=""
           fi
