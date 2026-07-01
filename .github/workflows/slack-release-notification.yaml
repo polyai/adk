@@ -9,10 +9,7 @@ on:
         description: "Tag to simulate release for (e.g. v0.31.0)"
         required: true
         type: string
-  # TODO: Remove before merging — temporary trigger for testing on this branch
-  push:
-    branches:
-      - ci/slack-release-notification
+
 
 permissions:
   contents: read
