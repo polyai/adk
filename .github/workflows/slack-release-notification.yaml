@@ -229,21 +229,7 @@ jobs:
                   elements: [
                     {
                       type: "mrkdwn",
-                      text: "Update with `pip install --upgrade polyai-adk`"
-                    }
-                  ]
-                },
-                {
-                  type: "actions",
-                  elements: [
-                    {
-                      type: "button",
-                      text: {
-                        type: "plain_text",
-                        text: "View Release",
-                        emoji: true
-                      },
-                      url: $release_url
+                      text: ("Update with `pip install --upgrade polyai-adk` | <" + $release_url + "|View Release>")
                     }
                   ]
                 }
