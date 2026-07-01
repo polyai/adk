@@ -101,17 +101,15 @@ jobs:
             pr_list="- No PRs found for this release"
           fi
 
-          # Extract the primary feat title from conventional commits
+          # Extract the primary feat title from conventional commits (keep the prefix)
           feat_title="$(git log "${merge_base}..${CURRENT_TAG}" --pretty=format:'%s' \
             | grep -m1 '^feat' \
-            | sed 's/^feat[^:]*: //' \
             | sed 's/ (#[0-9]*)$//' \
             || true)"
           if [ -z "${feat_title}" ]; then
             feat_title="$(git log "${merge_base}..${CURRENT_TAG}" --pretty=format:'%s' \
               | grep -v '^chore(release)' \
               | head -1 \
-              | sed 's/^[a-z]*[^:]*: //' \
               | sed 's/ (#[0-9]*)$//' \
               || true)"
           fi
@@ -139,35 +137,34 @@ jobs:
           DIFF_STAT: ${{ steps.changes.outputs.diff_stat }}
           RELEASE_BODY: ${{ steps.release-info.outputs.release_body }}
         run: |
-          prompt="You are writing a concise Slack release summary for the PolyAI ADK (Agent Development Kit) CLI tool.
-
-          Current release: ${CURRENT_TAG}
-          Previous release: ${PREVIOUS_TAG}
-          Diff stats: ${DIFF_STAT}
-
-          GitHub release body:
-          ${RELEASE_BODY}
-
-          PRs included:
-          ${PR_LIST}
-
-          Write a 2-3 sentence summary of what changed in this release.
-          Focus on what users care about — new capabilities, important fixes, breaking changes.
-          Be direct and specific, not marketing-speak. Plain text only, no markdown."
+          # Build the prompt via jq to safely handle special characters in release body
+          request_body="$(jq -n \
+            --arg current_tag "${CURRENT_TAG}" \
+            --arg previous_tag "${PREVIOUS_TAG}" \
+            --arg diff_stat "${DIFF_STAT}" \
+            --arg release_body "${RELEASE_BODY}" \
+            --arg pr_list "${PR_LIST}" \
+            '{
+              "model": "claude-sonnet-4-6-20250514",
+              "max_tokens": 300,
+              "messages": [{
+                "role": "user",
+                "content": ("You are writing a concise Slack release summary for the PolyAI ADK (Agent Development Kit) CLI tool.\n\nCurrent release: " + $current_tag + "\nPrevious release: " + $previous_tag + "\nDiff stats: " + $diff_stat + "\n\nGitHub release body:\n" + $release_body + "\n\nPRs included:\n" + $pr_list + "\n\nWrite a 2-3 sentence summary of what changed in this release. Focus on what users care about — new capabilities, important fixes, breaking changes. Be direct and specific, not marketing-speak. Plain text only, no markdown.")
+              }]
+            }')"
 
           response="$(curl -s https://api.anthropic.com/v1/messages \
             -H "content-type: application/json" \
             -H "x-api-key: ${ANTHROPIC_API_KEY}" \
             -H "anthropic-version: 2023-06-01" \
-            -d "$(jq -n \
-              --arg prompt "${prompt}" \
-              '{
-                "model": "claude-sonnet-4-6-20250514",
-                "max_tokens": 300,
-                "messages": [{"role": "user", "content": $prompt}]
-              }')")"
+            -d "${request_body}")"
 
-          summary="$(echo "${response}" | jq -r '.content[0].text // "See the release notes for details."')"
+          summary="$(echo "${response}" | jq -r '.content[0].text // empty')"
+          if [ -z "${summary}" ]; then
+            error_msg="$(echo "${response}" | jq -r '.error.message // "unknown error"')"
+            echo "::warning::Claude API failed: ${error_msg}"
+            summary="See the release notes for details."
+          fi
 
           {
             echo "summary<<EOF"
@@ -228,6 +225,15 @@ jobs:
                   }
                 },
                 {
+                  type: "context",
+                  elements: [
+                    {
+                      type: "mrkdwn",
+                      text: "Update with `pip install --upgrade polyai-adk`"
+                    }
+                  ]
+                },
+                {
                   type: "actions",
                   elements: [
                     {
@@ -238,15 +244,6 @@ jobs:
                         emoji: true
                       },
                       url: $release_url
-                    }
-                  ]
-                },
-                {
-                  type: "context",
-                  elements: [
-                    {
-                      type: "mrkdwn",
-                      text: "Update with `pip install --upgrade polyai-adk`"
                     }
                   ]
                 }
