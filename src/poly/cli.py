@@ -2054,10 +2054,11 @@ class AgentStudioCLI:
 
         choices = [questionary.Choice(title="No template (blank project)", value=None)]
         for t in templates:
-            name = t.get("name", "")
+            display = t.get("name", "")
+            slug = t.get("short_name", display)
             desc = t.get("description", "")
-            title = f"{name} — {desc}" if desc else name
-            choices.append(questionary.Choice(title=title, value=name))
+            title = f"{display} — {desc}" if desc else display
+            choices.append(questionary.Choice(title=title, value=slug))
 
         template_name = questionary.select(
             "Start from a template?",
@@ -2552,13 +2553,14 @@ class AgentStudioCLI:
         cls,
         templates: list[dict],
     ) -> str | None:
-        """Show an interactive template picker. Returns template name or None."""
+        """Show an interactive template picker. Returns the short_name (folder slug)."""
         choices = []
         for t in templates:
-            name = t.get("name", "")
+            display = t.get("name", "")
+            slug = t.get("short_name", display)
             desc = t.get("description", "")
-            title = f"{name} — {desc}" if desc else name
-            choices.append(questionary.Choice(title=title, value=name))
+            title = f"{display} — {desc}" if desc else display
+            choices.append(questionary.Choice(title=title, value=slug))
 
         return questionary.select(
             "Select a template",
@@ -2590,12 +2592,15 @@ class AgentStudioCLI:
 
         info(f"Available templates ({len(templates)}):\n")
         for t in templates:
-            name = t.get("name", "unknown")
+            display = t.get("name", "unknown")
+            slug = t.get("short_name", "")
             desc = t.get("description", "")
+            label = f"  [bold]{display}[/bold]"
+            if slug:
+                label += f" ({slug})"
             if desc:
-                plain(f"  [bold]{name}[/bold] — {desc}")
-            else:
-                plain(f"  [bold]{name}[/bold]")
+                label += f" — {desc}"
+            plain(label)
         plain("")
 
     @staticmethod

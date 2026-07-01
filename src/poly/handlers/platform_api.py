@@ -48,7 +48,7 @@ class PlatformAPIHandler:
         "euw-1": "https://api.eu.poly.ai",
         "uk-1": "https://api.uk.poly.ai",
         "us-1": "https://api.us.poly.ai",
-        "studio": "https://api.studio.poly.ai",
+        "studio": "http://localhost:6464/public_api",
     }
 
     jupiter_region_to_base_url = {
