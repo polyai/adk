@@ -26,6 +26,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          fetch-tags: true
 
       - name: Get release info
         id: release-info
@@ -88,10 +89,9 @@ jobs:
             pr_num="$(echo "${line}" | grep -oP '#\d+' | head -1 | tr -d '#')"
             if [ -n "${pr_num}" ]; then
               repo_url="${{ github.server_url }}/${{ github.repository }}"
-              pr_info="$(gh pr view "${pr_num}" --json number,title,labels,author --jq \
-                --arg repo_url "${repo_url}" \
-                '"- <\($repo_url)/pull/\(.number)|#\(.number)> \(.title) (@\(.author.login))"
-              ' 2>/dev/null || true)"
+              pr_info="$(gh pr view "${pr_num}" --json number,title,author --jq \
+                "\"- <${repo_url}/pull/\(.number)|#\(.number)> \(.title) (@\(.author.login))\"" \
+                2>/dev/null || true)"
               if [ -n "${pr_info}" ]; then
                 pr_list="${pr_list}${pr_info}\n"
               fi
