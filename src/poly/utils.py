@@ -156,32 +156,46 @@ def _read_all_from_stub(source: str) -> list[str] | None:
     return None
 
 
-def _load_file_class_maps() -> dict[str, list[str]]:
+def _load_file_class_maps(
+    pkg: importlib.resources.abc.Traversable | None = None,
+    prefix: str = "",
+) -> dict[str, list[str]]:
     """Discover exported names by reading __all__ from each type file.
 
+    Recurses into subpackages so nested modules like
+    ``integrations/integrations.py`` are included.
+
     Returns:
-        A dictionary mapping filenames (e.g. "conversation.py") to the list of
-        names declared in that module's __all__.
+        A dictionary mapping dotted module paths (e.g.
+        ``"conversation"`` or ``"integrations.integrations"``)
+        to the list of names declared in that module's ``__all__``.
     """
+    if pkg is None:
+        pkg = importlib.resources.files(_TYPES_PACKAGE)
     result: dict[str, list[str]] = {}
-    pkg = importlib.resources.files(_TYPES_PACKAGE)
     for resource in sorted(pkg.iterdir(), key=lambda r: r.name):
         name = resource.name
-        if not name.endswith(".py") or name.startswith("_"):
+        if name == "__pycache__":
+            continue
+        if resource.is_dir():
+            sub_prefix = f"{prefix}{name}." if prefix else f"{name}."
+            result.update(_load_file_class_maps(resource, sub_prefix))
+            continue
+        if not name.endswith(".pyi") or name.startswith("_"):
             continue
         names = _read_all_from_stub(resource.read_text(encoding="utf-8"))
         if names:
-            result[name] = names
+            module_name = name.removesuffix(".pyi")
+            result[f"{prefix}{module_name}"] = names
     return result
 
 
 def _gen_import_statements() -> str:
     """Import statements for _gen/__init__.py using _gen.<module> absolute form."""
     imports = []
-    for file_path, names in _load_file_class_maps().items():
-        module_name = os.path.basename(file_path).replace(".py", "")
+    for dotted_module, names in _load_file_class_maps().items():
         imports.append(
-            f"""from _gen.{module_name} import (
+            f"""from _gen.{dotted_module} import (
     {", ".join(names)}
 )"""
         )
@@ -197,10 +211,10 @@ def create_import_file_contents() -> str:
 
 
 def _copy_types_tree(pkg: importlib.resources.abc.Traversable, dest_dir: str) -> None:
-    """Recursively copy .py stub files from a package into *dest_dir*.
+    """Recursively copy .pyi stub files from a package into *dest_dir*.
 
     Creates subdirectories as needed and rewrites ``runtime.``/``utils.``
-    imports to relative form.
+    imports to relative form.  Files are written as ``.pyi``.
     """
     os.makedirs(dest_dir, exist_ok=True)
     for resource in sorted(pkg.iterdir(), key=lambda r: r.name):
@@ -210,7 +224,7 @@ def _copy_types_tree(pkg: importlib.resources.abc.Traversable, dest_dir: str) ->
         if resource.is_dir():
             _copy_types_tree(resource, os.path.join(dest_dir, name))
             continue
-        if not name.endswith(".py") or (name.startswith("_") and name != "__init__.py"):
+        if not name.endswith(".pyi"):
             continue
         source = _relativize_stub_imports(resource.read_text(encoding="utf-8"))
         with open(os.path.join(dest_dir, name), "w", encoding="utf-8") as f:
@@ -218,13 +232,13 @@ def _copy_types_tree(pkg: importlib.resources.abc.Traversable, dest_dir: str) ->
 
 
 def save_imports(base_path: str) -> None:
-    """Save the _gen package: __init__.py and importable stub .py files."""
+    """Save the _gen package: __init__.py and .pyi stub files."""
     gen_dir = os.path.join(base_path, "_gen")
     os.makedirs(gen_dir, exist_ok=True)
 
-    # Remove stale .pyi files if any exist from a previous generation
+    # Remove stale .py stub files from previous generation (now .pyi)
     for fname in os.listdir(gen_dir):
-        if fname.endswith(".pyi"):
+        if fname.endswith(".py") and fname != "__init__.py" and fname != "decorators.py":
             os.remove(os.path.join(gen_dir, fname))
 
     # Copy type files (including subdirectories) into _gen/

@@ -26,6 +26,11 @@
   },
   {
     "License": "MIT",
+    "Name": "ast_serialize",
+    "URL": "https://github.com/mypyc/ast_serialize"
+  },
+  {
+    "License": "MIT",
     "Name": "attrs",
     "URL": "https://www.attrs.org/en/stable/changelog.html"
   },
@@ -100,6 +105,11 @@
     "URL": "https://github.com/georgkrause/langcodes"
   },
   {
+    "License": "MIT",
+    "Name": "librt",
+    "URL": "https://github.com/mypyc/librt"
+  },
+  {
     "License": "MIT License",
     "Name": "licensecheck",
     "URL": "https://github.com/FHPythonUtils/LicenseCheck"
@@ -120,6 +130,16 @@
     "URL": "https://github.com/executablebooks/mdurl"
   },
   {
+    "License": "MIT",
+    "Name": "mypy",
+    "URL": "https://www.mypy-lang.org/"
+  },
+  {
+    "License": "MIT",
+    "Name": "mypy_extensions",
+    "URL": "https://github.com/python/mypy_extensions"
+  },
+  {
     "License": "BSD License",
     "Name": "nodeenv",
     "URL": "https://github.com/ekalinin/nodeenv"
@@ -128,6 +148,11 @@
     "License": "Apache Software License; BSD License",
     "Name": "packaging",
     "URL": "https://github.com/pypa/packaging"
+  },
+  {
+    "License": "Mozilla Public License 2.0 (MPL 2.0)",
+    "Name": "pathspec",
+    "URL": "https://python-path-specification.readthedocs.io/en/latest/index.html"
   },
   {
     "License": "MIT",
@@ -238,6 +263,11 @@
     "License": "MIT License",
     "Name": "ty",
     "URL": "https://github.com/astral-sh/ty/"
+  },
+  {
+    "License": "PSF-2.0",
+    "Name": "typing_extensions",
+    "URL": "https://github.com/python/typing_extensions"
   },
   {
     "License": "MIT",

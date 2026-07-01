@@ -26,6 +26,10 @@ exclude = [
 "poly.docs" = [
     "*.md",
 ]
+"poly.types" = [
+    "*.pyi",
+    "**/*.pyi",
+]
 
 [tool.ruff]
 target-version = "py312"
@@ -175,6 +179,7 @@ dev = [
     "tomli-w>=1.0.0",
     "pip-licenses>=5.5.1",
     "licensecheck>=2024.3",
+    "mypy>=1.0.0",
 ]
 
 [project.scripts]
