@@ -52,14 +52,15 @@ jobs:
             exit 0
           fi
 
-          # For workflow_dispatch, fetch release body from GitHub
-          if [ -n "${{ inputs.tag }}" ]; then
-            release_body="$(gh release view "${current_tag}" --json body --jq '.body' 2>/dev/null || echo "")"
-            release_url="$(gh release view "${current_tag}" --json url --jq '.url' 2>/dev/null || echo "")"
-          else
+          # Fetch release body — try event payload first, then GitHub API
+          if [ -n "${{ github.event.release.tag_name }}" ]; then
             release_body="${{ github.event.release.body }}"
             release_url="${{ github.event.release.html_url }}"
+          else
+            release_body="$(gh release view "${current_tag}" --json body --jq '.body' 2>/dev/null || echo "")"
+            release_url="$(gh release view "${current_tag}" --json htmlUrl --jq '.htmlUrl' 2>/dev/null || echo "")"
           fi
+          release_url="${release_url:-${{ github.server_url }}/${{ github.repository }}}"
 
           {
             echo "release_body<<EOF"
