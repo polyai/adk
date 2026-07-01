@@ -145,7 +145,7 @@ jobs:
             --arg release_body "${RELEASE_BODY}" \
             --arg pr_list "${PR_LIST}" \
             '{
-              "model": "claude-sonnet-4-6-20250514",
+              "model": "claude-sonnet-4-6",
               "max_tokens": 300,
               "messages": [{
                 "role": "user",
