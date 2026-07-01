@@ -37,6 +37,14 @@ jobs:
           fi
           echo "current_tag=${current_tag}" >> "$GITHUB_OUTPUT"
 
+          # Skip patch releases (only notify on major/minor bumps)
+          patch="$(echo "${current_tag}" | grep -oP '\d+$')"
+          if [ "${patch}" != "0" ]; then
+            echo "Patch release (${current_tag}) — skipping notification"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           # Find the tag immediately before current_tag
           previous_tag="$(git tag --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' | grep -A1 "^${current_tag}$" | tail -1)"
           if [ "${previous_tag}" = "${current_tag}" ]; then
