@@ -883,6 +883,216 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         self.assertIn("booking_ref", str(ctx.exception))
         self.assertIn("unsupported type annotation", str(ctx.exception))
 
+    # -- _swap_latency_control_references tests --
+
+    def _make_variable_mapping(self, resource_id: str, resource_name: str) -> ResourceMapping:
+        """Helper to build a Variable ResourceMapping."""
+        return ResourceMapping(
+            resource_id=resource_id,
+            resource_name=resource_name,
+            resource_type=Variable,
+            file_path=f"variables/{resource_name.lower().replace(' ', '_')}.yaml",
+            resource_prefix="vrbl",
+            flow_name=None,
+        )
+
+    def _make_translation_mapping(self, resource_id: str, resource_name: str) -> ResourceMapping:
+        """Helper to build a Translation ResourceMapping."""
+        return ResourceMapping(
+            resource_id=resource_id,
+            resource_name=resource_name,
+            resource_type=Translation,
+            file_path=f"translations/{resource_name.lower().replace(' ', '_')}.yaml",
+            resource_prefix="tn",
+            flow_name=None,
+        )
+
+    def test_swap_ids_replaced_with_names_in_decorator_message(self):
+        """A variable ID reference in a delay_responses message is swapped to its name."""
+        code = (
+            "from _gen import *  # <AUTO GENERATED>\n\n"
+            "@func_latency_control(delay_responses=[('Hello {{vrbl:var-1}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, resource_utils.replace_resource_ids_with_names
+        )
+
+        self.assertIn("{{vrbl:My Variable}}", result)
+        self.assertNotIn("{{vrbl:var-1}}", result)
+
+    def test_swap_names_replaced_with_ids_in_decorator_message(self):
+        """A variable name reference in a delay_responses message is swapped to its ID."""
+        code = (
+            "@func_latency_control(delay_responses=[('Hello {{vrbl:My Variable}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, resource_utils.replace_resource_names_with_ids
+        )
+
+        self.assertIn("{{vrbl:var-1}}", result)
+        self.assertNotIn("{{vrbl:My Variable}}", result)
+
+    def test_swap_body_references_not_swapped(self):
+        """References inside the function body must NOT be touched."""
+        code = (
+            "@func_latency_control(delay_responses=[('decorator {{vrbl:var-1}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    msg = '{{vrbl:var-1}}'\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, resource_utils.replace_resource_ids_with_names
+        )
+
+        self.assertIn("{{vrbl:My Variable}}", result)
+        body_line = [line for line in result.splitlines() if "msg = " in line][0]
+        self.assertIn("{{vrbl:var-1}}", body_line)
+
+    def test_swap_multiple_delay_responses_all_swapped(self):
+        """Every message in the delay_responses list is processed."""
+        code = (
+            "@func_latency_control(delay_responses=["
+            "('First {{vrbl:var-1}}', 3), "
+            "('Second {{tn:tn-1}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [
+            self._make_variable_mapping("var-1", "My Variable"),
+            self._make_translation_mapping("tn-1", "Greeting"),
+        ]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, resource_utils.replace_resource_ids_with_names
+        )
+
+        self.assertIn("{{vrbl:My Variable}}", result)
+        self.assertIn("{{tn:Greeting}}", result)
+
+    def test_swap_no_decorator_returns_unchanged(self):
+        """Code without @func_latency_control is returned as-is."""
+        code = "def my_func(conv: Conversation):\n    msg = '{{vrbl:var-1}}'\n"
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, resource_utils.replace_resource_ids_with_names
+        )
+
+        self.assertEqual(result, code)
+
+    def test_swap_decorator_without_delay_responses_returns_unchanged(self):
+        """@func_latency_control with no delay_responses keyword is returned as-is."""
+        code = (
+            "@func_latency_control(delay_before_responses_start=3)\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, resource_utils.replace_resource_ids_with_names
+        )
+
+        self.assertEqual(result, code)
+
+    def test_swap_syntax_error_returns_unchanged(self):
+        """Unparseable code is returned as-is without raising."""
+        code = "def broken(:\n"
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, resource_utils.replace_resource_ids_with_names
+        )
+
+        self.assertEqual(result, code)
+
+    def test_swap_no_matching_mapping_leaves_reference_unchanged(self):
+        """References with no corresponding ResourceMapping are left intact."""
+        code = (
+            "@func_latency_control(delay_responses=[('Hello {{vrbl:unknown-id}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, resource_utils.replace_resource_ids_with_names
+        )
+
+        self.assertIn("{{vrbl:unknown-id}}", result)
+
+    def test_swap_async_function_decorator_swapped(self):
+        """References in async function decorators are also swapped."""
+        code = (
+            "@func_latency_control(delay_responses=[('Wait {{vrbl:var-1}}', 2)])\n"
+            "async def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, resource_utils.replace_resource_ids_with_names
+        )
+
+        self.assertIn("{{vrbl:My Variable}}", result)
+        self.assertNotIn("{{vrbl:var-1}}", result)
+
+    def test_swap_empty_mappings_returns_unchanged(self):
+        """An empty mappings list means nothing can match, so code is unchanged."""
+        code = (
+            "@func_latency_control(delay_responses=[('Hello {{vrbl:var-1}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+
+        result = Function._swap_latency_control_references(
+            code, [], resource_utils.replace_resource_ids_with_names
+        )
+
+        self.assertEqual(result, code)
+
+    def test_swap_message_without_references_unchanged(self):
+        """A plain-text delay message with no references passes through unchanged."""
+        code = (
+            "@func_latency_control(delay_responses=[('Please hold', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, resource_utils.replace_resource_ids_with_names
+        )
+
+        self.assertEqual(result, code)
+
+    def test_swap_roundtrip_ids_to_names_and_back(self):
+        """Swapping IDs to names and back yields the original code."""
+        original = (
+            "@func_latency_control(delay_responses=[('Hello {{vrbl:var-1}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        pretty = Function._swap_latency_control_references(
+            original, mappings, resource_utils.replace_resource_ids_with_names
+        )
+        restored = Function._swap_latency_control_references(
+            pretty, mappings, resource_utils.replace_resource_names_with_ids
+        )
+
+        self.assertEqual(restored, original)
+
 
 TEST_TOPIC = Topic(
     resource_id="123",
