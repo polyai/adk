@@ -80,8 +80,7 @@ jobs:
           PREVIOUS_TAG: ${{ steps.release-info.outputs.previous_tag }}
         run: |
           # Get merged PRs between tags
-          merge_base="$(git merge-base "${PREVIOUS_TAG}" "${CURRENT_TAG}")"
-          pr_commits="$(git log "${merge_base}..${CURRENT_TAG}" --oneline --grep='#' --pretty=format:'%s')"
+          pr_commits="$(git log "${PREVIOUS_TAG}..${CURRENT_TAG}" --oneline --grep='#' --pretty=format:'%s')"
 
           # Extract PR numbers and fetch their titles/labels
           pr_list=""
@@ -104,12 +103,12 @@ jobs:
           fi
 
           # Extract the primary feat title from conventional commits (keep the prefix)
-          feat_title="$(git log "${merge_base}..${CURRENT_TAG}" --pretty=format:'%s' \
+          feat_title="$(git log "${PREVIOUS_TAG}..${CURRENT_TAG}" --pretty=format:'%s' \
             | grep -m1 '^feat' \
             | sed 's/ (#[0-9]*)$//' \
             || true)"
           if [ -z "${feat_title}" ]; then
-            feat_title="$(git log "${merge_base}..${CURRENT_TAG}" --pretty=format:'%s' \
+            feat_title="$(git log "${PREVIOUS_TAG}..${CURRENT_TAG}" --pretty=format:'%s' \
               | grep -v '^chore(release)' \
               | head -1 \
               | sed 's/ (#[0-9]*)$//' \
@@ -203,7 +202,7 @@ jobs:
                   type: "header",
                   text: {
                     type: "plain_text",
-                    text: ("ADK Release (" + $tag + ")"),
+                    text: ("ADK Release (" + $tag + ") — " + $title),
                     emoji: true
                   }
                 },
@@ -211,7 +210,7 @@ jobs:
                   type: "section",
                   text: {
                     type: "mrkdwn",
-                    text: ("*" + $title + "*\n" + $summary)
+                    text: $summary
                   }
                 },
                 {
