@@ -88,8 +88,10 @@ jobs:
           while IFS= read -r line; do
             pr_num="$(echo "${line}" | grep -oP '#\d+' | head -1 | tr -d '#')"
             if [ -n "${pr_num}" ]; then
-              pr_info="$(gh pr view "${pr_num}" --json number,title,labels,author --jq '
-                "- #\(.number) \(.title) (@\(.author.login))"
+              repo_url="${{ github.server_url }}/${{ github.repository }}"
+              pr_info="$(gh pr view "${pr_num}" --json number,title,labels,author --jq \
+                --arg repo_url "${repo_url}" \
+                '"- <\($repo_url)/pull/\(.number)|#\(.number)> \(.title) (@\(.author.login))"
               ' 2>/dev/null || true)"
               if [ -n "${pr_info}" ]; then
                 pr_list="${pr_list}${pr_info}\n"
@@ -146,10 +148,10 @@ jobs:
             --arg pr_list "${PR_LIST}" \
             '{
               "model": "claude-sonnet-4-6",
-              "max_tokens": 300,
+              "max_tokens": 600,
               "messages": [{
                 "role": "user",
-                "content": ("You are writing a concise Slack release summary for the PolyAI ADK (Agent Development Kit) CLI tool.\n\nCurrent release: " + $current_tag + "\nPrevious release: " + $previous_tag + "\nDiff stats: " + $diff_stat + "\n\nGitHub release body:\n" + $release_body + "\n\nPRs included:\n" + $pr_list + "\n\nWrite a 2-3 sentence summary of what changed in this release. Focus on what users care about — new capabilities, important fixes, breaking changes. Be direct and specific, not marketing-speak. Plain text only, no markdown.")
+                "content": ("You are writing a Slack release summary for the PolyAI ADK (Agent Development Kit) CLI tool. Use Slack mrkdwn formatting.\n\nDiff stats: " + $diff_stat + "\n\nGitHub release body:\n" + $release_body + "\n\nPRs included:\n" + $pr_list + "\n\nWrite a summary of what changed in this release.\n\nRules:\n- Start with a 1-2 sentence overview of the release\n- If the release adds new CLI commands, list each one with `backtick formatting` and a short description (one line per command). Include key flags.\n- If the release adds new resource types or config options, mention them briefly without listing every field\n- For bug fixes or minor changes, keep it to one sentence\n- Be direct and professional, not marketing-speak or overly casual\n- Use Slack mrkdwn: *bold* for emphasis, `code` for commands/flags, bullet points with •")
               }]
             }')"
 
@@ -180,7 +182,6 @@ jobs:
           TITLE: ${{ steps.changes.outputs.feat_title }}
           SUMMARY: ${{ steps.summary.outputs.summary }}
           PR_LIST: ${{ steps.changes.outputs.pr_list }}
-          RELEASE_URL: ${{ steps.release-info.outputs.release_url }}
         run: |
           # Truncate PR list if too long for Slack
           pr_list_limited="${PR_LIST}"
@@ -195,7 +196,6 @@ jobs:
             --arg title "${TITLE}" \
             --arg summary "${SUMMARY}" \
             --arg pr_list "${pr_list_limited}" \
-            --arg release_url "${RELEASE_URL}" \
             '{
               text: $text,
               blocks: [
@@ -229,7 +229,7 @@ jobs:
                   elements: [
                     {
                       type: "mrkdwn",
-                      text: ("Update with `pip install --upgrade polyai-adk` | <" + $release_url + "|View Release>")
+                      text: "Update with `pip install --upgrade polyai-adk`"
                     }
                   ]
                 }
