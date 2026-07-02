@@ -1,6 +1,101 @@
 # CHANGELOG
 
 
+## v0.31.1 (2026-07-02)
+
+### Bug Fixes
+
+- Allow clearing variant_id on test case update ([#207](https://github.com/polyai/adk/pull/207),
+  [`d27cb34`](https://github.com/polyai/adk/commit/d27cb34441945e3efc9ba62520d01561dd783b7e))
+
+## Summary
+
+Send empty string instead of omitting `variant_id` in the `Update_TestCase` proto when the variant
+  is removed, so the platform can detect the field is being cleared.
+
+## Motivation
+
+When a user removes a variant from a test case and pushes, the `variant_id` field was omitted from
+  the protobuf update command (proto3 optional fields with `None` are not serialized). The platform
+  therefore didn't know to clear the variant, leaving stale data.
+
+## Changes
+
+- Changed `variant_id=self.variant` to `variant_id=self.variant or ""` in
+  `TestCase.build_update_proto()` so the field is always present in the serialized proto
+
+> **Note:** This requires a corresponding platform-side change to accept empty string for
+  `variantId` in the `updateTestCase` Zod validation. Without that, the platform will reject the
+  command with a min-length validation error.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Before (variant_id absent from command): ``` update_test_case { id: "TEST_CASES-d1a4ef69"
+
+name: "Greeting Test"
+
+scenario: "Hello, what can you help me with?"
+
+language: "en-US"
+
+channel: "chat.polyai" } ```
+
+After (variant_id explicitly set to empty): ``` update_test_case { id: "TEST_CASES-d1a4ef69"
+
+variant_id: ""
+
+### Continuous Integration
+
+- Add Slack release notification workflow ([#206](https://github.com/polyai/adk/pull/206),
+  [`1252967`](https://github.com/polyai/adk/commit/12529677502585bb1ff7d260a100b798ad55fb4c))
+
+## Summary
+
+Adds a GitHub Actions workflow that posts a formatted Slack notification on every ADK release, with
+  a Claude-generated summary.
+
+## Motivation
+
+Automate release announcements so the team gets notified in Slack whenever a new version is
+  published, without manual effort.
+
+## Changes
+
+- New workflow `.github/workflows/slack-release-notification.yaml` - Triggers on `release:
+  published` (fired by existing semantic-release workflow) - Collects PRs between previous and
+  current tag - Extracts feat title from conventional commit messages - Calls Claude (Sonnet) to
+  generate a 2-3 sentence summary from the release body - Posts formatted Slack message with title,
+  summary, PR list, and release link - Includes `workflow_dispatch` trigger for testing against
+  existing tags
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+### To test
+
+1. Add `SLACK_WEBHOOK_URL` secret pointing at a test channel 2. Run: `gh workflow run
+  slack-release-notification.yaml -f tag=v0.31.0`
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.31.0 (2026-07-01)
 
 ### Features
