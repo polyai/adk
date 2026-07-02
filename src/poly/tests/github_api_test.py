@@ -6,7 +6,7 @@ Copyright PolyAI Limited
 import unittest
 from unittest.mock import patch
 
-from poly.cli import AgentStudioCLI, _format_gist_choice
+from poly.cli_commands import AgentStudioCLI, _format_gist_choice
 from poly.handlers.github_api_handler import GitHubAPIHandler
 
 

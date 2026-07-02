@@ -8,7 +8,7 @@ import unittest
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
-from poly.cli import AgentStudioCLI
+from poly.cli_commands import AgentStudioCLI
 from poly.tests.project_test import TEST_DIR
 
 
@@ -511,14 +511,14 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
     """Branch merge conflict enrichment, resolution payload, and conflict table layout."""
 
     def test_branch_merge_conflict_file_key(self):
-        from poly.cli import _branch_merge_conflict_file_key
+        from poly.cli_commands import _branch_merge_conflict_file_key
 
         self.assertEqual(_branch_merge_conflict_file_key([]), "")
         self.assertEqual(_branch_merge_conflict_file_key(["a"]), "a")
         self.assertEqual(_branch_merge_conflict_file_key(["a", "b", "c"]), os.path.join("a", "b"))
 
     def test_enrich_branch_merge_conflicts_counts_and_merged_value(self):
-        from poly.cli import enrich_branch_merge_conflicts
+        from poly.cli_commands import enrich_branch_merge_conflicts
 
         conflicts = [
             {
@@ -544,7 +544,7 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
         self.assertFalse(out[1]["can_auto_merge"])
 
     def test_enrich_skips_timestamp_paths_without_merge_metadata(self):
-        from poly.cli import enrich_branch_merge_conflicts
+        from poly.cli_commands import enrich_branch_merge_conflicts
 
         conflicts = [
             {
@@ -558,7 +558,7 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
         self.assertNotIn("merged_value", out[0])
 
     def test_enrich_dict_values_skips_merge_and_marks_not_auto_mergeable(self):
-        from poly.cli import enrich_branch_merge_conflicts
+        from poly.cli_commands import enrich_branch_merge_conflicts
 
         conflicts = [
             {
@@ -574,7 +574,7 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
         self.assertEqual(out[0]["visual_path"], os.path.join("entities", "TOPIC-1", "content"))
 
     def test_enrich_none_base_with_string_theirs_ours_auto_merges(self):
-        from poly.cli import enrich_branch_merge_conflicts
+        from poly.cli_commands import enrich_branch_merge_conflicts
 
         conflicts = [
             {
@@ -589,7 +589,7 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
         self.assertFalse(out[0]["can_auto_merge"])
 
     def test_enrich_numeric_values_skips_merge(self):
-        from poly.cli import enrich_branch_merge_conflicts
+        from poly.cli_commands import enrich_branch_merge_conflicts
 
         conflicts = [
             {
@@ -604,7 +604,7 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
         self.assertFalse(out[0]["can_auto_merge"])
 
     def test_enrich_array_values_skips_merge(self):
-        from poly.cli import enrich_branch_merge_conflicts
+        from poly.cli_commands import enrich_branch_merge_conflicts
 
         conflicts = [
             {
@@ -620,7 +620,7 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
 
     def test_enrich_missing_base_with_string_theirs_ours_auto_merges(self):
         """Add conflicts where baseValue is absent but theirs/ours are strings."""
-        from poly.cli import enrich_branch_merge_conflicts
+        from poly.cli_commands import enrich_branch_merge_conflicts
 
         conflicts = [
             {
@@ -635,7 +635,7 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
 
     def test_enrich_none_base_with_non_string_theirs_ours_skips_merge(self):
         """Delete-vs-update where the surviving values are dicts, not strings."""
-        from poly.cli import enrich_branch_merge_conflicts
+        from poly.cli_commands import enrich_branch_merge_conflicts
 
         conflicts = [
             {
@@ -650,7 +650,7 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
         self.assertFalse(out[0]["can_auto_merge"])
 
     def test_enrich_mixed_string_and_non_string_conflicts(self):
-        from poly.cli import enrich_branch_merge_conflicts
+        from poly.cli_commands import enrich_branch_merge_conflicts
 
         conflicts = [
             {
@@ -678,7 +678,7 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
         self.assertEqual(out[1]["file_key"], fk)
 
     def test_auto_merge_resolution_payload(self):
-        from poly.cli import _auto_merge_resolution
+        from poly.cli_commands import _auto_merge_resolution
 
         path = ["topics", "actions"]
         r = _auto_merge_resolution(path, "line1\nline2\n")

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import requests
 
-from poly.cli import AgentStudioCLI
+from poly.cli_commands import AgentStudioCLI
 from poly.tests.project_test import TEST_DIR
 
 
