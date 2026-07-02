@@ -1,6 +1,53 @@
 # CHANGELOG
 
 
+## v0.31.3 (2026-07-02)
+
+### Bug Fixes
+
+- Exclude deleted attributes from new variant create commands
+  ([#205](https://github.com/polyai/adk/pull/205),
+  [`7b965d3`](https://github.com/polyai/adk/commit/7b965d30e6ae43c201cf3d68b08b5e82c3eec8b6))
+
+## Summary
+
+When creating a new variant in the same push as deleting an attribute, the variant's create proto
+  incorrectly included the deleted attribute ID with an empty value, causing the server to reject
+  the batch.
+
+## Motivation
+
+`poly push` fails with `ZodValidationError: All attributes must have a value at "attributeValues"`
+  when a variant is created in the same batch as an attribute deletion. The `variant_create_variant`
+  command references the attribute being deleted because `attribute_ids` was populated from the full
+  current state without filtering out deleted attributes.
+
+## Changes
+
+- Filter deleted attribute IDs from `attribute_ids` when building new variant create protos in
+  `_clean_resources_before_push` - Add test covering the scenario
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly push`)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Before fix: ``` ERROR:poly.handlers.sync_client:Failed to send commands: Error: {'name':
+  'ZodValidationError', 'message': '[command 2: variantCreateVariant "Variant 1"
+  (VARIANTS-ac00f938)] Validation error: All attributes must have a value at "attributeValues"',
+  'details': [{'code': 'custom', 'message': 'All attributes must have a value', 'path':
+  ['attributeValues']}]} ```
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.31.2 (2026-07-02)
 
 ### Bug Fixes
