@@ -6,12 +6,13 @@ Copyright PolyAI Limited
 import unittest
 from unittest.mock import patch
 
-from poly.cli_commands import AgentStudioCLI, _format_gist_choice
+from poly.cli_commands.review import ReviewCommand
+from poly.cli_commands.shared import format_gist_choice
 from poly.handlers.github_api_handler import GitHubAPIHandler
 
 
 class FormatGistChoiceTest(unittest.TestCase):
-    """Tests for the _format_gist_choice module-level helper."""
+    """Tests for the format_gist_choice module-level helper."""
 
     def test_formats_date_short_id_and_description(self):
         """All three parts are joined with double-space separators."""
@@ -22,7 +23,7 @@ class FormatGistChoiceTest(unittest.TestCase):
             "html_url": "https://gist.github.com/abc1234567890",
         }
 
-        result = _format_gist_choice(gist)
+        result = format_gist_choice(gist)
 
         self.assertEqual(result, "2026-03-25  abc1234  my-project: local → remote")
 
@@ -34,7 +35,7 @@ class FormatGistChoiceTest(unittest.TestCase):
             "created_at": "2026-01-01T00:00:00Z",
         }
 
-        result = _format_gist_choice(gist)
+        result = format_gist_choice(gist)
 
         self.assertIn("deadbee", result)
         self.assertNotIn("deadbeef", result)
@@ -46,7 +47,7 @@ class FormatGistChoiceTest(unittest.TestCase):
             "description": "some description",
         }
 
-        result = _format_gist_choice(gist)
+        result = format_gist_choice(gist)
 
         self.assertEqual(result, "abc1234  some description")
 
@@ -58,7 +59,7 @@ class FormatGistChoiceTest(unittest.TestCase):
             "created_at": "",
         }
 
-        result = _format_gist_choice(gist)
+        result = format_gist_choice(gist)
 
         self.assertEqual(result, "abc1234  desc")
 
@@ -70,7 +71,7 @@ class FormatGistChoiceTest(unittest.TestCase):
             "created_at": "2026-03-25T10:30:00Z",
         }
 
-        result = _format_gist_choice(gist)
+        result = format_gist_choice(gist)
 
         self.assertEqual(result, "2026-03-25  abc1234")
 
@@ -175,7 +176,7 @@ class ListDiffGistsTest(unittest.TestCase):
 
 
 class DeleteGistsTest(unittest.TestCase):
-    """Tests for AgentStudioCLI.delete_gists interactive deletion flow."""
+    """Tests for ReviewCommand.delete_gists interactive deletion flow."""
 
     SAMPLE_GISTS = [
         {
@@ -192,105 +193,105 @@ class DeleteGistsTest(unittest.TestCase):
         },
     ]
 
-    @patch("poly.cli.GitHubAPIHandler.list_diff_gists", return_value=[])
-    @patch("poly.cli.plain")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists", return_value=[])
+    @patch("poly.cli_commands.review.plain")
     def test_no_gists_found_prints_message(self, mock_plain, mock_list):
         """When no review gists exist, a 'no gists found' message is displayed."""
-        AgentStudioCLI.delete_gists()
+        ReviewCommand.delete_gists()
 
         mock_plain.assert_called_once()
         self.assertIn("No review gists found", mock_plain.call_args[0][0])
 
-    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
-    @patch("poly.cli.questionary")
-    @patch("poly.cli.warning")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli_commands.review.questionary")
+    @patch("poly.cli_commands.review.warning")
     def test_user_selects_none_shows_warning(self, mock_warning, mock_q, mock_list):
         """When user cancels or selects nothing, a warning is shown and no deletions occur."""
         mock_list.return_value = self.SAMPLE_GISTS
         mock_q.checkbox.return_value.ask.return_value = []
 
-        AgentStudioCLI.delete_gists()
+        ReviewCommand.delete_gists()
 
         mock_warning.assert_called_once()
         self.assertIn("No gists selected", mock_warning.call_args[0][0])
 
-    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
-    @patch("poly.cli.GitHubAPIHandler.delete_gist")
-    @patch("poly.cli.questionary")
-    @patch("poly.cli.success")
-    @patch("poly.cli.plain")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.delete_gist")
+    @patch("poly.cli_commands.review.questionary")
+    @patch("poly.cli_commands.review.success")
+    @patch("poly.cli_commands.review.plain")
     def test_user_selects_and_deletes_gists(
         self, mock_plain, mock_success, mock_q, mock_delete, mock_list
     ):
         """Selected gists are deleted and a success message reports the count."""
         mock_list.return_value = self.SAMPLE_GISTS
         # Simulate user selecting the first gist
-        first_choice = _format_gist_choice(self.SAMPLE_GISTS[0])
+        first_choice = format_gist_choice(self.SAMPLE_GISTS[0])
         mock_q.checkbox.return_value.ask.return_value = [first_choice]
 
-        AgentStudioCLI.delete_gists()
+        ReviewCommand.delete_gists()
 
         mock_delete.assert_called_once_with("aaa1111111")
         mock_success.assert_called_once()
         self.assertIn("1 gist(s)", mock_success.call_args[0][0])
 
-    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
-    @patch("poly.cli.GitHubAPIHandler.delete_gist")
-    @patch("poly.cli.questionary")
-    @patch("poly.cli.success")
-    @patch("poly.cli.plain")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.delete_gist")
+    @patch("poly.cli_commands.review.questionary")
+    @patch("poly.cli_commands.review.success")
+    @patch("poly.cli_commands.review.plain")
     def test_deleting_multiple_gists(
         self, mock_plain, mock_success, mock_q, mock_delete, mock_list
     ):
         """Selecting multiple gists deletes each and reports total count."""
         mock_list.return_value = self.SAMPLE_GISTS
-        choices = [_format_gist_choice(g) for g in self.SAMPLE_GISTS]
+        choices = [format_gist_choice(g) for g in self.SAMPLE_GISTS]
         mock_q.checkbox.return_value.ask.return_value = choices
 
-        AgentStudioCLI.delete_gists()
+        ReviewCommand.delete_gists()
 
         self.assertEqual(mock_delete.call_count, 2)
         self.assertIn("2 gist(s)", mock_success.call_args[0][0])
 
-    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
-    @patch("poly.cli.GitHubAPIHandler.delete_gist")
-    @patch("poly.cli.success")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.delete_gist")
+    @patch("poly.cli_commands.review.success")
     def test_direct_gist_id_skips_interactive_prompt(self, mock_success, mock_delete, mock_list):
         """Passing a full gist_id deletes it directly without showing a checkbox prompt."""
         mock_list.return_value = self.SAMPLE_GISTS
 
-        AgentStudioCLI.delete_gists(gist_id="aaa1111111")
+        ReviewCommand.delete_gists(gist_id="aaa1111111")
 
         mock_delete.assert_called_once_with("aaa1111111")
         mock_success.assert_called_once()
 
-    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
-    @patch("poly.cli.GitHubAPIHandler.delete_gist")
-    @patch("poly.cli.success")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.delete_gist")
+    @patch("poly.cli_commands.review.success")
     def test_short_gist_id_prefix_matches(self, mock_success, mock_delete, mock_list):
         """Passing the first 7 characters of a gist ID resolves and deletes the full gist."""
         mock_list.return_value = self.SAMPLE_GISTS
 
-        AgentStudioCLI.delete_gists(gist_id="aaa1111")
+        ReviewCommand.delete_gists(gist_id="aaa1111")
 
         mock_delete.assert_called_once_with("aaa1111111")
         mock_success.assert_called_once()
 
-    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
-    @patch("poly.cli.GitHubAPIHandler.delete_gist")
-    @patch("poly.cli.error")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.delete_gist")
+    @patch("poly.cli_commands.review.error")
     def test_unmatched_gist_id_shows_error(self, mock_error, mock_delete, mock_list):
         """An ID that doesn't match any review gist shows an error and does not delete."""
         mock_list.return_value = self.SAMPLE_GISTS
 
-        AgentStudioCLI.delete_gists(gist_id="zzz9999")
+        ReviewCommand.delete_gists(gist_id="zzz9999")
 
         mock_delete.assert_not_called()
         mock_error.assert_called_once()
 
-    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
-    @patch("poly.cli.GitHubAPIHandler.delete_gist")
-    @patch("poly.cli.error")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.delete_gist")
+    @patch("poly.cli_commands.review.error")
     def test_full_id_sharing_prefix_does_not_match_wrong_gist(
         self, mock_error, mock_delete, mock_list
     ):
@@ -299,40 +300,40 @@ class DeleteGistsTest(unittest.TestCase):
         mock_list.return_value = self.SAMPLE_GISTS  # contains "aaa1111111"
 
         # "aaa1111xyz" shares the "aaa1111" prefix but is not a valid ID
-        AgentStudioCLI.delete_gists(gist_id="aaa1111xyz")
+        ReviewCommand.delete_gists(gist_id="aaa1111xyz")
 
         mock_delete.assert_not_called()
         mock_error.assert_called_once()
 
-    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
-    @patch("poly.cli.GitHubAPIHandler.delete_gist")
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.delete_gist")
+    @patch("poly.cli_commands.review.json_print")
     def test_direct_gist_id_with_json_output(self, mock_json_print, mock_delete, mock_list):
         """With output_json=True and a gist_id, result is printed as JSON."""
         mock_list.return_value = self.SAMPLE_GISTS
 
-        AgentStudioCLI.delete_gists(gist_id="aaa1111111", output_json=True)
+        ReviewCommand.delete_gists(gist_id="aaa1111111", output_json=True)
 
         mock_delete.assert_called_once_with("aaa1111111")
         mock_json_print.assert_called_once_with({"success": True})
 
-    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
-    @patch("poly.cli.GitHubAPIHandler.delete_gist")
-    @patch("poly.cli.questionary")
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.delete_gist")
+    @patch("poly.cli_commands.review.questionary")
+    @patch("poly.cli_commands.review.json_print")
     def test_json_output_prints_success(self, mock_json_print, mock_q, mock_delete, mock_list):
         """With output_json=True, a success JSON object is printed after deletion."""
         mock_list.return_value = self.SAMPLE_GISTS
-        first_choice = _format_gist_choice(self.SAMPLE_GISTS[0])
+        first_choice = format_gist_choice(self.SAMPLE_GISTS[0])
         mock_q.checkbox.return_value.ask.return_value = [first_choice]
 
-        AgentStudioCLI.delete_gists(output_json=True)
+        ReviewCommand.delete_gists(output_json=True)
 
         mock_json_print.assert_called_once_with({"success": True})
 
 
 class ListGistsTest(unittest.TestCase):
-    """Tests for AgentStudioCLI.list_gists interactive selection flow."""
+    """Tests for ReviewCommand.list_gists interactive selection flow."""
 
     SAMPLE_GISTS = [
         {
@@ -343,55 +344,58 @@ class ListGistsTest(unittest.TestCase):
         },
     ]
 
-    @patch("poly.cli.GitHubAPIHandler.list_diff_gists", return_value=[])
-    @patch("poly.cli.plain")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists", return_value=[])
+    @patch("poly.cli_commands.review.plain")
     def test_no_gists_found_prints_message(self, mock_plain, mock_list):
         """When no review gists exist, a 'no gists found' message is displayed."""
-        AgentStudioCLI.list_gists()
+        ReviewCommand.list_gists()
 
         mock_plain.assert_called_once()
         self.assertIn("No review gists found", mock_plain.call_args[0][0])
 
-    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
-    @patch("poly.cli.questionary")
-    @patch("poly.cli.webbrowser")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli_commands.review.questionary")
+    @patch("poly.cli_commands.review.webbrowser")
     def test_user_selects_gist_opens_browser(self, mock_browser, mock_q, mock_list):
         """Selecting a gist opens its html_url in the browser."""
         mock_list.return_value = self.SAMPLE_GISTS
-        choice_label = _format_gist_choice(self.SAMPLE_GISTS[0])
+        choice_label = format_gist_choice(self.SAMPLE_GISTS[0])
         mock_q.select.return_value.ask.return_value = choice_label
 
-        AgentStudioCLI.list_gists()
+        ReviewCommand.list_gists()
 
         mock_browser.open.assert_called_once_with("https://gist.github.com/aaa1111111")
 
-    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
-    @patch("poly.cli.questionary")
-    @patch("poly.cli.webbrowser")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli_commands.review.questionary")
+    @patch("poly.cli_commands.review.webbrowser")
     def test_user_cancels_selection_does_not_open_browser(self, mock_browser, mock_q, mock_list):
         """When user cancels the selection prompt, no browser is opened."""
         mock_list.return_value = self.SAMPLE_GISTS
         mock_q.select.return_value.ask.return_value = None
 
-        AgentStudioCLI.list_gists()
+        ReviewCommand.list_gists()
 
         mock_browser.open.assert_not_called()
 
-    @patch("poly.cli.GitHubAPIHandler.list_diff_gists")
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
+    @patch("poly.cli_commands.review.json_print")
     def test_json_output_prints_gist_list(self, mock_json_print, mock_list):
         """With output_json=True, gists are printed as JSON without an interactive prompt."""
         mock_list.return_value = self.SAMPLE_GISTS
 
-        AgentStudioCLI.list_gists(output_json=True)
+        ReviewCommand.list_gists(output_json=True)
 
         mock_json_print.assert_called_once_with(self.SAMPLE_GISTS)
 
-    @patch("poly.cli.GitHubAPIHandler.list_diff_gists", side_effect=OSError("disk error"))
-    @patch("poly.cli.json_print")
+    @patch(
+        "poly.cli_commands.review.GitHubAPIHandler.list_diff_gists",
+        side_effect=OSError("disk error"),
+    )
+    @patch("poly.cli_commands.review.json_print")
     def test_json_output_on_error_prints_failure(self, mock_json_print, _mock_list):
         """With output_json=True, an API/OS error prints {success: false, message: ...}."""
-        AgentStudioCLI.list_gists(output_json=True)
+        ReviewCommand.list_gists(output_json=True)
 
         mock_json_print.assert_called_once()
         result = mock_json_print.call_args[0][0]
@@ -400,29 +404,35 @@ class ListGistsTest(unittest.TestCase):
 
 
 class ReviewDescriptionTest(unittest.TestCase):
-    """Tests for AgentStudioCLI.review gist description formatting."""
+    """Tests for ReviewCommand.review gist description formatting."""
 
-    @patch("poly.cli.GitHubAPIHandler.create_gist", return_value="https://gist.github.com/xyz")
-    @patch("poly.cli.AgentStudioCLI._compute_diff", return_value={"file": "+line"})
-    @patch("poly.cli.success")
+    @patch(
+        "poly.cli_commands.review.GitHubAPIHandler.create_gist",
+        return_value="https://gist.github.com/xyz",
+    )
+    @patch("poly.cli_commands.review.compute_diff", return_value={"file": "+line"})
+    @patch("poly.cli_commands.review.success")
     def test_local_to_remote_description_includes_project_name(
         self, mock_success, mock_review, mock_create
     ):
         """Local-to-remote review uses 'project_name: local -> remote' description."""
-        AgentStudioCLI.review(base_path="/some/my-project")
+        ReviewCommand.review(base_path="/some/my-project")
 
         description = mock_create.call_args[1]["description"]
         self.assertIn("my-project", description)
         self.assertIn("local → remote", description)
 
-    @patch("poly.cli.GitHubAPIHandler.create_gist", return_value="https://gist.github.com/xyz")
-    @patch("poly.cli.AgentStudioCLI._compute_diff", return_value={"file": "+line"})
-    @patch("poly.cli.success")
+    @patch(
+        "poly.cli_commands.review.GitHubAPIHandler.create_gist",
+        return_value="https://gist.github.com/xyz",
+    )
+    @patch("poly.cli_commands.review.compute_diff", return_value={"file": "+line"})
+    @patch("poly.cli_commands.review.success")
     def test_branch_comparison_description_includes_branch_names(
         self, mock_success, mock_review, mock_create
     ):
         """Branch-to-branch review uses 'project_name: before -> after' description."""
-        AgentStudioCLI.review(
+        ReviewCommand.review(
             base_path="/some/my-project",
             before="main",
             after="dev",
@@ -432,40 +442,46 @@ class ReviewDescriptionTest(unittest.TestCase):
         self.assertIn("my-project", description)
         self.assertIn("main → dev", description)
 
-    @patch("poly.cli.GitHubAPIHandler.create_gist")
-    @patch("poly.cli.AgentStudioCLI._compute_diff", return_value={})
+    @patch("poly.cli_commands.review.GitHubAPIHandler.create_gist")
+    @patch("poly.cli_commands.review.compute_diff", return_value={})
     def test_empty_diff_does_not_create_gist(self, mock_review, mock_create):
         """When _compute_diff returns an empty dict, no gist is created."""
-        AgentStudioCLI.review(base_path="/some/my-project")
+        ReviewCommand.review(base_path="/some/my-project")
 
         mock_create.assert_not_called()
 
-    @patch("poly.cli.GitHubAPIHandler.create_gist", return_value="https://gist.github.com/xyz")
-    @patch("poly.cli.AgentStudioCLI._compute_diff", return_value={"file": "+line"})
-    @patch("poly.cli.success")
+    @patch(
+        "poly.cli_commands.review.GitHubAPIHandler.create_gist",
+        return_value="https://gist.github.com/xyz",
+    )
+    @patch("poly.cli_commands.review.compute_diff", return_value={"file": "+line"})
+    @patch("poly.cli_commands.review.success")
     def test_gist_created_as_private(self, mock_success, mock_review, mock_create):
         """Review gists are always created as private (public=False)."""
-        AgentStudioCLI.review(base_path="/some/my-project")
+        ReviewCommand.review(base_path="/some/my-project")
 
         self.assertFalse(mock_create.call_args[1]["public"])
 
-    @patch("poly.cli.GitHubAPIHandler.create_gist", return_value="https://gist.github.com/xyz")
-    @patch("poly.cli.AgentStudioCLI._compute_diff", return_value={"file": "+line"})
-    @patch("poly.cli.json_print")
+    @patch(
+        "poly.cli_commands.review.GitHubAPIHandler.create_gist",
+        return_value="https://gist.github.com/xyz",
+    )
+    @patch("poly.cli_commands.review.compute_diff", return_value={"file": "+line"})
+    @patch("poly.cli_commands.review.json_print")
     def test_json_output_prints_success_and_link(self, mock_json_print, mock_review, mock_create):
         """With output_json=True, a successful review prints {success: true, link: url}."""
-        AgentStudioCLI.review(base_path="/some/my-project", output_json=True)
+        ReviewCommand.review(base_path="/some/my-project", output_json=True)
 
         mock_json_print.assert_called_once_with(
             {"success": True, "link": "https://gist.github.com/xyz"}
         )
 
-    @patch("poly.cli.GitHubAPIHandler.create_gist")
-    @patch("poly.cli.AgentStudioCLI._compute_diff", return_value={})
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.review.GitHubAPIHandler.create_gist")
+    @patch("poly.cli_commands.review.compute_diff", return_value={})
+    @patch("poly.cli_commands.review.json_print")
     def test_json_output_empty_diff_prints_failure(self, mock_json_print, mock_review, mock_create):
         """With output_json=True, an empty diff prints {success: false, message: ...}."""
-        AgentStudioCLI.review(base_path="/some/my-project", output_json=True)
+        ReviewCommand.review(base_path="/some/my-project", output_json=True)
 
         mock_json_print.assert_called_once()
         result = mock_json_print.call_args[0][0]
