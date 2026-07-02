@@ -453,7 +453,7 @@ class TestCase(YamlResource):
             id=self.resource_id,
             name=self.name,
             scenario=self.scenario,
-            variant_id=self.variant,
+            variant_id=self.variant or "",
             language=self.language,
             channel=self.channel,
         )
