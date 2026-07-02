@@ -1,6 +1,25 @@
 # CHANGELOG
 
 
+## v0.31.2 (2026-07-02)
+
+### Bug Fixes
+
+- Add missing X-Poly-Source header to send_command_batch
+  ([#208](https://github.com/polyai/adk/pull/208),
+  [`0e44d04`](https://github.com/polyai/adk/commit/0e44d04f777315d755e08b1a8be458b6603f5791))
+
+## Summary - `send_command_batch` builds its own headers dict for the protobuf POST request but was
+  missing the `X-Poly-Source: adk` header that every other request includes via the default session
+  headers (line 60 of `sdk.py`). - Adds the missing header to the dict at `sdk.py:567`.
+
+## Test plan - [x] Run `uv run pytest src/poly/tests/ -v` to confirm no regressions
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.31.1 (2026-07-02)
 
 ### Bug Fixes
