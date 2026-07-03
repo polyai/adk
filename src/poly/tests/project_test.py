@@ -208,7 +208,7 @@ class SerializationRoundTripTest(unittest.TestCase):
         self.assertEqual(restored.name, "test")
         self.assertEqual(restored.path, "test.md")
         self.assertEqual(restored.contents, "hello world\n")
-        self.assertEqual(restored.file_path, "context/test.md")
+        self.assertEqual(restored.file_path, os.path.join("context", "test.md"))
         self.assertEqual(restored.compute_hash(), doc.compute_hash())
 
     def test_flow_step_round_trip_excludes_sub_resource_internals(self):
