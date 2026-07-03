@@ -1,6 +1,64 @@
 # CHANGELOG
 
 
+## v0.32.0 (2026-07-03)
+
+### Features
+
+- Expose projection-to-projection diffing (diff_projections)
+  ([#210](https://github.com/polyai/adk/pull/210),
+  [`e174d95`](https://github.com/polyai/adk/commit/e174d9555acb7124a49518bdca88e63c84745d3e))
+
+## Summary
+
+Adds `diff_projections(before_projection, after_projection)` — semantic per-file diffing of two
+  sourcerer projections with no API calls — by extracting the diff core of
+  `diff_remote_named_versions` into a reusable `diff_resource_maps`.
+
+## Motivation
+
+The deployed adk_service (poly_core) is stateless: callers (Glot) fetch projections from sourcerer
+  with their own session auth and post them in the request body. To give Glot a branch-vs-main
+  `branch_diff` tool with the same semantic, pretty-rendered diffs as `poly diff --before main
+  --after <branch>`, adk_service needs a `/diff` endpoint following the `/pull`/`/push` pattern
+  (PolyAI-LDN/poly_core#43520) — which needs this projection-based entry point.
+
+## Changes
+
+- `Project.diff_resource_maps(before, after)` — the by-path map building, combined resource
+  mappings, `to_pretty` rendering and per-file `get_diff` previously inlined in
+  `diff_remote_named_versions`. - `Project.diff_projections(before_projection, after_projection)` —
+  builds both resource maps via `SyncClientHandler.load_resources_from_projection` and delegates to
+  `diff_resource_maps`. Empty projections are valid. - `diff_remote_named_versions` delegates to the
+  extracted core; behavior unchanged (same fetch, same error handling, same no-differences logging).
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New `DiffProjectionsTest` covers modified / added+deleted / identical / empty-projection cases. Also
+  verified end-to-end: installed this branch into a local adk_service and curled the new `/diff`
+  endpoint — correct unified diffs for modified + added resources.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+``` $ curl -s -X POST localhost:8199/diff -d '{"before_projection": …, "after_projection": …}' {
+  "diffs": { "topics/opening_hours.yaml": "--- original\n+++ updated\n@@ -1,5 +1,5 @@\n name:
+  Opening Hours\n ...\n-content: We open at 9am\n+content: We open at 8am\n ...",
+  "topics/refunds.yaml": "--- original\n+++ updated\n@@ -0,0 +1,5 @@\n+name: Refunds\n+..." } } ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+
 ## v0.31.3 (2026-07-02)
 
 ### Bug Fixes
