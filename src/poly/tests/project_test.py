@@ -18,6 +18,7 @@ from poly.resources import (
     ChatGreeting,
     ChatSafetyFilters,
     ChatStylePrompt,
+    Document,
     Entity,
     ExperimentalConfig,
     FlowConfig,
@@ -196,6 +197,20 @@ class SerializationRoundTripTest(unittest.TestCase):
         self.assertEqual(restored.name, "Test Flow")
         self.assertEqual(restored.start_step, "step-1")
 
+    def test_document_round_trip(self):
+        """Document serializes and deserializes via status dict correctly."""
+        doc = Document(
+            resource_id="test.md", name="test", path="test.md", contents="hello world\n"
+        )
+        serialized = resource_utils.resource_to_dict(doc)
+        restored = Document(**serialized)
+        self.assertEqual(restored.resource_id, "test.md")
+        self.assertEqual(restored.name, "test")
+        self.assertEqual(restored.path, "test.md")
+        self.assertEqual(restored.contents, "hello world\n")
+        self.assertEqual(restored.file_path, "context/test.md")
+        self.assertEqual(restored.compute_hash(), doc.compute_hash())
+
     def test_flow_step_round_trip_excludes_sub_resource_internals(self):
         """ASRBiasing/DTMFConfig set 'name' and 'resource_id' internally,
         but these are not __init__ params. They must be excluded from
@@ -371,6 +386,15 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
                 os.path.join(
                     TEST_DIR, "config", "translations.yaml", "translations", "farewell"
                 ),
+            ],
+        )
+
+        # Find Documents
+        self.assertEqual(len(local_resources[Document]), 1)
+        self.assertCountEqual(
+            local_resources[Document],
+            [
+                os.path.join(TEST_DIR, "context", "test_document.md"),
             ],
         )
 
