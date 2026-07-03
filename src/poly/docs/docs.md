@@ -133,5 +133,5 @@ Resource-specific documentation is available via `poly docs {resource} [resource
 - [Safety Filters](safety_filters.md) - content moderation settings (violence, hate, sexual, self-harm)
 - [Languages](languages.md) - default and additional language configuration
 - [Translations](translations.md) - localized text strings per language
-- [Documents](documents.md) - context files for agent knowledge
+- [Context](context.md) - context files for agent knowledge
 - [Experimental Config](experimental_config.md) - feature flags
