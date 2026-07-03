@@ -22,6 +22,7 @@ import poly.utils as utils
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
+from poly.handlers.sync_client import SyncClientHandler
 from poly.migration_utils import (
     MigrationFlag,
     get_all_migration_flags,
@@ -1982,6 +1983,32 @@ class AgentStudioProject:
             )
             return None
 
+        diffs = self.diff_resource_maps(before_resources, after_resources)
+        if diffs is None:
+            logger.info(
+                f"No differences detected between names '{before_name}' and '{after_name}'."
+            )
+        return diffs
+
+    def diff_projections(
+        self, before_projection: dict[str, Any], after_projection: dict[str, Any]
+    ) -> Optional[dict[str, str]]:
+        """Compute diffs between two sourcerer projections without any API calls.
+
+        Empty projections are valid (e.g. diffing a branch against an empty main).
+        """
+        before_resources = SyncClientHandler.load_resources_from_projection(before_projection)
+        after_resources = SyncClientHandler.load_resources_from_projection(after_projection)
+        return self.diff_resource_maps(before_resources, after_resources)
+
+    def diff_resource_maps(
+        self, before_resources: ResourceMap, after_resources: ResourceMap
+    ) -> Optional[dict[str, str]]:
+        """Compute per-file diffs between two in-memory resource maps.
+
+        Returns a mapping of file path to unified diff, or None when the two
+        states render identically.
+        """
         before_resources_by_path: dict[tuple[ResourceType, str], Resource] = {}
         for resource_type, resources_dict in before_resources.items():
             for resource_id, resource in resources_dict.items():
@@ -2028,9 +2055,6 @@ class AgentStudioProject:
                 diffs[after_resource.file_path] = resource_utils.get_diff("", after_pretty)
 
         if not diffs:
-            logger.info(
-                f"No differences detected between names '{before_name}' and '{after_name}'."
-            )
             return None
 
         return diffs
