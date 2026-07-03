@@ -624,6 +624,73 @@ class ProjectStatusTest(unittest.TestCase):
         self.assertEqual(deleted_files, [os.path.join(TEST_DIR, "functions", "extra_function.py")])
 
 
+class DiffProjectionsTest(unittest.TestCase):
+    """Tests for the diff_projections method"""
+
+    @staticmethod
+    def _projection(topics: dict[str, tuple[str, str]]) -> dict:
+        return {
+            "knowledgeBase": {
+                "topics": {
+                    "entities": {
+                        topic_id: {
+                            "name": name,
+                            "actions": "",
+                            "content": content,
+                            "exampleQueries": [],
+                            "isActive": True,
+                        }
+                        for topic_id, (name, content) in topics.items()
+                    }
+                }
+            }
+        }
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+
+    def test_identical_projections_return_none(self):
+        projection = self._projection({"TOPIC-1": ("Opening Hours", "We open at 9am")})
+        self.assertIsNone(self.project.diff_projections(projection, deepcopy(projection)))
+
+    def test_modified_resource(self):
+        before = self._projection({"TOPIC-1": ("Opening Hours", "We open at 9am")})
+        after = self._projection({"TOPIC-1": ("Opening Hours", "We open at 8am")})
+        diffs = self.project.diff_projections(before, after)
+
+        topic_path = os.path.join("topics", "opening_hours.yaml")
+        self.assertEqual(list(diffs.keys()), [topic_path])
+        self.assertIn("-content: We open at 9am", diffs[topic_path])
+        self.assertIn("+content: We open at 8am", diffs[topic_path])
+
+    def test_added_and_deleted_resources(self):
+        before = self._projection(
+            {
+                "TOPIC-1": ("Opening Hours", "We open at 9am"),
+                "TOPIC-2": ("Parking", "Free parking on site"),
+            }
+        )
+        after = self._projection(
+            {
+                "TOPIC-1": ("Opening Hours", "We open at 9am"),
+                "TOPIC-3": ("Refunds", "Refunds within 30 days"),
+            }
+        )
+        diffs = self.project.diff_projections(before, after)
+
+        parking_path = os.path.join("topics", "parking.yaml")
+        refunds_path = os.path.join("topics", "refunds.yaml")
+        self.assertEqual(sorted(diffs.keys()), [parking_path, refunds_path])
+        self.assertIn("-content: Free parking on site", diffs[parking_path])
+        self.assertIn("+content: Refunds within 30 days", diffs[refunds_path])
+
+    def test_empty_projections(self):
+        after = self._projection({"TOPIC-1": ("Opening Hours", "We open at 9am")})
+        diffs = self.project.diff_projections({}, after)
+        self.assertIn(os.path.join("topics", "opening_hours.yaml"), diffs)
+        self.assertIsNone(self.project.diff_projections({}, {}))
+
+
 class GetDiffsTest(unittest.TestCase):
     """Tests for the get_diffs method"""
 
