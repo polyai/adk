@@ -69,6 +69,7 @@ from poly.resources import (
     VoiceGreeting,
     VoiceSafetyFilters,
     VoiceStylePrompt,
+    Document,
 )
 from poly.resources.resource import _parse_multi_resource_path
 from poly.utils import compute_variable_references
@@ -114,6 +115,7 @@ RESOURCE_NAME_TO_CLASS: dict[str, type[Resource]] = {
     "translations": Translation,
     "default_language": DefaultLanguage,
     "additional_languages": AdditionalLanguage,
+    "documents": Document,
 }
 
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
@@ -2231,6 +2233,9 @@ class AgentStudioProject:
                         resource_utils.get_flow_name_from_path(file_path),
                     )
                     resource_id = self.generate_uuid(resource_type)
+                    if resource_type == Document:
+                        resource_id = os.path.basename(file_path)
+
                     if resource_type == FlowStep:
                         flow_step: FlowStep = self.read_local_resource(
                             ResourceMapping(
