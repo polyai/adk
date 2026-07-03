@@ -38,6 +38,8 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 ├── chat/                               # Chat channel settings
 │   ├── configuration.yaml              # Greeting, style prompt
 │   └── safety_filters.yaml             # Optional
+├── context/                            # Optional - document context files
+│   └── {document_name}.md
 ├── flows/                              # Optional - flow definitions
 │   └── {flow_name}/
 │       ├── flow_config.yaml
@@ -131,4 +133,5 @@ Resource-specific documentation is available via `poly docs {resource} [resource
 - [Safety Filters](safety_filters.md) - content moderation settings (violence, hate, sexual, self-harm)
 - [Languages](languages.md) - default and additional language configuration
 - [Translations](translations.md) - localized text strings per language
+- [Documents](documents.md) - context files for agent knowledge
 - [Experimental Config](experimental_config.md) - feature flags
