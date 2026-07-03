@@ -504,6 +504,47 @@ class AgentStudioProject:
             self._not_loaded_resources = []
         self.save_config()
 
+    def fetch_project(
+        self,
+        branch_name: Optional[str] = None,
+        projection_json: Optional[dict[str, Any]] = None,
+    ) -> tuple[dict[str, list["Resource"]], dict[str, Any]]:
+        """Fetch the latest remote state without writing resource files to disk.
+
+        Like ``load_project``, this updates the in-memory resources and the
+        status file but does **not** touch the working-tree YAML/Python files.
+
+        Args:
+            branch_name: If provided, switch the API context to this branch
+                before fetching.  Raises ``ValueError`` if the branch does not
+                exist.
+            projection_json: If set, build resources from this projection dict
+                instead of fetching from the API.
+
+        Returns:
+            A tuple of (resources, projection).
+        """
+        if branch_name is not None:
+            branches = self.api_handler.get_branches()
+            if branch_name not in branches:
+                raise ValueError(f"Branch '{branch_name}' does not exist.")
+            branch_id = branches[branch_name]
+            self.branch_id = branch_id
+            self.api_handler.switch_branch(branch_id)
+
+        resources, projection = self.api_handler.pull_resources(projection_json=projection_json)
+        self._check_no_duplicate_resource_paths(resources)
+
+        self.resources = resources
+        self.file_structure_info = self.compute_file_structure_info(resources)
+        self._not_loaded_resources = []
+
+        if projection_json is None:
+            self.branch_id = self.api_handler.branch_id
+
+        self.save_config()
+        return resources, projection
+
     def pull_project(
         self,
         force: bool = False,

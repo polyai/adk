@@ -561,6 +561,41 @@ class AgentStudioCLI:
             default=False,
         )
 
+        # FETCH
+        fetch_parser = subparsers.add_parser(
+            "fetch",
+            parents=[verbose_parent, json_parent, debug_parent],
+            help="Fetch the latest project state from Agent Studio without modifying local files.",
+            description="Fetch the latest project state from Agent Studio without modifying local resource files.\n\nLike 'git fetch', this updates the tracked remote state but does not change your working files.\nUse --branch to switch to a different branch before fetching.\n\nExamples:\n  poly fetch\n  poly fetch --branch my-feature",
+            formatter_class=RawTextHelpFormatter,
+        )
+        fetch_parser.add_argument(
+            "--path",
+            type=str,
+            default=os.getcwd(),
+            help="Base path to the project. Defaults to current working directory.",
+        )
+        fetch_parser.add_argument(
+            "--branch",
+            "-b",
+            type=str,
+            default=None,
+            help="Switch to this branch before fetching. Errors if the branch does not exist.",
+        )
+        fetch_parser.add_argument(
+            "--from-projection",
+            type=str,
+            metavar="JSON|-",
+            help=SUPPRESS,
+            default=None,
+        )
+        fetch_parser.add_argument(
+            "--output-json-projection",
+            action="store_true",
+            help=SUPPRESS,
+            default=False,
+        )
+
         # PUSH
         push_parser = subparsers.add_parser(
             "push",
@@ -1679,6 +1714,15 @@ class AgentStudioCLI:
                         new_project_id=args.new_project_id,
                         output_json=args.json,
                     )
+
+            elif args.command == "fetch":
+                cls.fetch(
+                    args.path,
+                    args.branch,
+                    args.from_projection,
+                    output_json=args.json,
+                    output_json_projection=args.output_json_projection,
+                )
 
             elif args.command == "pull":
                 cls.pull(
@@ -2845,6 +2889,44 @@ class AgentStudioCLI:
             info(
                 f'Change your working directory to your project\'s directory to continue. "cd {project.root_path}"'
             )
+
+    @classmethod
+    def fetch(
+        cls,
+        base_path: str,
+        branch_name: Optional[str] = None,
+        from_projection: Optional[str] = None,
+        output_json: bool = False,
+        output_json_projection: bool = False,
+    ) -> None:
+        """Fetch the latest project state from Agent Studio without modifying local files."""
+        project = cls._load_project(base_path, output_json=output_json)
+        if not output_json:
+            info(f"Fetching project [bold]{project.account_id}/{project.project_id}[/bold]...")
+
+        projection_json = cls._parse_from_projection_json(
+            from_projection,
+            json_errors=output_json or output_json_projection,
+        )
+
+        resources, projection = project.fetch_project(
+            branch_name=branch_name,
+            projection_json=projection_json,
+        )
+
+        if output_json or output_json_projection:
+            json_output: dict[str, Any] = {"success": True}
+            if branch_name:
+                json_output["branch_name"] = branch_name
+                json_output["branch_id"] = project.branch_id
+            if output_json_projection:
+                json_output["projection"] = projection
+            json_print(json_output)
+            return
+
+        if branch_name:
+            info(f"Switched to branch '{branch_name}'.")
+        success(f"Fetched {project.account_id}/{project.project_id}")
 
     @classmethod
     def pull(
