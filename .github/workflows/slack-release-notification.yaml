@@ -29,9 +29,14 @@ jobs:
         id: release-info
         env:
           GH_TOKEN: ${{ github.token }}
+          EVENT_TAG: ${{ github.event.release.tag_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT_RELEASE_BODY: ${{ github.event.release.body }}
+          EVENT_RELEASE_URL: ${{ github.event.release.html_url }}
+          FALLBACK_URL: ${{ github.server_url }}/${{ github.repository }}
         run: |
           # Resolve tag: release event > manual input > latest tag (for push trigger testing)
-          current_tag="${{ github.event.release.tag_name || inputs.tag }}"
+          current_tag="${EVENT_TAG:-${INPUT_TAG}}"
           if [ -z "${current_tag}" ]; then
             current_tag="$(git tag --sort=-v:refname | grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
           fi
@@ -59,14 +64,14 @@ jobs:
           fi
 
           # Fetch release body — try event payload first, then GitHub API
-          if [ -n "${{ github.event.release.tag_name }}" ]; then
-            release_body="${{ github.event.release.body }}"
-            release_url="${{ github.event.release.html_url }}"
+          if [ -n "${EVENT_TAG}" ]; then
+            release_body="${EVENT_RELEASE_BODY}"
+            release_url="${EVENT_RELEASE_URL}"
           else
             release_body="$(gh release view "${current_tag}" --json body --jq '.body' 2>/dev/null || echo "")"
             release_url="$(gh release view "${current_tag}" --json htmlUrl --jq '.htmlUrl' 2>/dev/null || echo "")"
           fi
-          release_url="${release_url:-${{ github.server_url }}/${{ github.repository }}}"
+          release_url="${release_url:-${FALLBACK_URL}}"
 
           {
             echo "release_body<<EOF"
@@ -84,6 +89,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CURRENT_TAG: ${{ steps.release-info.outputs.current_tag }}
           PREVIOUS_TAG: ${{ steps.release-info.outputs.previous_tag }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
         run: |
           # Get merged PRs between tags
           pr_commits="$(git log "${PREVIOUS_TAG}..${CURRENT_TAG}" --oneline --grep='#' --pretty=format:'%s')"
@@ -93,7 +99,7 @@ jobs:
           while IFS= read -r line; do
             pr_num="$(echo "${line}" | grep -oP '#\d+' | head -1 | tr -d '#')"
             if [ -n "${pr_num}" ]; then
-              repo_url="${{ github.server_url }}/${{ github.repository }}"
+              repo_url="${REPO_URL}"
               pr_info="$(gh pr view "${pr_num}" --json number,title,author --jq \
                 "\"- <${repo_url}/pull/\(.number)|#\(.number)> \(.title) (@\(.author.login))\"" \
                 2>/dev/null || true)"
