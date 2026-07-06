@@ -34,6 +34,16 @@ exclude = [
     "src/poly/handlers/protobuf/",
 ]
 
+[tool.ruff.lint]
+# Ruff defaults (pycodestyle errors + pyflakes) plus import sorting
+select = [
+    "E4",
+    "E7",
+    "E9",
+    "F",
+    "I",
+]
+
 [tool.ruff.format]
 exclude = [
     "src/poly/tests/**.py",
