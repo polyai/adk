@@ -1391,7 +1391,9 @@ class AgentStudioProject:
         prepush.enable_webchat_channel(
             new_resources,
             pre_push_updated_resources,
-            queue_command=self.api_handler.queue_command,
+            # Lazy lambda: only touch the api_handler property (which saves config
+            # as a side effect) if a webchat command is actually queued
+            queue_command=lambda command: self.api_handler.queue_command(command),
         )
         prepush.fix_orphaned_variables(
             state,

@@ -840,7 +840,15 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
     """Tests for the _clean_resources_before_push method"""
 
     def setUp(self):
+        # Mock the api_handler property: accessing it saves the project config as a
+        # side effect, which would write _gen/.agent_studio_config into the fixture
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
         self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def tearDown(self):
+        patch.stopall()
 
     def test_clean_resources_before_push_groups_steps_and_functions(self):
         # Create a flow config with steps and functions
