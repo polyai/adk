@@ -3440,7 +3440,7 @@ class FetchProjectTest(unittest.TestCase):
         patch.stopall()
 
     def test_fetch_without_branch_updates_resources_and_returns_them(self):
-        """fetch_project() without a branch fetches remote state and returns resources."""
+        """fetch_project() without a branch fetches remote state and returns projection."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         expected_resources = deepcopy(project.resources)
         expected_projection = {"some": "projection"}
@@ -3450,9 +3450,8 @@ class FetchProjectTest(unittest.TestCase):
         )
         self.mock_api_handler.branch_id = "remote-branch-id"
 
-        resources, projection = project.fetch_project()
+        projection = project.fetch_project()
 
-        self.assertEqual(resources, expected_resources)
         self.assertEqual(projection, expected_projection)
         self.assertEqual(project.resources, expected_resources)
         self.assertEqual(project._not_loaded_resources, [])

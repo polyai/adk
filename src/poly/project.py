@@ -483,10 +483,11 @@ class AgentStudioProject:
         self,
         preserve_not_loaded_resources: bool = False,
         projection_json: Optional[dict[str, Any]] = None,
-    ) -> None:
-        """Load the current state of project on Agent Studio into memory
+    ) -> tuple[dict[str, list["Resource"]], dict[str, Any]]:
+        """Load the current state of project on Agent Studio into memory.
 
-        This is used when no current resources are loaded.
+        Pulls resources from the API (or a projection dict), updates in-memory
+        state and the status file, but does **not** touch working-tree files.
 
         Args:
             preserve_not_loaded_resources: If True, retain the current
@@ -494,25 +495,32 @@ class AgentStudioProject:
                 for comparison without affecting local state).
             projection_json: If set, build resources from this projection dict
                 instead of fetching from the API (same shape as a sourcerer projection).
+
+        Returns:
+            A tuple of (resources dict, projection dict).
         """
-        resources, _ = self.api_handler.pull_resources(projection_json=projection_json)
+        resources, projection = self.api_handler.pull_resources(projection_json=projection_json)
         self._check_no_duplicate_resource_paths(resources)
 
         self.resources = resources
         self.file_structure_info = self.compute_file_structure_info(resources)
         if not preserve_not_loaded_resources:
             self._not_loaded_resources = []
+
+        if projection_json is None:
+            self.branch_id = self.api_handler.branch_id
+
         self.save_config()
+        return resources, projection
 
     def fetch_project(
         self,
         branch_name: Optional[str] = None,
         projection_json: Optional[dict[str, Any]] = None,
-    ) -> tuple[dict[str, list["Resource"]], dict[str, Any]]:
-        """Fetch the latest remote state without writing resource files to disk.
+    ) -> dict[str, Any]:
+        """Fetch the latest remote state, optionally switching branch first.
 
-        Like ``load_project``, this updates the in-memory resources and the
-        status file but does **not** touch the working-tree YAML/Python files.
+        Handles branch switching then delegates to ``load_project``.
 
         Args:
             branch_name: If provided, switch the API context to this branch
@@ -522,7 +530,7 @@ class AgentStudioProject:
                 instead of fetching from the API.
 
         Returns:
-            A tuple of (resources, projection).
+            The projection dict.
         """
         if branch_name is not None:
             branches = self.api_handler.get_branches()
@@ -532,18 +540,8 @@ class AgentStudioProject:
             self.branch_id = branch_id
             self.api_handler.switch_branch(branch_id)
 
-        resources, projection = self.api_handler.pull_resources(projection_json=projection_json)
-        self._check_no_duplicate_resource_paths(resources)
-
-        self.resources = resources
-        self.file_structure_info = self.compute_file_structure_info(resources)
-        self._not_loaded_resources = []
-
-        if projection_json is None:
-            self.branch_id = self.api_handler.branch_id
-
-        self.save_config()
-        return resources, projection
+        _, projection = self.load_project(projection_json=projection_json)
+        return projection
 
     def pull_project(
         self,
