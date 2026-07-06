@@ -16,7 +16,104 @@ from poly.cli_commands.shared import compute_diff, load_project, parse_from_proj
 from poly.handlers.interface import AgentStudioInterface
 from poly.output.json_output import commands_to_dicts, json_print
 
+from typing import Any, Optional
+
 logger = logging.getLogger(__name__)
+
+
+class FetchCommand(BaseCommand):
+    """Fetch the latest project configuration from Agent Studio without applying it."""
+
+    command = "fetch"
+
+    @classmethod
+    def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
+        """Register the ``fetch`` subcommand."""
+        fetch_parser = subparsers.add_parser(
+            "fetch",
+            parents=[parents.verbose, parents.json, parents.debug],
+            help="Fetch the latest project state from Agent Studio without modifying local files.",
+            description="Fetch the latest project state from Agent Studio without modifying local resource files.\n\nLike 'git fetch', this updates the tracked remote state but does not change your working files.\nUse --branch to switch to a different branch before fetching.\n\nExamples:\n  poly fetch\n  poly fetch --branch my-feature",
+            formatter_class=RawTextHelpFormatter,
+        )
+        fetch_parser.add_argument(
+            "--path",
+            type=str,
+            default=os.getcwd(),
+            help="Base path to the project. Defaults to current working directory.",
+        )
+        fetch_parser.add_argument(
+            "--branch",
+            "-b",
+            type=str,
+            default=None,
+            help="Switch to this branch before fetching. Errors if the branch does not exist.",
+        )
+        fetch_parser.add_argument(
+            "--from-projection",
+            type=str,
+            metavar="JSON|-",
+            help=SUPPRESS,
+            default=None,
+        )
+        fetch_parser.add_argument(
+            "--output-json-projection",
+            action="store_true",
+            help=SUPPRESS,
+            default=False,
+        )
+
+    @classmethod
+    def run(cls, args: Namespace) -> None:
+        """Execute the fetch command."""
+        cls.fetch(
+            args.path,
+            args.branch,
+            args.from_projection,
+            output_json=args.json,
+            output_json_projection=args.output_json_projection,
+        )
+
+    @classmethod
+    def fetch(
+        cls,
+        base_path: str,
+        branch_name: Optional[str] = None,
+        from_projection: Optional[str] = None,
+        output_json: bool = False,
+        output_json_projection: bool = False,
+    ) -> None:
+        """Fetch the latest project state from Agent Studio without modifying local files."""
+
+        from poly.output.console import info, success
+
+        project = load_project(base_path, output_json=output_json)
+        if not output_json:
+            info(f"Fetching project [bold]{project.account_id}/{project.project_id}[/bold]...")
+
+        projection_json = parse_from_projection_json(
+            from_projection,
+            json_errors=output_json or output_json_projection,
+        )
+
+        projection = project.fetch_project(
+            branch_name=branch_name,
+            projection_json=projection_json,
+        )
+
+        if output_json or output_json_projection:
+            json_output: dict[str, Any] = {"success": True}
+            if branch_name:
+                json_output["branch_name"] = branch_name
+                json_output["branch_id"] = project.branch_id
+            if output_json_projection:
+                json_output["projection"] = projection
+            json_print(json_output)
+            return
+
+        if branch_name:
+            info(f"Switched to branch '{branch_name}'.")
+        success(f"Fetched {project.account_id}/{project.project_id}")
 
 
 class PullCommand(BaseCommand):
