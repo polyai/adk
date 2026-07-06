@@ -1,6 +1,94 @@
 # CHANGELOG
 
 
+## v0.32.1 (2026-07-06)
+
+### Bug Fixes
+
+- Prevent shell injection from release body in Slack notification workflow
+  ([#212](https://github.com/polyai/adk/pull/212),
+  [`336f4ff`](https://github.com/polyai/adk/commit/336f4ff09f1a05349bccd165318d6b618be4cd81))
+
+## Summary
+
+Moves `${{ }}` GitHub Actions expressions out of inline bash `run:` blocks and into `env:` variables
+  to prevent the release body from being interpreted as shell commands.
+
+## Motivation
+
+The v0.32.0 release triggered ~20 bash parse errors in the Slack notification workflow because the
+  release body contained backticks, parentheses, and angle brackets that bash interpreted as command
+  substitutions, subshells, and redirections.
+
+## Changes
+
+- Move `github.event.release.body`, `github.event.release.tag_name`,
+  `github.event.release.html_url`, `inputs.tag`, and repo URL expressions into `env:` block
+  variables - Reference them as `${ENV_VAR}` in the script instead of inline `${{ }}` interpolation
+
+## Test strategy
+
+- [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Refactoring
+
+- Split CLI into per-command-family modules ([#209](https://github.com/polyai/adk/pull/209),
+  [`832d294`](https://github.com/polyai/adk/commit/832d29440c3936234880904d65d02ba8323a51a0))
+
+## Summary
+
+Splits the monolithic `cli.py` (~5,760 lines) into a `cli_commands/` package with one module per
+  command family, each implementing a `BaseCommand` contract (`add_arguments` + `run`).
+
+## Motivation
+
+`cli.py` had grown to nearly 6K lines with ~60 command handlers in a single class, making it hard to
+  navigate, review, and maintain. The split gives each command family its own file with clear
+  boundaries.
+
+## Changes
+
+- **New `cli_commands/` package** with 12 modules: - `base.py` — `BaseCommand` ABC + `Parents`
+  dataclass - `shared.py` — generic utilities (`load_project`, `read_project_config`,
+  `compute_diff`, `parse_from_projection_json`, `format_gist_choice`) - `sync.py` — Pull, Push,
+  Status, Revert, Diff, Format, Validate commands - `branch.py` — Branch
+  list/create/switch/current/delete/merge + merge helpers - `deployments.py` — Deployments
+  list/show/promote/rollback + nested AB-test commands - `project.py` — Project
+  list/create/delete/duplicate, Init, Studio commands - `auth.py` — Start, Login commands -
+  `chat.py` — Chat command + chat loop helpers - `conversations.py` — Conversations
+  list/get/get-audio - `review.py` — Review create/list/delete (GitHub Gist) - `testing.py` — Test
+  run/show/list - `utils.py` — Docs, Completion commands - **`cli.py` reduced to ~130 lines** —
+  orchestrator with `COMMANDS` list, parser construction, and dispatch - **Tests updated** — all
+  patch targets point at the actual command modules (~275 sites across 3 test files) -
+  **De-duplicated** `_resolve_included_deployments` (was defined twice identically)
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+All 766 tests pass. `poly --help` shows all 20 commands with identical parser trees. Nested
+  subcommands (`branch`, `deployments ab-test`, `project`, `review`, `test`) verified via `--help`.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
 ## v0.32.0 (2026-07-03)
 
 ### Features
