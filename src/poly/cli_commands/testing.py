@@ -8,16 +8,6 @@ from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParser
 
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
-from poly.output.console import (
-    error,
-    info,
-    plain,
-    poll_test_run_live,
-    print_test_detail,
-    print_test_run_list,
-    print_test_run_summary,
-    success,
-)
 from poly.output.json_output import json_print
 
 
@@ -170,6 +160,8 @@ class TestingCommand(BaseCommand):
         dry_run: bool = False,
     ) -> None:
         """Run tests for the project."""
+        from poly.output.console import error, info, plain, poll_test_run_live, success
+
         project = load_project(base_path)
 
         json_output = {}
@@ -260,6 +252,8 @@ class TestingCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """List test runs."""
+        from poly.output.console import print_test_run_list
+
         project = load_project(base_path)
         result = project.list_test_runs(limit=limit, offset=offset)
 
@@ -278,6 +272,8 @@ class TestingCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Show test run results, optionally for a specific test case."""
+        from poly.output.console import error, print_test_detail, print_test_run_summary
+
         project = load_project(base_path)
         result = project.get_test_run(run_id)
 

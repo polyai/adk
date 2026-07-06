@@ -8,21 +8,8 @@ import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from typing import Any, Optional
 
-import questionary
-
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
-from poly.output.console import (
-    error,
-    info,
-    plain,
-    print_ab_test_detail,
-    print_ab_tests,
-    print_deployment_show,
-    print_deployments,
-    success,
-    warning,
-)
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
 
@@ -513,6 +500,8 @@ class DeploymentsCommand(BaseCommand):
             output_json: If True, print result as JSON instead of rich text.
             details: If True, print full metadata for each deployment.
         """
+        from poly.output.console import error, print_deployments
+
         project = load_project(base_path)
         versions, active_deployment_hashes = project.get_deployments(client_env=environment)
 
@@ -566,6 +555,8 @@ class DeploymentsCommand(BaseCommand):
             environment: Environment to query (sandbox, pre-release, live).
             output_json: If True, emit machine-readable JSON.
         """
+        from poly.output.console import error, print_deployment_show
+
         project = load_project(base_path, output_json=output_json)
         env_versions, active_deployment_hashes = project.get_deployments(client_env=environment)
 
@@ -640,6 +631,10 @@ class DeploymentsCommand(BaseCommand):
             output_json: If True, print result as JSON instead of rich text.
             dry_run: If True, show what would be promoted without actually promoting.
         """
+        import questionary
+
+        from poly.output.console import error, plain, print_deployments, success, warning
+
         project = load_project(base_path, output_json=output_json)
 
         result: dict = {"success": False, "to_env": to_env}
@@ -753,6 +748,10 @@ class DeploymentsCommand(BaseCommand):
         dry_run: bool = False,
     ) -> None:
         """Rollback sandbox/main to a previous deployment."""
+        import questionary
+
+        from poly.output.console import error, plain, print_deployments, success, warning
+
         project = load_project(base_path, output_json=output_json)
 
         versions, active_deployment_hashes = project.get_deployments("sandbox")
@@ -841,6 +840,10 @@ class DeploymentsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Start a new A/B test."""
+        import questionary
+
+        from poly.output.console import error, print_ab_test_detail, success, warning
+
         project = load_project(base_path, output_json=output_json)
 
         # -- name --
@@ -969,6 +972,8 @@ class DeploymentsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """List A/B tests for the project."""
+        from poly.output.console import print_ab_tests
+
         project = load_project(base_path, output_json=output_json)
         ab_tests = project.list_ab_tests(limit=limit)
         if output_json:
@@ -984,6 +989,8 @@ class DeploymentsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Show the currently active A/B test."""
+        from poly.output.console import print_ab_test_detail
+
         project = load_project(base_path, output_json=output_json)
         ab_test = project.get_active_ab_test()
         if output_json:
@@ -1000,6 +1007,10 @@ class DeploymentsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Update traffic percentage for the active A/B test."""
+        import questionary
+
+        from poly.output.console import error, info, print_ab_test_detail, success, warning
+
         project = load_project(base_path, output_json=output_json)
 
         ab_test = project.get_active_ab_test()
@@ -1061,6 +1072,10 @@ class DeploymentsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """End the active A/B test and choose the winning deployment."""
+        import questionary
+
+        from poly.output.console import error, info, success, warning
+
         project = load_project(base_path, output_json=output_json)
 
         ab_test = project.get_active_ab_test()

@@ -31,7 +31,6 @@ from poly.cli_commands.sync import (
 )
 from poly.cli_commands.testing import TestingCommand
 from poly.cli_commands.utils import CompletionCommand, DocsCommand
-from poly.output.console import handle_exception, plain, set_verbose
 from poly.output.json_output import json_print
 
 logger = logging.getLogger(__name__)
@@ -158,14 +157,20 @@ class AgentStudioCLI:
             else:
                 args = parser.parse_args()
 
+            from poly.output.console import set_verbose
+
             set_verbose(getattr(args, "verbose", False))
             self._run_command(args)
         except SystemExit:
             raise
         except KeyboardInterrupt:
+            from poly.output.console import plain
+
             plain("\nAborted.")
             sys.exit(130)
         except Exception as e:
+            from poly.output.console import handle_exception
+
             handle_exception(e)
 
 

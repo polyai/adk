@@ -55,8 +55,8 @@ class ABTestStartTest(unittest.TestCase):
 
     # -- Happy path --
 
-    @patch("poly.cli_commands.deployments.success")
-    @patch("poly.cli_commands.deployments.print_ab_test_detail")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.print_ab_test_detail")
     def test_start__success_rich_output(self, mock_detail, mock_success):
         """Successful start prints success and detail in rich mode."""
         DeploymentsCommand.ab_test_start(
@@ -97,28 +97,32 @@ class ABTestStartTest(unittest.TestCase):
 
     # -- Interactive prompts --
 
-    @patch("poly.cli_commands.deployments.questionary")
-    @patch("poly.cli_commands.deployments.success")
-    @patch("poly.cli_commands.deployments.print_ab_test_detail")
-    def test_start__interactive_name_and_traffic(self, mock_detail, mock_success, mock_q):
+    @patch("questionary.text")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.print_ab_test_detail")
+    def test_start__interactive_name_and_traffic(self, mock_detail, mock_success, mock_text):
         """When name and traffic are None, prompts interactively with defaults."""
-        mock_q.text.return_value.ask.side_effect = ["my test", "50"]
+        mock_text.return_value.ask.side_effect = ["my test", "50"]
 
         DeploymentsCommand.ab_test_start(
             TEST_DIR, name=None, variant_version="variant111", traffic_percentage=None
         )
 
-        self.assertEqual(mock_q.text.call_count, 2)
-        name_call = mock_q.text.call_args_list[0]
+        self.assertEqual(mock_text.call_count, 2)
+        name_call = mock_text.call_args_list[0]
         self.assertIn("name", name_call[0][0].lower())
-        traffic_call = mock_q.text.call_args_list[1]
+        traffic_call = mock_text.call_args_list[1]
         self.assertEqual(traffic_call[1]["default"], "50")
         self.proj.create_ab_test.assert_called_once_with("my test", "dep-v", 50)
 
-    @patch("poly.cli_commands.deployments.questionary")
-    @patch("poly.cli_commands.deployments.success")
-    @patch("poly.cli_commands.deployments.print_ab_test_detail")
-    def test_start__interactive_variant_picker(self, mock_detail, mock_success, mock_q):
+    @patch("questionary.select")
+    @patch("questionary.Choice")
+    @patch("questionary.text")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.print_ab_test_detail")
+    def test_start__interactive_variant_picker(
+        self, mock_detail, mock_success, mock_text, mock_choice, mock_select
+    ):
         """When variant is None, fetches pre-release deployments and prompts."""
         self.proj.get_deployments.return_value = (
             [
@@ -130,21 +134,21 @@ class ABTestStartTest(unittest.TestCase):
             ],
             {"live": "live000000"},
         )
-        mock_q.text.return_value.ask.return_value = "50"
-        mock_q.Choice = MagicMock(side_effect=lambda **kw: kw)
-        mock_q.select.return_value.ask.return_value = "dep-pr-1"
+        mock_text.return_value.ask.return_value = "50"
+        mock_choice.side_effect = lambda **kw: kw
+        mock_select.return_value.ask.return_value = "dep-pr-1"
 
         DeploymentsCommand.ab_test_start(
             TEST_DIR, name="test", variant_version=None, traffic_percentage=None
         )
 
         self.proj.get_deployments.assert_any_call(client_env="pre-release")
-        mock_q.select.assert_called_once()
+        mock_select.assert_called_once()
         self.proj.create_ab_test.assert_called_once_with("test", "dep-pr-1", 50)
 
     # -- Version validation --
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_start__variant_same_version_as_live_exits(self, mock_error):
         """Explicit variant with same version_hash as live exits with error."""
         self.proj.get_deployments.return_value = (
@@ -182,7 +186,7 @@ class ABTestStartTest(unittest.TestCase):
         payload = mock_json.call_args[0][0]
         self.assertIn("same version", payload["error"])
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_start__interactive_filters_same_version_deployments(self, mock_error):
         """Interactive picker excludes pre-release deployments matching live version."""
         self.proj.get_deployments.return_value = (
@@ -246,11 +250,11 @@ class ABTestStartTest(unittest.TestCase):
         payload = mock_json.call_args[0][0]
         self.assertIn("--traffic", payload["error"])
 
-    @patch("poly.cli_commands.deployments.questionary")
-    @patch("poly.cli_commands.deployments.error")
-    def test_start__interactive_traffic_not_a_number(self, mock_error, mock_q):
+    @patch("questionary.text")
+    @patch("poly.output.console.error")
+    def test_start__interactive_traffic_not_a_number(self, mock_error, mock_text):
         """Non-numeric interactive traffic input exits with error."""
-        mock_q.text.return_value.ask.side_effect = ["my test", "abc"]
+        mock_text.return_value.ask.side_effect = ["my test", "abc"]
 
         with self.assertRaises(SystemExit) as ctx:
             DeploymentsCommand.ab_test_start(
@@ -262,7 +266,7 @@ class ABTestStartTest(unittest.TestCase):
 
     # -- Validation: name --
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_start__empty_name_exits_with_error(self, mock_error):
         """Empty string name triggers error and sys.exit(1)."""
         with self.assertRaises(SystemExit) as ctx:
@@ -275,7 +279,7 @@ class ABTestStartTest(unittest.TestCase):
         self.assertIn("required", mock_error.call_args[0][0])
         self.proj.create_ab_test.assert_not_called()
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_start__whitespace_only_name_exits_with_error(self, mock_error):
         """Whitespace-only name triggers error and sys.exit(1)."""
         with self.assertRaises(SystemExit) as ctx:
@@ -305,7 +309,7 @@ class ABTestStartTest(unittest.TestCase):
 
     # -- Validation: traffic_percentage --
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_start__negative_traffic_exits_with_error(self, mock_error):
         """Negative traffic percentage triggers error and sys.exit(1)."""
         with self.assertRaises(SystemExit) as ctx:
@@ -317,7 +321,7 @@ class ABTestStartTest(unittest.TestCase):
         self.assertIn("0 and 100", mock_error.call_args[0][0])
         self.proj.create_ab_test.assert_not_called()
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_start__traffic_above_100_exits_with_error(self, mock_error):
         """Traffic percentage > 100 triggers error and sys.exit(1)."""
         with self.assertRaises(SystemExit) as ctx:
@@ -400,7 +404,7 @@ class ABTestListTest(unittest.TestCase):
         self.addCleanup(patch.stopall)
 
     @patch("poly.cli_commands.deployments.DeploymentsCommand._fetch_deployment_map")
-    @patch("poly.cli_commands.deployments.print_ab_tests")
+    @patch("poly.output.console.print_ab_tests")
     def test_list__success_rich_output(self, mock_print, mock_dep_map):
         """Successful list calls print_ab_tests with results and deployment map."""
         self.proj.list_ab_tests.return_value = [SAMPLE_AB_TEST]
@@ -425,7 +429,7 @@ class ABTestListTest(unittest.TestCase):
         self.assertTrue(payload["success"])
         self.assertEqual(len(payload["ab_tests"]), 1)
 
-    @patch("poly.cli_commands.deployments.print_ab_tests")
+    @patch("poly.output.console.print_ab_tests")
     def test_list__empty_results(self, mock_print):
         """Empty list result still calls print_ab_tests with empty list."""
         self.proj.list_ab_tests.return_value = []
@@ -461,7 +465,7 @@ class ABTestActiveTest(unittest.TestCase):
         self.mock_load.return_value = self.proj
         self.addCleanup(patch.stopall)
 
-    @patch("poly.cli_commands.deployments.print_ab_test_detail")
+    @patch("poly.output.console.print_ab_test_detail")
     def test_active__found_rich_output(self, mock_detail):
         """Active test found prints detail in rich mode."""
         self.proj.get_active_ab_test.return_value = SAMPLE_AB_TEST
@@ -482,7 +486,7 @@ class ABTestActiveTest(unittest.TestCase):
         self.assertTrue(payload["success"])
         self.assertEqual(payload["ab_test"]["id"], "ab-001")
 
-    @patch("poly.cli_commands.deployments.print_ab_test_detail")
+    @patch("poly.output.console.print_ab_test_detail")
     def test_active__none_returned_rich(self, mock_detail):
         """No active test passes None to print_ab_test_detail."""
         self.proj.get_active_ab_test.return_value = None
@@ -526,8 +530,8 @@ class ABTestUpdateTest(unittest.TestCase):
 
     # -- Happy path --
 
-    @patch("poly.cli_commands.deployments.success")
-    @patch("poly.cli_commands.deployments.print_ab_test_detail")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.print_ab_test_detail")
     def test_update__success_rich_output(self, mock_detail, mock_success):
         """Successful update prints success message with new percentage."""
         DeploymentsCommand.ab_test_update(TEST_DIR, traffic_percentage=30)
@@ -548,7 +552,7 @@ class ABTestUpdateTest(unittest.TestCase):
 
     # -- No active test --
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_update__no_active_test_exits(self, mock_error):
         """No active test exits with error."""
         self.proj.get_active_ab_test.return_value = None
@@ -574,7 +578,7 @@ class ABTestUpdateTest(unittest.TestCase):
 
     # -- Validation: traffic_percentage --
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_update__negative_traffic_exits_with_error(self, mock_error):
         """Negative traffic percentage triggers error and sys.exit(1)."""
         with self.assertRaises(SystemExit) as ctx:
@@ -584,7 +588,7 @@ class ABTestUpdateTest(unittest.TestCase):
         self.assertIn("0 and 100", mock_error.call_args[0][0])
         self.proj.update_ab_test.assert_not_called()
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_update__traffic_above_100_exits_with_error(self, mock_error):
         """Traffic > 100 triggers error and sys.exit(1)."""
         with self.assertRaises(SystemExit) as ctx:
@@ -645,8 +649,8 @@ class ABTestEndTest(unittest.TestCase):
 
     # -- Happy path: control wins (no promotion) --
 
-    @patch("poly.cli_commands.deployments.success")
-    @patch("poly.cli_commands.deployments.info")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.info")
     def test_end__explicit_winner_rich_output(self, mock_info, mock_success):
         """Ending with control as winner prints success, no promotion."""
         DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version="live00000")
@@ -666,8 +670,8 @@ class ABTestEndTest(unittest.TestCase):
 
     # -- Happy path: variant wins (triggers promotion) --
 
-    @patch("poly.cli_commands.deployments.success")
-    @patch("poly.cli_commands.deployments.info")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.info")
     def test_end__variant_wins_promotes_to_live(self, mock_info, mock_success):
         """Choosing the variant promotes it to live."""
         DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version="variant111")
@@ -687,9 +691,9 @@ class ABTestEndTest(unittest.TestCase):
         self.assertTrue(payload["success"])
         self.assertTrue(payload["promoted"])
 
-    @patch("poly.cli_commands.deployments.warning")
-    @patch("poly.cli_commands.deployments.success")
-    @patch("poly.cli_commands.deployments.info")
+    @patch("poly.output.console.warning")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.info")
     def test_end__variant_wins_promote_fails_warns(self, mock_info, mock_success, mock_warning):
         """If promotion fails after ending, warns but doesn't exit with error."""
         self.proj.promote_deployment.side_effect = Exception("promote failed")
@@ -716,29 +720,33 @@ class ABTestEndTest(unittest.TestCase):
 
     # -- Interactive prompt flow --
 
-    @patch("poly.cli_commands.deployments.questionary")
-    @patch("poly.cli_commands.deployments.success")
-    @patch("poly.cli_commands.deployments.info")
-    def test_end__interactive_prompt_selects_winner(self, mock_info, mock_success, mock_q):
+    @patch("questionary.select")
+    @patch("questionary.Choice")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.info")
+    def test_end__interactive_prompt_selects_winner(
+        self, mock_info, mock_success, mock_choice, mock_select
+    ):
         """Interactive mode fetches active test, prompts, ends test and promotes variant."""
-        mock_q.Choice = MagicMock(side_effect=lambda **kw: kw)
-        mock_q.select.return_value.ask.return_value = "dep-variant"
+        mock_choice.side_effect = lambda **kw: kw
+        mock_select.return_value.ask.return_value = "dep-variant"
 
         DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version=None)
 
         self.proj.get_active_ab_test.assert_called_once()
-        mock_q.select.assert_called_once()
+        mock_select.assert_called_once()
         self.proj.end_ab_test.assert_called_once_with("ab-001", "dep-variant")
         self.proj.promote_deployment.assert_called_once()
         self.assertEqual(mock_success.call_count, 2)
 
-    @patch("poly.cli_commands.deployments.questionary")
-    @patch("poly.cli_commands.deployments.warning")
-    @patch("poly.cli_commands.deployments.info")
-    def test_end__interactive_user_aborts(self, mock_info, mock_warning, mock_q):
+    @patch("questionary.select")
+    @patch("questionary.Choice")
+    @patch("poly.output.console.warning")
+    @patch("poly.output.console.info")
+    def test_end__interactive_user_aborts(self, mock_info, mock_warning, mock_choice, mock_select):
         """User aborting the interactive prompt exits with 0."""
-        mock_q.Choice = MagicMock(side_effect=lambda **kw: kw)
-        mock_q.select.return_value.ask.return_value = None
+        mock_choice.side_effect = lambda **kw: kw
+        mock_select.return_value.ask.return_value = None
 
         with self.assertRaises(SystemExit) as ctx:
             DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version=None)
@@ -749,7 +757,7 @@ class ABTestEndTest(unittest.TestCase):
 
     # -- No active test --
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_end__no_active_test_exits(self, mock_error):
         """If no active test exists, exits with error."""
         self.proj.get_active_ab_test.return_value = None

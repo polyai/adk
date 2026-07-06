@@ -194,7 +194,7 @@ class DeleteGistsTest(unittest.TestCase):
     ]
 
     @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists", return_value=[])
-    @patch("poly.cli_commands.review.plain")
+    @patch("poly.output.console.plain")
     def test_no_gists_found_prints_message(self, mock_plain, mock_list):
         """When no review gists exist, a 'no gists found' message is displayed."""
         ReviewCommand.delete_gists()
@@ -203,12 +203,12 @@ class DeleteGistsTest(unittest.TestCase):
         self.assertIn("No review gists found", mock_plain.call_args[0][0])
 
     @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
-    @patch("poly.cli_commands.review.questionary")
-    @patch("poly.cli_commands.review.warning")
-    def test_user_selects_none_shows_warning(self, mock_warning, mock_q, mock_list):
+    @patch("questionary.checkbox")
+    @patch("poly.output.console.warning")
+    def test_user_selects_none_shows_warning(self, mock_warning, mock_checkbox, mock_list):
         """When user cancels or selects nothing, a warning is shown and no deletions occur."""
         mock_list.return_value = self.SAMPLE_GISTS
-        mock_q.checkbox.return_value.ask.return_value = []
+        mock_checkbox.return_value.ask.return_value = []
 
         ReviewCommand.delete_gists()
 
@@ -217,17 +217,17 @@ class DeleteGistsTest(unittest.TestCase):
 
     @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
     @patch("poly.cli_commands.review.GitHubAPIHandler.delete_gist")
-    @patch("poly.cli_commands.review.questionary")
-    @patch("poly.cli_commands.review.success")
-    @patch("poly.cli_commands.review.plain")
+    @patch("questionary.checkbox")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.plain")
     def test_user_selects_and_deletes_gists(
-        self, mock_plain, mock_success, mock_q, mock_delete, mock_list
+        self, mock_plain, mock_success, mock_checkbox, mock_delete, mock_list
     ):
         """Selected gists are deleted and a success message reports the count."""
         mock_list.return_value = self.SAMPLE_GISTS
         # Simulate user selecting the first gist
         first_choice = format_gist_choice(self.SAMPLE_GISTS[0])
-        mock_q.checkbox.return_value.ask.return_value = [first_choice]
+        mock_checkbox.return_value.ask.return_value = [first_choice]
 
         ReviewCommand.delete_gists()
 
@@ -237,16 +237,16 @@ class DeleteGistsTest(unittest.TestCase):
 
     @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
     @patch("poly.cli_commands.review.GitHubAPIHandler.delete_gist")
-    @patch("poly.cli_commands.review.questionary")
-    @patch("poly.cli_commands.review.success")
-    @patch("poly.cli_commands.review.plain")
+    @patch("questionary.checkbox")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.plain")
     def test_deleting_multiple_gists(
-        self, mock_plain, mock_success, mock_q, mock_delete, mock_list
+        self, mock_plain, mock_success, mock_checkbox, mock_delete, mock_list
     ):
         """Selecting multiple gists deletes each and reports total count."""
         mock_list.return_value = self.SAMPLE_GISTS
         choices = [format_gist_choice(g) for g in self.SAMPLE_GISTS]
-        mock_q.checkbox.return_value.ask.return_value = choices
+        mock_checkbox.return_value.ask.return_value = choices
 
         ReviewCommand.delete_gists()
 
@@ -255,7 +255,7 @@ class DeleteGistsTest(unittest.TestCase):
 
     @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
     @patch("poly.cli_commands.review.GitHubAPIHandler.delete_gist")
-    @patch("poly.cli_commands.review.success")
+    @patch("poly.output.console.success")
     def test_direct_gist_id_skips_interactive_prompt(self, mock_success, mock_delete, mock_list):
         """Passing a full gist_id deletes it directly without showing a checkbox prompt."""
         mock_list.return_value = self.SAMPLE_GISTS
@@ -267,7 +267,7 @@ class DeleteGistsTest(unittest.TestCase):
 
     @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
     @patch("poly.cli_commands.review.GitHubAPIHandler.delete_gist")
-    @patch("poly.cli_commands.review.success")
+    @patch("poly.output.console.success")
     def test_short_gist_id_prefix_matches(self, mock_success, mock_delete, mock_list):
         """Passing the first 7 characters of a gist ID resolves and deletes the full gist."""
         mock_list.return_value = self.SAMPLE_GISTS
@@ -279,7 +279,7 @@ class DeleteGistsTest(unittest.TestCase):
 
     @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
     @patch("poly.cli_commands.review.GitHubAPIHandler.delete_gist")
-    @patch("poly.cli_commands.review.error")
+    @patch("poly.output.console.error")
     def test_unmatched_gist_id_shows_error(self, mock_error, mock_delete, mock_list):
         """An ID that doesn't match any review gist shows an error and does not delete."""
         mock_list.return_value = self.SAMPLE_GISTS
@@ -291,7 +291,7 @@ class DeleteGistsTest(unittest.TestCase):
 
     @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
     @patch("poly.cli_commands.review.GitHubAPIHandler.delete_gist")
-    @patch("poly.cli_commands.review.error")
+    @patch("poly.output.console.error")
     def test_full_id_sharing_prefix_does_not_match_wrong_gist(
         self, mock_error, mock_delete, mock_list
     ):
@@ -319,13 +319,13 @@ class DeleteGistsTest(unittest.TestCase):
 
     @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
     @patch("poly.cli_commands.review.GitHubAPIHandler.delete_gist")
-    @patch("poly.cli_commands.review.questionary")
+    @patch("questionary.checkbox")
     @patch("poly.cli_commands.review.json_print")
-    def test_json_output_prints_success(self, mock_json_print, mock_q, mock_delete, mock_list):
+    def test_json_output_prints_success(self, mock_json_print, mock_checkbox, mock_delete, mock_list):
         """With output_json=True, a success JSON object is printed after deletion."""
         mock_list.return_value = self.SAMPLE_GISTS
         first_choice = format_gist_choice(self.SAMPLE_GISTS[0])
-        mock_q.checkbox.return_value.ask.return_value = [first_choice]
+        mock_checkbox.return_value.ask.return_value = [first_choice]
 
         ReviewCommand.delete_gists(output_json=True)
 
@@ -345,7 +345,7 @@ class ListGistsTest(unittest.TestCase):
     ]
 
     @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists", return_value=[])
-    @patch("poly.cli_commands.review.plain")
+    @patch("poly.output.console.plain")
     def test_no_gists_found_prints_message(self, mock_plain, mock_list):
         """When no review gists exist, a 'no gists found' message is displayed."""
         ReviewCommand.list_gists()
@@ -354,29 +354,29 @@ class ListGistsTest(unittest.TestCase):
         self.assertIn("No review gists found", mock_plain.call_args[0][0])
 
     @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
-    @patch("poly.cli_commands.review.questionary")
-    @patch("poly.cli_commands.review.webbrowser")
-    def test_user_selects_gist_opens_browser(self, mock_browser, mock_q, mock_list):
+    @patch("questionary.select")
+    @patch("webbrowser.open")
+    def test_user_selects_gist_opens_browser(self, mock_open, mock_select, mock_list):
         """Selecting a gist opens its html_url in the browser."""
         mock_list.return_value = self.SAMPLE_GISTS
         choice_label = format_gist_choice(self.SAMPLE_GISTS[0])
-        mock_q.select.return_value.ask.return_value = choice_label
+        mock_select.return_value.ask.return_value = choice_label
 
         ReviewCommand.list_gists()
 
-        mock_browser.open.assert_called_once_with("https://gist.github.com/aaa1111111")
+        mock_open.assert_called_once_with("https://gist.github.com/aaa1111111")
 
     @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
-    @patch("poly.cli_commands.review.questionary")
-    @patch("poly.cli_commands.review.webbrowser")
-    def test_user_cancels_selection_does_not_open_browser(self, mock_browser, mock_q, mock_list):
+    @patch("questionary.select")
+    @patch("webbrowser.open")
+    def test_user_cancels_selection_does_not_open_browser(self, mock_open, mock_select, mock_list):
         """When user cancels the selection prompt, no browser is opened."""
         mock_list.return_value = self.SAMPLE_GISTS
-        mock_q.select.return_value.ask.return_value = None
+        mock_select.return_value.ask.return_value = None
 
         ReviewCommand.list_gists()
 
-        mock_browser.open.assert_not_called()
+        mock_open.assert_not_called()
 
     @patch("poly.cli_commands.review.GitHubAPIHandler.list_diff_gists")
     @patch("poly.cli_commands.review.json_print")
@@ -411,7 +411,7 @@ class ReviewDescriptionTest(unittest.TestCase):
         return_value="https://gist.github.com/xyz",
     )
     @patch("poly.cli_commands.review.compute_diff", return_value={"file": "+line"})
-    @patch("poly.cli_commands.review.success")
+    @patch("poly.output.console.success")
     def test_local_to_remote_description_includes_project_name(
         self, mock_success, mock_review, mock_create
     ):
@@ -427,7 +427,7 @@ class ReviewDescriptionTest(unittest.TestCase):
         return_value="https://gist.github.com/xyz",
     )
     @patch("poly.cli_commands.review.compute_diff", return_value={"file": "+line"})
-    @patch("poly.cli_commands.review.success")
+    @patch("poly.output.console.success")
     def test_branch_comparison_description_includes_branch_names(
         self, mock_success, mock_review, mock_create
     ):
@@ -455,7 +455,7 @@ class ReviewDescriptionTest(unittest.TestCase):
         return_value="https://gist.github.com/xyz",
     )
     @patch("poly.cli_commands.review.compute_diff", return_value={"file": "+line"})
-    @patch("poly.cli_commands.review.success")
+    @patch("poly.output.console.success")
     def test_gist_created_as_private(self, mock_success, mock_review, mock_create):
         """Review gists are always created as private (public=False)."""
         ReviewCommand.review(base_path="/some/my-project")

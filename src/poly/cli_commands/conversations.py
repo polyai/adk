@@ -9,12 +9,6 @@ from typing import Optional
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
 from poly.handlers.interface import AgentStudioInterface
-from poly.output.console import (
-    info,
-    print_conversation_detail,
-    print_conversations,
-    success,
-)
 from poly.output.json_output import json_print
 
 
@@ -165,6 +159,8 @@ class ConversationsCommand(BaseCommand):
             offset: Number of conversations to skip.
             output_json: If True, emit machine-readable JSON.
         """
+        from poly.output.console import info, print_conversations
+
         project = load_project(base_path, output_json=output_json)
         result = AgentStudioInterface.list_conversations(
             region=project.region,
@@ -196,6 +192,8 @@ class ConversationsCommand(BaseCommand):
             conversation_id: The conversation ID to look up.
             output_json: If True, emit machine-readable JSON.
         """
+        from poly.output.console import print_conversation_detail
+
         project = load_project(base_path, output_json=output_json)
         conversation = AgentStudioInterface.get_conversation(
             region=project.region,
@@ -229,6 +227,8 @@ class ConversationsCommand(BaseCommand):
             output_path: Output file path. Defaults to <conversation_id>.wav.
             output_json: If True, emit machine-readable JSON.
         """
+        from poly.output.console import success
+
         project = load_project(base_path, output_json=output_json)
         audio_data = AgentStudioInterface.get_conversation_audio(
             region=project.region,

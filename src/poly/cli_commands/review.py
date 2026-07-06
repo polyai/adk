@@ -4,17 +4,12 @@ Copyright PolyAI Limited
 """
 
 import os
-import webbrowser
-from argparse import Namespace, RawTextHelpFormatter, _SubParsersAction, ArgumentParser
+from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from typing import Optional
-
-import questionary
-import requests
 
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import compute_diff, format_gist_choice
 from poly.handlers.github_api_handler import GitHubAPIHandler
-from poly.output.console import error, plain, success, warning
 from poly.output.json_output import json_print
 
 
@@ -137,6 +132,10 @@ class ReviewCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Create a GitHub gist for reviewing changes, similar to a pull request."""
+        import requests
+
+        from poly.output.console import error, plain, success
+
         project_name = "/".join(os.path.abspath(base_path).split(os.sep)[-2:])
         if version_hash and (before or after):
             error("Cannot specify both hash and before/after versions.")
@@ -198,6 +197,13 @@ class ReviewCommand(BaseCommand):
     @classmethod
     def list_gists(cls, output_json: bool = False) -> None:
         """Interactively select a review gist and open it in the browser."""
+        import webbrowser
+
+        import questionary
+        import requests
+
+        from poly.output.console import error, plain
+
         try:
             gists = GitHubAPIHandler.list_diff_gists()
         except requests.HTTPError as e:
@@ -231,6 +237,11 @@ class ReviewCommand(BaseCommand):
     @classmethod
     def delete_gists(cls, gist_id: Optional[str] = None, output_json: bool = False) -> None:
         """Interactively select and delete review gists."""
+        import questionary
+        import requests
+
+        from poly.output.console import error, plain, success, warning
+
         try:
             gists = GitHubAPIHandler.list_diff_gists()
         except requests.HTTPError as e:

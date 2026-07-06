@@ -10,18 +10,8 @@ from argparse import Namespace, _SubParsersAction, ArgumentParser, RawTextHelpFo
 from contextlib import nullcontext
 from typing import Optional
 
-import requests
-
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
-from poly.output.console import (
-    error,
-    info,
-    plain,
-    print_turn_metadata,
-    success,
-    warning,
-)
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
 
@@ -158,6 +148,8 @@ class ChatCommand(BaseCommand):
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to the chat handler, reading input file/stdin if needed."""
+        from poly.output.console import error
+
         show_all = args.metadata
         input_messages = None
         input_lang = args.input_lang or args.lang
@@ -219,6 +211,10 @@ class ChatCommand(BaseCommand):
         conversation_id: Optional[str] = None,
     ) -> None:
         """Start an interactive chat session with the agent."""
+        import requests
+
+        from poly.output.console import error, info, plain, print_turn_metadata, success
+
         project = load_project(base_path)
 
         json_output = {}
@@ -390,6 +386,10 @@ class ChatCommand(BaseCommand):
             requested a new session, and conversation is a dict with conversation_id,
             url, and turns (populated when output_json=True).
         """
+        import requests
+
+        from poly.output.console import error, info, plain, print_turn_metadata, warning
+
         conversation_ended = False
         restart = False
         url = project.get_conversation_url(conversation_id)

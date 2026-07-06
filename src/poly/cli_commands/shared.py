@@ -12,7 +12,6 @@ import os
 import sys
 from typing import Any, Optional
 
-from poly.output.console import error
 from poly.output.json_output import json_print
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE, AgentStudioProject
 
@@ -58,6 +57,8 @@ def load_project(base_path: str, output_json: bool = False) -> AgentStudioProjec
     Returns:
         The loaded project.
     """
+    from poly.output.console import error
+
     project = read_project_config(base_path)
     if not project:
         if output_json:
@@ -88,6 +89,8 @@ def compute_diff(
     If both are specified, compares the two remote versions.
     If only after is specified, compares against the previous version.
     """
+    from poly.output.console import error
+
     project = load_project(base_path, output_json=output_json)
     files = [os.path.abspath(os.path.join(os.getcwd(), file)) for file in files or []]
     if not (before or after):
@@ -131,6 +134,8 @@ def parse_from_projection_json(
 
     If the value is ``-`` (after stripping), JSON is read from stdin until EOF.
     """
+    from poly.output.console import error
+
     if not from_projection:
         return None
     raw = from_projection.strip()

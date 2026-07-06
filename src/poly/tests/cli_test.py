@@ -323,11 +323,11 @@ class BranchDeleteTest(unittest.TestCase):
 
     # -- Direct deletion (branch_name provided) --
 
-    @patch("poly.cli_commands.branch.questionary")
-    @patch("poly.cli_commands.branch.success")
-    def test_direct_delete_existing_branch_shows_success(self, mock_success, mock_q):
+    @patch("questionary.confirm")
+    @patch("poly.output.console.success")
+    def test_direct_delete_existing_branch_shows_success(self, mock_success, mock_confirm):
         """Deleting an existing branch by name prints a success message."""
-        mock_q.confirm.return_value.ask.return_value = True
+        mock_confirm.return_value.ask.return_value = True
 
         BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a")
 
@@ -343,7 +343,7 @@ class BranchDeleteTest(unittest.TestCase):
         self.proj.delete_branch.assert_called_once_with("feature-a")
         mock_json.assert_called_once_with({"success": True})
 
-    @patch("poly.cli_commands.branch.error")
+    @patch("poly.output.console.error")
     def test_direct_delete_nonexistent_branch_shows_error(self, mock_error):
         """Attempting to delete a branch that doesn't exist shows an error."""
         BranchCommand.branch_delete(TEST_DIR, branch_name="no-such-branch")
@@ -363,7 +363,7 @@ class BranchDeleteTest(unittest.TestCase):
         self.assertFalse(payload["success"])
         self.assertIn("does not exist", payload["message"])
 
-    @patch("poly.cli_commands.branch.error")
+    @patch("poly.output.console.error")
     def test_direct_delete_main_branch_shows_error(self, mock_error):
         """Attempting to delete 'main' shows an error because main is not deletable."""
         BranchCommand.branch_delete(TEST_DIR, branch_name="main")
@@ -372,11 +372,11 @@ class BranchDeleteTest(unittest.TestCase):
         mock_error.assert_called_once()
         self.assertIn("does not exist or cannot be deleted", mock_error.call_args[0][0])
 
-    @patch("poly.cli_commands.branch.questionary")
-    @patch("poly.cli_commands.branch.error")
-    def test_direct_delete_when_project_raises_shows_error(self, mock_error, mock_q):
+    @patch("questionary.confirm")
+    @patch("poly.output.console.error")
+    def test_direct_delete_when_project_raises_shows_error(self, mock_error, mock_confirm):
         """If project.delete_branch raises, the error is shown to the user."""
-        mock_q.confirm.return_value.ask.return_value = True
+        mock_confirm.return_value.ask.return_value = True
         self.proj.delete_branch.side_effect = ValueError("API failure")
 
         BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a")
@@ -396,11 +396,11 @@ class BranchDeleteTest(unittest.TestCase):
         self.assertFalse(payload["success"])
         self.assertIn("API failure", payload["message"])
 
-    @patch("poly.cli_commands.branch.questionary")
-    @patch("poly.cli_commands.branch.error")
-    def test_direct_delete_returns_false_shows_failure(self, mock_error, mock_q):
+    @patch("questionary.confirm")
+    @patch("poly.output.console.error")
+    def test_direct_delete_returns_false_shows_failure(self, mock_error, mock_confirm):
         """If project.delete_branch returns False, a failure message is shown."""
-        mock_q.confirm.return_value.ask.return_value = True
+        mock_confirm.return_value.ask.return_value = True
         self.proj.delete_branch.return_value = False
 
         BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a")
@@ -410,7 +410,7 @@ class BranchDeleteTest(unittest.TestCase):
 
     # -- Interactive mode (no branch_name) --
 
-    @patch("poly.cli_commands.branch.plain")
+    @patch("poly.output.console.plain")
     def test_interactive_no_deletable_branches_shows_message(self, mock_plain):
         """When only 'main' exists, a 'no deletable branches' message is shown."""
         self.proj.get_branches.return_value = ("main", {"main": "main-id"})
@@ -421,11 +421,11 @@ class BranchDeleteTest(unittest.TestCase):
         self.assertIn("[muted]No deletable branches found.[/muted]", mock_plain.call_args[0][0])
         self.proj.delete_branch.assert_not_called()
 
-    @patch("poly.cli_commands.branch.questionary")
-    @patch("poly.cli_commands.branch.warning")
-    def test_interactive_user_selects_nothing_shows_warning(self, mock_warning, mock_q):
+    @patch("questionary.checkbox")
+    @patch("poly.output.console.warning")
+    def test_interactive_user_selects_nothing_shows_warning(self, mock_warning, mock_checkbox):
         """When user cancels the checkbox, a warning is shown and nothing is deleted."""
-        mock_q.checkbox.return_value.ask.return_value = []
+        mock_checkbox.return_value.ask.return_value = []
 
         BranchCommand.branch_delete(TEST_DIR)
 
@@ -433,23 +433,24 @@ class BranchDeleteTest(unittest.TestCase):
         self.assertIn("No branches selected", mock_warning.call_args[0][0])
         self.proj.delete_branch.assert_not_called()
 
-    @patch("poly.cli_commands.branch.questionary")
-    @patch("poly.cli_commands.branch.warning")
-    def test_interactive_user_returns_none_shows_warning(self, mock_warning, mock_q):
+    @patch("questionary.checkbox")
+    @patch("poly.output.console.warning")
+    def test_interactive_user_returns_none_shows_warning(self, mock_warning, mock_checkbox):
         """When questionary returns None (Ctrl+C), a warning is shown."""
-        mock_q.checkbox.return_value.ask.return_value = None
+        mock_checkbox.return_value.ask.return_value = None
 
         BranchCommand.branch_delete(TEST_DIR)
 
         mock_warning.assert_called_once()
         self.proj.delete_branch.assert_not_called()
 
-    @patch("poly.cli_commands.branch.questionary")
-    @patch("poly.cli_commands.branch.success")
-    def test_interactive_single_branch_deleted(self, mock_success, mock_q):
+    @patch("questionary.confirm")
+    @patch("questionary.checkbox")
+    @patch("poly.output.console.success")
+    def test_interactive_single_branch_deleted(self, mock_success, mock_checkbox, mock_confirm):
         """Selecting one branch in the checkbox deletes it and reports success."""
-        mock_q.checkbox.return_value.ask.return_value = ["feature-a"]
-        mock_q.confirm.return_value.ask.return_value = True
+        mock_checkbox.return_value.ask.return_value = ["feature-a"]
+        mock_confirm.return_value.ask.return_value = True
 
         BranchCommand.branch_delete(TEST_DIR)
 
@@ -457,12 +458,13 @@ class BranchDeleteTest(unittest.TestCase):
         mock_success.assert_called_once()
         self.assertIn("1 branch(es)", mock_success.call_args[0][0])
 
-    @patch("poly.cli_commands.branch.questionary")
-    @patch("poly.cli_commands.branch.success")
-    def test_interactive_multiple_branches_deleted(self, mock_success, mock_q):
+    @patch("questionary.confirm")
+    @patch("questionary.checkbox")
+    @patch("poly.output.console.success")
+    def test_interactive_multiple_branches_deleted(self, mock_success, mock_checkbox, mock_confirm):
         """Selecting multiple branches deletes each and reports total count."""
-        mock_q.checkbox.return_value.ask.return_value = ["feature-a", "feature-b"]
-        mock_q.confirm.return_value.ask.return_value = True
+        mock_checkbox.return_value.ask.return_value = ["feature-a", "feature-b"]
+        mock_confirm.return_value.ask.return_value = True
 
         BranchCommand.branch_delete(TEST_DIR)
 
@@ -470,24 +472,30 @@ class BranchDeleteTest(unittest.TestCase):
         mock_success.assert_called_once()
         self.assertIn("2 branch(es)", mock_success.call_args[0][0])
 
-    @patch("poly.cli_commands.branch.questionary")
-    @patch("poly.cli_commands.branch.success")
-    def test_interactive_current_branch_label_stripped(self, mock_success, mock_q):
+    @patch("questionary.confirm")
+    @patch("questionary.checkbox")
+    @patch("poly.output.console.success")
+    def test_interactive_current_branch_label_stripped(
+        self, mock_success, mock_checkbox, mock_confirm
+    ):
         """The ' (current)' suffix is stripped from labels before calling delete_branch."""
         self.proj.get_branches.return_value = ("feature-a", dict(self.SAMPLE_BRANCHES))
-        mock_q.checkbox.return_value.ask.return_value = ["feature-a (current)"]
-        mock_q.confirm.return_value.ask.return_value = True
+        mock_checkbox.return_value.ask.return_value = ["feature-a (current)"]
+        mock_confirm.return_value.ask.return_value = True
 
         BranchCommand.branch_delete(TEST_DIR)
 
         self.proj.delete_branch.assert_called_once_with("feature-a")
 
-    @patch("poly.cli_commands.branch.questionary")
+    @patch("questionary.confirm")
+    @patch("questionary.checkbox")
     @patch("poly.cli_commands.branch.json_print")
-    def test_interactive_json_mode_reports_deleted_count(self, mock_json, mock_q):
+    def test_interactive_json_mode_reports_deleted_count(
+        self, mock_json, mock_checkbox, mock_confirm
+    ):
         """In JSON mode, interactive deletion prints success and deleted count."""
-        mock_q.checkbox.return_value.ask.return_value = ["feature-a", "feature-b"]
-        mock_q.confirm.return_value.ask.return_value = True
+        mock_checkbox.return_value.ask.return_value = ["feature-a", "feature-b"]
+        mock_confirm.return_value.ask.return_value = True
 
         BranchCommand.branch_delete(TEST_DIR, output_json=True)
 
@@ -496,16 +504,17 @@ class BranchDeleteTest(unittest.TestCase):
         self.assertTrue(payload["success"])
         self.assertEqual(payload["deleted"], 2)
 
-    @patch("poly.cli_commands.branch.questionary")
-    @patch("poly.cli_commands.branch.error")
-    @patch("poly.cli_commands.branch.success")
+    @patch("questionary.confirm")
+    @patch("questionary.checkbox")
+    @patch("poly.output.console.error")
+    @patch("poly.output.console.success")
     def test_interactive_error_on_one_branch_continues_others(
-        self, mock_success, mock_error, mock_q
+        self, mock_success, mock_error, mock_checkbox, mock_confirm
     ):
         """If one branch fails to delete, others still proceed."""
         self.proj.delete_branch.side_effect = [ValueError("oops"), True]
-        mock_q.checkbox.return_value.ask.return_value = ["feature-a", "feature-b"]
-        mock_q.confirm.return_value.ask.return_value = True
+        mock_checkbox.return_value.ask.return_value = ["feature-a", "feature-b"]
+        mock_confirm.return_value.ask.return_value = True
 
         BranchCommand.branch_delete(TEST_DIR)
 
@@ -1127,7 +1136,7 @@ class ComputeDiffTest(unittest.TestCase):
         self.assertEqual(call_kwargs["after_name"], "abc123456xyz")
         self.assertEqual(call_kwargs["before_name"], "def789012")
 
-    @patch("poly.cli_commands.shared.error")
+    @patch("poly.output.console.error")
     def test_only_after_version_not_found_returns_none(self, mock_error):
         """With only after and hash not in versions, calls error and returns None."""
         versions = [{"version_hash": "abc123456xyz"}]
@@ -1139,7 +1148,7 @@ class ComputeDiffTest(unittest.TestCase):
         mock_error.assert_called_once()
         self.assertIn("not found", mock_error.call_args[0][0])
 
-    @patch("poly.cli_commands.shared.error")
+    @patch("poly.output.console.error")
     def test_only_after_no_previous_version_returns_none(self, mock_error):
         """With only after matching the last version, returns None (no previous)."""
         versions = [{"version_hash": "abc123456xyz"}]
@@ -1151,7 +1160,7 @@ class ComputeDiffTest(unittest.TestCase):
         mock_error.assert_called_once()
         self.assertIn("No previous version", mock_error.call_args[0][0])
 
-    @patch("poly.cli_commands.shared.error")
+    @patch("poly.output.console.error")
     def test_only_after_no_versions_returns_none(self, mock_error):
         """With only after but no versions at all, calls error and returns None."""
         self.proj.get_deployments.return_value = ([], {})
@@ -1228,7 +1237,7 @@ class PrintDeploymentsTest(unittest.TestCase):
     def tearDown(self):
         patch.stopall()
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_no_versions_calls_error(self, mock_error):
         """print_deployments with no versions calls error('No versions found.')."""
         self.proj.get_deployments.return_value = ([], {})
@@ -1238,7 +1247,7 @@ class PrintDeploymentsTest(unittest.TestCase):
         mock_error.assert_called_once()
         self.assertIn("No versions found", mock_error.call_args[0][0])
 
-    @patch("poly.cli_commands.deployments.print_deployments")
+    @patch("poly.output.console.print_deployments")
     def test_default_call_shows_first_ten(self, mock_print_dep):
         """Default call (no hash, no json) displays the first 10 versions."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
@@ -1263,7 +1272,7 @@ class PrintDeploymentsTest(unittest.TestCase):
         self.assertIn("active_deployment_hashes", output)
         self.assertEqual(len(output["versions"]), 10)
 
-    @patch("poly.cli_commands.deployments.print_deployments")
+    @patch("poly.output.console.print_deployments")
     def test_hash_sets_offset(self, mock_print_dep):
         """print_deployments with hash finds version index and uses it as offset."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
@@ -1274,7 +1283,7 @@ class PrintDeploymentsTest(unittest.TestCase):
         displayed_versions = mock_print_dep.call_args[0][0]
         self.assertEqual(displayed_versions[0]["name"], "v5")
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_hash_not_found_calls_error(self, mock_error):
         """print_deployments with unknown hash calls error."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
@@ -1284,7 +1293,7 @@ class PrintDeploymentsTest(unittest.TestCase):
         mock_error.assert_called_once()
         self.assertIn("not found", mock_error.call_args[0][0])
 
-    @patch("poly.cli_commands.deployments.print_deployments")
+    @patch("poly.output.console.print_deployments")
     def test_limit_and_offset_applied(self, mock_print_dep):
         """print_deployments with custom limit and offset slices correctly."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
@@ -1296,7 +1305,7 @@ class PrintDeploymentsTest(unittest.TestCase):
         self.assertEqual(len(displayed_versions), 3)
         self.assertEqual(displayed_versions[0]["name"], "v2")
 
-    @patch("poly.cli_commands.deployments.print_deployments")
+    @patch("poly.output.console.print_deployments")
     def test_details_passed_through(self, mock_print_dep):
         """print_deployments with details=True passes it to the console function."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
@@ -1343,7 +1352,7 @@ class DeploymentsShowTest(unittest.TestCase):
 
     # ── Error cases ──────────────────────────────────────────────────
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_no_versions_calls_error(self, mock_error):
         """When the project has no versions, error is called."""
         self.proj.get_deployments.return_value = ([], {})
@@ -1353,7 +1362,7 @@ class DeploymentsShowTest(unittest.TestCase):
         mock_error.assert_called_once()
         self.assertIn("No versions found", mock_error.call_args[0][0])
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_hash_not_found_calls_error(self, mock_error):
         """When the version hash doesn't match any version, error is called."""
         self.proj.get_deployments.return_value = (self.sandbox_versions, self.active_hashes)
@@ -1534,7 +1543,7 @@ class DeploymentsShowTest(unittest.TestCase):
 
     # ── Rich output path ─────────────────────────────────────────────
 
-    @patch("poly.cli_commands.deployments.print_deployment_show")
+    @patch("poly.output.console.print_deployment_show")
     def test_rich_output_calls_print_deployment_show(self, mock_show):
         """Without output_json, the rich console function is called."""
         self.proj.get_deployments.return_value = (self.sandbox_versions, self.active_hashes)
@@ -1609,7 +1618,7 @@ class DeploymentsPromoteTest(unittest.TestCase):
         self.assertEqual(payload["from_hash"], "abc123456xyz")
         self.assertIn("included_deployments", payload)
 
-    @patch("poly.cli_commands.deployments.success")
+    @patch("poly.output.console.success")
     def test_promote_happy_path_force(self, mock_success):
         """Promote with --force skips confirmation and prints success."""
         DeploymentsCommand.deployments_promote(
@@ -1708,7 +1717,7 @@ class DeploymentsPromoteTest(unittest.TestCase):
         self.assertFalse(payload["success"])
         self.assertIn("not found", payload["error"])
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_promote_not_found_rich(self, mock_error):
         """Promote with unknown hash prints error and exits."""
         with self.assertRaises(SystemExit):
@@ -1742,7 +1751,7 @@ class DeploymentsPromoteTest(unittest.TestCase):
         self.assertFalse(payload["success"])
         self.assertIn("API down", payload["error"])
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_promote_api_error_rich(self, mock_error):
         """API exception during promote prints error and exits."""
         self.proj.promote_deployment.side_effect = RuntimeError("API down")
@@ -1759,11 +1768,11 @@ class DeploymentsPromoteTest(unittest.TestCase):
         mock_error.assert_called_once()
         self.assertIn("API down", mock_error.call_args[0][0])
 
-    @patch("poly.cli_commands.deployments.questionary")
-    @patch("poly.cli_commands.deployments.warning")
-    def test_promote_user_aborts_confirmation(self, mock_warning, mock_q):
+    @patch("questionary.confirm")
+    @patch("poly.output.console.warning")
+    def test_promote_user_aborts_confirmation(self, mock_warning, mock_confirm):
         """User declining confirmation aborts with exit 0."""
-        mock_q.confirm.return_value.ask.return_value = False
+        mock_confirm.return_value.ask.return_value = False
 
         with self.assertRaises(SystemExit) as ctx:
             DeploymentsCommand.deployments_promote(
@@ -1858,7 +1867,7 @@ class DeploymentsRollbackTest(unittest.TestCase):
         self.assertEqual(payload["message"], "revert")
         self.assertIn("reverted_deployments", payload)
 
-    @patch("poly.cli_commands.deployments.success")
+    @patch("poly.output.console.success")
     def test_rollback_happy_path_force(self, mock_success):
         """Rollback with --force skips confirmation and prints success."""
         DeploymentsCommand.deployments_rollback(
@@ -1912,7 +1921,7 @@ class DeploymentsRollbackTest(unittest.TestCase):
         self.assertFalse(payload["success"])
         self.assertIn("not found", payload["error"])
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_rollback_not_found_rich(self, mock_error):
         """Rollback with unknown hash prints error and exits."""
         with self.assertRaises(SystemExit):
@@ -1944,7 +1953,7 @@ class DeploymentsRollbackTest(unittest.TestCase):
         self.assertFalse(payload["success"])
         self.assertIn("timeout", payload["error"])
 
-    @patch("poly.cli_commands.deployments.error")
+    @patch("poly.output.console.error")
     def test_rollback_api_error_rich(self, mock_error):
         """API exception during rollback prints error and exits."""
         self.proj.rollback_deployment.side_effect = RuntimeError("timeout")
@@ -1960,11 +1969,11 @@ class DeploymentsRollbackTest(unittest.TestCase):
         mock_error.assert_called_once()
         self.assertIn("timeout", mock_error.call_args[0][0])
 
-    @patch("poly.cli_commands.deployments.questionary")
-    @patch("poly.cli_commands.deployments.warning")
-    def test_rollback_user_aborts_confirmation(self, mock_warning, mock_q):
+    @patch("questionary.confirm")
+    @patch("poly.output.console.warning")
+    def test_rollback_user_aborts_confirmation(self, mock_warning, mock_confirm):
         """User declining confirmation aborts with exit 0."""
-        mock_q.confirm.return_value.ask.return_value = False
+        mock_confirm.return_value.ask.return_value = False
 
         with self.assertRaises(SystemExit) as ctx:
             DeploymentsCommand.deployments_rollback(
@@ -2071,30 +2080,30 @@ class InitProjectTest(unittest.TestCase):
 
         self.assertEqual(ctx.exception.code, 1)
 
-    @patch("poly.cli_commands.project.questionary")
+    @patch("questionary.confirm")
     @patch("poly.cli_commands.project.AgentStudioInterface")
-    def test_init_offers_create_when_no_projects(self, mock_iface_cls, mock_q):
+    def test_init_offers_create_when_no_projects(self, mock_iface_cls, mock_confirm):
         """When get_projects returns empty dict, user is offered to create a project."""
         api = mock_iface_cls.return_value
         api.get_accounts.return_value = {"acc_1": "Only Account"}
         api.get_projects.return_value = {}
-        mock_q.confirm.return_value.ask.return_value = False
+        mock_confirm.return_value.ask.return_value = False
 
         InitCommand.init_project(TEST_DIR, region="eu-west-1")
 
-        mock_q.confirm.assert_called_once()
+        mock_confirm.assert_called_once()
 
     @patch("poly.cli_commands.project.ProjectCommand.create_project")
-    @patch("poly.cli_commands.project.questionary")
+    @patch("questionary.confirm")
     @patch("poly.cli_commands.project.AgentStudioInterface")
     def test_init_delegates_to_create_project_when_accepted(
-        self, mock_iface_cls, mock_q, mock_create
+        self, mock_iface_cls, mock_confirm, mock_create
     ):
         """When user accepts create prompt, create_project is called."""
         api = mock_iface_cls.return_value
         api.get_accounts.return_value = {"acc_1": "Only Account"}
         api.get_projects.return_value = {}
-        mock_q.confirm.return_value.ask.return_value = True
+        mock_confirm.return_value.ask.return_value = True
 
         InitCommand.init_project(TEST_DIR, region="eu-west-1")
 
@@ -2140,13 +2149,14 @@ class CreateProjectTest(unittest.TestCase):
 
     @patch("poly.cli_commands.project.InitCommand.init_project")
     @patch("poly.cli_commands.project.AgentStudioInterface")
-    @patch("poly.cli_commands.project.questionary")
+    @patch("questionary.text")
+    @patch("questionary.select")
     def test_interactive_flow_selects_region_account_and_name(
-        self, mock_q, mock_iface_cls, mock_init
+        self, mock_select, mock_text, mock_iface_cls, mock_init
     ):
         """create project with no args probes regions, prompts account/name/id."""
-        mock_q.select.return_value.ask.side_effect = ["us-1", "acc-789"]
-        mock_q.text.return_value.ask.side_effect = ["new-project", "new-project"]
+        mock_select.return_value.ask.side_effect = ["us-1", "acc-789"]
+        mock_text.return_value.ask.side_effect = ["new-project", "new-project"]
 
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_accessible_regions.return_value = ["us-1", "euw-1"]
@@ -2181,10 +2191,13 @@ class CreateProjectTest(unittest.TestCase):
 
     @patch("poly.cli_commands.project.InitCommand.init_project")
     @patch("poly.cli_commands.project.AgentStudioInterface")
-    @patch("poly.cli_commands.project.questionary")
-    def test_auto_selects_single_region_and_account(self, mock_q, mock_iface_cls, mock_init):
+    @patch("questionary.select")
+    @patch("questionary.text")
+    def test_auto_selects_single_region_and_account(
+        self, mock_text, mock_select, mock_iface_cls, mock_init
+    ):
         """create project auto-selects when only one region and one account."""
-        mock_q.text.return_value.ask.side_effect = ["new-project", "new-project"]
+        mock_text.return_value.ask.side_effect = ["new-project", "new-project"]
 
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_accessible_regions.return_value = ["us-1"]
@@ -2199,7 +2212,7 @@ class CreateProjectTest(unittest.TestCase):
             output_json=False,
         )
 
-        mock_q.select.assert_not_called()
+        mock_select.assert_not_called()
         mock_iface.create_project.assert_called_once_with(
             "us-1",
             "acc-789",
@@ -2226,12 +2239,12 @@ class CreateProjectTest(unittest.TestCase):
 
     @patch("poly.cli_commands.project.InitCommand.init_project")
     @patch("poly.cli_commands.project.AgentStudioInterface")
-    @patch("poly.cli_commands.project.questionary")
-    def test_user_cancels_region_selection(self, mock_q, mock_iface_cls, mock_init):
+    @patch("questionary.select")
+    def test_user_cancels_region_selection(self, mock_select, mock_iface_cls, mock_init):
         """create project returns early when user cancels region selection."""
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_accessible_regions.return_value = ["us-1", "euw-1"]
-        mock_q.select.return_value.ask.return_value = None
+        mock_select.return_value.ask.return_value = None
 
         ProjectCommand.create_project(
             TEST_DIR,
@@ -2246,13 +2259,13 @@ class CreateProjectTest(unittest.TestCase):
 
     @patch("poly.cli_commands.project.InitCommand.init_project")
     @patch("poly.cli_commands.project.AgentStudioInterface")
-    @patch("poly.cli_commands.project.questionary")
-    def test_user_cancels_account_selection(self, mock_q, mock_iface_cls, mock_init):
+    @patch("questionary.select")
+    def test_user_cancels_account_selection(self, mock_select, mock_iface_cls, mock_init):
         """create project returns early when user cancels account selection."""
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_accessible_regions.return_value = ["us-1", "euw-1"]
         mock_iface.get_accounts.return_value = {"acc-100": "Acme Corp", "acc-200": "Other"}
-        mock_q.select.return_value.ask.side_effect = ["us-1", None]
+        mock_select.return_value.ask.side_effect = ["us-1", None]
 
         ProjectCommand.create_project(
             TEST_DIR,
@@ -2267,14 +2280,15 @@ class CreateProjectTest(unittest.TestCase):
 
     @patch("poly.cli_commands.project.InitCommand.init_project")
     @patch("poly.cli_commands.project.AgentStudioInterface")
-    @patch("poly.cli_commands.project.questionary")
-    def test_user_cancels_project_name_entry(self, mock_q, mock_iface_cls, mock_init):
+    @patch("questionary.text")
+    @patch("questionary.select")
+    def test_user_cancels_project_name_entry(self, mock_select, mock_text, mock_iface_cls, mock_init):
         """create project returns early when user enters empty project name."""
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_accessible_regions.return_value = ["us-1", "euw-1"]
         mock_iface.get_accounts.return_value = {"acc-200": "My Account", "acc-300": "Other"}
-        mock_q.select.return_value.ask.side_effect = ["us-1", "acc-200"]
-        mock_q.text.return_value.ask.return_value = ""
+        mock_select.return_value.ask.side_effect = ["us-1", "acc-200"]
+        mock_text.return_value.ask.return_value = ""
 
         ProjectCommand.create_project(
             TEST_DIR,
@@ -2330,13 +2344,13 @@ class CreateProjectTest(unittest.TestCase):
 
     @patch("poly.cli_commands.project.InitCommand.init_project")
     @patch("poly.cli_commands.project.AgentStudioInterface")
-    @patch("poly.cli_commands.project.questionary")
-    def test_no_accounts_found_exits(self, mock_q, mock_iface_cls, mock_init):
+    @patch("questionary.select")
+    def test_no_accounts_found_exits(self, mock_select, mock_iface_cls, mock_init):
         """create project exits when no accounts exist for the region."""
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_accessible_regions.return_value = ["us-1", "euw-1"]
         mock_iface.get_accounts.return_value = {}
-        mock_q.select.return_value.ask.return_value = "us-1"
+        mock_select.return_value.ask.return_value = "us-1"
 
         with self.assertRaises(SystemExit) as ctx:
             ProjectCommand.create_project(
@@ -2373,14 +2387,14 @@ class CreateProjectTest(unittest.TestCase):
 
     @patch("poly.cli_commands.project.InitCommand.init_project")
     @patch("poly.cli_commands.project.AgentStudioInterface")
-    @patch("poly.cli_commands.project.questionary")
-    def test_project_name_is_stripped(self, mock_q, mock_iface_cls, mock_init):
+    @patch("questionary.text")
+    def test_project_name_is_stripped(self, mock_text, mock_iface_cls, mock_init):
         """create project strips whitespace from interactively entered project name."""
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_accessible_regions.return_value = ["euw-1"]
         mock_iface.get_accounts.return_value = {"acc-600": "My Account"}
         mock_iface.create_project.return_value = {"id": "proj-007", "name": "spaced-name"}
-        mock_q.text.return_value.ask.side_effect = ["  spaced-name  ", "spaced-name"]
+        mock_text.return_value.ask.side_effect = ["  spaced-name  ", "spaced-name"]
 
         ProjectCommand.create_project(
             TEST_DIR,
@@ -2401,14 +2415,14 @@ class CreateProjectTest(unittest.TestCase):
 
     @patch("poly.cli_commands.project.InitCommand.init_project")
     @patch("poly.cli_commands.project.AgentStudioInterface")
-    @patch("poly.cli_commands.project.questionary")
-    def test_project_id_defaults_to_slugified_name(self, mock_q, mock_iface_cls, mock_init):
+    @patch("questionary.text")
+    def test_project_id_defaults_to_slugified_name(self, mock_text, mock_iface_cls, mock_init):
         """create project ID prompt defaults to lowercase hyphenated version of the name."""
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_accessible_regions.return_value = ["us-1"]
         mock_iface.get_accounts.return_value = {"acc-1": "Acme"}
         mock_iface.create_project.return_value = {"id": "my-new-project", "name": "My New Project"}
-        mock_q.text.return_value.ask.side_effect = ["My New Project", "my-new-project"]
+        mock_text.return_value.ask.side_effect = ["My New Project", "my-new-project"]
 
         ProjectCommand.create_project(
             TEST_DIR,
@@ -2463,12 +2477,12 @@ class DeleteProjectTest(unittest.TestCase):
         mock_iface_cls.return_value.delete_project.assert_not_called()
 
     @patch("poly.cli_commands.project.AgentStudioInterface")
-    @patch("poly.cli_commands.project.questionary")
-    def test_interactive_confirm_false_cancels_delete(self, mock_q, mock_iface_cls):
+    @patch("questionary.confirm")
+    def test_interactive_confirm_false_cancels_delete(self, mock_confirm, mock_iface_cls):
         """delete project returns early when user declines confirmation prompt."""
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_agents.return_value = {"proj-123": "My Project"}
-        mock_q.confirm.return_value.ask.return_value = False
+        mock_confirm.return_value.ask.return_value = False
 
         ProjectCommand.delete_project(
             region="us-1",
@@ -2557,15 +2571,15 @@ class DuplicateProjectTest(unittest.TestCase):
         mock_iface_cls.return_value.duplicate_project.assert_not_called()
 
     @patch("poly.cli_commands.project.AgentStudioInterface")
-    @patch("poly.cli_commands.project.questionary")
-    def test_interactive_flow_prompts_for_name_and_id(self, mock_q, mock_iface_cls):
+    @patch("questionary.text")
+    def test_interactive_flow_prompts_for_name_and_id(self, mock_text, mock_iface_cls):
         """duplicate project without name/id prompts user for both."""
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_agents.return_value = {"proj-123": "My Project"}
         mock_iface.duplicate_project.return_value = {"id": "proj-dup", "name": "My Project (copy)"}
 
         # First text prompt: project name. Second: project id.
-        mock_q.text.return_value.ask.side_effect = ["My Project (copy)", "proj-dup"]
+        mock_text.return_value.ask.side_effect = ["My Project (copy)", "proj-dup"]
 
         ProjectCommand.duplicate_project(
             region="us-1",
@@ -2669,7 +2683,7 @@ class ConversationsCommandTest(unittest.TestCase):
         patch.stopall()
 
     @patch("poly.cli_commands.conversations.AgentStudioInterface.list_conversations")
-    @patch("poly.cli_commands.conversations.print_conversations")
+    @patch("poly.output.console.print_conversations")
     def test_list_calls_api_with_params(self, mock_print, mock_api):
         """conversations list passes limit/offset to the API."""
         mock_api.return_value = self.SAMPLE_CONVERSATIONS
@@ -2692,7 +2706,7 @@ class ConversationsCommandTest(unittest.TestCase):
         mock_json.assert_called_once_with(self.SAMPLE_CONVERSATIONS)
 
     @patch("poly.cli_commands.conversations.AgentStudioInterface.list_conversations")
-    @patch("poly.cli_commands.conversations.info")
+    @patch("poly.output.console.info")
     def test_list_empty_shows_info(self, mock_info, mock_api):
         """conversations list with no results shows info message."""
         mock_api.return_value = {"conversations": [], "count": 0, "limit": 50, "offset": 0}
@@ -2702,7 +2716,7 @@ class ConversationsCommandTest(unittest.TestCase):
         mock_info.assert_called_once()
 
     @patch("poly.cli_commands.conversations.AgentStudioInterface.get_conversation")
-    @patch("poly.cli_commands.conversations.print_conversation_detail")
+    @patch("poly.output.console.print_conversation_detail")
     def test_get_calls_api_and_prints(self, mock_print, mock_api):
         """conversations get calls API with conversation_id and prints detail."""
         mock_api.return_value = self.SAMPLE_DETAIL
@@ -2727,7 +2741,7 @@ class ConversationsCommandTest(unittest.TestCase):
 
     @patch("builtins.open", create=True)
     @patch("poly.cli_commands.conversations.AgentStudioInterface.get_conversation_audio")
-    @patch("poly.cli_commands.conversations.success")
+    @patch("poly.output.console.success")
     def test_get_audio_writes_file(self, mock_success, mock_api, mock_open):
         """conversations get-audio downloads and writes a WAV file."""
         mock_open.return_value.__enter__ = MagicMock()

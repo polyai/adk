@@ -5,27 +5,12 @@ Copyright PolyAI Limited
 
 import os
 import sys
-import time
-import webbrowser
-from argparse import Namespace, _SubParsersAction, ArgumentParser
-
-import questionary
-import requests
+from argparse import ArgumentParser, Namespace, _SubParsersAction
 
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.project import ProjectCommand
 from poly.handlers.auth0_handler import Auth0Handler
 from poly.handlers.interface import REGIONS, AgentStudioInterface
-from poly.output.console import (
-    console,
-    error,
-    info,
-    mask_api_key,
-    plain,
-    print_welcome_message,
-    success,
-    warning,
-)
 from poly.utils import (
     CREDENTIALS_FILE_PATH,
     any_credentials_exist,
@@ -35,6 +20,8 @@ from poly.utils import (
 
 def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
     """Authorise the user, fetch or create a PAT, and save it to the credential file."""
+    from poly.output.console import console, error, info, mask_api_key, plain, success
+
     api_handler = AgentStudioInterface()
 
     info("Setting up your account...")
@@ -66,6 +53,13 @@ def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
 
 def _signin(region: str) -> str:
     """Sign in via the Auth0 device authorization flow and return a JWT access token."""
+    import time
+    import webbrowser
+
+    import requests
+
+    from poly.output.console import console, error, info, success
+
     auth0_handler = Auth0Handler()
 
     try:
@@ -151,6 +145,20 @@ class StartCommand(BaseCommand):
     @classmethod
     def start(cls, base_path: str) -> None:
         """Create an Agent Studio account, set up API key, and create a first project."""
+        import time
+
+        import questionary
+
+        from poly.output.console import (
+            console,
+            error,
+            info,
+            plain,
+            print_welcome_message,
+            success,
+            warning,
+        )
+
         print_welcome_message()
         plain(
             "This will guide you through setting up your API key"
@@ -252,6 +260,10 @@ class LoginCommand(BaseCommand):
     @classmethod
     def login(cls, region: str | None = None) -> None:
         """Log in to an existing Agent Studio account and save API key credentials."""
+        import questionary
+
+        from poly.output.console import plain, print_welcome_message, success
+
         print_welcome_message()
         plain(
             "This will guide you through logging in to your Agent Studio account"

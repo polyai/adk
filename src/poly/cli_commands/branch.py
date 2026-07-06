@@ -12,23 +12,8 @@ from collections import Counter
 from contextlib import nullcontext
 from typing import Any, Optional
 
-import questionary
-
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project, parse_from_projection_json, read_project_config
-from poly.output.console import (
-    console,
-    edit_in_editor,
-    error,
-    info,
-    output_merge_conflict_table,
-    plain,
-    print_branches,
-    print_merge_conflict_interactive_header,
-    prompt_typed_edit,
-    success,
-    warning,
-)
 from poly.output.json_output import json_print
 from poly.resources.resource_utils import contains_merge_conflict
 from poly.utils import merge_strings
@@ -283,6 +268,8 @@ class BranchCommand(BaseCommand):
     @classmethod
     def branch_list(cls, base_path: str, output_json: bool = False) -> None:
         """List branches in the Agent Studio project."""
+        from poly.output.console import plain, print_branches, warning
+
         project = load_project(base_path, output_json=output_json)
 
         current_branch, branches = project.get_branches()
@@ -317,6 +304,8 @@ class BranchCommand(BaseCommand):
         force: bool = False,
     ) -> None:
         """Create a new branch in the Agent Studio project."""
+        from poly.output.console import error, success, warning
+
         project = load_project(base_path, output_json=output_json)
 
         if project.branch_id != "main":
@@ -398,6 +387,10 @@ class BranchCommand(BaseCommand):
         from_projection: str = None,
     ) -> None:
         """Switch to a different branch in the Agent Studio project."""
+        import questionary
+
+        from poly.output.console import console, error, plain, success, warning
+
         project = load_project(base_path, output_json=output_json)
 
         if not branch_name:
@@ -479,6 +472,8 @@ class BranchCommand(BaseCommand):
     @classmethod
     def get_current_branch(cls, base_path: str, output_json: bool = False) -> None:
         """Get the current branch of the Agent Studio project."""
+        from poly.output.console import plain, warning
+
         project = load_project(base_path, output_json=output_json)
 
         current_branch = project.get_current_branch()
@@ -508,6 +503,10 @@ class BranchCommand(BaseCommand):
 
         If branch_name is provided, delete that specific branch without an interactive prompt.
         """
+        import questionary
+
+        from poly.output.console import error, info, plain, success, warning
+
         project = load_project(base_path, output_json=output_json)
         current_branch, branches = project.get_branches()
 
@@ -609,6 +608,15 @@ class BranchCommand(BaseCommand):
         branch_display_name: str = "",
     ) -> list[dict[str, Any]]:
         """Resolve merge conflicts with questionary; expects API conflicts optionally enriched."""
+        import questionary
+
+        from poly.output.console import (
+            edit_in_editor,
+            print_merge_conflict_interactive_header,
+            prompt_typed_edit,
+            warning,
+        )
+
         resolutions: list[dict[str, Any]] = []
         index_in_resource: dict[str, int] = {}
         branch_label = branch_display_name or "current branch"
@@ -755,6 +763,16 @@ class BranchCommand(BaseCommand):
         resolutions_file: str = None,
     ):
         """Merge the current branch into main, with optional conflict resolutions."""
+        from poly.output.console import (
+            console,
+            error,
+            info,
+            output_merge_conflict_table,
+            plain,
+            success,
+            warning,
+        )
+
         if message is None or (isinstance(message, str) and not message.strip()):
             if output_json:
                 json_print({"success": False, "error": "Merge message is required."})

@@ -14,18 +14,6 @@ from contextlib import nullcontext
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import compute_diff, load_project, parse_from_projection_json
 from poly.handlers.interface import AgentStudioInterface
-from poly.output.console import (
-    console,
-    error,
-    info,
-    plain,
-    print_diff,
-    print_file_list,
-    print_status,
-    print_validation_errors,
-    success,
-    warning,
-)
 from poly.output.json_output import commands_to_dicts, json_print
 
 logger = logging.getLogger(__name__)
@@ -101,6 +89,8 @@ class PullCommand(BaseCommand):
         output_json_projection: bool = False,
     ) -> None:
         """Pull the latest project configuration from the Agent Studio."""
+        from poly.output.console import console, info, print_file_list, success, warning
+
         project = load_project(base_path, output_json=output_json)
         if not output_json:
             info(f"Pulling project [bold]{project.account_id}/{project.project_id}[/bold]...")
@@ -239,6 +229,8 @@ class PushCommand(BaseCommand):
         output_commands: bool = False,
     ) -> None:
         """Push the project configuration to the Agent Studio."""
+        from poly.output.console import error, info, plain, success, warning
+
         project = load_project(base_path, output_json=output_json)
         if not output_json and not output_commands:
             info(
@@ -318,6 +310,8 @@ class StatusCommand(BaseCommand):
     @classmethod
     def status(cls, base_path: str, output_json: bool = False) -> None:
         """Check the changed files of the project."""
+        from poly.output.console import plain, print_file_list, print_status
+
         project = load_project(base_path, output_json=output_json)
 
         if not project.account_name:
@@ -407,6 +401,8 @@ class RevertCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Revert changes in the project."""
+        from poly.output.console import plain, success
+
         project = load_project(base_path, output_json=output_json)
 
         # If relative paths are provided, convert them to absolute paths
@@ -495,6 +491,8 @@ class DiffCommand(BaseCommand):
         Pass a version hash to compare that version against its predecessor.
         Use --before / --after to compare any two named versions or branches.
         """
+        from poly.output.console import console, error, plain, print_diff
+
         if version_hash and (before or after):
             error("Cannot specify both hash and before/after versions.")
             return
@@ -593,6 +591,8 @@ class FormatCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Format project resources (Python via ruff, YAML/JSON via in-process formatting); optionally run ty."""
+        from poly.output.console import error, info, plain, success
+
         project = load_project(base_path, output_json=output_json)
         files_resolved: list[str] | None = None
         if files:
@@ -749,6 +749,8 @@ class ValidateCommand(BaseCommand):
     @classmethod
     def validate_project(cls, base_path: str, output_json: bool = False) -> None:
         """Validate the project configuration locally."""
+        from poly.output.console import print_validation_errors, success
+
         project = load_project(base_path, output_json=output_json)
         errors = project.validate_project()
 

@@ -10,7 +10,6 @@ from typing import Optional
 import argcomplete
 
 from poly.cli_commands.base import BaseCommand, Parents
-from poly.output.console import plain, success
 from poly.project import AgentStudioProject
 
 DOCUMENT_CHOICES = AgentStudioProject.discover_docs()
@@ -69,6 +68,8 @@ class DocsCommand(BaseCommand):
         output: Optional[str] = None,
     ) -> None:
         """Generate documentation for the project."""
+        from poly.output.console import plain, success
+
         parts: list[str] = []
         if not documents and not all_documents:
             parts.append(AgentStudioProject.load_docs("docs"))

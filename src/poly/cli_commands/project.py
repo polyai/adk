@@ -6,23 +6,12 @@ Copyright PolyAI Limited
 import os
 import re
 import sys
-import webbrowser
 from argparse import SUPPRESS, ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from contextlib import nullcontext
-
-import questionary
 
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project, parse_from_projection_json
 from poly.handlers.interface import REGIONS, AgentStudioInterface
-from poly.output.console import (
-    console,
-    error,
-    info,
-    print_agents,
-    success,
-    warning,
-)
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
 
@@ -267,6 +256,10 @@ class ProjectCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Create a new Agent Studio project under an interactively selected account."""
+        import questionary
+
+        from poly.output.console import console, error, info, success, warning
+
         if output_json and not (region and account_id and project_name):
             json_print(
                 {
@@ -407,6 +400,10 @@ class ProjectCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """List Agent Studio projects in an account."""
+        import questionary
+
+        from poly.output.console import console, error, info, print_agents, warning
+
         if output_json and not (region and account_id):
             json_print(
                 {
@@ -511,6 +508,10 @@ class ProjectCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Delete an Agent Studio project."""
+        import questionary
+
+        from poly.output.console import console, error, info, success, warning
+
         if output_json and not (region and account_id and project_id):
             json_print(
                 {
@@ -660,6 +661,10 @@ class ProjectCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Duplicate an Agent Studio project."""
+        import questionary
+
+        from poly.output.console import console, error, info, success, warning
+
         if output_json and not (region and account_id and project_id and new_name):
             json_print(
                 {
@@ -897,6 +902,10 @@ class InitCommand(BaseCommand):
         output_json_projection: bool = False,
     ) -> None:
         """Initialize a new Agent Studio project."""
+        import questionary
+
+        from poly.output.console import console, error, info, success, warning
+
         if output_json and not (region and account_id and project_id):
             json_print(
                 {
@@ -1114,6 +1123,10 @@ class StudioCommand(BaseCommand):
     @classmethod
     def open_agent_studio(cls, base_path: str = "", output_json: bool = False) -> None:
         """Open the current project in the Agent Studio web UI."""
+        import webbrowser
+
+        from poly.output.console import info
+
         project = load_project(base_path or os.getcwd(), output_json=output_json)
         url = project.studio_base_url
         if output_json:
