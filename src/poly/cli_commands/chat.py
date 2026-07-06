@@ -6,7 +6,7 @@ Copyright PolyAI Limited
 import json
 import os
 import sys
-from argparse import _SubParsersAction, ArgumentParser, RawTextHelpFormatter
+from argparse import Namespace, _SubParsersAction, ArgumentParser, RawTextHelpFormatter
 from contextlib import nullcontext
 from typing import Optional
 
@@ -156,7 +156,7 @@ class ChatCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Dispatch to the chat handler, reading input file/stdin if needed."""
         show_all = args.metadata
         input_messages = None

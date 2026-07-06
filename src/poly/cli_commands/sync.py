@@ -8,7 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
-from argparse import SUPPRESS, ArgumentParser, RawTextHelpFormatter, _SubParsersAction
+from argparse import SUPPRESS, ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from contextlib import nullcontext
 
 from poly.cli_commands.base import BaseCommand, Parents
@@ -79,7 +79,7 @@ class PullCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Execute the pull command."""
         cls.pull(
             args.path,
@@ -213,7 +213,7 @@ class PushCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Execute the push command."""
         cls.push(
             args.path,
@@ -311,7 +311,7 @@ class StatusCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Execute the status command."""
         cls.status(args.path, args.json)
 
@@ -395,7 +395,7 @@ class RevertCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Execute the revert command."""
         cls.revert(args.path, args.files, output_json=args.json)
 
@@ -475,7 +475,7 @@ class DiffCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Execute the diff command."""
         cls.diff(args.path, args.files, args.hash, args.before, args.after, args.json)
 
@@ -533,7 +533,7 @@ class FormatCommand(BaseCommand):
     command = "format"
 
     @classmethod
-    def add_arguments(cls, subparsers, parents: Parents) -> None:
+    def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
         """Register the ``format`` subparser."""
         format_parser = subparsers.add_parser(
             "format",
@@ -573,7 +573,7 @@ class FormatCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Run the format command."""
         cls.format(
             args.path,
@@ -725,7 +725,7 @@ class ValidateCommand(BaseCommand):
     command = "validate"
 
     @classmethod
-    def add_arguments(cls, subparsers, parents: Parents) -> None:
+    def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
         """Register the ``validate`` subparser."""
         validate_parser = subparsers.add_parser(
             "validate",
@@ -742,7 +742,7 @@ class ValidateCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Run the validate command."""
         cls.validate_project(args.path, args.json)
 

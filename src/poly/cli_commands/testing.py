@@ -3,9 +3,8 @@
 Copyright PolyAI Limited
 """
 
-import os
 import sys
-from argparse import ArgumentParser, RawTextHelpFormatter
+from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
@@ -28,16 +27,8 @@ class TestingCommand(BaseCommand):
     command = "test"
 
     @classmethod
-    def add_arguments(cls, subparsers, parents: Parents) -> None:
+    def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
         """Register the ``test`` subcommand tree."""
-        path_parent = ArgumentParser(add_help=False)
-        path_parent.add_argument(
-            "--path",
-            type=str,
-            default=os.getcwd(),
-            help="Base path to the project. Defaults to current working directory.",
-        )
-
         test_parser = subparsers.add_parser(
             "test",
             parents=[parents.verbose, parents.debug],
@@ -49,7 +40,7 @@ class TestingCommand(BaseCommand):
 
         test_run_parser = testing_subparsers.add_parser(
             "run",
-            parents=[path_parent, parents.json, parents.verbose, parents.debug],
+            parents=[parents.path, parents.json, parents.verbose, parents.debug],
             help="Run tests for the project.",
             description=(
                 "Run tests for the project. Runs all tests by default.\n"
@@ -91,7 +82,7 @@ class TestingCommand(BaseCommand):
 
         test_get_parser = testing_subparsers.add_parser(
             "show",
-            parents=[path_parent, parents.json, parents.verbose, parents.debug],
+            parents=[parents.path, parents.json, parents.verbose, parents.debug],
             help="View test run results.",
             description=(
                 "Get test run results.\n\n"
@@ -116,7 +107,7 @@ class TestingCommand(BaseCommand):
 
         test_list_parser = testing_subparsers.add_parser(
             "list",
-            parents=[path_parent, parents.json, parents.verbose, parents.debug],
+            parents=[parents.path, parents.json, parents.verbose, parents.debug],
             help="List test runs.",
             description=(
                 "List test runs.\n\n"
@@ -140,7 +131,7 @@ class TestingCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Dispatch to the matching test sub-handler."""
         if args.test_subcommand == "run":
             cls.testing_run(

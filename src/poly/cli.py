@@ -4,6 +4,7 @@ Copyright PolyAI Limited
 """
 
 import logging
+import os
 import sys
 import traceback
 from argparse import ArgumentParser
@@ -105,7 +106,17 @@ class AgentStudioCLI:
             help="Display debug logs.",
         )
 
-        parents = Parents(verbose=verbose_parent, json=json_parent, debug=debug_parent)
+        path_parent = ArgumentParser(add_help=False)
+        path_parent.add_argument(
+            "--path",
+            type=str,
+            default=os.getcwd(),
+            help="Base path to the project. Defaults to current working directory.",
+        )
+
+        parents = Parents(
+            verbose=verbose_parent, json=json_parent, debug=debug_parent, path=path_parent
+        )
 
         subparsers = parser.add_subparsers(dest="command", required=True)
 

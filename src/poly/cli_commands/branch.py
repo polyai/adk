@@ -7,7 +7,7 @@ import json
 import os
 import subprocess
 import sys
-from argparse import SUPPRESS, ArgumentParser, RawTextHelpFormatter, _SubParsersAction
+from argparse import SUPPRESS, ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from collections import Counter
 from contextlib import nullcontext
 from typing import Any, Optional
@@ -110,14 +110,6 @@ class BranchCommand(BaseCommand):
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
         """Register the ``branch`` subcommand tree."""
-        branch_path_parent = ArgumentParser(add_help=False)
-        branch_path_parent.add_argument(
-            "--path",
-            type=str,
-            default=os.getcwd(),
-            help="Base path to the project. Defaults to current working directory.",
-        )
-
         branches_parser = subparsers.add_parser(
             "branch",
             parents=[],
@@ -138,14 +130,14 @@ class BranchCommand(BaseCommand):
 
         branch_list_parser = branch_subparsers.add_parser(
             "list",
-            parents=[branch_path_parent, parents.verbose, parents.json, parents.debug],
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
             help="List all branches in the project.",
         )
         branch_list_parser.set_defaults(branch_subcommand="list")
 
         branch_create_parser = branch_subparsers.add_parser(
             "create",
-            parents=[branch_path_parent, parents.verbose, parents.json, parents.debug],
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
             help="Create a new branch.",
         )
         branch_create_parser.add_argument(
@@ -170,7 +162,7 @@ class BranchCommand(BaseCommand):
 
         branch_switch_parser = branch_subparsers.add_parser(
             "switch",
-            parents=[branch_path_parent, parents.verbose, parents.json, parents.debug],
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
             help="Switch to a different branch.",
         )
         branch_switch_parser.add_argument(
@@ -204,14 +196,14 @@ class BranchCommand(BaseCommand):
 
         branch_current_parser = branch_subparsers.add_parser(
             "current",
-            parents=[branch_path_parent, parents.verbose, parents.json, parents.debug],
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
             help="Show the current branch.",
         )
         branch_current_parser.set_defaults(branch_subcommand="current")
 
         branch_delete_parser = branch_subparsers.add_parser(
             "delete",
-            parents=[branch_path_parent, parents.verbose, parents.json, parents.debug],
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
             help="Interactively select and delete a branch.",
         )
         branch_delete_parser.add_argument(
@@ -224,7 +216,7 @@ class BranchCommand(BaseCommand):
 
         branch_merge_parser = branch_subparsers.add_parser(
             "merge",
-            parents=[branch_path_parent, parents.verbose, parents.json, parents.debug],
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
             help="Merge branch into main",
         )
         branch_merge_parser.add_argument(
@@ -254,7 +246,7 @@ class BranchCommand(BaseCommand):
         branch_merge_parser.set_defaults(branch_subcommand="merge")
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Dispatch to the matching branch sub-handler."""
         if args.branch_subcommand == "list":
             cls.branch_list(args.path, args.json)

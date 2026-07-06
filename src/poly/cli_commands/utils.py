@@ -4,7 +4,7 @@ Copyright PolyAI Limited
 """
 
 import os
-from argparse import _SubParsersAction, ArgumentParser, RawTextHelpFormatter
+from argparse import Namespace, _SubParsersAction, ArgumentParser, RawTextHelpFormatter
 from typing import Optional
 
 import argcomplete
@@ -53,7 +53,7 @@ class DocsCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Dispatch to the docs handler."""
         cls.docs(
             documents=args.documents,
@@ -122,7 +122,7 @@ class CompletionCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Dispatch to the completion handler."""
         cls.print_completion(args.shell)
 

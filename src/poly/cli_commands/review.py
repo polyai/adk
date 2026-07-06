@@ -5,7 +5,7 @@ Copyright PolyAI Limited
 
 import os
 import webbrowser
-from argparse import RawTextHelpFormatter
+from argparse import Namespace, RawTextHelpFormatter, _SubParsersAction, ArgumentParser
 from typing import Optional
 
 import questionary
@@ -24,7 +24,7 @@ class ReviewCommand(BaseCommand):
     command = "review"
 
     @classmethod
-    def add_arguments(cls, subparsers, parents: Parents) -> None:
+    def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
         """Register the ``review`` subcommand tree."""
         review_parser = subparsers.add_parser(
             "review",
@@ -110,7 +110,7 @@ class ReviewCommand(BaseCommand):
         review_delete_parser.set_defaults(review_subcommand="delete")
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Dispatch to the matching review sub-handler."""
         if args.review_subcommand == "delete":
             cls.delete_gists(gist_id=args.id, output_json=args.json)

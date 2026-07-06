@@ -7,12 +7,13 @@ import os
 import sys
 import time
 import webbrowser
-from argparse import _SubParsersAction, ArgumentParser
+from argparse import Namespace, _SubParsersAction, ArgumentParser
 
 import questionary
 import requests
 
 from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.project import ProjectCommand
 from poly.handlers.auth0_handler import Auth0Handler
 from poly.handlers.interface import REGIONS, AgentStudioInterface
 from poly.output.console import (
@@ -143,16 +144,13 @@ class StartCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Dispatch to the start handler."""
         cls.start(base_path=args.base_path)
 
     @classmethod
     def start(cls, base_path: str) -> None:
         """Create an Agent Studio account, set up API key, and create a first project."""
-        # Import here to avoid circular imports — ProjectCommand may not exist yet.
-        from poly.cli_commands.project import ProjectCommand
-
         print_welcome_message()
         plain(
             "This will guide you through setting up your API key"
@@ -247,7 +245,7 @@ class LoginCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Dispatch to the login handler."""
         cls.login(region=args.region)
 

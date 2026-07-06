@@ -4,9 +4,8 @@ Copyright PolyAI Limited
 """
 
 import logging
-import os
 import sys
-from argparse import ArgumentParser, RawTextHelpFormatter, _SubParsersAction
+from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from typing import Any, Optional
 
 import questionary
@@ -38,14 +37,6 @@ class DeploymentsCommand(BaseCommand):
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
         """Register the ``deployments`` subcommand tree."""
-        deployments_path_parent = ArgumentParser(add_help=False)
-        deployments_path_parent.add_argument(
-            "--path",
-            type=str,
-            default=os.getcwd(),
-            help="Base path to the project. Defaults to current working directory.",
-        )
-
         deployments_parser = subparsers.add_parser(
             "deployments",
             parents=[parents.verbose],
@@ -62,7 +53,7 @@ class DeploymentsCommand(BaseCommand):
 
         deployment_list_parser = deployments_subparsers.add_parser(
             "list",
-            parents=[deployments_path_parent, parents.json, parents.verbose],
+            parents=[parents.path, parents.json, parents.verbose],
             help="List deployments for the project.",
             description=(
                 "List deployments for the project.\n\n"
@@ -106,7 +97,7 @@ class DeploymentsCommand(BaseCommand):
 
         deployment_show_parser = deployments_subparsers.add_parser(
             "show",
-            parents=[deployments_path_parent, parents.json],
+            parents=[parents.path, parents.json],
             help="Show details for a specific deployment.",
             description=(
                 "Show detailed metadata and included deployments for a specific"
@@ -133,7 +124,7 @@ class DeploymentsCommand(BaseCommand):
 
         deployment_promote_parser = deployments_subparsers.add_parser(
             "promote",
-            parents=[deployments_path_parent, parents.json, parents.verbose, parents.debug],
+            parents=[parents.path, parents.json, parents.verbose, parents.debug],
             help="Promote a deployment to the next environment.",
             description=(
                 "Promote a deployment to the next environment.\n\nExamples:\n  poly deployments promote --from <deployment_id> --to <target_env>\n"
@@ -175,7 +166,7 @@ class DeploymentsCommand(BaseCommand):
 
         deployment_rollback_parser = deployments_subparsers.add_parser(
             "rollback",
-            parents=[deployments_path_parent, parents.json, parents.verbose, parents.debug],
+            parents=[parents.path, parents.json, parents.verbose, parents.debug],
             help="Rollback sandbox/main to a previous version.",
             description=(
                 "Rollback a deployment to a previous version.\n\nExamples:\n  poly deployments rollback --to <deployment_id>\n"
@@ -228,7 +219,7 @@ class DeploymentsCommand(BaseCommand):
 
         ab_test_start_parser = ab_test_subparsers.add_parser(
             "start",
-            parents=[deployments_path_parent, parents.json, parents.verbose],
+            parents=[parents.path, parents.json, parents.verbose],
             help="Start a new A/B test.",
             description=(
                 "Start a new A/B test against the current live deployment.\n\n"
@@ -262,7 +253,7 @@ class DeploymentsCommand(BaseCommand):
 
         ab_test_list_parser = ab_test_subparsers.add_parser(
             "list",
-            parents=[deployments_path_parent, parents.json, parents.verbose],
+            parents=[parents.path, parents.json, parents.verbose],
             help="List A/B tests for the project.",
             description=(
                 "List A/B tests for the project.\n\n"
@@ -281,7 +272,7 @@ class DeploymentsCommand(BaseCommand):
 
         ab_test_subparsers.add_parser(
             "active",
-            parents=[deployments_path_parent, parents.json, parents.verbose],
+            parents=[parents.path, parents.json, parents.verbose],
             help="Show the currently active A/B test.",
             description="Show the currently active A/B test, if any.",
             formatter_class=RawTextHelpFormatter,
@@ -289,7 +280,7 @@ class DeploymentsCommand(BaseCommand):
 
         ab_test_update_parser = ab_test_subparsers.add_parser(
             "update",
-            parents=[deployments_path_parent, parents.json, parents.verbose],
+            parents=[parents.path, parents.json, parents.verbose],
             help="Update traffic percentage for an active A/B test.",
             description=(
                 "Update the traffic split for the active A/B test.\n\n"
@@ -307,7 +298,7 @@ class DeploymentsCommand(BaseCommand):
 
         ab_test_end_parser = ab_test_subparsers.add_parser(
             "end",
-            parents=[deployments_path_parent, parents.json, parents.verbose],
+            parents=[parents.path, parents.json, parents.verbose],
             help="End an active A/B test and choose a winner.",
             description=(
                 "End the active A/B test and choose which deployment wins.\n\n"
@@ -328,7 +319,7 @@ class DeploymentsCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Dispatch to the matching deployments sub-handler."""
         if args.deployments_subcommand == "list":
             cls.deployments_list(

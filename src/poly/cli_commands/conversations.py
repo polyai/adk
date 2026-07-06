@@ -3,8 +3,7 @@
 Copyright PolyAI Limited
 """
 
-import os
-from argparse import _SubParsersAction, ArgumentParser, RawTextHelpFormatter
+from argparse import Namespace, _SubParsersAction, ArgumentParser, RawTextHelpFormatter
 from typing import Optional
 
 from poly.cli_commands.base import BaseCommand, Parents
@@ -27,14 +26,6 @@ class ConversationsCommand(BaseCommand):
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
         """Register the ``conversations`` subcommand tree."""
-        path_parent = ArgumentParser(add_help=False)
-        path_parent.add_argument(
-            "--path",
-            type=str,
-            default=os.getcwd(),
-            help="Base path to the project. Defaults to current working directory.",
-        )
-
         conversations_parser = subparsers.add_parser(
             "conversations",
             parents=[parents.verbose],
@@ -55,7 +46,7 @@ class ConversationsCommand(BaseCommand):
 
         conv_list_parser = conversations_subparsers.add_parser(
             "list",
-            parents=[path_parent, parents.json, parents.verbose],
+            parents=[parents.path, parents.json, parents.verbose],
             help="List conversations for the project.",
             description=(
                 "List conversations for the project.\n\n"
@@ -80,7 +71,7 @@ class ConversationsCommand(BaseCommand):
 
         conv_get_parser = conversations_subparsers.add_parser(
             "get",
-            parents=[path_parent, parents.json, parents.verbose],
+            parents=[parents.path, parents.json, parents.verbose],
             help="Get details for a specific conversation.",
             description=(
                 "Get detailed information for a conversation including turns.\n\n"
@@ -97,7 +88,7 @@ class ConversationsCommand(BaseCommand):
 
         conv_audio_parser = conversations_subparsers.add_parser(
             "get-audio",
-            parents=[path_parent, parents.json, parents.verbose],
+            parents=[parents.path, parents.json, parents.verbose],
             help="Download audio recording for a conversation.",
             description=(
                 "Download the audio recording for a conversation as a WAV file.\n\n"
@@ -133,7 +124,7 @@ class ConversationsCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Dispatch to the matching conversations sub-handler."""
         if args.conversations_subcommand == "list":
             cls.conversations_list(

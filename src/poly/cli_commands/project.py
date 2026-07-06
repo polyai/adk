@@ -7,7 +7,7 @@ import os
 import re
 import sys
 import webbrowser
-from argparse import SUPPRESS, ArgumentParser, RawTextHelpFormatter, _SubParsersAction
+from argparse import SUPPRESS, ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from contextlib import nullcontext
 
 import questionary
@@ -217,7 +217,7 @@ class ProjectCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Dispatch to the matching project sub-handler."""
         if args.project_subcommand == "list":
             cls.list_projects(
@@ -871,7 +871,7 @@ class InitCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Dispatch to the init handler."""
         cls.init_project(
             args.base_path,
@@ -1107,7 +1107,7 @@ class StudioCommand(BaseCommand):
         )
 
     @classmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Dispatch to the studio handler."""
         cls.open_agent_studio(base_path=args.path, output_json=args.json)
 

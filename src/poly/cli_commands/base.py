@@ -8,7 +8,7 @@ Copyright PolyAI Limited
 """
 
 from abc import ABC, abstractmethod
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace, _SubParsersAction
 from dataclasses import dataclass
 
 
@@ -19,6 +19,7 @@ class Parents:
     verbose: ArgumentParser
     json: ArgumentParser
     debug: ArgumentParser
+    path: ArgumentParser
 
 
 class BaseCommand(ABC):
@@ -28,12 +29,14 @@ class BaseCommand(ABC):
 
     @classmethod
     @abstractmethod
-    def add_arguments(cls, subparsers, parents: "Parents") -> None:
+    def add_arguments(
+        cls, subparsers: "_SubParsersAction[ArgumentParser]", parents: "Parents"
+    ) -> None:
         """Register this command's subparser(s) on the root subparsers action."""
         pass
 
     @classmethod
     @abstractmethod
-    def run(cls, args) -> None:
+    def run(cls, args: Namespace) -> None:
         """Run the command with the provided arguments."""
         pass
