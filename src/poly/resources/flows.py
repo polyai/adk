@@ -7,7 +7,7 @@ import os
 import re
 import uuid
 from abc import ABC
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from enum import Enum
 from functools import cached_property
 from typing import Optional
@@ -22,9 +22,11 @@ from poly.handlers.protobuf.flows_pb2 import (
     CreateNoCodeCondition,
     CreateNoCodeStep,
     CreateStep,
+    CreateStepCondition,
     DeleteNoCodeCondition,
     DeleteNoCodeStep,
     DeleteStep,
+    DeleteStepCondition,
     ExitFlowCondition,
     Flow_CreateFlow,
     Flow_CreateStep,
@@ -48,6 +50,7 @@ from poly.handlers.protobuf.flows_pb2 import (
     UpdateNoCodeCondition,
     UpdateNoCodeStep,
     UpdateStep,
+    UpdateStepCondition,
 )
 from poly.resources.entities import Entity
 from poly.resources.function import Function, FunctionType
@@ -348,8 +351,11 @@ class FlowStep(BaseFlowStep, YamlResource):
             self.dtmf_config = None
 
         self.extracted_entities = extracted_entities or []
+        condition_names = {f.name for f in fields(Condition) if f.init}
         self.conditions = [
-            Condition(**condition) if not isinstance(condition, Condition) else condition
+            Condition(**{k: v for k, v in condition.items() if k in condition_names})
+            if not isinstance(condition, Condition)
+            else condition
             for condition in (conditions or [])
         ]
         self.prompt = prompt
@@ -1123,6 +1129,7 @@ class Condition(SubResource):
     ingress: str
     step_id: str
     flow_id: str
+    parent_is_no_code_step: bool
 
     def __init__(
         self,
@@ -1137,6 +1144,7 @@ class Condition(SubResource):
         position: dict | None = None,
         ingress: str = "top",
         exit_flow_position: dict | None = None,
+        parent_is_no_code_step: bool = True,
     ):
         self.resource_id = resource_id
         self.name = name
@@ -1153,6 +1161,7 @@ class Condition(SubResource):
         self.position = position or {}
         self.ingress = ingress
         self.exit_flow_position = exit_flow_position or {}
+        self.parent_is_no_code_step = parent_is_no_code_step
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
@@ -1216,11 +1225,20 @@ class Condition(SubResource):
     @property
     def command_type(self) -> str:
         """Get the update type for updating the resource."""
-        return "no_code_condition"
+        if self.parent_is_no_code_step:
+            return "no_code_condition"
+        return "step_condition"
 
-    def build_update_proto(self) -> UpdateNoCodeCondition:
+    def build_update_proto(self) -> UpdateNoCodeCondition | UpdateStepCondition:
         """Create a proto for updating the condition."""
-        return UpdateNoCodeCondition(
+        if self.parent_is_no_code_step:
+            return UpdateNoCodeCondition(
+                flow_id=self.flow_id,
+                step_id=self.step_id,
+                condition_id=self.resource_id,
+                **self._get_condition_type_proto(),
+            )
+        return UpdateStepCondition(
             flow_id=self.flow_id,
             step_id=self.step_id,
             condition_id=self.resource_id,
@@ -1229,7 +1247,13 @@ class Condition(SubResource):
 
     def build_delete_proto(self) -> DeleteNoCodeCondition:
         """Create a proto for deleting the condition."""
-        return DeleteNoCodeCondition(
+        if self.parent_is_no_code_step:
+            return DeleteNoCodeCondition(
+                flow_id=self.flow_id,
+                step_id=self.step_id,
+                condition_id=self.resource_id,
+            )
+        return DeleteStepCondition(
             flow_id=self.flow_id,
             step_id=self.step_id,
             condition_id=self.resource_id,
@@ -1237,7 +1261,14 @@ class Condition(SubResource):
 
     def build_create_proto(self) -> CreateNoCodeCondition:
         """Create a proto for creating the condition."""
-        return CreateNoCodeCondition(
+        if self.parent_is_no_code_step:
+            return CreateNoCodeCondition(
+                flow_id=self.flow_id,
+                step_id=self.step_id,
+                condition_id=self.resource_id,
+                **self._get_condition_type_proto(),
+            )
+        return CreateStepCondition(
             flow_id=self.flow_id,
             step_id=self.step_id,
             condition_id=self.resource_id,
@@ -1346,6 +1377,7 @@ class FunctionStep(Function, BaseFlowStep):
     """Dataclass representing a function step"""
 
     function_id: str
+    conditions: Optional[list["Condition"]]
     step_type: StepType = field(default=StepType.FUNCTION_STEP, init=False)
     function_type: FunctionType = field(default=FunctionType.FUNCTION_STEP, init=False)
 
@@ -1357,6 +1389,7 @@ class FunctionStep(Function, BaseFlowStep):
         flow_id: str,
         flow_name: str,
         code: str,
+        conditions: Optional[list["Condition | dict"]] = None,
         description: str = None,
         parameters: list = None,
         latency_control: dict = None,
@@ -1368,6 +1401,10 @@ class FunctionStep(Function, BaseFlowStep):
         self.function_id = function_id
         self.step_type = StepType.FUNCTION_STEP
         self.position = position or {}
+        self.conditions = [
+            Condition(**condition) if not isinstance(condition, Condition) else condition
+            for condition in (conditions or [])
+        ]
         super().__init__(
             resource_id=resource_id,
             name=name,
@@ -1412,6 +1449,7 @@ class FunctionStep(Function, BaseFlowStep):
         known_latency_control: dict,
         known_function_id: str = None,
         known_position: dict[str, float] = None,
+        known_conditions: list["Condition"] = None,
         **kwargs,
     ) -> "FunctionStep":
         code = cls.read_to_raw(
@@ -1447,6 +1485,111 @@ class FunctionStep(Function, BaseFlowStep):
         # Read references from code
         variable_references = cls._extract_variable_references(code, resource_mappings)
 
+        # Extract conditions from code
+        code_for_validation = utils.remove_comments_from_code(code)
+        steps = utils.extract_go_to_steps(code_for_validation)
+
+        known_conditions = known_conditions or []
+        condition_name_map = {
+            cond.name: cond
+            for cond in known_conditions
+            if cond.condition_type != ConditionType.EXIT_FLOW
+        }
+        conditions = []
+
+        for child_step_name, condition_name in steps:
+            if not condition_name:
+                continue
+            # Find Child Step to infer condition type if needed
+            child_step_type = None
+            known_condition = condition_name_map.get(condition_name)
+            child_step_id = ""
+            for resource in resource_mappings or []:
+                if (
+                    issubclass(resource.resource_type, BaseFlowStep)
+                    and resource.flow_name == flow_name
+                    and resource.resource_name == child_step_name
+                ):
+                    child_step_id = resource.resource_id.removeprefix(resource.flow_name + "_")
+
+                    if issubclass(resource.resource_type, FunctionStep):
+                        child_step_type = StepType.FUNCTION_STEP
+                        break
+
+                    child_step_contents = cls.read_to_raw(
+                        resource.file_path,
+                        resource_mappings=resource_mappings,
+                        flow_name=flow_name,
+                    )
+                    child_step_yaml = utils.load_yaml(child_step_contents)
+                    child_step_type = StepType(child_step_yaml.get("step_type"))
+                    break
+
+            if child_step_type == StepType.DEFAULT_STEP:
+                condition_type = ConditionType.NO_CODE_STEP
+            elif child_step_type == StepType.FUNCTION_STEP:
+                condition_type = ConditionType.FUNCTION_STEP
+            else:
+                condition_type = ConditionType.STEP
+
+            conditions.append(
+                Condition(
+                    resource_id=(
+                        known_condition.resource_id
+                        if known_condition
+                        else f"CONDITION-{uuid.uuid4().hex[:8]}"
+                    ),
+                    name=condition_name,
+                    condition_type=condition_type,
+                    step_id=step_id,
+                    flow_id=flow_id,
+                    child_step=child_step_id,
+                    position=known_condition.position if known_condition else None,
+                    ingress=known_condition.ingress if known_condition else None,
+                    exit_flow_position=None,
+                    parent_is_no_code_step=False,
+                ),
+            )
+            if known_condition:
+                del condition_name_map[condition_name]
+
+        if "conv.exit_flow()" in code_for_validation:
+            known_exit_flow_condition = next(
+                (
+                    cond
+                    for cond in known_conditions
+                    if cond.condition_type == ConditionType.EXIT_FLOW
+                ),
+                None,
+            )
+
+            conditions.append(
+                Condition(
+                    resource_id=(
+                        known_exit_flow_condition.resource_id
+                        if known_exit_flow_condition
+                        else f"CONDITION-{uuid.uuid4().hex[:8]}"
+                    ),
+                    name=(
+                        known_exit_flow_condition.name if known_exit_flow_condition else "Exit flow"
+                    ),
+                    condition_type=ConditionType.EXIT_FLOW,
+                    step_id=step_id,
+                    flow_id=flow_id,
+                    child_step="",
+                    position=known_exit_flow_condition.position
+                    if known_exit_flow_condition
+                    else None,
+                    ingress=known_exit_flow_condition.ingress
+                    if known_exit_flow_condition
+                    else None,
+                    exit_flow_position=known_exit_flow_condition.exit_flow_position
+                    if known_exit_flow_condition
+                    else None,
+                    parent_is_no_code_step=False,
+                ),
+            )
+
         return FunctionStep(
             resource_id=resource_id,
             step_id=step_id,
@@ -1459,6 +1602,7 @@ class FunctionStep(Function, BaseFlowStep):
             parameters=[],
             function_id=function_id,
             variable_references=variable_references,
+            conditions=conditions,
         )
 
     @staticmethod
@@ -1541,4 +1685,28 @@ class FunctionStep(Function, BaseFlowStep):
     ) -> tuple[list[SubResource], list[SubResource], list[SubResource]]:
         """LatencyControl is already included in the step update/create protos,
         so skip emitting it as a separate sub-resource command."""
-        return [], [], []
+        new = []
+        updated = []
+        deleted = []
+        old_condition_ids = (
+            {cond.resource_id for cond in old_resource.conditions} if old_resource else set()
+        )
+        new_condition_ids = {cond.resource_id for cond in self.conditions}
+
+        for condition in self.conditions:
+            if condition.resource_id not in old_condition_ids:
+                new.append(condition)
+            else:
+                # Check if updated
+                old_condition = next(
+                    (c for c in old_resource.conditions if c.resource_id == condition.resource_id),
+                    None,
+                )
+                if old_condition and condition != old_condition:
+                    updated.append(condition)
+
+        if old_resource:
+            for condition in old_resource.conditions:
+                if condition.resource_id not in new_condition_ids:
+                    deleted.append(condition)
+        return new, updated, deleted

@@ -513,12 +513,7 @@ class Function(Resource):
                 and r.flow_name == self.flow_name
             }
             if valid_step_names:
-                for match in re.finditer(
-                    r'flow\.goto_step\(\s*"((?:[^"\\]|\\.)*)"'
-                    r"|flow\.goto_step\(\s*'((?:[^'\\]|\\.)*)'",
-                    code_for_validation,
-                ):
-                    target_step = match.group(1) or match.group(2)
+                for target_step, _ in utils.extract_go_to_steps(code_for_validation):
                     if target_step not in valid_step_names:
                         raise ValueError(
                             f"flow.goto_step('{target_step}') references a step that does not exist "
@@ -532,12 +527,7 @@ class Function(Resource):
                 if r.resource_type.__name__ == "FlowConfig"
             }
             if valid_flow_names:
-                for match in re.finditer(
-                    r'conv\.goto_flow\(\s*"((?:[^"\\]|\\.)*)"'
-                    r"|conv\.goto_flow\(\s*'((?:[^'\\]|\\.)*)'",
-                    code_for_validation,
-                ):
-                    target_flow = match.group(1) or match.group(2)
+                for target_flow in utils.extract_go_to_flows(code_for_validation):
                     if target_flow not in valid_flow_names:
                         raise ValueError(
                             f"conv.goto_flow('{target_flow}') references a flow that does not exist."
