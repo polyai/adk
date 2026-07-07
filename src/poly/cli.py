@@ -136,7 +136,8 @@ class AgentStudioCLI:
         for command in self.commands:
             command.add_arguments(subparsers, parents=parents)
 
-        # RTC
+        # RTC — inline rather than a BaseCommand subclass because RTC is
+        # environment-scoped (not branch-scoped) and bypasses Sourcerer.
         rtc_path_parent = ArgumentParser(add_help=False)
         rtc_path_parent.add_argument(
             "--path",
@@ -282,13 +283,14 @@ class AgentStudioCLI:
             output_json: If True, emit machine-readable JSON.
         """
         project = load_project(base_path, output_json=output_json)
+        project_root = project.root_path
 
         if env == "all":
             envs_to_fetch = ["sandbox", "pre-release", "live"]
         else:
             envs_to_fetch = [env]
 
-        rtc_root = os.path.join(base_path, "real_time_configuration")
+        rtc_root = os.path.join(project_root, "real_time_configuration")
         results = []
 
         try:
@@ -307,11 +309,13 @@ class AgentStudioCLI:
                 schema_path = os.path.join(env_dir, "schema.json")
                 with open(schema_path, "w", encoding="utf-8") as f:
                     json.dump(schema, f, indent=2)
+                    f.write("\n")
 
                 variables = config.get("variables", {})
                 data_path = os.path.join(env_dir, "data.json")
                 with open(data_path, "w", encoding="utf-8") as f:
                     json.dump(variables, f, indent=2)
+                    f.write("\n")
 
                 results.append(
                     {
@@ -351,9 +355,10 @@ class AgentStudioCLI:
             output_json: If True, emit machine-readable JSON.
         """
         project = load_project(base_path, output_json=output_json)
+        project_root = project.root_path
 
         dir_name = RTC_ENV_TO_DIR[env]
-        env_dir = os.path.join(base_path, "real_time_configuration", dir_name)
+        env_dir = os.path.join(project_root, "real_time_configuration", dir_name)
 
         schema_path = os.path.join(env_dir, "schema.json")
         data_path = os.path.join(env_dir, "data.json")
@@ -380,7 +385,12 @@ class AgentStudioCLI:
         with open(data_path, "r", encoding="utf-8") as f:
             variables = json.load(f)
 
-        if env == "live" and not force and not output_json:
+        if env == "live" and not force:
+            if output_json:
+                json_print(
+                    {"success": False, "error": "Refusing to push RTC to live without --force."}
+                )
+                sys.exit(1)
             confirm = questionary.confirm(
                 f"Push RTC to {env}? This will update live configuration.",
                 auto_enter=False,
@@ -397,32 +407,41 @@ class AgentStudioCLI:
                 client_env=env,
                 schema=schema,
             )
+        except requests.HTTPError as e:
+            if output_json:
+                json_print({"success": False, "error": str(e), "step": "schema"})
+                sys.exit(1)
+            else:
+                raise
 
+        try:
             AgentStudioInterface.patch_rtc_variables(
                 region=project.region,
                 project_id=project.project_id,
                 client_env=env,
                 variables=variables,
             )
-
-            if output_json:
-                json_print(
-                    {
-                        "success": True,
-                        "environment": env,
-                        "schema_file": schema_path,
-                        "data_file": data_path,
-                    }
-                )
-            else:
-                success(f"Pushed RTC to {env}")
-
         except requests.HTTPError as e:
+            # Schema was already pushed — warn so the user knows the state is partial
+            msg = f"Schema pushed but variables failed: {e}"
             if output_json:
-                json_print({"success": False, "error": str(e)})
+                json_print({"success": False, "error": msg, "step": "variables"})
                 sys.exit(1)
             else:
+                error(f"Warning: schema was pushed to {env}, but variables update failed.")
                 raise
+
+        if output_json:
+            json_print(
+                {
+                    "success": True,
+                    "environment": env,
+                    "schema_file": schema_path,
+                    "data_file": data_path,
+                }
+            )
+        else:
+            success(f"Pushed RTC to {env}")
 
 
 def main():

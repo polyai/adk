@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 from poly.cli import AgentStudioCLI, RTC_ENV_TO_DIR, RTC_DIR_TO_ENV
 
 
-class TestRTCIntegration(unittest.TestCase):
+class TestRTC(unittest.TestCase):
     """Test suite for poly rtc command."""
 
     def setUp(self):
@@ -22,6 +22,7 @@ class TestRTCIntegration(unittest.TestCase):
     def tearDown(self):
         """Clean up temporary files."""
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_env_mapping_roundtrip(self):
@@ -55,6 +56,7 @@ class TestRTCIntegration(unittest.TestCase):
         mock_project = MagicMock()
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
+        mock_project.root_path = self.temp_dir
         mock_load_project.return_value = mock_project
 
         # Mock API responses
@@ -83,6 +85,7 @@ class TestRTCIntegration(unittest.TestCase):
         mock_project = MagicMock()
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
+        mock_project.root_path = self.temp_dir
         mock_load_project.return_value = mock_project
 
         rtc_response = {
@@ -105,6 +108,7 @@ class TestRTCIntegration(unittest.TestCase):
         mock_project = MagicMock()
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
+        mock_project.root_path = self.temp_dir
         mock_load_project.return_value = mock_project
 
         rtc_response = {
@@ -127,6 +131,7 @@ class TestRTCIntegration(unittest.TestCase):
         mock_project = MagicMock()
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
+        mock_project.root_path = self.temp_dir
         mock_load_project.return_value = mock_project
 
         schema_obj = {"type": "object", "properties": {"flag": {"type": "boolean"}}}
@@ -170,6 +175,7 @@ class TestRTCIntegration(unittest.TestCase):
         mock_project = MagicMock()
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
+        mock_project.root_path = self.temp_dir
         mock_load_project.return_value = mock_project
 
         # Create test files
@@ -204,6 +210,7 @@ class TestRTCIntegration(unittest.TestCase):
     def test_rtc_push_missing_schema_raises(self, mock_load_project):
         """Verify rtc push raises if schema.json is missing."""
         mock_project = MagicMock()
+        mock_project.root_path = self.temp_dir
         mock_load_project.return_value = mock_project
 
         # Create only data.json
@@ -219,6 +226,7 @@ class TestRTCIntegration(unittest.TestCase):
     def test_rtc_push_missing_data_raises(self, mock_load_project):
         """Verify rtc push raises if data.json is missing."""
         mock_project = MagicMock()
+        mock_project.root_path = self.temp_dir
         mock_load_project.return_value = mock_project
 
         # Create only schema.json
@@ -229,6 +237,161 @@ class TestRTCIntegration(unittest.TestCase):
 
         with self.assertRaises(SystemExit):
             AgentStudioCLI.rtc_push(self.temp_dir, env="sandbox", output_json=True)
+
+    @patch("poly.cli.load_project")
+    def test_rtc_push_live_without_force_json_exits(self, mock_load_project):
+        """Verify pushing to live in JSON mode without --force is refused."""
+        mock_project = MagicMock()
+        mock_project.root_path = self.temp_dir
+        mock_load_project.return_value = mock_project
+
+        live_dir = os.path.join(self.temp_dir, "real_time_configuration", "live")
+        os.makedirs(live_dir)
+        with open(os.path.join(live_dir, "schema.json"), "w") as f:
+            json.dump({}, f)
+        with open(os.path.join(live_dir, "data.json"), "w") as f:
+            json.dump({}, f)
+
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI.rtc_push(self.temp_dir, env="live", force=False, output_json=True)
+
+    @patch("poly.cli.load_project")
+    @patch("poly.cli.AgentStudioInterface.put_rtc_schema")
+    @patch("poly.cli.AgentStudioInterface.patch_rtc_variables")
+    def test_rtc_push_live_with_force_succeeds(
+        self, mock_patch_vars, mock_put_schema, mock_load_project
+    ):
+        """Verify pushing to live with --force bypasses the safety gate."""
+        mock_project = MagicMock()
+        mock_project.region = "studio"
+        mock_project.project_id = "test-project"
+        mock_project.root_path = self.temp_dir
+        mock_load_project.return_value = mock_project
+
+        live_dir = os.path.join(self.temp_dir, "real_time_configuration", "live")
+        os.makedirs(live_dir)
+        with open(os.path.join(live_dir, "schema.json"), "w") as f:
+            json.dump({"type": "object"}, f)
+        with open(os.path.join(live_dir, "data.json"), "w") as f:
+            json.dump({"key": "val"}, f)
+
+        AgentStudioCLI.rtc_push(self.temp_dir, env="live", force=True, output_json=True)
+
+        mock_put_schema.assert_called_once()
+        mock_patch_vars.assert_called_once()
+
+
+class TestIncludeRTC(unittest.TestCase):
+    """Test suite for --include-rtc on pull/push commands."""
+
+    @patch("poly.cli.AgentStudioCLI.rtc_pull")
+    @patch("poly.cli_commands.sync.load_project")
+    def test_pull_include_rtc_calls_rtc_pull(self, mock_load_project, mock_rtc_pull):
+        """Verify pull --include-rtc calls rtc_pull after normal pull."""
+        from poly.cli_commands.sync import PullCommand
+
+        mock_project = MagicMock()
+        mock_project.branch_id = "branch-1"
+        mock_project.account_id = "acc"
+        mock_project.project_id = "proj"
+        mock_project.pull_project.return_value = ([], {})
+        mock_load_project.return_value = mock_project
+
+        PullCommand.pull("/tmp/test", include_rtc=True, output_json=True)
+
+        mock_rtc_pull.assert_called_once_with("/tmp/test", env="all", output_json=True)
+
+    @patch("poly.cli.AgentStudioCLI.rtc_pull")
+    @patch("poly.cli_commands.sync.load_project")
+    def test_pull_without_include_rtc_does_not_call_rtc(self, mock_load_project, mock_rtc_pull):
+        """Verify pull without --include-rtc does not call rtc_pull."""
+        from poly.cli_commands.sync import PullCommand
+
+        mock_project = MagicMock()
+        mock_project.branch_id = "branch-1"
+        mock_project.account_id = "acc"
+        mock_project.project_id = "proj"
+        mock_project.pull_project.return_value = ([], {})
+        mock_load_project.return_value = mock_project
+
+        PullCommand.pull("/tmp/test", include_rtc=False, output_json=True)
+
+        mock_rtc_pull.assert_not_called()
+
+    @patch("poly.cli.AgentStudioCLI.rtc_push")
+    @patch("poly.cli_commands.sync.load_project")
+    def test_push_include_rtc_calls_rtc_push_sandbox_default(
+        self, mock_load_project, mock_rtc_push
+    ):
+        """Verify push --include-rtc calls rtc_push with sandbox default."""
+        from poly.cli_commands.sync import PushCommand
+
+        mock_project = MagicMock()
+        mock_project.branch_id = "branch-1"
+        mock_project.account_id = "acc"
+        mock_project.project_id = "proj"
+        mock_project.push_project.return_value = (True, "ok", [])
+        mock_load_project.return_value = mock_project
+
+        PushCommand.push("/tmp/test", include_rtc=True, output_json=True)
+
+        mock_rtc_push.assert_called_once_with(
+            "/tmp/test", env="sandbox", force=False, output_json=True
+        )
+
+    @patch("poly.cli.AgentStudioCLI.rtc_push")
+    @patch("poly.cli_commands.sync.load_project")
+    def test_push_include_rtc_with_custom_env(self, mock_load_project, mock_rtc_push):
+        """Verify push --include-rtc --rtc-env live passes the correct env."""
+        from poly.cli_commands.sync import PushCommand
+
+        mock_project = MagicMock()
+        mock_project.branch_id = "branch-1"
+        mock_project.account_id = "acc"
+        mock_project.project_id = "proj"
+        mock_project.push_project.return_value = (True, "ok", [])
+        mock_load_project.return_value = mock_project
+
+        PushCommand.push(
+            "/tmp/test", include_rtc=True, rtc_env="live", force=True, output_json=True
+        )
+
+        mock_rtc_push.assert_called_once_with("/tmp/test", env="live", force=True, output_json=True)
+
+    @patch("poly.cli.AgentStudioCLI.rtc_push")
+    @patch("poly.cli_commands.sync.load_project")
+    def test_push_without_include_rtc_does_not_call_rtc(self, mock_load_project, mock_rtc_push):
+        """Verify push without --include-rtc does not call rtc_push."""
+        from poly.cli_commands.sync import PushCommand
+
+        mock_project = MagicMock()
+        mock_project.branch_id = "branch-1"
+        mock_project.account_id = "acc"
+        mock_project.project_id = "proj"
+        mock_project.push_project.return_value = (True, "ok", [])
+        mock_load_project.return_value = mock_project
+
+        PushCommand.push("/tmp/test", include_rtc=False, output_json=True)
+
+        mock_rtc_push.assert_not_called()
+
+    @patch("poly.cli.AgentStudioCLI.rtc_push")
+    @patch("poly.cli_commands.sync.load_project")
+    def test_push_include_rtc_skipped_on_failed_push(self, mock_load_project, mock_rtc_push):
+        """Verify rtc_push is not called when the main push fails."""
+        from poly.cli_commands.sync import PushCommand
+
+        mock_project = MagicMock()
+        mock_project.branch_id = "branch-1"
+        mock_project.account_id = "acc"
+        mock_project.project_id = "proj"
+        mock_project.push_project.return_value = (False, "error", [])
+        mock_load_project.return_value = mock_project
+
+        with self.assertRaises(SystemExit):
+            PushCommand.push("/tmp/test", include_rtc=True, output_json=True)
+
+        mock_rtc_push.assert_not_called()
 
 
 if __name__ == "__main__":

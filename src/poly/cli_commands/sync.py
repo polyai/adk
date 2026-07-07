@@ -65,6 +65,12 @@ class PullCommand(BaseCommand):
             help=SUPPRESS,
             default=False,
         )
+        pull_parser.add_argument(
+            "--include-rtc",
+            action="store_true",
+            default=False,
+            help="Also pull Real-Time Configuration for all environments.",
+        )
 
     @classmethod
     def run(cls, args: Namespace) -> None:
@@ -76,6 +82,7 @@ class PullCommand(BaseCommand):
             args.from_projection,
             output_json=args.json,
             output_json_projection=args.output_json_projection,
+            include_rtc=getattr(args, "include_rtc", False),
         )
 
     @classmethod
@@ -87,6 +94,7 @@ class PullCommand(BaseCommand):
         from_projection: str = None,
         output_json: bool = False,
         output_json_projection: bool = False,
+        include_rtc: bool = False,
     ) -> None:
         """Pull the latest project configuration from the Agent Studio."""
         from poly.output.console import console, info, print_file_list, success, warning
@@ -131,6 +139,10 @@ class PullCommand(BaseCommand):
             if output_json_projection:
                 json_output["projection"] = projection
             json_print(json_output)
+            if include_rtc:
+                from poly.cli import AgentStudioCLI
+
+                AgentStudioCLI.rtc_pull(base_path, env="all", output_json=output_json)
             if files_with_conflicts:
                 sys.exit(1)
             return
@@ -143,6 +155,11 @@ class PullCommand(BaseCommand):
             print_file_list("Merge conflicts detected", files_with_conflicts, "filename.conflict")
 
         success(f"Pulled {project.account_id}/{project.project_id}")
+
+        if include_rtc:
+            from poly.cli import AgentStudioCLI
+
+            AgentStudioCLI.rtc_pull(base_path, env="all", output_json=output_json)
 
 
 class PushCommand(BaseCommand):
@@ -201,6 +218,19 @@ class PushCommand(BaseCommand):
             help=SUPPRESS,
             default=False,
         )
+        push_parser.add_argument(
+            "--include-rtc",
+            action="store_true",
+            default=False,
+            help="Also push Real-Time Configuration. Defaults to sandbox; use --rtc-env to override.",
+        )
+        push_parser.add_argument(
+            "--rtc-env",
+            type=str,
+            default="sandbox",
+            choices=["sandbox", "pre-release", "live"],
+            help="RTC environment to push to (only used with --include-rtc). Defaults to sandbox.",
+        )
 
     @classmethod
     def run(cls, args: Namespace) -> None:
@@ -214,6 +244,8 @@ class PushCommand(BaseCommand):
             args.from_projection,
             output_json=args.json,
             output_commands=args.output_json_commands,
+            include_rtc=getattr(args, "include_rtc", False),
+            rtc_env=getattr(args, "rtc_env", "sandbox"),
         )
 
     @classmethod
@@ -227,6 +259,8 @@ class PushCommand(BaseCommand):
         from_projection: str = None,
         output_json: bool = False,
         output_commands: bool = False,
+        include_rtc: bool = False,
+        rtc_env: str = "sandbox",
     ) -> None:
         """Push the project configuration to the Agent Studio."""
         from poly.output.console import error, info, plain, success, warning
@@ -265,6 +299,12 @@ class PushCommand(BaseCommand):
             if output_commands:
                 json_output["commands"] = commands_to_dicts(commands)
             json_print(json_output)
+            if include_rtc and push_ok:
+                from poly.cli import AgentStudioCLI
+
+                AgentStudioCLI.rtc_push(
+                    base_path, env=rtc_env, force=force, output_json=output_json
+                )
             if not push_ok:
                 sys.exit(1)
             return
@@ -276,6 +316,11 @@ class PushCommand(BaseCommand):
         else:
             error(f"Failed to push {project.account_id}/{project.project_id} to Agent Studio.")
             plain(output)
+
+        if include_rtc and push_ok:
+            from poly.cli import AgentStudioCLI
+
+            AgentStudioCLI.rtc_push(base_path, env=rtc_env, force=force, output_json=output_json)
 
 
 class StatusCommand(BaseCommand):
