@@ -10,7 +10,6 @@ import yaml
 from jsonschema import ValidationError
 
 import poly.resources.resource_utils as resource_utils
-from poly.handlers.sync_client import SyncClientHandler
 from poly.resources.agent_settings import (
     SettingsPersonality,
     SettingsRole,
@@ -70,6 +69,7 @@ from poly.resources.safety_filters import (
     GeneralSafetyFilters,
     SafetyFilterCategory,
     VoiceSafetyFilters,
+    parse_safety_filter_config,
 )
 from poly.resources.sms import EnvPhoneNumbers, SMSTemplate
 from poly.resources.test_suite import (
@@ -6291,7 +6291,7 @@ class SafetyFiltersTests(unittest.TestCase):
             "sexual": {"isActive": False, "precision": "LOOSE"},
             # selfHarm missing
         }
-        result = SyncClientHandler._parse_safety_filter_config(azure)
+        result = parse_safety_filter_config(azure)
         self.assertIn("self_harm", result)
         self.assertFalse(result["self_harm"].enabled)
         self.assertEqual(result["self_harm"].precision, "MEDIUM")
@@ -6304,7 +6304,7 @@ class SafetyFiltersTests(unittest.TestCase):
             "sexual": {"isActive": False, "precision": "LOOSE"},
             "selfHarm": {"isActive": True, "precision": "STRICT"},
         }
-        result = SyncClientHandler._parse_safety_filter_config(azure)
+        result = parse_safety_filter_config(azure)
         self.assertFalse(result["violence"].enabled)
         self.assertEqual(result["violence"].precision, "STRICT")
 
@@ -6422,7 +6422,7 @@ class SafetyFiltersTests(unittest.TestCase):
             with self.subTest(missing=missing):
                 azure = self._make_azure_categories()
                 del azure[missing]
-                result = SyncClientHandler._parse_safety_filter_config(azure)
+                result = parse_safety_filter_config(azure)
                 internal_key = cat_to_internal[missing]
                 self.assertIn(internal_key, result)
                 self.assertFalse(result[internal_key].enabled)
@@ -6430,7 +6430,7 @@ class SafetyFiltersTests(unittest.TestCase):
 
     def test_parse_safety_filter_config_empty_uses_defaults(self):
         """An empty Azure config populates all categories with defaults."""
-        result = SyncClientHandler._parse_safety_filter_config({})
+        result = parse_safety_filter_config({})
         for cat in ("violence", "hate", "sexual", "self_harm"):
             self.assertIn(cat, result)
             self.assertFalse(result[cat].enabled)
@@ -6604,7 +6604,7 @@ class SafetyFiltersTests(unittest.TestCase):
 
     def test_read_safety_filters_from_projection(self):
         """_read_safety_filters_from_projection parses a full projection correctly."""
-        result = SyncClientHandler._read_safety_filters_from_projection(
+        result = GeneralSafetyFilters.from_projection(
             {"contentFilterSettings": self._make_content_filter_projection()}
         )
         sf = result["safety_filters"]
@@ -6624,7 +6624,7 @@ class SafetyFiltersTests(unittest.TestCase):
         """
 
         def from_projection(disabled, is_active):
-            return SyncClientHandler._read_safety_filters_from_projection(
+            return GeneralSafetyFilters.from_projection(
                 {
                     "contentFilterSettings": {
                         "disabled": disabled,
@@ -6645,35 +6645,34 @@ class SafetyFiltersTests(unittest.TestCase):
 
     def test_read_safety_filters_from_projection_empty(self):
         """_read_safety_filters_from_projection returns {} when key absent."""
-        result = SyncClientHandler._read_safety_filters_from_projection({})
+        result = GeneralSafetyFilters.from_projection({})
         self.assertEqual(result, {})
 
     def test_read_voice_safety_filters_from_channel_settings_projection(self):
-        """_read_channel_settings_from_projection parses voice channel safety filters."""
+        """VoiceSafetyFilters.from_projection parses voice channel safety filters."""
         projection = {
             "channels": {
                 "voice": {"config": {"safetyFilters": self._make_content_filter_projection()}}
             }
         }
-        result = SyncClientHandler._read_channel_settings_from_projection(projection)
+        result = VoiceSafetyFilters.from_projection(projection)
 
-        self.assertIn(VoiceSafetyFilters, result)
-        self.assertIn("voice_safety_filters", result[VoiceSafetyFilters])
-        vsf = result[VoiceSafetyFilters]["voice_safety_filters"]
+        self.assertIn("voice_safety_filters", result)
+        vsf = result["voice_safety_filters"]
         self.assertIsInstance(vsf, VoiceSafetyFilters)
         self.assertTrue(vsf.enabled)  # disabled=False in projection → enabled=True
         self.assertTrue(vsf.categories["self_harm"].enabled)
         self.assertEqual(vsf.categories["self_harm"].precision, "STRICT")
 
     def test_read_voice_safety_filters_from_channel_settings_projection_empty(self):
-        """_read_channel_settings_from_projection returns {} when channels are absent."""
-        result = SyncClientHandler._read_channel_settings_from_projection({})
+        """VoiceSafetyFilters.from_projection returns {} when channels are absent."""
+        result = VoiceSafetyFilters.from_projection({})
         self.assertEqual(result, {})
 
     def test_projection_precision_is_converted_to_yaml_level(self):
         """Projection precision values  are converted to YAML level."""
         projection = {"contentFilterSettings": self._make_content_filter_projection()}
-        sf = SyncClientHandler._read_safety_filters_from_projection(projection)["safety_filters"]
+        sf = GeneralSafetyFilters.from_projection(projection)["safety_filters"]
         # Internal precision stays in backend format (UPPERCASE)
         self.assertEqual(sf.categories["violence"].precision, "STRICT")
         self.assertEqual(sf.categories["sexual"].precision, "LOOSE")
@@ -6749,7 +6748,7 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertEqual(proto.safety_filters.azure_config.violence.precision, "MEDIUM")
 
     def test_read_chat_safety_filters_from_channel_settings_projection(self):
-        """_read_channel_settings_from_projection parses chat channel safety filters."""
+        """ChatSafetyFilters.from_projection parses chat channel safety filters."""
         projection = {
             "channels": {
                 "webChat": {
@@ -6758,18 +6757,17 @@ class SafetyFiltersTests(unittest.TestCase):
                 }
             }
         }
-        result = SyncClientHandler._read_channel_settings_from_projection(projection)
+        result = ChatSafetyFilters.from_projection(projection)
 
-        self.assertIn(ChatSafetyFilters, result)
-        self.assertIn("chat_safety_filters", result[ChatSafetyFilters])
-        csf = result[ChatSafetyFilters]["chat_safety_filters"]
+        self.assertIn("chat_safety_filters", result)
+        csf = result["chat_safety_filters"]
         self.assertIsInstance(csf, ChatSafetyFilters)
         self.assertTrue(csf.enabled)
         self.assertTrue(csf.categories["self_harm"].enabled)
         self.assertEqual(csf.categories["self_harm"].precision, "STRICT")
 
     def test_read_chat_safety_filters_skipped_when_webchat_status_false(self):
-        """_read_channel_settings_from_projection skips chat filters when webChat status is False."""
+        """ChatSafetyFilters.from_projection skips chat filters when webChat status is False."""
         projection = {
             "channels": {
                 "webChat": {
@@ -6778,9 +6776,9 @@ class SafetyFiltersTests(unittest.TestCase):
                 }
             }
         }
-        result = SyncClientHandler._read_channel_settings_from_projection(projection)
+        result = ChatSafetyFilters.from_projection(projection)
 
-        self.assertNotIn(ChatSafetyFilters, result)
+        self.assertEqual(result, {})
 
     def test_chat_safety_filters_file_path(self):
         """ChatSafetyFilters.file_path returns the chat subdirectory path."""
@@ -6795,7 +6793,7 @@ class SafetyFiltersTests(unittest.TestCase):
             name="chat_safety_filters",
             enabled=not data.get("disabled", False),
             filter_type=data.get("type", "azure"),
-            categories=SyncClientHandler._parse_safety_filter_config(data["azureConfig"]),
+            categories=parse_safety_filter_config(data["azureConfig"]),
         )
 
         self.assertTrue(csf.enabled)
@@ -6823,7 +6821,7 @@ class SafetyFiltersTests(unittest.TestCase):
             name="chat_safety_filters",
             enabled=not data.get("disabled", False),
             filter_type=data.get("type", "azure"),
-            categories=SyncClientHandler._parse_safety_filter_config(data["azureConfig"]),
+            categories=parse_safety_filter_config(data["azureConfig"]),
         )
 
         self.assertFalse(csf.enabled)

@@ -2284,8 +2284,9 @@ class ValidateProjectTest(unittest.TestCase):
         ):
             errors = project.validate_project()
         self.assertEqual(len(errors), 2)
-        self.assertIn("Invalid references: ['global_functions: FUNCTION-missing_function']", errors[0])
-        self.assertIn("Start step 'missing_step' not found.", errors[1])
+        error_texts = "\n".join(errors)
+        self.assertIn("Invalid references: ['global_functions: FUNCTION-missing_function']", error_texts)
+        self.assertIn("Start step 'missing_step' not found.", error_texts)
 
 
 class PullProjectTest(unittest.TestCase):

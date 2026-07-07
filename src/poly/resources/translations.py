@@ -16,15 +16,37 @@ from poly.handlers.protobuf.translations_pb2 import (
     UpdateEntry,
 )
 from poly.resources.languages import AdditionalLanguage, DefaultLanguage
-from poly.resources.resource import MultiResourceYamlResource, ResourceMapping
+from poly.resources.resource import MultiResourceYamlResource, ResourceMapping, register_resource
 
 
+@register_resource("translations")
 @dataclass
 class Translation(MultiResourceYamlResource):
     """Dataclass representing an Agent Studio Translation"""
 
     translations: dict[str, str]
     top_level_name: ClassVar[str] = "translations"
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "Translation"]:
+        """Parse translations from a projection dict."""
+        translations_data = (
+            projection.get("translations", {}).get("translations", {}).get("entities", {})
+        )
+        if not translations_data:
+            return {}
+
+        translations = {}
+        for translation_id, translation_data in translations_data.items():
+            translations[translation_id] = cls(
+                resource_id=translation_id,
+                name=translation_data.get("translationKey", ""),
+                translations={
+                    translation.get("languageCode"): translation.get("text", "")
+                    for translation in translation_data.get("translations", [])
+                },
+            )
+        return translations
 
     def __init__(
         self,

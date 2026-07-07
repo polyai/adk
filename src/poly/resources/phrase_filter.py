@@ -15,9 +15,10 @@ from poly.handlers.protobuf.stop_keywords_pb2 import (
     StopKeywordReferences,
 )
 from poly.resources.function import Function
-from poly.resources.resource import MultiResourceYamlResource, ResourceMapping
+from poly.resources.resource import MultiResourceYamlResource, ResourceMapping, register_resource
 
 
+@register_resource("phrase_filtering")
 @dataclass
 class PhraseFilter(MultiResourceYamlResource):
     """Dataclass representing an Agent Studio Phrase Filter (Stop Keyword)"""
@@ -47,6 +48,28 @@ class PhraseFilter(MultiResourceYamlResource):
         self.say_phrase = say_phrase
         self.language_code = language_code
         self.function = function
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "PhraseFilter"]:
+        """Parse phrase filters from a projection dict."""
+        phrase_filters = {}
+        for filter_id, filter_data in (
+            projection.get("stopKeywords", {}).get("filters", {}).get("entities", {}).items()
+        ):
+            references = filter_data.get("references", {})
+            global_functions = references.get("globalFunctions", {})
+            function_id = next(iter(global_functions), None) if global_functions else None
+
+            phrase_filters[filter_id] = cls(
+                resource_id=filter_id,
+                name=filter_data.get("title", ""),
+                description=filter_data.get("description", ""),
+                regular_expressions=filter_data.get("regularExpressions", []),
+                say_phrase=filter_data.get("sayPhrase", False),
+                language_code=filter_data.get("languageCode", ""),
+                function=function_id,
+            )
+        return phrase_filters
 
     @property
     def file_path(self) -> str:
