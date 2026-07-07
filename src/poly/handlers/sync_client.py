@@ -9,24 +9,7 @@ from copy import deepcopy
 from typing import Any, Optional
 
 from poly.handlers.protobuf.commands_pb2 import Command
-from poly.handlers.protobuf.handoff_pb2 import Handoff_SetDefault
 from poly.handlers.sdk import SourcererAPIError, SourcererSDK
-from poly.resources import (
-    ApiIntegration,
-    BaseResource,
-    Condition,
-    Entity,
-    FlowConfig,
-    FlowStep,
-    Function,
-    FunctionStep,
-    Handoff,
-    Resource,
-    SMSTemplate,
-    Variable,
-    Variant,
-    VariantAttribute,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -84,28 +67,14 @@ class SyncClientHandler:
                 self._sdk.branch_id = "main"
         return self.branch_id
 
-    @staticmethod
-    def load_resources_from_projection(
-        projection: dict,
-    ) -> dict[type[Resource], dict[str, Resource]]:
-        """Parse a projection dict into typed Resources.
+    def pull_deployment_projection(self, deployment_id: str) -> dict[str, Any]:
+        """Fetch the raw projection for a specific deployment.
 
-        Delegates to each resource class's from_projection() classmethod
-        via the resource registry.
-        """
-        from poly.resources.resource import load_resources_from_projection
-
-        return load_resources_from_projection(projection)
-
-    def pull_deployment_resources(
-        self, deployment_id: str
-    ) -> dict[type[Resource], dict[str, Resource]]:
-        """Fetch all resources for a specific deployment of a project.
         Args:
-            deployment_id (str): The deployment ID
+            deployment_id: The deployment ID.
+
         Returns:
-            dict[type[Resource], dict[str, Resource]]: A dictionary mapping resource types to
-                their resources
+            The raw projection dict.
         """
         logger.info(
             f"Fetching project data for project {self.project_id} for deployment {deployment_id}"
@@ -113,17 +82,16 @@ class SyncClientHandler:
         self.assert_branch_exists()
         projection = self.sdk.fetch_deployment_projection(deployment_id=deployment_id)
         logger.info(
-            f"Successfully fetched project data for project {self.project_id} for deployment {deployment_id}"
+            f"Successfully fetched project data for project {self.project_id} "
+            f"for deployment {deployment_id}"
         )
-        return self.load_resources_from_projection(projection)
+        return projection
 
-    def pull_resources(self) -> tuple[dict[type[Resource], dict[str, Resource]], dict[str, Any]]:
-        """Fetch all resources from a specific project.
+    def pull_projection(self) -> dict[str, Any]:
+        """Fetch the raw projection for the current branch.
 
         Returns:
-            dict[type[Resource], dict[str, Resource]]: A dictionary mapping resource types to
-                their resources
-            dict[str, Any]: The projection data
+            The raw projection dict.
         """
         logger.info(
             f"Fetching project data for project {self.project_id} on branch {self.sdk.branch_id}"
@@ -132,151 +100,10 @@ class SyncClientHandler:
         projection = self.sdk.fetch_projection(force_refresh=True)
         logger.debug(f"Projection: {projection}")
         logger.info(
-            f"Successfully fetched project data for project {self.project_id} on branch {self.sdk.branch_id}"
+            f"Successfully fetched project data for project {self.project_id} "
+            f"on branch {self.sdk.branch_id}"
         )
-        return self.load_resources_from_projection(projection), projection
-
-    # Types that should be created first
-    # as they are referenced by other resources
-    PRIORITY_CREATE_TYPES = [
-        # Things that are referenced in prompts
-        Variable,
-        Entity,
-        Variant,
-        VariantAttribute,
-        SMSTemplate,
-        Handoff,
-        Function,
-        # Steps should be created before conditions
-        FlowConfig,  # Flow config contains initial steps and functions
-        FunctionStep,
-        FlowStep,
-        Condition,
-        # Integrations should be created before operations and environments
-        ApiIntegration,
-    ]
-
-    PRIORITY_DELETE_TYPES = [
-        # If a function is deleted and it is the last reference to a variable,
-        # the variable will be deleted as well. So we need to delete variables
-        # first or its delete command will fail.
-        Variable,
-        # Conditions should be deleted before steps, as steps auto delete their conditions
-        Condition,
-    ]
-
-    PRIORITY_UPDATE_TYPES = [
-        # If variable references will change, we should update the variable first so
-        # it isn't pruned by the backend.
-        Variable,
-    ]
-
-    def queue_resources(
-        self,
-        deleted_resources: dict[type[BaseResource], dict[str, BaseResource]],
-        new_resources: dict[type[BaseResource], dict[str, BaseResource]],
-        updated_resources: dict[type[BaseResource], dict[str, BaseResource]],
-    ) -> list[Command]:
-        """Queue multiple resources for the specific project.
-
-        Sends in order:
-        - delete
-        - create
-        - update
-
-        Args:
-            deleted_resources (dict[type[BaseResource], dict[str, BaseResource]]): Resources to delete
-            new_resources (dict[type[BaseResource], dict[str, BaseResource]]): New resources to upload
-            updated_resources (dict[type[BaseResource], dict[str, BaseResource]]): Updated resources to upload
-
-        Returns:
-            list[Command]: A list of queued Command protobuf messages.
-        """
-        metadata = self.sdk.create_metadata()
-
-        commands = []
-
-        delete_resources_priority: list[type[BaseResource]] = []
-        for resource_type in self.PRIORITY_DELETE_TYPES:
-            if resource_type in deleted_resources:
-                delete_resources_priority.append(resource_type)
-        for resource_type in deleted_resources.keys():
-            if resource_type not in self.PRIORITY_DELETE_TYPES:
-                delete_resources_priority.append(resource_type)
-
-        for resource_type in delete_resources_priority:
-            for resource_id, resource in deleted_resources.get(resource_type, {}).items():
-                delete_type = resource.delete_command_type
-                commands.append(
-                    Command(
-                        type=delete_type,
-                        command_id=str(uuid.uuid4()),
-                        metadata=metadata,
-                        **{delete_type: resource.build_delete_proto()},
-                    )
-                )
-
-        new_resources_priority: list[type[BaseResource]] = []
-        for resource_type in self.PRIORITY_CREATE_TYPES:
-            if resource_type in new_resources:
-                new_resources_priority.append(resource_type)
-        for resource_type in new_resources.keys():
-            if resource_type not in self.PRIORITY_CREATE_TYPES:
-                new_resources_priority.append(resource_type)
-
-        for resource_type in new_resources_priority:
-            resources = new_resources.get(resource_type, {})
-            for resource_id, resource in resources.items():
-                create_type = resource.create_command_type
-                commands.append(
-                    Command(
-                        type=create_type,
-                        command_id=str(uuid.uuid4()),
-                        metadata=metadata,
-                        **{create_type: resource.build_create_proto()},
-                    )
-                )
-
-        updated_resource_priority: list[type[BaseResource]] = []
-        for resource_type in self.PRIORITY_UPDATE_TYPES:
-            if resource_type in updated_resources:
-                updated_resource_priority.append(resource_type)
-        for resource_type in updated_resources.keys():
-            if resource_type not in self.PRIORITY_UPDATE_TYPES:
-                updated_resource_priority.append(resource_type)
-
-        for resource_type in updated_resource_priority:
-            resources = updated_resources.get(resource_type, {})
-            for resource_id, resource in resources.items():
-                update_type = resource.update_command_type
-                commands.append(
-                    Command(
-                        type=update_type,
-                        command_id=str(uuid.uuid4()),
-                        metadata=metadata,
-                        **{update_type: resource.build_update_proto()},
-                    )
-                )
-
-        # is_default is not part of create/update protos; it requires a separate command
-        for resource_dict in [new_resources, updated_resources]:
-            for resource_id, resource in resource_dict.get(Handoff, {}).items():
-                if isinstance(resource, Handoff) and resource.is_default:
-                    commands.append(
-                        Command(
-                            type="handoff_set_default",
-                            command_id=str(uuid.uuid4()),
-                            metadata=metadata,
-                            handoff_set_default=Handoff_SetDefault(id=resource.resource_id),
-                        )
-                    )
-
-        for command in commands:
-            self.sdk.add_command_to_queue(command)
-
-        logger.info(f"Queued {len(commands)} commands")
-        logger.debug(f"Commands: {commands!r}")
-        return commands
+        return projection
 
     def queue_command(self, command: Command) -> None:
         """Add a single command to the queue.
