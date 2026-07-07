@@ -165,7 +165,7 @@ class AgentStudioCLI:
 
         rtc_pull_parser = rtc_subparsers.add_parser(
             "pull",
-            parents=[rtc_path_parent, json_parent, verbose_parent],
+            parents=[rtc_path_parent, json_parent, verbose_parent, debug_parent],
             help="Pull RTC from Agent Studio and write to local files.",
             description=(
                 "Pull Real-Time Configuration from Agent Studio and write to local files.\n\n"
@@ -186,7 +186,7 @@ class AgentStudioCLI:
 
         rtc_push_parser = rtc_subparsers.add_parser(
             "push",
-            parents=[rtc_path_parent, json_parent, verbose_parent],
+            parents=[rtc_path_parent, json_parent, verbose_parent, debug_parent],
             help="Push RTC from local files to Agent Studio.",
             description=(
                 "Push Real-Time Configuration from local files to Agent Studio.\n\n"
