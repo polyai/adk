@@ -85,6 +85,7 @@ from poly.resources.topic import (
 )
 from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
 from poly.resources.translations import Translation
+from poly.resources.documents import Document
 from poly.resources.variable import Variable
 from poly.resources.variant_attributes import Variant, VariantAttribute
 from poly.tests.testing_utils import mock_read_from_file, mock_variant_attributes_file
@@ -8108,6 +8109,99 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
             variant=None,
         )
         resource_utils.check_yaml_field_types(test_case)
+
+
+class DocumentTests(unittest.TestCase):
+    """Tests for the Document resource."""
+
+    def test_file_path(self):
+        doc = Document(
+            resource_id="test.md", name="test", path="test.md", contents="hello"
+        )
+        self.assertEqual(doc.file_path, os.path.join("context", "test.md"))
+
+    def test_raw(self):
+        doc = Document(
+            resource_id="test.md", name="test", path="test.md", contents="some content"
+        )
+        self.assertEqual(doc.raw, "some content")
+
+    def test_make_pretty_from_pretty_passthrough(self):
+        content = "# Title\nSome markdown content"
+        self.assertEqual(Document.make_pretty(content), content)
+        self.assertEqual(Document.from_pretty(content), content)
+
+    def test_read_local_resource(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context_dir = os.path.join(tmpdir, "context")
+            os.makedirs(context_dir)
+            file_path = os.path.join(context_dir, "doc.md")
+            with open(file_path, "w") as f:
+                f.write("file contents\n")
+
+            doc = Document.read_local_resource(
+                file_path=file_path,
+                resource_id="doc.md",
+                resource_name="doc",
+            )
+            self.assertEqual(doc.resource_id, "doc.md")
+            self.assertEqual(doc.name, "doc")
+            self.assertEqual(doc.path, "doc.md")
+            self.assertEqual(doc.contents, "file contents\n")
+
+    def test_save_and_read_round_trip(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            doc = Document(
+                resource_id="round_trip.md",
+                name="round_trip",
+                path="round_trip.md",
+                contents="round trip content\n",
+            )
+            doc.save(tmpdir)
+
+            file_path = os.path.join(tmpdir, "context", "round_trip.md")
+            self.assertTrue(os.path.exists(file_path))
+
+            restored = Document.read_local_resource(
+                file_path=file_path,
+                resource_id="round_trip.md",
+                resource_name="round_trip",
+            )
+            self.assertEqual(restored.contents, doc.contents)
+            self.assertEqual(restored.path, doc.path)
+
+    def test_discover_resources(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context_dir = os.path.join(tmpdir, "context")
+            os.makedirs(context_dir)
+            with open(os.path.join(context_dir, "doc1.md"), "w") as f:
+                f.write("doc1")
+            with open(os.path.join(context_dir, "doc2.md"), "w") as f:
+                f.write("doc2")
+            with open(os.path.join(context_dir, "not_markdown.txt"), "w") as f:
+                f.write("skip me")
+
+            discovered = Document.discover_resources(tmpdir)
+            self.assertCountEqual(
+                discovered,
+                [
+                    os.path.join(context_dir, "doc1.md"),
+                    os.path.join(context_dir, "doc2.md"),
+                ],
+            )
+
+    def test_discover_resources_no_context_dir(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            discovered = Document.discover_resources(tmpdir)
+            self.assertEqual(discovered, [])
 
 
 if __name__ == "__main__":

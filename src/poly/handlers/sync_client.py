@@ -62,6 +62,7 @@ from poly.resources import (
     VoiceGreeting,
     VoiceSafetyFilters,
     VoiceStylePrompt,
+    Document,
 )
 
 logger = logging.getLogger(__name__)
@@ -150,6 +151,7 @@ class SyncClientHandler:
             TestCase: cls._read_test_cases_from_projection(projection),
             Translation: cls._read_translations_from_projection(projection),
             **cls._read_languages_from_projection(projection),
+            Document: cls._read_documents_from_projection(projection),
         }  # ty:ignore[invalid-return-type]
 
     def pull_deployment_resources(
@@ -1007,6 +1009,24 @@ class SyncClientHandler:
             DefaultLanguage: default_languages,
             AdditionalLanguage: additional_languages,
         }
+
+    @staticmethod
+    def _read_documents_from_projection(
+        projection: dict,
+    ) -> dict[str, Document]:
+        documents = {}
+        for document_id, document_data in (
+            projection.get("documents", {}).get("documents", {}).get("entities", {}).items()
+        ):
+            path = document_data.get("path", "") or ""
+            name = path.removesuffix(".md")
+            documents[document_id] = Document(
+                resource_id=document_id,
+                name=name,
+                path=path,
+                contents=document_data.get("content", ""),
+            )
+        return documents
 
     # Types that should be created first
     # as they are referenced by other resources
