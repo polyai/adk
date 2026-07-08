@@ -506,6 +506,30 @@ class AgentStudioProject:
             self._not_loaded_resources = []
         self.save_config()
 
+    def load_template(self, region, template_id):
+        """Load a template into the project."""
+        template_resources = AgentStudioInterface.get_template_resources(region, template_id)
+
+        # Pull latest remote state so it becomes the merge baseline.
+        # On next push the 3-way merge sees original == incoming (both remote),
+        # so local (template) changes apply cleanly without conflicts.
+        incoming_resources, _ = self.api_handler.pull_resources()
+        self.resources = incoming_resources
+        self.file_structure_info = self.compute_file_structure_info(incoming_resources)
+
+        # Wipe all local resource files so stale flows/functions from the
+        # previous project don't leak through and cause validation errors.
+        self._delete_all_local_resources()
+
+        self._update_pulled_resources(
+            original_resources={},
+            incoming_resources=template_resources,
+            force=True,
+        )
+        utils.export_decorators(DECORATORS, self.root_path)
+        utils.save_imports(self.root_path)
+        self.save_config()
+
     def pull_project(
         self,
         force: bool = False,
@@ -572,18 +596,7 @@ class AgentStudioProject:
 
         # Delete all new resources
         if force:
-            new_resources, _, _ = self.find_new_kept_deleted(self.discover_local_resources())
-            pronunciations = []
-            for resource_mapping in new_resources:
-                # Because pronunciation uses position as a "name", deleting these out of order
-                # Effectively "changes" the name, causing some of the resources to not be deleted
-                if resource_mapping.resource_type == Pronunciation:
-                    pronunciations.append(resource_mapping.file_path)
-                else:
-                    resource_mapping.resource_type.delete_resource(resource_mapping.file_path)
-
-            for file_path in self._sort_paths_for_reverse_deletion(pronunciations, Pronunciation):
-                Pronunciation.delete_resource(file_path)
+            self._delete_new_resources()
 
         utils.export_decorators(DECORATORS, self.root_path)
         utils.save_imports(self.root_path)
@@ -626,13 +639,27 @@ class AgentStudioProject:
         if os.path.exists(flow_folder):
             self._delete_empty_folders(flow_folder)
 
-        self.resources = incoming_resources
-        self.file_structure_info = self.compute_file_structure_info(incoming_resources)
+        utils.export_decorators(DECORATORS, self.root_path)
+        utils.save_imports(self.root_path)
 
+        return files_with_conflicts
+
+    def _delete_all_local_resources(self) -> None:
+        """Delete every local resource file, leaving a clean slate."""
+        discovered = self.discover_local_resources()
+        for resource_class, file_paths in discovered.items():
+            for file_path in file_paths:
+                resource_class.delete_resource(file_path)
+
+        flow_folder = os.path.join(self.root_path, "flows")
+        self._delete_empty_folders(flow_folder)
+
+    def _delete_new_resources(self) -> None:
+        """Delete locally-new resources that don't exist on the remote."""
         new_resources, _, _ = self.find_new_kept_deleted(self.discover_local_resources())
         pronunciations = []
         for resource_mapping in new_resources:
-            # Because pronunciation uses position as a "name", deleting these out of order
+            # Pronunciation uses position as a "name" — deleting out of order
             # effectively "changes" the name, causing some resources not to be deleted.
             if resource_mapping.resource_type == Pronunciation:
                 pronunciations.append(resource_mapping.file_path)
@@ -641,12 +668,6 @@ class AgentStudioProject:
 
         for file_path in self._sort_paths_for_reverse_deletion(pronunciations, Pronunciation):
             Pronunciation.delete_resource(file_path)
-
-        utils.export_decorators(DECORATORS, self.root_path)
-        utils.save_imports(self.root_path)
-        self.save_config()
-
-        return files_with_conflicts
 
     @staticmethod
     def _delete_empty_folders(folder_path: str) -> None:
@@ -2213,6 +2234,53 @@ class AgentStudioProject:
 
             for file_path in resource_files:
                 discovered_files.add(file_path)
+                # Flow step names are not from file names, so we need to handle them separately
+                resource_name = os.path.splitext(os.path.basename(file_path))[0]
+                flow_name = flow_paths_to_names.get(
+                    resource_utils.get_flow_name_from_path(file_path),
+                )
+                if resource_type == FlowStep:
+                    flow_step: FlowStep = self.read_local_resource(
+                        ResourceMapping(
+                            resource_id="temp_id",
+                            resource_type=FlowStep,
+                            resource_name=resource_name,
+                            file_path=file_path,
+                            flow_name=flow_name,
+                            resource_prefix=resource_type.get_resource_prefix(
+                                file_path=file_path
+                            ),
+                        ),
+                        resource_mappings=[],
+                    )
+                    resource_name = flow_step.name
+
+
+                if resource_type == FlowConfig:
+                    resource_name = flow_name
+
+                # Resource name in file path is cleaned, so we need to get the original name
+                if (
+                    issubclass(resource_type, MultiResourceYamlResource)
+                    or resource_type == Topic
+                ):
+                    resource = self.read_local_resource(
+                        ResourceMapping(
+                            resource_id="temp_id",
+                            resource_type=resource_type,
+                            resource_name=resource_name,
+                            file_path=file_path,
+                            flow_name=flow_name,
+                            resource_prefix=resource_type.get_resource_prefix(
+                                file_path=file_path
+                            ),
+                        ),
+                        resource_mappings=[],
+                    )
+                    resource_name = resource.name
+
+
+
                 if file_path in known_files:
                     # Remove root path from file path
                     resource_info = self.file_structure_info.get(
@@ -2221,10 +2289,6 @@ class AgentStudioProject:
                     if not resource_info:
                         raise ValueError(f"Resource info not found for {file_path}")
 
-                    resource_name = resource_info["resource_name"]
-                    flow_name = flow_paths_to_names.get(
-                        resource_utils.get_flow_name_from_path(file_path),
-                    )
 
                     # Default Language will only be modified, but name must
                     # be read from file
@@ -2261,68 +2325,18 @@ class AgentStudioProject:
                     )
 
                 else:
-                    # Flow step names are not from file names, so we need to handle them separately
-                    resource_name = os.path.splitext(os.path.basename(file_path))[0]
-                    flow_name = flow_paths_to_names.get(
-                        resource_utils.get_flow_name_from_path(file_path),
-                    )
+                    resource_id = self.generate_uuid(resource_type)
                     flow_id = flow_paths_to_ids.get(
                         resource_utils.get_flow_name_from_path(file_path),
                     )
-                    resource_id = self.generate_uuid(resource_type)
-                    if resource_type == Document:
-                        resource_id = os.path.basename(file_path)
 
-                    if resource_type == FlowStep:
-                        flow_step: FlowStep = self.read_local_resource(
-                            ResourceMapping(
-                                resource_id="temp_id",
-                                resource_type=FlowStep,
-                                resource_name=resource_name,
-                                file_path=file_path,
-                                flow_name=flow_name,
-                                resource_prefix=resource_type.get_resource_prefix(
-                                    file_path=file_path
-                                ),
-                            ),
-                            resource_mappings=[],
-                        )
-                        resource_name = flow_step.name
+                    if resource_type in (FunctionStep, FlowStep):
                         resource_id = (
                             f"{flow_id}_{resource_id}" if flow_id else f"{flow_name}_{resource_id}"
                         )
-
-                    elif resource_type == FunctionStep:
-                        resource_id = (
-                            f"{flow_id}_{resource_id}" if flow_id else f"{flow_name}_{resource_id}"
-                        )
-
-                    if resource_type == FlowConfig:
-                        resource_name = flow_name
-
-                    # Resource name in file path is cleaned, so we need to get the original name
-                    if (
-                        issubclass(resource_type, MultiResourceYamlResource)
-                        or resource_type == Topic
-                    ):
-                        resource = self.read_local_resource(
-                            ResourceMapping(
-                                resource_id="temp_id",
-                                resource_type=resource_type,
-                                resource_name=resource_name,
-                                file_path=file_path,
-                                flow_name=flow_name,
-                                resource_prefix=resource_type.get_resource_prefix(
-                                    file_path=file_path
-                                ),
-                            ),
-                            resource_mappings=[],
-                        )
-                        resource_name = resource.name
-
                     if resource_type == FlowConfig:
                         flow_paths_to_ids[resource_utils.clean_name(flow_name)] = resource_id
-
+                    
                     new_resource_mappings.append(
                         ResourceMapping(
                             resource_id=resource_id,
@@ -2334,6 +2348,8 @@ class AgentStudioProject:
                             flow_id=flow_id if resource_type != FlowConfig else resource_id,
                         )
                     )
+
+
 
         deleted_file_paths = known_files - discovered_files
         for file_path in deleted_file_paths:

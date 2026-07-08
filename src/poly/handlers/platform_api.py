@@ -42,13 +42,15 @@ TEST_RUNS_URL = "/v1/agents/{project_id}/testing/test-runs"
 TEST_RUN_URL = "/v1/agents/{project_id}/testing/test-runs/{test_run_id}"
 TEST_HISTORY_URL = "/v1/agents/{project_id}/testing/test-history"
 TRIGGER_TEST_RUN_URL = "/v1/agents/{project_id}/testing/test-runs/trigger"
+TEMPLATE_PROJECTS_URL = "/v1/template-projects"
+TEMPLATE_PROJECT_PROJECTION_URL = "/v1/template-projects/{template_id}/projection"
 
 
 class PlatformAPIHandler:
     """Class for interacting with the Platform API"""
 
     region_to_base_url = {
-        "dev": "https://api.dev.poly.ai",
+        "dev": "http://localhost:6996/api",
         "staging": "https://api.staging.poly.ai",
         "euw-1": "https://api.eu.poly.ai",
         "uk-1": "https://api.uk.poly.ai",
@@ -364,6 +366,40 @@ class PlatformAPIHandler:
 
         result = PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
         return {"id": result.get("agentId"), "name": result.get("agentName")}
+
+    @staticmethod
+    def list_template_projects(region: str) -> list[dict[str, ty.Any]]:
+        """List available template projects.
+
+        Args:
+            region (str): The region name
+
+        Returns:
+            list[dict[str, Any]]: A list of template project summaries.
+        """
+        result = PlatformAPIHandler.make_request(
+            region, TEMPLATE_PROJECTS_URL, "GET", params={"owner": "adk"}
+        )
+        return result.get("templates", [])
+
+    @staticmethod
+    def get_template_project_projection(region: str, template_id: str) -> dict[str, ty.Any]:
+        """Get the full projection for a template project.
+
+        The template API returns a different shape to the sourcerer projection.
+        This method fetches and normalises it so
+        ``SyncClientHandler.load_resources_from_projection`` can consume it.
+
+        Args:
+            region (str): The region name
+            template_id (str): The template project ID
+
+        Returns:
+            dict[str, Any]: The projection in sourcerer-compatible format.
+        """
+        endpoint = TEMPLATE_PROJECT_PROJECTION_URL.format(template_id=template_id)
+        result = PlatformAPIHandler.make_request(region, endpoint, "GET")
+        return result.get("projection", result)
 
     @staticmethod
     def get_deployments(
