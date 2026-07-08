@@ -141,7 +141,9 @@ class PullCommand(BaseCommand):
             if include_rtc and not files_with_conflicts:
                 from poly.cli_commands.rtc import RTCCommand
 
-                json_output["rtc"] = RTCCommand.rtc_pull(base_path, env="all")
+                json_output["rtc"] = RTCCommand.rtc_pull(
+                    base_path, env="all", output_json=output_json
+                )
             json_print(json_output)
             if files_with_conflicts:
                 sys.exit(1)

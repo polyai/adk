@@ -4,7 +4,6 @@ Copyright PolyAI Limited
 """
 
 import json
-import logging
 import os
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
@@ -18,8 +17,6 @@ from poly.cli_commands.shared import load_project
 from poly.handlers.interface import AgentStudioInterface
 from poly.output.console import error, info, success
 from poly.output.json_output import json_print
-
-logger = logging.getLogger(__name__)
 
 RTC_ENV_TO_DIR = {
     "sandbox": "draft_and_sandbox",
@@ -104,7 +101,7 @@ class RTCCommand(BaseCommand):
     def run(cls, args: Namespace) -> None:
         """Dispatch to the matching RTC sub-handler."""
         if args.rtc_subcommand == "pull":
-            result = cls.rtc_pull(args.path, args.env)
+            result = cls.rtc_pull(args.path, args.env, output_json=args.json)
             if args.json:
                 json_print(result)
             else:

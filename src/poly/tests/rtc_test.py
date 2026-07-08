@@ -356,7 +356,7 @@ class TestIncludeRTC(unittest.TestCase):
 
         PullCommand.pull("/tmp/test", include_rtc=True, output_json=True)
 
-        mock_rtc_pull.assert_called_once_with("/tmp/test", env="all")
+        mock_rtc_pull.assert_called_once_with("/tmp/test", env="all", output_json=True)
 
     @patch("poly.cli_commands.rtc.RTCCommand.rtc_pull")
     @patch("poly.cli_commands.sync.load_project")
