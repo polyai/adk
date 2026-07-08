@@ -9,7 +9,7 @@ import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
 
-from poly.cli import AgentStudioCLI, RTC_ENV_TO_DIR, RTC_DIR_TO_ENV
+from poly.cli_commands.rtc import RTCCommand, RTC_ENV_TO_DIR, RTC_DIR_TO_ENV
 
 
 class TestRTC(unittest.TestCase):
@@ -49,8 +49,8 @@ class TestRTC(unittest.TestCase):
         """Verify live API env maps to live directory."""
         self.assertEqual(RTC_ENV_TO_DIR["live"], "live")
 
-    @patch("poly.cli.load_project")
-    @patch("poly.cli.AgentStudioInterface.get_rtc_config")
+    @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
     def test_rtc_pull_all_envs(self, mock_get_rtc, mock_load_project):
         """Verify rtc pull writes all 3 environments."""
         mock_project = MagicMock()
@@ -68,7 +68,7 @@ class TestRTC(unittest.TestCase):
         }
         mock_get_rtc.return_value = rtc_response
 
-        AgentStudioCLI.rtc_pull(self.temp_dir, env="all", output_json=True)
+        RTCCommand.rtc_pull(self.temp_dir, env="all", output_json=True)
 
         # Verify API was called for each environment
         self.assertEqual(mock_get_rtc.call_count, 3)
@@ -78,8 +78,8 @@ class TestRTC(unittest.TestCase):
         self.assertIn("pre-release", envs_called)
         self.assertIn("live", envs_called)
 
-    @patch("poly.cli.load_project")
-    @patch("poly.cli.AgentStudioInterface.get_rtc_config")
+    @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
     def test_rtc_pull_single_env(self, mock_get_rtc, mock_load_project):
         """Verify rtc pull --env sandbox only calls API once."""
         mock_project = MagicMock()
@@ -95,14 +95,14 @@ class TestRTC(unittest.TestCase):
         }
         mock_get_rtc.return_value = rtc_response
 
-        AgentStudioCLI.rtc_pull(self.temp_dir, env="sandbox", output_json=True)
+        RTCCommand.rtc_pull(self.temp_dir, env="sandbox", output_json=True)
 
         # Verify API was called once
         mock_get_rtc.assert_called_once()
         self.assertEqual(mock_get_rtc.call_args[1]["client_env"], "sandbox")
 
-    @patch("poly.cli.load_project")
-    @patch("poly.cli.AgentStudioInterface.get_rtc_config")
+    @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
     def test_rtc_pull_creates_directories(self, mock_get_rtc, mock_load_project):
         """Verify rtc pull creates necessary directories."""
         mock_project = MagicMock()
@@ -118,14 +118,14 @@ class TestRTC(unittest.TestCase):
         }
         mock_get_rtc.return_value = rtc_response
 
-        AgentStudioCLI.rtc_pull(self.temp_dir, env="sandbox", output_json=True)
+        RTCCommand.rtc_pull(self.temp_dir, env="sandbox", output_json=True)
 
         # Verify directories were created
         sandbox_dir = os.path.join(self.temp_dir, "real_time_configuration", "draft_and_sandbox")
         self.assertTrue(os.path.isdir(sandbox_dir))
 
-    @patch("poly.cli.load_project")
-    @patch("poly.cli.AgentStudioInterface.get_rtc_config")
+    @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
     def test_rtc_pull_writes_json_files(self, mock_get_rtc, mock_load_project):
         """Verify rtc pull writes valid JSON files."""
         mock_project = MagicMock()
@@ -144,7 +144,7 @@ class TestRTC(unittest.TestCase):
         }
         mock_get_rtc.return_value = rtc_response
 
-        AgentStudioCLI.rtc_pull(self.temp_dir, env="sandbox", output_json=True)
+        RTCCommand.rtc_pull(self.temp_dir, env="sandbox", output_json=True)
 
         # Verify files exist and contain correct content
         schema_path = os.path.join(
@@ -165,9 +165,9 @@ class TestRTC(unittest.TestCase):
             loaded_variables = json.load(f)
         self.assertEqual(loaded_variables, variables_obj)
 
-    @patch("poly.cli.load_project")
-    @patch("poly.cli.AgentStudioInterface.put_rtc_schema")
-    @patch("poly.cli.AgentStudioInterface.patch_rtc_variables")
+    @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.put_rtc_schema")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
     def test_rtc_push_schema_and_variables(
         self, mock_patch_vars, mock_put_schema, mock_load_project
     ):
@@ -191,7 +191,7 @@ class TestRTC(unittest.TestCase):
         with open(os.path.join(sandbox_dir, "data.json"), "w") as f:
             json.dump(variables_obj, f)
 
-        AgentStudioCLI.rtc_push(self.temp_dir, env="sandbox", output_json=True)
+        RTCCommand.rtc_push(self.temp_dir, env="sandbox", output_json=True)
 
         # Verify both APIs were called
         mock_put_schema.assert_called_once()
@@ -206,7 +206,7 @@ class TestRTC(unittest.TestCase):
         self.assertEqual(vars_call["client_env"], "sandbox")
         self.assertEqual(vars_call["variables"], variables_obj)
 
-    @patch("poly.cli.load_project")
+    @patch("poly.cli_commands.rtc.load_project")
     def test_rtc_push_missing_schema_raises(self, mock_load_project):
         """Verify rtc push raises if schema.json is missing."""
         mock_project = MagicMock()
@@ -220,9 +220,9 @@ class TestRTC(unittest.TestCase):
             json.dump({}, f)
 
         with self.assertRaises(SystemExit):
-            AgentStudioCLI.rtc_push(self.temp_dir, env="sandbox", output_json=True)
+            RTCCommand.rtc_push(self.temp_dir, env="sandbox", output_json=True)
 
-    @patch("poly.cli.load_project")
+    @patch("poly.cli_commands.rtc.load_project")
     def test_rtc_push_missing_data_raises(self, mock_load_project):
         """Verify rtc push raises if data.json is missing."""
         mock_project = MagicMock()
@@ -236,9 +236,9 @@ class TestRTC(unittest.TestCase):
             json.dump({}, f)
 
         with self.assertRaises(SystemExit):
-            AgentStudioCLI.rtc_push(self.temp_dir, env="sandbox", output_json=True)
+            RTCCommand.rtc_push(self.temp_dir, env="sandbox", output_json=True)
 
-    @patch("poly.cli.load_project")
+    @patch("poly.cli_commands.rtc.load_project")
     def test_rtc_push_live_without_force_json_exits(self, mock_load_project):
         """Verify pushing to live in JSON mode without --force is refused."""
         mock_project = MagicMock()
@@ -253,11 +253,11 @@ class TestRTC(unittest.TestCase):
             json.dump({}, f)
 
         with self.assertRaises(SystemExit):
-            AgentStudioCLI.rtc_push(self.temp_dir, env="live", force=False, output_json=True)
+            RTCCommand.rtc_push(self.temp_dir, env="live", force=False, output_json=True)
 
-    @patch("poly.cli.load_project")
-    @patch("poly.cli.AgentStudioInterface.put_rtc_schema")
-    @patch("poly.cli.AgentStudioInterface.patch_rtc_variables")
+    @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.put_rtc_schema")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
     def test_rtc_push_live_with_force_succeeds(
         self, mock_patch_vars, mock_put_schema, mock_load_project
     ):
@@ -275,7 +275,7 @@ class TestRTC(unittest.TestCase):
         with open(os.path.join(live_dir, "data.json"), "w") as f:
             json.dump({"key": "val"}, f)
 
-        AgentStudioCLI.rtc_push(self.temp_dir, env="live", force=True, output_json=True)
+        RTCCommand.rtc_push(self.temp_dir, env="live", force=True, output_json=True)
 
         mock_put_schema.assert_called_once()
         mock_patch_vars.assert_called_once()
@@ -284,7 +284,7 @@ class TestRTC(unittest.TestCase):
 class TestIncludeRTC(unittest.TestCase):
     """Test suite for --include-rtc on pull/push commands."""
 
-    @patch("poly.cli.AgentStudioCLI.rtc_pull")
+    @patch("poly.cli_commands.rtc.RTCCommand.rtc_pull")
     @patch("poly.cli_commands.sync.load_project")
     def test_pull_include_rtc_calls_rtc_pull(self, mock_load_project, mock_rtc_pull):
         """Verify pull --include-rtc calls rtc_pull after normal pull."""
@@ -301,7 +301,7 @@ class TestIncludeRTC(unittest.TestCase):
 
         mock_rtc_pull.assert_called_once_with("/tmp/test", env="all", output_json=True)
 
-    @patch("poly.cli.AgentStudioCLI.rtc_pull")
+    @patch("poly.cli_commands.rtc.RTCCommand.rtc_pull")
     @patch("poly.cli_commands.sync.load_project")
     def test_pull_without_include_rtc_does_not_call_rtc(self, mock_load_project, mock_rtc_pull):
         """Verify pull without --include-rtc does not call rtc_pull."""
@@ -318,7 +318,7 @@ class TestIncludeRTC(unittest.TestCase):
 
         mock_rtc_pull.assert_not_called()
 
-    @patch("poly.cli.AgentStudioCLI.rtc_push")
+    @patch("poly.cli_commands.rtc.RTCCommand.rtc_push")
     @patch("poly.cli_commands.sync.load_project")
     def test_push_include_rtc_calls_rtc_push_sandbox_default(
         self, mock_load_project, mock_rtc_push
@@ -339,7 +339,7 @@ class TestIncludeRTC(unittest.TestCase):
             "/tmp/test", env="sandbox", force=False, output_json=True
         )
 
-    @patch("poly.cli.AgentStudioCLI.rtc_push")
+    @patch("poly.cli_commands.rtc.RTCCommand.rtc_push")
     @patch("poly.cli_commands.sync.load_project")
     def test_push_include_rtc_with_custom_env(self, mock_load_project, mock_rtc_push):
         """Verify push --include-rtc --rtc-env live passes the correct env."""
@@ -358,7 +358,7 @@ class TestIncludeRTC(unittest.TestCase):
 
         mock_rtc_push.assert_called_once_with("/tmp/test", env="live", force=True, output_json=True)
 
-    @patch("poly.cli.AgentStudioCLI.rtc_push")
+    @patch("poly.cli_commands.rtc.RTCCommand.rtc_push")
     @patch("poly.cli_commands.sync.load_project")
     def test_push_without_include_rtc_does_not_call_rtc(self, mock_load_project, mock_rtc_push):
         """Verify push without --include-rtc does not call rtc_push."""
@@ -375,7 +375,7 @@ class TestIncludeRTC(unittest.TestCase):
 
         mock_rtc_push.assert_not_called()
 
-    @patch("poly.cli.AgentStudioCLI.rtc_push")
+    @patch("poly.cli_commands.rtc.RTCCommand.rtc_push")
     @patch("poly.cli_commands.sync.load_project")
     def test_push_include_rtc_skipped_on_failed_push(self, mock_load_project, mock_rtc_push):
         """Verify rtc_push is not called when the main push fails."""

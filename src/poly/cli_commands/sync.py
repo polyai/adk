@@ -140,9 +140,9 @@ class PullCommand(BaseCommand):
                 json_output["projection"] = projection
             json_print(json_output)
             if include_rtc:
-                from poly.cli import AgentStudioCLI
+                from poly.cli_commands.rtc import RTCCommand
 
-                AgentStudioCLI.rtc_pull(base_path, env="all", output_json=output_json)
+                RTCCommand.rtc_pull(base_path, env="all", output_json=output_json)
             if files_with_conflicts:
                 sys.exit(1)
             return
@@ -157,9 +157,9 @@ class PullCommand(BaseCommand):
         success(f"Pulled {project.account_id}/{project.project_id}")
 
         if include_rtc:
-            from poly.cli import AgentStudioCLI
+            from poly.cli_commands.rtc import RTCCommand
 
-            AgentStudioCLI.rtc_pull(base_path, env="all", output_json=output_json)
+            RTCCommand.rtc_pull(base_path, env="all", output_json=output_json)
 
 
 class PushCommand(BaseCommand):
@@ -300,11 +300,9 @@ class PushCommand(BaseCommand):
                 json_output["commands"] = commands_to_dicts(commands)
             json_print(json_output)
             if include_rtc and push_ok:
-                from poly.cli import AgentStudioCLI
+                from poly.cli_commands.rtc import RTCCommand
 
-                AgentStudioCLI.rtc_push(
-                    base_path, env=rtc_env, force=force, output_json=output_json
-                )
+                RTCCommand.rtc_push(base_path, env=rtc_env, force=force, output_json=output_json)
             if not push_ok:
                 sys.exit(1)
             return
@@ -318,9 +316,9 @@ class PushCommand(BaseCommand):
             plain(output)
 
         if include_rtc and push_ok:
-            from poly.cli import AgentStudioCLI
+            from poly.cli_commands.rtc import RTCCommand
 
-            AgentStudioCLI.rtc_push(base_path, env=rtc_env, force=force, output_json=output_json)
+            RTCCommand.rtc_push(base_path, env=rtc_env, force=force, output_json=output_json)
 
 
 class StatusCommand(BaseCommand):
