@@ -1,6 +1,43 @@
 # CHANGELOG
 
 
+## v0.34.0 (2026-07-08)
+
+### Features
+
+- Allow validating experimental config against custom schema
+  ([#217](https://github.com/polyai/adk/pull/217),
+  [`d1033e2`](https://github.com/polyai/adk/commit/d1033e265ca8a37ee1826f5798bcd75a89d76913))
+
+## Summary
+
+Allow overriding the experimental config validation schema via the
+  `ADK_EXPERIMENTAL_CONFIG_SCHEMA_PATH` environment variable, falling back to the bundled schema.
+
+## Motivation
+
+The bundled `experimental_config_schema.yaml` may not always match the schema expected by a given
+  Agent Studio environment. This lets users point validation at a custom schema file without
+  modifying the package.
+
+## Changes
+
+- Read `ADK_EXPERIMENTAL_CONFIG_SCHEMA_PATH` env var in `ExperimentalConfig.validate()`; fall back
+  to the bundled schema when unset - Use a context manager (`with open(...)`) for the schema file
+  handle
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.33.1 (2026-07-08)
 
 ### Bug Fixes
