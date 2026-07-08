@@ -2229,6 +2229,53 @@ class AgentStudioProject:
 
             for file_path in resource_files:
                 discovered_files.add(file_path)
+                # Flow step names are not from file names, so we need to handle them separately
+                resource_name = os.path.splitext(os.path.basename(file_path))[0]
+                flow_name = flow_paths_to_names.get(
+                    resource_utils.get_flow_name_from_path(file_path),
+                )
+                if resource_type == FlowStep:
+                    flow_step: FlowStep = self.read_local_resource(
+                        ResourceMapping(
+                            resource_id="temp_id",
+                            resource_type=FlowStep,
+                            resource_name=resource_name,
+                            file_path=file_path,
+                            flow_name=flow_name,
+                            resource_prefix=resource_type.get_resource_prefix(
+                                file_path=file_path
+                            ),
+                        ),
+                        resource_mappings=[],
+                    )
+                    resource_name = flow_step.name
+
+
+                if resource_type == FlowConfig:
+                    resource_name = flow_name
+
+                # Resource name in file path is cleaned, so we need to get the original name
+                if (
+                    issubclass(resource_type, MultiResourceYamlResource)
+                    or resource_type == Topic
+                ):
+                    resource = self.read_local_resource(
+                        ResourceMapping(
+                            resource_id="temp_id",
+                            resource_type=resource_type,
+                            resource_name=resource_name,
+                            file_path=file_path,
+                            flow_name=flow_name,
+                            resource_prefix=resource_type.get_resource_prefix(
+                                file_path=file_path
+                            ),
+                        ),
+                        resource_mappings=[],
+                    )
+                    resource_name = resource.name
+
+
+
                 if file_path in known_files:
                     # Remove root path from file path
                     resource_info = self.file_structure_info.get(
@@ -2237,13 +2284,6 @@ class AgentStudioProject:
                     if not resource_info:
                         raise ValueError(f"Resource info not found for {file_path}")
 
-                    resource_name = resource_info["resource_name"]
-                    flow_name = flow_paths_to_names.get(
-                        resource_utils.get_flow_name_from_path(file_path),
-                    )
-
-                    if resource_type == FlowConfig:
-                        resource_name = flow_name
 
                     # Default Language will only be modified, but name must
                     # be read from file
@@ -2275,58 +2315,9 @@ class AgentStudioProject:
                     )
 
                 else:
-                    # Flow step names are not from file names, so we need to handle them separately
-                    resource_name = os.path.splitext(os.path.basename(file_path))[0]
-                    flow_name = flow_paths_to_names.get(
-                        resource_utils.get_flow_name_from_path(file_path),
-                    )
                     resource_id = self.generate_uuid(resource_type)
-                    if resource_type == Document:
-                        resource_id = os.path.basename(file_path)
-
-                    if resource_type == FlowStep:
-                        flow_step: FlowStep = self.read_local_resource(
-                            ResourceMapping(
-                                resource_id="temp_id",
-                                resource_type=FlowStep,
-                                resource_name=resource_name,
-                                file_path=file_path,
-                                flow_name=flow_name,
-                                resource_prefix=resource_type.get_resource_prefix(
-                                    file_path=file_path
-                                ),
-                            ),
-                            resource_mappings=[],
-                        )
-                        resource_name = flow_step.name
+                    if resource_type in (FunctionStep, FlowStep):
                         resource_id = f"{flow_name}_{resource_id}"
-
-                    elif resource_type == FunctionStep:
-                        resource_id = f"{flow_name}_{resource_id}"
-
-                    if resource_type == FlowConfig:
-                        resource_name = flow_name
-
-                    # Resource name in file path is cleaned, so we need to get the original name
-                    if (
-                        issubclass(resource_type, MultiResourceYamlResource)
-                        or resource_type == Topic
-                    ):
-                        resource = self.read_local_resource(
-                            ResourceMapping(
-                                resource_id="temp_id",
-                                resource_type=resource_type,
-                                resource_name=resource_name,
-                                file_path=file_path,
-                                flow_name=flow_name,
-                                resource_prefix=resource_type.get_resource_prefix(
-                                    file_path=file_path
-                                ),
-                            ),
-                            resource_mappings=[],
-                        )
-                        resource_name = resource.name
-
                     new_resource_mappings.append(
                         ResourceMapping(
                             resource_id=resource_id,
@@ -2337,6 +2328,8 @@ class AgentStudioProject:
                             resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
                         )
                     )
+
+
 
         deleted_file_paths = known_files - discovered_files
         for file_path in deleted_file_paths:
