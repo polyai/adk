@@ -708,30 +708,34 @@ def test_code(conv: Conversation, test_param: int):
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_step-1",
+                resource_id="flow-123_step-1",
                 resource_name="Step One",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/step_one.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_process_payment",
+                resource_id="flow-123_process_payment",
                 resource_name="process_payment",
                 resource_type=FunctionStep,
                 file_path="flows/test_flow/function_steps/process_payment.py",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_dont_know",
+                resource_id="flow-123_dont_know",
                 resource_name="Don't know/ Can't Find",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/dont_know.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
         ]
 
@@ -804,6 +808,7 @@ def test_code(conv: Conversation, test_param: int):
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
                 resource_id="flow-456",
@@ -2083,12 +2088,13 @@ class FlowConfigTests(unittest.TestCase):
         """Test converting flow config to pretty format with start_step name mapping."""
         resource_mappings = [
             ResourceMapping(
-                resource_id="Test Flow_step-1",
+                resource_id="flow-123_step-1",
                 resource_name="Start Step",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/start_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             )
         ]
         pretty_content = TEST_FLOW_CONFIG.to_pretty(
@@ -2108,12 +2114,13 @@ class FlowConfigTests(unittest.TestCase):
         """Test roundtrip conversion: to_pretty -> from_pretty."""
         resource_mappings = [
             ResourceMapping(
-                resource_id="Test Flow_step-1",
+                resource_id="flow-123_step-1",
                 resource_name="Start Step",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/start_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             )
         ]
         converted_config = TEST_FLOW_CONFIG.to_pretty(
@@ -2133,15 +2140,16 @@ class FlowConfigTests(unittest.TestCase):
 
         resource_mappings = [
             ResourceMapping(
-                resource_id="Test Flow_step-1",
+                resource_id="flow-123_step-1",
                 resource_name="Start Step",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/start_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_step-2",
+                resource_id="flow-123_step-2",
                 resource_name="Start Step",
                 resource_type=FlowStep,
                 file_path="flows/test_flow_2/steps/start_step.yaml",
@@ -2171,12 +2179,13 @@ class FlowConfigTests(unittest.TestCase):
         """Test validation of flow config."""
         resource_mappings = [
             ResourceMapping(
-                resource_id="Test Flow_step-1",
+                resource_id="flow-123_step-1",
                 resource_name="Start Step",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/start_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             )
         ]
         self.assertIsNone(TEST_FLOW_CONFIG.validate(resource_mappings=resource_mappings))
@@ -2242,14 +2251,16 @@ start_step: Start Step
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_step-1",
+                resource_id="flow-123_step-1",
                 resource_name="Start Step",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/start_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
         ]
 
@@ -2503,7 +2514,7 @@ class FlowStepTests(unittest.TestCase):
         yaml_dict = yaml.safe_load(FLOW_STEP_RAW_NO_ASR_DTMF)
         step = FlowStep.from_yaml_dict(
             yaml_dict,
-            resource_id="Test Flow_step-1",
+            resource_id="flow-123_step-1",
             file_name="test_step",
             flow_id="flow-123",
             flow_name="Test Flow",
@@ -2519,7 +2530,7 @@ class FlowStepTests(unittest.TestCase):
         )
         step = FlowStep.from_yaml_dict(
             yaml_dict,
-            resource_id="Test Flow_step-1",
+            resource_id="flow-123_step-1",
             file_name="test_step",
             flow_id="flow-123",
             flow_name="Test Flow",
@@ -2532,7 +2543,7 @@ class FlowStepTests(unittest.TestCase):
         yaml_dict = yaml.safe_load("step_type: advanced_step\nname: Test Step\n")
         step = FlowStep.from_yaml_dict(
             yaml_dict,
-            resource_id="Test Flow_step-1",
+            resource_id="flow-123_step-1",
             file_name="test_step",
             flow_id="flow-123",
             flow_name="Test Flow",
@@ -2643,6 +2654,7 @@ conditions:
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             )
         ]
         self.assertIsNone(TEST_FLOW_STEP.validate(resource_mappings=resource_mappings))
@@ -2730,6 +2742,7 @@ conditions:
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             )
         ]
         for valid_name in ("Test Step", "Step_1", "Step & 2", "Step 1, 2", "a/b", "v1.0", "café"):
@@ -2777,14 +2790,16 @@ conditions:
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_step-2",  # Format: flow_name_step_id
+                resource_id="flow-123_step-2",  # Format: flow_name_step_id
                 resource_name="Step 2",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/step_2.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
         ]
 
@@ -3275,6 +3290,7 @@ dtmf_config:
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             )
         ]
 
@@ -3324,14 +3340,16 @@ conditions:
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_step-2",
+                resource_id="flow-123_step-2",
                 resource_name="Step 2",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/step_2.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
         ]
 
@@ -3443,30 +3461,34 @@ conditions:
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_advanced-step-1",
+                resource_id="flow-123_advanced-step-1",
                 resource_name="Advanced Step",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/advanced_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_default-step-1",
+                resource_id="flow-123_default-step-1",
                 resource_name="Default Step",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/default_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_function-step-1",
+                resource_id="flow-123_function-step-1",
                 resource_name="function_step",
                 resource_type=FunctionStep,
                 file_path="flows/test_flow/function_steps/function_step.py",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
         ]
 
@@ -3725,19 +3747,20 @@ class FunctionStepTests(unittest.TestCase):
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="test_flow",
             )
         ]
 
         with mock_read_from_file(test_file_pretty_content):
             result = FunctionStep.read_local_resource(
                 file_path="flows/test_flow/function_steps/process_data.py",
-                resource_id="Test Flow_process_data",
+                resource_id="test_flow_process_data",
                 resource_name="process_data",
                 resource_mappings=resource_mappings,
                 known_latency_control={},
             )
 
-            self.assertEqual(result.resource_id, "Test Flow_process_data")
+            self.assertEqual(result.resource_id, "test_flow_process_data")
             self.assertEqual(result.step_id, "process_data")
             self.assertEqual(result.name, "process_data")
             self.assertEqual(result.flow_id, "test_flow")
@@ -8115,15 +8138,11 @@ class DocumentTests(unittest.TestCase):
     """Tests for the Document resource."""
 
     def test_file_path(self):
-        doc = Document(
-            resource_id="test.md", name="test", path="test.md", contents="hello"
-        )
+        doc = Document(resource_id="test.md", name="test", path="test.md", contents="hello")
         self.assertEqual(doc.file_path, os.path.join("context", "test.md"))
 
     def test_raw(self):
-        doc = Document(
-            resource_id="test.md", name="test", path="test.md", contents="some content"
-        )
+        doc = Document(resource_id="test.md", name="test", path="test.md", contents="some content")
         self.assertEqual(doc.raw, "some content")
 
     def test_make_pretty_from_pretty_passthrough(self):

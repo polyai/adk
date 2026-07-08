@@ -262,6 +262,9 @@ class AgentStudioProject:
             json_bytes = base64.b64decode(encoded)
             status_dict = json.loads(json_bytes.decode("utf-8"))
 
+        migration_flags = load_migration_flags(status_dict.get("migration_flags", []))
+        migration_flags = run_migrations(root_path, migration_flags, status_dict=status_dict)
+
         # Load resources
         resources, not_loaded_resources = cls._load_resources_from_status_dict(status_dict)
 
@@ -270,9 +273,6 @@ class AgentStudioProject:
             last_updated = datetime.fromisoformat(last_updated_str)
         else:
             last_updated = datetime.now()
-
-        migration_flags = load_migration_flags(status_dict.get("migration_flags", []))
-        migration_flags = run_migrations(root_path, migration_flags)
 
         return cls(
             region=config_dict.get("region", ""),
@@ -314,12 +314,12 @@ class AgentStudioProject:
     @classmethod
     def from_dict(cls, data: dict, root_path: str) -> "AgentStudioProject":
         """Load whole project class from a dictionary"""
+        migration_flags = load_migration_flags(data.get("migration_flags", []))
+        migration_flags = run_migrations(root_path, migration_flags, status_dict=data)
+
         resources, not_loaded_resources = cls._load_resources_from_status_dict(data)
 
         file_structure_info = cls.compute_file_structure_info(resources)
-
-        migration_flags = load_migration_flags(data.get("migration_flags", []))
-        migration_flags = run_migrations(root_path, migration_flags)
 
         return cls(
             region=data.get("region", ""),
@@ -1523,7 +1523,7 @@ class AgentStudioProject:
                 # Create a dummy default step
                 dummy_step_id = f"{function_start_step.step_id}_start_step_temp"
                 dummy = FlowStep(
-                    resource_id=f"{flow_config.name}_{dummy_step_id}",
+                    resource_id=f"{flow_config.resource_id}_{dummy_step_id}",
                     step_id=dummy_step_id,
                     name=f"{flow_config.name}-temp",
                     flow_id=flow_config.resource_id,
@@ -1562,7 +1562,7 @@ class AgentStudioProject:
             if flow_config_id in new_resources.get(FlowConfig, {}):
                 continue
             old_flow_config = self.resources.get(FlowConfig, {}).get(flow_config_id)
-            old_step_resource_id = f"{old_flow_config.name}_{old_flow_config.start_step}"
+            old_step_resource_id = f"{old_flow_config.resource_id}_{old_flow_config.start_step}"
 
             old_start_step = self.resources.get(FlowStep, {}).get(
                 old_step_resource_id
@@ -1573,7 +1573,7 @@ class AgentStudioProject:
             if flow_config.start_step != old_start_step.step_id:
                 if old_start_step.resource_id in deleted_resources.get(type(old_start_step), {}):
                     # If it's being recreated with the same name (sync ids) we need to create a dummy step
-                    new_step_resource_id = f"{flow_config.name}_{flow_config.start_step}"
+                    new_step_resource_id = f"{flow_config.resource_id}_{flow_config.start_step}"
                     if (
                         (
                             new_start_step := (
@@ -1586,7 +1586,7 @@ class AgentStudioProject:
                     ):
                         dummy_step_id = f"{old_start_step.step_id}_temp"
                         dummy = FlowStep(
-                            resource_id=f"{new_start_step.flow_name}_{dummy_step_id}",
+                            resource_id=f"{new_start_step.flow_id}_{dummy_step_id}",
                             step_id=dummy_step_id,
                             name=f"{new_start_step.name}-temp",
                             flow_id=new_start_step.flow_id,
@@ -1635,7 +1635,7 @@ class AgentStudioProject:
                 if is_start_step:
                     dummy_step_id = f"{original_flow_step.step_id}_temp"
                     dummy = FlowStep(
-                        resource_id=f"{original_flow_step.flow_name}_{dummy_step_id}",
+                        resource_id=f"{original_flow_step.flow_id}_{dummy_step_id}",
                         step_id=dummy_step_id,
                         name=f"{original_flow_step.name}-temp",
                         flow_id=original_flow_step.flow_id,
@@ -2224,6 +2224,11 @@ class AgentStudioProject:
             )
             flow_paths_to_names[resource_utils.clean_name(flow_config.name)] = flow_config.name
 
+        # Build a map of clean flow folder names to flow IDs (from existing resources)
+        flow_paths_to_ids: dict[str, str] = {}
+        for flow_id, flow_cfg in self.resources.get(FlowConfig, {}).items():
+            flow_paths_to_ids[resource_utils.clean_name(flow_cfg.name)] = flow_id
+
         if not self.file_structure_info:
             self.file_structure_info = self.compute_file_structure_info(self.resources)
 
@@ -2268,6 +2273,10 @@ class AgentStudioProject:
                         )
                         resource_name = resource.name
 
+                    flow_id = flow_paths_to_ids.get(
+                        resource_utils.get_flow_name_from_path(file_path),
+                    )
+
                     kept_resource_mappings.append(
                         ResourceMapping(
                             resource_id=resource_info["resource_id"],
@@ -2276,6 +2285,7 @@ class AgentStudioProject:
                             file_path=file_path,
                             flow_name=flow_name,
                             resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
+                            flow_id=flow_id,
                         )
                     )
 
@@ -2283,6 +2293,9 @@ class AgentStudioProject:
                     # Flow step names are not from file names, so we need to handle them separately
                     resource_name = os.path.splitext(os.path.basename(file_path))[0]
                     flow_name = flow_paths_to_names.get(
+                        resource_utils.get_flow_name_from_path(file_path),
+                    )
+                    flow_id = flow_paths_to_ids.get(
                         resource_utils.get_flow_name_from_path(file_path),
                     )
                     resource_id = self.generate_uuid(resource_type)
@@ -2304,10 +2317,14 @@ class AgentStudioProject:
                             resource_mappings=[],
                         )
                         resource_name = flow_step.name
-                        resource_id = f"{flow_name}_{resource_id}"
+                        resource_id = (
+                            f"{flow_id}_{resource_id}" if flow_id else f"{flow_name}_{resource_id}"
+                        )
 
                     elif resource_type == FunctionStep:
-                        resource_id = f"{flow_name}_{resource_id}"
+                        resource_id = (
+                            f"{flow_id}_{resource_id}" if flow_id else f"{flow_name}_{resource_id}"
+                        )
 
                     if resource_type == FlowConfig:
                         resource_name = flow_name
@@ -2332,6 +2349,9 @@ class AgentStudioProject:
                         )
                         resource_name = resource.name
 
+                    if resource_type == FlowConfig:
+                        flow_paths_to_ids[resource_utils.clean_name(flow_name)] = resource_id
+
                     new_resource_mappings.append(
                         ResourceMapping(
                             resource_id=resource_id,
@@ -2340,6 +2360,7 @@ class AgentStudioProject:
                             file_path=file_path,
                             flow_name=flow_name,
                             resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
+                            flow_id=flow_id if resource_type != FlowConfig else resource_id,
                         )
                     )
 
@@ -2366,6 +2387,9 @@ class AgentStudioProject:
                 ),
                 file_path=file_path,
                 resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
+                flow_id=flow_paths_to_ids.get(
+                    resource_utils.get_flow_name_from_path(file_path),
+                ),
             )
             deleted_resource_mappings.append(resource_mapping)
 
@@ -2656,6 +2680,11 @@ class AgentStudioProject:
                 else getattr(resource, "flow_name", None)
             ),
             resource_prefix=resource.get_resource_prefix(file_path=resource.file_path),
+            flow_id=(
+                resource.resource_id
+                if isinstance(resource, FlowConfig)
+                else getattr(resource, "flow_id", None)
+            ),
         )
 
     def format_files(
@@ -2931,6 +2960,11 @@ class AgentStudioProject:
                             else getattr(resource, "flow_name", None)
                         ),
                         resource_prefix=resource.get_resource_prefix(file_path=resource.file_path),
+                        flow_id=(
+                            mapping_resource_id
+                            if isinstance(resource, FlowConfig)
+                            else getattr(resource, "flow_id", None)
+                        ),
                     )
                 )
 
