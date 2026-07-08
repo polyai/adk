@@ -2242,23 +2242,17 @@ class AgentStudioProject:
                             resource_name=resource_name,
                             file_path=file_path,
                             flow_name=flow_name,
-                            resource_prefix=resource_type.get_resource_prefix(
-                                file_path=file_path
-                            ),
+                            resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
                         ),
                         resource_mappings=[],
                     )
                     resource_name = flow_step.name
 
-
                 if resource_type == FlowConfig:
                     resource_name = flow_name
 
                 # Resource name in file path is cleaned, so we need to get the original name
-                if (
-                    issubclass(resource_type, MultiResourceYamlResource)
-                    or resource_type == Topic
-                ):
+                if issubclass(resource_type, MultiResourceYamlResource) or resource_type == Topic:
                     resource = self.read_local_resource(
                         ResourceMapping(
                             resource_id="temp_id",
@@ -2266,15 +2260,11 @@ class AgentStudioProject:
                             resource_name=resource_name,
                             file_path=file_path,
                             flow_name=flow_name,
-                            resource_prefix=resource_type.get_resource_prefix(
-                                file_path=file_path
-                            ),
+                            resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
                         ),
                         resource_mappings=[],
                     )
                     resource_name = resource.name
-
-
 
                 if file_path in known_files:
                     # Remove root path from file path
@@ -2283,7 +2273,6 @@ class AgentStudioProject:
                     )
                     if not resource_info:
                         raise ValueError(f"Resource info not found for {file_path}")
-
 
                     # Default Language will only be modified, but name must
                     # be read from file
@@ -2328,8 +2317,6 @@ class AgentStudioProject:
                             resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
                         )
                     )
-
-
 
         deleted_file_paths = known_files - discovered_files
         for file_path in deleted_file_paths:
