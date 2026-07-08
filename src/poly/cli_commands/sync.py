@@ -139,7 +139,7 @@ class PullCommand(BaseCommand):
             if output_json_projection:
                 json_output["projection"] = projection
             json_print(json_output)
-            if include_rtc:
+            if include_rtc and not files_with_conflicts:
                 from poly.cli_commands.rtc import RTCCommand
 
                 RTCCommand.rtc_pull(base_path, env="all", output_json=output_json)
@@ -156,7 +156,7 @@ class PullCommand(BaseCommand):
 
         success(f"Pulled {project.account_id}/{project.project_id}")
 
-        if include_rtc:
+        if include_rtc and not files_with_conflicts:
             from poly.cli_commands.rtc import RTCCommand
 
             RTCCommand.rtc_pull(base_path, env="all", output_json=output_json)
