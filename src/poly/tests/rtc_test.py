@@ -207,40 +207,40 @@ class TestRTC(unittest.TestCase):
         self.assertEqual(vars_call["variables"], variables_obj)
 
     @patch("poly.cli_commands.rtc.load_project")
-    def test_rtc_push_missing_schema_raises(self, mock_load_project):
-        """Verify rtc push raises if schema.json is missing."""
+    def test_rtc_push_missing_schema_returns_error(self, mock_load_project):
+        """Verify rtc push returns error if schema.json is missing."""
         mock_project = MagicMock()
         mock_project.root_path = self.temp_dir
         mock_load_project.return_value = mock_project
 
-        # Create only data.json
         sandbox_dir = os.path.join(self.temp_dir, "real_time_configuration", "draft_and_sandbox")
         os.makedirs(sandbox_dir)
         with open(os.path.join(sandbox_dir, "data.json"), "w") as f:
             json.dump({}, f)
 
-        with self.assertRaises(SystemExit):
-            RTCCommand.rtc_push(self.temp_dir, env="sandbox", output_json=True)
+        result = RTCCommand.rtc_push(self.temp_dir, env="sandbox", output_json=True)
+        self.assertFalse(result["success"])
+        self.assertIn("schema.json not found", result["error"])
 
     @patch("poly.cli_commands.rtc.load_project")
-    def test_rtc_push_missing_data_raises(self, mock_load_project):
-        """Verify rtc push raises if data.json is missing."""
+    def test_rtc_push_missing_data_returns_error(self, mock_load_project):
+        """Verify rtc push returns error if data.json is missing."""
         mock_project = MagicMock()
         mock_project.root_path = self.temp_dir
         mock_load_project.return_value = mock_project
 
-        # Create only schema.json
         sandbox_dir = os.path.join(self.temp_dir, "real_time_configuration", "draft_and_sandbox")
         os.makedirs(sandbox_dir)
         with open(os.path.join(sandbox_dir, "schema.json"), "w") as f:
             json.dump({}, f)
 
-        with self.assertRaises(SystemExit):
-            RTCCommand.rtc_push(self.temp_dir, env="sandbox", output_json=True)
+        result = RTCCommand.rtc_push(self.temp_dir, env="sandbox", output_json=True)
+        self.assertFalse(result["success"])
+        self.assertIn("data.json not found", result["error"])
 
     @patch("poly.cli_commands.rtc.load_project")
-    def test_rtc_push_live_without_force_json_exits(self, mock_load_project):
-        """Verify pushing to live in JSON mode without --force is refused."""
+    def test_rtc_push_live_without_force_json_returns_error(self, mock_load_project):
+        """Verify pushing to live in JSON mode without --force returns error."""
         mock_project = MagicMock()
         mock_project.root_path = self.temp_dir
         mock_load_project.return_value = mock_project
@@ -252,8 +252,9 @@ class TestRTC(unittest.TestCase):
         with open(os.path.join(live_dir, "data.json"), "w") as f:
             json.dump({}, f)
 
-        with self.assertRaises(SystemExit):
-            RTCCommand.rtc_push(self.temp_dir, env="live", force=False, output_json=True)
+        result = RTCCommand.rtc_push(self.temp_dir, env="live", force=False, output_json=True)
+        self.assertFalse(result["success"])
+        self.assertIn("--force", result["error"])
 
     @patch("poly.cli_commands.rtc.load_project")
     @patch("poly.cli_commands.rtc.AgentStudioInterface.put_rtc_schema")
@@ -355,7 +356,7 @@ class TestIncludeRTC(unittest.TestCase):
 
         PullCommand.pull("/tmp/test", include_rtc=True, output_json=True)
 
-        mock_rtc_pull.assert_called_once_with("/tmp/test", env="all", output_json=True)
+        mock_rtc_pull.assert_called_once_with("/tmp/test", env="all")
 
     @patch("poly.cli_commands.rtc.RTCCommand.rtc_pull")
     @patch("poly.cli_commands.sync.load_project")

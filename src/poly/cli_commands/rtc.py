@@ -8,6 +8,7 @@ import logging
 import os
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
+from typing import Optional
 
 import questionary
 import requests
@@ -103,9 +104,27 @@ class RTCCommand(BaseCommand):
     def run(cls, args: Namespace) -> None:
         """Dispatch to the matching RTC sub-handler."""
         if args.rtc_subcommand == "pull":
-            cls.rtc_pull(args.path, args.env, args.json)
+            result = cls.rtc_pull(args.path, args.env)
+            if args.json:
+                json_print(result)
+            else:
+                if not result["success"]:
+                    error(result["error"])
+                    sys.exit(1)
+                for f in result["files_written"]:
+                    success(f"Pulled {f['environment']} — {f['schema_file']}")
+                    success(f"Pulled {f['environment']} — {f['data_file']}")
         elif args.rtc_subcommand == "push":
-            cls.rtc_push(args.path, args.env, getattr(args, "force", False), args.json)
+            result = cls.rtc_push(args.path, args.env, getattr(args, "force", False), args.json)
+            if result is None:
+                return
+            if args.json:
+                json_print(result)
+            else:
+                if not result["success"]:
+                    error(result["error"])
+                    sys.exit(1)
+                success(f"Pushed RTC to {args.env}")
 
     @classmethod
     def rtc_pull(
@@ -113,19 +132,22 @@ class RTCCommand(BaseCommand):
         base_path: str,
         env: str = "all",
         output_json: bool = False,
-    ) -> None:
+    ) -> dict:
         """Pull RTC from Agent Studio and write to local files.
 
         Args:
             base_path: Base path for the project.
             env: Environment(s) to pull — sandbox, pre-release, live, or all.
-            output_json: If True, emit machine-readable JSON.
+            output_json: If True, format errors as JSON on failure.
+
+        Returns:
+            dict: Result with success status and files_written list.
         """
         project = load_project(base_path, output_json=output_json)
         project_root = project.root_path
 
         if env == "all":
-            envs_to_fetch = ["sandbox", "pre-release", "live"]
+            envs_to_fetch = list(RTC_ENV_TO_DIR.keys())
         else:
             envs_to_fetch = [env]
 
@@ -164,19 +186,10 @@ class RTCCommand(BaseCommand):
                     }
                 )
 
-            if output_json:
-                json_print({"success": True, "files_written": results})
-            else:
-                for result in results:
-                    success(f"Pulled {result['environment']} — {result['schema_file']}")
-                    success(f"Pulled {result['environment']} — {result['data_file']}")
+            return {"success": True, "files_written": results}
 
         except requests.HTTPError as e:
-            if output_json:
-                json_print({"success": False, "error": str(e)})
-                sys.exit(1)
-            else:
-                raise
+            return {"success": False, "error": str(e), "files_written": results}
 
     @classmethod
     def rtc_push(
@@ -185,14 +198,17 @@ class RTCCommand(BaseCommand):
         env: str,
         force: bool = False,
         output_json: bool = False,
-    ) -> None:
+    ) -> Optional[dict]:
         """Push RTC from local files to Agent Studio.
 
         Args:
             base_path: Base path for the project.
             env: Environment to push to — sandbox, pre-release, or live.
             force: If True, skip confirmation for live environment.
-            output_json: If True, emit machine-readable JSON.
+            output_json: If True, format errors as JSON on failure.
+
+        Returns:
+            dict with success status, or None if the user cancelled interactively.
         """
         project = load_project(base_path, output_json=output_json)
         project_root = project.root_path
@@ -204,33 +220,25 @@ class RTCCommand(BaseCommand):
         data_path = os.path.join(env_dir, "data.json")
 
         if not os.path.exists(schema_path):
-            msg = f"schema.json not found at {schema_path}"
-            if output_json:
-                json_print({"success": False, "error": msg})
-            else:
-                error(msg)
-            sys.exit(1)
+            return {"success": False, "error": f"schema.json not found at {schema_path}"}
 
         if not os.path.exists(data_path):
-            msg = f"data.json not found at {data_path}"
-            if output_json:
-                json_print({"success": False, "error": msg})
-            else:
-                error(msg)
-            sys.exit(1)
+            return {"success": False, "error": f"data.json not found at {data_path}"}
 
-        with open(schema_path, "r", encoding="utf-8") as f:
-            schema = json.load(f)
-
-        with open(data_path, "r", encoding="utf-8") as f:
-            variables = json.load(f)
+        try:
+            with open(schema_path, "r", encoding="utf-8") as f:
+                schema = json.load(f)
+            with open(data_path, "r", encoding="utf-8") as f:
+                variables = json.load(f)
+        except json.JSONDecodeError as e:
+            return {"success": False, "error": f"Invalid JSON in local RTC file: {e}"}
 
         if env == "live" and not force:
             if output_json:
-                json_print(
-                    {"success": False, "error": "Refusing to push RTC to live without --force."}
-                )
-                sys.exit(1)
+                return {
+                    "success": False,
+                    "error": "Refusing to push RTC to live without --force.",
+                }
             confirm = questionary.confirm(
                 f"Push RTC to {env}? This will update live configuration.",
                 auto_enter=False,
@@ -238,7 +246,7 @@ class RTCCommand(BaseCommand):
             ).ask()
             if not confirm:
                 info("Push cancelled.")
-                return
+                return None
 
         try:
             AgentStudioInterface.put_rtc_schema(
@@ -248,11 +256,7 @@ class RTCCommand(BaseCommand):
                 schema=schema,
             )
         except requests.HTTPError as e:
-            if output_json:
-                json_print({"success": False, "error": str(e), "step": "schema"})
-                sys.exit(1)
-            else:
-                raise
+            return {"success": False, "error": str(e), "step": "schema"}
 
         try:
             AgentStudioInterface.patch_rtc_variables(
@@ -262,23 +266,17 @@ class RTCCommand(BaseCommand):
                 variables=variables,
             )
         except requests.HTTPError as e:
-            # Schema was already pushed — warn so the user knows the state is partial
-            msg = f"Schema pushed but variables failed: {e}"
-            if output_json:
-                json_print({"success": False, "error": msg, "step": "variables"})
-                sys.exit(1)
-            else:
+            if not output_json:
                 error(f"Warning: schema was pushed to {env}, but variables update failed.")
-                raise
+            return {
+                "success": False,
+                "error": f"Schema pushed but variables failed: {e}",
+                "step": "variables",
+            }
 
-        if output_json:
-            json_print(
-                {
-                    "success": True,
-                    "environment": env,
-                    "schema_file": schema_path,
-                    "data_file": data_path,
-                }
-            )
-        else:
-            success(f"Pushed RTC to {env}")
+        return {
+            "success": True,
+            "environment": env,
+            "schema_file": schema_path,
+            "data_file": data_path,
+        }
