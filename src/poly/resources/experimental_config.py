@@ -63,12 +63,13 @@ class ExperimentalConfig(Resource):
 
     def validate(self, **kwargs):
         # Validate against schema
-        openapi_schema = utils.load_yaml(
-            open(
-                os.path.join(os.path.dirname(__file__), "experimental_config_schema.yaml"),
-                encoding="utf-8",
-            )
+        schema_path = os.environ.get("ADK_EXPERIMENTAL_CONFIG_SCHEMA_PATH") or os.path.join(
+            os.path.dirname(__file__), "experimental_config_schema.yaml"
         )
+
+        with open(schema_path, encoding="utf-8") as schema_file:
+            openapi_schema = utils.load_yaml(schema_file.read())
+
         additional_features = openapi_schema["components"]["schemas"]["additional_features"]
         resolver = jsonschema.RefResolver.from_schema(openapi_schema)
 
