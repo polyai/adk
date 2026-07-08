@@ -54,7 +54,7 @@ Top-level keys represent feature areas, and values contain the settings for thos
 
 ## Schema and validation
 
-Available features and their types are defined in:
+Available features and their types are defined in a bundled schema file:
 
 ~~~text
 src/poly/resources/experimental_config_schema.yaml
@@ -67,6 +67,17 @@ poly validate
 ~~~
 
 Invalid configuration fails `poly validate` locally. Experimental config that fails validation is not read by the runtime in deployed agents.
+
+### Custom schema path
+
+If the bundled schema does not match the schema expected by your Agent Studio environment, you can point validation at a custom schema file by setting the `ADK_EXPERIMENTAL_CONFIG_SCHEMA_PATH` environment variable:
+
+~~~bash
+export ADK_EXPERIMENTAL_CONFIG_SCHEMA_PATH=/path/to/your/experimental_config_schema.yaml
+poly validate
+~~~
+
+When `ADK_EXPERIMENTAL_CONFIG_SCHEMA_PATH` is set, the ADK uses that file instead of the bundled schema. When the variable is unset or empty, validation falls back to the bundled schema.
 
 !!! info "Validate before pushing"
 
