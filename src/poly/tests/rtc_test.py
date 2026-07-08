@@ -280,6 +280,62 @@ class TestRTC(unittest.TestCase):
         mock_put_schema.assert_called_once()
         mock_patch_vars.assert_called_once()
 
+    @patch("poly.cli_commands.rtc.questionary")
+    @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.put_rtc_schema")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
+    def test_rtc_push_live_interactive_confirm(
+        self, mock_patch_vars, mock_put_schema, mock_load_project, mock_questionary
+    ):
+        """Verify interactive live push proceeds when user confirms."""
+        mock_project = MagicMock()
+        mock_project.region = "studio"
+        mock_project.project_id = "test-project"
+        mock_project.root_path = self.temp_dir
+        mock_load_project.return_value = mock_project
+        mock_questionary.confirm.return_value.ask.return_value = True
+
+        live_dir = os.path.join(self.temp_dir, "real_time_configuration", "live")
+        os.makedirs(live_dir)
+        with open(os.path.join(live_dir, "schema.json"), "w") as f:
+            json.dump({"type": "object"}, f)
+        with open(os.path.join(live_dir, "data.json"), "w") as f:
+            json.dump({"key": "val"}, f)
+
+        RTCCommand.rtc_push(self.temp_dir, env="live", force=False, output_json=False)
+
+        mock_questionary.confirm.assert_called_once()
+        mock_put_schema.assert_called_once()
+        mock_patch_vars.assert_called_once()
+
+    @patch("poly.cli_commands.rtc.questionary")
+    @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.put_rtc_schema")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
+    def test_rtc_push_live_interactive_decline(
+        self, mock_patch_vars, mock_put_schema, mock_load_project, mock_questionary
+    ):
+        """Verify interactive live push is cancelled when user declines."""
+        mock_project = MagicMock()
+        mock_project.region = "studio"
+        mock_project.project_id = "test-project"
+        mock_project.root_path = self.temp_dir
+        mock_load_project.return_value = mock_project
+        mock_questionary.confirm.return_value.ask.return_value = False
+
+        live_dir = os.path.join(self.temp_dir, "real_time_configuration", "live")
+        os.makedirs(live_dir)
+        with open(os.path.join(live_dir, "schema.json"), "w") as f:
+            json.dump({"type": "object"}, f)
+        with open(os.path.join(live_dir, "data.json"), "w") as f:
+            json.dump({"key": "val"}, f)
+
+        RTCCommand.rtc_push(self.temp_dir, env="live", force=False, output_json=False)
+
+        mock_questionary.confirm.assert_called_once()
+        mock_put_schema.assert_not_called()
+        mock_patch_vars.assert_not_called()
+
 
 class TestIncludeRTC(unittest.TestCase):
     """Test suite for --include-rtc on pull/push commands."""
