@@ -1,6 +1,44 @@
 # CHANGELOG
 
 
+## v0.33.0 (2026-07-08)
+
+### Features
+
+- Add Document resource type ([#211](https://github.com/polyai/adk/pull/211),
+  [`ebb646d`](https://github.com/polyai/adk/commit/ebb646d2ed50e12cad37ff877b24dd510cf01320))
+
+## Summary
+
+Adds support for Document resources — context files stored as Markdown in `context/` that provide
+  background knowledge to the agent via Studio Assistant.
+
+## Motivation
+
+Documents are a new resource type on Agent Studio. This PR adds full ADK support: pull, push, diff,
+  status, and discovery.
+
+## Changes
+
+- New `Document` resource class in `src/poly/resources/documents.py` - Register in
+  `RESOURCE_NAME_TO_CLASS` and `__init__.py` - Read documents from projection in `SyncClientHandler`
+  - Fix: use document path as resource ID (matches server) instead of generated UUID - Add `poly
+  docs context` documentation page - Improve `poly docs` listing in `docs.md` to show actual command
+  names - Add tests in `resources_test.py` and `project_test.py` - Add test fixture
+  (`context/test_document.md` + JSON entry)
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.32.1 (2026-07-06)
 
 ### Bug Fixes
