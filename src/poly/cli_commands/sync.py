@@ -97,7 +97,7 @@ class PullCommand(BaseCommand):
         include_rtc: bool = False,
     ) -> None:
         """Pull the latest project configuration from the Agent Studio."""
-        from poly.output.console import console, info, print_file_list, success, warning
+        from poly.output.console import console, error, info, print_file_list, success, warning
 
         project = load_project(base_path, output_json=output_json)
         if not output_json:
