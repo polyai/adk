@@ -81,7 +81,7 @@ class TemplateCommand(BaseCommand):
             "template_name",
             nargs="?",
             type=str,
-            help="ID of the template to load. If omitted, an interactive picker is shown.",
+            help="Name of the template to load. If omitted, an interactive picker is shown.",
         )
         template_load_parser.add_argument(
             "--path",
@@ -146,16 +146,15 @@ class TemplateCommand(BaseCommand):
 
     @classmethod
     def _pick_template(cls, templates: list[dict]) -> str | None:
-        """Show an interactive template picker. Returns the template ID."""
+        """Show an interactive template picker. Returns the template display name."""
         import questionary
 
         choices = []
         for t in templates:
             display = t.get("displayName", "")
-            template_id = t.get("id", "")
             desc = t.get("description", "").strip()
             title = f"{display} — {desc}" if desc else display
-            choices.append(questionary.Choice(title=title, value=template_id))
+            choices.append(questionary.Choice(title=title, value=display))
 
         return questionary.select(
             "Select a template",
@@ -188,10 +187,9 @@ class TemplateCommand(BaseCommand):
         for t in templates:
             display = t.get("displayName", "unknown")
             desc = t.get("description", "").strip()
-            label = f"  [bold]{display}[/bold]"
+            plain(f"  [bold]{display}[/bold]")
             if desc:
-                label += f" — {desc}"
-            plain(label)
+                plain(f"    {desc}")
         plain("")
 
     @classmethod
@@ -231,8 +229,18 @@ class TemplateCommand(BaseCommand):
                 warning("No template selected. Exiting.")
                 return
 
-        templates_by_id = {t.get("id", ""): t for t in templates}
-        template = templates_by_id.get(template_name)
+        query = template_name.lower()
+        template = None
+        for t in templates:
+            name = t.get("displayName", "")
+            if name.lower() == query:
+                template = t
+                break
+        if not template:
+            for t in templates:
+                if query in t.get("displayName", "").lower():
+                    template = t
+                    break
         if not template:
             msg = f"Template '{template_name}' not found."
             if output_json:
