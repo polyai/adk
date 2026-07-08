@@ -1,6 +1,45 @@
 # CHANGELOG
 
 
+## v0.33.1 (2026-07-08)
+
+### Bug Fixes
+
+- Bump experimental config schema with Soniox ASR ([#218](https://github.com/polyai/adk/pull/218),
+  [`bebbbfe`](https://github.com/polyai/adk/commit/bebbbfe5928ee6611f3f7ae6510c3a99d8b206c5))
+
+## Summary
+
+Adds `soniox` as a supported ASR provider in the experimental config schema.
+
+## Motivation
+
+The Soniox speech recognition provider (poly_core #43628) needs to be a valid option in the
+  experimental config schema so projects using it pass validation. Agent Studio already accepts
+  `soniox` in published configs, so the reverse-synced `experimental_config.json` currently fails
+  ADK validation in agent-deployments CI (e.g. PolyAI-LDN/agent-deployments#8033) until the config
+  is manually stripped.
+
+## Changes
+
+- Added `soniox` to the ASR provider enum list - Added `soniox: Soniox cloud speech recognition` to
+  the provider description enum - Added `soniox: "stt-rt-v5"` to the model documentation
+
+## Test strategy
+
+- [x] Validated the real reverse-synced Corilus `experimental_config.json` (soniox language
+  overrides) against the updated schema with `jsonschema.Draft202012Validator`; unknown providers
+  are still rejected - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Moaed Yahia <moaedpoly@gmail.com>
+
+
 ## v0.33.0 (2026-07-08)
 
 ### Features
