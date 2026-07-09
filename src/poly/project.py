@@ -518,6 +518,9 @@ class AgentStudioProject:
             force=True,
         )
 
+        flow_folder = os.path.join(self.root_path, "flows")
+        self._delete_empty_folders(flow_folder)
+
     def pull_project(
         self,
         force: bool = False,
