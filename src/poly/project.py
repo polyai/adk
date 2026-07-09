@@ -510,16 +510,7 @@ class AgentStudioProject:
         """Load a template into the project."""
         template_resources = self.api_handler.get_template_resources(region, template_id)
 
-        # Pull latest remote state so it becomes the merge baseline.
-        # On next push the 3-way merge sees original == incoming (both remote),
-        # so local (template) changes apply cleanly without conflicts.
-        incoming_resources, _ = self.api_handler.pull_resources()
-        self.resources = incoming_resources
-        self.file_structure_info = self.compute_file_structure_info(incoming_resources)
-
-        # Wipe all local resource files so stale flows/functions from the
-        # previous project don't leak through and cause validation errors.
-        self._delete_all_local_resources()
+        self._delete_new_resources()
 
         self._update_pulled_resources(
             original_resources={},
