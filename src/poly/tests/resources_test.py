@@ -2795,7 +2795,7 @@ conditions:
                 flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="flow-123_step-2",  # Format: flow_name_step_id
+                resource_id="flow-123_step-2",  # Format: flow_id_step_id
                 resource_name="Step 2",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/step_2.yaml",
@@ -2806,7 +2806,7 @@ conditions:
         ]
 
         # Test with valid condition
-        # child_step should match the step_id part after removing flow_name prefix from resource_id
+        # child_step should match the step_id part after removing flow_id prefix from resource_id
         valid_condition = Condition(
             resource_id="cond-1",
             name="Valid Condition",

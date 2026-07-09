@@ -2232,7 +2232,7 @@ class AgentStudioProject:
         # Add to mapping for new flows
         for flow_path in discovered_resources.get(FlowConfig, []):
             flow_name = resource_utils.get_flow_name_from_path(flow_path)
-            if flow_name not in flow_paths_to_ids:
+            if resource_utils.clean_name(flow_name) not in flow_paths_to_ids:
                 flow_paths_to_ids[resource_utils.clean_name(flow_name)] = self.generate_uuid(
                     FlowConfig
                 )
