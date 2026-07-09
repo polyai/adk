@@ -2300,12 +2300,13 @@ start_step: step-1
 
         resource_mappings = [
             ResourceMapping(
-                resource_id="Test Flow: Main_step-1",
+                resource_id="flow-colon_step-1",
                 resource_name="Step: Start",
                 resource_type=FlowStep,
                 file_path="flows/test_flow_main/steps/start_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow: Main",
+                flow_id="flow-colon",
             )
         ]
 
@@ -2606,12 +2607,13 @@ conditions:
 
         resource_mappings = [
             ResourceMapping(
-                resource_id="Test Flow: Main_step-2",
+                resource_id="flow-colon_step-2",
                 resource_name="Step: Next",
                 resource_type=FlowStep,
                 file_path="flows/test_flow_main/steps/next_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow: Main",
+                flow_id="flow-colon",
             ),
             ResourceMapping(
                 resource_id="entity-123",

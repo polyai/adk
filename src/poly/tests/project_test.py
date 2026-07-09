@@ -567,6 +567,40 @@ class FindNewKeptDeletedTest(unittest.TestCase):
         deleted_mapping = deleted_mappings[0]
         self.assertEqual(deleted_mapping.resource_type, Function)
 
+    def test_find_new_kept_deleted_new_flow_steps_use_flow_id_prefix(self):
+        """When flow resources are not loaded, new flow steps should use
+        the FlowConfig's generated flow_id as their resource_id prefix,
+        not the flow_name."""
+        project_data = deepcopy(PROJECT_DATA)
+        # Remove all flow resources so they appear as new (not loaded)
+        project_data["resources"].pop("flow_config", None)
+        project_data["resources"].pop("flow_steps", None)
+        project_data["resources"].pop("function_steps", None)
+
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+        local_resources = project.discover_local_resources()
+        new_mappings, kept_mappings, _ = project.find_new_kept_deleted(local_resources)
+
+        new_flow_configs = [m for m in new_mappings if m.resource_type == FlowConfig]
+        new_flow_steps = [m for m in new_mappings if m.resource_type == FlowStep]
+        new_function_steps = [m for m in new_mappings if m.resource_type == FunctionStep]
+
+        self.assertTrue(len(new_flow_configs) > 0)
+        self.assertTrue(len(new_flow_steps) > 0)
+
+        # Build flow_name -> flow_id map from the new FlowConfig mappings
+        flow_id_by_name = {m.flow_name: m.resource_id for m in new_flow_configs}
+
+        # Every new flow step's resource_id should start with its flow's flow_id
+        for step_mapping in new_flow_steps + new_function_steps:
+            expected_flow_id = flow_id_by_name[step_mapping.flow_name]
+            self.assertTrue(
+                step_mapping.resource_id.startswith(expected_flow_id + "_"),
+                f"Step {step_mapping.resource_name} resource_id '{step_mapping.resource_id}' "
+                f"should start with flow_id '{expected_flow_id}_'",
+            )
+            self.assertEqual(step_mapping.flow_id, expected_flow_id)
+
 
 class ProjectStatusTest(unittest.TestCase):
     """Tests for the project_status method"""

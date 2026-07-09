@@ -2229,6 +2229,14 @@ class AgentStudioProject:
         for flow_id, flow_cfg in self.resources.get(FlowConfig, {}).items():
             flow_paths_to_ids[resource_utils.clean_name(flow_cfg.name)] = flow_id
 
+        # Add to mapping for new flows
+        for flow_path in discovered_resources.get(FlowConfig, []):
+            flow_name = resource_utils.get_flow_name_from_path(flow_path)
+            if flow_name not in flow_paths_to_ids:
+                flow_paths_to_ids[resource_utils.clean_name(flow_name)] = self.generate_uuid(
+                    FlowConfig
+                )
+
         if not self.file_structure_info:
             self.file_structure_info = self.compute_file_structure_info(self.resources)
 
@@ -2239,49 +2247,63 @@ class AgentStudioProject:
 
         for resource_type, resource_files in discovered_resources.items():
             # Build a map of resource name to resource instance for current resources
-
             for file_path in resource_files:
                 discovered_files.add(file_path)
+
+                # Load resource name, flow name, flow id
+                resource_name = os.path.splitext(os.path.basename(file_path))[0]
+
+                flow_name = flow_paths_to_names.get(
+                    resource_utils.get_flow_name_from_path(file_path),
+                )
+                flow_id = flow_paths_to_ids.get(
+                    resource_utils.get_flow_name_from_path(file_path),
+                )
+
+                if resource_type == FlowStep:
+                    flow_step: FlowStep = self.read_local_resource(
+                        ResourceMapping(
+                            resource_id="temp_id",
+                            resource_type=FlowStep,
+                            resource_name=resource_name,
+                            file_path=file_path,
+                            flow_name=flow_name,
+                            resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
+                        ),
+                        resource_mappings=[],
+                    )
+                    resource_name = flow_step.name
+
+                if resource_type == FlowConfig:
+                    resource_name = flow_name
+
+                # Resource name in file path is cleaned, so we need to get the original name
+                if issubclass(resource_type, MultiResourceYamlResource) or resource_type == Topic:
+                    resource = self.read_local_resource(
+                        ResourceMapping(
+                            resource_id="temp_id",
+                            resource_type=resource_type,
+                            resource_name=resource_name,
+                            file_path=file_path,
+                            flow_name=flow_name,
+                            resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
+                        ),
+                        resource_mappings=[],
+                    )
+                    resource_name = resource.name
+
                 if file_path in known_files:
-                    # Remove root path from file path
                     resource_info = self.file_structure_info.get(
                         os.path.relpath(file_path, self.root_path)
                     )
                     if not resource_info:
                         raise ValueError(f"Resource info not found for {file_path}")
 
-                    resource_name = resource_info["resource_name"]
-                    flow_name = flow_paths_to_names.get(
-                        resource_utils.get_flow_name_from_path(file_path),
-                    )
-
-                    # Default Language will only be modified, but name must
-                    # be read from file
-                    if resource_type == DefaultLanguage:
-                        resource = self.read_local_resource(
-                            ResourceMapping(
-                                resource_id=resource_info["resource_id"],
-                                resource_type=resource_type,
-                                resource_name=resource_name,
-                                file_path=file_path,
-                                flow_name=flow_name,
-                                resource_prefix=resource_type.get_resource_prefix(
-                                    file_path=file_path
-                                ),
-                            ),
-                            resource_mappings=[],
-                        )
-                        resource_name = resource.name
-
-                    flow_id = flow_paths_to_ids.get(
-                        resource_utils.get_flow_name_from_path(file_path),
-                    )
-
                     kept_resource_mappings.append(
                         ResourceMapping(
                             resource_id=resource_info["resource_id"],
                             resource_type=resource_type,
-                            resource_name=resource_name,
+                            resource_name=resource_info["resource_name"],
                             file_path=file_path,
                             flow_name=flow_name,
                             resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
@@ -2290,67 +2312,19 @@ class AgentStudioProject:
                     )
 
                 else:
-                    # Flow step names are not from file names, so we need to handle them separately
-                    resource_name = os.path.splitext(os.path.basename(file_path))[0]
-                    flow_name = flow_paths_to_names.get(
-                        resource_utils.get_flow_name_from_path(file_path),
-                    )
-                    flow_id = flow_paths_to_ids.get(
-                        resource_utils.get_flow_name_from_path(file_path),
-                    )
+                    # Compute new resource ID
                     resource_id = self.generate_uuid(resource_type)
+
                     if resource_type == Document:
                         resource_id = os.path.basename(file_path)
 
-                    if resource_type == FlowStep:
-                        flow_step: FlowStep = self.read_local_resource(
-                            ResourceMapping(
-                                resource_id="temp_id",
-                                resource_type=FlowStep,
-                                resource_name=resource_name,
-                                file_path=file_path,
-                                flow_name=flow_name,
-                                resource_prefix=resource_type.get_resource_prefix(
-                                    file_path=file_path
-                                ),
-                            ),
-                            resource_mappings=[],
-                        )
-                        resource_name = flow_step.name
-                        resource_id = (
-                            f"{flow_id}_{resource_id}" if flow_id else f"{flow_name}_{resource_id}"
-                        )
-
-                    elif resource_type == FunctionStep:
+                    if resource_type in (FlowStep, FunctionStep):
                         resource_id = (
                             f"{flow_id}_{resource_id}" if flow_id else f"{flow_name}_{resource_id}"
                         )
 
                     if resource_type == FlowConfig:
-                        resource_name = flow_name
-
-                    # Resource name in file path is cleaned, so we need to get the original name
-                    if (
-                        issubclass(resource_type, MultiResourceYamlResource)
-                        or resource_type == Topic
-                    ):
-                        resource = self.read_local_resource(
-                            ResourceMapping(
-                                resource_id="temp_id",
-                                resource_type=resource_type,
-                                resource_name=resource_name,
-                                file_path=file_path,
-                                flow_name=flow_name,
-                                resource_prefix=resource_type.get_resource_prefix(
-                                    file_path=file_path
-                                ),
-                            ),
-                            resource_mappings=[],
-                        )
-                        resource_name = resource.name
-
-                    if resource_type == FlowConfig:
-                        flow_paths_to_ids[resource_utils.clean_name(flow_name)] = resource_id
+                        resource_id = flow_id
 
                     new_resource_mappings.append(
                         ResourceMapping(
@@ -2359,8 +2333,8 @@ class AgentStudioProject:
                             resource_name=resource_name,
                             file_path=file_path,
                             flow_name=flow_name,
+                            flow_id=flow_id,
                             resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
-                            flow_id=flow_id if resource_type != FlowConfig else resource_id,
                         )
                     )
 
