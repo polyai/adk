@@ -159,7 +159,7 @@ def group_new_flow_resources(
             # Create a dummy default step
             dummy_step_id = f"{function_start_step.step_id}_start_step_temp"
             dummy = FlowStep(
-                resource_id=f"{flow_config.name}_{dummy_step_id}",
+                resource_id=f"{flow_config.resource_id}_{dummy_step_id}",
                 step_id=dummy_step_id,
                 name=f"{flow_config.name}-temp",
                 flow_id=flow_config.resource_id,
@@ -219,7 +219,7 @@ def replace_flow_steps_with_dummy_workaround(
         if flow_config_id in new_resources.get(FlowConfig, {}):
             continue
         old_flow_config = current_resources.get(FlowConfig, {}).get(flow_config_id)
-        old_step_resource_id = f"{old_flow_config.name}_{old_flow_config.start_step}"
+        old_step_resource_id = f"{old_flow_config.resource_id}_{old_flow_config.start_step}"
 
         old_start_step = current_resources.get(FlowStep, {}).get(
             old_step_resource_id
@@ -230,7 +230,7 @@ def replace_flow_steps_with_dummy_workaround(
         if flow_config.start_step != old_start_step.step_id:
             if old_start_step.resource_id in deleted_resources.get(type(old_start_step), {}):
                 # If it's being recreated with the same name (sync ids) we need to create a dummy step
-                new_step_resource_id = f"{flow_config.name}_{flow_config.start_step}"
+                new_step_resource_id = f"{flow_config.resource_id}_{flow_config.start_step}"
                 if (
                     (
                         new_start_step := (
@@ -243,7 +243,7 @@ def replace_flow_steps_with_dummy_workaround(
                 ):
                     dummy_step_id = f"{old_start_step.step_id}_temp"
                     dummy = FlowStep(
-                        resource_id=f"{new_start_step.flow_name}_{dummy_step_id}",
+                        resource_id=f"{new_start_step.flow_id}_{dummy_step_id}",
                         step_id=dummy_step_id,
                         name=f"{new_start_step.name}-temp",
                         flow_id=new_start_step.flow_id,
@@ -290,7 +290,7 @@ def replace_flow_steps_with_dummy_workaround(
             if is_start_step:
                 dummy_step_id = f"{original_flow_step.step_id}_temp"
                 dummy = FlowStep(
-                    resource_id=f"{original_flow_step.flow_name}_{dummy_step_id}",
+                    resource_id=f"{original_flow_step.flow_id}_{dummy_step_id}",
                     step_id=dummy_step_id,
                     name=f"{original_flow_step.name}-temp",
                     flow_id=original_flow_step.flow_id,

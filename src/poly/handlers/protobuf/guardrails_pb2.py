@@ -15,19 +15,55 @@ _sym_db = _symbol_database.Default()
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10guardrails.proto\x12\nguardrails\x1a\x1fgoogle/protobuf/timestamp.proto\"E\n\tGuardrail\x12\'\n\x04name\x18\x01 \x01(\x0e\x32\x19.guardrails.GuardrailName\x12\x0f\n\x07\x65nabled\x18\x02 \x01(\x08\"\xa3\x01\n\nGuardrails\x12)\n\nguardrails\x18\x01 \x03(\x0b\x32\x15.guardrails.Guardrail\x12\x17\n\nupdated_by\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x33\n\nupdated_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x01\x88\x01\x01\x42\r\n\x0b_updated_byB\r\n\x0b_updated_at\"H\n\x1bGuardrails_UpdateGuardrails\x12)\n\nguardrails\x18\x01 \x03(\x0b\x32\x15.guardrails.Guardrail*\xf0\x01\n\rGuardrailName\x12\x1e\n\x1aGUARDRAIL_NAME_UNSPECIFIED\x10\x00\x12$\n GUARDRAIL_NAME_JAILBREAK_DEFENCE\x10\x01\x12(\n$GUARDRAIL_NAME_HALLUCINATION_CONTROL\x10\x02\x12\x1e\n\x1aGUARDRAIL_NAME_AI_IDENTITY\x10\x03\x12\'\n#GUARDRAIL_NAME_EMERGENCY_ESCALATION\x10\x04\x12&\n\"GUARDRAIL_NAME_TOOL_CALL_INTEGRITY\x10\x05\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x10guardrails.proto\x12\nguardrails\x1a\x1fgoogle/protobuf/timestamp.proto\"E\n\tGuardrail\x12\'\n\x04name\x18\x01 \x01(\x0e\x32\x19.guardrails.GuardrailName\x12\x0f\n\x07\x65nabled\x18\x02 \x01(\x08\"\xdb\x01\n\nGuardrails\x12)\n\nguardrails\x18\x01 \x03(\x0b\x32\x15.guardrails.Guardrail\x12\x17\n\nupdated_by\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x33\n\nupdated_at\x18\x03 \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x01\x88\x01\x01\x12\x36\n\x11\x63ustom_guardrails\x18\x04 \x03(\x0b\x32\x1b.guardrails.CustomGuardrailB\r\n\x0b_updated_byB\r\n\x0b_updated_at\"H\n\x1bGuardrails_UpdateGuardrails\x12)\n\nguardrails\x18\x01 \x03(\x0b\x32\x15.guardrails.Guardrail\"\x84\x06\n\x19\x43ustomGuardrailReferences\x12;\n\x03sms\x18\x01 \x03(\x0b\x32..guardrails.CustomGuardrailReferences.SmsEntry\x12\x43\n\x07handoff\x18\x02 \x03(\x0b\x32\x32.guardrails.CustomGuardrailReferences.HandoffEntry\x12I\n\nattributes\x18\x03 \x03(\x0b\x32\x35.guardrails.CustomGuardrailReferences.AttributesEntry\x12T\n\x10global_functions\x18\x04 \x03(\x0b\x32:.guardrails.CustomGuardrailReferences.GlobalFunctionsEntry\x12G\n\tvariables\x18\x05 \x03(\x0b\x32\x34.guardrails.CustomGuardrailReferences.VariablesEntry\x12M\n\x0ctranslations\x18\x06 \x03(\x0b\x32\x37.guardrails.CustomGuardrailReferences.TranslationsEntry\x1a*\n\x08SmsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a.\n\x0cHandoffEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a\x31\n\x0f\x41ttributesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a\x36\n\x14GlobalFunctionsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a\x30\n\x0eVariablesEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\x1a\x33\n\x11TranslationsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\x08:\x02\x38\x01\"\x9f\x02\n\x0f\x43ustomGuardrail\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0e\n\x06prompt\x18\x03 \x01(\t\x12\x0e\n\x06\x61\x63tion\x18\x04 \x01(\t\x12\x0f\n\x07\x65nabled\x18\x05 \x01(\x08\x12\x39\n\nreferences\x18\x06 \x01(\x0b\x32%.guardrails.CustomGuardrailReferences\x12.\n\ncreated_at\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\ncreated_by\x18\x08 \x01(\t\x12.\n\nupdated_at\x18\t \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x12\n\nupdated_by\x18\n \x01(\t\"J\n\x10\x43ustomGuardrails\x12\x36\n\x11\x63ustom_guardrails\x18\x01 \x03(\x0b\x32\x1b.guardrails.CustomGuardrail\"\xa8\x01\n Guardrails_CreateCustomGuardrail\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x0e\n\x06prompt\x18\x03 \x01(\t\x12\x0e\n\x06\x61\x63tion\x18\x04 \x01(\t\x12\x0f\n\x07\x65nabled\x18\x05 \x01(\x08\x12\x39\n\nreferences\x18\x06 \x01(\x0b\x32%.guardrails.CustomGuardrailReferences\"\xfb\x01\n Guardrails_UpdateCustomGuardrail\x12\n\n\x02id\x18\x01 \x01(\t\x12\x11\n\x04name\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x13\n\x06prompt\x18\x03 \x01(\tH\x01\x88\x01\x01\x12\x13\n\x06\x61\x63tion\x18\x04 \x01(\tH\x02\x88\x01\x01\x12\x14\n\x07\x65nabled\x18\x05 \x01(\x08H\x03\x88\x01\x01\x12>\n\nreferences\x18\x06 \x01(\x0b\x32%.guardrails.CustomGuardrailReferencesH\x04\x88\x01\x01\x42\x07\n\x05_nameB\t\n\x07_promptB\t\n\x07_actionB\n\n\x08_enabledB\r\n\x0b_references\".\n Guardrails_DeleteCustomGuardrail\x12\n\n\x02id\x18\x01 \x01(\t*\xf0\x01\n\rGuardrailName\x12\x1e\n\x1aGUARDRAIL_NAME_UNSPECIFIED\x10\x00\x12$\n GUARDRAIL_NAME_JAILBREAK_DEFENCE\x10\x01\x12(\n$GUARDRAIL_NAME_HALLUCINATION_CONTROL\x10\x02\x12\x1e\n\x1aGUARDRAIL_NAME_AI_IDENTITY\x10\x03\x12\'\n#GUARDRAIL_NAME_EMERGENCY_ESCALATION\x10\x04\x12&\n\"GUARDRAIL_NAME_TOOL_CALL_INTEGRITY\x10\x05\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'guardrails_pb2', _globals)
 if _descriptor._USE_C_DESCRIPTORS == False:
   DESCRIPTOR._options = None
-  _globals['_GUARDRAILNAME']._serialized_start=377
-  _globals['_GUARDRAILNAME']._serialized_end=617
+  _globals['_CUSTOMGUARDRAILREFERENCES_SMSENTRY']._options = None
+  _globals['_CUSTOMGUARDRAILREFERENCES_SMSENTRY']._serialized_options = b'8\001'
+  _globals['_CUSTOMGUARDRAILREFERENCES_HANDOFFENTRY']._options = None
+  _globals['_CUSTOMGUARDRAILREFERENCES_HANDOFFENTRY']._serialized_options = b'8\001'
+  _globals['_CUSTOMGUARDRAILREFERENCES_ATTRIBUTESENTRY']._options = None
+  _globals['_CUSTOMGUARDRAILREFERENCES_ATTRIBUTESENTRY']._serialized_options = b'8\001'
+  _globals['_CUSTOMGUARDRAILREFERENCES_GLOBALFUNCTIONSENTRY']._options = None
+  _globals['_CUSTOMGUARDRAILREFERENCES_GLOBALFUNCTIONSENTRY']._serialized_options = b'8\001'
+  _globals['_CUSTOMGUARDRAILREFERENCES_VARIABLESENTRY']._options = None
+  _globals['_CUSTOMGUARDRAILREFERENCES_VARIABLESENTRY']._serialized_options = b'8\001'
+  _globals['_CUSTOMGUARDRAILREFERENCES_TRANSLATIONSENTRY']._options = None
+  _globals['_CUSTOMGUARDRAILREFERENCES_TRANSLATIONSENTRY']._serialized_options = b'8\001'
+  _globals['_GUARDRAILNAME']._serialized_start=2047
+  _globals['_GUARDRAILNAME']._serialized_end=2287
   _globals['_GUARDRAIL']._serialized_start=65
   _globals['_GUARDRAIL']._serialized_end=134
   _globals['_GUARDRAILS']._serialized_start=137
-  _globals['_GUARDRAILS']._serialized_end=300
-  _globals['_GUARDRAILS_UPDATEGUARDRAILS']._serialized_start=302
-  _globals['_GUARDRAILS_UPDATEGUARDRAILS']._serialized_end=374
+  _globals['_GUARDRAILS']._serialized_end=356
+  _globals['_GUARDRAILS_UPDATEGUARDRAILS']._serialized_start=358
+  _globals['_GUARDRAILS_UPDATEGUARDRAILS']._serialized_end=430
+  _globals['_CUSTOMGUARDRAILREFERENCES']._serialized_start=433
+  _globals['_CUSTOMGUARDRAILREFERENCES']._serialized_end=1205
+  _globals['_CUSTOMGUARDRAILREFERENCES_SMSENTRY']._serialized_start=905
+  _globals['_CUSTOMGUARDRAILREFERENCES_SMSENTRY']._serialized_end=947
+  _globals['_CUSTOMGUARDRAILREFERENCES_HANDOFFENTRY']._serialized_start=949
+  _globals['_CUSTOMGUARDRAILREFERENCES_HANDOFFENTRY']._serialized_end=995
+  _globals['_CUSTOMGUARDRAILREFERENCES_ATTRIBUTESENTRY']._serialized_start=997
+  _globals['_CUSTOMGUARDRAILREFERENCES_ATTRIBUTESENTRY']._serialized_end=1046
+  _globals['_CUSTOMGUARDRAILREFERENCES_GLOBALFUNCTIONSENTRY']._serialized_start=1048
+  _globals['_CUSTOMGUARDRAILREFERENCES_GLOBALFUNCTIONSENTRY']._serialized_end=1102
+  _globals['_CUSTOMGUARDRAILREFERENCES_VARIABLESENTRY']._serialized_start=1104
+  _globals['_CUSTOMGUARDRAILREFERENCES_VARIABLESENTRY']._serialized_end=1152
+  _globals['_CUSTOMGUARDRAILREFERENCES_TRANSLATIONSENTRY']._serialized_start=1154
+  _globals['_CUSTOMGUARDRAILREFERENCES_TRANSLATIONSENTRY']._serialized_end=1205
+  _globals['_CUSTOMGUARDRAIL']._serialized_start=1208
+  _globals['_CUSTOMGUARDRAIL']._serialized_end=1495
+  _globals['_CUSTOMGUARDRAILS']._serialized_start=1497
+  _globals['_CUSTOMGUARDRAILS']._serialized_end=1571
+  _globals['_GUARDRAILS_CREATECUSTOMGUARDRAIL']._serialized_start=1574
+  _globals['_GUARDRAILS_CREATECUSTOMGUARDRAIL']._serialized_end=1742
+  _globals['_GUARDRAILS_UPDATECUSTOMGUARDRAIL']._serialized_start=1745
+  _globals['_GUARDRAILS_UPDATECUSTOMGUARDRAIL']._serialized_end=1996
+  _globals['_GUARDRAILS_DELETECUSTOMGUARDRAIL']._serialized_start=1998
+  _globals['_GUARDRAILS_DELETECUSTOMGUARDRAIL']._serialized_end=2044
 # @@protoc_insertion_point(module_scope)

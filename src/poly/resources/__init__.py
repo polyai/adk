@@ -74,3 +74,4 @@ from poly.resources.transcript_correction import RegularExpressionRule, Transcri
 from poly.resources.translations import Translation
 from poly.resources.variable import Variable
 from poly.resources.variant_attributes import Variant, VariantAttribute
+from poly.resources.documents import Document

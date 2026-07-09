@@ -19,12 +19,27 @@ class GuardrailName(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     GUARDRAIL_NAME_AI_IDENTITY: _ClassVar[GuardrailName]
     GUARDRAIL_NAME_EMERGENCY_ESCALATION: _ClassVar[GuardrailName]
     GUARDRAIL_NAME_TOOL_CALL_INTEGRITY: _ClassVar[GuardrailName]
+
+class ReasoningEffort(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    REASONING_EFFORT_UNSPECIFIED: _ClassVar[ReasoningEffort]
+    REASONING_EFFORT_MINIMAL: _ClassVar[ReasoningEffort]
+    REASONING_EFFORT_LOW: _ClassVar[ReasoningEffort]
+    REASONING_EFFORT_MEDIUM: _ClassVar[ReasoningEffort]
+    REASONING_EFFORT_HIGH: _ClassVar[ReasoningEffort]
+    REASONING_EFFORT_AUTO: _ClassVar[ReasoningEffort]
 GUARDRAIL_NAME_UNSPECIFIED: GuardrailName
 GUARDRAIL_NAME_JAILBREAK_DEFENCE: GuardrailName
 GUARDRAIL_NAME_HALLUCINATION_CONTROL: GuardrailName
 GUARDRAIL_NAME_AI_IDENTITY: GuardrailName
 GUARDRAIL_NAME_EMERGENCY_ESCALATION: GuardrailName
 GUARDRAIL_NAME_TOOL_CALL_INTEGRITY: GuardrailName
+REASONING_EFFORT_UNSPECIFIED: ReasoningEffort
+REASONING_EFFORT_MINIMAL: ReasoningEffort
+REASONING_EFFORT_LOW: ReasoningEffort
+REASONING_EFFORT_MEDIUM: ReasoningEffort
+REASONING_EFFORT_HIGH: ReasoningEffort
+REASONING_EFFORT_AUTO: ReasoningEffort
 
 class CoreArtifact(_message.Message):
     __slots__ = ("name", "last_updated", "functions_deployment", "conversation_limits", "voice", "asr", "model", "assistant_config", "knowledge_base", "functions", "start_function", "handoffs", "voice_tuning_settings", "sms_templates", "flows", "intro_message", "stop_keywords", "variants", "variant_attributes", "end_function", "deployed_voices", "entities", "api_integrations", "variables", "disclaimers", "agent_voices", "multilingual_agent_settings", "multilingual_translations", "channels", "integrations")
@@ -275,7 +290,7 @@ class Model(_message.Message):
     def __init__(self, provider_model_id: _Optional[str] = ..., config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class AssistantConfig(_message.Message):
-    __slots__ = ("updated_at", "updated_by", "default_handoff_id", "model_id", "voice_id", "config", "asr_id", "tts_rules", "content_filter", "barge_in_config", "latency_config", "asr_keyphrases", "asr_corrections", "languages", "guardrails")
+    __slots__ = ("updated_at", "updated_by", "default_handoff_id", "model_id", "voice_id", "config", "asr_id", "tts_rules", "content_filter", "barge_in_config", "latency_config", "asr_keyphrases", "asr_corrections", "languages", "guardrails", "custom_guardrails")
     UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
     UPDATED_BY_FIELD_NUMBER: _ClassVar[int]
     DEFAULT_HANDOFF_ID_FIELD_NUMBER: _ClassVar[int]
@@ -291,6 +306,7 @@ class AssistantConfig(_message.Message):
     ASR_CORRECTIONS_FIELD_NUMBER: _ClassVar[int]
     LANGUAGES_FIELD_NUMBER: _ClassVar[int]
     GUARDRAILS_FIELD_NUMBER: _ClassVar[int]
+    CUSTOM_GUARDRAILS_FIELD_NUMBER: _ClassVar[int]
     updated_at: _timestamp_pb2.Timestamp
     updated_by: str
     default_handoff_id: str
@@ -306,7 +322,8 @@ class AssistantConfig(_message.Message):
     asr_corrections: _containers.RepeatedCompositeFieldContainer[AsrCorrection]
     languages: Languages
     guardrails: _containers.RepeatedCompositeFieldContainer[Guardrail]
-    def __init__(self, updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., default_handoff_id: _Optional[str] = ..., model_id: _Optional[str] = ..., voice_id: _Optional[str] = ..., config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., asr_id: _Optional[str] = ..., tts_rules: _Optional[_Iterable[_Union[TTSRule, _Mapping]]] = ..., content_filter: _Optional[_Union[ContentFilter, _Mapping]] = ..., barge_in_config: _Optional[_Union[BargeInConfig, _Mapping]] = ..., latency_config: _Optional[_Union[LatencyConfig, _Mapping]] = ..., asr_keyphrases: _Optional[_Iterable[_Union[AsrKeyphrase, _Mapping]]] = ..., asr_corrections: _Optional[_Iterable[_Union[AsrCorrection, _Mapping]]] = ..., languages: _Optional[_Union[Languages, _Mapping]] = ..., guardrails: _Optional[_Iterable[_Union[Guardrail, _Mapping]]] = ...) -> None: ...
+    custom_guardrails: _containers.RepeatedCompositeFieldContainer[CustomGuardrail]
+    def __init__(self, updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., default_handoff_id: _Optional[str] = ..., model_id: _Optional[str] = ..., voice_id: _Optional[str] = ..., config: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., asr_id: _Optional[str] = ..., tts_rules: _Optional[_Iterable[_Union[TTSRule, _Mapping]]] = ..., content_filter: _Optional[_Union[ContentFilter, _Mapping]] = ..., barge_in_config: _Optional[_Union[BargeInConfig, _Mapping]] = ..., latency_config: _Optional[_Union[LatencyConfig, _Mapping]] = ..., asr_keyphrases: _Optional[_Iterable[_Union[AsrKeyphrase, _Mapping]]] = ..., asr_corrections: _Optional[_Iterable[_Union[AsrCorrection, _Mapping]]] = ..., languages: _Optional[_Union[Languages, _Mapping]] = ..., guardrails: _Optional[_Iterable[_Union[Guardrail, _Mapping]]] = ..., custom_guardrails: _Optional[_Iterable[_Union[CustomGuardrail, _Mapping]]] = ...) -> None: ...
 
 class Guardrail(_message.Message):
     __slots__ = ("name", "enabled")
@@ -315,6 +332,24 @@ class Guardrail(_message.Message):
     name: GuardrailName
     enabled: bool
     def __init__(self, name: _Optional[_Union[GuardrailName, str]] = ..., enabled: bool = ...) -> None: ...
+
+class CustomGuardrail(_message.Message):
+    __slots__ = ("id", "name", "prompt", "action", "functions", "handoffs", "sms_templates")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    NAME_FIELD_NUMBER: _ClassVar[int]
+    PROMPT_FIELD_NUMBER: _ClassVar[int]
+    ACTION_FIELD_NUMBER: _ClassVar[int]
+    FUNCTIONS_FIELD_NUMBER: _ClassVar[int]
+    HANDOFFS_FIELD_NUMBER: _ClassVar[int]
+    SMS_TEMPLATES_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    name: str
+    prompt: str
+    action: str
+    functions: _containers.RepeatedScalarFieldContainer[str]
+    handoffs: _containers.RepeatedScalarFieldContainer[str]
+    sms_templates: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., prompt: _Optional[str] = ..., action: _Optional[str] = ..., functions: _Optional[_Iterable[str]] = ..., handoffs: _Optional[_Iterable[str]] = ..., sms_templates: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Rules(_message.Message):
     __slots__ = ("behaviour", "system_prompt", "functions", "handoffs", "sms_templates", "variant_attributes")
@@ -525,7 +560,7 @@ class StepLayout(_message.Message):
     def __init__(self, x: _Optional[float] = ..., y: _Optional[float] = ...) -> None: ...
 
 class FlowStep(_message.Message):
-    __slots__ = ("name", "content", "functions_referenced", "layout", "asr_biasing_config", "dtmf_config", "initial_timeout")
+    __slots__ = ("name", "content", "functions_referenced", "layout", "asr_biasing_config", "dtmf_config", "initial_timeout", "settings")
     NAME_FIELD_NUMBER: _ClassVar[int]
     CONTENT_FIELD_NUMBER: _ClassVar[int]
     FUNCTIONS_REFERENCED_FIELD_NUMBER: _ClassVar[int]
@@ -533,6 +568,7 @@ class FlowStep(_message.Message):
     ASR_BIASING_CONFIG_FIELD_NUMBER: _ClassVar[int]
     DTMF_CONFIG_FIELD_NUMBER: _ClassVar[int]
     INITIAL_TIMEOUT_FIELD_NUMBER: _ClassVar[int]
+    SETTINGS_FIELD_NUMBER: _ClassVar[int]
     name: str
     content: str
     functions_referenced: _containers.RepeatedCompositeFieldContainer[FunctionReference]
@@ -540,7 +576,8 @@ class FlowStep(_message.Message):
     asr_biasing_config: StepAsrBiasingConfig
     dtmf_config: StepDTMFConfig
     initial_timeout: _duration_pb2.Duration
-    def __init__(self, name: _Optional[str] = ..., content: _Optional[str] = ..., functions_referenced: _Optional[_Iterable[_Union[FunctionReference, _Mapping]]] = ..., layout: _Optional[_Union[StepLayout, _Mapping]] = ..., asr_biasing_config: _Optional[_Union[StepAsrBiasingConfig, _Mapping]] = ..., dtmf_config: _Optional[_Union[StepDTMFConfig, _Mapping]] = ..., initial_timeout: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ...) -> None: ...
+    settings: FlowStepSettings
+    def __init__(self, name: _Optional[str] = ..., content: _Optional[str] = ..., functions_referenced: _Optional[_Iterable[_Union[FunctionReference, _Mapping]]] = ..., layout: _Optional[_Union[StepLayout, _Mapping]] = ..., asr_biasing_config: _Optional[_Union[StepAsrBiasingConfig, _Mapping]] = ..., dtmf_config: _Optional[_Union[StepDTMFConfig, _Mapping]] = ..., initial_timeout: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ..., settings: _Optional[_Union[FlowStepSettings, _Mapping]] = ...) -> None: ...
 
 class FunctionStep(_message.Message):
     __slots__ = ("name", "function_reference")
@@ -637,16 +674,18 @@ class Condition(_message.Message):
     def __init__(self, exit_flow_condition: _Optional[_Union[ExitFlowCondition, _Mapping]] = ..., step_condition: _Optional[_Union[FlowStepCondition, _Mapping]] = ..., no_code_step_condition: _Optional[_Union[NoCodeStepCondition, _Mapping]] = ..., function_step_condition: _Optional[_Union[FunctionStepCondition, _Mapping]] = ...) -> None: ...
 
 class NoCodeStep(_message.Message):
-    __slots__ = ("name", "prompt", "entity_references", "conditions")
+    __slots__ = ("name", "prompt", "entity_references", "conditions", "settings")
     NAME_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
     ENTITY_REFERENCES_FIELD_NUMBER: _ClassVar[int]
     CONDITIONS_FIELD_NUMBER: _ClassVar[int]
+    SETTINGS_FIELD_NUMBER: _ClassVar[int]
     name: str
     prompt: str
     entity_references: _containers.RepeatedScalarFieldContainer[str]
     conditions: _containers.RepeatedCompositeFieldContainer[Condition]
-    def __init__(self, name: _Optional[str] = ..., prompt: _Optional[str] = ..., entity_references: _Optional[_Iterable[str]] = ..., conditions: _Optional[_Iterable[_Union[Condition, _Mapping]]] = ...) -> None: ...
+    settings: FlowStepSettings
+    def __init__(self, name: _Optional[str] = ..., prompt: _Optional[str] = ..., entity_references: _Optional[_Iterable[str]] = ..., conditions: _Optional[_Iterable[_Union[Condition, _Mapping]]] = ..., settings: _Optional[_Union[FlowStepSettings, _Mapping]] = ...) -> None: ...
 
 class StepAsrBiasingConfig(_message.Message):
     __slots__ = ("alphanumeric", "name_spelling", "numeric", "party_size", "precise_date", "relative_date", "single_number", "time", "yes_no", "custom_keywords", "address", "is_enabled")
@@ -692,8 +731,60 @@ class StepDTMFConfig(_message.Message):
     is_pii: bool
     def __init__(self, is_enabled: bool = ..., inter_digit_timeout: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ..., max_digits: _Optional[int] = ..., end_key: _Optional[str] = ..., collect_while_agent_speaking: bool = ..., is_pii: bool = ...) -> None: ...
 
+class FlowASRConfig(_message.Message):
+    __slots__ = ("provider", "model")
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    provider: str
+    model: str
+    def __init__(self, provider: _Optional[str] = ..., model: _Optional[str] = ...) -> None: ...
+
+class FlowVADConfig(_message.Message):
+    __slots__ = ("provider", "vad_start", "vad_end", "speech_threshold", "silence_threshold")
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    VAD_START_FIELD_NUMBER: _ClassVar[int]
+    VAD_END_FIELD_NUMBER: _ClassVar[int]
+    SPEECH_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
+    SILENCE_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
+    provider: str
+    vad_start: _duration_pb2.Duration
+    vad_end: _duration_pb2.Duration
+    speech_threshold: float
+    silence_threshold: float
+    def __init__(self, provider: _Optional[str] = ..., vad_start: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ..., vad_end: _Optional[_Union[_duration_pb2.Duration, _Mapping]] = ..., speech_threshold: _Optional[float] = ..., silence_threshold: _Optional[float] = ...) -> None: ...
+
+class FlowBargeInConfig(_message.Message):
+    __slots__ = ("is_enabled",)
+    IS_ENABLED_FIELD_NUMBER: _ClassVar[int]
+    is_enabled: bool
+    def __init__(self, is_enabled: bool = ...) -> None: ...
+
+class FlowLLMConfig(_message.Message):
+    __slots__ = ("provider_model_id", "reasoning_effort")
+    PROVIDER_MODEL_ID_FIELD_NUMBER: _ClassVar[int]
+    REASONING_EFFORT_FIELD_NUMBER: _ClassVar[int]
+    provider_model_id: str
+    reasoning_effort: ReasoningEffort
+    def __init__(self, provider_model_id: _Optional[str] = ..., reasoning_effort: _Optional[_Union[ReasoningEffort, str]] = ...) -> None: ...
+
+class FlowStepSettings(_message.Message):
+    __slots__ = ("asr_biasing", "dtmf", "asr", "vad", "barge_in", "llm")
+    ASR_BIASING_FIELD_NUMBER: _ClassVar[int]
+    DTMF_FIELD_NUMBER: _ClassVar[int]
+    ASR_FIELD_NUMBER: _ClassVar[int]
+    VAD_FIELD_NUMBER: _ClassVar[int]
+    BARGE_IN_FIELD_NUMBER: _ClassVar[int]
+    LLM_FIELD_NUMBER: _ClassVar[int]
+    asr_biasing: StepAsrBiasingConfig
+    dtmf: StepDTMFConfig
+    asr: FlowASRConfig
+    vad: FlowVADConfig
+    barge_in: FlowBargeInConfig
+    llm: FlowLLMConfig
+    def __init__(self, asr_biasing: _Optional[_Union[StepAsrBiasingConfig, _Mapping]] = ..., dtmf: _Optional[_Union[StepDTMFConfig, _Mapping]] = ..., asr: _Optional[_Union[FlowASRConfig, _Mapping]] = ..., vad: _Optional[_Union[FlowVADConfig, _Mapping]] = ..., barge_in: _Optional[_Union[FlowBargeInConfig, _Mapping]] = ..., llm: _Optional[_Union[FlowLLMConfig, _Mapping]] = ...) -> None: ...
+
 class Flow(_message.Message):
-    __slots__ = ("id", "name", "description", "start_step", "steps", "created_at", "created_by", "updated_at", "updated_by", "no_code_start_step", "no_code_steps", "flow_start_step", "flow_steps")
+    __slots__ = ("id", "name", "description", "start_step", "steps", "created_at", "created_by", "updated_at", "updated_by", "no_code_start_step", "no_code_steps", "flow_start_step", "flow_steps", "settings")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
@@ -707,6 +798,7 @@ class Flow(_message.Message):
     NO_CODE_STEPS_FIELD_NUMBER: _ClassVar[int]
     FLOW_START_STEP_FIELD_NUMBER: _ClassVar[int]
     FLOW_STEPS_FIELD_NUMBER: _ClassVar[int]
+    SETTINGS_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     description: str
@@ -720,7 +812,8 @@ class Flow(_message.Message):
     no_code_steps: _containers.RepeatedCompositeFieldContainer[NoCodeStep]
     flow_start_step: FlowStartStep
     flow_steps: _containers.RepeatedCompositeFieldContainer[Step]
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., start_step: _Optional[_Union[FlowStep, _Mapping]] = ..., steps: _Optional[_Iterable[_Union[FlowStep, _Mapping]]] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., no_code_start_step: _Optional[_Union[NoCodeStep, _Mapping]] = ..., no_code_steps: _Optional[_Iterable[_Union[NoCodeStep, _Mapping]]] = ..., flow_start_step: _Optional[_Union[FlowStartStep, _Mapping]] = ..., flow_steps: _Optional[_Iterable[_Union[Step, _Mapping]]] = ...) -> None: ...
+    settings: FlowStepSettings
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., start_step: _Optional[_Union[FlowStep, _Mapping]] = ..., steps: _Optional[_Iterable[_Union[FlowStep, _Mapping]]] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., no_code_start_step: _Optional[_Union[NoCodeStep, _Mapping]] = ..., no_code_steps: _Optional[_Iterable[_Union[NoCodeStep, _Mapping]]] = ..., flow_start_step: _Optional[_Union[FlowStartStep, _Mapping]] = ..., flow_steps: _Optional[_Iterable[_Union[Step, _Mapping]]] = ..., settings: _Optional[_Union[FlowStepSettings, _Mapping]] = ...) -> None: ...
 
 class Flows(_message.Message):
     __slots__ = ("flow_list",)
