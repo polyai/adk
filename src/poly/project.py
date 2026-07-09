@@ -509,26 +509,13 @@ class AgentStudioProject:
     def load_template(self, region, template_id):
         """Load a template into the project."""
         template_resources = AgentStudioInterface.get_template_resources(region, template_id)
-
-        # Pull latest remote state so it becomes the merge baseline.
-        # On next push the 3-way merge sees original == incoming (both remote),
-        # so local (template) changes apply cleanly without conflicts.
-        incoming_resources, _ = self.api_handler.pull_resources()
-        self.resources = incoming_resources
-        self.file_structure_info = self.compute_file_structure_info(incoming_resources)
-
-        # Wipe all local resource files so stale flows/functions from the
-        # previous project don't leak through and cause validation errors.
-        self._delete_all_local_resources()
+        self._delete_new_resources()
 
         self._update_pulled_resources(
             original_resources={},
             incoming_resources=template_resources,
             force=True,
         )
-        utils.export_decorators(DECORATORS, self.root_path)
-        utils.save_imports(self.root_path)
-        self.save_config()
 
     def pull_project(
         self,
@@ -2247,23 +2234,17 @@ class AgentStudioProject:
                             resource_name=resource_name,
                             file_path=file_path,
                             flow_name=flow_name,
-                            resource_prefix=resource_type.get_resource_prefix(
-                                file_path=file_path
-                            ),
+                            resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
                         ),
                         resource_mappings=[],
                     )
                     resource_name = flow_step.name
 
-
                 if resource_type == FlowConfig:
                     resource_name = flow_name
 
                 # Resource name in file path is cleaned, so we need to get the original name
-                if (
-                    issubclass(resource_type, MultiResourceYamlResource)
-                    or resource_type == Topic
-                ):
+                if issubclass(resource_type, MultiResourceYamlResource) or resource_type == Topic:
                     resource = self.read_local_resource(
                         ResourceMapping(
                             resource_id="temp_id",
@@ -2271,15 +2252,11 @@ class AgentStudioProject:
                             resource_name=resource_name,
                             file_path=file_path,
                             flow_name=flow_name,
-                            resource_prefix=resource_type.get_resource_prefix(
-                                file_path=file_path
-                            ),
+                            resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
                         ),
                         resource_mappings=[],
                     )
                     resource_name = resource.name
-
-
 
                 if file_path in known_files:
                     # Remove root path from file path
@@ -2288,7 +2265,6 @@ class AgentStudioProject:
                     )
                     if not resource_info:
                         raise ValueError(f"Resource info not found for {file_path}")
-
 
                     # Default Language will only be modified, but name must
                     # be read from file
@@ -2336,7 +2312,7 @@ class AgentStudioProject:
                         )
                     if resource_type == FlowConfig:
                         flow_paths_to_ids[resource_utils.clean_name(flow_name)] = resource_id
-                    
+
                     new_resource_mappings.append(
                         ResourceMapping(
                             resource_id=resource_id,
@@ -2348,8 +2324,6 @@ class AgentStudioProject:
                             flow_id=flow_id if resource_type != FlowConfig else resource_id,
                         )
                     )
-
-
 
         deleted_file_paths = known_files - discovered_files
         for file_path in deleted_file_paths:
