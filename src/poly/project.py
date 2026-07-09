@@ -517,9 +517,6 @@ class AgentStudioProject:
             incoming_resources=template_resources,
             force=True,
         )
-        utils.export_decorators(DECORATORS, self.root_path)
-        utils.save_imports(self.root_path)
-        self.save_config()
 
     def pull_project(
         self,
