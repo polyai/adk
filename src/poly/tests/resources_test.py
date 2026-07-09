@@ -12,6 +12,7 @@ from jsonschema import ValidationError
 import poly.resources.resource_utils as resource_utils
 from poly.handlers.sync_client import SyncClientHandler
 from poly.resources.agent_settings import (
+    ALLOWED_ADJECTIVES,
     SettingsPersonality,
     SettingsRole,
     SettingsRules,
@@ -1681,7 +1682,6 @@ TEST_PERSONALITY = SettingsPersonality(
 PERSONALITY_RAW = """adjectives:
   Polite: true
   Calm: true
-  Kind: false
 custom: ''
 """
 
@@ -1690,6 +1690,26 @@ class SettingsPersonalityTests(unittest.TestCase):
     def test_get_raw(self):
         """Test that raw property returns correct YAML representation."""
         self.assertEqual(TEST_PERSONALITY.raw, PERSONALITY_RAW)
+
+    def test_to_yaml_dict_strips_disabled_adjectives(self):
+        """Test that to_yaml_dict excludes adjectives set to False."""
+        yaml_dict = TEST_PERSONALITY.to_yaml_dict()
+        self.assertEqual(yaml_dict["adjectives"], {"Polite": True, "Calm": True})
+        self.assertNotIn("Kind", yaml_dict["adjectives"])
+
+    def test_to_yaml_dict_normalizes_empty_and_all_false(self):
+        """Test that both empty and all-false adjectives produce the same YAML dict."""
+        empty = SettingsPersonality(
+            resource_id="p1", name="personality", adjectives={}, custom=""
+        )
+        all_false = SettingsPersonality(
+            resource_id="p2",
+            name="personality",
+            adjectives={"Polite": False, "Calm": False},
+            custom="",
+        )
+        self.assertEqual(empty.to_yaml_dict()["adjectives"], {})
+        self.assertEqual(all_false.to_yaml_dict()["adjectives"], {})
 
     def test_to_pretty(self):
         """Test converting personality to pretty format."""
@@ -1763,8 +1783,8 @@ class SettingsPersonalityTests(unittest.TestCase):
             str(cm.exception),
         )
 
-    def test_build_update_proto_filters_invalid_adjectives(self):
-        """Test that build_update_proto excludes non-allowed adjectives from the payload."""
+    def test_build_update_proto_sends_all_allowed_adjectives(self):
+        """Test that build_update_proto sends all allowed adjectives, defaulting unset to False."""
         personality = SettingsPersonality(
             resource_id="personality_123",
             name="personality",
@@ -1773,8 +1793,12 @@ class SettingsPersonalityTests(unittest.TestCase):
         )
         proto = personality.build_update_proto()
         adjective_values = proto.adjectives.values
-        self.assertEqual(adjective_values, {"Polite": True, "Calm": True})
         self.assertNotIn("InvalidAdjective", adjective_values)
+        self.assertEqual(set(adjective_values.keys()), ALLOWED_ADJECTIVES)
+        self.assertTrue(adjective_values["Polite"])
+        self.assertTrue(adjective_values["Calm"])
+        self.assertFalse(adjective_values["Kind"])
+        self.assertFalse(adjective_values["Funny"])
 
     def test_read_local_resource(self):
         """Test reading a personality from a YAML file."""

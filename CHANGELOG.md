@@ -1,6 +1,49 @@
 # CHANGELOG
 
 
+## v0.34.3 (2026-07-09)
+
+### Bug Fixes
+
+- Normalize personality adjectives on pull and send removals on push
+  ([#225](https://github.com/polyai/adk/pull/225),
+  [`3d327b8`](https://github.com/polyai/adk/commit/3d327b858326ddb637e5fbc027269cfb937f172a))
+
+## Summary
+
+Fix two bugs in personality adjective handling that caused phantom diffs on pull and silent no-ops
+  when removing adjectives.
+
+## Motivation
+
+1. Pulling a project could produce spurious diffs because the platform may return `{Friendly:
+  false}` or `{}` for the same state — both mean "not enabled" but produced different YAML. 2.
+  Removing an adjective from the local YAML and pushing had no effect because `build_update_proto`
+  only sent adjectives present in the local dict, never signalling a removal.
+
+## Changes
+
+- `to_yaml_dict` now filters out disabled (`false`) adjectives so pull always writes the same YAML
+  regardless of API representation - `build_update_proto` now iterates all `ALLOWED_ADJECTIVES`,
+  defaulting missing ones to `false`, so removals are explicitly sent to the platform - Updated and
+  added tests for both behaviors
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.34.2 (2026-07-09)
 
 ### Bug Fixes
