@@ -48,7 +48,7 @@ class PlatformAPIHandler:
     """Class for interacting with the Platform API"""
 
     region_to_base_url = {
-        "dev": "http://localhost:6996/api",
+        "dev": "https://api.dev.poly.ai",
         "staging": "https://api.staging.poly.ai",
         "euw-1": "https://api.eu.poly.ai",
         "uk-1": "https://api.uk.poly.ai",
