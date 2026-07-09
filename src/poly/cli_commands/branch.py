@@ -268,6 +268,20 @@ class BranchCommand(BaseCommand):
         )
         branch_review_parser.set_defaults(branch_subcommand="review")
 
+        # ── status ──
+        branch_status_parser = branch_subparsers.add_parser(
+            "status",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Show branch status including local changes and fork-point info.",
+        )
+        branch_status_parser.add_argument(
+            "branch_name",
+            nargs="?",
+            default=None,
+            help="Branch to check status for. Defaults to the current branch.",
+        ).completer = cls._branch_name_completer
+        branch_status_parser.set_defaults(branch_subcommand="status")
+
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to the matching branch sub-handler."""
@@ -308,6 +322,9 @@ class BranchCommand(BaseCommand):
 
         elif args.branch_subcommand == "review":
             cls.branch_review(args.path, args.branch_name, getattr(args, "files", None), args.json)
+
+        elif args.branch_subcommand == "status":
+            cls.branch_status(args.path, args.branch_name, args.json)
 
     @classmethod
     def branch_list(cls, base_path: str, output_json: bool = False) -> None:
@@ -1051,3 +1068,74 @@ class BranchCommand(BaseCommand):
                 json_print({"success": False, "message": str(e)})
             else:
                 error(str(e))
+
+    @classmethod
+    def branch_status(
+        cls,
+        base_path: str,
+        branch_name: str = None,
+        output_json: bool = False,
+    ) -> None:
+        """Show what changed on a branch relative to its fork point."""
+        from poly.cli_commands.shared import resolve_account_name
+        from poly.output.console import error, plain, print_file_list, print_status
+
+        project = load_project(base_path, output_json=output_json)
+        resolve_account_name(project)
+
+        current_branch_name, branches = project.get_branches()
+        target_name = branch_name or current_branch_name
+        branch_meta = branches.get(target_name, {}) if target_name else {}
+
+        parent_branch_id = branch_meta.get("parentBranchId")
+        parent_name = next(
+            (name for name, meta in branches.items() if meta.get("branchId") == parent_branch_id),
+            parent_branch_id,
+        )
+        created_by = branch_meta.get("createdBy")
+        is_diverged = branch_meta.get("isDiverged")
+
+        try:
+            new_files, modified_files, deleted_files = project.branch_status(
+                branch_name=branch_name
+            )
+        except ValueError as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(str(e))
+            sys.exit(1)
+
+        if output_json:
+            json_print(
+                {
+                    "branch": target_name,
+                    "parent_branch": parent_name,
+                    "created_by": created_by,
+                    "is_diverged": is_diverged,
+                    "new_files": new_files,
+                    "modified_files": modified_files,
+                    "deleted_files": deleted_files,
+                }
+            )
+            return
+
+        print_status(
+            region=project.region,
+            account_id=project.account_id,
+            project_id=project.project_id,
+            last_updated=project.last_updated.isoformat(),
+            branch=target_name,
+            account_name=project.account_name,
+            project_name=project.project_name,
+            parent_branch=parent_name,
+            created_by=created_by,
+            is_diverged=is_diverged,
+        )
+
+        print_file_list("New files", new_files, "filename.new")
+        print_file_list("Deleted files", deleted_files, "filename.deleted")
+        print_file_list("Modified files", modified_files, "filename.modified")
+
+        if not new_files and not modified_files and not deleted_files:
+            plain("\n[muted]No changes on this branch.[/muted]")

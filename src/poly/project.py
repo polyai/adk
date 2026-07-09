@@ -2090,20 +2090,16 @@ class AgentStudioProject:
 
         return diffs
 
-    def diff_branch(
-        self,
-        branch_name: Optional[str] = None,
-        file_paths: Optional[list[str]] = None,
-    ) -> Optional[dict[str, str]]:
-        """Compute diffs showing what a branch changed relative to its fork point.
+    def _resolve_branch_fork_point(
+        self, branch_name: Optional[str] = None
+    ) -> tuple[ResourceMap, ResourceMap]:
+        """Fetch parent (at fork point) and branch (latest) resource maps.
 
         Args:
-            branch_name: Name of the branch to diff. Defaults to the current branch.
-            file_paths: When provided, only include diffs for these files.
+            branch_name: Name of the branch. Defaults to the current branch.
 
         Returns:
-            A mapping of file path to unified diff text, or None when there
-            are no differences.
+            (parent_resources, branch_resources) tuple.
 
         Raises:
             ValueError: If on main with no branch specified, or the branch
@@ -2127,7 +2123,6 @@ class AgentStudioProject:
         parent_branch_id = branch_meta.get("parentBranchId")
         parent_sequence_raw = branch_meta.get("parentSequence")
 
-        # Fetch parent projection — at fork point when available, latest otherwise
         parent_at_sequence: Optional[int] = None
         if parent_sequence_raw is not None:
             try:
@@ -2145,10 +2140,30 @@ class AgentStudioProject:
 
         parent_id = parent_branch_id or "main"
         parent_resources = self.api_handler.pull_branch_resources(parent_id, parent_at_sequence)
-
-        # Fetch current branch projection (latest)
         branch_resources = self.api_handler.pull_branch_resources(branch_id)
 
+        return parent_resources, branch_resources
+
+    def diff_branch(
+        self,
+        branch_name: Optional[str] = None,
+        file_paths: Optional[list[str]] = None,
+    ) -> Optional[dict[str, str]]:
+        """Compute diffs showing what a branch changed relative to its fork point.
+
+        Args:
+            branch_name: Name of the branch to diff. Defaults to the current branch.
+            file_paths: When provided, only include diffs for these files.
+
+        Returns:
+            A mapping of file path to unified diff text, or None when there
+            are no differences.
+
+        Raises:
+            ValueError: If on main with no branch specified, or the branch
+                does not exist.
+        """
+        parent_resources, branch_resources = self._resolve_branch_fork_point(branch_name)
         diffs = self.diff_resource_maps(parent_resources, branch_resources)
 
         if diffs and file_paths:
@@ -2157,6 +2172,63 @@ class AgentStudioProject:
                 return None
 
         return diffs
+
+    def branch_status(
+        self, branch_name: Optional[str] = None
+    ) -> tuple[list[str], list[str], list[str]]:
+        """Categorize files changed on a branch relative to its fork point.
+
+        Args:
+            branch_name: Name of the branch. Defaults to the current branch.
+
+        Returns:
+            (new_files, modified_files, deleted_files) — lists of file paths.
+
+        Raises:
+            ValueError: If on main with no branch specified, or the branch
+                does not exist.
+        """
+        parent_resources, branch_resources = self._resolve_branch_fork_point(branch_name)
+
+        parent_by_path: dict[tuple, Resource] = {}
+        for resources_dict in parent_resources.values():
+            for resource in resources_dict.values():
+                parent_by_path[(type(resource), resource.file_path)] = resource
+
+        branch_by_path: dict[tuple, Resource] = {}
+        for resources_dict in branch_resources.values():
+            for resource in resources_dict.values():
+                branch_by_path[(type(resource), resource.file_path)] = resource
+
+        combined: ResourceMap = {}
+        for rt, rd in parent_resources.items():
+            combined[rt] = combined.get(rt, {})
+            combined[rt].update(rd)
+        for rt, rd in branch_resources.items():
+            combined[rt] = combined.get(rt, {})
+            combined[rt].update(rd)
+        resource_mappings = self._make_resource_mappings(combined)
+
+        new_files: list[str] = []
+        modified_files: list[str] = []
+        deleted_files: list[str] = []
+
+        all_keys = set(parent_by_path.keys()) | set(branch_by_path.keys())
+        for key in all_keys:
+            parent_r = parent_by_path.get(key)
+            branch_r = branch_by_path.get(key)
+
+            if parent_r and branch_r:
+                if parent_r.to_pretty(resource_mappings=resource_mappings) != branch_r.to_pretty(
+                    resource_mappings=resource_mappings
+                ):
+                    modified_files.append(branch_r.file_path)
+            elif branch_r and not parent_r:
+                new_files.append(branch_r.file_path)
+            elif parent_r and not branch_r:
+                deleted_files.append(parent_r.file_path)
+
+        return new_files, modified_files, deleted_files
 
     def discover_local_resources(self) -> DiscoveredResourcePaths:
         """Return a dict of all discovered resources locally

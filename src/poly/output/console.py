@@ -85,6 +85,9 @@ def print_status(
     branch: str,
     account_name: str = None,
     project_name: str = None,
+    parent_branch: str = None,
+    created_by: str = None,
+    is_diverged: bool = None,
 ) -> None:
     """Print project status in a styled panel."""
     table = Table(show_header=False, box=None, padding=(0, 1))
@@ -95,6 +98,13 @@ def print_status(
     table.add_row("Project", f"{project_name} ({project_id})" if project_name else project_id)
     table.add_row("Last Pulled", last_updated)
     table.add_row("Current Branch", branch)
+    if parent_branch is not None:
+        table.add_row("Parent Branch", parent_branch)
+    if created_by is not None:
+        table.add_row("Created By", created_by)
+    if is_diverged is not None:
+        diverged_text = "Yes (parent has advanced past fork point)" if is_diverged else "No"
+        table.add_row("Diverged", diverged_text)
 
     console.print(Panel(table, title="[bold]Project Status[/bold]", border_style="cyan"))
 
