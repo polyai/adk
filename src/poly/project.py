@@ -851,6 +851,21 @@ class AgentStudioProject:
             MultiResourceYamlResource.save_to_file(merged_contents, file)
         MultiResourceYamlResource._file_cache.clear()
 
+        # Delete multi-resource types whose entire type is absent from incoming
+        for resource_type, original in original_resources.items():
+            if not issubclass(resource_type, MultiResourceYamlResource):
+                continue
+            if resource_type in incoming_resources:
+                continue
+            if (
+                self._not_loaded_resources is not None
+                and resource_type in self._not_loaded_resources
+            ):
+                continue
+            deleted_paths = {res.get_path(self.root_path) for res in original.values()}
+            for file_path in self._sort_paths_for_reverse_deletion(deleted_paths, resource_type):
+                resource_type.delete_resource(file_path, save_to_cache=True)
+
         return files_with_conflicts, progress_offset
 
     def _update_pulled_resources(
@@ -1024,6 +1039,20 @@ class AgentStudioProject:
                 and resource_type in self._not_loaded_resources
             ):
                 self._not_loaded_resources.remove(resource_type)
+
+        # Delete resources whose entire type is absent from incoming
+        for resource_type, original in original_resources.items():
+            if resource_type in incoming_resources:
+                continue
+            if issubclass(resource_type, MultiResourceYamlResource):
+                continue
+            if (
+                self._not_loaded_resources is not None
+                and resource_type in self._not_loaded_resources
+            ):
+                continue
+            for resource in original.values():
+                resource_type.delete_resource(resource.get_path(self.root_path))
 
         return files_with_conflicts
 
