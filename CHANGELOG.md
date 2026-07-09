@@ -1,6 +1,169 @@
 # CHANGELOG
 
 
+## v0.34.2 (2026-07-09)
+
+### Bug Fixes
+
+- Use flow_id instead of flow_name as resource ID prefix for flow steps
+  ([#220](https://github.com/polyai/adk/pull/220),
+  [`e55fd24`](https://github.com/polyai/adk/commit/e55fd24e324eac32d64a92bfb045237e4336cadd))
+
+## Summary
+
+Flow step resource IDs now use the stable `flow_id` (FlowConfig's resource_id) as their prefix
+  instead of the mutable `flow_name`, preventing step_id extraction failures when a flow is renamed
+  with a casing change.
+
+## Motivation
+
+When a flow was renamed with only a casing change (e.g. "SMS Flow" → "sms flow"), `clean_name()`
+  produced the same folder, so `find_new_kept_deleted` preserved the old resource_id. But
+  `removeprefix(f"{flow_name}_")` used the new name against the old resource_id — the prefix didn't
+  match, silently producing wrong step_ids.
+
+## Changes
+
+- Added `flow_id` field to `ResourceMapping` dataclass - Changed resource ID construction from
+  `{flow_name}_{step_id}` to `{flow_id}_{step_id}` in `sync_client.py`, `project.py`, and `flows.py`
+  - Updated all `removeprefix` calls (~8 sites) to strip `flow_id` prefix - Updated
+  `FlowConfig.validate` to use `resource_id` for step lookup - Added migration in `run_migrations`
+  to re-key existing status dict entries from old to new format - Updated test fixtures and added
+  migration tests
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Documentation
+
+- Add CLI test commands (run, list, show) ([#222](https://github.com/polyai/adk/pull/222),
+  [`44ea700`](https://github.com/polyai/adk/commit/44ea700aef035191664a3f0927127754c212c10a))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Add Document resource type ([#223](https://github.com/polyai/adk/pull/223),
+  [`629a554`](https://github.com/polyai/adk/commit/629a554f4c3f57c43d0e2ab68b0cc986e3a48781))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Allow validating experimental config against custom schema
+  ([#224](https://github.com/polyai/adk/pull/224),
+  [`2a9acc2`](https://github.com/polyai/adk/commit/2a9acc26ecd4d30b86b2796042d6760bb55e2c30))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+
 ## v0.34.1 (2026-07-09)
 
 ### Bug Fixes
