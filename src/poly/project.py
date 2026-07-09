@@ -508,7 +508,7 @@ class AgentStudioProject:
 
     def load_template(self, region, template_id):
         """Load a template into the project."""
-        template_resources = AgentStudioInterface.get_template_resources(region, template_id)
+        template_resources = self.api_handler.get_template_resources(region, template_id)
 
         # Pull latest remote state so it becomes the merge baseline.
         # On next push the 3-way merge sees original == incoming (both remote),
