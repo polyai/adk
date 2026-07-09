@@ -508,12 +508,16 @@ class AgentStudioProject:
 
     def load_template(self, region, template_id):
         """Load a template into the project."""
-        template_resources = self.api_handler.get_template_resources(template_id)
+        template_resources = self.api_handler.get_template_resources(template_id, region)
 
-        self._delete_new_resources()
+        # Delete all existing local resource files without parsing them
+        for resource_class, paths in self.discover_local_resources().items():
+            for path in paths:
+                resource_class.delete_resource(path)
 
+        empty_resources: ResourceMap = {}
         self._update_pulled_resources(
-            original_resources=self.resources,
+            original_resources=empty_resources,
             incoming_resources=template_resources,
             force=True,
         )
@@ -897,7 +901,7 @@ class AgentStudioProject:
 
         # If not force, compare with original and local changes
         original_resource_mappings: list[ResourceMapping] = self._make_resource_mappings(
-            self.resources
+            original_resources
         )
 
         # Merging is done on a per file basis.
@@ -907,7 +911,7 @@ class AgentStudioProject:
         total = sum(len(res) for res in incoming_resources.values())
 
         multi_conflicts, current = self._update_multi_resource_yaml_resources(
-            original_resources=self.resources,
+            original_resources=original_resources,
             incoming_resources=incoming_resources,
             original_resource_mappings=original_resource_mappings,
             incoming_resource_mappings=incoming_resource_mappings,

@@ -38,7 +38,7 @@ class SourcererSDK:
 
     # Environment to base URL mapping
     ENVIRONMENT_URLS = {
-        "dev": "https://api.dev.poly.ai/adk/v1",
+        "dev": "http://localhost:6996/public_api/adk/v1",
         "staging": "https://api.staging.poly.ai/adk/v1",
         "euw-1": "https://api.eu.poly.ai/adk/v1",
         "us-1": "https://api.us.poly.ai/adk/v1",
