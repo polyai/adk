@@ -38,7 +38,7 @@ class SourcererSDK:
 
     # Environment to base URL mapping
     ENVIRONMENT_URLS = {
-        "dev": "http://localhost:6996/api",
+        "dev": "http://localhost:6996/public_api/adk/v1",
         "staging": "https://api.staging.poly.ai/adk/v1",
         "euw-1": "https://api.eu.poly.ai/adk/v1",
         "us-1": "https://api.us.poly.ai/adk/v1",
@@ -68,8 +68,8 @@ class SourcererSDK:
     def __init__(
         self,
         region: str,
-        account_id: str,
-        project_id: str,
+        account_id: Optional[str] = None,
+        project_id: Optional[str] = None,
         branch_id: Optional[str] = None,
         base_url: Optional[str] = None,
     ):
@@ -77,8 +77,8 @@ class SourcererSDK:
 
         Args:
             region: The region (e.g., 'us-1', 'euw-1', 'uk-1', 'studio', 'staging', 'dev')
-            account_id: The account ID
-            project_id: The project ID
+            account_id: The account ID. Optional for project-agnostic endpoints.
+            project_id: The project ID. Optional for project-agnostic endpoints.
             branch_id: Optional branch ID. If not provided, will use the first available branch or create a new one
             base_url: Optional custom base URL. If not provided, will use the environment mapping
         """
@@ -108,7 +108,7 @@ class SourcererSDK:
         self._command_queue: list[Command] = []
 
         # Initialize branch_id if not provided
-        if self.branch_id is None:
+        if self.branch_id is None and self.account_id and self.project_id:
             self.branch_id = self._initialize_branch()
 
     def create_metadata(self):
@@ -681,3 +681,56 @@ class SourcererSDK:
             "projection": self._projection_cache,
             "last_known_sequence": self._last_known_sequence,
         }
+
+    def list_template_projects(self) -> list[dict[str, Any]]:
+        """List available template projects.
+
+        Returns:
+            A list of template project summaries.
+
+        Raises:
+            SourcererAPIError: If the API request fails.
+        """
+        url = f"{self.base_url}/template-projects"
+        try:
+            response = self.session.get(url, params={"owner": "adk"})
+            response.raise_for_status()
+            return response.json().get("templates", [])
+        except requests.exceptions.RequestException as e:
+            raise SourcererAPIError(self._format_request_error(e)) from e
+
+    def get_template_project_projection(self, template_id: str) -> dict[str, Any]:
+        """Get the full projection for a template project.
+
+        The template API returns a different shape to the sourcerer projection.
+        This method fetches and normalises it so
+        ``SyncClientHandler.load_resources_from_projection`` can consume it.
+
+        Args:
+            template_id: The template project ID.
+
+        Returns:
+            The projection in sourcerer-compatible format.
+
+        Raises:
+            SourcererAPIError: If the API request fails.
+        """
+        url = f"{self.base_url}/template-projects/{template_id}/projection"
+        try:
+            response = self.session.get(url)
+            response.raise_for_status()
+            result = response.json()
+            return result.get("projection", result)
+        except requests.exceptions.RequestException as e:
+            raise SourcererAPIError(self._format_request_error(e)) from e
+
+    @staticmethod
+    def _format_request_error(e: requests.exceptions.RequestException) -> str:
+        """Format a requests exception into a human-readable error message."""
+        if hasattr(e, "response") and e.response is not None:
+            try:
+                error_detail = e.response.json()
+                return f"API Error {e.response.status_code}: {error_detail}"
+            except (ValueError, KeyError):
+                return f"API request failed: {e}"
+        return f"Request failed: {e}"

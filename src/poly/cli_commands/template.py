@@ -11,7 +11,8 @@ from contextlib import nullcontext
 
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project, read_project_config
-from poly.handlers.interface import REGIONS, AgentStudioInterface
+from poly.handlers.interface import REGIONS
+from poly.handlers.sync_client import SyncClientHandler
 from poly.output.json_output import json_print
 
 logger = logging.getLogger(__name__)
@@ -138,11 +139,8 @@ class TemplateCommand(BaseCommand):
 
     @classmethod
     def _fetch_templates(cls, region: str) -> list[dict]:
-        """Fetch template projects from the API. Returns [] on failure."""
-        try:
-            return AgentStudioInterface.list_template_projects(region)
-        except Exception:
-            return []
+        """Fetch template projects from the API."""
+        return SyncClientHandler(region=region).list_template_projects()
 
     @classmethod
     def _pick_template(cls, templates: list[dict]) -> str | None:
@@ -170,10 +168,17 @@ class TemplateCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """List available example project templates."""
-        from poly.output.console import info, plain
+        from poly.output.console import error, info, plain
 
         region = cls._resolve_region_for_templates(region)
-        templates = cls._fetch_templates(region)
+        try:
+            templates = cls._fetch_templates(region)
+        except Exception as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(f"Failed to fetch templates: {e}")
+            return
 
         if output_json:
             json_print({"success": True, "templates": templates})
@@ -207,7 +212,15 @@ class TemplateCommand(BaseCommand):
         project = load_project(path, output_json=output_json)
         region = region or project.region
 
-        templates = cls._fetch_templates(region)
+        try:
+            templates = cls._fetch_templates(region)
+        except Exception as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(f"Failed to fetch templates: {e}")
+            return
+
         if not templates:
             if output_json:
                 json_print({"success": False, "error": "No templates available."})

@@ -513,7 +513,7 @@ class AgentStudioProject:
         self._delete_new_resources()
 
         self._update_pulled_resources(
-            original_resources=self.resources
+            original_resources=self.resources,
             incoming_resources=template_resources,
             force=True,
         )
