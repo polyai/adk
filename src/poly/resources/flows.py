@@ -144,10 +144,7 @@ class FlowConfig(YamlResource):
                 if (
                     issubclass(resource.resource_type, BaseFlowStep)
                     and resource_name == resource.flow_name
-                    and resource.resource_id.removeprefix(
-                        (resource.flow_id or resource.flow_name) + "_"
-                    )
-                    == start_step_id
+                    and resource.resource_id.removeprefix(resource.flow_id + "_") == start_step_id
                 ):
                     d["start_step"] = resource.resource_name
                     break
@@ -171,7 +168,7 @@ class FlowConfig(YamlResource):
                     and resource.resource_name == start_step_name
                 ):
                     yaml_dict["start_step"] = resource.resource_id.removeprefix(
-                        (resource.flow_id or resource.flow_name) + "_"
+                        resource.flow_id + "_"
                     )
                     break
         return yaml_dict
@@ -408,9 +405,7 @@ class FlowStep(BaseFlowStep, YamlResource):
                     if (
                         issubclass(resource.resource_type, BaseFlowStep)
                         and resource.flow_name == flow_name
-                        and resource.resource_id.removeprefix(
-                            (resource.flow_id or resource.flow_name) + "_"
-                        )
+                        and resource.resource_id.removeprefix(resource.flow_id + "_")
                         == child_step_id
                     ):
                         if issubclass(resource.resource_type, FunctionStep):
@@ -521,9 +516,7 @@ class FlowStep(BaseFlowStep, YamlResource):
                             issubclass(resource.resource_type, BaseFlowStep)
                             and flow_folder_name
                             in os.path.normpath(resource.file_path).split(os.sep)
-                            and resource.resource_id.removeprefix(
-                                (resource.flow_id or resource.flow_name) + "_"
-                            )
+                            and resource.resource_id.removeprefix(resource.flow_id + "_")
                             == child_step_id
                         ):
                             condition["child_step"] = resource.resource_name
@@ -578,7 +571,7 @@ class FlowStep(BaseFlowStep, YamlResource):
                             and resource.resource_name == child_step_name
                         ):
                             condition["child_step"] = resource.resource_id.removeprefix(
-                                (resource.flow_id or resource.flow_name) + "_"
+                                resource.flow_id + "_"
                             )
                             break
 
@@ -1329,10 +1322,7 @@ class Condition(SubResource):
             if (
                 not found_step
                 and issubclass(resource.resource_type, BaseFlowStep)
-                and resource.resource_id.removeprefix(
-                    (resource.flow_id or resource.flow_name) + "_"
-                )
-                == self.child_step
+                and resource.resource_id.removeprefix(resource.flow_id + "_") == self.child_step
             ):
                 found_step = True
 

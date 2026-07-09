@@ -567,6 +567,40 @@ class FindNewKeptDeletedTest(unittest.TestCase):
         deleted_mapping = deleted_mappings[0]
         self.assertEqual(deleted_mapping.resource_type, Function)
 
+    def test_find_new_kept_deleted_new_flow_steps_use_flow_id_prefix(self):
+        """When flow resources are not loaded, new flow steps should use
+        the FlowConfig's generated flow_id as their resource_id prefix,
+        not the flow_name."""
+        project_data = deepcopy(PROJECT_DATA)
+        # Remove all flow resources so they appear as new (not loaded)
+        project_data["resources"].pop("flow_config", None)
+        project_data["resources"].pop("flow_steps", None)
+        project_data["resources"].pop("function_steps", None)
+
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+        local_resources = project.discover_local_resources()
+        new_mappings, kept_mappings, _ = project.find_new_kept_deleted(local_resources)
+
+        new_flow_configs = [m for m in new_mappings if m.resource_type == FlowConfig]
+        new_flow_steps = [m for m in new_mappings if m.resource_type == FlowStep]
+        new_function_steps = [m for m in new_mappings if m.resource_type == FunctionStep]
+
+        self.assertTrue(len(new_flow_configs) > 0)
+        self.assertTrue(len(new_flow_steps) > 0)
+
+        # Build flow_name -> flow_id map from the new FlowConfig mappings
+        flow_id_by_name = {m.flow_name: m.resource_id for m in new_flow_configs}
+
+        # Every new flow step's resource_id should start with its flow's flow_id
+        for step_mapping in new_flow_steps + new_function_steps:
+            expected_flow_id = flow_id_by_name[step_mapping.flow_name]
+            self.assertTrue(
+                step_mapping.resource_id.startswith(expected_flow_id + "_"),
+                f"Step {step_mapping.resource_name} resource_id '{step_mapping.resource_id}' "
+                f"should start with flow_id '{expected_flow_id}_'",
+            )
+            self.assertEqual(step_mapping.flow_id, expected_flow_id)
+
 
 class ProjectStatusTest(unittest.TestCase):
     """Tests for the project_status method"""
@@ -3453,6 +3487,109 @@ class ResolveTestsTest(unittest.TestCase):
         with self.assertRaises(ValueError, msg="No tests found"):
             self.project.resolve_tests(files=["no_such_test.yaml"])
 
+
+class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
+    """Tests that _update_pulled_resources and _update_multi_resource_yaml_resources
+    delete local resources when their entire resource type is absent from incoming."""
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.mock_save_config = patch.object(AgentStudioProject, "save_config").start()
+        self.mock_save_imports = patch("poly.utils.save_imports").start()
+        self.mock_export_decorators = patch("poly.utils.export_decorators").start()
+        self.mock_resource_save = patch.object(Resource, "save").start()
+        self.mock_save_to_file = patch.object(Resource, "save_to_file").start()
+        self.mock_os_remove = patch("os.remove").start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_absent_non_multi_resource_type_deleted_on_pull(self):
+        """When incoming_resources omits an entire non-multi resource type (e.g. Topic),
+        all local files for that type should be deleted."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+
+        # Record the topic paths that exist locally before removal
+        topic_paths = [res.get_path(TEST_DIR) for res in incoming_resources[Topic].values()]
+        self.assertGreater(len(topic_paths), 0)
+
+        # Remove Topics entirely from incoming — simulates remote having deleted all topics
+        del incoming_resources[Topic]
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+
+        files_with_conflicts, _ = project.pull_project(force=False)
+
+        self.assertEqual(files_with_conflicts, [])
+        # Verify delete_resource was called (via os.remove) for each topic file
+        removed_paths = [call[0][0] for call in self.mock_os_remove.call_args_list]
+        for path in topic_paths:
+            self.assertIn(
+                path,
+                removed_paths,
+                f"Expected {path} to be deleted when Topic type is absent from incoming",
+            )
+
+    def test_absent_multi_resource_type_deleted_on_pull(self):
+        """When incoming_resources omits an entire MultiResourceYamlResource type
+        (e.g. Entity), delete_resource should be called for each local resource
+        of that type."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+
+        # Record entity paths before removal
+        entity_paths = {res.get_path(TEST_DIR) for res in incoming_resources[Entity].values()}
+        self.assertGreater(len(entity_paths), 0)
+
+        # Remove Entities entirely from incoming — simulates remote having deleted all entities
+        del incoming_resources[Entity]
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+
+        MultiResourceYamlResource._file_cache.clear()
+        with patch.object(Entity, "delete_resource") as mock_delete:
+            files_with_conflicts, _ = project.pull_project(force=False)
+        MultiResourceYamlResource._file_cache.clear()
+
+        self.assertEqual(files_with_conflicts, [])
+        # Verify delete_resource was called for each entity
+        deleted_paths = {call[0][0] for call in mock_delete.call_args_list}
+        self.assertEqual(
+            deleted_paths,
+            entity_paths,
+            "delete_resource should be called for every entity when Entity type is absent",
+        )
+
+    def test_not_loaded_resource_type_not_deleted_on_pull(self):
+        """When a resource type is in _not_loaded_resources, it should NOT be deleted
+        even if absent from incoming_resources. This prevents spurious deletions of
+        types that were never loaded from the local status file."""
+        # Load project without variant_attributes — simulates an older project format
+        project_data = deepcopy(PROJECT_DATA)
+        del project_data["resources"]["variant_attributes"]
+        del project_data["resources"]["variants"]
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        # Verify VariantAttribute is in _not_loaded_resources
+        self.assertIn(VariantAttribute, project._not_loaded_resources)
+
+        # Incoming also doesn't have VariantAttribute — but since it's "not loaded",
+        # we should NOT delete local files for it
+        incoming_resources = deepcopy(project.resources)
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+
+        files_with_conflicts, _ = project.pull_project(force=False)
+
+        self.assertEqual(files_with_conflicts, [])
+        # os.remove should NOT have been called for any variant attribute paths
+        removed_paths = [call[0][0] for call in self.mock_os_remove.call_args_list]
+        variant_attr_paths = [path for path in removed_paths if "variant_attribute" in path]
+        self.assertEqual(
+            variant_attr_paths,
+            [],
+            "Should not delete files for resource types in _not_loaded_resources",
+        )
 
 class MigrateFlowStepResourceIdsTest(unittest.TestCase):
     """Tests for migrate_flow_step_resource_ids status dict migration."""
