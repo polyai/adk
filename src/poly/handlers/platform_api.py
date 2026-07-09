@@ -44,8 +44,6 @@ TEST_RUNS_URL = "/v1/agents/{project_id}/testing/test-runs"
 TEST_RUN_URL = "/v1/agents/{project_id}/testing/test-runs/{test_run_id}"
 TEST_HISTORY_URL = "/v1/agents/{project_id}/testing/test-history"
 TRIGGER_TEST_RUN_URL = "/v1/agents/{project_id}/testing/test-runs/trigger"
-TEMPLATE_PROJECTS_URL = "/v1/template-projects"
-TEMPLATE_PROJECT_PROJECTION_URL = "/v1/template-projects/{template_id}/projection"
 
 
 class PlatformAPIHandler:
