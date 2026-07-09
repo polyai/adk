@@ -131,7 +131,7 @@ class Entity(MultiResourceYamlResource):
         """Create an instance from YAML data and identity fields."""
         return cls(
             resource_id=resource_id,
-            name=yaml_data.get("name", ""),
+            name=yaml_data.get("name") or name,
             description=(yaml_data.get("description") or "").strip(),
             entity_type=EntityType(yaml_data.get("entity_type")),
             config=yaml_data.get("config", {}),
