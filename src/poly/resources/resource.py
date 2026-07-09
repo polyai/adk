@@ -23,6 +23,7 @@ class ResourceMapping:
     file_path: Optional[str]
     flow_name: Optional[str]
     resource_prefix: Optional[str]
+    flow_id: Optional[str] = None
 
 
 @dataclass

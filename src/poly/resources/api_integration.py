@@ -355,7 +355,7 @@ class ApiIntegration(MultiResourceYamlResource):
         operations = [ApiIntegrationOperation.from_dict(o) for o in ops_data]
         return cls(
             resource_id=resource_id,
-            name=name,
+            name=yaml_dict.get("name") or name,
             description=yaml_dict.get("description", ""),
             environments=environments,
             operations=operations,

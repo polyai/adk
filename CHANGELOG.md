@@ -1,6 +1,324 @@
 # CHANGELOG
 
 
+## v0.34.2 (2026-07-09)
+
+### Bug Fixes
+
+- Use flow_id instead of flow_name as resource ID prefix for flow steps
+  ([#220](https://github.com/polyai/adk/pull/220),
+  [`e55fd24`](https://github.com/polyai/adk/commit/e55fd24e324eac32d64a92bfb045237e4336cadd))
+
+## Summary
+
+Flow step resource IDs now use the stable `flow_id` (FlowConfig's resource_id) as their prefix
+  instead of the mutable `flow_name`, preventing step_id extraction failures when a flow is renamed
+  with a casing change.
+
+## Motivation
+
+When a flow was renamed with only a casing change (e.g. "SMS Flow" → "sms flow"), `clean_name()`
+  produced the same folder, so `find_new_kept_deleted` preserved the old resource_id. But
+  `removeprefix(f"{flow_name}_")` used the new name against the old resource_id — the prefix didn't
+  match, silently producing wrong step_ids.
+
+## Changes
+
+- Added `flow_id` field to `ResourceMapping` dataclass - Changed resource ID construction from
+  `{flow_name}_{step_id}` to `{flow_id}_{step_id}` in `sync_client.py`, `project.py`, and `flows.py`
+  - Updated all `removeprefix` calls (~8 sites) to strip `flow_id` prefix - Updated
+  `FlowConfig.validate` to use `resource_id` for step lookup - Added migration in `run_migrations`
+  to re-key existing status dict entries from old to new format - Updated test fixtures and added
+  migration tests
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Documentation
+
+- Add CLI test commands (run, list, show) ([#222](https://github.com/polyai/adk/pull/222),
+  [`44ea700`](https://github.com/polyai/adk/commit/44ea700aef035191664a3f0927127754c212c10a))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Add Document resource type ([#223](https://github.com/polyai/adk/pull/223),
+  [`629a554`](https://github.com/polyai/adk/commit/629a554f4c3f57c43d0e2ab68b0cc986e3a48781))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Allow validating experimental config against custom schema
+  ([#224](https://github.com/polyai/adk/pull/224),
+  [`2a9acc2`](https://github.com/polyai/adk/commit/2a9acc26ecd4d30b86b2796042d6760bb55e2c30))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+
+## v0.34.1 (2026-07-09)
+
+### Bug Fixes
+
+- Delete local resources when entire type is absent from incoming on pull
+  ([#219](https://github.com/polyai/adk/pull/219),
+  [`a3857b0`](https://github.com/polyai/adk/commit/a3857b033e1db9140a51f4dcf63e24d08b126b60))
+
+## Summary
+
+When pulling, resource types present locally but entirely absent from `incoming_resources` were
+  silently kept on disk. This fixes that by deleting local files for absent types after the main
+  pull loop.
+
+## Motivation
+
+If all resources of a given type (e.g. SMS templates) are deleted remotely,
+  `_update_pulled_resources` only iterated types present in `incoming_resources` — so the local
+  files for that type survived the pull.
+
+## Changes
+
+- Added cleanup loop in `_update_pulled_resources` for non-multi resource types absent from incoming
+  - Added cleanup loop in `_update_multi_resource_yaml_resources` for multi-resource types absent
+  from incoming, using `_sort_paths_for_reverse_deletion` and `save_to_cache=True` - Both loops skip
+  `_not_loaded_resources` types to avoid spurious deletions
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.34.0 (2026-07-08)
+
+### Features
+
+- Allow validating experimental config against custom schema
+  ([#217](https://github.com/polyai/adk/pull/217),
+  [`d1033e2`](https://github.com/polyai/adk/commit/d1033e265ca8a37ee1826f5798bcd75a89d76913))
+
+## Summary
+
+Allow overriding the experimental config validation schema via the
+  `ADK_EXPERIMENTAL_CONFIG_SCHEMA_PATH` environment variable, falling back to the bundled schema.
+
+## Motivation
+
+The bundled `experimental_config_schema.yaml` may not always match the schema expected by a given
+  Agent Studio environment. This lets users point validation at a custom schema file without
+  modifying the package.
+
+## Changes
+
+- Read `ADK_EXPERIMENTAL_CONFIG_SCHEMA_PATH` env var in `ExperimentalConfig.validate()`; fall back
+  to the bundled schema when unset - Use a context manager (`with open(...)`) for the schema file
+  handle
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
+## v0.33.1 (2026-07-08)
+
+### Bug Fixes
+
+- Bump experimental config schema with Soniox ASR ([#218](https://github.com/polyai/adk/pull/218),
+  [`bebbbfe`](https://github.com/polyai/adk/commit/bebbbfe5928ee6611f3f7ae6510c3a99d8b206c5))
+
+## Summary
+
+Adds `soniox` as a supported ASR provider in the experimental config schema.
+
+## Motivation
+
+The Soniox speech recognition provider (poly_core #43628) needs to be a valid option in the
+  experimental config schema so projects using it pass validation. Agent Studio already accepts
+  `soniox` in published configs, so the reverse-synced `experimental_config.json` currently fails
+  ADK validation in agent-deployments CI (e.g. PolyAI-LDN/agent-deployments#8033) until the config
+  is manually stripped.
+
+## Changes
+
+- Added `soniox` to the ASR provider enum list - Added `soniox: Soniox cloud speech recognition` to
+  the provider description enum - Added `soniox: "stt-rt-v5"` to the model documentation
+
+## Test strategy
+
+- [x] Validated the real reverse-synced Corilus `experimental_config.json` (soniox language
+  overrides) against the updated schema with `jsonschema.Draft202012Validator`; unknown providers
+  are still rejected - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Moaed Yahia <moaedpoly@gmail.com>
+
+
+## v0.33.0 (2026-07-08)
+
+### Features
+
+- Add Document resource type ([#211](https://github.com/polyai/adk/pull/211),
+  [`ebb646d`](https://github.com/polyai/adk/commit/ebb646d2ed50e12cad37ff877b24dd510cf01320))
+
+## Summary
+
+Adds support for Document resources — context files stored as Markdown in `context/` that provide
+  background knowledge to the agent via Studio Assistant.
+
+## Motivation
+
+Documents are a new resource type on Agent Studio. This PR adds full ADK support: pull, push, diff,
+  status, and discovery.
+
+## Changes
+
+- New `Document` resource class in `src/poly/resources/documents.py` - Register in
+  `RESOURCE_NAME_TO_CLASS` and `__init__.py` - Read documents from projection in `SyncClientHandler`
+  - Fix: use document path as resource ID (matches server) instead of generated UUID - Add `poly
+  docs context` documentation page - Improve `poly docs` listing in `docs.md` to show actual command
+  names - Add tests in `resources_test.py` and `project_test.py` - Add test fixture
+  (`context/test_document.md` + JSON entry)
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.32.1 (2026-07-06)
 
 ### Bug Fixes

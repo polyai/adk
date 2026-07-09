@@ -160,7 +160,7 @@ class FlowConfig(YamlResource):
                 if (
                     issubclass(resource.resource_type, BaseFlowStep)
                     and resource_name == resource.flow_name
-                    and resource.resource_id.removeprefix(resource.flow_name + "_") == start_step_id
+                    and resource.resource_id.removeprefix(resource.flow_id + "_") == start_step_id
                 ):
                     d["start_step"] = resource.resource_name
                     break
@@ -184,7 +184,7 @@ class FlowConfig(YamlResource):
                     and resource.resource_name == start_step_name
                 ):
                     yaml_dict["start_step"] = resource.resource_id.removeprefix(
-                        resource.flow_name + "_"
+                        resource.flow_id + "_"
                     )
                     break
         return yaml_dict
@@ -196,7 +196,7 @@ class FlowConfig(YamlResource):
 
         # Check flow step exists in resource mappings
         found_step = False
-        expected_step_resource_id = f"{self.name}_{self.start_step}"
+        expected_step_resource_id = f"{self.resource_id}_{self.start_step}"
         for resource in resource_mappings or []:
             if (
                 issubclass(resource.resource_type, BaseFlowStep)
@@ -491,7 +491,7 @@ class FlowStep(BaseFlowStep, YamlResource):
         known_conditions = known_conditions or []
         condition_name_map = {cond.name: cond for cond in known_conditions}
 
-        step_id = resource_id.removeprefix(f"{flow_name}_")
+        step_id = resource_id.removeprefix(f"{flow_id}_")
 
         conditions = []
         for condition_yaml in yaml_dict.get("conditions", []):
@@ -505,7 +505,8 @@ class FlowStep(BaseFlowStep, YamlResource):
                     if (
                         issubclass(resource.resource_type, BaseFlowStep)
                         and resource.flow_name == flow_name
-                        and resource.resource_id.removeprefix(f"{flow_name}_") == child_step_id
+                        and resource.resource_id.removeprefix(resource.flow_id + "_")
+                        == child_step_id
                     ):
                         if issubclass(resource.resource_type, FunctionStep):
                             child_step_type = StepType.FUNCTION_STEP
@@ -615,7 +616,7 @@ class FlowStep(BaseFlowStep, YamlResource):
                             issubclass(resource.resource_type, BaseFlowStep)
                             and flow_folder_name
                             in os.path.normpath(resource.file_path).split(os.sep)
-                            and resource.resource_id.removeprefix(resource.flow_name + "_")
+                            and resource.resource_id.removeprefix(resource.flow_id + "_")
                             == child_step_id
                         ):
                             condition["child_step"] = resource.resource_name
@@ -670,7 +671,7 @@ class FlowStep(BaseFlowStep, YamlResource):
                             and resource.resource_name == child_step_name
                         ):
                             condition["child_step"] = resource.resource_id.removeprefix(
-                                resource.flow_name + "_"
+                                resource.flow_id + "_"
                             )
                             break
 
@@ -1421,7 +1422,7 @@ class Condition(SubResource):
             if (
                 not found_step
                 and issubclass(resource.resource_type, BaseFlowStep)
-                and resource.resource_id.removeprefix(resource.flow_name + "_") == self.child_step
+                and resource.resource_id.removeprefix(resource.flow_id + "_") == self.child_step
             ):
                 found_step = True
 
@@ -1569,7 +1570,7 @@ class FunctionStep(Function, BaseFlowStep):
                 flow_folder_name, resource_mappings
             )
 
-        step_id = resource_id.removeprefix(f"{flow_name}_")
+        step_id = resource_id.removeprefix(f"{flow_id}_")
 
         function_id = known_function_id or f"FUNCTION-{uuid.uuid4().hex[:8]}"
 

@@ -445,8 +445,8 @@
       }
     },
     "flow_steps": {
-      "test_flow_start_step": {
-        "resource_id": "test_flow_start_step",
+      "FLOW_CONFIG-test_flow_start_step": {
+        "resource_id": "FLOW_CONFIG-test_flow_start_step",
         "step_id": "start_step",
         "name": "start_step",
         "flow_id": "FLOW_CONFIG-test_flow",
@@ -488,8 +488,8 @@
           "y": 0.0
         }
       },
-      "test_flow_collect_name": {
-        "resource_id": "test_flow_collect_name",
+      "FLOW_CONFIG-test_flow_collect_name": {
+        "resource_id": "FLOW_CONFIG-test_flow_collect_name",
         "step_id": "collect_name",
         "name": "collect_name",
         "flow_id": "FLOW_CONFIG-test_flow",
@@ -532,8 +532,8 @@
           "y": 500.0
         }
       },
-      "test_flow_confirm_details": {
-        "resource_id": "test_flow_confirm_details",
+      "FLOW_CONFIG-test_flow_confirm_details": {
+        "resource_id": "FLOW_CONFIG-test_flow_confirm_details",
         "step_id": "confirm_details",
         "name": "confirm_details",
         "flow_id": "FLOW_CONFIG-test_flow",
@@ -575,8 +575,8 @@
           "y": 500.0
         }
       },
-      "test_flow_collect_phone": {
-        "resource_id": "test_flow_collect_phone",
+      "FLOW_CONFIG-test_flow_collect_phone": {
+        "resource_id": "FLOW_CONFIG-test_flow_collect_phone",
         "step_id": "collect_phone",
         "name": "collect_phone",
         "flow_id": "FLOW_CONFIG-test_flow",
@@ -619,8 +619,8 @@
           "y": 500.0
         }
       },
-      "test_flow_final_step": {
-        "resource_id": "test_flow_final_step",
+      "FLOW_CONFIG-test_flow_final_step": {
+        "resource_id": "FLOW_CONFIG-test_flow_final_step",
         "step_id": "final_step",
         "name": "final_step",
         "flow_id": "FLOW_CONFIG-test_flow",
@@ -662,8 +662,8 @@
           "y": 1000.0
         }
       },
-      "test_flow_with_punctuation!_welcome_step": {
-        "resource_id": "test_flow_with_punctuation!_welcome_step",
+      "FLOW_CONFIG-test_flow_with_punctuation_welcome_step": {
+        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation_welcome_step",
         "step_id": "welcome_step",
         "name": "welcome_step",
         "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
@@ -719,8 +719,8 @@
           "y": 0.0
         }
       },
-      "test_flow_with_punctuation!_collect_party_size": {
-        "resource_id": "test_flow_with_punctuation!_collect_party_size",
+      "FLOW_CONFIG-test_flow_with_punctuation_collect_party_size": {
+        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation_collect_party_size",
         "step_id": "collect_party_size",
         "name": "collect_party_size",
         "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
@@ -763,8 +763,8 @@
           "y": 500.0
         }
       },
-      "test_flow_with_punctuation!_collect_email": {
-        "resource_id": "test_flow_with_punctuation!_collect_email",
+      "FLOW_CONFIG-test_flow_with_punctuation_collect_email": {
+        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation_collect_email",
         "step_id": "collect_email",
         "name": "collect_email",
         "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
@@ -806,8 +806,8 @@
           "y": 500.0
         }
       },
-      "test_flow_with_punctuation!_status_result": {
-        "resource_id": "test_flow_with_punctuation!_status_result",
+      "FLOW_CONFIG-test_flow_with_punctuation_status_result": {
+        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation_status_result",
         "step_id": "status_result",
         "name": "status_result",
         "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
@@ -874,8 +874,8 @@
       }
     },
     "function_steps": {
-      "test_flow_process_payment": {
-        "resource_id": "test_flow_process_payment",
+      "FLOW_CONFIG-test_flow_process_payment": {
+        "resource_id": "FLOW_CONFIG-test_flow_process_payment",
         "step_id": "process_payment",
         "flow_id": "FLOW_CONFIG-test_flow",
         "flow_name": "test_flow",
@@ -892,8 +892,8 @@
           "y": 0.0
         }
       },
-      "test_flow_process_data": {
-        "resource_id": "test_flow_with_punctuation!_calculate_discount",
+      "FLOW_CONFIG-test_flow_with_punctuation_calculate_discount": {
+        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation_calculate_discount",
         "step_id": "calculate_discount",
         "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
         "flow_name": "test_flow_with_punctuation!",
@@ -1208,6 +1208,14 @@
       "fr-FR": {
         "resource_id": "fr-FR",
         "name": "fr-FR"
+      }
+    },
+    "documents": {
+      "test_document.md": {
+        "resource_id": "test_document.md",
+        "name": "test_document",
+        "path": "test_document.md",
+        "contents": "This is a test document.\nIt has multiple lines.\n"
       }
     }
   },

@@ -107,7 +107,7 @@ class Pronunciation(MultiResourceYamlResource):
     ) -> "Pronunciation":
         return cls(
             resource_id=resource_id,
-            name=yaml_dict.get("name", ""),
+            name=yaml_dict.get("name") or name,
             regex=yaml_dict.get("regex", ""),
             replacement=yaml_dict.get("replacement", ""),
             case_sensitive=yaml_dict.get("case_sensitive", False),
