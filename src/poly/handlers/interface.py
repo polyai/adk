@@ -385,14 +385,13 @@ class AgentStudioInterface:
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
-    def get_branches(self) -> dict[str, str]:
-        """Get a list of branches.
-
-        Args:
-            branch_name (str): The name of the branch
+    def get_branches(self) -> dict[str, dict[str, Any]]:
+        """Get a list of branches with full metadata.
 
         Returns:
-            dict[str, str]: A dictionary mapping branch names to branch IDs
+            A dictionary mapping branch names to their metadata dicts.
+            Each value contains at least ``branchId``, and may include
+            ``parentBranchId``, ``parentSequence``, ``isDiverged``, etc.
         """
         try:
             return self.sync_client.get_branches()
@@ -460,6 +459,23 @@ class AgentStudioInterface:
         """
         try:
             return self.sync_client.delete_branch(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def pull_branch_resources(
+        self, branch_id: str, at_sequence: Optional[int] = None
+    ) -> dict[type, dict[str, Any]]:
+        """Fetch resources for a branch, optionally at a historical sequence.
+
+        Args:
+            branch_id: The branch whose projection to fetch.
+            at_sequence: When provided, fetches the projection at this sequence number.
+
+        Returns:
+            A ResourceMap of the branch's resources.
+        """
+        try:
+            return self.sync_client.pull_branch_resources(branch_id, at_sequence)
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 

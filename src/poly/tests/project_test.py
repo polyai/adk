@@ -3591,6 +3591,7 @@ class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
             "Should not delete files for resource types in _not_loaded_resources",
         )
 
+
 class MigrateFlowStepResourceIdsTest(unittest.TestCase):
     """Tests for migrate_flow_step_resource_ids status dict migration."""
 
@@ -3665,6 +3666,282 @@ class MigrateFlowStepResourceIdsTest(unittest.TestCase):
         flow_steps = status_dict["resources"]["flow_steps"]
         self.assertIn("FLOW-abc_step-1", flow_steps)
         self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
+
+
+class DiffBranchTest(unittest.TestCase):
+    """Tests for the diff_branch method."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "main"
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def _make_branches(self, entries):
+        """Build a branches dict from a list of (name, branchId, extras) tuples."""
+        branches = {}
+        for name, branch_id, extras in entries:
+            meta = {"branchId": branch_id}
+            meta.update(extras)
+            branches[name] = meta
+        return branches
+
+    def _make_topic(self, resource_id, name, content):
+        """Create a Topic with all required fields."""
+        return Topic(
+            resource_id=resource_id,
+            name=name,
+            actions="",
+            content=content,
+            example_queries=[],
+        )
+
+    def test_on_main_with_no_branch_name_raises_value_error(self):
+        """Calling diff_branch() while on main without specifying a branch raises ValueError."""
+        self.project.branch_id = "main"
+        self.mock_api.get_branches.return_value = self._make_branches([("main", "main", {})])
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.diff_branch()
+        self.assertIn("Cannot diff main branch", str(ctx.exception))
+
+    def test_named_branch_not_found_raises_value_error(self):
+        """Specifying a branch name that doesn't exist raises ValueError."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [("main", "main", {}), ("feature-a", "branch-a-id", {})]
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.diff_branch(branch_name="nonexistent")
+        self.assertIn("does not exist", str(ctx.exception))
+
+    def test_happy_path_returns_diffs(self):
+        """diff_branch returns diffs between fork-point parent and current branch state."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-x",
+                    "branch-x-id",
+                    {"parentBranchId": "main", "parentSequence": "42"},
+                ),
+            ]
+        )
+
+        parent_topic = self._make_topic("TOPIC-1", "Greetings", "Hello original")
+        branch_topic = self._make_topic("TOPIC-1", "Greetings", "Hello updated")
+        parent_resources = {Topic: {"TOPIC-1": parent_topic}}
+        branch_resources = {Topic: {"TOPIC-1": branch_topic}}
+
+        self.mock_api.pull_branch_resources.side_effect = [
+            parent_resources,
+            branch_resources,
+        ]
+
+        diffs = self.project.diff_branch(branch_name="feature-x")
+
+        self.assertIsNotNone(diffs)
+        self.assertEqual(len(diffs), 1)
+        topic_path = os.path.join("topics", "greetings.yaml")
+        self.assertIn(topic_path, diffs)
+        self.assertIn("-content: Hello original", diffs[topic_path])
+        self.assertIn("+content: Hello updated", diffs[topic_path])
+
+        # Verify pull_branch_resources called with correct args
+        calls = self.mock_api.pull_branch_resources.call_args_list
+        self.assertEqual(calls[0].args, ("main", 42))
+        self.assertEqual(calls[1].args, ("branch-x-id",))
+
+    def test_no_changes_returns_none(self):
+        """When parent and branch have identical resources, diff_branch returns None."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-y",
+                    "branch-y-id",
+                    {"parentBranchId": "main", "parentSequence": "10"},
+                ),
+            ]
+        )
+
+        topic = self._make_topic("TOPIC-1", "Hours", "9am-5pm")
+        identical_resources = {Topic: {"TOPIC-1": topic}}
+
+        self.mock_api.pull_branch_resources.side_effect = [
+            identical_resources,
+            deepcopy(identical_resources),
+        ]
+
+        result = self.project.diff_branch(branch_name="feature-y")
+        self.assertIsNone(result)
+
+    def test_null_parent_sequence_falls_back_to_latest(self):
+        """When parentSequence is null, pull_branch_resources is called with at_sequence=None."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-z",
+                    "branch-z-id",
+                    {"parentBranchId": "main", "parentSequence": None},
+                ),
+            ]
+        )
+
+        topic = self._make_topic("TOPIC-1", "Hours", "9am-5pm")
+        self.mock_api.pull_branch_resources.side_effect = [
+            {Topic: {"TOPIC-1": topic}},
+            {Topic: {"TOPIC-1": deepcopy(topic)}},
+        ]
+
+        self.project.diff_branch(branch_name="feature-z")
+
+        # Parent projection should be fetched with at_sequence=None (latest)
+        parent_call = self.mock_api.pull_branch_resources.call_args_list[0]
+        self.assertEqual(parent_call.args[0], "main")
+        self.assertIsNone(parent_call.args[1])
+
+    def test_file_path_filtering(self):
+        """Only diffs matching the provided file_paths are returned."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-f",
+                    "branch-f-id",
+                    {"parentBranchId": "main", "parentSequence": "5"},
+                ),
+            ]
+        )
+
+        topic_a = self._make_topic("TOPIC-A", "Topic A", "old A")
+        topic_b = self._make_topic("TOPIC-B", "Topic B", "old B")
+        parent_resources = {
+            Topic: {"TOPIC-A": topic_a, "TOPIC-B": topic_b},
+        }
+
+        topic_a_new = self._make_topic("TOPIC-A", "Topic A", "new A")
+        topic_b_new = self._make_topic("TOPIC-B", "Topic B", "new B")
+        branch_resources = {
+            Topic: {"TOPIC-A": topic_a_new, "TOPIC-B": topic_b_new},
+        }
+
+        self.mock_api.pull_branch_resources.side_effect = [
+            parent_resources,
+            branch_resources,
+        ]
+
+        topic_a_path = os.path.join("topics", "topic_a.yaml")
+        diffs = self.project.diff_branch(branch_name="feature-f", file_paths=[topic_a_path])
+
+        self.assertIsNotNone(diffs)
+        self.assertIn(topic_a_path, diffs)
+        topic_b_path = os.path.join("topics", "topic_b.yaml")
+        self.assertNotIn(topic_b_path, diffs)
+
+    def test_file_path_filtering_no_matches_returns_none(self):
+        """When file_paths filter excludes all diffs, returns None."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-g",
+                    "branch-g-id",
+                    {"parentBranchId": "main", "parentSequence": "5"},
+                ),
+            ]
+        )
+
+        topic = self._make_topic("TOPIC-1", "Hours", "old")
+        topic_new = self._make_topic("TOPIC-1", "Hours", "new")
+
+        self.mock_api.pull_branch_resources.side_effect = [
+            {Topic: {"TOPIC-1": topic}},
+            {Topic: {"TOPIC-1": topic_new}},
+        ]
+
+        result = self.project.diff_branch(
+            branch_name="feature-g",
+            file_paths=["nonexistent/file.yaml"],
+        )
+        self.assertIsNone(result)
+
+    def test_current_branch_used_when_no_name_specified(self):
+        """When no branch_name given, uses the current branch."""
+        self.project.branch_id = "branch-cur-id"
+        self.mock_api.branch_id = "branch-cur-id"
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "current-branch",
+                    "branch-cur-id",
+                    {"parentBranchId": "main", "parentSequence": "7"},
+                ),
+            ]
+        )
+
+        topic = self._make_topic("TOPIC-1", "FAQ", "same")
+        self.mock_api.pull_branch_resources.side_effect = [
+            {Topic: {"TOPIC-1": topic}},
+            {Topic: {"TOPIC-1": deepcopy(topic)}},
+        ]
+
+        result = self.project.diff_branch()
+        self.assertIsNone(result)
+
+        # Should have used the current branch's metadata
+        branch_call = self.mock_api.pull_branch_resources.call_args_list[1]
+        self.assertEqual(branch_call.args, ("branch-cur-id",))
+
+
+class GetBranchesReturnTypeTest(unittest.TestCase):
+    """Tests for the updated get_branches return type (dict of metadata dicts)."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def test_returns_current_branch_name_and_metadata_dict(self):
+        """get_branches returns (current_name, {name: metadata_dict})."""
+        self.project.branch_id = "branch-abc"
+        self.mock_api.branch_id = "branch-abc"
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+            "my-feature": {"branchId": "branch-abc", "parentBranchId": "main"},
+        }
+
+        current_name, branches = self.project.get_branches()
+
+        self.assertEqual(current_name, "my-feature")
+        self.assertIn("main", branches)
+        self.assertIn("my-feature", branches)
+        self.assertEqual(branches["my-feature"]["branchId"], "branch-abc")
+        self.assertEqual(branches["my-feature"]["parentBranchId"], "main")
+
+    def test_returns_none_when_local_branch_not_found(self):
+        """When the local branch_id doesn't match any remote branch, current_name is None."""
+        self.project.branch_id = "deleted-branch-id"
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+        }
+
+        current_name, branches = self.project.get_branches()
+
+        self.assertIsNone(current_name)
+        self.assertEqual(len(branches), 1)
 
 
 if __name__ == "__main__":

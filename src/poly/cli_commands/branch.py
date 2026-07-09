@@ -230,6 +230,44 @@ class BranchCommand(BaseCommand):
         )
         branch_merge_parser.set_defaults(branch_subcommand="merge")
 
+        # ── diff ──
+        branch_diff_parser = branch_subparsers.add_parser(
+            "diff",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Show changes made on a branch since it was created.",
+        )
+        branch_diff_parser.add_argument(
+            "branch_name",
+            nargs="?",
+            default=None,
+            help="Branch to diff. Defaults to the current branch.",
+        ).completer = cls._branch_name_completer
+        branch_diff_parser.add_argument(
+            "--files",
+            nargs="*",
+            help="Only show changes for these files.",
+        )
+        branch_diff_parser.set_defaults(branch_subcommand="diff")
+
+        # ── review ──
+        branch_review_parser = branch_subparsers.add_parser(
+            "review",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Create a GitHub Gist of branch changes since it was created.",
+        )
+        branch_review_parser.add_argument(
+            "branch_name",
+            nargs="?",
+            default=None,
+            help="Branch to review. Defaults to the current branch.",
+        ).completer = cls._branch_name_completer
+        branch_review_parser.add_argument(
+            "--files",
+            nargs="*",
+            help="Only include changes for these files.",
+        )
+        branch_review_parser.set_defaults(branch_subcommand="review")
+
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to the matching branch sub-handler."""
@@ -264,6 +302,12 @@ class BranchCommand(BaseCommand):
 
         elif args.branch_subcommand == "merge":
             cls.branch_merge(args.path, args.message, args.json, args.interactive, args.resolutions)
+
+        elif args.branch_subcommand == "diff":
+            cls.branch_diff(args.path, args.branch_name, getattr(args, "files", None), args.json)
+
+        elif args.branch_subcommand == "review":
+            cls.branch_review(args.path, args.branch_name, getattr(args, "files", None), args.json)
 
     @classmethod
     def branch_list(cls, base_path: str, output_json: bool = False) -> None:
@@ -511,7 +555,7 @@ class BranchCommand(BaseCommand):
         current_branch, branches = project.get_branches()
 
         # Filter out 'main' — it cannot be deleted
-        deletable = {name: bid for name, bid in branches.items() if name != "main"}
+        deletable = {name: meta for name, meta in branches.items() if name != "main"}
 
         if branch_name:
             if branch_name not in deletable:
@@ -906,3 +950,104 @@ class BranchCommand(BaseCommand):
                     show_type=True,
                     panel_title="Remaining merge conflicts",
                 )
+
+    @classmethod
+    def branch_diff(
+        cls,
+        base_path: str,
+        branch_name: str = None,
+        files: list[str] = None,
+        output_json: bool = False,
+    ) -> None:
+        """Show changes made on a branch since it was created."""
+        from poly.output.console import console, error, plain, print_diff
+
+        project = load_project(base_path, output_json=output_json)
+
+        try:
+            diffs = project.diff_branch(branch_name=branch_name, file_paths=files)
+        except ValueError as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(str(e))
+            sys.exit(1)
+
+        if not diffs:
+            if output_json:
+                json_print({"success": True, "diffs": {}})
+            else:
+                plain("[muted]No changes detected on this branch.[/muted]")
+            return
+
+        if output_json:
+            json_print({"success": True, "diffs": diffs})
+            return
+
+        for file_path, diff_text in diffs.items():
+            console.rule(f"[bold]{file_path}[/bold]")
+            print_diff(diff_text)
+
+    @classmethod
+    def branch_review(
+        cls,
+        base_path: str,
+        branch_name: str = None,
+        files: list[str] = None,
+        output_json: bool = False,
+    ) -> None:
+        """Create a GitHub Gist of branch changes since it was created."""
+        import requests as req
+
+        from poly.handlers.github_api_handler import GitHubAPIHandler
+        from poly.output.console import error, plain, success
+
+        project = load_project(base_path, output_json=output_json)
+
+        try:
+            diffs = project.diff_branch(branch_name=branch_name, file_paths=files)
+        except ValueError as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(str(e))
+            sys.exit(1)
+
+        if not diffs:
+            if output_json:
+                json_print({"success": False, "message": "No changes to review."})
+            else:
+                plain("[muted]No changes detected on this branch.[/muted]")
+            return
+
+        project_name = "/".join(os.path.abspath(base_path).split(os.sep)[-2:])
+        display_name = branch_name or project.get_current_branch() or project.branch_id
+        description = f"Poly ADK: {project_name}: branch '{display_name}' review"
+
+        body = {}
+        for file_path, diff in diffs.items():
+            if not diff:
+                continue
+            safe_name = file_path.replace(os.sep, "_")
+            body[f"{safe_name}.diff"] = {"content": diff}
+
+        try:
+            url = GitHubAPIHandler.create_gist(
+                files=body,
+                description=description,
+                public=False,
+            )
+            if output_json:
+                json_print({"success": True, "link": url})
+            else:
+                success(f"Review gist created: {url}")
+        except req.HTTPError as e:
+            if output_json:
+                json_print({"success": False, "message": f"GitHub API error: {e}"})
+            else:
+                error(f"GitHub API error: {e}")
+        except OSError as e:
+            if output_json:
+                json_print({"success": False, "message": str(e)})
+            else:
+                error(str(e))

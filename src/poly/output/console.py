@@ -136,7 +136,7 @@ def print_agents(agents: list[dict[str, Any]]) -> None:
     console.print(table)
 
 
-def print_branches(branches: dict[str, str] | list[str], current_branch: str | None) -> None:
+def print_branches(branches: dict[str, Any] | list[str], current_branch: str | None) -> None:
     """Print branch list with current branch highlighted."""
     console.print("[label]Branches:[/label]")
     items = branches.keys() if isinstance(branches, dict) else branches

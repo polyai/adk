@@ -174,6 +174,25 @@ class SyncClientHandler:
         )
         return self.load_resources_from_projection(projection)
 
+    def pull_branch_resources(
+        self, branch_id: str, at_sequence: Optional[int] = None
+    ) -> dict[type[Resource], dict[str, Resource]]:
+        """Fetch resources for a specific branch, optionally at a historical sequence.
+
+        Args:
+            branch_id: The branch whose projection to fetch.
+            at_sequence: When provided, fetches the projection at this sequence number.
+
+        Returns:
+            A ResourceMap of the branch's resources.
+        """
+        logger.info(
+            f"Fetching projection for branch {branch_id}"
+            + (f" at sequence {at_sequence}" if at_sequence is not None else "")
+        )
+        projection = self.sdk.fetch_projection(branch_id=branch_id, at_sequence=at_sequence)
+        return self.load_resources_from_projection(projection)
+
     def pull_resources(self) -> tuple[dict[type[Resource], dict[str, Resource]], dict[str, Any]]:
         """Fetch all resources from a specific project.
 
@@ -1286,17 +1305,22 @@ class SyncClientHandler:
         )
         return self.sdk.branch_id
 
-    def get_branches(self) -> dict[str, str]:
+    def get_branches(self) -> dict[str, dict[str, Any]]:
         """Get a list of all branches in the project.
 
         Returns:
-            dict[str, str]: A dictionary mapping branch names to branch IDs
+            A dictionary mapping branch names to their full metadata dicts.
+            Each value contains at least ``branchId``, ``parentBranchId``,
+            ``parentSequence``, ``isDiverged``, etc.  The ``main`` entry is
+            synthetic with ``branchId="main"`` and no parent info.
         """
-        branches = {"main": "main"}
+        branches: dict[str, dict[str, Any]] = {
+            "main": {"branchId": "main", "name": "main"},
+        }
         logger.info(f"Fetching branches for project {self.account_id}/{self.project_id}")
-        for branch in self.sdk.fetch_branches().get("branches"):
-            branches[branch.get("name")] = branch.get("branchId")
-        logger.info(f"Fetched {len(branches)} branches branches={branches!r}")
+        for branch in self.sdk.fetch_branches().get("branches", []):
+            branches[branch.get("name")] = branch
+        logger.info(f"Fetched {len(branches)} branches")
         return branches
 
     def delete_branch(self, branch_id: str) -> bool:

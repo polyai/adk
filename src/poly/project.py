@@ -1959,7 +1959,7 @@ class AgentStudioProject:
         # 2) Branch name -> branch resources (event sourcing only)
         branches = self.api_handler.get_branches()
         if name in branches:
-            branch_id = branches[name]
+            branch_id = branches[name]["branchId"]
             branch_api_handler = AgentStudioInterface(
                 self.region, self.account_id, self.project_id, branch_id
             )
@@ -2087,6 +2087,74 @@ class AgentStudioProject:
 
         if not diffs:
             return None
+
+        return diffs
+
+    def diff_branch(
+        self,
+        branch_name: Optional[str] = None,
+        file_paths: Optional[list[str]] = None,
+    ) -> Optional[dict[str, str]]:
+        """Compute diffs showing what a branch changed relative to its fork point.
+
+        Args:
+            branch_name: Name of the branch to diff. Defaults to the current branch.
+            file_paths: When provided, only include diffs for these files.
+
+        Returns:
+            A mapping of file path to unified diff text, or None when there
+            are no differences.
+
+        Raises:
+            ValueError: If on main with no branch specified, or the branch
+                does not exist.
+        """
+        _, branches = self.get_branches()
+
+        if branch_name:
+            if branch_name not in branches:
+                raise ValueError(f"Branch '{branch_name}' does not exist.")
+            branch_meta = branches[branch_name]
+        else:
+            current_name, _ = self.get_branches()
+            if self.branch_id == "main" or current_name is None:
+                raise ValueError(
+                    "Cannot diff main branch. Switch to a branch or specify a branch name."
+                )
+            branch_meta = branches[current_name]
+
+        branch_id = branch_meta["branchId"]
+        parent_branch_id = branch_meta.get("parentBranchId")
+        parent_sequence_raw = branch_meta.get("parentSequence")
+
+        # Fetch parent projection — at fork point when available, latest otherwise
+        parent_at_sequence: Optional[int] = None
+        if parent_sequence_raw is not None:
+            try:
+                parent_at_sequence = int(parent_sequence_raw)
+            except (TypeError, ValueError):
+                logger.warning(
+                    f"Invalid parentSequence '{parent_sequence_raw}', "
+                    "falling back to latest parent projection."
+                )
+
+        if parent_at_sequence is None:
+            logger.warning(
+                "Fork-point sequence unavailable; comparing against latest parent state."
+            )
+
+        parent_id = parent_branch_id or "main"
+        parent_resources = self.api_handler.pull_branch_resources(parent_id, parent_at_sequence)
+
+        # Fetch current branch projection (latest)
+        branch_resources = self.api_handler.pull_branch_resources(branch_id)
+
+        diffs = self.diff_resource_maps(parent_resources, branch_resources)
+
+        if diffs and file_paths:
+            diffs = {fp: d for fp, d in diffs.items() if fp in file_paths}
+            if not diffs:
+                return None
 
         return diffs
 
@@ -2382,16 +2450,17 @@ class AgentStudioProject:
             return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
         return f"{RESOURCE_CLASS_TO_NAME[resource_type].upper()}-{uuid.uuid4().hex[:8]}"
 
-    def get_branches(self) -> tuple[Optional[str], dict[str, str]]:
+    def get_branches(self) -> tuple[Optional[str], dict[str, dict[str, Any]]]:
         """Get a list of all branches in the (remote) project.
 
         Returns:
-            Optional[str], dict[str, str]: The current branch name and a dictionary mapping
-            branch names to branch IDs. First element is None if the current branch does not exist in the remote.
+            The current branch name (None if the local branch no longer exists
+            on the remote) and a dictionary mapping branch names to their full
+            metadata dicts (each containing at least ``branchId``).
         """
         branches = self.api_handler.get_branches()
         current_branch = next(
-            (name for name, branch_id in branches.items() if branch_id == self.branch_id),
+            (name for name, meta in branches.items() if meta["branchId"] == self.branch_id),
             None,
         )
         return current_branch, branches
@@ -2441,10 +2510,11 @@ class AgentStudioProject:
         branches = self.api_handler.get_branches()
         if branch_name not in branches:
             raise ValueError(f"Branch {branch_name} does not exist.")
-        success = self.api_handler.switch_branch(branches[branch_name])
+        branch_id = branches[branch_name]["branchId"]
+        success = self.api_handler.switch_branch(branch_id)
         projection = {}
         if success:
-            self.branch_id = branches[branch_name]
+            self.branch_id = branch_id
             _, projection = self.pull_project(
                 force=True, format=format, projection_json=projection_json, on_save=on_save
             )
@@ -2842,7 +2912,8 @@ class AgentStudioProject:
             list[dict[str, str]]: A list of errors
         """
         branches = self.api_handler.get_branches()
-        if self.branch_id not in branches.values():
+        branch_ids = {meta["branchId"] for meta in branches.values()}
+        if self.branch_id not in branch_ids:
             raise ValueError(f"Branch {self.branch_id} does not exist.")
 
         if self.branch_id == "main":
@@ -2887,8 +2958,9 @@ class AgentStudioProject:
         if branch_name == "main":
             raise ValueError("Deleting 'main' branch is not supported.")
 
-        success = self.api_handler.delete_branch(branches[branch_name])
-        if success and self.branch_id == branches[branch_name]:
+        branch_id = branches[branch_name]["branchId"]
+        success = self.api_handler.delete_branch(branch_id)
+        if success and self.branch_id == branch_id:
             self.switch_branch("main", force=True)
         return True
 
