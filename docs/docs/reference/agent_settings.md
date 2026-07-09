@@ -96,6 +96,10 @@ Allowed adjective values are:
 
 If `Other` is set to `true`, no other adjective can be selected.
 
+Only adjectives that are enabled (`true`) are written to `personality.yaml`. Disabled adjectives are omitted from the file entirely — both when you write them locally and when the ADK normalizes the file on `poly pull`. This means `{}` and `{Kind: false}` are treated as the same state: neither writes `Kind: false` to disk.
+
+When pushing, the ADK explicitly sends the full set of allowed adjectives to the platform, setting any adjective not present in your local file to `false`. This ensures that removing an adjective from `personality.yaml` actually removes it on the platform.
+
 !!! info "Non-standard adjectives"
 
     The platform may return adjectives not in the local allowed set (for example, deprecated or newly added adjectives). Validation only fails for adjectives that are **enabled** (`true`) and not in the allowed set. Disabled (`false`) non-standard adjectives pass validation and are silently excluded from the update payload when pushing.
