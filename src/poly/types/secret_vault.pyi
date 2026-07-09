@@ -1,23 +1,22 @@
 # Copyright PolyAI Limited
-# flake8: noqa
-# ruff: noqa
-# type: ignore
 __all__ = ["InvalidInput", "MissingAccess", "SecretNotFound"]
 
+from typing import Any
+
+secret_client: Any
 
 class SecretNotFound(Exception):
-    """Secret with specified name cannot be found"""
-
     def __init__(self, secret_name: str) -> None: ...
 
-
 class MissingAccess(Exception):
-    """Assistant is not on access list for the secret"""
-
     def __init__(self, assistant_id: str, secret_name: str) -> None: ...
-
 
 class InvalidInput(Exception):
-    """Assistant is sending invalid input for secret access"""
-
     def __init__(self, assistant_id: str, secret_name: str) -> None: ...
+
+class InternalError(Exception):
+    def __init__(self) -> None: ...
+
+def secret_vault(secret_name: str) -> str | dict: ...
+def get_secret_vault_custom_secret(secret_name: str) -> dict: ...
+def build_sms_secret_name() -> str: ...
