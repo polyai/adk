@@ -2317,7 +2317,7 @@ class AgentStudioProject:
                         ResourceMapping(
                             resource_id=resource_info["resource_id"],
                             resource_type=resource_type,
-                            resource_name=resource_info["resource_name"],
+                            resource_name=resource_name,
                             file_path=file_path,
                             flow_name=flow_name,
                             resource_prefix=resource_type.get_resource_prefix(file_path=file_path),
@@ -2333,9 +2333,7 @@ class AgentStudioProject:
                         resource_id = os.path.basename(file_path)
 
                     if resource_type in (FlowStep, FunctionStep):
-                        resource_id = (
-                            f"{flow_id}_{resource_id}" if flow_id else f"{flow_name}_{resource_id}"
-                        )
+                        resource_id = f"{flow_id}_{resource_id}"
 
                     if resource_type == FlowConfig:
                         resource_id = flow_id
