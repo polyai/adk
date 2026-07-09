@@ -223,25 +223,22 @@ class AgentStudioInterface:
         Returns:
             list[dict[str, Any]]: A list of template project summaries.
         """
-        return self.sync_client.list_template_projects(region=region)
+        return SyncClientHandler(region=region).list_template_projects()
 
     def get_template_resources(
-        self, region: str, template_id: str
+        self, template_id: str
     ) -> dict[type[Resource], dict[str, Resource]]:
         """Fetch a template and return its resources.
 
         Combines projection fetching and resource conversion in one call.
 
         Args:
-            region: The region to fetch the template from.
             template_id: The template project ID.
 
         Returns:
             dict mapping resource types to their resources.
         """
-        projection = self.sync_client.get_template_project_projection(
-            template_id, region=region
-        )
+        projection = self.sync_client.get_template_project_projection(template_id)
         return SyncClientHandler.load_resources_from_projection(projection)
 
     @staticmethod

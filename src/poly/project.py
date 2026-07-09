@@ -508,7 +508,7 @@ class AgentStudioProject:
 
     def load_template(self, region, template_id):
         """Load a template into the project."""
-        template_resources = self.api_handler.get_template_resources(region, template_id)
+        template_resources = self.api_handler.get_template_resources(template_id)
 
         self._delete_new_resources()
 

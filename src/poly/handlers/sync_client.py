@@ -154,26 +154,15 @@ class SyncClientHandler:
             Document: cls._read_documents_from_projection(projection),
         }  # ty:ignore[invalid-return-type]
 
-    def _get_sdk_for_region(self, region: Optional[str] = None) -> SourcererSDK:
-        """Return the SDK for the given region, or self.sdk if region matches."""
-        if region is None or region == self.region:
-            return self.sdk
-        return SourcererSDK(region=region)
-
-    def list_template_projects(self, region: Optional[str] = None) -> list[dict[str, Any]]:
+    def list_template_projects(self) -> list[dict[str, Any]]:
         """List available template projects.
-
-        Args:
-            region: Region override. Defaults to the project's region.
 
         Returns:
             list[dict[str, Any]]: A list of template project summaries.
         """
-        return self._get_sdk_for_region(region).list_template_projects()
+        return self.sdk.list_template_projects()
 
-    def get_template_project_projection(
-        self, template_id: str, region: Optional[str] = None
-    ) -> dict[str, Any]:
+    def get_template_project_projection(self, template_id: str) -> dict[str, Any]:
         """Get the full projection for a template project.
 
         The template API returns a different shape to the sourcerer projection.
@@ -182,12 +171,11 @@ class SyncClientHandler:
 
         Args:
             template_id: The template project ID.
-            region: Region override. Defaults to the project's region.
 
         Returns:
             dict[str, Any]: The projection in sourcerer-compatible format.
         """
-        return self._get_sdk_for_region(region).get_template_project_projection(template_id)
+        return self.sdk.get_template_project_projection(template_id)
 
     def pull_deployment_resources(
         self, deployment_id: str
