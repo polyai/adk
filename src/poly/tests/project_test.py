@@ -567,6 +567,40 @@ class FindNewKeptDeletedTest(unittest.TestCase):
         deleted_mapping = deleted_mappings[0]
         self.assertEqual(deleted_mapping.resource_type, Function)
 
+    def test_find_new_kept_deleted_new_flow_steps_use_flow_id_prefix(self):
+        """When flow resources are not loaded, new flow steps should use
+        the FlowConfig's generated flow_id as their resource_id prefix,
+        not the flow_name."""
+        project_data = deepcopy(PROJECT_DATA)
+        # Remove all flow resources so they appear as new (not loaded)
+        project_data["resources"].pop("flow_config", None)
+        project_data["resources"].pop("flow_steps", None)
+        project_data["resources"].pop("function_steps", None)
+
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+        local_resources = project.discover_local_resources()
+        new_mappings, kept_mappings, _ = project.find_new_kept_deleted(local_resources)
+
+        new_flow_configs = [m for m in new_mappings if m.resource_type == FlowConfig]
+        new_flow_steps = [m for m in new_mappings if m.resource_type == FlowStep]
+        new_function_steps = [m for m in new_mappings if m.resource_type == FunctionStep]
+
+        self.assertTrue(len(new_flow_configs) > 0)
+        self.assertTrue(len(new_flow_steps) > 0)
+
+        # Build flow_name -> flow_id map from the new FlowConfig mappings
+        flow_id_by_name = {m.flow_name: m.resource_id for m in new_flow_configs}
+
+        # Every new flow step's resource_id should start with its flow's flow_id
+        for step_mapping in new_flow_steps + new_function_steps:
+            expected_flow_id = flow_id_by_name[step_mapping.flow_name]
+            self.assertTrue(
+                step_mapping.resource_id.startswith(expected_flow_id + "_"),
+                f"Step {step_mapping.resource_name} resource_id '{step_mapping.resource_id}' "
+                f"should start with flow_id '{expected_flow_id}_'",
+            )
+            self.assertEqual(step_mapping.flow_id, expected_flow_id)
+
 
 class ProjectStatusTest(unittest.TestCase):
     """Tests for the project_status method"""
@@ -663,7 +697,7 @@ class ProjectStatusTest(unittest.TestCase):
             "function_type": "global",
         }
         # Modify a flow step so it seems there's a modified one
-        project_data["resources"]["flow_steps"]["test_flow_start_step"]["prompt"] = (
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["prompt"] = (
             "Modified prompt"
         )
 
@@ -877,7 +911,9 @@ class GetDiffsTest(unittest.TestCase):
         """Reordering extracted_entities should not produce a diff."""
         project_data = deepcopy(PROJECT_DATA)
         # Reverse the extracted_entities order so it differs from local YAML
-        step = project_data["resources"]["flow_steps"]["test_flow_with_punctuation!_welcome_step"]
+        step = project_data["resources"]["flow_steps"][
+            "FLOW_CONFIG-test_flow_with_punctuation_welcome_step"
+        ]
         step["extracted_entities"] = list(reversed(step["extracted_entities"]))
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         diffs = project.get_diffs()
@@ -1112,7 +1148,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
 
         # Pre-push: dummy step and flow config switch to dummy
         self.assertIn(FlowStep, pre_push_new)
-        dummy_id = "Test Flow_step-1_temp"
+        dummy_id = "flow-123_step-1_temp"
         self.assertIn(dummy_id, pre_push_new[FlowStep])
         dummy = pre_push_new[FlowStep][dummy_id]
         self.assertEqual(dummy.step_id, "step-1_temp")
@@ -1154,7 +1190,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="step-1",
         )
         old_start_step = FlowStep(
-            resource_id="Test Flow_step-1",
+            resource_id="flow-123_step-1",
             step_id="step-1",
             name="Start Step",
             flow_id="flow-123",
@@ -1166,7 +1202,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             extracted_entities=[],
         )
         new_start_step = FlowStep(
-            resource_id="Test Flow_step-2",
+            resource_id="flow-123_step-2",
             step_id="step-2",
             name="Other Step",
             flow_id="flow-123",
@@ -1184,12 +1220,12 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="step-2",
         )
 
-        self.project.resources.setdefault(FlowStep, {})["Test Flow_step-1"] = old_start_step
+        self.project.resources.setdefault(FlowStep, {})["flow-123_step-1"] = old_start_step
         self.project.resources.setdefault(FlowConfig, {})["flow-123"] = flow_config
 
-        new_resources = {FlowStep: {"Test Flow_step-2": new_start_step}}
+        new_resources = {FlowStep: {"flow-123_step-2": new_start_step}}
         updated_resources = {FlowConfig: {"flow-123": updated_flow_config}}
-        deleted_resources = {FlowStep: {"Test Flow_step-1": old_start_step}}
+        deleted_resources = {FlowStep: {"flow-123_step-1": old_start_step}}
 
         push_changes = self.project._clean_resources_before_push(
             {},
@@ -1203,12 +1239,12 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         post_push_deleted = push_changes.post.deleted
 
         # Old step should be moved to post-push deleted (not in main push deleted)
-        self.assertNotIn("Test Flow_step-1", cleaned_deleted.get(FlowStep, {}))
+        self.assertNotIn("flow-123_step-1", cleaned_deleted.get(FlowStep, {}))
         self.assertIn(FlowStep, post_push_deleted)
-        self.assertIn("Test Flow_step-1", post_push_deleted[FlowStep])
+        self.assertIn("flow-123_step-1", post_push_deleted[FlowStep])
 
         # New step in new, flow config in updated
-        self.assertIn("Test Flow_step-2", cleaned_new[FlowStep])
+        self.assertIn("flow-123_step-2", cleaned_new[FlowStep])
         self.assertIn(FlowConfig, cleaned_updated)
         self.assertEqual(cleaned_updated[FlowConfig]["flow-123"].start_step, "step-2")
 
@@ -1229,7 +1265,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         )
         # Old step from branch - different step_id (e.g. from UUID before sync)
         old_start_step = FlowStep(
-            resource_id="Test Flow_step-abc123",
+            resource_id="flow-123_step-abc123",
             step_id="step-abc123",
             name="Start Step",
             flow_id="flow-123",
@@ -1242,7 +1278,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         )
         # New step from main - same name, step_id from file
         new_start_step = FlowStep(
-            resource_id="Test Flow_step-1",
+            resource_id="flow-123_step-1",
             step_id="step-1",
             name="Start Step",
             flow_id="flow-123",
@@ -1260,12 +1296,12 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="step-1",
         )
 
-        self.project.resources.setdefault(FlowStep, {})["Test Flow_step-abc123"] = old_start_step
+        self.project.resources.setdefault(FlowStep, {})["flow-123_step-abc123"] = old_start_step
         self.project.resources.setdefault(FlowConfig, {})["flow-123"] = flow_config
 
-        new_resources = {FlowStep: {"Test Flow_step-1": new_start_step}}
+        new_resources = {FlowStep: {"flow-123_step-1": new_start_step}}
         updated_resources = {FlowConfig: {"flow-123": updated_flow_config}}
-        deleted_resources = {FlowStep: {"Test Flow_step-abc123": old_start_step}}
+        deleted_resources = {FlowStep: {"flow-123_step-abc123": old_start_step}}
 
         push_changes = self.project._clean_resources_before_push(
             {},
@@ -1282,7 +1318,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
 
         # Pre-push: dummy step and flow config switch to dummy
         self.assertIn(FlowStep, pre_push_new)
-        dummy_id = "Test Flow_step-abc123_temp"
+        dummy_id = "flow-123_step-abc123_temp"
         self.assertIn(dummy_id, pre_push_new[FlowStep])
         dummy = pre_push_new[FlowStep][dummy_id]
         self.assertEqual(dummy.step_id, "step-abc123_temp")
@@ -1295,8 +1331,8 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         self.assertIn(dummy_id, post_push_deleted[FlowStep])
 
         # Main push: old in deleted, new in new, flow config in updated
-        self.assertIn("Test Flow_step-abc123", cleaned_deleted[FlowStep])
-        self.assertIn("Test Flow_step-1", cleaned_new[FlowStep])
+        self.assertIn("flow-123_step-abc123", cleaned_deleted[FlowStep])
+        self.assertIn("flow-123_step-1", cleaned_new[FlowStep])
         self.assertIn(FlowConfig, cleaned_updated)
         self.assertEqual(cleaned_updated[FlowConfig]["flow-123"].start_step, "step-1")
 
@@ -1311,7 +1347,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="func_step",
         )
         old_function_step = FunctionStep(
-            resource_id="Test Flow_func_step",
+            resource_id="flow-123_func_step",
             step_id="func_step",
             name="Func Start",
             flow_id="flow-123",
@@ -1321,7 +1357,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             function_id="FUNC-123",
         )
         new_flow_step = FlowStep(
-            resource_id="Test Flow_step-2",
+            resource_id="flow-123_step-2",
             step_id="step-2",
             name="New Start",
             flow_id="flow-123",
@@ -1339,14 +1375,14 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="step-2",
         )
 
-        self.project.resources.setdefault(FunctionStep, {})["Test Flow_func_step"] = (
+        self.project.resources.setdefault(FunctionStep, {})["flow-123_func_step"] = (
             old_function_step
         )
         self.project.resources.setdefault(FlowConfig, {})["flow-123"] = flow_config
 
-        new_resources = {FlowStep: {"Test Flow_step-2": new_flow_step}}
+        new_resources = {FlowStep: {"flow-123_step-2": new_flow_step}}
         updated_resources = {FlowConfig: {"flow-123": updated_flow_config}}
-        deleted_resources = {FunctionStep: {"Test Flow_func_step": old_function_step}}
+        deleted_resources = {FunctionStep: {"flow-123_func_step": old_function_step}}
 
         push_changes = self.project._clean_resources_before_push(
             {},
@@ -1358,9 +1394,9 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         post_push_deleted = push_changes.post.deleted
 
         # Old FunctionStep should be in post-push deleted
-        self.assertNotIn("Test Flow_func_step", cleaned_deleted.get(FunctionStep, {}))
+        self.assertNotIn("flow-123_func_step", cleaned_deleted.get(FunctionStep, {}))
         self.assertIn(FunctionStep, post_push_deleted)
-        self.assertIn("Test Flow_func_step", post_push_deleted[FunctionStep])
+        self.assertIn("flow-123_func_step", post_push_deleted[FunctionStep])
 
     def test_clean_resources_before_push_function_step_same_name_uses_dummy(
         self,
@@ -1378,7 +1414,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="func_step_old",
         )
         old_function_step = FunctionStep(
-            resource_id="Test Flow_func_step_old",
+            resource_id="flow-123_func_step_old",
             step_id="func_step_old",
             name="Func Start",
             flow_id="flow-123",
@@ -1388,7 +1424,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             function_id="FUNC-123",
         )
         new_function_step = FunctionStep(
-            resource_id="Test Flow_func_step",
+            resource_id="flow-123_func_step",
             step_id="func_step",
             name="Func Start",
             flow_id="flow-123",
@@ -1404,14 +1440,14 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="func_step",
         )
 
-        self.project.resources.setdefault(FunctionStep, {})["Test Flow_func_step_old"] = (
+        self.project.resources.setdefault(FunctionStep, {})["flow-123_func_step_old"] = (
             old_function_step
         )
         self.project.resources.setdefault(FlowConfig, {})["flow-123"] = flow_config
 
-        new_resources = {FunctionStep: {"Test Flow_func_step": new_function_step}}
+        new_resources = {FunctionStep: {"flow-123_func_step": new_function_step}}
         updated_resources = {FlowConfig: {"flow-123": updated_flow_config}}
-        deleted_resources = {FunctionStep: {"Test Flow_func_step_old": old_function_step}}
+        deleted_resources = {FunctionStep: {"flow-123_func_step_old": old_function_step}}
 
         push_changes = self.project._clean_resources_before_push(
             {},
@@ -1427,16 +1463,16 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
 
         # Pre-push: dummy step (uses old step_id for dummy)
         self.assertIn(FlowStep, pre_push_new)
-        self.assertIn("Test Flow_func_step_old_temp", pre_push_new[FlowStep])
+        self.assertIn("flow-123_func_step_old_temp", pre_push_new[FlowStep])
         self.assertIn(FlowConfig, pre_push_updated)
 
         # Post-push: delete dummy
         self.assertIn(FlowStep, post_push_deleted)
-        self.assertIn("Test Flow_func_step_old_temp", post_push_deleted[FlowStep])
+        self.assertIn("flow-123_func_step_old_temp", post_push_deleted[FlowStep])
 
         # Main push: old in deleted, new in new
-        self.assertIn("Test Flow_func_step_old", cleaned_deleted[FunctionStep])
-        self.assertIn("Test Flow_func_step", cleaned_new[FunctionStep])
+        self.assertIn("flow-123_func_step_old", cleaned_deleted[FunctionStep])
+        self.assertIn("flow-123_func_step", cleaned_new[FunctionStep])
 
     def test_clean_resources_before_push_new_flow_function_step_as_start_fixes_with_dummy(
         self,
@@ -1455,7 +1491,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="entry_func",
         )
         function_start_step = FunctionStep(
-            resource_id="New Flow_entry_func",
+            resource_id="flow-new-func-start_entry_func",
             step_id="entry_func",
             name="Entry",
             flow_id=flow_config_id,
@@ -1467,7 +1503,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
 
         new_resources = {
             FlowConfig: {flow_config_id: flow_config},
-            FunctionStep: {"New Flow_entry_func": function_start_step},
+            FunctionStep: {"flow-new-func-start_entry_func": function_start_step},
         }
         push_changes = self.project._clean_resources_before_push(
             {},
@@ -1497,7 +1533,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
 
         # Dummy step is scheduled for post-push deletion
         self.assertIn(FlowStep, post_deleted)
-        self.assertIn("New Flow_entry_func_start_step_temp", post_deleted[FlowStep])
+        self.assertIn("flow-new-func-start_entry_func_start_step_temp", post_deleted[FlowStep])
 
     def test_clean_resources_before_push_orphaned_variable_delete_and_recreate(self):
         """When all functions referencing a variable are deleted, variable is delete+recreated."""
@@ -2041,7 +2077,7 @@ class PushProjectTest(unittest.TestCase):
 
     def test_push_project_modified_sub_resources_dtmf(self):
         project_data = deepcopy(PROJECT_DATA)
-        project_data["resources"]["flow_steps"]["test_flow_start_step"]["dtmf_config"][
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["dtmf_config"][
             "is_enabled"
         ] = True
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
@@ -2057,7 +2093,9 @@ class PushProjectTest(unittest.TestCase):
     def test_push_project_new_sub_resources_condition(self):
         project_data = deepcopy(PROJECT_DATA)
         # Delete condition in project_data to mimic new condition locally
-        project_data["resources"]["flow_steps"]["test_flow_collect_name"]["conditions"] = []
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_collect_name"][
+            "conditions"
+        ] = []
 
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
@@ -2074,7 +2112,9 @@ class PushProjectTest(unittest.TestCase):
     def test_push_project_deleted_sub_resource_condition(self):
         project_data = deepcopy(PROJECT_DATA)
         # Mimic deleting a condition locally by adding to project data
-        project_data["resources"]["flow_steps"]["test_flow_collect_name"]["conditions"].append(
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_collect_name"][
+            "conditions"
+        ].append(
             {
                 "name": "delete_condition",
                 "description": "A condition to be deleted",
@@ -2104,7 +2144,7 @@ class PushProjectTest(unittest.TestCase):
         """Test pushing an updated ASRBiasing sub-resource"""
         project_data = deepcopy(PROJECT_DATA)
         # Modify ASR biasing in project_data
-        project_data["resources"]["flow_steps"]["test_flow_start_step"]["asr_biasing"][
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["asr_biasing"][
             "custom_keywords"
         ] = ["NewKeyword1", "NewKeyword2"]
 
@@ -2135,7 +2175,7 @@ class PushProjectTest(unittest.TestCase):
             "function_type": "global",
         }
         # Modified resource in subresource
-        project_data["resources"]["flow_steps"]["test_flow_start_step"]["asr_biasing"][
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["asr_biasing"][
             "is_enabled"
         ] = False
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
@@ -3550,6 +3590,81 @@ class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
             [],
             "Should not delete files for resource types in _not_loaded_resources",
         )
+
+class MigrateFlowStepResourceIdsTest(unittest.TestCase):
+    """Tests for migrate_flow_step_resource_ids status dict migration."""
+
+    def test_rekeys_flow_steps_from_flow_name_to_flow_id(self):
+        """Old-format keys are re-keyed using flow_id."""
+        from poly.migration_utils import migrate_flow_step_resource_ids
+
+        status_dict = {
+            "resources": {
+                "flow_steps": {
+                    "SMS Flow_step-1": {
+                        "resource_id": "SMS Flow_step-1",
+                        "flow_name": "SMS Flow",
+                        "flow_id": "FLOW-abc",
+                    },
+                },
+                "function_steps": {
+                    "SMS Flow_func-1": {
+                        "resource_id": "SMS Flow_func-1",
+                        "flow_name": "SMS Flow",
+                        "flow_id": "FLOW-abc",
+                    },
+                },
+            },
+            "file_structure_info": {
+                "flows/sms_flow/steps/step_1.yaml": {
+                    "resource_id": "SMS Flow_step-1",
+                },
+                "flows/sms_flow/function_steps/func_1.py": {
+                    "resource_id": "SMS Flow_func-1",
+                },
+            },
+        }
+
+        migrate_flow_step_resource_ids(status_dict)
+
+        flow_steps = status_dict["resources"]["flow_steps"]
+        self.assertNotIn("SMS Flow_step-1", flow_steps)
+        self.assertIn("FLOW-abc_step-1", flow_steps)
+        self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
+
+        func_steps = status_dict["resources"]["function_steps"]
+        self.assertNotIn("SMS Flow_func-1", func_steps)
+        self.assertIn("FLOW-abc_func-1", func_steps)
+        self.assertEqual(func_steps["FLOW-abc_func-1"]["resource_id"], "FLOW-abc_func-1")
+
+        fsi = status_dict["file_structure_info"]
+        self.assertEqual(fsi["flows/sms_flow/steps/step_1.yaml"]["resource_id"], "FLOW-abc_step-1")
+        self.assertEqual(
+            fsi["flows/sms_flow/function_steps/func_1.py"]["resource_id"], "FLOW-abc_func-1"
+        )
+
+    def test_already_migrated_entries_are_unchanged(self):
+        """Entries whose key doesn't start with flow_name_ are left as-is."""
+        from poly.migration_utils import migrate_flow_step_resource_ids
+
+        status_dict = {
+            "resources": {
+                "flow_steps": {
+                    "FLOW-abc_step-1": {
+                        "resource_id": "FLOW-abc_step-1",
+                        "flow_name": "SMS Flow",
+                        "flow_id": "FLOW-abc",
+                    },
+                },
+            },
+            "file_structure_info": {},
+        }
+
+        migrate_flow_step_resource_ids(status_dict)
+
+        flow_steps = status_dict["resources"]["flow_steps"]
+        self.assertIn("FLOW-abc_step-1", flow_steps)
+        self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
 
 
 if __name__ == "__main__":

@@ -124,7 +124,7 @@ class Handoff(MultiResourceYamlResource):
     ) -> "Handoff":
         return cls(
             resource_id=resource_id,
-            name=name,
+            name=yaml_dict.get("name") or name,
             description=yaml_dict.get("description", ""),
             is_default=yaml_dict.get("is_default", False),
             sip_config=yaml_dict.get("sip_config", {}),
