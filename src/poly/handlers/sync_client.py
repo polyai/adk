@@ -532,7 +532,7 @@ class SyncClientHandler:
             )
 
             for step_id, step in flow_data.get("steps", {}).get("entities", {}).items():
-                local_resource_id = f"{flow_data['name']}_{step_id}"
+                local_resource_id = f"{flow_id}_{step_id}"
 
                 if step.get("type") == "function_step":
                     function = step.get("function", {})

@@ -18,6 +18,7 @@ class MigrationFlag(Enum):
     """
 
     MIGRATED_LEGACY_TOPIC_FILES = "migrated_legacy_topic_files"
+    MIGRATED_FLOW_STEP_RESOURCE_IDS = "migrated_flow_step_resource_ids"
 
 
 def load_migration_flags(flags: list[str]) -> set[MigrationFlag]:
@@ -43,13 +44,19 @@ def get_all_migration_flags() -> set[MigrationFlag]:
     return set(flag for flag in MigrationFlag)
 
 
-def run_migrations(root_path: str, applied_migrations: set[MigrationFlag]) -> set[MigrationFlag]:
+def run_migrations(
+    root_path: str,
+    applied_migrations: set[MigrationFlag],
+    status_dict: dict | None = None,
+) -> set[MigrationFlag]:
     """Run necessary migrations based on the current state of the project and
     which migrations have already been applied.
 
     Args:
         root_path: The root path of the project.
         applied_migrations: A set of MigrationFlag indicating which migrations have already been applied.
+        status_dict: The raw status dict. Required for dict-level migrations
+            that re-key entries before resources are loaded.
 
     Returns:
         A new set of MigrationFlag indicating which migrations have been applied after running this function.
@@ -59,7 +66,50 @@ def run_migrations(root_path: str, applied_migrations: set[MigrationFlag]) -> se
         migrate_legacy_topic_files(root_path)
         new_flags.add(MigrationFlag.MIGRATED_LEGACY_TOPIC_FILES)
 
+    if (
+        MigrationFlag.MIGRATED_FLOW_STEP_RESOURCE_IDS not in applied_migrations
+        and status_dict is not None
+    ):
+        migrate_flow_step_resource_ids(status_dict)
+        new_flags.add(MigrationFlag.MIGRATED_FLOW_STEP_RESOURCE_IDS)
+
     return new_flags
+
+
+def migrate_flow_step_resource_ids(status_dict: dict) -> None:
+    """Re-key flow step resource IDs from {flow_name}_{step_id} to {flow_id}_{step_id}."""
+    resources = status_dict.get("resources", {})
+    file_structure_info = status_dict.get("file_structure_info", {})
+
+    for resource_key in ("flow_steps", "function_steps"):
+        entries = resources.get(resource_key)
+        if not entries:
+            continue
+
+        rekeyed = {}
+        for old_id, resource_dict in entries.items():
+            flow_name = resource_dict.get("flow_name")
+            flow_id = resource_dict.get("flow_id")
+            if not flow_name or not flow_id:
+                rekeyed[old_id] = resource_dict
+                continue
+
+            step_id = old_id.removeprefix(f"{flow_name}_")
+            if step_id == old_id:
+                # Prefix didn't match — may already be migrated or have a different format
+                rekeyed[old_id] = resource_dict
+                continue
+
+            new_id = f"{flow_id}_{step_id}"
+            resource_dict["resource_id"] = new_id
+            rekeyed[new_id] = resource_dict
+
+            # Update file_structure_info entries that reference the old resource_id
+            for file_info in file_structure_info.values():
+                if file_info.get("resource_id") == old_id:
+                    file_info["resource_id"] = new_id
+
+        resources[resource_key] = rekeyed
 
 
 def migrate_legacy_topic_files(root_path: str) -> None:
