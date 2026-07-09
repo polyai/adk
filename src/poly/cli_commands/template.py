@@ -125,7 +125,7 @@ class TemplateCommand(BaseCommand):
         """Resolve a region for template commands when none is provided.
 
         Tries --region flag first, then the current project, then defaults to
-        "studio" (templates are the same across all regions).
+        "studio"
         """
         if region:
             return region
