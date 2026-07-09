@@ -24,6 +24,7 @@ from poly.resources import (
     ChatStylePrompt,
     Condition,
     DefaultLanguage,
+    Document,
     DTMFConfig,
     Entity,
     ExperimentalConfig,
@@ -62,7 +63,6 @@ from poly.resources import (
     VoiceGreeting,
     VoiceSafetyFilters,
     VoiceStylePrompt,
-    Document,
 )
 
 logger = logging.getLogger(__name__)

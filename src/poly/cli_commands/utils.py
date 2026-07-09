@@ -4,7 +4,7 @@ Copyright PolyAI Limited
 """
 
 import os
-from argparse import Namespace, _SubParsersAction, ArgumentParser, RawTextHelpFormatter
+from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from typing import Optional
 
 import argcomplete

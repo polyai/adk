@@ -34,6 +34,7 @@ from poly.resources.channel_settings import (
     VoiceGreeting,
     VoiceStylePrompt,
 )
+from poly.resources.documents import Document
 from poly.resources.entities import Entity, EntityType
 from poly.resources.experimental_config import ExperimentalConfig
 from poly.resources.flows import (
@@ -86,7 +87,6 @@ from poly.resources.topic import (
 )
 from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
 from poly.resources.translations import Translation
-from poly.resources.documents import Document
 from poly.resources.variable import Variable
 from poly.resources.variant_attributes import Variant, VariantAttribute
 from poly.tests.testing_utils import mock_read_from_file, mock_variant_attributes_file
