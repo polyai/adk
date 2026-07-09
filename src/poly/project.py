@@ -512,7 +512,7 @@ class AgentStudioProject:
         self._delete_new_resources()
 
         self._update_pulled_resources(
-            original_resources={},
+            original_resources=self.resources,
             incoming_resources=template_resources,
             force=True,
         )
@@ -641,20 +641,24 @@ class AgentStudioProject:
         flow_folder = os.path.join(self.root_path, "flows")
         self._delete_empty_folders(flow_folder)
 
-    def _delete_new_resources(self) -> None:
+    def _delete_new_resources(self) -> list[str]:
         """Delete locally-new resources that don't exist on the remote."""
         new_resources, _, _ = self.find_new_kept_deleted(self.discover_local_resources())
         pronunciations = []
+        deleted_file_paths = []
         for resource_mapping in new_resources:
             # Pronunciation uses position as a "name" — deleting out of order
             # effectively "changes" the name, causing some resources not to be deleted.
+            resource_mapping.resource_type.delete_resource(resource_mapping.file_path)
             if resource_mapping.resource_type == Pronunciation:
                 pronunciations.append(resource_mapping.file_path)
             else:
-                resource_mapping.resource_type.delete_resource(resource_mapping.file_path)
+                deleted_file_paths.append(resource_mapping.file_path)
 
         for file_path in self._sort_paths_for_reverse_deletion(pronunciations, Pronunciation):
             Pronunciation.delete_resource(file_path)
+
+        return deleted_file_paths
 
     @staticmethod
     def _delete_empty_folders(folder_path: str) -> None:
@@ -1822,6 +1826,8 @@ class AgentStudioProject:
 
             resource.save(self.root_path, resource_mappings=resource_mappings)
             reverted_files.append(resource.get_path(self.root_path))
+
+        self._delete_new_resources()
 
         return reverted_files
 
