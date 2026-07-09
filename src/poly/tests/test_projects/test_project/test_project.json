@@ -1209,6 +1209,14 @@
         "resource_id": "fr-FR",
         "name": "fr-FR"
       }
+    },
+    "documents": {
+      "test_document.md": {
+        "resource_id": "test_document.md",
+        "name": "test_document",
+        "path": "test_document.md",
+        "contents": "This is a test document.\nIt has multiple lines.\n"
+      }
     }
   },
   "file_structure_info": {},

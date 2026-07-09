@@ -1,6 +1,533 @@
 # CHANGELOG
 
 
+## v0.34.1 (2026-07-09)
+
+### Bug Fixes
+
+- Delete local resources when entire type is absent from incoming on pull
+  ([#219](https://github.com/polyai/adk/pull/219),
+  [`a3857b0`](https://github.com/polyai/adk/commit/a3857b033e1db9140a51f4dcf63e24d08b126b60))
+
+## Summary
+
+When pulling, resource types present locally but entirely absent from `incoming_resources` were
+  silently kept on disk. This fixes that by deleting local files for absent types after the main
+  pull loop.
+
+## Motivation
+
+If all resources of a given type (e.g. SMS templates) are deleted remotely,
+  `_update_pulled_resources` only iterated types present in `incoming_resources` — so the local
+  files for that type survived the pull.
+
+## Changes
+
+- Added cleanup loop in `_update_pulled_resources` for non-multi resource types absent from incoming
+  - Added cleanup loop in `_update_multi_resource_yaml_resources` for multi-resource types absent
+  from incoming, using `_sort_paths_for_reverse_deletion` and `save_to_cache=True` - Both loops skip
+  `_not_loaded_resources` types to avoid spurious deletions
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.34.0 (2026-07-08)
+
+### Features
+
+- Allow validating experimental config against custom schema
+  ([#217](https://github.com/polyai/adk/pull/217),
+  [`d1033e2`](https://github.com/polyai/adk/commit/d1033e265ca8a37ee1826f5798bcd75a89d76913))
+
+## Summary
+
+Allow overriding the experimental config validation schema via the
+  `ADK_EXPERIMENTAL_CONFIG_SCHEMA_PATH` environment variable, falling back to the bundled schema.
+
+## Motivation
+
+The bundled `experimental_config_schema.yaml` may not always match the schema expected by a given
+  Agent Studio environment. This lets users point validation at a custom schema file without
+  modifying the package.
+
+## Changes
+
+- Read `ADK_EXPERIMENTAL_CONFIG_SCHEMA_PATH` env var in `ExperimentalConfig.validate()`; fall back
+  to the bundled schema when unset - Use a context manager (`with open(...)`) for the schema file
+  handle
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
+## v0.33.1 (2026-07-08)
+
+### Bug Fixes
+
+- Bump experimental config schema with Soniox ASR ([#218](https://github.com/polyai/adk/pull/218),
+  [`bebbbfe`](https://github.com/polyai/adk/commit/bebbbfe5928ee6611f3f7ae6510c3a99d8b206c5))
+
+## Summary
+
+Adds `soniox` as a supported ASR provider in the experimental config schema.
+
+## Motivation
+
+The Soniox speech recognition provider (poly_core #43628) needs to be a valid option in the
+  experimental config schema so projects using it pass validation. Agent Studio already accepts
+  `soniox` in published configs, so the reverse-synced `experimental_config.json` currently fails
+  ADK validation in agent-deployments CI (e.g. PolyAI-LDN/agent-deployments#8033) until the config
+  is manually stripped.
+
+## Changes
+
+- Added `soniox` to the ASR provider enum list - Added `soniox: Soniox cloud speech recognition` to
+  the provider description enum - Added `soniox: "stt-rt-v5"` to the model documentation
+
+## Test strategy
+
+- [x] Validated the real reverse-synced Corilus `experimental_config.json` (soniox language
+  overrides) against the updated schema with `jsonschema.Draft202012Validator`; unknown providers
+  are still rejected - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Moaed Yahia <moaedpoly@gmail.com>
+
+
+## v0.33.0 (2026-07-08)
+
+### Features
+
+- Add Document resource type ([#211](https://github.com/polyai/adk/pull/211),
+  [`ebb646d`](https://github.com/polyai/adk/commit/ebb646d2ed50e12cad37ff877b24dd510cf01320))
+
+## Summary
+
+Adds support for Document resources — context files stored as Markdown in `context/` that provide
+  background knowledge to the agent via Studio Assistant.
+
+## Motivation
+
+Documents are a new resource type on Agent Studio. This PR adds full ADK support: pull, push, diff,
+  status, and discovery.
+
+## Changes
+
+- New `Document` resource class in `src/poly/resources/documents.py` - Register in
+  `RESOURCE_NAME_TO_CLASS` and `__init__.py` - Read documents from projection in `SyncClientHandler`
+  - Fix: use document path as resource ID (matches server) instead of generated UUID - Add `poly
+  docs context` documentation page - Improve `poly docs` listing in `docs.md` to show actual command
+  names - Add tests in `resources_test.py` and `project_test.py` - Add test fixture
+  (`context/test_document.md` + JSON entry)
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
+## v0.32.1 (2026-07-06)
+
+### Bug Fixes
+
+- Prevent shell injection from release body in Slack notification workflow
+  ([#212](https://github.com/polyai/adk/pull/212),
+  [`336f4ff`](https://github.com/polyai/adk/commit/336f4ff09f1a05349bccd165318d6b618be4cd81))
+
+## Summary
+
+Moves `${{ }}` GitHub Actions expressions out of inline bash `run:` blocks and into `env:` variables
+  to prevent the release body from being interpreted as shell commands.
+
+## Motivation
+
+The v0.32.0 release triggered ~20 bash parse errors in the Slack notification workflow because the
+  release body contained backticks, parentheses, and angle brackets that bash interpreted as command
+  substitutions, subshells, and redirections.
+
+## Changes
+
+- Move `github.event.release.body`, `github.event.release.tag_name`,
+  `github.event.release.html_url`, `inputs.tag`, and repo URL expressions into `env:` block
+  variables - Reference them as `${ENV_VAR}` in the script instead of inline `${{ }}` interpolation
+
+## Test strategy
+
+- [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Refactoring
+
+- Split CLI into per-command-family modules ([#209](https://github.com/polyai/adk/pull/209),
+  [`832d294`](https://github.com/polyai/adk/commit/832d29440c3936234880904d65d02ba8323a51a0))
+
+## Summary
+
+Splits the monolithic `cli.py` (~5,760 lines) into a `cli_commands/` package with one module per
+  command family, each implementing a `BaseCommand` contract (`add_arguments` + `run`).
+
+## Motivation
+
+`cli.py` had grown to nearly 6K lines with ~60 command handlers in a single class, making it hard to
+  navigate, review, and maintain. The split gives each command family its own file with clear
+  boundaries.
+
+## Changes
+
+- **New `cli_commands/` package** with 12 modules: - `base.py` — `BaseCommand` ABC + `Parents`
+  dataclass - `shared.py` — generic utilities (`load_project`, `read_project_config`,
+  `compute_diff`, `parse_from_projection_json`, `format_gist_choice`) - `sync.py` — Pull, Push,
+  Status, Revert, Diff, Format, Validate commands - `branch.py` — Branch
+  list/create/switch/current/delete/merge + merge helpers - `deployments.py` — Deployments
+  list/show/promote/rollback + nested AB-test commands - `project.py` — Project
+  list/create/delete/duplicate, Init, Studio commands - `auth.py` — Start, Login commands -
+  `chat.py` — Chat command + chat loop helpers - `conversations.py` — Conversations
+  list/get/get-audio - `review.py` — Review create/list/delete (GitHub Gist) - `testing.py` — Test
+  run/show/list - `utils.py` — Docs, Completion commands - **`cli.py` reduced to ~130 lines** —
+  orchestrator with `COMMANDS` list, parser construction, and dispatch - **Tests updated** — all
+  patch targets point at the actual command modules (~275 sites across 3 test files) -
+  **De-duplicated** `_resolve_included_deployments` (was defined twice identically)
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+All 766 tests pass. `poly --help` shows all 20 commands with identical parser trees. Nested
+  subcommands (`branch`, `deployments ab-test`, `project`, `review`, `test`) verified via `--help`.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+## v0.32.0 (2026-07-03)
+
+### Features
+
+- Expose projection-to-projection diffing (diff_projections)
+  ([#210](https://github.com/polyai/adk/pull/210),
+  [`e174d95`](https://github.com/polyai/adk/commit/e174d9555acb7124a49518bdca88e63c84745d3e))
+
+## Summary
+
+Adds `diff_projections(before_projection, after_projection)` — semantic per-file diffing of two
+  sourcerer projections with no API calls — by extracting the diff core of
+  `diff_remote_named_versions` into a reusable `diff_resource_maps`.
+
+## Motivation
+
+The deployed adk_service (poly_core) is stateless: callers (Glot) fetch projections from sourcerer
+  with their own session auth and post them in the request body. To give Glot a branch-vs-main
+  `branch_diff` tool with the same semantic, pretty-rendered diffs as `poly diff --before main
+  --after <branch>`, adk_service needs a `/diff` endpoint following the `/pull`/`/push` pattern
+  (PolyAI-LDN/poly_core#43520) — which needs this projection-based entry point.
+
+## Changes
+
+- `Project.diff_resource_maps(before, after)` — the by-path map building, combined resource
+  mappings, `to_pretty` rendering and per-file `get_diff` previously inlined in
+  `diff_remote_named_versions`. - `Project.diff_projections(before_projection, after_projection)` —
+  builds both resource maps via `SyncClientHandler.load_resources_from_projection` and delegates to
+  `diff_resource_maps`. Empty projections are valid. - `diff_remote_named_versions` delegates to the
+  extracted core; behavior unchanged (same fetch, same error handling, same no-differences logging).
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New `DiffProjectionsTest` covers modified / added+deleted / identical / empty-projection cases. Also
+  verified end-to-end: installed this branch into a local adk_service and curled the new `/diff`
+  endpoint — correct unified diffs for modified + added resources.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+``` $ curl -s -X POST localhost:8199/diff -d '{"before_projection": …, "after_projection": …}' {
+  "diffs": { "topics/opening_hours.yaml": "--- original\n+++ updated\n@@ -1,5 +1,5 @@\n name:
+  Opening Hours\n ...\n-content: We open at 9am\n+content: We open at 8am\n ...",
+  "topics/refunds.yaml": "--- original\n+++ updated\n@@ -0,0 +1,5 @@\n+name: Refunds\n+..." } } ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+
+## v0.31.3 (2026-07-02)
+
+### Bug Fixes
+
+- Exclude deleted attributes from new variant create commands
+  ([#205](https://github.com/polyai/adk/pull/205),
+  [`7b965d3`](https://github.com/polyai/adk/commit/7b965d30e6ae43c201cf3d68b08b5e82c3eec8b6))
+
+## Summary
+
+When creating a new variant in the same push as deleting an attribute, the variant's create proto
+  incorrectly included the deleted attribute ID with an empty value, causing the server to reject
+  the batch.
+
+## Motivation
+
+`poly push` fails with `ZodValidationError: All attributes must have a value at "attributeValues"`
+  when a variant is created in the same batch as an attribute deletion. The `variant_create_variant`
+  command references the attribute being deleted because `attribute_ids` was populated from the full
+  current state without filtering out deleted attributes.
+
+## Changes
+
+- Filter deleted attribute IDs from `attribute_ids` when building new variant create protos in
+  `_clean_resources_before_push` - Add test covering the scenario
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly push`)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Before fix: ``` ERROR:poly.handlers.sync_client:Failed to send commands: Error: {'name':
+  'ZodValidationError', 'message': '[command 2: variantCreateVariant "Variant 1"
+  (VARIANTS-ac00f938)] Validation error: All attributes must have a value at "attributeValues"',
+  'details': [{'code': 'custom', 'message': 'All attributes must have a value', 'path':
+  ['attributeValues']}]} ```
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.31.2 (2026-07-02)
+
+### Bug Fixes
+
+- Add missing X-Poly-Source header to send_command_batch
+  ([#208](https://github.com/polyai/adk/pull/208),
+  [`0e44d04`](https://github.com/polyai/adk/commit/0e44d04f777315d755e08b1a8be458b6603f5791))
+
+## Summary - `send_command_batch` builds its own headers dict for the protobuf POST request but was
+  missing the `X-Poly-Source: adk` header that every other request includes via the default session
+  headers (line 60 of `sdk.py`). - Adds the missing header to the dict at `sdk.py:567`.
+
+## Test plan - [x] Run `uv run pytest src/poly/tests/ -v` to confirm no regressions
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.31.1 (2026-07-02)
+
+### Bug Fixes
+
+- Allow clearing variant_id on test case update ([#207](https://github.com/polyai/adk/pull/207),
+  [`d27cb34`](https://github.com/polyai/adk/commit/d27cb34441945e3efc9ba62520d01561dd783b7e))
+
+## Summary
+
+Send empty string instead of omitting `variant_id` in the `Update_TestCase` proto when the variant
+  is removed, so the platform can detect the field is being cleared.
+
+## Motivation
+
+When a user removes a variant from a test case and pushes, the `variant_id` field was omitted from
+  the protobuf update command (proto3 optional fields with `None` are not serialized). The platform
+  therefore didn't know to clear the variant, leaving stale data.
+
+## Changes
+
+- Changed `variant_id=self.variant` to `variant_id=self.variant or ""` in
+  `TestCase.build_update_proto()` so the field is always present in the serialized proto
+
+> **Note:** This requires a corresponding platform-side change to accept empty string for
+  `variantId` in the `updateTestCase` Zod validation. Without that, the platform will reject the
+  command with a min-length validation error.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Before (variant_id absent from command): ``` update_test_case { id: "TEST_CASES-d1a4ef69"
+
+name: "Greeting Test"
+
+scenario: "Hello, what can you help me with?"
+
+language: "en-US"
+
+channel: "chat.polyai" } ```
+
+After (variant_id explicitly set to empty): ``` update_test_case { id: "TEST_CASES-d1a4ef69"
+
+variant_id: ""
+
+### Continuous Integration
+
+- Add Slack release notification workflow ([#206](https://github.com/polyai/adk/pull/206),
+  [`1252967`](https://github.com/polyai/adk/commit/12529677502585bb1ff7d260a100b798ad55fb4c))
+
+## Summary
+
+Adds a GitHub Actions workflow that posts a formatted Slack notification on every ADK release, with
+  a Claude-generated summary.
+
+## Motivation
+
+Automate release announcements so the team gets notified in Slack whenever a new version is
+  published, without manual effort.
+
+## Changes
+
+- New workflow `.github/workflows/slack-release-notification.yaml` - Triggers on `release:
+  published` (fired by existing semantic-release workflow) - Collects PRs between previous and
+  current tag - Extracts feat title from conventional commit messages - Calls Claude (Sonnet) to
+  generate a 2-3 sentence summary from the release body - Posts formatted Slack message with title,
+  summary, PR list, and release link - Includes `workflow_dispatch` trigger for testing against
+  existing tags
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+### To test
+
+1. Add `SLACK_WEBHOOK_URL` secret pointing at a test channel 2. Run: `gh workflow run
+  slack-release-notification.yaml -f tag=v0.31.0`
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
+## v0.31.0 (2026-07-01)
+
+### Features
+
+- Add CLI test commands (run, list, show) ([#202](https://github.com/polyai/adk/pull/202),
+  [`3c3e6ec`](https://github.com/polyai/adk/commit/3c3e6ec06b4ad6d150b29738d74d6a51303438ad))
+
+## Summary
+
+Adds a complete testing workflow to the CLI: trigger tests, watch results live, list past runs, and
+  inspect failures — all without leaving the terminal.
+
+## Motivation
+
+Running tests previously required switching to Agent Studio to see results. This brings the full
+  test lifecycle into the CLI: trigger, poll, list, and review results.
+
+## Changes
+
+- **`poly test run`**: trigger tests with live polling UI (every 5s), adaptive display (full table
+  for ≤20 tests, compact rolling view for >20), `--dry-run` to preview, `--dont-poll` to trigger and
+  exit, `--push` to push before running, `--files`/`--tag` for filtering (runs all tests by default)
+  - **`poly test list`**: list past test runs with status, pass/fail/error counts, branch, and
+  timestamps - **`poly test show <run_id>`**: inspect a completed test run with all results -
+  **`poly test show <run_id> <test_case_id>`**: drill into a single test — assertions, function call
+  failures, and conversation transcript - All commands support `--json` for machine-readable output
+  - Handle all API statuses: `pending`, `in_progress`, `passed`, `failed`, `errored`, `timed_out` -
+  Extract `resolve_tests()`, `get_test_run()`, `list_test_runs()`, and `trigger_tests()` on
+  `AgentStudioProject` - Add `print_test_run_list`, `print_test_run_summary`, `print_test_detail`,
+  and `poll_test_run_live` console helpers - Simplify `get_diffs()` and `revert_changes()`
+  signatures — replace `all_files`/`files` with a single `file_paths` param (defaults to all)
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (12 pre-existing
+  failures unrelated to this change) - [x] No breaking changes to the `poly` CLI interface (or
+  migration path documented) - [x] Commit messages follow [conventional
+  commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+### Running tests: With <20 tests (by tag) <img width="446" height="78" alt="Screenshot 2026-06-29
+  at 17 48 21" src="https://github.com/user-attachments/assets/c3e71fa7-b6fa-4a94-b51c-27de07f14b49"
+  /> With >20 tests (all tests) <img width="753" height="576" alt="Screenshot 2026-06-30 at 18 18
+  54" src="https://github.com/user-attachments/assets/f2450674-1a68-4069-b6f9-a3823e740981" />
+
+### View previous runs <img width="741" height="148" alt="Screenshot 2026-06-29 at 17 47 55"
+  src="https://github.com/user-attachments/assets/811abffb-b876-4945-95e5-37bc70c7f3b7" />
+
+### View test run <img width="786" height="360" alt="Screenshot 2026-06-29 at 17 47 50"
+  src="https://github.com/user-attachments/assets/b79dbbb3-2abc-44b8-a30c-f7c96befc0ed" />
+
+### View specific test in a run <img width="1268" height="310" alt="Screenshot 2026-06-29 at 17 47
+  41" src="https://github.com/user-attachments/assets/a2449f03-5b10-4d8b-8f22-f97d7460b165" />
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.30.0 (2026-06-30)
 
 ### Features

@@ -5,14 +5,30 @@ from poly.handlers.protobuf import sms_pb2 as _sms_pb2
 from poly.handlers.protobuf import variant_pb2 as _variant_pb2
 from poly.handlers.protobuf import entities_pb2 as _entities_pb2
 from google.protobuf.internal import containers as _containers
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Mapping, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class ReasoningEffort(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    REASONING_EFFORT_UNSPECIFIED: _ClassVar[ReasoningEffort]
+    REASONING_EFFORT_MINIMAL: _ClassVar[ReasoningEffort]
+    REASONING_EFFORT_LOW: _ClassVar[ReasoningEffort]
+    REASONING_EFFORT_MEDIUM: _ClassVar[ReasoningEffort]
+    REASONING_EFFORT_HIGH: _ClassVar[ReasoningEffort]
+    REASONING_EFFORT_AUTO: _ClassVar[ReasoningEffort]
+REASONING_EFFORT_UNSPECIFIED: ReasoningEffort
+REASONING_EFFORT_MINIMAL: ReasoningEffort
+REASONING_EFFORT_LOW: ReasoningEffort
+REASONING_EFFORT_MEDIUM: ReasoningEffort
+REASONING_EFFORT_HIGH: ReasoningEffort
+REASONING_EFFORT_AUTO: ReasoningEffort
+
 class Flow(_message.Message):
-    __slots__ = ("id", "name", "description", "created_at", "created_by", "updated_at", "updated_by", "start_step_id", "transition_functions", "steps", "no_code_steps", "flow_steps")
+    __slots__ = ("id", "name", "description", "created_at", "created_by", "updated_at", "updated_by", "start_step_id", "transition_functions", "steps", "no_code_steps", "flow_steps", "settings")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
@@ -25,6 +41,7 @@ class Flow(_message.Message):
     STEPS_FIELD_NUMBER: _ClassVar[int]
     NO_CODE_STEPS_FIELD_NUMBER: _ClassVar[int]
     FLOW_STEPS_FIELD_NUMBER: _ClassVar[int]
+    SETTINGS_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     description: str
@@ -37,7 +54,8 @@ class Flow(_message.Message):
     steps: _containers.RepeatedCompositeFieldContainer[AdvancedStep]
     no_code_steps: _containers.RepeatedCompositeFieldContainer[DefaultStep]
     flow_steps: _containers.RepeatedCompositeFieldContainer[Step]
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., start_step_id: _Optional[str] = ..., transition_functions: _Optional[_Iterable[_Union[TransitionFunction, _Mapping]]] = ..., steps: _Optional[_Iterable[_Union[AdvancedStep, _Mapping]]] = ..., no_code_steps: _Optional[_Iterable[_Union[DefaultStep, _Mapping]]] = ..., flow_steps: _Optional[_Iterable[_Union[Step, _Mapping]]] = ...) -> None: ...
+    settings: FlowStepSettings
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., start_step_id: _Optional[str] = ..., transition_functions: _Optional[_Iterable[_Union[TransitionFunction, _Mapping]]] = ..., steps: _Optional[_Iterable[_Union[AdvancedStep, _Mapping]]] = ..., no_code_steps: _Optional[_Iterable[_Union[DefaultStep, _Mapping]]] = ..., flow_steps: _Optional[_Iterable[_Union[Step, _Mapping]]] = ..., settings: _Optional[_Union[FlowStepSettings, _Mapping]] = ...) -> None: ...
 
 class Flows(_message.Message):
     __slots__ = ("flows",)
@@ -46,7 +64,7 @@ class Flows(_message.Message):
     def __init__(self, flows: _Optional[_Iterable[_Union[Flow, _Mapping]]] = ...) -> None: ...
 
 class AdvancedStep(_message.Message):
-    __slots__ = ("id", "name", "prompt", "created_at", "created_by", "updated_at", "updated_by", "position", "asr_biasing", "dtmf_config", "references")
+    __slots__ = ("id", "name", "prompt", "created_at", "created_by", "updated_at", "updated_by", "position", "asr_biasing", "dtmf_config", "references", "settings")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
@@ -58,6 +76,7 @@ class AdvancedStep(_message.Message):
     ASR_BIASING_FIELD_NUMBER: _ClassVar[int]
     DTMF_CONFIG_FIELD_NUMBER: _ClassVar[int]
     REFERENCES_FIELD_NUMBER: _ClassVar[int]
+    SETTINGS_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     prompt: str
@@ -69,10 +88,11 @@ class AdvancedStep(_message.Message):
     asr_biasing: StepAsrConfig
     dtmf_config: StepDtmfConfig
     references: StepReferences
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., prompt: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., position: _Optional[_Union[StepPosition, _Mapping]] = ..., asr_biasing: _Optional[_Union[StepAsrConfig, _Mapping]] = ..., dtmf_config: _Optional[_Union[StepDtmfConfig, _Mapping]] = ..., references: _Optional[_Union[StepReferences, _Mapping]] = ...) -> None: ...
+    settings: FlowStepSettings
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., prompt: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., position: _Optional[_Union[StepPosition, _Mapping]] = ..., asr_biasing: _Optional[_Union[StepAsrConfig, _Mapping]] = ..., dtmf_config: _Optional[_Union[StepDtmfConfig, _Mapping]] = ..., references: _Optional[_Union[StepReferences, _Mapping]] = ..., settings: _Optional[_Union[FlowStepSettings, _Mapping]] = ...) -> None: ...
 
 class DefaultStep(_message.Message):
-    __slots__ = ("id", "name", "prompt", "created_at", "created_by", "updated_at", "updated_by", "position", "references", "conditions")
+    __slots__ = ("id", "name", "prompt", "created_at", "created_by", "updated_at", "updated_by", "position", "references", "conditions", "settings")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
@@ -83,6 +103,7 @@ class DefaultStep(_message.Message):
     POSITION_FIELD_NUMBER: _ClassVar[int]
     REFERENCES_FIELD_NUMBER: _ClassVar[int]
     CONDITIONS_FIELD_NUMBER: _ClassVar[int]
+    SETTINGS_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     prompt: str
@@ -93,7 +114,8 @@ class DefaultStep(_message.Message):
     position: StepPosition
     references: NoCodeStepReferences
     conditions: _containers.RepeatedCompositeFieldContainer[Condition]
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., prompt: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., position: _Optional[_Union[StepPosition, _Mapping]] = ..., references: _Optional[_Union[NoCodeStepReferences, _Mapping]] = ..., conditions: _Optional[_Iterable[_Union[Condition, _Mapping]]] = ...) -> None: ...
+    settings: FlowStepSettings
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., prompt: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., position: _Optional[_Union[StepPosition, _Mapping]] = ..., references: _Optional[_Union[NoCodeStepReferences, _Mapping]] = ..., conditions: _Optional[_Iterable[_Union[Condition, _Mapping]]] = ..., settings: _Optional[_Union[FlowStepSettings, _Mapping]] = ...) -> None: ...
 
 class FunctionStep(_message.Message):
     __slots__ = ("id", "name", "position", "function", "conditions", "created_at", "updated_at", "updated_by", "created_by")
@@ -398,6 +420,58 @@ class StepDtmfConfig(_message.Message):
     is_pii: bool
     def __init__(self, is_enabled: bool = ..., inter_digit_timeout: _Optional[int] = ..., max_digits: _Optional[int] = ..., end_key: _Optional[str] = ..., collect_while_agent_speaking: bool = ..., is_pii: bool = ...) -> None: ...
 
+class FlowASRConfig(_message.Message):
+    __slots__ = ("provider", "model")
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    MODEL_FIELD_NUMBER: _ClassVar[int]
+    provider: str
+    model: str
+    def __init__(self, provider: _Optional[str] = ..., model: _Optional[str] = ...) -> None: ...
+
+class FlowVADConfig(_message.Message):
+    __slots__ = ("provider", "vad_start", "vad_end", "speech_threshold", "silence_threshold")
+    PROVIDER_FIELD_NUMBER: _ClassVar[int]
+    VAD_START_FIELD_NUMBER: _ClassVar[int]
+    VAD_END_FIELD_NUMBER: _ClassVar[int]
+    SPEECH_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
+    SILENCE_THRESHOLD_FIELD_NUMBER: _ClassVar[int]
+    provider: str
+    vad_start: float
+    vad_end: float
+    speech_threshold: float
+    silence_threshold: float
+    def __init__(self, provider: _Optional[str] = ..., vad_start: _Optional[float] = ..., vad_end: _Optional[float] = ..., speech_threshold: _Optional[float] = ..., silence_threshold: _Optional[float] = ...) -> None: ...
+
+class FlowBargeInConfig(_message.Message):
+    __slots__ = ("is_enabled",)
+    IS_ENABLED_FIELD_NUMBER: _ClassVar[int]
+    is_enabled: bool
+    def __init__(self, is_enabled: bool = ...) -> None: ...
+
+class FlowLLMConfig(_message.Message):
+    __slots__ = ("provider_model_id", "reasoning_effort")
+    PROVIDER_MODEL_ID_FIELD_NUMBER: _ClassVar[int]
+    REASONING_EFFORT_FIELD_NUMBER: _ClassVar[int]
+    provider_model_id: str
+    reasoning_effort: ReasoningEffort
+    def __init__(self, provider_model_id: _Optional[str] = ..., reasoning_effort: _Optional[_Union[ReasoningEffort, str]] = ...) -> None: ...
+
+class FlowStepSettings(_message.Message):
+    __slots__ = ("asr_biasing", "dtmf", "asr", "vad", "barge_in", "llm")
+    ASR_BIASING_FIELD_NUMBER: _ClassVar[int]
+    DTMF_FIELD_NUMBER: _ClassVar[int]
+    ASR_FIELD_NUMBER: _ClassVar[int]
+    VAD_FIELD_NUMBER: _ClassVar[int]
+    BARGE_IN_FIELD_NUMBER: _ClassVar[int]
+    LLM_FIELD_NUMBER: _ClassVar[int]
+    asr_biasing: StepAsrConfig
+    dtmf: StepDtmfConfig
+    asr: FlowASRConfig
+    vad: FlowVADConfig
+    barge_in: FlowBargeInConfig
+    llm: FlowLLMConfig
+    def __init__(self, asr_biasing: _Optional[_Union[StepAsrConfig, _Mapping]] = ..., dtmf: _Optional[_Union[StepDtmfConfig, _Mapping]] = ..., asr: _Optional[_Union[FlowASRConfig, _Mapping]] = ..., vad: _Optional[_Union[FlowVADConfig, _Mapping]] = ..., barge_in: _Optional[_Union[FlowBargeInConfig, _Mapping]] = ..., llm: _Optional[_Union[FlowLLMConfig, _Mapping]] = ...) -> None: ...
+
 class Flow_CreateFlow(_message.Message):
     __slots__ = ("id", "name", "description", "start_step_id", "steps", "transition_functions", "no_code_steps")
     ID_FIELD_NUMBER: _ClassVar[int]
@@ -513,7 +587,7 @@ class UpdateAdvancedStep(_message.Message):
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., prompt: _Optional[str] = ..., references: _Optional[_Union[StepReferences, _Mapping]] = ...) -> None: ...
 
 class ImportFlowStep(_message.Message):
-    __slots__ = ("id", "name", "prompt", "position", "asr_biasing", "dtmf_config", "references")
+    __slots__ = ("id", "name", "prompt", "position", "asr_biasing", "dtmf_config", "references", "settings")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
@@ -521,6 +595,7 @@ class ImportFlowStep(_message.Message):
     ASR_BIASING_FIELD_NUMBER: _ClassVar[int]
     DTMF_CONFIG_FIELD_NUMBER: _ClassVar[int]
     REFERENCES_FIELD_NUMBER: _ClassVar[int]
+    SETTINGS_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     prompt: str
@@ -528,7 +603,8 @@ class ImportFlowStep(_message.Message):
     asr_biasing: StepAsrConfig
     dtmf_config: StepDtmfConfig
     references: StepReferences
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., prompt: _Optional[str] = ..., position: _Optional[_Union[StepPosition, _Mapping]] = ..., asr_biasing: _Optional[_Union[StepAsrConfig, _Mapping]] = ..., dtmf_config: _Optional[_Union[StepDtmfConfig, _Mapping]] = ..., references: _Optional[_Union[StepReferences, _Mapping]] = ...) -> None: ...
+    settings: FlowStepSettings
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., prompt: _Optional[str] = ..., position: _Optional[_Union[StepPosition, _Mapping]] = ..., asr_biasing: _Optional[_Union[StepAsrConfig, _Mapping]] = ..., dtmf_config: _Optional[_Union[StepDtmfConfig, _Mapping]] = ..., references: _Optional[_Union[StepReferences, _Mapping]] = ..., settings: _Optional[_Union[FlowStepSettings, _Mapping]] = ...) -> None: ...
 
 class Flow_UpdateStepAsrConfig(_message.Message):
     __slots__ = ("flow_id", "step_id", "asr_biasing")
@@ -599,6 +675,26 @@ class StepDtmfConfigUpdate(_message.Message):
     collect_while_agent_speaking: bool
     is_pii: bool
     def __init__(self, is_enabled: bool = ..., inter_digit_timeout: _Optional[int] = ..., max_digits: _Optional[int] = ..., end_key: _Optional[str] = ..., collect_while_agent_speaking: bool = ..., is_pii: bool = ...) -> None: ...
+
+class Flow_UpdateStepSettings(_message.Message):
+    __slots__ = ("flow_id", "step_id", "settings")
+    FLOW_ID_FIELD_NUMBER: _ClassVar[int]
+    STEP_ID_FIELD_NUMBER: _ClassVar[int]
+    SETTINGS_FIELD_NUMBER: _ClassVar[int]
+    flow_id: str
+    step_id: str
+    settings: FlowStepSettings
+    def __init__(self, flow_id: _Optional[str] = ..., step_id: _Optional[str] = ..., settings: _Optional[_Union[FlowStepSettings, _Mapping]] = ...) -> None: ...
+
+class Flow_ClearStepSettings(_message.Message):
+    __slots__ = ("flow_id", "step_id", "sections")
+    FLOW_ID_FIELD_NUMBER: _ClassVar[int]
+    STEP_ID_FIELD_NUMBER: _ClassVar[int]
+    SECTIONS_FIELD_NUMBER: _ClassVar[int]
+    flow_id: str
+    step_id: str
+    sections: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, flow_id: _Optional[str] = ..., step_id: _Optional[str] = ..., sections: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class Flow_UpdateStepPosition(_message.Message):
     __slots__ = ("flow_id", "position_update")
@@ -845,20 +941,22 @@ class UpdateNoCodeStepPosition(_message.Message):
     def __init__(self, flow_id: _Optional[str] = ..., step_id: _Optional[str] = ..., new_position: _Optional[_Union[StepPosition, _Mapping]] = ...) -> None: ...
 
 class ImportNoCodeStep(_message.Message):
-    __slots__ = ("id", "name", "prompt", "position", "references", "conditions")
+    __slots__ = ("id", "name", "prompt", "position", "references", "conditions", "settings")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     PROMPT_FIELD_NUMBER: _ClassVar[int]
     POSITION_FIELD_NUMBER: _ClassVar[int]
     REFERENCES_FIELD_NUMBER: _ClassVar[int]
     CONDITIONS_FIELD_NUMBER: _ClassVar[int]
+    SETTINGS_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     prompt: str
     position: StepPosition
     references: NoCodeStepReferences
     conditions: _containers.RepeatedCompositeFieldContainer[Condition]
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., prompt: _Optional[str] = ..., position: _Optional[_Union[StepPosition, _Mapping]] = ..., references: _Optional[_Union[NoCodeStepReferences, _Mapping]] = ..., conditions: _Optional[_Iterable[_Union[Condition, _Mapping]]] = ...) -> None: ...
+    settings: FlowStepSettings
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., prompt: _Optional[str] = ..., position: _Optional[_Union[StepPosition, _Mapping]] = ..., references: _Optional[_Union[NoCodeStepReferences, _Mapping]] = ..., conditions: _Optional[_Iterable[_Union[Condition, _Mapping]]] = ..., settings: _Optional[_Union[FlowStepSettings, _Mapping]] = ...) -> None: ...
 
 class CreateNoCodeCondition(_message.Message):
     __slots__ = ("flow_id", "step_id", "condition_id", "exit_flow_condition", "step_condition", "no_code_step_condition", "function_step_condition")

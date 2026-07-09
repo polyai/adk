@@ -22,6 +22,7 @@ import poly.utils as utils
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
+from poly.handlers.sync_client import SyncClientHandler
 from poly.migration_utils import (
     MigrationFlag,
     get_all_migration_flags,
@@ -69,6 +70,7 @@ from poly.resources import (
     VoiceGreeting,
     VoiceSafetyFilters,
     VoiceStylePrompt,
+    Document,
 )
 from poly.resources.resource import _parse_multi_resource_path
 from poly.utils import compute_variable_references
@@ -114,6 +116,7 @@ RESOURCE_NAME_TO_CLASS: dict[str, type[Resource]] = {
     "translations": Translation,
     "default_language": DefaultLanguage,
     "additional_languages": AdditionalLanguage,
+    "documents": Document,
 }
 
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
@@ -848,6 +851,21 @@ class AgentStudioProject:
             MultiResourceYamlResource.save_to_file(merged_contents, file)
         MultiResourceYamlResource._file_cache.clear()
 
+        # Delete multi-resource types whose entire type is absent from incoming
+        for resource_type, original in original_resources.items():
+            if not issubclass(resource_type, MultiResourceYamlResource):
+                continue
+            if resource_type in incoming_resources:
+                continue
+            if (
+                self._not_loaded_resources is not None
+                and resource_type in self._not_loaded_resources
+            ):
+                continue
+            deleted_paths = {res.get_path(self.root_path) for res in original.values()}
+            for file_path in self._sort_paths_for_reverse_deletion(deleted_paths, resource_type):
+                resource_type.delete_resource(file_path, save_to_cache=True)
+
         return files_with_conflicts, progress_offset
 
     def _update_pulled_resources(
@@ -1021,6 +1039,20 @@ class AgentStudioProject:
                 and resource_type in self._not_loaded_resources
             ):
                 self._not_loaded_resources.remove(resource_type)
+
+        # Delete resources whose entire type is absent from incoming
+        for resource_type, original in original_resources.items():
+            if resource_type in incoming_resources:
+                continue
+            if issubclass(resource_type, MultiResourceYamlResource):
+                continue
+            if (
+                self._not_loaded_resources is not None
+                and resource_type in self._not_loaded_resources
+            ):
+                continue
+            for resource in original.values():
+                resource_type.delete_resource(resource.get_path(self.root_path))
 
         return files_with_conflicts
 
@@ -1633,10 +1665,15 @@ class AgentStudioProject:
             updated_resources[FlowStep].pop(flow_step_id, None)
 
         # Add known attributes to any new variant to give it a default value
+        deleted_attribute_ids = set(deleted_resources.get(VariantAttribute, {}).keys())
         for variant in new_resources.get(Variant, {}).values():
             if not isinstance(variant, Variant):
                 raise TypeError(f"Variant is not a Variant: {variant}")
-            attribute_ids = list(self.resources.get(VariantAttribute, {}).keys())
+            attribute_ids = [
+                aid
+                for aid in self.resources.get(VariantAttribute, {}).keys()
+                if aid not in deleted_attribute_ids
+            ]
             variant.attribute_ids = attribute_ids
 
         # Only update the default variant if it's being enabled
@@ -1977,6 +2014,32 @@ class AgentStudioProject:
             )
             return None
 
+        diffs = self.diff_resource_maps(before_resources, after_resources)
+        if diffs is None:
+            logger.info(
+                f"No differences detected between names '{before_name}' and '{after_name}'."
+            )
+        return diffs
+
+    def diff_projections(
+        self, before_projection: dict[str, Any], after_projection: dict[str, Any]
+    ) -> Optional[dict[str, str]]:
+        """Compute diffs between two sourcerer projections without any API calls.
+
+        Empty projections are valid (e.g. diffing a branch against an empty main).
+        """
+        before_resources = SyncClientHandler.load_resources_from_projection(before_projection)
+        after_resources = SyncClientHandler.load_resources_from_projection(after_projection)
+        return self.diff_resource_maps(before_resources, after_resources)
+
+    def diff_resource_maps(
+        self, before_resources: ResourceMap, after_resources: ResourceMap
+    ) -> Optional[dict[str, str]]:
+        """Compute per-file diffs between two in-memory resource maps.
+
+        Returns a mapping of file path to unified diff, or None when the two
+        states render identically.
+        """
         before_resources_by_path: dict[tuple[ResourceType, str], Resource] = {}
         for resource_type, resources_dict in before_resources.items():
             for resource_id, resource in resources_dict.items():
@@ -2023,9 +2086,6 @@ class AgentStudioProject:
                 diffs[after_resource.file_path] = resource_utils.get_diff("", after_pretty)
 
         if not diffs:
-            logger.info(
-                f"No differences detected between names '{before_name}' and '{after_name}'."
-            )
             return None
 
         return diffs
@@ -2226,6 +2286,9 @@ class AgentStudioProject:
                         resource_utils.get_flow_name_from_path(file_path),
                     )
                     resource_id = self.generate_uuid(resource_type)
+                    if resource_type == Document:
+                        resource_id = os.path.basename(file_path)
+
                     if resource_type == FlowStep:
                         flow_step: FlowStep = self.read_local_resource(
                             ResourceMapping(

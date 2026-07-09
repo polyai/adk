@@ -564,6 +564,7 @@ class SourcererSDK:
             headers = {
                 "X-API-KEY": retrieve_api_key(self.region),
                 "X-PolyAI-Correlation-Id": correlation_id,
+                "X-Poly-Source": "adk",
                 "Content-Type": "application/octet-stream",
             }
             if self.email:

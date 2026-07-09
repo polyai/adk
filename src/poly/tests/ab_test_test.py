@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import requests
 
-from poly.cli import AgentStudioCLI
+from poly.cli_commands.deployments import DeploymentsCommand
 from poly.tests.project_test import TEST_DIR
 
 
@@ -33,10 +33,10 @@ SAMPLE_AB_TEST = {
 
 
 class ABTestStartTest(unittest.TestCase):
-    """Tests for AgentStudioCLI.ab_test_start."""
+    """Tests for DeploymentsCommand.ab_test_start."""
 
     def setUp(self):
-        patcher = patch("poly.cli.AgentStudioCLI._load_project")
+        patcher = patch("poly.cli_commands.deployments.load_project")
         self.mock_load = patcher.start()
         self.proj = MagicMock()
         self.proj.create_ab_test.return_value = dict(SAMPLE_AB_TEST)
@@ -55,11 +55,11 @@ class ABTestStartTest(unittest.TestCase):
 
     # -- Happy path --
 
-    @patch("poly.cli.success")
-    @patch("poly.cli.print_ab_test_detail")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.print_ab_test_detail")
     def test_start__success_rich_output(self, mock_detail, mock_success):
         """Successful start prints success and detail in rich mode."""
-        AgentStudioCLI.ab_test_start(
+        DeploymentsCommand.ab_test_start(
             TEST_DIR, name="v2 test", variant_version="variant111", traffic_percentage=50
         )
 
@@ -67,10 +67,10 @@ class ABTestStartTest(unittest.TestCase):
         mock_success.assert_called_once()
         mock_detail.assert_called_once()
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_start__success_json_output(self, mock_json):
         """Successful start emits JSON with success=True and the ab_test payload."""
-        AgentStudioCLI.ab_test_start(
+        DeploymentsCommand.ab_test_start(
             TEST_DIR,
             name="v2 test",
             variant_version="variant111",
@@ -82,10 +82,10 @@ class ABTestStartTest(unittest.TestCase):
         self.assertTrue(payload["success"])
         self.assertEqual(payload["ab_test"]["id"], "ab-001")
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_start__name_is_stripped(self, mock_json):
         """Leading/trailing whitespace in name is stripped before calling the API."""
-        AgentStudioCLI.ab_test_start(
+        DeploymentsCommand.ab_test_start(
             TEST_DIR,
             name="  v2 test  ",
             variant_version="variant111",
@@ -97,28 +97,32 @@ class ABTestStartTest(unittest.TestCase):
 
     # -- Interactive prompts --
 
-    @patch("poly.cli.questionary")
-    @patch("poly.cli.success")
-    @patch("poly.cli.print_ab_test_detail")
-    def test_start__interactive_name_and_traffic(self, mock_detail, mock_success, mock_q):
+    @patch("questionary.text")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.print_ab_test_detail")
+    def test_start__interactive_name_and_traffic(self, mock_detail, mock_success, mock_text):
         """When name and traffic are None, prompts interactively with defaults."""
-        mock_q.text.return_value.ask.side_effect = ["my test", "50"]
+        mock_text.return_value.ask.side_effect = ["my test", "50"]
 
-        AgentStudioCLI.ab_test_start(
+        DeploymentsCommand.ab_test_start(
             TEST_DIR, name=None, variant_version="variant111", traffic_percentage=None
         )
 
-        self.assertEqual(mock_q.text.call_count, 2)
-        name_call = mock_q.text.call_args_list[0]
+        self.assertEqual(mock_text.call_count, 2)
+        name_call = mock_text.call_args_list[0]
         self.assertIn("name", name_call[0][0].lower())
-        traffic_call = mock_q.text.call_args_list[1]
+        traffic_call = mock_text.call_args_list[1]
         self.assertEqual(traffic_call[1]["default"], "50")
         self.proj.create_ab_test.assert_called_once_with("my test", "dep-v", 50)
 
-    @patch("poly.cli.questionary")
-    @patch("poly.cli.success")
-    @patch("poly.cli.print_ab_test_detail")
-    def test_start__interactive_variant_picker(self, mock_detail, mock_success, mock_q):
+    @patch("questionary.select")
+    @patch("questionary.Choice")
+    @patch("questionary.text")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.print_ab_test_detail")
+    def test_start__interactive_variant_picker(
+        self, mock_detail, mock_success, mock_text, mock_choice, mock_select
+    ):
         """When variant is None, fetches pre-release deployments and prompts."""
         self.proj.get_deployments.return_value = (
             [
@@ -130,21 +134,21 @@ class ABTestStartTest(unittest.TestCase):
             ],
             {"live": "live000000"},
         )
-        mock_q.text.return_value.ask.return_value = "50"
-        mock_q.Choice = MagicMock(side_effect=lambda **kw: kw)
-        mock_q.select.return_value.ask.return_value = "dep-pr-1"
+        mock_text.return_value.ask.return_value = "50"
+        mock_choice.side_effect = lambda **kw: kw
+        mock_select.return_value.ask.return_value = "dep-pr-1"
 
-        AgentStudioCLI.ab_test_start(
+        DeploymentsCommand.ab_test_start(
             TEST_DIR, name="test", variant_version=None, traffic_percentage=None
         )
 
         self.proj.get_deployments.assert_any_call(client_env="pre-release")
-        mock_q.select.assert_called_once()
+        mock_select.assert_called_once()
         self.proj.create_ab_test.assert_called_once_with("test", "dep-pr-1", 50)
 
     # -- Version validation --
 
-    @patch("poly.cli.error")
+    @patch("poly.output.console.error")
     def test_start__variant_same_version_as_live_exits(self, mock_error):
         """Explicit variant with same version_hash as live exits with error."""
         self.proj.get_deployments.return_value = (
@@ -153,7 +157,7 @@ class ABTestStartTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_start(
+            DeploymentsCommand.ab_test_start(
                 TEST_DIR, name="test", variant_version="same_hash", traffic_percentage=50
             )
 
@@ -161,7 +165,7 @@ class ABTestStartTest(unittest.TestCase):
         self.assertIn("same version", mock_error.call_args[0][0])
         self.proj.create_ab_test.assert_not_called()
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_start__variant_same_version_as_live_json(self, mock_json):
         """Explicit variant with same version as live exits with error JSON."""
         self.proj.get_deployments.return_value = (
@@ -170,7 +174,7 @@ class ABTestStartTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_start(
+            DeploymentsCommand.ab_test_start(
                 TEST_DIR,
                 name="test",
                 variant_version="same_hash",
@@ -182,7 +186,7 @@ class ABTestStartTest(unittest.TestCase):
         payload = mock_json.call_args[0][0]
         self.assertIn("same version", payload["error"])
 
-    @patch("poly.cli.error")
+    @patch("poly.output.console.error")
     def test_start__interactive_filters_same_version_deployments(self, mock_error):
         """Interactive picker excludes pre-release deployments matching live version."""
         self.proj.get_deployments.return_value = (
@@ -191,18 +195,18 @@ class ABTestStartTest(unittest.TestCase):
         )
 
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_start(
+            DeploymentsCommand.ab_test_start(
                 TEST_DIR, name="test", variant_version=None, traffic_percentage=50
             )
 
         self.assertEqual(ctx.exception.code, 1)
         self.assertIn("match the current live version", mock_error.call_args[0][0])
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_start__json_mode_requires_name(self, mock_json):
         """JSON mode with name=None exits with error."""
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_start(
+            DeploymentsCommand.ab_test_start(
                 TEST_DIR,
                 name=None,
                 variant_version="variant111",
@@ -214,11 +218,11 @@ class ABTestStartTest(unittest.TestCase):
         payload = mock_json.call_args[0][0]
         self.assertIn("--name", payload["error"])
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_start__json_mode_requires_variant_version(self, mock_json):
         """JSON mode with variant_version=None exits with error."""
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_start(
+            DeploymentsCommand.ab_test_start(
                 TEST_DIR,
                 name="test",
                 variant_version=None,
@@ -230,11 +234,11 @@ class ABTestStartTest(unittest.TestCase):
         payload = mock_json.call_args[0][0]
         self.assertIn("--variant-version", payload["error"])
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_start__json_mode_requires_traffic(self, mock_json):
         """JSON mode with traffic=None exits with error."""
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_start(
+            DeploymentsCommand.ab_test_start(
                 TEST_DIR,
                 name="test",
                 variant_version="variant111",
@@ -246,14 +250,14 @@ class ABTestStartTest(unittest.TestCase):
         payload = mock_json.call_args[0][0]
         self.assertIn("--traffic", payload["error"])
 
-    @patch("poly.cli.questionary")
-    @patch("poly.cli.error")
-    def test_start__interactive_traffic_not_a_number(self, mock_error, mock_q):
+    @patch("questionary.text")
+    @patch("poly.output.console.error")
+    def test_start__interactive_traffic_not_a_number(self, mock_error, mock_text):
         """Non-numeric interactive traffic input exits with error."""
-        mock_q.text.return_value.ask.side_effect = ["my test", "abc"]
+        mock_text.return_value.ask.side_effect = ["my test", "abc"]
 
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_start(
+            DeploymentsCommand.ab_test_start(
                 TEST_DIR, name=None, variant_version="variant111", traffic_percentage=None
             )
 
@@ -262,11 +266,11 @@ class ABTestStartTest(unittest.TestCase):
 
     # -- Validation: name --
 
-    @patch("poly.cli.error")
+    @patch("poly.output.console.error")
     def test_start__empty_name_exits_with_error(self, mock_error):
         """Empty string name triggers error and sys.exit(1)."""
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_start(
+            DeploymentsCommand.ab_test_start(
                 TEST_DIR, name="", variant_version="variant111", traffic_percentage=50
             )
 
@@ -275,22 +279,22 @@ class ABTestStartTest(unittest.TestCase):
         self.assertIn("required", mock_error.call_args[0][0])
         self.proj.create_ab_test.assert_not_called()
 
-    @patch("poly.cli.error")
+    @patch("poly.output.console.error")
     def test_start__whitespace_only_name_exits_with_error(self, mock_error):
         """Whitespace-only name triggers error and sys.exit(1)."""
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_start(
+            DeploymentsCommand.ab_test_start(
                 TEST_DIR, name="   ", variant_version="variant111", traffic_percentage=50
             )
 
         self.assertEqual(ctx.exception.code, 1)
         self.proj.create_ab_test.assert_not_called()
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_start__empty_name_json_mode_exits_with_error(self, mock_json):
         """Empty name in JSON mode emits error JSON and exits."""
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_start(
+            DeploymentsCommand.ab_test_start(
                 TEST_DIR,
                 name="",
                 variant_version="variant111",
@@ -305,11 +309,11 @@ class ABTestStartTest(unittest.TestCase):
 
     # -- Validation: traffic_percentage --
 
-    @patch("poly.cli.error")
+    @patch("poly.output.console.error")
     def test_start__negative_traffic_exits_with_error(self, mock_error):
         """Negative traffic percentage triggers error and sys.exit(1)."""
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_start(
+            DeploymentsCommand.ab_test_start(
                 TEST_DIR, name="test", variant_version="variant111", traffic_percentage=-1
             )
 
@@ -317,22 +321,22 @@ class ABTestStartTest(unittest.TestCase):
         self.assertIn("0 and 100", mock_error.call_args[0][0])
         self.proj.create_ab_test.assert_not_called()
 
-    @patch("poly.cli.error")
+    @patch("poly.output.console.error")
     def test_start__traffic_above_100_exits_with_error(self, mock_error):
         """Traffic percentage > 100 triggers error and sys.exit(1)."""
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_start(
+            DeploymentsCommand.ab_test_start(
                 TEST_DIR, name="test", variant_version="variant111", traffic_percentage=101
             )
 
         self.assertEqual(ctx.exception.code, 1)
         self.proj.create_ab_test.assert_not_called()
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_start__traffic_above_100_json_mode(self, mock_json):
         """Traffic > 100 in JSON mode emits error JSON and exits."""
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_start(
+            DeploymentsCommand.ab_test_start(
                 TEST_DIR,
                 name="test",
                 variant_version="variant111",
@@ -346,10 +350,10 @@ class ABTestStartTest(unittest.TestCase):
 
     # -- Boundary: traffic at 0 and 100 --
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_start__traffic_zero_is_valid(self, mock_json):
         """Traffic percentage of 0 is accepted."""
-        AgentStudioCLI.ab_test_start(
+        DeploymentsCommand.ab_test_start(
             TEST_DIR,
             name="test",
             variant_version="variant111",
@@ -359,10 +363,10 @@ class ABTestStartTest(unittest.TestCase):
 
         self.proj.create_ab_test.assert_called_once_with("test", "dep-v", 0)
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_start__traffic_100_is_valid(self, mock_json):
         """Traffic percentage of 100 is accepted."""
-        AgentStudioCLI.ab_test_start(
+        DeploymentsCommand.ab_test_start(
             TEST_DIR,
             name="test",
             variant_version="variant111",
@@ -381,7 +385,7 @@ class ABTestStartTest(unittest.TestCase):
         )
 
         with self.assertRaises(requests.HTTPError):
-            AgentStudioCLI.ab_test_start(
+            DeploymentsCommand.ab_test_start(
                 TEST_DIR,
                 name="test",
                 variant_version="variant111",
@@ -390,56 +394,56 @@ class ABTestStartTest(unittest.TestCase):
 
 
 class ABTestListTest(unittest.TestCase):
-    """Tests for AgentStudioCLI.ab_test_list."""
+    """Tests for DeploymentsCommand.ab_test_list."""
 
     def setUp(self):
-        patcher = patch("poly.cli.AgentStudioCLI._load_project")
+        patcher = patch("poly.cli_commands.deployments.load_project")
         self.mock_load = patcher.start()
         self.proj = MagicMock()
         self.mock_load.return_value = self.proj
         self.addCleanup(patch.stopall)
 
-    @patch("poly.cli.AgentStudioCLI._fetch_deployment_map")
-    @patch("poly.cli.print_ab_tests")
+    @patch("poly.cli_commands.deployments.DeploymentsCommand._fetch_deployment_map")
+    @patch("poly.output.console.print_ab_tests")
     def test_list__success_rich_output(self, mock_print, mock_dep_map):
         """Successful list calls print_ab_tests with results and deployment map."""
         self.proj.list_ab_tests.return_value = [SAMPLE_AB_TEST]
         mock_dep_map.return_value = {"dep-live": {"id": "dep-live"}}
 
-        AgentStudioCLI.ab_test_list(TEST_DIR, limit=10)
+        DeploymentsCommand.ab_test_list(TEST_DIR, limit=10)
 
         self.proj.list_ab_tests.assert_called_once_with(limit=10)
         mock_print.assert_called_once_with(
             [SAMPLE_AB_TEST], deployments={"dep-live": {"id": "dep-live"}}
         )
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_list__success_json_output(self, mock_json):
         """Successful list emits JSON with success=True and the ab_tests array."""
         self.proj.list_ab_tests.return_value = [SAMPLE_AB_TEST]
 
-        AgentStudioCLI.ab_test_list(TEST_DIR, limit=5, output_json=True)
+        DeploymentsCommand.ab_test_list(TEST_DIR, limit=5, output_json=True)
 
         self.proj.list_ab_tests.assert_called_once_with(limit=5)
         payload = mock_json.call_args[0][0]
         self.assertTrue(payload["success"])
         self.assertEqual(len(payload["ab_tests"]), 1)
 
-    @patch("poly.cli.print_ab_tests")
+    @patch("poly.output.console.print_ab_tests")
     def test_list__empty_results(self, mock_print):
         """Empty list result still calls print_ab_tests with empty list."""
         self.proj.list_ab_tests.return_value = []
 
-        AgentStudioCLI.ab_test_list(TEST_DIR)
+        DeploymentsCommand.ab_test_list(TEST_DIR)
 
         mock_print.assert_called_once_with([], deployments={})
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_list__limit_parameter_forwarded(self, mock_json):
         """Custom limit is forwarded to project.list_ab_tests."""
         self.proj.list_ab_tests.return_value = []
 
-        AgentStudioCLI.ab_test_list(TEST_DIR, limit=25, output_json=True)
+        DeploymentsCommand.ab_test_list(TEST_DIR, limit=25, output_json=True)
 
         self.proj.list_ab_tests.assert_called_once_with(limit=25)
 
@@ -448,56 +452,56 @@ class ABTestListTest(unittest.TestCase):
         self.proj.list_ab_tests.side_effect = _make_http_error(500)
 
         with self.assertRaises(requests.HTTPError):
-            AgentStudioCLI.ab_test_list(TEST_DIR)
+            DeploymentsCommand.ab_test_list(TEST_DIR)
 
 
 class ABTestActiveTest(unittest.TestCase):
-    """Tests for AgentStudioCLI.ab_test_active."""
+    """Tests for DeploymentsCommand.ab_test_active."""
 
     def setUp(self):
-        patcher = patch("poly.cli.AgentStudioCLI._load_project")
+        patcher = patch("poly.cli_commands.deployments.load_project")
         self.mock_load = patcher.start()
         self.proj = MagicMock()
         self.mock_load.return_value = self.proj
         self.addCleanup(patch.stopall)
 
-    @patch("poly.cli.print_ab_test_detail")
+    @patch("poly.output.console.print_ab_test_detail")
     def test_active__found_rich_output(self, mock_detail):
         """Active test found prints detail in rich mode."""
         self.proj.get_active_ab_test.return_value = SAMPLE_AB_TEST
 
-        AgentStudioCLI.ab_test_active(TEST_DIR)
+        DeploymentsCommand.ab_test_active(TEST_DIR)
 
         mock_detail.assert_called_once()
         self.assertEqual(mock_detail.call_args[0][0], SAMPLE_AB_TEST)
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_active__found_json_output(self, mock_json):
         """Active test found emits JSON with the ab_test."""
         self.proj.get_active_ab_test.return_value = SAMPLE_AB_TEST
 
-        AgentStudioCLI.ab_test_active(TEST_DIR, output_json=True)
+        DeploymentsCommand.ab_test_active(TEST_DIR, output_json=True)
 
         payload = mock_json.call_args[0][0]
         self.assertTrue(payload["success"])
         self.assertEqual(payload["ab_test"]["id"], "ab-001")
 
-    @patch("poly.cli.print_ab_test_detail")
+    @patch("poly.output.console.print_ab_test_detail")
     def test_active__none_returned_rich(self, mock_detail):
         """No active test passes None to print_ab_test_detail."""
         self.proj.get_active_ab_test.return_value = None
 
-        AgentStudioCLI.ab_test_active(TEST_DIR)
+        DeploymentsCommand.ab_test_active(TEST_DIR)
 
         mock_detail.assert_called_once()
         self.assertIsNone(mock_detail.call_args[0][0])
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_active__none_returned_json(self, mock_json):
         """No active test emits JSON with ab_test: None."""
         self.proj.get_active_ab_test.return_value = None
 
-        AgentStudioCLI.ab_test_active(TEST_DIR, output_json=True)
+        DeploymentsCommand.ab_test_active(TEST_DIR, output_json=True)
 
         payload = mock_json.call_args[0][0]
         self.assertTrue(payload["success"])
@@ -508,14 +512,14 @@ class ABTestActiveTest(unittest.TestCase):
         self.proj.get_active_ab_test.side_effect = _make_http_error(500)
 
         with self.assertRaises(requests.HTTPError):
-            AgentStudioCLI.ab_test_active(TEST_DIR)
+            DeploymentsCommand.ab_test_active(TEST_DIR)
 
 
 class ABTestUpdateTest(unittest.TestCase):
-    """Tests for AgentStudioCLI.ab_test_update."""
+    """Tests for DeploymentsCommand.ab_test_update."""
 
     def setUp(self):
-        patcher = patch("poly.cli.AgentStudioCLI._load_project")
+        patcher = patch("poly.cli_commands.deployments.load_project")
         self.mock_load = patcher.start()
         self.proj = MagicMock()
         updated = dict(SAMPLE_AB_TEST, traffic_percentage=30)
@@ -526,21 +530,21 @@ class ABTestUpdateTest(unittest.TestCase):
 
     # -- Happy path --
 
-    @patch("poly.cli.success")
-    @patch("poly.cli.print_ab_test_detail")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.print_ab_test_detail")
     def test_update__success_rich_output(self, mock_detail, mock_success):
         """Successful update prints success message with new percentage."""
-        AgentStudioCLI.ab_test_update(TEST_DIR, traffic_percentage=30)
+        DeploymentsCommand.ab_test_update(TEST_DIR, traffic_percentage=30)
 
         self.proj.update_ab_test.assert_called_once_with("ab-001", 30)
         mock_success.assert_called_once()
         self.assertIn("30%", mock_success.call_args[0][0])
         mock_detail.assert_called_once()
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_update__success_json_output(self, mock_json):
         """Successful update emits JSON with updated ab_test."""
-        AgentStudioCLI.ab_test_update(TEST_DIR, traffic_percentage=30, output_json=True)
+        DeploymentsCommand.ab_test_update(TEST_DIR, traffic_percentage=30, output_json=True)
 
         payload = mock_json.call_args[0][0]
         self.assertTrue(payload["success"])
@@ -548,25 +552,25 @@ class ABTestUpdateTest(unittest.TestCase):
 
     # -- No active test --
 
-    @patch("poly.cli.error")
+    @patch("poly.output.console.error")
     def test_update__no_active_test_exits(self, mock_error):
         """No active test exits with error."""
         self.proj.get_active_ab_test.return_value = None
 
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_update(TEST_DIR, traffic_percentage=30)
+            DeploymentsCommand.ab_test_update(TEST_DIR, traffic_percentage=30)
 
         self.assertEqual(ctx.exception.code, 1)
         self.assertIn("No active", mock_error.call_args[0][0])
         self.proj.update_ab_test.assert_not_called()
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_update__no_active_test_json_exits(self, mock_json):
         """No active test in JSON mode exits with error JSON."""
         self.proj.get_active_ab_test.return_value = None
 
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_update(TEST_DIR, traffic_percentage=30, output_json=True)
+            DeploymentsCommand.ab_test_update(TEST_DIR, traffic_percentage=30, output_json=True)
 
         self.assertEqual(ctx.exception.code, 1)
         payload = mock_json.call_args[0][0]
@@ -574,31 +578,31 @@ class ABTestUpdateTest(unittest.TestCase):
 
     # -- Validation: traffic_percentage --
 
-    @patch("poly.cli.error")
+    @patch("poly.output.console.error")
     def test_update__negative_traffic_exits_with_error(self, mock_error):
         """Negative traffic percentage triggers error and sys.exit(1)."""
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_update(TEST_DIR, traffic_percentage=-5)
+            DeploymentsCommand.ab_test_update(TEST_DIR, traffic_percentage=-5)
 
         self.assertEqual(ctx.exception.code, 1)
         self.assertIn("0 and 100", mock_error.call_args[0][0])
         self.proj.update_ab_test.assert_not_called()
 
-    @patch("poly.cli.error")
+    @patch("poly.output.console.error")
     def test_update__traffic_above_100_exits_with_error(self, mock_error):
         """Traffic > 100 triggers error and sys.exit(1)."""
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_update(TEST_DIR, traffic_percentage=150)
+            DeploymentsCommand.ab_test_update(TEST_DIR, traffic_percentage=150)
 
         self.assertEqual(ctx.exception.code, 1)
         mock_error.assert_called_once()
         self.proj.update_ab_test.assert_not_called()
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_update__traffic_above_100_json_mode(self, mock_json):
         """Traffic > 100 in JSON mode emits error JSON and exits."""
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_update(TEST_DIR, traffic_percentage=200, output_json=True)
+            DeploymentsCommand.ab_test_update(TEST_DIR, traffic_percentage=200, output_json=True)
 
         self.assertEqual(ctx.exception.code, 1)
         payload = mock_json.call_args[0][0]
@@ -613,14 +617,14 @@ class ABTestUpdateTest(unittest.TestCase):
         )
 
         with self.assertRaises(requests.HTTPError):
-            AgentStudioCLI.ab_test_update(TEST_DIR, traffic_percentage=30)
+            DeploymentsCommand.ab_test_update(TEST_DIR, traffic_percentage=30)
 
 
 class ABTestEndTest(unittest.TestCase):
-    """Tests for AgentStudioCLI.ab_test_end."""
+    """Tests for DeploymentsCommand.ab_test_end."""
 
     def setUp(self):
-        patcher = patch("poly.cli.AgentStudioCLI._load_project")
+        patcher = patch("poly.cli_commands.deployments.load_project")
         self.mock_load = patcher.start()
         self.proj = MagicMock()
         self.proj.end_ab_test.return_value = dict(SAMPLE_AB_TEST, status="ended")
@@ -645,20 +649,20 @@ class ABTestEndTest(unittest.TestCase):
 
     # -- Happy path: control wins (no promotion) --
 
-    @patch("poly.cli.success")
-    @patch("poly.cli.info")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.info")
     def test_end__explicit_winner_rich_output(self, mock_info, mock_success):
         """Ending with control as winner prints success, no promotion."""
-        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version="live00000")
+        DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version="live00000")
 
         self.proj.end_ab_test.assert_called_once_with("ab-001", "dep-live")
         mock_success.assert_called_once()
         self.proj.promote_deployment.assert_not_called()
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_end__explicit_winner_json_output(self, mock_json):
         """Ending with control as winner emits JSON with promoted=False."""
-        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version="live00000", output_json=True)
+        DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version="live00000", output_json=True)
 
         payload = mock_json.call_args[0][0]
         self.assertTrue(payload["success"])
@@ -666,11 +670,11 @@ class ABTestEndTest(unittest.TestCase):
 
     # -- Happy path: variant wins (triggers promotion) --
 
-    @patch("poly.cli.success")
-    @patch("poly.cli.info")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.info")
     def test_end__variant_wins_promotes_to_live(self, mock_info, mock_success):
         """Choosing the variant promotes it to live."""
-        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version="variant111")
+        DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version="variant111")
 
         self.proj.end_ab_test.assert_called_once_with("ab-001", "dep-variant")
         self.proj.promote_deployment.assert_called_once_with(
@@ -678,23 +682,23 @@ class ABTestEndTest(unittest.TestCase):
         )
         self.assertEqual(mock_success.call_count, 2)
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_end__variant_wins_json_includes_promoted(self, mock_json):
         """Variant win in JSON mode includes promoted=True."""
-        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version="variant111", output_json=True)
+        DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version="variant111", output_json=True)
 
         payload = mock_json.call_args[0][0]
         self.assertTrue(payload["success"])
         self.assertTrue(payload["promoted"])
 
-    @patch("poly.cli.warning")
-    @patch("poly.cli.success")
-    @patch("poly.cli.info")
+    @patch("poly.output.console.warning")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.info")
     def test_end__variant_wins_promote_fails_warns(self, mock_info, mock_success, mock_warning):
         """If promotion fails after ending, warns but doesn't exit with error."""
         self.proj.promote_deployment.side_effect = Exception("promote failed")
 
-        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version="variant111")
+        DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version="variant111")
 
         self.proj.end_ab_test.assert_called_once()
         mock_warning.assert_called_once()
@@ -702,11 +706,11 @@ class ABTestEndTest(unittest.TestCase):
 
     # -- JSON mode without chosen_version --
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_end__json_mode_without_chosen_version_exits_with_error(self, mock_json):
         """JSON mode requires --chosen-version; omitting it exits with error."""
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version=None, output_json=True)
+            DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version=None, output_json=True)
 
         self.assertEqual(ctx.exception.code, 1)
         payload = mock_json.call_args[0][0]
@@ -716,32 +720,36 @@ class ABTestEndTest(unittest.TestCase):
 
     # -- Interactive prompt flow --
 
-    @patch("poly.cli.questionary")
-    @patch("poly.cli.success")
-    @patch("poly.cli.info")
-    def test_end__interactive_prompt_selects_winner(self, mock_info, mock_success, mock_q):
+    @patch("questionary.select")
+    @patch("questionary.Choice")
+    @patch("poly.output.console.success")
+    @patch("poly.output.console.info")
+    def test_end__interactive_prompt_selects_winner(
+        self, mock_info, mock_success, mock_choice, mock_select
+    ):
         """Interactive mode fetches active test, prompts, ends test and promotes variant."""
-        mock_q.Choice = MagicMock(side_effect=lambda **kw: kw)
-        mock_q.select.return_value.ask.return_value = "dep-variant"
+        mock_choice.side_effect = lambda **kw: kw
+        mock_select.return_value.ask.return_value = "dep-variant"
 
-        AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version=None)
+        DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version=None)
 
         self.proj.get_active_ab_test.assert_called_once()
-        mock_q.select.assert_called_once()
+        mock_select.assert_called_once()
         self.proj.end_ab_test.assert_called_once_with("ab-001", "dep-variant")
         self.proj.promote_deployment.assert_called_once()
         self.assertEqual(mock_success.call_count, 2)
 
-    @patch("poly.cli.questionary")
-    @patch("poly.cli.warning")
-    @patch("poly.cli.info")
-    def test_end__interactive_user_aborts(self, mock_info, mock_warning, mock_q):
+    @patch("questionary.select")
+    @patch("questionary.Choice")
+    @patch("poly.output.console.warning")
+    @patch("poly.output.console.info")
+    def test_end__interactive_user_aborts(self, mock_info, mock_warning, mock_choice, mock_select):
         """User aborting the interactive prompt exits with 0."""
-        mock_q.Choice = MagicMock(side_effect=lambda **kw: kw)
-        mock_q.select.return_value.ask.return_value = None
+        mock_choice.side_effect = lambda **kw: kw
+        mock_select.return_value.ask.return_value = None
 
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version=None)
+            DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version=None)
 
         self.assertEqual(ctx.exception.code, 0)
         mock_warning.assert_called_once()
@@ -749,27 +757,25 @@ class ABTestEndTest(unittest.TestCase):
 
     # -- No active test --
 
-    @patch("poly.cli.error")
+    @patch("poly.output.console.error")
     def test_end__no_active_test_exits(self, mock_error):
         """If no active test exists, exits with error."""
         self.proj.get_active_ab_test.return_value = None
 
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version=None)
+            DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version=None)
 
         self.assertEqual(ctx.exception.code, 1)
         self.assertIn("No active", mock_error.call_args[0][0])
         self.proj.end_ab_test.assert_not_called()
 
-    @patch("poly.cli.json_print")
+    @patch("poly.cli_commands.deployments.json_print")
     def test_end__no_active_test_json_exits(self, mock_json):
         """If no active test exists in JSON mode, exits with error JSON."""
         self.proj.get_active_ab_test.return_value = None
 
         with self.assertRaises(SystemExit) as ctx:
-            AgentStudioCLI.ab_test_end(
-                TEST_DIR, chosen_version="live00000", output_json=True
-            )
+            DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version="live00000", output_json=True)
 
         self.assertEqual(ctx.exception.code, 1)
         payload = mock_json.call_args[0][0]
@@ -782,7 +788,7 @@ class ABTestEndTest(unittest.TestCase):
         self.proj.get_active_ab_test.side_effect = _make_http_error(500)
 
         with self.assertRaises(requests.HTTPError):
-            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version=None)
+            DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version=None)
 
     def test_end__http_error_ending_test_propagates(self):
         """HTTPError from end_ab_test propagates to the top-level handler."""
@@ -791,7 +797,7 @@ class ABTestEndTest(unittest.TestCase):
         )
 
         with self.assertRaises(requests.HTTPError):
-            AgentStudioCLI.ab_test_end(TEST_DIR, chosen_version="live00000")
+            DeploymentsCommand.ab_test_end(TEST_DIR, chosen_version="live00000")
 
 
 if __name__ == "__main__":
