@@ -29,6 +29,8 @@ CHAT_END_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/chat/{conver
 AB_TESTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests"
 AB_TEST_ACTIVE_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/active"
 AB_TEST_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/{ab_test_id}"
+TEMPLATE_PROJECTS_URL = "/adk/v1/template-projects"
+TEMPLATE_PROJECT_PROJECTION_URL = "/adk/v1/template-projects/{template_id}/projection"
 # These use public APIs not /adk endpoints
 PROMOTE_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/promote"
 ROLLBACK_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/rollback"
@@ -50,7 +52,7 @@ class PlatformAPIHandler:
     """Class for interacting with the Platform API"""
 
     region_to_base_url = {
-        "dev": "http://localhost:6996/api",
+        "dev": "https://api.dev.poly.ai",
         "staging": "https://api.staging.poly.ai",
         "euw-1": "https://api.eu.poly.ai",
         "uk-1": "https://api.uk.poly.ai",
