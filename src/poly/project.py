@@ -2319,9 +2319,7 @@ class AgentStudioProject:
                         resource_id = os.path.basename(file_path)
 
                     if resource_type in (FlowStep, FunctionStep):
-                        resource_id = (
-                            f"{flow_id}_{resource_id}" if flow_id else f"{flow_name}_{resource_id}"
-                        )
+                        resource_id = f"{flow_id}_{resource_id}"
 
                     if resource_type == FlowConfig:
                         resource_id = flow_id
