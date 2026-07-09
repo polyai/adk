@@ -1,6 +1,84 @@
 # CHANGELOG
 
 
+## v0.34.1 (2026-07-09)
+
+### Bug Fixes
+
+- Delete local resources when entire type is absent from incoming on pull
+  ([#219](https://github.com/polyai/adk/pull/219),
+  [`a3857b0`](https://github.com/polyai/adk/commit/a3857b033e1db9140a51f4dcf63e24d08b126b60))
+
+## Summary
+
+When pulling, resource types present locally but entirely absent from `incoming_resources` were
+  silently kept on disk. This fixes that by deleting local files for absent types after the main
+  pull loop.
+
+## Motivation
+
+If all resources of a given type (e.g. SMS templates) are deleted remotely,
+  `_update_pulled_resources` only iterated types present in `incoming_resources` — so the local
+  files for that type survived the pull.
+
+## Changes
+
+- Added cleanup loop in `_update_pulled_resources` for non-multi resource types absent from incoming
+  - Added cleanup loop in `_update_multi_resource_yaml_resources` for multi-resource types absent
+  from incoming, using `_sort_paths_for_reverse_deletion` and `save_to_cache=True` - Both loops skip
+  `_not_loaded_resources` types to avoid spurious deletions
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.34.0 (2026-07-08)
+
+### Features
+
+- Allow validating experimental config against custom schema
+  ([#217](https://github.com/polyai/adk/pull/217),
+  [`d1033e2`](https://github.com/polyai/adk/commit/d1033e265ca8a37ee1826f5798bcd75a89d76913))
+
+## Summary
+
+Allow overriding the experimental config validation schema via the
+  `ADK_EXPERIMENTAL_CONFIG_SCHEMA_PATH` environment variable, falling back to the bundled schema.
+
+## Motivation
+
+The bundled `experimental_config_schema.yaml` may not always match the schema expected by a given
+  Agent Studio environment. This lets users point validation at a custom schema file without
+  modifying the package.
+
+## Changes
+
+- Read `ADK_EXPERIMENTAL_CONFIG_SCHEMA_PATH` env var in `ExperimentalConfig.validate()`; fall back
+  to the bundled schema when unset - Use a context manager (`with open(...)`) for the schema file
+  handle
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.33.1 (2026-07-08)
 
 ### Bug Fixes
