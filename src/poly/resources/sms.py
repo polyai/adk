@@ -98,7 +98,7 @@ class SMSTemplate(MultiResourceYamlResource):
     ) -> "SMSTemplate":
         return cls(
             resource_id=resource_id,
-            name=yaml_data.get("name", ""),
+            name=yaml_data.get("name") or name,
             text=yaml_data.get("text", ""),
             env_phone_numbers=yaml_data.get("env_phone_numbers", {}),
         )

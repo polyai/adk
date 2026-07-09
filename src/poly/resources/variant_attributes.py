@@ -53,7 +53,7 @@ class Variant(MultiResourceYamlResource):
     def from_yaml_dict(cls, yaml_dict: dict, resource_id: str, name: str, **kwargs) -> "Variant":
         return cls(
             resource_id=resource_id,
-            name=yaml_dict.get("name"),
+            name=yaml_dict.get("name") or name,
             is_default=yaml_dict.get("is_default", False),
         )
 
@@ -191,7 +191,7 @@ class VariantAttribute(MultiResourceYamlResource):
         clean_mapping = {key: value.strip() for key, value in yaml_dict.get("values", {}).items()}
         return cls(
             resource_id=resource_id,
-            name=yaml_dict.get("name"),
+            name=yaml_dict.get("name") or name,
             mappings=clean_mapping,
         )
 

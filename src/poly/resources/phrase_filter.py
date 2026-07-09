@@ -76,7 +76,7 @@ class PhraseFilter(MultiResourceYamlResource):
     ) -> "PhraseFilter":
         return cls(
             resource_id=resource_id,
-            name=(yaml_dict.get("name") or name or ""),
+            name=yaml_dict.get("name") or name,
             description=(yaml_dict.get("description") or "").strip(),
             regular_expressions=yaml_dict.get("regular_expressions", []),
             say_phrase=yaml_dict.get("say_phrase", False),

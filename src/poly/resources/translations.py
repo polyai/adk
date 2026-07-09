@@ -57,7 +57,7 @@ class Translation(MultiResourceYamlResource):
     ) -> "Translation":
         return cls(
             resource_id=resource_id,
-            name=name,
+            name=yaml_dict.get("name") or name,
             translations=yaml_dict.get("translations", {}),
         )
 
