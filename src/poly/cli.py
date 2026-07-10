@@ -13,6 +13,7 @@ from importlib.metadata import version as get_package_version
 import argcomplete
 
 from poly.cli_commands.audio_cache import AudioCacheCommand
+from poly.cli_commands.assistant import AssistantCommand
 from poly.cli_commands.auth import LoginCommand, StartCommand
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.branch import BranchCommand
@@ -57,6 +58,7 @@ COMMANDS = [
     AudioCacheCommand,
     TestingCommand,
     RTCCommand,
+    AssistantCommand,
     ChatCommand,
     DocsCommand,
     CompletionCommand,
