@@ -450,6 +450,7 @@ def _render_events(
     json_mode: bool = False,
     first_turn: bool = True,
     on_branch_change: Callable[[str, str], dict[str, str] | None] | None = None,
+    on_changes_applied: Callable[[], None] | None = None,
 ) -> None:
     """Render a stream of assistant events to the console, updating result.
 
@@ -526,6 +527,8 @@ def _render_events(
                         result.changes = counts
                         if not json_mode:
                             plain(f"[success]{_format_change_summary(counts)}[/success]")
+                        if on_changes_applied is not None:
+                            on_changes_applied()
                     else:
                         if not json_mode:
                             plain("[muted]Workspace already up to date.[/muted]")
@@ -712,6 +715,7 @@ def _stream_turn(
     verbose: bool = False,
     json_mode: bool = False,
     first_turn: bool = True,
+    no_pull: bool = False,
 ) -> TurnResult:
     """Stream a single assistant turn, rendering events to the console.
 
@@ -723,6 +727,7 @@ def _stream_turn(
         verbose: Whether to show verbose output.
         json_mode: Suppress console output and accumulate for JSON.
         first_turn: Whether this is the first turn of the session.
+        no_pull: If True, skip automatic pulling on apply.
 
     Returns:
         TurnResult with session state and what happened.
@@ -732,6 +737,10 @@ def _stream_turn(
     context = _build_context(project)
     result = TurnResult(session_id=session_id)
     display = _TurnDisplay(enabled=not json_mode)
+
+    def _pull_on_apply() -> None:
+        if not no_pull and not json_mode:
+            _pull_local(project)
 
     try:
         _render_events(
@@ -750,6 +759,7 @@ def _stream_turn(
             on_branch_change=lambda branch_id, action: _handle_branch_change(
                 project, branch_id, action, json_mode
             ),
+            on_changes_applied=_pull_on_apply,
         )
     except requests.HTTPError as e:
         display.clear()
@@ -818,6 +828,7 @@ def _turn_with_retry(
     verbose: bool = False,
     json_mode: bool = False,
     first_turn: bool = True,
+    no_pull: bool = False,
 ) -> TurnResult:
     """Run a turn, waiting and retrying while a previous run is still in progress.
 
@@ -838,6 +849,7 @@ def _turn_with_retry(
             verbose=verbose,
             json_mode=json_mode,
             first_turn=first_turn,
+            no_pull=no_pull,
         )
         busy = bool(result.error) and result.error.get("code") == "run_in_progress"
         if not busy:
@@ -1047,11 +1059,12 @@ class AssistantCommand(BaseCommand):
                     verbose=verbose,
                     first_turn=first_turn,
                     on_branch_change=replay_branch_change,
+                    on_changes_applied=lambda: plain(
+                        "[muted]  Pulling changes to local workspace… done. (replay)[/muted]"
+                    ),
                 )
             finally:
                 display.clear()
-            if result.changes_applied:
-                plain("[muted]  Pulling changes to local workspace… done. (replay)[/muted]")
             first_turn = False
 
         _print_exit_summary(conv.get("sessionId"))
@@ -1074,6 +1087,7 @@ class AssistantCommand(BaseCommand):
             verbose=False,
             json_mode=True,
             first_turn=True,
+            no_pull=no_pull,
         )
         output: dict[str, Any] = {
             "success": result.error is None,
@@ -1123,14 +1137,13 @@ class AssistantCommand(BaseCommand):
             verbose=verbose,
             json_mode=False,
             first_turn=True,
+            no_pull=no_pull,
         )
         if result.suspended:
             plain(
                 "[muted]  The assistant is continuing to work remotely — "
                 "run 'poly pull' later or resume with --session-id to see the result.[/muted]"
             )
-        if result.changes_applied and not no_pull:
-            _pull_local(project)
         _print_exit_summary(result.session_id)
 
     @classmethod
@@ -1182,15 +1195,13 @@ class AssistantCommand(BaseCommand):
                     verbose=verbose,
                     json_mode=False,
                     first_turn=first_turn,
+                    no_pull=no_pull,
                 )
                 session_id = turn.session_id or session_id
                 first_turn = False
 
-                if turn.changes_applied and not no_pull:
-                    _pull_local(project)
+                if turn.changes_applied:
                     pending_pull = False
-                elif turn.changes_applied:
-                    pending_pull = True
 
                 if turn.suspended:
                     # The run keeps working server-side after the stream closes;
