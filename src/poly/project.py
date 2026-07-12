@@ -506,14 +506,31 @@ class AgentStudioProject:
             self._not_loaded_resources = []
         self.save_config()
 
-    def load_template(self, region, template_id):
-        """Load a template into the project."""
+    def load_template(self, region: str, template_id: str) -> None:
+        """Load a template into the project.
+
+        Writes template resources to disk without updating the tracked state,
+        so the next ``poly push`` detects the template files as changes.
+        """
         template_resources = self.api_handler.get_template_resources(template_id, region)
 
-        # Delete all existing local resource files without parsing them
-        for resource_class, paths in self.discover_local_resources().items():
-            for path in paths:
-                resource_class.delete_resource(path)
+        # Ensure all resource types participate in the merge during the
+        # next push/pull, rather than being silently overwritten.
+        self._not_loaded_resources = []
+        self.save_config()
+
+        # Delete all existing local resource files without parsing them.
+        # We avoid discover_local_resources() here because it parses YAML,
+        # which fails on files with merge conflict markers.
+        preserved = {"_gen", "project.yaml"}
+        for entry in os.listdir(self.root_path):
+            if entry in preserved or entry.startswith("."):
+                continue
+            entry_path = os.path.join(self.root_path, entry)
+            if os.path.isdir(entry_path):
+                shutil.rmtree(entry_path)
+            else:
+                os.remove(entry_path)
 
         empty_resources: ResourceMap = {}
         self._update_pulled_resources(
