@@ -3053,21 +3053,31 @@ class AgentStudioProject:
 
     # ── Simulation tests ───────────────────────────────────────────────────
 
-    def resolve_tests(self, files: list[str] = None, tags: list[str] = None) -> list["TestCase"]:
+    def resolve_tests(
+        self,
+        files: list[str] = None,
+        tags: list[str] = None,
+        severities: list[str] = None,
+    ) -> list["TestCase"]:
         """Resolve which tests match the given criteria.
 
-        Runs all tests by default. Use files or tags to filter.
+        Runs all tests by default. Use files, tags or severities to filter.
 
         Args:
             files: List of specific test file paths to select.
             tags: List of tags to filter by.
+            severities: List of severity levels to filter by.
 
         Returns:
             list[TestCase]: The matched test cases.
         """
         tests: dict[str, TestCase] = self.resources.get(TestCase, {})
         matched: list[TestCase] = []
-        if tags:
+        if severities:
+            for test in tests.values():
+                if test.severity.severity in severities:
+                    matched.append(test)
+        elif tags:
             for test in tests.values():
                 if any(tag in test.tags.tags for tag in tags):
                     matched.append(test)
@@ -3083,22 +3093,27 @@ class AgentStudioProject:
 
         return matched
 
-    def trigger_tests(self, test_ids: list[str]) -> dict:
+    def trigger_tests(self, select: dict | list[str]) -> dict:
         """Trigger tests for the project.
 
         Args:
-            test_ids: List of test case resource IDs to run.
+            select: Selection for the run — either a select dict
+                ({"mode": "testIds" | "severities" | "tags", ...}) or, for
+                backwards compatibility, a plain list of test case IDs.
 
         Returns:
             dict: API response with test run details.
         """
-        if not test_ids:
+        if isinstance(select, list):
+            select = {"mode": "testIds", "testIds": select}
+
+        if select.get("mode") == "testIds" and not select.get("testIds"):
             raise ValueError("No test IDs provided.")
 
         return self.api_handler.trigger_test_run(
             self.region,
             self.project_id,
-            test_ids,
+            select,
             self.branch_id,
         )
 

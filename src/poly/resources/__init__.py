@@ -67,6 +67,7 @@ from poly.resources.test_suite import (
     FunctionCallAssertion,
     TestCase,
     TestCaseAssertion,
+    TestCaseSeverity,
     TestCaseTags,
 )
 from poly.resources.topic import Topic

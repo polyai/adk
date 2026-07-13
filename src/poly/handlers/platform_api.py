@@ -1024,7 +1024,7 @@ class PlatformAPIHandler:
     def trigger_test_run(
         region: str,
         project_id: str,
-        test_case_ids: list[str],
+        select: dict,
         branch_id: str,
     ) -> dict:
         """Trigger a test run for a project.
@@ -1032,7 +1032,9 @@ class PlatformAPIHandler:
         Args:
             region: The region name.
             project_id: The project ID (agent ID).
-            test_case_ids: List of test case IDs to run.
+            select: Test selection, e.g. {"mode": "severities", "severities": ["high"]}
+                or {"mode": "testIds", "testIds": [...]} or
+                {"mode": "tags", "tags": [...]}. Resolved server-side.
             branch_id: The branch ID to run tests against.
 
         Returns:
@@ -1040,7 +1042,7 @@ class PlatformAPIHandler:
         """
         endpoint = TRIGGER_TEST_RUN_URL.format(project_id=project_id)
         data = {
-            "testCaseIds": test_case_ids,
+            "select": select,
             "branchId": branch_id,
         }
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)

@@ -15,6 +15,7 @@ from poly.handlers.protobuf.testing_pb2 import (
     Delete_TestCase,
     PromptAssertion,
     SetTestCaseAssertions,
+    SetTestCaseSeverity,
     SetTestCaseTags,
     Update_TestCase,
 )
@@ -40,6 +41,10 @@ CHANNEL_TO_INTERNAL = {v: k for k, v in INTERNAL_TO_CHANNEL.items()}
 
 
 ALLOWED_TYPES = ["string", "integer", "number", "boolean"]
+
+# Severity scale; the closed set is enforced server-side (zod enum) —
+# kept in sync here for early local validation and --help.
+ALLOWED_SEVERITIES = ["low", "medium", "high", "critical"]
 
 
 @dataclass
@@ -181,6 +186,38 @@ class TestCaseTags(SubResource):
 
 
 @dataclass
+class TestCaseSeverity(SubResource):
+    """Dataclass representing a Test Case Severity (single level or None)"""
+
+    __test__ = False
+
+    severity: Optional[str] = None
+
+    @property
+    def command_type(self) -> str:
+        return "test_case_severity"
+
+    @property
+    def update_command_type(self) -> str:
+        return "set_test_case_severity"
+
+    def build_update_proto(self) -> SetTestCaseSeverity:
+        if self.severity is None:
+            # Leaving the optional field unset clears the severity.
+            return SetTestCaseSeverity(id=self.resource_id)
+        return SetTestCaseSeverity(
+            id=self.resource_id,
+            severity=self.severity,
+        )
+
+    def build_create_proto(self) -> None:
+        raise NotImplementedError("Test Case Severity cannot be created")
+
+    def build_delete_proto(self) -> None:
+        raise NotImplementedError("Test Case Severity cannot be deleted")
+
+
+@dataclass
 class TestCase(YamlResource):
     """Dataclass representing an Agent Studio Test"""
 
@@ -192,6 +229,7 @@ class TestCase(YamlResource):
     language: str
     assertions: TestCaseAssertion = None
     tags: TestCaseTags = None
+    severity: TestCaseSeverity = None
     variant: Optional[str] = None
 
     def __init__(
@@ -204,6 +242,7 @@ class TestCase(YamlResource):
         language: str,
         assertions: TestCaseAssertion | dict,
         tags: TestCaseTags | dict,
+        severity: TestCaseSeverity | dict | None = None,
         variant: Optional[str] = None,
     ):
         self.resource_id = resource_id
@@ -218,6 +257,14 @@ class TestCase(YamlResource):
             self.tags = tags
         else:
             self.tags = TestCaseTags(**tags)
+        if severity is None:
+            self.severity = TestCaseSeverity(
+                resource_id=resource_id, name="severity", severity=None
+            )
+        elif isinstance(severity, TestCaseSeverity):
+            self.severity = severity
+        else:
+            self.severity = TestCaseSeverity(**severity)
         self.variant = variant
         self.language = language
 
@@ -238,6 +285,9 @@ class TestCase(YamlResource):
 
         if tags_list := self.tags.tags:
             output["tags"] = tags_list
+
+        if severity_value := self.severity.severity:
+            output["severity"] = severity_value
 
         if assert_dict := self.assertions.to_yaml_dict():
             output.update(assert_dict)
@@ -273,6 +323,11 @@ class TestCase(YamlResource):
         tags = yaml_dict.get("tags", [])
         test_case_tags = TestCaseTags(resource_id=resource_id, name="tags", tags=tags)
 
+        severity = yaml_dict.get("severity")
+        test_case_severity = TestCaseSeverity(
+            resource_id=resource_id, name="severity", severity=severity
+        )
+
         channel = yaml_dict.get("channel")
         return cls(
             resource_id=resource_id,
@@ -282,6 +337,7 @@ class TestCase(YamlResource):
             language=yaml_dict.get("language", ""),
             assertions=test_case_assertion,
             tags=test_case_tags,
+            severity=test_case_severity,
             variant=yaml_dict.get("variant"),
         )
 
@@ -389,6 +445,13 @@ class TestCase(YamlResource):
             ):
                 raise ValueError(f"Variant {self.variant} not found")
 
+        # Severity comes from the predefined scale
+        if self.severity.severity is not None and self.severity.severity not in ALLOWED_SEVERITIES:
+            raise ValueError(
+                f"Invalid severity: {self.severity.severity}. "
+                f"Allowed severities: {', '.join(ALLOWED_SEVERITIES)}"
+            )
+
         # Function name is valid
         known_global_functions = {
             resource.resource_name
@@ -426,11 +489,14 @@ class TestCase(YamlResource):
         if not old_resource:
             updated.append(self.assertions)
             updated.append(self.tags)
+            updated.append(self.severity)
         else:
             if old_resource.assertions != self.assertions:
                 updated.append(self.assertions)
             if old_resource.tags != self.tags:
                 updated.append(self.tags)
+            if old_resource.severity != self.severity:
+                updated.append(self.severity)
 
         return [], updated, []
 

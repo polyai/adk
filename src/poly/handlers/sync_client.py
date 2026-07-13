@@ -51,6 +51,7 @@ from poly.resources import (
     SMSTemplate,
     TestCase,
     TestCaseAssertion,
+    TestCaseSeverity,
     TestCaseTags,
     Topic,
     TranscriptCorrection,
@@ -946,6 +947,11 @@ class SyncClientHandler:
             tags = TestCaseTags(
                 resource_id=test_case_id, name="tags", tags=test_case_data.get("tags", [])
             )
+            severity = TestCaseSeverity(
+                resource_id=test_case_id,
+                name="severity",
+                severity=test_case_data.get("severity"),
+            )
             test_cases[test_case_id] = TestCase(
                 resource_id=test_case_id,
                 name=test_case_data.get("name", ""),
@@ -955,6 +961,7 @@ class SyncClientHandler:
                 channel=test_case_data.get("channel", ""),
                 assertions=assertions,
                 tags=tags,
+                severity=severity,
             )
         return test_cases
 

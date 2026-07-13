@@ -9,6 +9,7 @@ from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParser
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
 from poly.output.json_output import json_print
+from poly.resources.test_suite import ALLOWED_SEVERITIES
 
 
 class TestingCommand(BaseCommand):
@@ -34,12 +35,13 @@ class TestingCommand(BaseCommand):
             help="Run tests for the project.",
             description=(
                 "Run tests for the project. Runs all tests by default.\n"
-                "Use --files or --tag to filter.\n\n"
+                "Use --files, --tag or --severity to filter.\n\n"
                 "Examples:\n"
                 "  poly test run\n"
                 "  poly test run --path /path/to/project\n"
                 "  poly test run --files test1.yaml test2.yaml\n"
-                "  poly test run --tag smoke\n"
+                "  poly test run --tag flow-booking\n"
+                "  poly test run --severity critical\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -52,7 +54,17 @@ class TestingCommand(BaseCommand):
             "--tag",
             type=str,
             nargs="*",
-            help="Run tests with the specified tag(s).",
+            help="Run tests with the specified tag(s). Resolved server-side against the branch.",
+        )
+        test_run_parser.add_argument(
+            "--severity",
+            type=str,
+            nargs="*",
+            choices=ALLOWED_SEVERITIES,
+            help=(
+                "Run tests at the specified severity level(s) "
+                f"({', '.join(ALLOWED_SEVERITIES)}). Resolved server-side against the branch."
+            ),
         )
         test_run_parser.add_argument(
             "--dont-poll",
@@ -128,6 +140,7 @@ class TestingCommand(BaseCommand):
                 args.path,
                 files=args.files,
                 tags=args.tag,
+                severities=args.severity,
                 dont_poll=args.dont_poll,
                 push=args.push,
                 output_json=args.json,
@@ -154,6 +167,7 @@ class TestingCommand(BaseCommand):
         base_path: str,
         files: list[str],
         tags: list[str] = None,
+        severities: list[str] = None,
         dont_poll: bool = False,
         push: bool = False,
         output_json: bool = False,
@@ -162,12 +176,22 @@ class TestingCommand(BaseCommand):
         """Run tests for the project."""
         from poly.output.console import error, info, plain, poll_test_run_live, success
 
+        if sum(bool(selector) for selector in (files, tags, severities)) > 1:
+            message = "Use only one of --files, --tag or --severity."
+            if output_json:
+                json_print({"success": False, "error": message})
+            else:
+                error(message)
+            sys.exit(1)
+
         project = load_project(base_path)
 
         json_output = {}
 
         if dry_run:
-            matched = project.resolve_tests(files=files, tags=tags)
+            # Local approximation: --tag/--severity runs are resolved
+            # server-side against the branch, so unpushed local edits may differ.
+            matched = project.resolve_tests(files=files, tags=tags, severities=severities)
             if output_json:
                 json_print(
                     {
@@ -214,13 +238,27 @@ class TestingCommand(BaseCommand):
                     plain(output)
                 sys.exit(1)
 
-        matched = project.resolve_tests(files=files, tags=tags)
-        test_ids = [t.resource_id for t in matched]
+        if severities:
+            select = {"mode": "severities", "severities": severities}
+        elif tags:
+            select = {"mode": "tags", "tags": tags}
+        else:
+            matched = project.resolve_tests(files=files)
+            select = {"mode": "testIds", "testIds": [t.resource_id for t in matched]}
+
+        if severities or tags:
+            # Selection is server-side; resolve locally only to drive the
+            # polling display. Stale local state degrades the display, not
+            # the run.
+            try:
+                matched = project.resolve_tests(files=None, tags=tags, severities=severities)
+            except ValueError:
+                matched = []
 
         if not output_json:
             info(f"Running tests for {project.account_id}/{project.project_id}...")
 
-        test_info = project.trigger_tests(test_ids)
+        test_info = project.trigger_tests(select)
         test_run_id = test_info.get("id")
 
         if output_json:
