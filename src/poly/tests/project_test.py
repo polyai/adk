@@ -35,6 +35,7 @@ from poly.resources import (
     SMSTemplate,
     TestCase,
     TestCaseAssertion,
+    TestCaseSeverity,
     TestCaseTags,
     Topic,
     TranscriptCorrection,
@@ -3415,6 +3416,7 @@ class GetUpdatedSubresourcesTest(unittest.TestCase):
                 function_calls=[],
             ),
             tags=TestCaseTags(resource_id=rid, name="tags", tags=["booking"]),
+            severity=TestCaseSeverity(resource_id=rid, name="severity", severity="high"),
         )
 
     def test_new_test_case_emits_assertions_and_tags(self):
@@ -3438,6 +3440,11 @@ class GetUpdatedSubresourcesTest(unittest.TestCase):
         self.assertEqual(
             change_set.updated[TestCaseTags][test_case.resource_id].tags,
             ["booking"],
+        )
+        self.assertIn(TestCaseSeverity, change_set.updated)
+        self.assertEqual(
+            change_set.updated[TestCaseSeverity][test_case.resource_id].severity,
+            "high",
         )
 
 
@@ -3477,6 +3484,33 @@ class ResolveTestsTest(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0].resource_id, target.resource_id)
 
+    def _set_severities(self):
+        """Assign severities in memory — shared YAML fixtures stay
+        severity-free so project_status hash comparisons elsewhere are
+        unaffected."""
+        by_name = {t.name: t for t in self.project.resources[TestCase].values()}
+        by_name["Webchat smoke test"].severity.severity = "high"
+        by_name["Greeting flow test"].severity.severity = "critical"
+
+    def test_filter_by_severity(self):
+        """Filtering by a severity level returns tests at that level."""
+        self._set_severities()
+        result = self.project.resolve_tests(severities=["high"])
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].name, "Webchat smoke test")
+
+    def test_filter_by_multiple_severities_is_or(self):
+        """Passing multiple levels matches tests at any of them."""
+        self._set_severities()
+        result = self.project.resolve_tests(severities=["high", "critical"])
+        self.assertEqual(len(result), 2)
+
+    def test_unmatched_severity_raises(self):
+        """A level that matches nothing raises ValueError."""
+        self._set_severities()
+        with self.assertRaises(ValueError, msg="No tests found"):
+            self.project.resolve_tests(severities=["low"])
+
     def test_unmatched_tag_raises(self):
         """A tag that matches nothing raises ValueError."""
         with self.assertRaises(ValueError, msg="No tests found"):
@@ -3486,6 +3520,41 @@ class ResolveTestsTest(unittest.TestCase):
         """A file path that matches nothing raises ValueError."""
         with self.assertRaises(ValueError, msg="No tests found"):
             self.project.resolve_tests(files=["no_such_test.yaml"])
+
+
+class TriggerTestsTest(unittest.TestCase):
+    """Tests for AgentStudioProject.trigger_tests select-body building."""
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_select_dict_passes_through(self):
+        self.project.trigger_tests({"mode": "severities", "severities": ["high"]})
+        self.mock_api_handler.trigger_test_run.assert_called_once_with(
+            self.project.region,
+            self.project.project_id,
+            {"mode": "severities", "severities": ["high"]},
+            self.project.branch_id,
+        )
+
+    def test_legacy_id_list_is_lifted(self):
+        self.project.trigger_tests(["tc-1", "tc-2"])
+        self.mock_api_handler.trigger_test_run.assert_called_once_with(
+            self.project.region,
+            self.project.project_id,
+            {"mode": "testIds", "testIds": ["tc-1", "tc-2"]},
+            self.project.branch_id,
+        )
+
+    def test_empty_id_list_raises(self):
+        with self.assertRaises(ValueError):
+            self.project.trigger_tests([])
 
 
 class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):

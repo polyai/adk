@@ -78,6 +78,7 @@ from poly.resources.test_suite import (
     FunctionCallAssertion,
     TestCase,
     TestCaseAssertion,
+    TestCaseSeverity,
     TestCaseTags,
 )
 from poly.resources.topic import (
@@ -7131,6 +7132,11 @@ class TestCaseTests(unittest.TestCase):
                 name="tags",
                 tags=["booking", "smoke"],
             ),
+            severity=TestCaseSeverity(
+                resource_id=resource_id,
+                name="severity",
+                severity="critical",
+            ),
             language="en-GB",
         )
 
@@ -7141,6 +7147,7 @@ class TestCaseTests(unittest.TestCase):
         self.assertEqual(yaml_dict["channel"], "voice")
         self.assertEqual(yaml_dict["language"], "en-GB")
         self.assertEqual(yaml_dict["tags"], ["booking", "smoke"])
+        self.assertEqual(yaml_dict["severity"], "critical")
         self.assertEqual(
             yaml_dict["function_call_assertions"][0]["arguments"][0]["parameter_name"],
             "param1",
@@ -7153,6 +7160,7 @@ class TestCaseTests(unittest.TestCase):
         self.assertEqual(restored.channel, test_case.channel)
         self.assertEqual(restored.language, test_case.language)
         self.assertEqual(restored.assertions.prompts, test_case.assertions.prompts)
+        self.assertEqual(restored.severity.severity, test_case.severity.severity)
         self.assertEqual(
             restored.assertions.function_calls[0].arguments[0].expected_value,
             "hello",
@@ -7164,6 +7172,7 @@ class TestCaseTests(unittest.TestCase):
         self.assertEqual(test_case.command_type, "test_case")
         self.assertEqual(test_case.assertions.update_command_type, "set_test_case_assertions")
         self.assertEqual(test_case.tags.update_command_type, "set_test_case_tags")
+        self.assertEqual(test_case.severity.update_command_type, "set_test_case_severity")
 
     def test_build_protos(self):
         test_case = self._sample_test_case()
@@ -7191,6 +7200,15 @@ class TestCaseTests(unittest.TestCase):
         tags_proto = test_case.tags.build_update_proto()
         self.assertEqual(tags_proto.tags, ["booking", "smoke"])
 
+        severity_proto = test_case.severity.build_update_proto()
+        self.assertEqual(severity_proto.id, "TEST-greeting_flow")
+        self.assertEqual(severity_proto.severity, "critical")
+
+        cleared_proto = TestCaseSeverity(
+            resource_id="TEST-greeting_flow", name="severity", severity=None
+        ).build_update_proto()
+        self.assertFalse(cleared_proto.HasField("severity"))
+
     def test_read_local_resource(self):
         file_path = os.path.join(
             os.path.dirname(__file__),
@@ -7208,6 +7226,7 @@ class TestCaseTests(unittest.TestCase):
         self.assertEqual(test_case.channel, "chat.polyai")
         self.assertEqual(test_case.language, "en-GB")
         self.assertEqual(test_case.tags.tags, ["booking", "smoke"])
+        self.assertIsNone(test_case.severity.severity)
 
     def test_read_local_resource_filename_mismatch_raises(self):
         file_path = os.path.join("test_suite", "greeting_flow_test.yaml")
@@ -7225,6 +7244,27 @@ class TestCaseTests(unittest.TestCase):
     def test_validate(self):
         test_case = self._sample_test_case()
         test_case.validate()
+
+    def test_validate_rejects_unknown_severity(self):
+        test_case = self._sample_test_case()
+        test_case.severity.severity = "blocker"
+        with self.assertRaises(ValueError) as cm:
+            test_case.validate()
+        self.assertIn("Invalid severity", str(cm.exception))
+        self.assertIn("blocker", str(cm.exception))
+
+    def test_severity_defaults_to_none(self):
+        yaml_dict = {
+            "name": "Greeting flow test",
+            "scenario": "Ask for help with booking.",
+            "channel": "voice",
+            "language": "en-GB",
+        }
+        test_case = TestCase.from_yaml_dict(
+            yaml_dict, resource_id="TEST-greeting_flow", name="Greeting flow test"
+        )
+        self.assertIsNone(test_case.severity.severity)
+        self.assertNotIn("severity", test_case.to_yaml_dict())
 
         with self.assertRaises(ValueError) as cm:
             TestCase(
@@ -7321,7 +7361,7 @@ class TestCaseTests(unittest.TestCase):
         new, updated, deleted = test_case.get_new_updated_deleted_subresources()
         self.assertEqual(new, [])
         self.assertEqual(deleted, [])
-        self.assertEqual(len(updated), 2)
+        self.assertEqual(len(updated), 3)
 
         unchanged, updated_after_edit, deleted_after_edit = (
             test_case.get_new_updated_deleted_subresources(old_resource=test_case)
