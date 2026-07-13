@@ -1680,8 +1680,8 @@ TEST_PERSONALITY = SettingsPersonality(
 )
 
 PERSONALITY_RAW = """adjectives:
-  Calm: true
   Polite: true
+  Calm: true
 custom: ''
 """
 
@@ -3714,43 +3714,6 @@ class EntityTests(unittest.TestCase):
         )
         self.assertIsNone(entity_without_config.validate())
 
-    def test_strip_proto_defaults_removes_zero_values(self):
-        """Proto3 zero defaults are stripped so local and API representations match."""
-        config = {"relative_date": False, "has_decimal": False, "min": 0, "max": 0.0}
-        self.assertEqual(Entity._strip_proto_defaults(config), {})
-
-    def test_strip_proto_defaults_keeps_truthy_values(self):
-        """Non-default values must be preserved."""
-        config = {"has_decimal": True, "has_range": True, "min": 1, "max": 100.5}
-        self.assertEqual(Entity._strip_proto_defaults(config), config)
-
-    def test_strip_proto_defaults_removes_empty_string_and_list(self):
-        """Empty strings and lists are proto3 defaults."""
-        config = {"validation_type": "", "regular_expression": "", "country_codes": []}
-        self.assertEqual(Entity._strip_proto_defaults(config), {})
-
-    def test_strip_proto_defaults_keeps_nonempty_string_and_list(self):
-        """Non-empty strings and lists are real values."""
-        config = {"validation_type": "regex", "options": ["a", "b"]}
-        self.assertEqual(Entity._strip_proto_defaults(config), config)
-
-    def test_to_yaml_dict_strips_proto_defaults(self):
-        """to_yaml_dict should produce config: {} for an entity with only default values."""
-        entity = Entity(
-            resource_id="e1",
-            name="date_entity",
-            description="A date",
-            entity_type=EntityType.DATE,
-            config={"relative_date": False},
-        )
-        self.assertEqual(entity.to_yaml_dict()["config"], {})
-
-    def test_hash_matches_after_strip(self):
-        """Entities differing only in proto3 defaults should have the same hash."""
-        base = dict(resource_id="e1", name="d", description="d", entity_type=EntityType.DATE)
-        with_default = Entity(**base, config={"relative_date": False})
-        without_default = Entity(**base, config={})
-        self.assertEqual(with_default.compute_hash(), without_default.compute_hash())
 
 
 TEST_FUNCTION_STEP_CODE = """def process_data(conv: Conversation, flow: Flow):

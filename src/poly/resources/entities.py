@@ -117,24 +117,13 @@ class Entity(MultiResourceYamlResource):
         path_safe_name = utils.clean_name(self.name, lowercase=False)
         return os.path.join("config", "entities.yaml", self.top_level_name, path_safe_name)
 
-    @staticmethod
-    def _strip_proto_defaults(config: dict) -> dict:
-        """Strip config values that match proto3 zero defaults.
-
-        Proto3 omits these on the wire, so the API never returns them.
-        Normalizing here prevents false merge conflicts between a locally
-        written ``relative_date: false`` and the API-returned ``{}``.
-        """
-        proto_zeros = (False, 0, 0.0, "", [])
-        return {k: v for k, v in config.items() if v not in proto_zeros}
-
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
         return {
             "name": self.name,
             "description": self.description,
             "entity_type": self.entity_type.value,
-            "config": self._strip_proto_defaults(self.config),
+            "config": self.config,
         }
 
     @classmethod
