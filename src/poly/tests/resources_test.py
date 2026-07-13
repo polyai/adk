@@ -1680,8 +1680,8 @@ TEST_PERSONALITY = SettingsPersonality(
 )
 
 PERSONALITY_RAW = """adjectives:
-  Polite: true
   Calm: true
+  Polite: true
 custom: ''
 """
 
@@ -1697,11 +1697,20 @@ class SettingsPersonalityTests(unittest.TestCase):
         self.assertEqual(yaml_dict["adjectives"], {"Polite": True, "Calm": True})
         self.assertNotIn("Kind", yaml_dict["adjectives"])
 
+    def test_to_yaml_dict_sorts_adjectives(self):
+        """Test that to_yaml_dict returns adjectives in sorted order."""
+        unsorted = SettingsPersonality(
+            resource_id="p1",
+            name="personality",
+            adjectives={"Polite": True, "Calm": True, "Energetic": True, "Kind": False},
+            custom="",
+        )
+        yaml_dict = unsorted.to_yaml_dict()
+        self.assertEqual(list(yaml_dict["adjectives"].keys()), ["Calm", "Energetic", "Polite"])
+
     def test_to_yaml_dict_normalizes_empty_and_all_false(self):
         """Test that both empty and all-false adjectives produce the same YAML dict."""
-        empty = SettingsPersonality(
-            resource_id="p1", name="personality", adjectives={}, custom=""
-        )
+        empty = SettingsPersonality(resource_id="p1", name="personality", adjectives={}, custom="")
         all_false = SettingsPersonality(
             resource_id="p2",
             name="personality",

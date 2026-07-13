@@ -1,6 +1,87 @@
 # CHANGELOG
 
 
+## v0.34.4 (2026-07-13)
+
+### Bug Fixes
+
+- Normalize local multi-resource content before merge
+  ([#229](https://github.com/polyai/adk/pull/229),
+  [`87adab2`](https://github.com/polyai/adk/commit/87adab29233e7cc5608529ee84b21073c9e1f933))
+
+## Summary
+
+Normalize local multi-resource YAML content through resource classes before the three-way merge on
+  pull, preventing false merge conflicts caused by serialization differences.
+
+## Motivation
+
+The three-way merge for multi-resource files (entities, keyphrases, etc.) read local files raw from
+  disk, while original and incoming content went through resource objects (`read_local_resource` →
+  `save(save_to_cache=True)`). Serialization differences — such as default values (`relative_date:
+  false` vs `config: {}`), case normalization (`Boosted` vs `boosted`), or whitespace stripping —
+  caused false merge conflicts on pull even when the logical content was identical.
+
+The non-multi-resource path already normalizes local content via `read_local_resource` → `to_pretty`
+  (with the comment "Normalise the local resource to ensure formatting differences don't cause
+  unnecessary merge conflicts"). The multi-resource path was missing this normalization.
+
+## Changes
+
+- Replaced raw `Resource.read_from_file()` local read in `_update_multi_resource_yaml_resources`
+  with `read_local_resource` → `save(save_to_cache=True)`, mirroring how original and incoming
+  content are already computed - Falls back to raw read for files not covered by the object-based
+  path (e.g. edge cases) - Added test verifying that mixed-case keyphrase levels in local YAML don't
+  cause false conflicts on pull
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- **agent-setting**: Agent setting sort ([#230](https://github.com/polyai/adk/pull/230),
+  [`6ed879c`](https://github.com/polyai/adk/commit/6ed879cdbb925223d57d40adb96de894c860a4f9))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. --> Fix agent setting sort to prevent merge
+  conflicts ## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. --> The order of the keys can
+  sometimes change causing merge conflicts. Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+
 ## v0.34.3 (2026-07-09)
 
 ### Bug Fixes
