@@ -1710,9 +1710,7 @@ class SettingsPersonalityTests(unittest.TestCase):
 
     def test_to_yaml_dict_normalizes_empty_and_all_false(self):
         """Test that both empty and all-false adjectives produce the same YAML dict."""
-        empty = SettingsPersonality(
-            resource_id="p1", name="personality", adjectives={}, custom=""
-        )
+        empty = SettingsPersonality(resource_id="p1", name="personality", adjectives={}, custom="")
         all_false = SettingsPersonality(
             resource_id="p2",
             name="personality",
