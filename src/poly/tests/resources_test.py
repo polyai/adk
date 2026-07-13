@@ -1680,8 +1680,8 @@ TEST_PERSONALITY = SettingsPersonality(
 )
 
 PERSONALITY_RAW = """adjectives:
-  Polite: true
   Calm: true
+  Polite: true
 custom: ''
 """
 
