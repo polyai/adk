@@ -80,6 +80,9 @@ def _to_sorted_json(data: dict) -> str:
     return json.dumps(data, indent=2, sort_keys=True) + "\n"
 
 
+_MISSING = object()
+
+
 def _merge_dicts(base: dict, local: dict, remote: dict) -> tuple[dict, list[str]]:
     """3-way merge at the dict key level.
 
@@ -92,19 +95,23 @@ def _merge_dicts(base: dict, local: dict, remote: dict) -> tuple[dict, list[str]
     conflicts = []
 
     for key in sorted(all_keys):
-        base_val = base.get(key)
-        local_val = local.get(key)
-        remote_val = remote.get(key)
+        base_val = base.get(key, _MISSING)
+        local_val = local.get(key, _MISSING)
+        remote_val = remote.get(key, _MISSING)
 
+        resolved = _MISSING
         if local_val == remote_val:
-            merged[key] = local_val
+            resolved = local_val
         elif local_val == base_val:
-            merged[key] = remote_val
+            resolved = remote_val
         elif remote_val == base_val:
-            merged[key] = local_val
+            resolved = local_val
         else:
             conflicts.append(key)
-            merged[key] = local_val
+            resolved = local_val
+
+        if resolved is not _MISSING:
+            merged[key] = resolved
 
     return merged, conflicts
 
@@ -294,6 +301,8 @@ class RTCCommand(BaseCommand):
             result = cls.rtc_pull(args.path, args.env, output_json=args.json)
             if args.json:
                 json_print(result)
+                if not result["success"]:
+                    sys.exit(1)
             else:
                 if not result["success"]:
                     error(result["error"])
@@ -313,6 +322,8 @@ class RTCCommand(BaseCommand):
                 return
             if args.json:
                 json_print(result)
+                if not result["success"]:
+                    sys.exit(1)
             else:
                 if not result["success"]:
                     error(result["error"])

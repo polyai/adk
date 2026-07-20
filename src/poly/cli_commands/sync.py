@@ -141,11 +141,12 @@ class PullCommand(BaseCommand):
             if include_rtc and not files_with_conflicts:
                 from poly.cli_commands.rtc import RTCCommand
 
-                json_output["rtc"] = RTCCommand.rtc_pull(
-                    base_path, env="all", output_json=output_json
-                )
+                rtc_result = RTCCommand.rtc_pull(base_path, env="all", output_json=output_json)
+                json_output["rtc"] = rtc_result
+                if not rtc_result["success"]:
+                    json_output["success"] = False
             json_print(json_output)
-            if files_with_conflicts:
+            if files_with_conflicts or not json_output["success"]:
                 sys.exit(1)
             return
 
@@ -168,6 +169,7 @@ class PullCommand(BaseCommand):
                     success(f"Pulled RTC {f['environment']} — {f['data_file']}")
             else:
                 error(f"RTC pull failed: {rtc_result['error']}")
+                sys.exit(1)
 
 
 class PushCommand(BaseCommand):
@@ -309,11 +311,14 @@ class PushCommand(BaseCommand):
             if include_rtc and push_ok:
                 from poly.cli_commands.rtc import RTCCommand
 
-                json_output["rtc"] = RTCCommand.rtc_push(
+                rtc_result = RTCCommand.rtc_push(
                     base_path, env=rtc_env, force=force, output_json=output_json
                 )
+                json_output["rtc"] = rtc_result
+                if rtc_result and not rtc_result.get("success"):
+                    json_output["success"] = False
             json_print(json_output)
-            if not push_ok:
+            if not json_output["success"]:
                 sys.exit(1)
             return
 
@@ -335,6 +340,7 @@ class PushCommand(BaseCommand):
                 success(f"Pushed RTC to {rtc_env}")
             else:
                 error(f"RTC push failed: {rtc_result['error']}")
+                sys.exit(1)
 
 
 class StatusCommand(BaseCommand):

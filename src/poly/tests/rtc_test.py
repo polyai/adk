@@ -449,10 +449,11 @@ class TestRTCDriftProtection(unittest.TestCase):
         mock_patch_vars.assert_called_once()
 
     @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
     @patch("poly.cli_commands.rtc.AgentStudioInterface.put_rtc_schema")
     @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
     def test_push_force_bypasses_drift_check(
-        self, mock_patch_vars, mock_put_schema, mock_load_project
+        self, mock_patch_vars, mock_put_schema, mock_get_rtc, mock_load_project
     ):
         """Verify --force skips drift check entirely."""
         mock_project = MagicMock()
@@ -470,6 +471,7 @@ class TestRTCDriftProtection(unittest.TestCase):
         self.assertTrue(result["success"])
         mock_put_schema.assert_called_once()
         mock_patch_vars.assert_called_once()
+        mock_get_rtc.assert_not_called()
 
     @patch("poly.cli_commands.rtc.load_project")
     @patch("poly.cli_commands.rtc.AgentStudioInterface.put_rtc_schema")
