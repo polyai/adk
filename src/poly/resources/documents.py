@@ -24,6 +24,10 @@ class Document(Resource):
     path: str
     contents: str
 
+    def __post_init__(self) -> None:
+        """Normalize path to uppercase to match platform convention."""
+        self.path = self.path.upper()
+
     @cached_property
     def file_path(self) -> str:
         """Get the file path for the Document resource."""
@@ -113,9 +117,9 @@ class Document(Resource):
             return file_paths
 
         for file_name in os.listdir(context_path):
-            if not file_name.endswith(".md"):
+            if not file_name.upper().endswith(".MD"):
                 continue
-            file_path = os.path.join(context_path, file_name)
+            file_path = os.path.join(context_path, file_name.upper())
             file_paths.append(file_path)
 
         return file_paths

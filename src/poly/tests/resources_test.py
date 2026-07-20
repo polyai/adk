@@ -8174,7 +8174,7 @@ class DocumentTests(unittest.TestCase):
 
     def test_file_path(self):
         doc = Document(resource_id="test.md", name="test", path="test.md", contents="hello")
-        self.assertEqual(doc.file_path, os.path.join("context", "test.md"))
+        self.assertEqual(doc.file_path, os.path.join("context", "TEST.MD"))
 
     def test_raw(self):
         doc = Document(resource_id="test.md", name="test", path="test.md", contents="some content")
@@ -8202,7 +8202,7 @@ class DocumentTests(unittest.TestCase):
             )
             self.assertEqual(doc.resource_id, "doc.md")
             self.assertEqual(doc.name, "doc")
-            self.assertEqual(doc.path, "doc.md")
+            self.assertEqual(doc.path, "DOC.MD")
             self.assertEqual(doc.contents, "file contents\n")
 
     def test_save_and_read_round_trip(self):
@@ -8217,12 +8217,12 @@ class DocumentTests(unittest.TestCase):
             )
             doc.save(tmpdir)
 
-            file_path = os.path.join(tmpdir, "context", "round_trip.md")
+            file_path = os.path.join(tmpdir, "context", "ROUND_TRIP.MD")
             self.assertTrue(os.path.exists(file_path))
 
             restored = Document.read_local_resource(
                 file_path=file_path,
-                resource_id="round_trip.md",
+                resource_id="ROUND_TRIP.MD",
                 resource_name="round_trip",
             )
             self.assertEqual(restored.contents, doc.contents)
@@ -8245,8 +8245,8 @@ class DocumentTests(unittest.TestCase):
             self.assertCountEqual(
                 discovered,
                 [
-                    os.path.join(context_dir, "doc1.md"),
-                    os.path.join(context_dir, "doc2.md"),
+                    os.path.join(context_dir, "DOC1.MD"),
+                    os.path.join(context_dir, "DOC2.MD"),
                 ],
             )
 
@@ -8256,6 +8256,23 @@ class DocumentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             discovered = Document.discover_resources(tmpdir)
             self.assertEqual(discovered, [])
+
+    def test_path_normalized_to_uppercase(self):
+        """Documents with different-case paths produce the same normalized path."""
+        doc_lower = Document(
+            resource_id="ctx.md", name="ctx", path="context.md", contents="hello"
+        )
+        doc_upper = Document(
+            resource_id="ctx.md", name="ctx", path="CONTEXT.MD", contents="hello"
+        )
+        doc_mixed = Document(
+            resource_id="ctx.md", name="ctx", path="Context.Md", contents="hello"
+        )
+        self.assertEqual(doc_lower.path, "CONTEXT.MD")
+        self.assertEqual(doc_upper.path, "CONTEXT.MD")
+        self.assertEqual(doc_mixed.path, "CONTEXT.MD")
+        self.assertEqual(doc_lower.file_path, doc_upper.file_path)
+        self.assertEqual(doc_lower.file_path, doc_mixed.file_path)
 
 
 if __name__ == "__main__":

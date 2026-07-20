@@ -1019,11 +1019,12 @@ class SyncClientHandler:
             projection.get("documents", {}).get("documents", {}).get("entities", {}).items()
         ):
             path = document_data.get("path", "") or ""
-            name = path.removesuffix(".md")
-            documents[document_id] = Document(
-                resource_id=document_id,
+            normalized_path = path.upper()
+            name = normalized_path.removesuffix(".MD")
+            documents[normalized_path] = Document(
+                resource_id=normalized_path,
                 name=name,
-                path=path,
+                path=normalized_path,
                 contents=document_data.get("content", ""),
             )
         return documents

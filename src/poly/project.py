@@ -2343,7 +2343,7 @@ class AgentStudioProject:
                     resource_id = self.generate_uuid(resource_type)
 
                     if resource_type == Document:
-                        resource_id = os.path.basename(file_path)
+                        resource_id = os.path.basename(file_path).upper()
 
                     if resource_type in (FlowStep, FunctionStep):
                         resource_id = f"{flow_id}_{resource_id}"
