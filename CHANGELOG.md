@@ -1,6 +1,56 @@
 # CHANGELOG
 
 
+## v0.34.5 (2026-07-20)
+
+### Bug Fixes
+
+- Normalize document paths to uppercase to prevent case-sensitivity conflicts
+  ([#231](https://github.com/polyai/adk/pull/231),
+  [`f26fc38`](https://github.com/polyai/adk/commit/f26fc3885f4e8f54555db1bd4a0615f1ac6a73e9))
+
+## Summary
+
+Normalizes all Document resource paths to uppercase at every entry point to prevent case-sensitivity
+  conflicts on macOS's case-insensitive filesystem.
+
+## Motivation
+
+On macOS (case-insensitive APFS), creating a local `context.md` and a remote `CONTEXT.MD` causes the
+  system to treat them as different resources despite being the same file on disk. This leads to the
+  remote version being incorrectly deleted on push, as `find_new_kept_deleted` uses case-sensitive
+  string comparison for file path matching.
+
+`CONTEXT.MD` is the version that the user can see in Studio Assistant
+
+## Changes
+
+- Added `Document.__post_init__` to normalize `self.path` to uppercase on construction - Updated
+  `Document.discover_resources()` to uppercase filenames from `os.listdir()` - Updated
+  `_read_documents_from_projection()` to use uppercase-normalized path as resource_id - Updated
+  `find_new_kept_deleted()` to uppercase the resource_id for new Documents - Updated existing test
+  assertions and added `test_path_normalized_to_uppercase`
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.34.4 (2026-07-13)
 
 ### Bug Fixes
