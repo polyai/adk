@@ -1021,10 +1021,10 @@ class SyncClientHandler:
             path = document_data.get("path", "") or ""
             normalized_path = path.upper()
             name = normalized_path.removesuffix(".MD")
-            documents[document_id] = Document(
-                resource_id=document_id,
+            documents[normalized_path] = Document(
+                resource_id=normalized_path,
                 name=name,
-                path=path,
+                path=normalized_path,
                 contents=document_data.get("content", ""),
             )
         return documents

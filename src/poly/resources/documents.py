@@ -25,7 +25,7 @@ class Document(Resource):
     contents: str
 
     def __post_init__(self) -> None:
-        """Normalize path to uppercase to avoid case-sensitivity issues on macOS."""
+        """Normalize path to uppercase to match platform convention."""
         self.path = self.path.upper()
 
     @cached_property
@@ -117,10 +117,9 @@ class Document(Resource):
             return file_paths
 
         for file_name in os.listdir(context_path):
-            upper_file_name = file_name.upper()
-            if not upper_file_name.endswith(".MD"):
+            if not file_name.upper().endswith(".MD"):
                 continue
-            file_path = os.path.join(context_path, upper_file_name)
+            file_path = os.path.join(context_path, file_name.upper())
             file_paths.append(file_path)
 
         return file_paths
