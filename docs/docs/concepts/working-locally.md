@@ -66,7 +66,7 @@ A typical project structure looks like this:
 │   ├── translations.yaml               # Optional
 │   └── variant_attributes.yaml         # Optional
 ├── context/                            # Optional - document context files
-│   └── {document_name}.md
+│   └── {DOCUMENT_NAME}.MD
 ├── voice/                              # Voice channel settings
 │   ├── configuration.yaml
 │   ├── safety_filters.yaml             # Optional
@@ -85,6 +85,10 @@ A typical project structure looks like this:
 !!! info "Generated files"
 
     Files under `_gen/` are generated stubs and should not be edited directly.
+
+!!! info "Document filenames are normalized to uppercase"
+
+    The ADK normalizes all document filenames in `context/` to uppercase (e.g. `CONTEXT.MD`, `CUSTOMER_FAQ.MD`). This prevents case-sensitivity conflicts on macOS's case-insensitive filesystem, where `context.md` and `CONTEXT.MD` would otherwise be treated as the same file on disk but as different resources by the platform. Files pulled from Agent Studio and files discovered locally are both normalized automatically.
 
 ## How local work maps to Agent Studio
 
