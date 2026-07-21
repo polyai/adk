@@ -9,8 +9,8 @@ from functools import cached_property
 
 from poly.handlers.protobuf.documents_pb2 import (
     Document_Create,
-    Document_Update,
     Document_Delete,
+    Document_Update,
 )
 from poly.resources.resource import Resource, register_resource
 

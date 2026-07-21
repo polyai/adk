@@ -54,3 +54,4 @@ __pycache__/
 
 .venv/
 src/poly/docs/.venv/
+.agent_studio_config

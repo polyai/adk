@@ -6,7 +6,7 @@ Copyright PolyAI Limited
 import json
 import os
 import sys
-from argparse import Namespace, _SubParsersAction, ArgumentParser, RawTextHelpFormatter
+from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from contextlib import nullcontext
 from typing import Optional
 
