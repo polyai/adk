@@ -310,3 +310,17 @@ class SyncClientHandler:
         """Get deployment info needed to start a draft chat on a branch."""
         self.assert_branch_exists()
         return self.sdk.get_branch_chat_info(branch_id)
+
+    def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
+        """Get the history of a specific branch.
+
+        Args:
+            branch_id (str): The ID of the branch to retrieve history for.
+
+        Returns:
+            list[dict[str, Any]]: A list of dictionaries containing commit information for the branch.
+        """
+        logger.info(f"Fetching history for branch ID:'{branch_id}'")
+        history = self.sdk.get_branch_history(branch_id)
+        logger.info(f"Fetched {len(history)} commits for branch ID:'{branch_id}'")
+        return history

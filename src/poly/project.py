@@ -2912,3 +2912,14 @@ class AgentStudioProject:
             ab_test_id=ab_test_id,
             traffic_percentage=traffic_percentage,
         )
+
+    def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
+        """Get the history of a branch.
+
+        Args:
+            branch_id (str): The ID of the branch to get history for.
+
+        Returns:
+            list[dict[str, Any]]: A list of commit history entries for the branch.
+        """
+        return self.api_handler.get_branch_history(branch_id)

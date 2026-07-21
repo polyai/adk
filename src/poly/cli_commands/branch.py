@@ -230,6 +230,22 @@ class BranchCommand(BaseCommand):
         )
         branch_merge_parser.set_defaults(branch_subcommand="merge")
 
+        branch_history_parser = branch_subparsers.add_parser(
+            "history",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Show the history of a branch.",
+        )
+
+        branch_history_parser.add_argument(
+            "--branch-name",
+            "-b",
+            type=str,
+            default=None,
+            help="Name of the branch to show history for. Defaults to the current branch.",
+        )
+
+        branch_history_parser.set_defaults(branch_subcommand="history")
+
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to the matching branch sub-handler."""
@@ -264,6 +280,9 @@ class BranchCommand(BaseCommand):
 
         elif args.branch_subcommand == "merge":
             cls.branch_merge(args.path, args.message, args.json, args.interactive, args.resolutions)
+
+        elif args.branch_subcommand == "history":
+            cls.branch_history(args.path, args.branch_name, args.json)
 
     @classmethod
     def branch_list(cls, base_path: str, output_json: bool = False) -> None:
@@ -906,3 +925,45 @@ class BranchCommand(BaseCommand):
                     show_type=True,
                     panel_title="Remaining merge conflicts",
                 )
+
+    @classmethod
+    def branch_history(
+        cls, base_path: str, branch_name: Optional[str] = None, output_json: bool = False
+    ) -> None:
+        """Show the history of a branch in the Agent Studio project."""
+        from poly.output.console import plain, print_branch_history, warning
+
+        project = load_project(base_path, output_json=output_json)
+
+        current_branch, branches = project.get_branches()
+        if not branch_name:
+            branch_name = current_branch
+
+        if not branch_name:
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "error": "No current branch found. Please specify a branch name.",
+                    }
+                )
+            else:
+                warning("No current branch found. Please specify a branch name.")
+
+        branch_id = branches.get(branch_name)
+        if not branch_id:
+            warning(f"Branch '{branch_name}' does not exist.")
+            return
+
+        history = project.get_branch_history(branch_id)
+
+        if output_json:
+            json_print({"branch_name": branch_name, "branch_id": branch_id, "history": history})
+            return
+
+        if not history:
+            plain(f"[muted]No history found for branch '{branch_name}'.[/muted]")
+            return
+
+        plain(f"History for branch '{branch_name}':")
+        print_branch_history(history)

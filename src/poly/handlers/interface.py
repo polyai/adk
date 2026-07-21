@@ -1097,3 +1097,17 @@ class AgentStudioInterface:
             dict: The created test run response.
         """
         return PlatformAPIHandler.trigger_test_run(region, project_id, test_case_ids, branch_id)
+
+    def get_branch_history(self, branch_name: str) -> list[dict[str, Any]]:
+        """Get the history of a specific branch.
+
+        Args:
+            branch_name (str): The name of the branch
+
+        Returns:
+            list[dict[str, Any]]: A list of commit history entries for the branch
+        """
+        try:
+            return self.sync_client.get_branch_history(branch_name)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
