@@ -19,7 +19,7 @@ from poly.output.console import edit_in_editor, error, info, success, warning
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
 from poly.resources.resource_utils import contains_merge_conflict
-from poly.utils import merge_dicts, read_json_file, write_json_file
+from poly.utils import merge_rtc_dicts, read_json_file, write_json_file
 
 RTC_ENV_TO_DIR = {
     "sandbox": "draft_and_sandbox",
@@ -89,7 +89,7 @@ def _merge_rtc_file(
     if remote == base:
         return local
 
-    merged, conflict_keys = merge_dicts(base, local, remote)
+    merged, conflict_keys = merge_rtc_dicts(base, local, remote)
 
     if not conflict_keys:
         if not output_json:

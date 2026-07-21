@@ -8,7 +8,7 @@ import difflib
 _MISSING = object()
 
 
-def merge_dicts(base: dict, local: dict, remote: dict) -> tuple[dict, list[str]]:
+def merge_rtc_dicts(base: dict, local: dict, remote: dict) -> tuple[dict, list[str]]:
     """3-way merge at the dict key level.
 
     Returns:

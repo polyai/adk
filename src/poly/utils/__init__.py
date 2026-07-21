@@ -22,7 +22,7 @@ from poly.utils.decorators import (
     func_parameter,
 )
 from poly.utils.json_io import read_json_file, write_json_file
-from poly.utils.merge import merge_dicts, merge_strings
+from poly.utils.merge import merge_rtc_dicts, merge_strings
 from poly.utils.stub_gen import create_import_file_contents, save_imports
 from poly.utils.variable_references import (
     FUNCTION_TYPE_TO_VAR_REF_FIELD,
@@ -40,7 +40,7 @@ __all__ = [
     "func_description",
     "func_latency_control",
     "func_parameter",
-    "merge_dicts",
+    "merge_rtc_dicts",
     "merge_strings",
     "read_json_file",
     "retrieve_api_key",
