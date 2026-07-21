@@ -7,7 +7,6 @@ import json
 import os
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
-from datetime import datetime, timezone
 from typing import Optional
 
 import questionary
@@ -16,10 +15,11 @@ import requests
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
 from poly.handlers.interface import AgentStudioInterface
-from poly.project import AgentStudioProject
 from poly.output.console import edit_in_editor, error, info, success, warning
 from poly.output.json_output import json_print
+from poly.project import AgentStudioProject
 from poly.resources.resource_utils import contains_merge_conflict
+from poly.utils import merge_dicts, read_json_file, write_json_file
 
 RTC_ENV_TO_DIR = {
     "sandbox": "draft_and_sandbox",
@@ -28,50 +28,20 @@ RTC_ENV_TO_DIR = {
 }
 RTC_DIR_TO_ENV = {v: k for k, v in RTC_ENV_TO_DIR.items()}
 
-RTC_METADATA_FILE = ".rtc_metadata.json"
 RTC_BASE_SCHEMA_FILE = ".rtc_base_schema.json"
 RTC_BASE_DATA_FILE = ".rtc_base_data.json"
 
 
-def _write_json_file(path: str, data: dict) -> None:
-    """Write a dict as pretty-printed JSON with trailing newline."""
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, sort_keys=True)
-        f.write("\n")
-
-
-def _read_json_file(path: str) -> Optional[dict]:
-    """Read a JSON file, or None if it doesn't exist."""
-    if not os.path.exists(path):
-        return None
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def _save_rtc_metadata(env_dir: str, last_updated: Optional[str]) -> None:
-    """Write RTC metadata after a pull or successful push."""
-    metadata = {
-        "last_updated": last_updated,
-        "pulled_at": datetime.now(timezone.utc).isoformat(),
-    }
-    _write_json_file(os.path.join(env_dir, RTC_METADATA_FILE), metadata)
-
-
-def _load_rtc_metadata(env_dir: str) -> Optional[dict]:
-    """Load RTC metadata from disk, or None if not present."""
-    return _read_json_file(os.path.join(env_dir, RTC_METADATA_FILE))
-
-
 def _save_rtc_base(env_dir: str, schema: dict, variables: dict) -> None:
     """Save base copies of schema and data for 3-way merge on push."""
-    _write_json_file(os.path.join(env_dir, RTC_BASE_SCHEMA_FILE), schema)
-    _write_json_file(os.path.join(env_dir, RTC_BASE_DATA_FILE), variables)
+    write_json_file(os.path.join(env_dir, RTC_BASE_SCHEMA_FILE), schema)
+    write_json_file(os.path.join(env_dir, RTC_BASE_DATA_FILE), variables)
 
 
 def _load_rtc_base(env_dir: str) -> tuple[Optional[dict], Optional[dict]]:
     """Load base copies, returning (schema, variables) or (None, None)."""
-    schema = _read_json_file(os.path.join(env_dir, RTC_BASE_SCHEMA_FILE))
-    variables = _read_json_file(os.path.join(env_dir, RTC_BASE_DATA_FILE))
+    schema = read_json_file(os.path.join(env_dir, RTC_BASE_SCHEMA_FILE))
+    variables = read_json_file(os.path.join(env_dir, RTC_BASE_DATA_FILE))
     return schema, variables
 
 
@@ -80,40 +50,24 @@ def _to_sorted_json(data: dict) -> str:
     return json.dumps(data, indent=2, sort_keys=True) + "\n"
 
 
-_MISSING = object()
+def _get_rtc_last_updated(project: AgentStudioProject, env: str) -> Optional[str]:
+    """Get the stored lastUpdated for an RTC environment from project config."""
+    if not project.rtc_metadata:
+        return None
+    env_meta = project.rtc_metadata.get(env)
+    if not env_meta:
+        return None
+    return env_meta.get("last_updated")
 
 
-def _merge_dicts(base: dict, local: dict, remote: dict) -> tuple[dict, list[str]]:
-    """3-way merge at the dict key level.
-
-    Returns:
-        (merged_dict, list_of_conflict_keys). If conflict_keys is empty, the
-        merge is clean.
-    """
-    all_keys = set(base) | set(local) | set(remote)
-    merged = {}
-    conflicts = []
-
-    for key in sorted(all_keys):
-        base_val = base.get(key, _MISSING)
-        local_val = local.get(key, _MISSING)
-        remote_val = remote.get(key, _MISSING)
-
-        resolved = _MISSING
-        if local_val == remote_val:
-            resolved = local_val
-        elif local_val == base_val:
-            resolved = remote_val
-        elif remote_val == base_val:
-            resolved = local_val
-        else:
-            conflicts.append(key)
-            resolved = local_val
-
-        if resolved is not _MISSING:
-            merged[key] = resolved
-
-    return merged, conflicts
+def _set_rtc_last_updated(
+    project: AgentStudioProject, env: str, last_updated: Optional[str]
+) -> None:
+    """Set the lastUpdated for an RTC environment and save project config."""
+    if project.rtc_metadata is None:
+        project.rtc_metadata = {}
+    project.rtc_metadata[env] = {"last_updated": last_updated}
+    project.save_config()
 
 
 def _merge_rtc_file(
@@ -125,13 +79,6 @@ def _merge_rtc_file(
 ) -> Optional[dict]:
     """Attempt 3-way merge on a single RTC JSON file.
 
-    Args:
-        filename: Display name (e.g. "data.json").
-        base: The pulled version.
-        local: The user's local version.
-        remote: The current remote version.
-        output_json: If True, skip interactive resolution.
-
     Returns:
         Merged dict, or None if the user cancelled.
     """
@@ -142,7 +89,7 @@ def _merge_rtc_file(
     if remote == base:
         return local
 
-    merged, conflict_keys = _merge_dicts(base, local, remote)
+    merged, conflict_keys = merge_dicts(base, local, remote)
 
     if not conflict_keys:
         if not output_json:
@@ -253,6 +200,7 @@ class RTCCommand(BaseCommand):
                 "  poly rtc pull\n"
                 "  poly rtc pull --env sandbox\n"
                 "  poly rtc pull --env all\n"
+                "  poly rtc pull --env sandbox --schema\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -263,6 +211,16 @@ class RTCCommand(BaseCommand):
             choices=["sandbox", "pre-release", "live", "all"],
             help="Environment to pull. Defaults to all.",
         )
+        rtc_pull_parser.add_argument(
+            "--schema",
+            action="store_true",
+            help="Pull schema only.",
+        )
+        rtc_pull_parser.add_argument(
+            "--data",
+            action="store_true",
+            help="Pull data only.",
+        )
 
         rtc_push_parser = rtc_subparsers.add_parser(
             "push",
@@ -272,6 +230,7 @@ class RTCCommand(BaseCommand):
                 "Push Real-Time Configuration from local files to Agent Studio.\n\n"
                 "Examples:\n"
                 "  poly rtc push --env sandbox\n"
+                "  poly rtc push --env sandbox --schema\n"
                 "  poly rtc push --env live --force\n"
             ),
             formatter_class=RawTextHelpFormatter,
@@ -293,16 +252,33 @@ class RTCCommand(BaseCommand):
             action="store_true",
             help="Disable automatic merge on drift; fail with error instead.",
         )
+        rtc_push_parser.add_argument(
+            "--schema",
+            action="store_true",
+            help="Push schema only.",
+        )
+        rtc_push_parser.add_argument(
+            "--data",
+            action="store_true",
+            help="Push data only.",
+        )
 
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to the matching RTC sub-handler."""
+        schema_only = getattr(args, "schema", False)
+        data_only = getattr(args, "data", False)
+
         if args.rtc_subcommand == "pull":
-            result = cls.rtc_pull(args.path, args.env, output_json=args.json)
+            result = cls.rtc_pull(
+                args.path,
+                args.env,
+                output_json=args.json,
+                schema_only=schema_only,
+                data_only=data_only,
+            )
             if args.json:
                 json_print(result)
-                if not result["success"]:
-                    sys.exit(1)
             else:
                 if not result["success"]:
                     error(result["error"])
@@ -317,13 +293,13 @@ class RTCCommand(BaseCommand):
                 force=getattr(args, "force", False),
                 output_json=args.json,
                 no_merge=getattr(args, "no_merge", False),
+                schema_only=schema_only,
+                data_only=data_only,
             )
             if result is None:
                 return
             if args.json:
                 json_print(result)
-                if not result["success"]:
-                    sys.exit(1)
             else:
                 if not result["success"]:
                     error(result["error"])
@@ -336,6 +312,8 @@ class RTCCommand(BaseCommand):
         base_path: str,
         env: str = "all",
         output_json: bool = False,
+        schema_only: bool = False,
+        data_only: bool = False,
     ) -> dict:
         """Pull RTC from Agent Studio and write to local files.
 
@@ -343,6 +321,8 @@ class RTCCommand(BaseCommand):
             base_path: Base path for the project.
             env: Environment(s) to pull — sandbox, pre-release, live, or all.
             output_json: If True, format errors as JSON on failure.
+            schema_only: If True, only pull schema.
+            data_only: If True, only pull data.
 
         Returns:
             dict: Result with success status and files_written list.
@@ -373,16 +353,22 @@ class RTCCommand(BaseCommand):
                 schema = config.get("schema", {})
                 variables = config.get("variables", {})
 
-                _write_json_file(os.path.join(env_dir, "schema.json"), schema)
-                _write_json_file(os.path.join(env_dir, "data.json"), variables)
+                schema_path = os.path.join(env_dir, "schema.json")
+                data_path = os.path.join(env_dir, "data.json")
+
+                if not data_only:
+                    write_json_file(schema_path, schema)
+                if not schema_only:
+                    write_json_file(data_path, variables)
+
                 _save_rtc_base(env_dir, schema, variables)
-                _save_rtc_metadata(env_dir, config.get("lastUpdated"))
+                _set_rtc_last_updated(project, client_env, config.get("lastUpdated"))
 
                 results.append(
                     {
                         "environment": client_env,
-                        "schema_file": os.path.join(env_dir, "schema.json"),
-                        "data_file": os.path.join(env_dir, "data.json"),
+                        "schema_file": schema_path,
+                        "data_file": data_path,
                     }
                 )
 
@@ -399,6 +385,8 @@ class RTCCommand(BaseCommand):
         force: bool = False,
         output_json: bool = False,
         no_merge: bool = False,
+        schema_only: bool = False,
+        data_only: bool = False,
     ) -> Optional[dict]:
         """Push RTC from local files to Agent Studio.
 
@@ -408,6 +396,8 @@ class RTCCommand(BaseCommand):
             force: If True, skip drift check and confirmation prompt.
             output_json: If True, format errors as JSON on failure.
             no_merge: If True, disable merge on drift; hard-fail instead.
+            schema_only: If True, only push schema.
+            data_only: If True, only push data.
 
         Returns:
             dict with success status, or None if the user cancelled interactively.
@@ -421,24 +411,28 @@ class RTCCommand(BaseCommand):
         schema_path = os.path.join(env_dir, "schema.json")
         data_path = os.path.join(env_dir, "data.json")
 
-        if not os.path.exists(schema_path):
+        if not data_only and not os.path.exists(schema_path):
             return {"success": False, "error": f"schema.json not found at {schema_path}"}
 
-        if not os.path.exists(data_path):
+        if not schema_only and not os.path.exists(data_path):
             return {"success": False, "error": f"data.json not found at {data_path}"}
 
         try:
-            with open(schema_path, "r", encoding="utf-8") as f:
-                schema = json.load(f)
-            with open(data_path, "r", encoding="utf-8") as f:
-                variables = json.load(f)
+            schema = None
+            variables = None
+            if not data_only:
+                with open(schema_path, "r", encoding="utf-8") as f:
+                    schema = json.load(f)
+            if not schema_only:
+                with open(data_path, "r", encoding="utf-8") as f:
+                    variables = json.load(f)
         except json.JSONDecodeError as e:
             return {"success": False, "error": f"Invalid JSON in local RTC file: {e}"}
 
         # Drift protection
         if not force:
-            metadata = _load_rtc_metadata(env_dir)
-            if metadata is None:
+            local_last_updated = _get_rtc_last_updated(project, env)
+            if local_last_updated is None:
                 if not output_json:
                     info(
                         "No RTC metadata found; skipping drift check. "
@@ -452,7 +446,6 @@ class RTCCommand(BaseCommand):
                         client_env=env,
                     )
                     remote_last_updated = remote_config.get("lastUpdated")
-                    local_last_updated = metadata.get("last_updated")
 
                     if remote_last_updated != local_last_updated:
                         merge_result = cls._handle_drift(
@@ -470,8 +463,10 @@ class RTCCommand(BaseCommand):
                             return None
                         if not merge_result["success"]:
                             return merge_result
-                        schema = merge_result["schema"]
-                        variables = merge_result["variables"]
+                        if merge_result.get("schema") is not None:
+                            schema = merge_result["schema"]
+                        if merge_result.get("variables") is not None:
+                            variables = merge_result["variables"]
 
                 except requests.HTTPError as e:
                     return {"success": False, "error": f"Drift check failed: {e}"}
@@ -491,28 +486,24 @@ class RTCCommand(BaseCommand):
                 info("Push cancelled.")
                 return None
 
-        return cls._do_push(project, env, env_dir, schema, variables, output_json)
+        return cls._do_push(
+            project, env, env_dir, schema, variables, output_json, schema_only, data_only
+        )
 
     @classmethod
     def _handle_drift(
         cls,
         env_dir: str,
         remote_config: dict,
-        local_schema: dict,
-        local_variables: dict,
+        local_schema: Optional[dict],
+        local_variables: Optional[dict],
         output_json: bool,
         no_merge: bool,
         env: str,
         local_last_updated: Optional[str],
         remote_last_updated: Optional[str],
     ) -> Optional[dict]:
-        """Handle drift between local and remote RTC config.
-
-        Returns:
-            dict with "success" and merged "schema"/"variables" on merge success,
-            dict with "success": False on error,
-            or None if the user cancelled.
-        """
+        """Handle drift between local and remote RTC config."""
         drift_msg = (
             f"Remote RTC config has changed since your last pull "
             f"(local: {local_last_updated}, remote: {remote_last_updated}). "
@@ -540,21 +531,33 @@ class RTCCommand(BaseCommand):
         if not output_json:
             info("Remote has changed since your last pull. Attempting merge...")
 
-        merged_schema = _merge_rtc_file(
-            "schema.json", base_schema, local_schema, remote_schema, output_json
-        )
-        if merged_schema is None and not output_json:
-            return None
-        if merged_schema is None:
-            return {"success": False, "error": drift_msg + "Schema conflicts.", "conflicts": True}
+        merged_schema = local_schema
+        if local_schema is not None:
+            merged_schema = _merge_rtc_file(
+                "schema.json", base_schema, local_schema, remote_schema, output_json
+            )
+            if merged_schema is None and not output_json:
+                return None
+            if merged_schema is None:
+                return {
+                    "success": False,
+                    "error": drift_msg + "Schema conflicts.",
+                    "conflicts": True,
+                }
 
-        merged_variables = _merge_rtc_file(
-            "data.json", base_variables, local_variables, remote_variables, output_json
-        )
-        if merged_variables is None and not output_json:
-            return None
-        if merged_variables is None:
-            return {"success": False, "error": drift_msg + "Data conflicts.", "conflicts": True}
+        merged_variables = local_variables
+        if local_variables is not None:
+            merged_variables = _merge_rtc_file(
+                "data.json", base_variables, local_variables, remote_variables, output_json
+            )
+            if merged_variables is None and not output_json:
+                return None
+            if merged_variables is None:
+                return {
+                    "success": False,
+                    "error": drift_msg + "Data conflicts.",
+                    "conflicts": True,
+                }
 
         if not output_json:
             info("Merge complete.")
@@ -567,42 +570,49 @@ class RTCCommand(BaseCommand):
         project: AgentStudioProject,
         env: str,
         env_dir: str,
-        schema: dict,
-        variables: dict,
+        schema: Optional[dict],
+        variables: Optional[dict],
         output_json: bool,
+        schema_only: bool = False,
+        data_only: bool = False,
     ) -> dict:
         """Execute the actual push to the API and update local state."""
-        try:
-            AgentStudioInterface.put_rtc_schema(
-                region=project.region,
-                project_id=project.project_id,
-                client_env=env,
-                schema=schema,
-            )
-        except requests.HTTPError as e:
-            return {"success": False, "error": str(e), "step": "schema"}
+        if schema is not None and not data_only:
+            try:
+                AgentStudioInterface.put_rtc_schema(
+                    region=project.region,
+                    project_id=project.project_id,
+                    client_env=env,
+                    schema=schema,
+                )
+            except requests.HTTPError as e:
+                return {"success": False, "error": str(e), "step": "schema"}
 
-        try:
-            push_response = AgentStudioInterface.patch_rtc_variables(
-                region=project.region,
-                project_id=project.project_id,
-                client_env=env,
-                variables=variables,
-            )
-        except requests.HTTPError as e:
-            if not output_json:
-                error(f"Warning: schema was pushed to {env}, but variables update failed.")
-            return {
-                "success": False,
-                "error": f"Schema pushed but variables failed: {e}",
-                "step": "variables",
-            }
+        push_response = None
+        if variables is not None and not schema_only:
+            try:
+                push_response = AgentStudioInterface.patch_rtc_variables(
+                    region=project.region,
+                    project_id=project.project_id,
+                    client_env=env,
+                    variables=variables,
+                )
+            except requests.HTTPError as e:
+                if not output_json and schema is not None:
+                    error(f"Warning: schema was pushed to {env}, but variables update failed.")
+                return {
+                    "success": False,
+                    "error": f"Schema pushed but variables failed: {e}",
+                    "step": "variables",
+                }
 
         new_last_updated = push_response.get("lastUpdated") if push_response else None
-        _save_rtc_metadata(env_dir, new_last_updated)
-        _save_rtc_base(env_dir, schema, variables)
-        _write_json_file(os.path.join(env_dir, "schema.json"), schema)
-        _write_json_file(os.path.join(env_dir, "data.json"), variables)
+        _set_rtc_last_updated(project, env, new_last_updated)
+
+        if schema is not None and variables is not None:
+            _save_rtc_base(env_dir, schema, variables)
+            write_json_file(os.path.join(env_dir, "schema.json"), schema)
+            write_json_file(os.path.join(env_dir, "data.json"), variables)
 
         return {
             "success": True,

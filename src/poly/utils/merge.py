@@ -1,9 +1,44 @@
-"""3-way string merge used when pulling remote changes over local edits.
+"""3-way merge utilities for pulling remote changes over local edits.
 
 Copyright PolyAI Limited
 """
 
 import difflib
+
+_MISSING = object()
+
+
+def merge_dicts(base: dict, local: dict, remote: dict) -> tuple[dict, list[str]]:
+    """3-way merge at the dict key level.
+
+    Returns:
+        (merged_dict, list_of_conflict_keys). If conflict_keys is empty, the
+        merge is clean.
+    """
+    all_keys = set(base) | set(local) | set(remote)
+    merged = {}
+    conflicts = []
+
+    for key in sorted(all_keys):
+        base_val = base.get(key, _MISSING)
+        local_val = local.get(key, _MISSING)
+        remote_val = remote.get(key, _MISSING)
+
+        resolved = _MISSING
+        if local_val == remote_val:
+            resolved = local_val
+        elif local_val == base_val:
+            resolved = remote_val
+        elif remote_val == base_val:
+            resolved = local_val
+        else:
+            conflicts.append(key)
+            resolved = local_val
+
+        if resolved is not _MISSING:
+            merged[key] = resolved
+
+    return merged, conflicts
 
 
 def merge_strings(original: str, updated: str, incoming: str) -> str:

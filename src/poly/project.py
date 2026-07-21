@@ -102,6 +102,7 @@ class AgentStudioProject:
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
+    rtc_metadata: Optional[dict[str, dict]] = None
 
     # Store resources that were not loaded from the status file
     # So they aren't considered locally deleted when pushing/pulling
@@ -218,6 +219,7 @@ class AgentStudioProject:
             account_name=config_dict.get("account_name") or status_dict.get("account_name"),
             _not_loaded_resources=not_loaded_resources,
             _migration_flags=migration_flags,
+            rtc_metadata=status_dict.get("rtc_metadata"),
         )
 
     def to_dict(self) -> dict:
@@ -240,6 +242,7 @@ class AgentStudioProject:
             "migration_flags": [flag.value for flag in self._migration_flags]
             if self._migration_flags
             else [],
+            "rtc_metadata": self.rtc_metadata or {},
         }
 
     @classmethod
@@ -265,6 +268,7 @@ class AgentStudioProject:
             account_name=data.get("account_name"),
             _migration_flags=migration_flags,
             _not_loaded_resources=not_loaded_resources,
+            rtc_metadata=data.get("rtc_metadata"),
         )
 
     @staticmethod

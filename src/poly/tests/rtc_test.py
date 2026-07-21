@@ -10,17 +10,15 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from poly.cli_commands.rtc import (
-    RTCCommand,
-    RTC_ENV_TO_DIR,
-    RTC_DIR_TO_ENV,
     RTC_BASE_DATA_FILE,
     RTC_BASE_SCHEMA_FILE,
-    RTC_METADATA_FILE,
+    RTC_DIR_TO_ENV,
+    RTC_ENV_TO_DIR,
+    RTCCommand,
     _load_rtc_base,
-    _load_rtc_metadata,
     _merge_rtc_file,
-    _write_json_file,
 )
+from poly.utils import write_json_file
 
 
 class TestRTC(unittest.TestCase):
@@ -187,6 +185,7 @@ class TestRTC(unittest.TestCase):
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
         mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = None
         mock_load_project.return_value = mock_project
         mock_patch_vars.return_value = {"lastUpdated": "T1"}
 
@@ -255,6 +254,7 @@ class TestRTC(unittest.TestCase):
         """Verify pushing to live in JSON mode without --force returns error."""
         mock_project = MagicMock()
         mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = None
         mock_load_project.return_value = mock_project
 
         live_dir = os.path.join(self.temp_dir, "real_time_configuration", "live")
@@ -306,6 +306,7 @@ class TestRTC(unittest.TestCase):
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
         mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = None
         mock_load_project.return_value = mock_project
         mock_patch_vars.return_value = {"lastUpdated": "T1"}
         mock_questionary.confirm.return_value.ask.return_value = True
@@ -335,6 +336,7 @@ class TestRTC(unittest.TestCase):
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
         mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = None
         mock_load_project.return_value = mock_project
         mock_questionary.confirm.return_value.ask.return_value = False
 
@@ -375,12 +377,13 @@ class TestRTCDriftProtection(unittest.TestCase):
 
     @patch("poly.cli_commands.rtc.load_project")
     @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
-    def test_pull_writes_metadata_file(self, mock_get_rtc, mock_load_project):
-        """Verify rtc pull writes .rtc_metadata.json with lastUpdated."""
+    def test_pull_stores_metadata_in_project(self, mock_get_rtc, mock_load_project):
+        """Verify rtc pull stores lastUpdated in project.rtc_metadata."""
         mock_project = MagicMock()
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
         mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = None
         mock_load_project.return_value = mock_project
 
         mock_get_rtc.return_value = {
@@ -391,10 +394,10 @@ class TestRTCDriftProtection(unittest.TestCase):
 
         RTCCommand.rtc_pull(self.temp_dir, env="sandbox")
 
-        metadata = _load_rtc_metadata(self.sandbox_dir)
-        self.assertIsNotNone(metadata)
-        self.assertEqual(metadata["last_updated"], "2024-06-01T12:00:00Z")
-        self.assertIn("pulled_at", metadata)
+        self.assertEqual(
+            mock_project.rtc_metadata["sandbox"]["last_updated"], "2024-06-01T12:00:00Z"
+        )
+        mock_project.save_config.assert_called()
 
     @patch("poly.cli_commands.rtc.load_project")
     @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
@@ -408,13 +411,9 @@ class TestRTCDriftProtection(unittest.TestCase):
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
         mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = {"sandbox": {"last_updated": "T1"}}
         mock_load_project.return_value = mock_project
 
-        # Local metadata says T1
-        with open(os.path.join(self.sandbox_dir, RTC_METADATA_FILE), "w") as f:
-            json.dump({"last_updated": "T1", "pulled_at": "2024-01-01T00:00:00Z"}, f)
-
-        # Remote says T2
         mock_get_rtc.return_value = {"lastUpdated": "T2"}
 
         result = RTCCommand.rtc_push(self.temp_dir, env="sandbox")
@@ -435,11 +434,9 @@ class TestRTCDriftProtection(unittest.TestCase):
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
         mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = {"sandbox": {"last_updated": "T1"}}
         mock_load_project.return_value = mock_project
         mock_patch_vars.return_value = {"lastUpdated": "T1"}
-
-        with open(os.path.join(self.sandbox_dir, RTC_METADATA_FILE), "w") as f:
-            json.dump({"last_updated": "T1", "pulled_at": "2024-01-01T00:00:00Z"}, f)
 
         mock_get_rtc.return_value = {"lastUpdated": "T1"}
 
@@ -460,12 +457,9 @@ class TestRTCDriftProtection(unittest.TestCase):
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
         mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = {"sandbox": {"last_updated": "T1"}}
         mock_load_project.return_value = mock_project
         mock_patch_vars.return_value = {"lastUpdated": "T3"}
-
-        # Metadata says T1 but we don't even check remote with --force
-        with open(os.path.join(self.sandbox_dir, RTC_METADATA_FILE), "w") as f:
-            json.dump({"last_updated": "T1", "pulled_at": "2024-01-01T00:00:00Z"}, f)
 
         result = RTCCommand.rtc_push(self.temp_dir, env="sandbox", force=True)
         self.assertTrue(result["success"])
@@ -479,15 +473,15 @@ class TestRTCDriftProtection(unittest.TestCase):
     def test_push_no_metadata_warns_and_proceeds(
         self, mock_patch_vars, mock_put_schema, mock_load_project
     ):
-        """Verify push proceeds with warning when no metadata file exists."""
+        """Verify push proceeds with warning when no metadata exists."""
         mock_project = MagicMock()
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
         mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = None
         mock_load_project.return_value = mock_project
         mock_patch_vars.return_value = {"lastUpdated": "T1"}
 
-        # No .rtc_metadata.json on disk
         result = RTCCommand.rtc_push(self.temp_dir, env="sandbox")
         self.assertTrue(result["success"])
         mock_put_schema.assert_called_once()
@@ -500,15 +494,13 @@ class TestRTCDriftProtection(unittest.TestCase):
     def test_push_updates_metadata_after_success(
         self, mock_patch_vars, mock_put_schema, mock_get_rtc, mock_load_project
     ):
-        """Verify push updates .rtc_metadata.json with new lastUpdated."""
+        """Verify push updates rtc_metadata with new lastUpdated."""
         mock_project = MagicMock()
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
         mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = {"sandbox": {"last_updated": "T1"}}
         mock_load_project.return_value = mock_project
-
-        with open(os.path.join(self.sandbox_dir, RTC_METADATA_FILE), "w") as f:
-            json.dump({"last_updated": "T1", "pulled_at": "2024-01-01T00:00:00Z"}, f)
 
         mock_get_rtc.return_value = {"lastUpdated": "T1"}
         mock_patch_vars.return_value = {"lastUpdated": "T2"}
@@ -516,8 +508,8 @@ class TestRTCDriftProtection(unittest.TestCase):
         result = RTCCommand.rtc_push(self.temp_dir, env="sandbox")
         self.assertTrue(result["success"])
 
-        metadata = _load_rtc_metadata(self.sandbox_dir)
-        self.assertEqual(metadata["last_updated"], "T2")
+        self.assertEqual(mock_project.rtc_metadata["sandbox"]["last_updated"], "T2")
+        mock_project.save_config.assert_called()
 
 
 class TestRTCMerge(unittest.TestCase):
@@ -621,25 +613,19 @@ class TestRTCMerge(unittest.TestCase):
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
         mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = {"sandbox": {"last_updated": "T1"}}
         mock_load_project.return_value = mock_project
         mock_patch_vars.return_value = {"lastUpdated": "T3"}
 
         base_schema = {"type": "object"}
         base_variables = {"a": 1, "b": 2}
 
-        # Write base files (from a previous pull)
-        _write_json_file(os.path.join(self.sandbox_dir, RTC_BASE_SCHEMA_FILE), base_schema)
-        _write_json_file(os.path.join(self.sandbox_dir, RTC_BASE_DATA_FILE), base_variables)
-        _write_json_file(
-            os.path.join(self.sandbox_dir, RTC_METADATA_FILE),
-            {"last_updated": "T1", "pulled_at": "2024-01-01T00:00:00Z"},
-        )
+        write_json_file(os.path.join(self.sandbox_dir, RTC_BASE_SCHEMA_FILE), base_schema)
+        write_json_file(os.path.join(self.sandbox_dir, RTC_BASE_DATA_FILE), base_variables)
 
-        # Local user changed "a"
-        _write_json_file(os.path.join(self.sandbox_dir, "schema.json"), base_schema)
-        _write_json_file(os.path.join(self.sandbox_dir, "data.json"), {"a": 10, "b": 2})
+        write_json_file(os.path.join(self.sandbox_dir, "schema.json"), base_schema)
+        write_json_file(os.path.join(self.sandbox_dir, "data.json"), {"a": 10, "b": 2})
 
-        # Remote changed "b"
         mock_get_rtc.return_value = {
             "lastUpdated": "T2",
             "schema": base_schema,
@@ -663,14 +649,11 @@ class TestRTCMerge(unittest.TestCase):
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
         mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = {"sandbox": {"last_updated": "T1"}}
         mock_load_project.return_value = mock_project
 
-        _write_json_file(
-            os.path.join(self.sandbox_dir, RTC_METADATA_FILE),
-            {"last_updated": "T1", "pulled_at": "2024-01-01T00:00:00Z"},
-        )
-        _write_json_file(os.path.join(self.sandbox_dir, "schema.json"), {"type": "object"})
-        _write_json_file(os.path.join(self.sandbox_dir, "data.json"), {"a": 10})
+        write_json_file(os.path.join(self.sandbox_dir, "schema.json"), {"type": "object"})
+        write_json_file(os.path.join(self.sandbox_dir, "data.json"), {"a": 10})
 
         mock_get_rtc.return_value = {"lastUpdated": "T2", "schema": {}, "variables": {}}
 
@@ -686,14 +669,11 @@ class TestRTCMerge(unittest.TestCase):
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
         mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = {"sandbox": {"last_updated": "T1"}}
         mock_load_project.return_value = mock_project
 
-        _write_json_file(
-            os.path.join(self.sandbox_dir, RTC_METADATA_FILE),
-            {"last_updated": "T1", "pulled_at": "2024-01-01T00:00:00Z"},
-        )
-        _write_json_file(os.path.join(self.sandbox_dir, "schema.json"), {"type": "object"})
-        _write_json_file(os.path.join(self.sandbox_dir, "data.json"), {"a": 10})
+        write_json_file(os.path.join(self.sandbox_dir, "schema.json"), {"type": "object"})
+        write_json_file(os.path.join(self.sandbox_dir, "data.json"), {"a": 10})
 
         mock_get_rtc.return_value = {"lastUpdated": "T2"}
 
@@ -713,18 +693,15 @@ class TestRTCMerge(unittest.TestCase):
         mock_project.region = "studio"
         mock_project.project_id = "test-project"
         mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = {"sandbox": {"last_updated": "T1"}}
         mock_load_project.return_value = mock_project
         mock_patch_vars.return_value = {"lastUpdated": "T3"}
 
         base_vars = {"a": 1, "b": 2}
-        _write_json_file(os.path.join(self.sandbox_dir, RTC_BASE_SCHEMA_FILE), {"type": "object"})
-        _write_json_file(os.path.join(self.sandbox_dir, RTC_BASE_DATA_FILE), base_vars)
-        _write_json_file(
-            os.path.join(self.sandbox_dir, RTC_METADATA_FILE),
-            {"last_updated": "T1", "pulled_at": "2024-01-01T00:00:00Z"},
-        )
-        _write_json_file(os.path.join(self.sandbox_dir, "schema.json"), {"type": "object"})
-        _write_json_file(os.path.join(self.sandbox_dir, "data.json"), {"a": 10, "b": 2})
+        write_json_file(os.path.join(self.sandbox_dir, RTC_BASE_SCHEMA_FILE), {"type": "object"})
+        write_json_file(os.path.join(self.sandbox_dir, RTC_BASE_DATA_FILE), base_vars)
+        write_json_file(os.path.join(self.sandbox_dir, "schema.json"), {"type": "object"})
+        write_json_file(os.path.join(self.sandbox_dir, "data.json"), {"a": 10, "b": 2})
 
         mock_get_rtc.return_value = {
             "lastUpdated": "T2",
