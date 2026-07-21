@@ -1,7 +1,6 @@
 # Copyright PolyAI Limited
 # flake8: noqa
 # ruff: noqa
-# type: ignore
 __all__ = ["InvalidInput", "MissingAccess", "SecretNotFound"]
 
 
