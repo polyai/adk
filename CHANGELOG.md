@@ -1,6 +1,46 @@
 # CHANGELOG
 
 
+## v0.34.7 (2026-07-21)
+
+### Bug Fixes
+
+- Use flow_id instead of flow_name in from_projection resource ID construction
+  ([#233](https://github.com/polyai/adk/pull/233),
+  [`34bdc2c`](https://github.com/polyai/adk/commit/34bdc2c0d9cbfe13a786108adebb8685eeb42641))
+
+## Summary
+
+Fix flow validation regression introduced in v0.34.6 where `poly validate` reports "Start step not
+  found" for all flows.
+
+## Motivation
+
+PR #216 introduced `from_projection` methods on `FlowStep` and `FunctionStep` that construct
+  resource IDs as `{flow_name}_{step_id}`. However, PR #220 had already changed the convention to
+  `{flow_id}_{step_id}`. The merge didn't produce a textual conflict, so the old convention slipped
+  through. `FlowConfig.validate` builds expected IDs with `flow_id`, so the lookup fails.
+
+## Changes
+
+- Changed `FlowStep.from_projection` to use `flow_id` instead of `flow_data['name']` for resource ID
+  prefix - Changed `FunctionStep.from_projection` to use `flow_id` instead of `flow_data['name']`
+  for resource ID prefix - Updated corresponding test assertions
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.34.6 (2026-07-21)
 
 ### Bug Fixes
