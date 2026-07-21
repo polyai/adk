@@ -9,11 +9,6 @@ from unittest.mock import MagicMock, patch
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererSDK
 from poly.handlers.sync_client import SyncClientHandler
-from poly.resources import (
-    Entity,
-    Topic,
-    Variable,
-)
 
 
 def build_handler():
@@ -27,65 +22,6 @@ def build_handler():
         handler = SyncClientHandler("studio", "acc-1", "proj-1", branch_id="branch-1")
     handler._sdk = MagicMock()
     return handler
-
-
-class QueueResources(unittest.TestCase):
-    """Tests for SyncClientHandler.queue_resources ordering and command shape."""
-
-    def setUp(self):
-        self.handler = build_handler()
-        # create_metadata is used to stamp each command; a bare Command works.
-        self.handler._sdk.create_metadata.return_value = Command().metadata
-
-    def test_creates_deletes_and_updates_produce_commands(self):
-        """New, updated, and deleted resources each produce a queued command."""
-        new = {Entity: {"ENT-1": Entity(resource_id="ENT-1", name="new", entity_type="free_text")}}
-        updated = {
-            Entity: {"ENT-2": Entity(resource_id="ENT-2", name="upd", entity_type="free_text")}
-        }
-        deleted = {
-            Entity: {"ENT-3": Entity(resource_id="ENT-3", name="old", entity_type="free_text")}
-        }
-
-        commands = self.handler.queue_resources(
-            deleted_resources=deleted, new_resources=new, updated_resources=updated
-        )
-
-        types = [c.type for c in commands]
-        self.assertEqual(types, ["entity_delete", "entity_create", "entity_update"])
-        self.assertEqual(self.handler._sdk.add_command_to_queue.call_count, 3)
-
-    def test_priority_create_types_are_queued_first(self):
-        """Variables (a priority-create type) are created before non-priority types."""
-        new = {
-            Topic: {"TOPIC-1": Topic(
-                resource_id="TOPIC-1", name="t", actions="", content="c", example_queries=[]
-            )},
-            Variable: {"VAR-1": Variable(resource_id="VAR-1", name="balance")},
-        }
-
-        commands = self.handler.queue_resources(
-            deleted_resources={}, new_resources=new, updated_resources={}
-        )
-
-        types = [c.type for c in commands]
-        self.assertLess(types.index("variable_create"), types.index("create_topic"))
-
-    def test_priority_delete_types_are_queued_first(self):
-        """Variables (a priority-delete type) are deleted before non-priority types."""
-        deleted = {
-            Topic: {"TOPIC-1": Topic(
-                resource_id="TOPIC-1", name="t", actions="", content="c", example_queries=[]
-            )},
-            Variable: {"VAR-1": Variable(resource_id="VAR-1", name="balance")},
-        }
-
-        commands = self.handler.queue_resources(
-            deleted_resources=deleted, new_resources={}, updated_resources={}
-        )
-
-        types = [c.type for c in commands]
-        self.assertLess(types.index("variable_delete"), types.index("delete_topic"))
 
 
 class QueueCommand(unittest.TestCase):

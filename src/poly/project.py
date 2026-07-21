@@ -21,7 +21,6 @@ import poly.utils as utils
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
-from poly.handlers.sync_client import SyncClientHandler
 from poly.migration_utils import (
     MigrationFlag,
     get_all_migration_flags,
@@ -29,47 +28,26 @@ from poly.migration_utils import (
     run_migrations,
 )
 from poly.resources import (
-    AdditionalLanguage,
-    ApiIntegration,
-    AsrSettings,
     BaseFlowStep,
-    ChatGreeting,
-    ChatSafetyFilters,
-    ChatStylePrompt,
-    DefaultLanguage,
     Document,
-    Entity,
-    ExperimentalConfig,
     FlowConfig,
     FlowStep,
     Function,
     FunctionStep,
-    GeneralSafetyFilters,
-    Handoff,
-    KeyphraseBoosting,
     MultiResourceYamlResource,
-    PhraseFilter,
     Pronunciation,
     Resource,
     ResourceMapping,
-    SettingsPersonality,
-    SettingsRole,
-    SettingsRules,
-    SMSTemplate,
     SubResource,
     TestCase,
     Topic,
-    TranscriptCorrection,
-    Translation,
-    Variable,
-    Variant,
-    VariantAttribute,
-    VoiceDisclaimerMessage,
-    VoiceGreeting,
-    VoiceSafetyFilters,
-    VoiceStylePrompt,
 )
-from poly.resources.resource import _parse_multi_resource_path
+from poly.resources.resource import (
+    RESOURCE_CLASS_TO_NAME,
+    RESOURCE_NAME_TO_CLASS,
+    _parse_multi_resource_path,
+    load_resources_from_projection,
+)
 from poly.utils import prepush
 
 logger = logging.getLogger(__name__)
@@ -77,51 +55,7 @@ logger = logging.getLogger(__name__)
 PROJECT_CONFIG_FILE = "project.yaml"
 STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
 
-
-# New resources to be added here
-RESOURCE_NAME_TO_CLASS: dict[str, type[Resource]] = {
-    "api_integration": ApiIntegration,
-    "functions": Function,
-    "topics": Topic,
-    "personality": SettingsPersonality,
-    "role": SettingsRole,
-    "rules": SettingsRules,
-    "flow_steps": FlowStep,
-    "function_steps": FunctionStep,
-    "flow_config": FlowConfig,
-    "entities": Entity,
-    "experimental_config": ExperimentalConfig,
-    "safety_filters": GeneralSafetyFilters,
-    "sms_templates": SMSTemplate,
-    "handoffs": Handoff,
-    "variants": Variant,
-    "variant_attributes": VariantAttribute,
-    "variables": Variable,
-    "voice_greeting": VoiceGreeting,
-    "voice_safety_filters": VoiceSafetyFilters,
-    "voice_style_prompt": VoiceStylePrompt,
-    "voice_disclaimer": VoiceDisclaimerMessage,
-    "chat_greeting": ChatGreeting,
-    "chat_safety_filters": ChatSafetyFilters,
-    "chat_style_prompt": ChatStylePrompt,
-    "keyphrase_boosting": KeyphraseBoosting,
-    "transcript_corrections": TranscriptCorrection,
-    "asr_settings": AsrSettings,
-    "phrase_filtering": PhraseFilter,
-    "pronunciations": Pronunciation,
-    "test_cases": TestCase,
-    "translations": Translation,
-    "default_language": DefaultLanguage,
-    "additional_languages": AdditionalLanguage,
-    "documents": Document,
-}
-
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
-
-
-RESOURCE_CLASS_TO_NAME: dict[type[Resource], str] = {
-    v: k for k, v in RESOURCE_NAME_TO_CLASS.items()
-}
 
 ResourceType: TypeAlias = type[Resource]
 ResourceMap: TypeAlias = dict[ResourceType, dict[str, Resource]]
@@ -1791,8 +1725,8 @@ class AgentStudioProject:
 
         Empty projections are valid (e.g. diffing a branch against an empty main).
         """
-        before_resources = SyncClientHandler.load_resources_from_projection(before_projection)
-        after_resources = SyncClientHandler.load_resources_from_projection(after_projection)
+        before_resources = load_resources_from_projection(before_projection)
+        after_resources = load_resources_from_projection(after_projection)
         return self.diff_resource_maps(before_resources, after_resources)
 
     def diff_resource_maps(

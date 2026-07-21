@@ -190,8 +190,9 @@ class Resource(BaseResource, ABC):
         """Read a local resource from the given file path.
 
         Args:
-            file_name (str): The name of the file.
             file_path (str): The file path to read the resource from.
+            resource_id (str): The ID of the resource.
+            resource_name (str): The name of the resource.
 
         Returns:
             Resource: The resource instance.
@@ -264,6 +265,18 @@ class Resource(BaseResource, ABC):
                 - Deleted subresources
         """
         return [], [], []
+
+    @classmethod
+    @abstractmethod
+    def from_projection(cls, projection: dict) -> dict[str, "Resource"]:
+        """Create a dictionary of resources from a projection.
+
+        Args:
+            projection (dict): The projection containing resource data.
+        Returns:
+            dict[str, Resource]: A dictionary mapping resource IDs to Resource instances.
+        """
+        pass
 
 
 @dataclass
@@ -618,3 +631,53 @@ class MultiResourceYamlResource(YamlResource, ABC):
     def format_resource(content: str, file_name: str, **kwargs) -> str:
         """Format the resource content."""
         return utils.format_yaml(content, file_name)
+
+
+# ---------------------------------------------------------------------------
+# Resource registry
+# ---------------------------------------------------------------------------
+
+RESOURCE_NAME_TO_CLASS: dict[str, type[Resource]] = {}
+RESOURCE_CLASS_TO_NAME: dict[type[Resource], str] = {}
+PROJECTION_REGISTRY: list[type[Resource]] = []
+
+
+def register_resource(name: str) -> callable:
+    """Class decorator to register a resource type.
+
+    Registers the class in both the name mapping (for YAML discovery and
+    serialization) and the projection registry (for parsing API projections).
+
+    Args:
+        name: The string key for this resource type (e.g. "topics", "functions").
+    """
+
+    def decorator(cls: type[Resource]) -> type[Resource]:
+        RESOURCE_NAME_TO_CLASS[name] = cls
+        RESOURCE_CLASS_TO_NAME[cls] = name
+        PROJECTION_REGISTRY.append(cls)
+        return cls
+
+    return decorator
+
+
+def load_resources_from_projection(
+    projection: dict,
+) -> dict[type[Resource], dict[str, Resource]]:
+    """Parse a projection dict into typed Resources.
+
+    Iterates all registered resource classes and calls their from_projection()
+    classmethod. No API dependency — works fully offline.
+
+    Args:
+        projection: Raw projection dict from the Sourcerer API or a local file.
+
+    Returns:
+        A dictionary mapping resource types to {resource_id: Resource}.
+    """
+    result: dict[type[Resource], dict[str, Resource]] = {}
+    for resource_cls in PROJECTION_REGISTRY:
+        resources = resource_cls.from_projection(projection)
+        if resources:
+            result[resource_cls] = resources
+    return result

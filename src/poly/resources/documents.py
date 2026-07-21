@@ -12,11 +12,10 @@ from poly.handlers.protobuf.documents_pb2 import (
     Document_Delete,
     Document_Update,
 )
-from poly.resources.resource import (
-    Resource,
-)
+from poly.resources.resource import Resource, register_resource
 
 
+@register_resource("documents")
 @dataclass
 class Document(Resource):
     """Resource class for managing documents"""
@@ -123,3 +122,19 @@ class Document(Resource):
             file_paths.append(file_path)
 
         return file_paths
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "Document"]:
+        documents = {}
+        for document_id, document_data in (
+            projection.get("documents", {}).get("documents", {}).get("entities", {}).items()
+        ):
+            path = document_data.get("path", "") or ""
+            name = path.removesuffix(".md")
+            documents[document_id] = Document(
+                resource_id=document_id,
+                name=name,
+                path=path,
+                contents=document_data.get("content", ""),
+            )
+        return documents
