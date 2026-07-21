@@ -23,6 +23,7 @@ from poly.handlers.protobuf.channels_pb2 import (
 from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
+    register_resource,
 )
 
 
@@ -31,6 +32,7 @@ def _config_path(channel: str) -> str:
     return os.path.join(channel, "configuration.yaml")
 
 
+@register_resource("voice_disclaimer")
 @dataclass
 class VoiceDisclaimerMessage(MultiResourceYamlResource):
     """Resource class for managing disclaimer message settings (voice-only)"""
@@ -116,6 +118,23 @@ class VoiceDisclaimerMessage(MultiResourceYamlResource):
     @property
     def update_command_type(self) -> str:
         return "voice_channel_update_disclaimer"
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "VoiceDisclaimerMessage"]:
+        """Parse voice disclaimer from a projection dict."""
+        voice_settings = projection.get("channels", {}).get("voice", {})
+        voice_disclaimer = voice_settings.get("disclaimer", None)
+        if not voice_disclaimer:
+            return {}
+        return {
+            "voice_disclaimer": cls(
+                resource_id="voice_disclaimer",
+                name="voice_disclaimer",
+                message=voice_disclaimer.get("message", ""),
+                enabled=voice_disclaimer.get("isEnabled", False),
+                language_code=voice_disclaimer.get("languageCode", "en-GB"),
+            )
+        }
 
     @staticmethod
     def discover_resources(base_path: str) -> list[str]:
@@ -238,6 +257,7 @@ class ChannelGreeting(MultiResourceYamlResource):
         return [os.path.join(file_path, cls.top_level_name)]
 
 
+@register_resource("voice_greeting")
 @dataclass
 class VoiceGreeting(ChannelGreeting):
     """Voice channel greeting settings."""
@@ -245,13 +265,49 @@ class VoiceGreeting(ChannelGreeting):
     channel_type: ClassVar[ChannelType] = ChannelType.VOICE
     channel_subpath: ClassVar[str] = "voice"
 
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "VoiceGreeting"]:
+        """Parse voice greeting from a projection dict."""
+        voice_config = projection.get("channels", {}).get("voice", {}).get("config", {}) or {}
+        voice_greeting = voice_config.get("greeting", None)
+        if not voice_greeting:
+            return {}
+        return {
+            "voice_greeting": cls(
+                resource_id="voice_greeting",
+                name="voice_greeting",
+                welcome_message=voice_greeting.get("welcomeMessage", ""),
+                language_code=voice_greeting.get("languageCode", "en-GB"),
+            )
+        }
 
+
+@register_resource("chat_greeting")
 @dataclass
 class ChatGreeting(ChannelGreeting):
     """Chat (web chat) channel greeting settings."""
 
     channel_type: ClassVar[ChannelType] = ChannelType.WEB_CHAT
     channel_subpath: ClassVar[str] = "chat"
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "ChatGreeting"]:
+        """Parse chat greeting from a projection dict."""
+        web_chat_settings = projection.get("channels", {}).get("webChat", {})
+        if not web_chat_settings.get("status", False):
+            return {}
+        chat_config = web_chat_settings.get("config", {}) or {}
+        chat_greeting = chat_config.get("greeting", None)
+        if not chat_greeting:
+            return {}
+        return {
+            "chat_greeting": cls(
+                resource_id="chat_greeting",
+                name="chat_greeting",
+                welcome_message=chat_greeting.get("welcomeMessage", ""),
+                language_code=chat_greeting.get("languageCode", "en-GB"),
+            )
+        }
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         """Validate the chat greeting resource."""
@@ -334,6 +390,7 @@ class ChannelStylePrompt(MultiResourceYamlResource):
         return [os.path.join(file_path, cls.top_level_name)]
 
 
+@register_resource("voice_style_prompt")
 @dataclass
 class VoiceStylePrompt(ChannelStylePrompt):
     """Voice channel style prompt settings."""
@@ -341,13 +398,47 @@ class VoiceStylePrompt(ChannelStylePrompt):
     channel_type: ClassVar[ChannelType] = ChannelType.VOICE
     channel_subpath: ClassVar[str] = "voice"
 
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "VoiceStylePrompt"]:
+        """Parse voice style prompt from a projection dict."""
+        voice_config = projection.get("channels", {}).get("voice", {}).get("config", {}) or {}
+        voice_style_prompt = voice_config.get("stylePrompt", None)
+        if not voice_style_prompt:
+            return {}
+        return {
+            "voice_style_prompt": cls(
+                resource_id="voice_style_prompt",
+                name="voice_style_prompt",
+                prompt=voice_style_prompt.get("prompt", ""),
+            )
+        }
 
+
+@register_resource("chat_style_prompt")
 @dataclass
 class ChatStylePrompt(ChannelStylePrompt):
     """Chat (web chat) channel style prompt settings."""
 
     channel_type: ClassVar[ChannelType] = ChannelType.WEB_CHAT
     channel_subpath: ClassVar[str] = "chat"
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "ChatStylePrompt"]:
+        """Parse chat style prompt from a projection dict."""
+        web_chat_settings = projection.get("channels", {}).get("webChat", {})
+        if not web_chat_settings.get("status", False):
+            return {}
+        chat_config = web_chat_settings.get("config", {}) or {}
+        chat_style_prompt = chat_config.get("stylePrompt", None)
+        if not chat_style_prompt:
+            return {}
+        return {
+            "chat_style_prompt": cls(
+                resource_id="chat_style_prompt",
+                name="chat_style_prompt",
+                prompt=chat_style_prompt.get("prompt", ""),
+            )
+        }
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         """Validate the chat style prompt resource."""

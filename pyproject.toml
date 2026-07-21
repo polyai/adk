@@ -28,10 +28,20 @@ exclude = [
 ]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py314"
 line-length = 100
 exclude = [
     "src/poly/handlers/protobuf/",
+]
+
+[tool.ruff.lint]
+# Ruff defaults (pycodestyle errors + pyflakes) plus import sorting
+select = [
+    "E4",
+    "E7",
+    "E9",
+    "F",
+    "I",
 ]
 
 [tool.ruff.format]
@@ -149,7 +159,7 @@ tag_format = "v{version}"
 
 [project]
 name = "polyai-adk"
-version = "0.34.3"
+version = "0.34.5"
 description = "Agent Development Kit (ADK) — a CLI for managing Agent Studio projects locally"
 readme = "README.md"
 requires-python = ">=3.14.0"

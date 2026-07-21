@@ -17,9 +17,11 @@ from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
     _parse_multi_resource_path,
+    register_resource,
 )
 
 
+@register_resource("pronunciations")
 @dataclass
 class Pronunciation(MultiResourceYamlResource):
     """Dataclass representing a TTS Rule"""
@@ -52,6 +54,30 @@ class Pronunciation(MultiResourceYamlResource):
         self.language_code = language_code
         self.description = description
         self.position = position
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "Pronunciation"]:
+        """Parse pronunciations from a projection dict."""
+        pronunciations = {}
+        index = 0
+        for pronunciation_id, pronunciation_data in (
+            projection.get("pronunciations", {})
+            .get("pronunciations", {})
+            .get("entities", {})
+            .items()
+        ):
+            pronunciations[pronunciation_id] = cls(
+                resource_id=pronunciation_id,
+                name=pronunciation_data.get("name", ""),
+                regex=pronunciation_data.get("regex", ""),
+                replacement=pronunciation_data.get("replacement", ""),
+                case_sensitive=pronunciation_data.get("caseSensitive", False),
+                language_code=pronunciation_data.get("languageCode", ""),
+                description=pronunciation_data.get("description", ""),
+                position=index,
+            )
+            index += 1
+        return pronunciations
 
     @property
     def file_path(self) -> str:
