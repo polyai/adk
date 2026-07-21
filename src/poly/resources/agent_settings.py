@@ -56,7 +56,12 @@ class SettingsPersonality(YamlResource):
 
     def to_yaml_dict(self) -> dict:
         """Convert the personality settings to a YAML-serializable dict."""
-        return {"adjectives": self.adjectives, "custom": self.custom}
+        return {
+            "adjectives": {
+                adj: enabled for adj, enabled in sorted(self.adjectives.items()) if enabled
+            },
+            "custom": self.custom,
+        }
 
     @classmethod
     def to_pretty_dict(
@@ -122,11 +127,7 @@ class SettingsPersonality(YamlResource):
 
         return Personality_UpdatePersonality(
             adjectives={
-                "values": {
-                    adj: enabled
-                    for adj, enabled in self.adjectives.items()
-                    if adj in ALLOWED_ADJECTIVES
-                },
+                "values": {adj: self.adjectives.get(adj, False) for adj in ALLOWED_ADJECTIVES},
             },
             custom=self.custom,
         )

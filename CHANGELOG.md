@@ -1,6 +1,180 @@
 # CHANGELOG
 
 
+## v0.34.5 (2026-07-20)
+
+### Bug Fixes
+
+- Normalize document paths to uppercase to prevent case-sensitivity conflicts
+  ([#231](https://github.com/polyai/adk/pull/231),
+  [`f26fc38`](https://github.com/polyai/adk/commit/f26fc3885f4e8f54555db1bd4a0615f1ac6a73e9))
+
+## Summary
+
+Normalizes all Document resource paths to uppercase at every entry point to prevent case-sensitivity
+  conflicts on macOS's case-insensitive filesystem.
+
+## Motivation
+
+On macOS (case-insensitive APFS), creating a local `context.md` and a remote `CONTEXT.MD` causes the
+  system to treat them as different resources despite being the same file on disk. This leads to the
+  remote version being incorrectly deleted on push, as `find_new_kept_deleted` uses case-sensitive
+  string comparison for file path matching.
+
+`CONTEXT.MD` is the version that the user can see in Studio Assistant
+
+## Changes
+
+- Added `Document.__post_init__` to normalize `self.path` to uppercase on construction - Updated
+  `Document.discover_resources()` to uppercase filenames from `os.listdir()` - Updated
+  `_read_documents_from_projection()` to use uppercase-normalized path as resource_id - Updated
+  `find_new_kept_deleted()` to uppercase the resource_id for new Documents - Updated existing test
+  assertions and added `test_path_normalized_to_uppercase`
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.34.4 (2026-07-13)
+
+### Bug Fixes
+
+- Normalize local multi-resource content before merge
+  ([#229](https://github.com/polyai/adk/pull/229),
+  [`87adab2`](https://github.com/polyai/adk/commit/87adab29233e7cc5608529ee84b21073c9e1f933))
+
+## Summary
+
+Normalize local multi-resource YAML content through resource classes before the three-way merge on
+  pull, preventing false merge conflicts caused by serialization differences.
+
+## Motivation
+
+The three-way merge for multi-resource files (entities, keyphrases, etc.) read local files raw from
+  disk, while original and incoming content went through resource objects (`read_local_resource` →
+  `save(save_to_cache=True)`). Serialization differences — such as default values (`relative_date:
+  false` vs `config: {}`), case normalization (`Boosted` vs `boosted`), or whitespace stripping —
+  caused false merge conflicts on pull even when the logical content was identical.
+
+The non-multi-resource path already normalizes local content via `read_local_resource` → `to_pretty`
+  (with the comment "Normalise the local resource to ensure formatting differences don't cause
+  unnecessary merge conflicts"). The multi-resource path was missing this normalization.
+
+## Changes
+
+- Replaced raw `Resource.read_from_file()` local read in `_update_multi_resource_yaml_resources`
+  with `read_local_resource` → `save(save_to_cache=True)`, mirroring how original and incoming
+  content are already computed - Falls back to raw read for files not covered by the object-based
+  path (e.g. edge cases) - Added test verifying that mixed-case keyphrase levels in local YAML don't
+  cause false conflicts on pull
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- **agent-setting**: Agent setting sort ([#230](https://github.com/polyai/adk/pull/230),
+  [`6ed879c`](https://github.com/polyai/adk/commit/6ed879cdbb925223d57d40adb96de894c860a4f9))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. --> Fix agent setting sort to prevent merge
+  conflicts ## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. --> The order of the keys can
+  sometimes change causing merge conflicts. Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+
+## v0.34.3 (2026-07-09)
+
+### Bug Fixes
+
+- Normalize personality adjectives on pull and send removals on push
+  ([#225](https://github.com/polyai/adk/pull/225),
+  [`3d327b8`](https://github.com/polyai/adk/commit/3d327b858326ddb637e5fbc027269cfb937f172a))
+
+## Summary
+
+Fix two bugs in personality adjective handling that caused phantom diffs on pull and silent no-ops
+  when removing adjectives.
+
+## Motivation
+
+1. Pulling a project could produce spurious diffs because the platform may return `{Friendly:
+  false}` or `{}` for the same state — both mean "not enabled" but produced different YAML. 2.
+  Removing an adjective from the local YAML and pushing had no effect because `build_update_proto`
+  only sent adjectives present in the local dict, never signalling a removal.
+
+## Changes
+
+- `to_yaml_dict` now filters out disabled (`false`) adjectives so pull always writes the same YAML
+  regardless of API representation - `build_update_proto` now iterates all `ALLOWED_ADJECTIVES`,
+  defaulting missing ones to `false`, so removals are explicitly sent to the platform - Updated and
+  added tests for both behaviors
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.34.2 (2026-07-09)
 
 ### Bug Fixes

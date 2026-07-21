@@ -11,6 +11,7 @@ from jsonschema import ValidationError
 
 import poly.resources.resource_utils as resource_utils
 from poly.resources.agent_settings import (
+    ALLOWED_ADJECTIVES,
     SettingsPersonality,
     SettingsRole,
     SettingsRules,
@@ -1679,9 +1680,8 @@ TEST_PERSONALITY = SettingsPersonality(
 )
 
 PERSONALITY_RAW = """adjectives:
-  Polite: true
   Calm: true
-  Kind: false
+  Polite: true
 custom: ''
 """
 
@@ -1690,6 +1690,35 @@ class SettingsPersonalityTests(unittest.TestCase):
     def test_get_raw(self):
         """Test that raw property returns correct YAML representation."""
         self.assertEqual(TEST_PERSONALITY.raw, PERSONALITY_RAW)
+
+    def test_to_yaml_dict_strips_disabled_adjectives(self):
+        """Test that to_yaml_dict excludes adjectives set to False."""
+        yaml_dict = TEST_PERSONALITY.to_yaml_dict()
+        self.assertEqual(yaml_dict["adjectives"], {"Polite": True, "Calm": True})
+        self.assertNotIn("Kind", yaml_dict["adjectives"])
+
+    def test_to_yaml_dict_sorts_adjectives(self):
+        """Test that to_yaml_dict returns adjectives in sorted order."""
+        unsorted = SettingsPersonality(
+            resource_id="p1",
+            name="personality",
+            adjectives={"Polite": True, "Calm": True, "Energetic": True, "Kind": False},
+            custom="",
+        )
+        yaml_dict = unsorted.to_yaml_dict()
+        self.assertEqual(list(yaml_dict["adjectives"].keys()), ["Calm", "Energetic", "Polite"])
+
+    def test_to_yaml_dict_normalizes_empty_and_all_false(self):
+        """Test that both empty and all-false adjectives produce the same YAML dict."""
+        empty = SettingsPersonality(resource_id="p1", name="personality", adjectives={}, custom="")
+        all_false = SettingsPersonality(
+            resource_id="p2",
+            name="personality",
+            adjectives={"Polite": False, "Calm": False},
+            custom="",
+        )
+        self.assertEqual(empty.to_yaml_dict()["adjectives"], {})
+        self.assertEqual(all_false.to_yaml_dict()["adjectives"], {})
 
     def test_to_pretty(self):
         """Test converting personality to pretty format."""
@@ -1763,8 +1792,8 @@ class SettingsPersonalityTests(unittest.TestCase):
             str(cm.exception),
         )
 
-    def test_build_update_proto_filters_invalid_adjectives(self):
-        """Test that build_update_proto excludes non-allowed adjectives from the payload."""
+    def test_build_update_proto_sends_all_allowed_adjectives(self):
+        """Test that build_update_proto sends all allowed adjectives, defaulting unset to False."""
         personality = SettingsPersonality(
             resource_id="personality_123",
             name="personality",
@@ -1773,8 +1802,12 @@ class SettingsPersonalityTests(unittest.TestCase):
         )
         proto = personality.build_update_proto()
         adjective_values = proto.adjectives.values
-        self.assertEqual(adjective_values, {"Polite": True, "Calm": True})
         self.assertNotIn("InvalidAdjective", adjective_values)
+        self.assertEqual(set(adjective_values.keys()), ALLOWED_ADJECTIVES)
+        self.assertTrue(adjective_values["Polite"])
+        self.assertTrue(adjective_values["Calm"])
+        self.assertFalse(adjective_values["Kind"])
+        self.assertFalse(adjective_values["Funny"])
 
     def test_read_local_resource(self):
         """Test reading a personality from a YAML file."""
@@ -8139,7 +8172,7 @@ class DocumentTests(unittest.TestCase):
 
     def test_file_path(self):
         doc = Document(resource_id="test.md", name="test", path="test.md", contents="hello")
-        self.assertEqual(doc.file_path, os.path.join("context", "test.md"))
+        self.assertEqual(doc.file_path, os.path.join("context", "TEST.MD"))
 
     def test_raw(self):
         doc = Document(resource_id="test.md", name="test", path="test.md", contents="some content")
@@ -8167,7 +8200,7 @@ class DocumentTests(unittest.TestCase):
             )
             self.assertEqual(doc.resource_id, "doc.md")
             self.assertEqual(doc.name, "doc")
-            self.assertEqual(doc.path, "doc.md")
+            self.assertEqual(doc.path, "DOC.MD")
             self.assertEqual(doc.contents, "file contents\n")
 
     def test_save_and_read_round_trip(self):
@@ -8182,12 +8215,12 @@ class DocumentTests(unittest.TestCase):
             )
             doc.save(tmpdir)
 
-            file_path = os.path.join(tmpdir, "context", "round_trip.md")
+            file_path = os.path.join(tmpdir, "context", "ROUND_TRIP.MD")
             self.assertTrue(os.path.exists(file_path))
 
             restored = Document.read_local_resource(
                 file_path=file_path,
-                resource_id="round_trip.md",
+                resource_id="ROUND_TRIP.MD",
                 resource_name="round_trip",
             )
             self.assertEqual(restored.contents, doc.contents)
@@ -8210,8 +8243,8 @@ class DocumentTests(unittest.TestCase):
             self.assertCountEqual(
                 discovered,
                 [
-                    os.path.join(context_dir, "doc1.md"),
-                    os.path.join(context_dir, "doc2.md"),
+                    os.path.join(context_dir, "DOC1.MD"),
+                    os.path.join(context_dir, "DOC2.MD"),
                 ],
             )
 
@@ -8221,6 +8254,23 @@ class DocumentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             discovered = Document.discover_resources(tmpdir)
             self.assertEqual(discovered, [])
+
+    def test_path_normalized_to_uppercase(self):
+        """Documents with different-case paths produce the same normalized path."""
+        doc_lower = Document(
+            resource_id="ctx.md", name="ctx", path="context.md", contents="hello"
+        )
+        doc_upper = Document(
+            resource_id="ctx.md", name="ctx", path="CONTEXT.MD", contents="hello"
+        )
+        doc_mixed = Document(
+            resource_id="ctx.md", name="ctx", path="Context.Md", contents="hello"
+        )
+        self.assertEqual(doc_lower.path, "CONTEXT.MD")
+        self.assertEqual(doc_upper.path, "CONTEXT.MD")
+        self.assertEqual(doc_mixed.path, "CONTEXT.MD")
+        self.assertEqual(doc_lower.file_path, doc_upper.file_path)
+        self.assertEqual(doc_lower.file_path, doc_mixed.file_path)
 
 
 class TopicFromProjection(unittest.TestCase):

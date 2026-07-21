@@ -754,20 +754,47 @@ class AgentStudioProject:
             for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
         }
 
-        # Compute current file (formatted)
+        # Normalise local resources through resource classes to ensure
+        # serialization differences don't cause merge conflicts
         local_file_contents = {}
         MultiResourceYamlResource._file_cache.clear()
         if not force:
-            for file in incoming_file_contents.keys():
-                try:
-                    contents = Resource.read_from_file(file)
-                    if format:
-                        contents = MultiResourceYamlResource.format_resource(
-                            contents, file_name=file
+            for resource_type, resources in incoming_resources.items():
+                if not issubclass(resource_type, MultiResourceYamlResource):
+                    continue
+                for resource in resources.values():
+                    try:
+                        mapping = self._make_resource_mapping(resource)
+                        local_resource = self.read_local_resource(
+                            resource=mapping,
+                            resource_mappings=incoming_resource_mappings,
                         )
-                    local_file_contents[file] = contents
-                except FileNotFoundError:
-                    local_file_contents[file] = ""
+                        local_resource.save(
+                            self.root_path,
+                            resource_name=local_resource.name,
+                            resource_mappings=incoming_resource_mappings,
+                            format=format,
+                            save_to_cache=True,
+                        )
+                    except (FileNotFoundError, ValueError, TypeError):
+                        continue
+
+            local_file_contents = {
+                file: resource_utils.dump_yaml(top_level_yaml_dict)
+                for file, (_, top_level_yaml_dict) in MultiResourceYamlResource._file_cache.items()
+            }
+
+            for file in incoming_file_contents:
+                if file not in local_file_contents:
+                    try:
+                        contents = Resource.read_from_file(file)
+                        if format:
+                            contents = MultiResourceYamlResource.format_resource(
+                                contents, file_name=file
+                            )
+                        local_file_contents[file] = contents
+                    except FileNotFoundError:
+                        local_file_contents[file] = ""
 
         # Save and compute merges
         for file, incoming_content in incoming_file_contents.items():
@@ -2256,7 +2283,7 @@ class AgentStudioProject:
                     resource_id = self.generate_uuid(resource_type)
 
                     if resource_type == Document:
-                        resource_id = os.path.basename(file_path)
+                        resource_id = os.path.basename(file_path).upper()
 
                     if resource_type in (FlowStep, FunctionStep):
                         resource_id = f"{flow_id}_{resource_id}"

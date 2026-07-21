@@ -204,9 +204,9 @@ class SerializationRoundTripTest(unittest.TestCase):
         restored = Document(**serialized)
         self.assertEqual(restored.resource_id, "test.md")
         self.assertEqual(restored.name, "test")
-        self.assertEqual(restored.path, "test.md")
+        self.assertEqual(restored.path, "TEST.MD")
         self.assertEqual(restored.contents, "hello world\n")
-        self.assertEqual(restored.file_path, os.path.join("context", "test.md"))
+        self.assertEqual(restored.file_path, os.path.join("context", "TEST.MD"))
         self.assertEqual(restored.compute_hash(), doc.compute_hash())
 
     def test_flow_step_round_trip_excludes_sub_resource_internals(self):
@@ -424,7 +424,7 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
         self.assertCountEqual(
             local_resources[Document],
             [
-                os.path.join(TEST_DIR, "context", "test_document.md"),
+                os.path.join(TEST_DIR, "context", "TEST_DOCUMENT.MD"),
             ],
         )
 
@@ -3064,6 +3064,39 @@ class PullProjectTest(unittest.TestCase):
         files_with_conflicts, _ = project.pull_project()
         self.assertEqual(files_with_conflicts, [])
 
+    def test_pull_multi_resource_local_normalization_no_false_conflict(self):
+        """Local multi-resource files should be normalised through resource classes
+        before the three-way merge, so formatting differences don't cause conflicts.
+
+        KeyphraseBoosting lowercases the level field in __init__. If the local file
+        has 'level: Boosted' (mixed case), a raw read would differ from the canonical
+        'level: boosted', causing a false merge conflict. Reading through the resource
+        class normalises this.
+        """
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        incoming_resources = deepcopy(project.resources)
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+
+        # Local file has mixed-case level values (not yet normalised)
+        local_keyphrases_yaml = (
+            "keyphrases:\n"
+            "- keyphrase: PolyAI\n"
+            "  level: Maximum\n"
+            "- keyphrase: reservation\n"
+            "  level: Boosted\n"
+            "- keyphrase: check-in\n"
+            "  level: Default\n"
+        )
+        keyphrases_yaml_path = os.path.join(
+            TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
+        )
+
+        with mock_read_from_file({keyphrases_yaml_path: local_keyphrases_yaml}):
+            files_with_conflicts, _ = project.pull_project(force=False)
+
+        self.assertEqual(files_with_conflicts, [])
+
 
 class PullProjectFromEnvTest(unittest.TestCase):
     """Tests for pull_project_from_env when targeting deployment environments.
@@ -3589,6 +3622,7 @@ class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
             [],
             "Should not delete files for resource types in _not_loaded_resources",
         )
+
 
 class MigrateFlowStepResourceIdsTest(unittest.TestCase):
     """Tests for migrate_flow_step_resource_ids status dict migration."""
