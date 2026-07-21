@@ -211,12 +211,13 @@ class RTCCommand(BaseCommand):
             choices=["sandbox", "pre-release", "live", "all"],
             help="Environment to pull. Defaults to all.",
         )
-        rtc_pull_parser.add_argument(
+        rtc_pull_mode = rtc_pull_parser.add_mutually_exclusive_group()
+        rtc_pull_mode.add_argument(
             "--schema",
             action="store_true",
             help="Pull schema only.",
         )
-        rtc_pull_parser.add_argument(
+        rtc_pull_mode.add_argument(
             "--data",
             action="store_true",
             help="Pull data only.",
@@ -252,12 +253,13 @@ class RTCCommand(BaseCommand):
             action="store_true",
             help="Disable automatic merge on drift; fail with error instead.",
         )
-        rtc_push_parser.add_argument(
+        rtc_push_mode = rtc_push_parser.add_mutually_exclusive_group()
+        rtc_push_mode.add_argument(
             "--schema",
             action="store_true",
             help="Push schema only.",
         )
-        rtc_push_parser.add_argument(
+        rtc_push_mode.add_argument(
             "--data",
             action="store_true",
             help="Push data only.",
@@ -284,8 +286,10 @@ class RTCCommand(BaseCommand):
                     error(result["error"])
                     sys.exit(1)
                 for f in result["files_written"]:
-                    success(f"Pulled {f['environment']} — {f['schema_file']}")
-                    success(f"Pulled {f['environment']} — {f['data_file']}")
+                    if not data_only:
+                        success(f"Pulled {f['environment']} — {f['schema_file']}")
+                    if not schema_only:
+                        success(f"Pulled {f['environment']} — {f['data_file']}")
         elif args.rtc_subcommand == "push":
             result = cls.rtc_push(
                 args.path,
@@ -361,7 +365,12 @@ class RTCCommand(BaseCommand):
                 if not schema_only:
                     write_json_file(data_path, variables)
 
-                _save_rtc_base(env_dir, schema, variables)
+                base_schema, base_variables = _load_rtc_base(env_dir)
+                _save_rtc_base(
+                    env_dir,
+                    schema if not data_only else (base_schema or schema),
+                    variables if not schema_only else (base_variables or variables),
+                )
                 _set_rtc_last_updated(project, client_env, config.get("lastUpdated"))
 
                 results.append(
@@ -577,9 +586,10 @@ class RTCCommand(BaseCommand):
         data_only: bool = False,
     ) -> dict:
         """Execute the actual push to the API and update local state."""
+        last_response = None
         if schema is not None and not data_only:
             try:
-                AgentStudioInterface.put_rtc_schema(
+                last_response = AgentStudioInterface.put_rtc_schema(
                     region=project.region,
                     project_id=project.project_id,
                     client_env=env,
@@ -588,10 +598,9 @@ class RTCCommand(BaseCommand):
             except requests.HTTPError as e:
                 return {"success": False, "error": str(e), "step": "schema"}
 
-        push_response = None
         if variables is not None and not schema_only:
             try:
-                push_response = AgentStudioInterface.patch_rtc_variables(
+                last_response = AgentStudioInterface.patch_rtc_variables(
                     region=project.region,
                     project_id=project.project_id,
                     client_env=env,
@@ -606,12 +615,18 @@ class RTCCommand(BaseCommand):
                     "step": "variables",
                 }
 
-        new_last_updated = push_response.get("lastUpdated") if push_response else None
-        _set_rtc_last_updated(project, env, new_last_updated)
+        if last_response and last_response.get("lastUpdated"):
+            _set_rtc_last_updated(project, env, last_response["lastUpdated"])
 
-        if schema is not None and variables is not None:
-            _save_rtc_base(env_dir, schema, variables)
+        base_schema, base_variables = _load_rtc_base(env_dir)
+        _save_rtc_base(
+            env_dir,
+            schema if schema is not None else (base_schema or {}),
+            variables if variables is not None else (base_variables or {}),
+        )
+        if schema is not None:
             write_json_file(os.path.join(env_dir, "schema.json"), schema)
+        if variables is not None:
             write_json_file(os.path.join(env_dir, "data.json"), variables)
 
         return {
