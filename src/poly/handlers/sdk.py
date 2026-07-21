@@ -701,3 +701,30 @@ class SourcererSDK:
             "projection": self._projection_cache,
             "last_known_sequence": self._last_known_sequence,
         }
+
+    def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
+        """Get the history of commands for a specific branch.
+
+        Args:
+            branch_id: The branch ID to fetch history for.
+
+        Returns:
+            A list of dictionaries containing commit information for the branch.
+        Raises:
+            SourcererAPIError: If the API request fails.
+        """
+        try:
+            url = f"{self._get_branches_url()}/{branch_id}/merge-history"
+            response = self.session.get(url)
+            response.raise_for_status()
+            return response.json().get("merges", [])
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
+                except (ValueError, KeyError):
+                    error_msg = f"API request failed: {e}"
+            else:
+                error_msg = f"Request failed: {e}"
+            raise SourcererAPIError(error_msg) from e

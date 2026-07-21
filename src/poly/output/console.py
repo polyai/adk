@@ -158,6 +158,29 @@ def print_branches(branches: dict[str, Any] | list[str], current_branch: str | N
             console.print(f"    {name}")
 
 
+# {'merges': [{'branchId': 'BRANCH-RLX9GX78', 'branchName': 'Ruari Phipps / Release', 'mergedBy': 'ruari@poly-ai.com', 'mergedAt': '2026-07-21T14:07:06.909Z', 'source': None}], 'count': 1}
+def print_branch_history(commits: list[dict[str, Any]]) -> None:
+    """Print a table of branch history commits."""
+    if not commits:
+        console.print("[muted]No commits found for this branch.[/muted]")
+        return
+
+    table = Table(box=None, show_header=False, header_style="bold", padding=(0, 1))
+    table.add_column("Merged At", no_wrap=True)
+    table.add_column("Branch", no_wrap=True)
+    table.add_column("Merged By", no_wrap=True)
+
+    for commit in commits:
+        merged_at = _format_iso_timestamp(commit.get("mergedAt", ""))
+        table.add_row(
+            merged_at,
+            commit.get("branchName", "—"),
+            commit.get("mergedBy", "—"),
+        )
+
+    console.print(table)
+
+
 def print_validation_errors(errors: list[str]) -> None:
     """Print validation errors in a styled list."""
     console.print("[error]Project configuration is invalid.[/error]")
