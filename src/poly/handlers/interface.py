@@ -588,8 +588,11 @@ class AgentStudioInterface:
         Returns:
             A ResourceMap of the branch's resources.
         """
+        from poly.resources.resource import load_resources_from_projection
+
         try:
-            return self.sync_client.pull_branch_resources(branch_id, at_sequence)
+            projection = self.sync_client.pull_branch_projection(branch_id, at_sequence)
+            return load_resources_from_projection(projection)
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
