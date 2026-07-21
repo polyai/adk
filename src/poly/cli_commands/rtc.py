@@ -40,8 +40,11 @@ def _save_rtc_base(env_dir: str, schema: dict, variables: dict) -> None:
 
 def _load_rtc_base(env_dir: str) -> tuple[Optional[dict], Optional[dict]]:
     """Load base copies, returning (schema, variables) or (None, None)."""
-    schema = read_json_file(os.path.join(env_dir, RTC_BASE_SCHEMA_FILE))
-    variables = read_json_file(os.path.join(env_dir, RTC_BASE_DATA_FILE))
+    try:
+        schema = read_json_file(os.path.join(env_dir, RTC_BASE_SCHEMA_FILE))
+        variables = read_json_file(os.path.join(env_dir, RTC_BASE_DATA_FILE))
+    except json.JSONDecodeError:
+        return None, None
     return schema, variables
 
 
