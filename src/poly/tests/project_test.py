@@ -2386,7 +2386,9 @@ class ValidateProjectTest(unittest.TestCase):
             errors = project.validate_project()
         self.assertEqual(len(errors), 2)
         error_texts = "\n".join(errors)
-        self.assertIn("Invalid references: ['global_functions: FUNCTION-missing_function']", error_texts)
+        self.assertIn(
+            "Invalid references: ['global_functions: FUNCTION-missing_function']", error_texts
+        )
         self.assertIn("Start step 'missing_step' not found.", error_texts)
 
 
@@ -3706,6 +3708,77 @@ class MigrateFlowStepResourceIdsTest(unittest.TestCase):
         flow_steps = status_dict["resources"]["flow_steps"]
         self.assertIn("FLOW-abc_step-1", flow_steps)
         self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
+
+
+class GetBranchHistoryProject(unittest.TestCase):
+    """Tests for AgentStudioProject.get_branch_history."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def test_delegates_to_api_handler(self):
+        """get_branch_history passes through to the api_handler and returns its result."""
+        expected = [{"commit_id": "c1"}, {"commit_id": "c2"}]
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branch_history.return_value = expected
+
+            result = self.project.get_branch_history("branch-1")
+
+        self.assertEqual(result, expected)
+        mock_api.get_branch_history.assert_called_once_with("branch-1")
+
+
+class RenameBranchProject(unittest.TestCase):
+    """Tests for AgentStudioProject.rename_branch."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def test_empty_name_raises_value_error(self):
+        """An empty branch name raises ValueError."""
+        with self.assertRaises(ValueError) as ctx:
+            self.project.rename_branch("")
+
+        self.assertIn("New branch name must be provided", str(ctx.exception))
+
+    def test_none_name_raises_value_error(self):
+        """A None branch name raises ValueError."""
+        with self.assertRaises(ValueError) as ctx:
+            self.project.rename_branch(None)
+
+        self.assertIn("New branch name must be provided", str(ctx.exception))
+
+    def test_main_branch_raises_value_error(self):
+        """Renaming the main branch raises ValueError."""
+        self.project.branch_id = "main"
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.rename_branch("new-name")
+
+        self.assertIn("main", str(ctx.exception))
+
+    def test_duplicate_name_raises_value_error(self):
+        """A name that already exists raises ValueError."""
+        self.project.branch_id = "branch-1"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = {"new-name": "branch-id-123"}
+
+            with self.assertRaises(ValueError) as ctx:
+                self.project.rename_branch("new-name")
+
+        self.assertIn("already exists", str(ctx.exception))
+
+    def test_successful_rename_returns_true(self):
+        """A valid rename delegates to api_handler and returns its result."""
+        self.project.branch_id = "branch-1"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = {"other-branch": "id-456"}
+            mock_api.rename_branch.return_value = True
+
+            result = self.project.rename_branch("new-name")
+
+        self.assertTrue(result)
+        mock_api.rename_branch.assert_called_once_with(new_branch_name="new-name")
 
 
 if __name__ == "__main__":
