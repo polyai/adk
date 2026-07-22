@@ -32,8 +32,17 @@ def merge_rtc_dicts(base: dict, local: dict, remote: dict) -> tuple[dict, list[s
         elif remote_val == base_val:
             resolved = local_val
         else:
-            conflicts.append(key)
-            resolved = local_val
+            if (
+                isinstance(base_val, dict)
+                and isinstance(local_val, dict)
+                and isinstance(remote_val, dict)
+            ):
+                nested_merged, nested_conflicts = merge_rtc_dicts(base_val, local_val, remote_val)
+                conflicts.extend([f"{key}.{c}" for c in nested_conflicts])
+                resolved = nested_merged
+            else:
+                conflicts.append(str(key))
+                resolved = local_val
 
         if resolved is not _MISSING:
             merged[key] = resolved
