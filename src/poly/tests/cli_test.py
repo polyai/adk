@@ -2761,3 +2761,200 @@ class ConversationsCommandTest(unittest.TestCase):
         )
         mock_success.assert_called_once()
         self.assertIn("2.0 MB", mock_success.call_args[0][0])
+
+
+class BranchHistoryTest(unittest.TestCase):
+    """Tests for BranchCommand.branch_history CLI handler."""
+
+    SAMPLE_BRANCHES = {"main": "main-id", "feature-a": "branch-a-id"}
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.get_branches.return_value = ("feature-a", dict(self.SAMPLE_BRANCHES))
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.output.console.print_branch_history")
+    @patch("poly.output.console.plain")
+    def test_defaults_to_current_branch(self, mock_plain, mock_print_history):
+        """When no branch_name is given, history uses the current branch."""
+        self.proj.get_branch_history.return_value = [{"mergedAt": "2026-07-01", "branchName": "x"}]
+
+        BranchCommand.branch_history(TEST_DIR)
+
+        self.proj.get_branch_history.assert_called_once_with("branch-a-id")
+        mock_print_history.assert_called_once()
+
+    @patch("poly.output.console.print_branch_history")
+    @patch("poly.output.console.plain")
+    def test_explicit_branch_name(self, mock_plain, mock_print_history):
+        """An explicit branch_name looks up its ID and fetches history."""
+        self.proj.get_branch_history.return_value = [{"mergedAt": "2026-07-01"}]
+
+        BranchCommand.branch_history(TEST_DIR, branch_name="main")
+
+        self.proj.get_branch_history.assert_called_once_with("main-id")
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_output(self, mock_json):
+        """JSON mode outputs branch_name, branch_id, and history."""
+        history = [{"mergedAt": "2026-07-01", "branchName": "feat"}]
+        self.proj.get_branch_history.return_value = history
+
+        BranchCommand.branch_history(TEST_DIR, branch_name="feature-a", output_json=True)
+
+        mock_json.assert_called_once()
+        payload = mock_json.call_args[0][0]
+        self.assertEqual(payload["branch_name"], "feature-a")
+        self.assertEqual(payload["branch_id"], "branch-a-id")
+        self.assertEqual(payload["history"], history)
+
+    @patch("poly.output.console.plain")
+    def test_empty_history_shows_message(self, mock_plain):
+        """When history is empty, a 'no history found' message is shown."""
+        self.proj.get_branch_history.return_value = []
+
+        BranchCommand.branch_history(TEST_DIR, branch_name="feature-a")
+
+        mock_plain.assert_called_once()
+        self.assertIn("No history found", mock_plain.call_args[0][0])
+
+    @patch("poly.output.console.warning")
+    def test_nonexistent_branch_shows_warning(self, mock_warning):
+        """A branch name not in the branches dict shows a warning."""
+        BranchCommand.branch_history(TEST_DIR, branch_name="no-such-branch")
+
+        self.proj.get_branch_history.assert_not_called()
+        mock_warning.assert_called_once()
+        self.assertIn("does not exist", mock_warning.call_args[0][0])
+
+
+class BranchRenameTest(unittest.TestCase):
+    """Tests for BranchCommand.branch_rename CLI handler."""
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.get_current_branch.return_value = "feature-a"
+        self.proj.rename_branch.return_value = True
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.output.console.success")
+    def test_successful_rename(self, mock_success):
+        """A successful rename prints a success message."""
+        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
+
+        self.proj.rename_branch.assert_called_once_with("new-name")
+        mock_success.assert_called_once()
+        self.assertIn("feature-a", mock_success.call_args[0][0])
+        self.assertIn("new-name", mock_success.call_args[0][0])
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_successful_rename_json(self, mock_json):
+        """JSON mode outputs old_branch_name, new_branch_name, and success."""
+        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name", output_json=True)
+
+        mock_json.assert_called_once()
+        payload = mock_json.call_args[0][0]
+        self.assertTrue(payload["success"])
+        self.assertEqual(payload["old_branch_name"], "feature-a")
+        self.assertEqual(payload["new_branch_name"], "new-name")
+
+    @patch("poly.output.console.error")
+    def test_rename_failure_shows_error(self, mock_error):
+        """When rename_branch returns False, a failure message is shown."""
+        self.proj.rename_branch.return_value = False
+
+        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
+
+        mock_error.assert_called_once()
+        self.assertIn("Failed to rename", mock_error.call_args[0][0])
+
+    @patch("poly.output.console.warning")
+    def test_no_current_branch_shows_warning(self, mock_warning):
+        """When current branch is None, a warning is shown."""
+        self.proj.get_current_branch.return_value = None
+
+        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
+
+        self.proj.rename_branch.assert_not_called()
+        mock_warning.assert_called_once()
+        self.assertIn("doesn't exist", mock_warning.call_args[0][0])
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_no_current_branch_json(self, mock_json):
+        """JSON mode outputs error when no current branch exists."""
+        self.proj.get_current_branch.return_value = None
+
+        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name", output_json=True)
+
+        mock_json.assert_called_once()
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("doesn't exist", payload["error"])
+
+    @patch("poly.output.console.error")
+    def test_main_branch_shows_error(self, mock_error):
+        """Renaming main branch shows an error."""
+        self.proj.get_current_branch.return_value = "main"
+
+        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name")
+
+        self.proj.rename_branch.assert_not_called()
+        mock_error.assert_called_once()
+        self.assertIn("Cannot rename the main branch", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_main_branch_json(self, mock_json):
+        """JSON mode outputs error when trying to rename main."""
+        self.proj.get_current_branch.return_value = "main"
+
+        BranchCommand.branch_rename(TEST_DIR, new_branch_name="new-name", output_json=True)
+
+        mock_json.assert_called_once()
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("Cannot rename the main branch", payload["error"])
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_no_name_json_mode(self, mock_json):
+        """JSON mode outputs error when no name is provided."""
+        self.proj.rename_branch.side_effect = ValueError("New branch name must be provided.")
+
+        BranchCommand.branch_rename(TEST_DIR, new_branch_name=None, output_json=True)
+
+        calls = mock_json.call_args_list
+        self.assertEqual(len(calls), 2)
+        self.assertFalse(calls[0][0][0]["success"])
+        self.assertIn("No new branch name provided", calls[0][0][0]["error"])
+        self.assertFalse(calls[1][0][0]["success"])
+
+    @patch("poly.output.console.error")
+    def test_rename_exception_shows_error(self, mock_error):
+        """When rename_branch raises, the error message is shown."""
+        self.proj.rename_branch.side_effect = ValueError("Branch already exists.")
+
+        BranchCommand.branch_rename(TEST_DIR, new_branch_name="existing")
+
+        mock_error.assert_called_once()
+        self.assertIn("Branch already exists", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_rename_exception_json(self, mock_json):
+        """JSON mode outputs the error when rename_branch raises."""
+        self.proj.rename_branch.side_effect = ValueError("Branch already exists.")
+
+        BranchCommand.branch_rename(TEST_DIR, new_branch_name="existing", output_json=True)
+
+        mock_json.assert_called_once()
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("Branch already exists", payload["error"])
