@@ -52,6 +52,7 @@ from poly.utils import prepush
 
 logger = logging.getLogger(__name__)
 
+
 PROJECT_CONFIG_FILE = "project.yaml"
 STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
 
@@ -453,8 +454,7 @@ class AgentStudioProject:
         # Delete only ADK-managed resource files, leaving non-ADK files intact.
         for resource_class in RESOURCE_NAME_TO_CLASS.values():
             for path in resource_class.discover_resources(self.root_path):
-                if os.path.isfile(path):
-                    os.remove(path)
+                resource_class.delete_resource(path)
 
         empty_resources: ResourceMap = {}
         self._update_pulled_resources(
