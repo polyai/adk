@@ -347,3 +347,29 @@ class SyncClientHandler:
         history = self.sdk.get_branch_history(branch_id)
         logger.info(f"Fetched {len(history)} commits for branch ID:'{branch_id}'")
         return history
+
+    def rename_branch(self, new_branch_name: str) -> bool:
+        """Rename the current branch.
+
+        Args:
+            new_branch_name (str): The new name for the current branch.
+
+        Returns:
+            bool: True if the rename was successful, False otherwise.
+        """
+        self.assert_branch_exists()
+
+        if self.sdk.branch_id == "main":
+            logger.error("Cannot rename 'main' branch.")
+            return False
+
+        logger.info(f"Renaming branch ID:'{self.sdk.branch_id}' to '{new_branch_name}'")
+
+        try:
+            self.sdk.rename_branch(new_branch_name=new_branch_name)
+        except SourcererAPIError as e:
+            logger.error(f"Failed to rename branch ID:'{self.sdk.branch_id}': {e}")
+            return False
+
+        logger.info(f"Successfully renamed branch ID:'{self.sdk.branch_id}' to '{new_branch_name}'")
+        return True

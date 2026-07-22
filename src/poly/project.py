@@ -3447,3 +3447,26 @@ class AgentStudioProject:
             list[dict[str, Any]]: A list of commit history entries for the branch.
         """
         return self.api_handler.get_branch_history(branch_id)
+
+    def rename_branch(self, new_branch_name: str) -> bool:
+        """Rename the current branch.
+
+        Args:
+            new_branch_name (str): The new name for the current branch.
+
+        Returns:
+            bool: True if the rename was successful, False otherwise.
+        """
+        if not new_branch_name:
+            raise ValueError("New branch name must be provided.")
+
+        if self.branch_id == "main":
+            raise ValueError("Renaming 'main' branch is not supported.")
+
+        branches = self.api_handler.get_branches()
+
+        if new_branch_name in branches:
+            raise ValueError(f"Branch {new_branch_name} already exists.")
+
+        success = self.api_handler.rename_branch(new_branch_name=new_branch_name)
+        return success

@@ -1204,3 +1204,17 @@ class AgentStudioInterface:
             return self.sync_client.get_branch_history(branch_name)
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
+
+    def rename_branch(self, new_branch_name: str) -> bool:
+        """Rename the current branch to a new name.
+
+        Args:
+            new_branch_name (str): The new name for the current branch
+
+        Returns:
+            bool: True if the branch was renamed successfully, False otherwise
+        """
+        try:
+            return self.sync_client.rename_branch(new_branch_name)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)

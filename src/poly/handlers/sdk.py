@@ -728,3 +728,35 @@ class SourcererSDK:
             else:
                 error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
+
+    def rename_branch(self, new_branch_name: str) -> dict[str, Any]:
+        """Rename the current branch.
+
+        Args:
+            new_branch_name: The new name for the current branch.
+
+        Returns:
+            A dictionary containing the updated branch information.
+
+        Raises:
+            SourcererAPIError: If the API request fails or if there is no current branch.
+        """
+        if not self.branch_id:
+            raise SourcererAPIError("No current branch found. Cannot rename.")
+
+        try:
+            url = f"{self._get_branches_url()}/{self.branch_id}"
+            payload = {"name": new_branch_name}
+            response = self.session.patch(url, json=payload)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
+                except (ValueError, KeyError):
+                    error_msg = f"API request failed: {e}"
+            else:
+                error_msg = f"Request failed: {e}"
+            raise SourcererAPIError(error_msg) from e
