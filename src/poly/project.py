@@ -3470,3 +3470,40 @@ class AgentStudioProject:
 
         success = self.api_handler.rename_branch(new_branch_name=new_branch_name)
         return success
+
+    def list_archived_branches(self) -> list[dict[str, Any]]:
+        """List soft-deleted (archived) branches for the project.
+
+        Returns:
+            list[dict[str, Any]]: A list of archived branch entries.
+        """
+        return self.api_handler.list_archived_branches()
+
+    def restore_branch(self, branch_name: str) -> bool:
+        """Restore a soft-deleted branch from the archive.
+
+        Args:
+            branch_name (str): The name of the branch to restore.
+
+        Returns:
+            bool: True if the branch was restored successfully, False otherwise.
+        """
+        if not branch_name:
+            raise ValueError("Branch name must be provided.")
+
+        archived = self.api_handler.list_archived_branches()
+        matches = [b for b in archived if b.get("name") == branch_name]
+        if not matches:
+            raise ValueError(
+                f"Branch '{branch_name}' not found in archive. "
+                "Use 'poly branch list --archived' to see available branches."
+            )
+
+        if len(matches) > 1:
+            branch_ids = ", ".join(b["branchId"] for b in matches)
+            raise ValueError(
+                f"Multiple archived branches named '{branch_name}' found ({branch_ids}). "
+                "Use the interactive picker (poly branch restore) to select the correct one."
+            )
+
+        return self.api_handler.restore_branch(matches[0]["branchId"])

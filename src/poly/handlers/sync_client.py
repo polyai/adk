@@ -373,3 +373,34 @@ class SyncClientHandler:
 
         logger.info(f"Successfully renamed branch ID:'{self.sdk.branch_id}' to '{new_branch_name}'")
         return True
+
+    def list_archived_branches(self) -> list[dict[str, Any]]:
+        """List soft-deleted (archived) branches for the project.
+
+        Returns:
+            list[dict[str, Any]]: A list of dictionaries containing archived branch information.
+        """
+        logger.info("Fetching archived branches")
+        branches = self.sdk.list_archived_branches()
+        logger.info(f"Fetched {len(branches)} archived branches")
+        return branches
+
+    def restore_branch(self, branch_id: str) -> bool:
+        """Restore a soft-deleted branch from the archive.
+
+        Args:
+            branch_id (str): The ID of the branch to restore.
+
+        Returns:
+            bool: True if the restore was successful, False otherwise.
+        """
+        logger.info(f"Restoring branch ID:'{branch_id}'")
+
+        try:
+            self.sdk.restore_branch(branch_id)
+        except SourcererAPIError as e:
+            logger.error(f"Failed to restore branch ID:'{branch_id}': {e}")
+            return False
+
+        logger.info(f"Successfully restored branch ID:'{branch_id}'")
+        return True

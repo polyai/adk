@@ -729,6 +729,59 @@ class SourcererSDK:
                 error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
+    def list_archived_branches(self) -> list[dict[str, Any]]:
+        """List soft-deleted (archived) branches for the project.
+
+        Returns:
+            A list of dictionaries containing archived branch information.
+
+        Raises:
+            SourcererAPIError: If the API request fails.
+        """
+        try:
+            url = f"{self._get_branches_url()}/archive"
+            response = self.session.get(url)
+            response.raise_for_status()
+            return response.json().get("branches", [])
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
+                except (ValueError, KeyError):
+                    error_msg = f"API request failed: {e}"
+            else:
+                error_msg = f"Request failed: {e}"
+            raise SourcererAPIError(error_msg) from e
+
+    def restore_branch(self, branch_id: str) -> dict[str, Any]:
+        """Restore a soft-deleted branch from the archive.
+
+        Args:
+            branch_id: The ID of the branch to restore.
+
+        Returns:
+            A dictionary containing the restored branch information.
+
+        Raises:
+            SourcererAPIError: If the API request fails.
+        """
+        try:
+            url = f"{self._get_branches_url()}/{branch_id}/restore"
+            response = self.session.post(url)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
+                except (ValueError, KeyError):
+                    error_msg = f"API request failed: {e}"
+            else:
+                error_msg = f"Request failed: {e}"
+            raise SourcererAPIError(error_msg) from e
+
     def rename_branch(self, new_branch_name: str) -> dict[str, Any]:
         """Rename the current branch.
 

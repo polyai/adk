@@ -159,6 +159,28 @@ def print_branches(branches: dict[str, Any] | list[str], current_branch: str | N
 
 
 # {'merges': [{'branchId': 'BRANCH-RLX9GX78', 'branchName': 'Ruari Phipps / Release', 'mergedBy': 'ruari@poly-ai.com', 'mergedAt': '2026-07-21T14:07:06.909Z', 'source': None}], 'count': 1}
+def print_archived_branches(branches: list[dict[str, Any]]) -> None:
+    """Print a table of archived (soft-deleted) branches."""
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Branch", no_wrap=True)
+    table.add_column("ID", style="muted", no_wrap=True)
+    table.add_column("Archived", no_wrap=True)
+    table.add_column("Expires", no_wrap=True)
+
+    for branch in branches:
+        archived_at = _format_iso_timestamp(branch.get("archivedAt", ""))
+        days_left = branch.get("daysLeft")
+        expires = f"{days_left} days left" if days_left is not None else "—"
+        table.add_row(
+            branch.get("name", "—"),
+            branch.get("branchId", "—"),
+            archived_at,
+            expires,
+        )
+
+    console.print(table)
+
+
 def print_branch_history(commits: list[dict[str, Any]]) -> None:
     """Print a table of branch history commits."""
     if not commits:
