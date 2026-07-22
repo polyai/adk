@@ -592,6 +592,26 @@ class TestRTCMerge(unittest.TestCase):
         result = _merge_rtc_file("data.json", base, local, remote)
         self.assertEqual(result["a"], 10)
 
+    def test_merge_nested_non_overlapping(self):
+        """Verify nested dict changes on different keys merge cleanly."""
+        base = {"config": {"a": 1, "b": 2}}
+        local = {"config": {"a": 10, "b": 2}}
+        remote = {"config": {"a": 1, "b": 20}}
+
+        result = _merge_rtc_file("data.json", base, local, remote, output_json=True)
+        self.assertIsNotNone(result)
+        self.assertEqual(result["config"]["a"], 10)
+        self.assertEqual(result["config"]["b"], 20)
+
+    def test_merge_nested_conflict_returns_none_in_json_mode(self):
+        """Verify nested dict conflict on same key returns None in JSON mode."""
+        base = {"config": {"a": 1}}
+        local = {"config": {"a": 10}}
+        remote = {"config": {"a": 20}}
+
+        result = _merge_rtc_file("data.json", base, local, remote, output_json=True)
+        self.assertIsNone(result)
+
     def test_merge_conflict_returns_none_in_json_mode(self):
         """Verify conflicting changes return None in JSON mode."""
         base = {"a": 1}
