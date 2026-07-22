@@ -19,58 +19,12 @@ from poly.output.console import edit_in_editor, error, info, success, warning
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
 from poly.resources.resource_utils import contains_merge_conflict
-from poly.utils import merge_rtc_dicts, read_json_file, write_json_file
-
-RTC_ENV_TO_DIR = {
-    "sandbox": "draft_and_sandbox",
-    "pre-release": "pre_release",
-    "live": "live",
-}
-RTC_DIR_TO_ENV = {v: k for k, v in RTC_ENV_TO_DIR.items()}
-
-RTC_BASE_SCHEMA_FILE = ".rtc_base_schema.json"
-RTC_BASE_DATA_FILE = ".rtc_base_data.json"
-
-
-def _save_rtc_base(env_dir: str, schema: dict, variables: dict) -> None:
-    """Save base copies of schema and data for 3-way merge on push."""
-    write_json_file(os.path.join(env_dir, RTC_BASE_SCHEMA_FILE), schema)
-    write_json_file(os.path.join(env_dir, RTC_BASE_DATA_FILE), variables)
-
-
-def _load_rtc_base(env_dir: str) -> tuple[Optional[dict], Optional[dict]]:
-    """Load base copies, returning (schema, variables) or (None, None)."""
-    try:
-        schema = read_json_file(os.path.join(env_dir, RTC_BASE_SCHEMA_FILE))
-        variables = read_json_file(os.path.join(env_dir, RTC_BASE_DATA_FILE))
-    except json.JSONDecodeError:
-        return None, None
-    return schema, variables
+from poly.utils import merge_rtc_dicts, write_json_file
 
 
 def _to_sorted_json(data: dict) -> str:
     """Serialize a dict to deterministically ordered JSON for merging."""
     return json.dumps(data, indent=2, sort_keys=True) + "\n"
-
-
-def _get_rtc_last_updated(project: AgentStudioProject, env: str) -> Optional[str]:
-    """Get the stored lastUpdated for an RTC environment from project config."""
-    if not project.rtc_metadata:
-        return None
-    env_meta = project.rtc_metadata.get(env)
-    if not env_meta:
-        return None
-    return env_meta.get("last_updated")
-
-
-def _set_rtc_last_updated(
-    project: AgentStudioProject, env: str, last_updated: Optional[str]
-) -> None:
-    """Set the lastUpdated for an RTC environment and save project config."""
-    if project.rtc_metadata is None:
-        project.rtc_metadata = {}
-    project.rtc_metadata[env] = {"last_updated": last_updated}
-    project.save_config()
 
 
 def _merge_rtc_file(
@@ -363,65 +317,23 @@ class RTCCommand(BaseCommand):
     ) -> dict:
         """Pull RTC from Agent Studio and write to local files.
 
-        Args:
-            base_path: Base path for the project.
-            env: Environment(s) to pull — sandbox, pre-release, live, or all.
-            output_json: If True, format errors as JSON on failure.
-            schema_only: If True, only pull schema.
-            data_only: If True, only pull data.
-
         Returns:
             dict: Result with success status and files_written list.
         """
         project = load_project(base_path, output_json=output_json)
-        project_root = project.root_path
 
         if env == "all":
-            envs_to_fetch = list(RTC_ENV_TO_DIR.keys())
+            envs_to_fetch = list(AgentStudioProject.RTC_ENV_TO_DIR.keys())
         else:
             envs_to_fetch = [env]
 
-        rtc_root = os.path.join(project_root, "real_time_configuration")
         results = []
-
         try:
             for client_env in envs_to_fetch:
-                config = AgentStudioInterface.get_rtc_config(
-                    region=project.region,
-                    project_id=project.project_id,
-                    client_env=client_env,
+                result = project.rtc_pull_env(
+                    client_env, schema_only=schema_only, data_only=data_only
                 )
-
-                dir_name = RTC_ENV_TO_DIR[client_env]
-                env_dir = os.path.join(rtc_root, dir_name)
-                os.makedirs(env_dir, exist_ok=True)
-
-                schema = config.get("schema", {})
-                variables = config.get("variables", {})
-
-                schema_path = os.path.join(env_dir, "schema.json")
-                data_path = os.path.join(env_dir, "data.json")
-
-                if not data_only:
-                    write_json_file(schema_path, schema)
-                if not schema_only:
-                    write_json_file(data_path, variables)
-
-                base_schema, base_variables = _load_rtc_base(env_dir)
-                _save_rtc_base(
-                    env_dir,
-                    schema if not data_only else (base_schema or schema),
-                    variables if not schema_only else (base_variables or variables),
-                )
-                _set_rtc_last_updated(project, client_env, config.get("lastUpdated"))
-
-                results.append(
-                    {
-                        "environment": client_env,
-                        "schema_file": schema_path,
-                        "data_file": data_path,
-                    }
-                )
+                results.append(result)
 
             return {"success": True, "files_written": results}
 
@@ -441,23 +353,11 @@ class RTCCommand(BaseCommand):
     ) -> Optional[dict]:
         """Push RTC from local files to Agent Studio.
 
-        Args:
-            base_path: Base path for the project.
-            env: Environment to push to — sandbox, pre-release, or live.
-            force: If True, skip drift check and confirmation prompt.
-            output_json: If True, format errors as JSON on failure.
-            no_merge: If True, disable merge on drift; hard-fail instead.
-            schema_only: If True, only push schema.
-            data_only: If True, only push data.
-
         Returns:
             dict with success status, or None if the user cancelled interactively.
         """
         project = load_project(base_path, output_json=output_json)
-        project_root = project.root_path
-
-        dir_name = RTC_ENV_TO_DIR[env]
-        env_dir = os.path.join(project_root, "real_time_configuration", dir_name)
+        env_dir = project._rtc_env_dir(env)
 
         schema_path = os.path.join(env_dir, "schema.json")
         data_path = os.path.join(env_dir, "data.json")
@@ -482,7 +382,7 @@ class RTCCommand(BaseCommand):
 
         # Drift protection
         if not force:
-            local_last_updated = _get_rtc_last_updated(project, env)
+            local_last_updated = project.get_rtc_last_updated(env)
             if local_last_updated is None:
                 if not output_json:
                     info(
@@ -500,7 +400,7 @@ class RTCCommand(BaseCommand):
 
                     if remote_last_updated != local_last_updated:
                         merge_result = cls._handle_drift(
-                            env_dir=env_dir,
+                            project=project,
                             remote_config=remote_config,
                             local_schema=schema,
                             local_variables=variables,
@@ -537,14 +437,21 @@ class RTCCommand(BaseCommand):
                 info("Push cancelled.")
                 return None
 
-        return cls._do_push(
-            project, env, env_dir, schema, variables, output_json, schema_only, data_only
+        result = project.rtc_push_to_api(
+            env,
+            schema=schema,
+            variables=variables,
+            schema_only=schema_only,
+            data_only=data_only,
         )
+        if not result["success"] and not output_json and result.get("step") == "variables":
+            error(f"Warning: schema was pushed to {env}, but variables update failed.")
+        return result
 
     @classmethod
     def _handle_drift(
         cls,
-        env_dir: str,
+        project: AgentStudioProject,
         remote_config: dict,
         local_schema: Optional[dict],
         local_variables: Optional[dict],
@@ -567,7 +474,7 @@ class RTCCommand(BaseCommand):
                 "or use --force to override.",
             }
 
-        base_schema, base_variables = _load_rtc_base(env_dir)
+        base_schema, base_variables = project.get_rtc_base(env)
         if base_schema is None or base_variables is None:
             return {
                 "success": False,
@@ -616,73 +523,6 @@ class RTCCommand(BaseCommand):
         return {"success": True, "schema": merged_schema, "variables": merged_variables}
 
     @classmethod
-    def _do_push(
-        cls,
-        project: AgentStudioProject,
-        env: str,
-        env_dir: str,
-        schema: Optional[dict],
-        variables: Optional[dict],
-        output_json: bool,
-        schema_only: bool = False,
-        data_only: bool = False,
-    ) -> dict:
-        """Execute the actual push to the API and update local state."""
-        last_response = None
-        if schema is not None and not data_only:
-            try:
-                last_response = AgentStudioInterface.put_rtc_schema(
-                    region=project.region,
-                    project_id=project.project_id,
-                    client_env=env,
-                    schema=schema,
-                )
-            except requests.HTTPError as e:
-                return {"success": False, "error": str(e), "step": "schema"}
-
-        if variables is not None and not schema_only:
-            try:
-                last_response = AgentStudioInterface.patch_rtc_variables(
-                    region=project.region,
-                    project_id=project.project_id,
-                    client_env=env,
-                    variables=variables,
-                )
-            except requests.HTTPError as e:
-                # Schema was already pushed — update metadata so drift check
-                # doesn't falsely trigger on retry.
-                if last_response and last_response.get("lastUpdated"):
-                    _set_rtc_last_updated(project, env, last_response["lastUpdated"])
-                if not output_json and schema is not None:
-                    error(f"Warning: schema was pushed to {env}, but variables update failed.")
-                return {
-                    "success": False,
-                    "error": f"Schema pushed but variables failed: {e}",
-                    "step": "variables",
-                }
-
-        if last_response and last_response.get("lastUpdated"):
-            _set_rtc_last_updated(project, env, last_response["lastUpdated"])
-
-        base_schema, base_variables = _load_rtc_base(env_dir)
-        _save_rtc_base(
-            env_dir,
-            schema if schema is not None else (base_schema or {}),
-            variables if variables is not None else (base_variables or {}),
-        )
-        if schema is not None:
-            write_json_file(os.path.join(env_dir, "schema.json"), schema)
-        if variables is not None:
-            write_json_file(os.path.join(env_dir, "data.json"), variables)
-
-        return {
-            "success": True,
-            "environment": env,
-            "schema_file": os.path.join(env_dir, "schema.json"),
-            "data_file": os.path.join(env_dir, "data.json"),
-        }
-
-    @classmethod
     def rtc_edit(
         cls,
         base_path: str,
@@ -690,16 +530,8 @@ class RTCCommand(BaseCommand):
         edit_schema: bool = False,
         force: bool = False,
     ) -> None:
-        """Pull latest RTC, open in editor, and push back.
-
-        Args:
-            base_path: Base path for the project.
-            env: Environment to edit.
-            edit_schema: If True, edit schema instead of data.
-            force: If True, skip confirmation for live environment.
-        """
+        """Pull latest RTC, open in editor, and push back."""
         project = load_project(base_path)
-        project_root = project.root_path
 
         try:
             config = AgentStudioInterface.get_rtc_config(
@@ -737,7 +569,7 @@ class RTCCommand(BaseCommand):
             error(f"Invalid JSON: {e}")
             sys.exit(1)
 
-        # Race check: ensure remote hasn't changed while editing
+        # Race check
         try:
             current_config = AgentStudioInterface.get_rtc_config(
                 region=project.region,
@@ -785,19 +617,19 @@ class RTCCommand(BaseCommand):
             sys.exit(1)
 
         if response and response.get("lastUpdated"):
-            _set_rtc_last_updated(project, env, response["lastUpdated"])
+            project.set_rtc_last_updated(env, response["lastUpdated"])
 
-        # Update local files if the env directory exists
-        dir_name = RTC_ENV_TO_DIR[env]
-        env_dir = os.path.join(project_root, "real_time_configuration", dir_name)
+        # Update base and local files
+        if edit_schema:
+            project.set_rtc_base(env, schema=edited)
+        else:
+            project.set_rtc_base(env, variables=edited)
+
+        env_dir = project._rtc_env_dir(env)
         if os.path.isdir(env_dir):
             if edit_schema:
                 write_json_file(os.path.join(env_dir, "schema.json"), edited)
-                base_schema, base_variables = _load_rtc_base(env_dir)
-                _save_rtc_base(env_dir, edited, base_variables or {})
             else:
                 write_json_file(os.path.join(env_dir, "data.json"), edited)
-                base_schema, base_variables = _load_rtc_base(env_dir)
-                _save_rtc_base(env_dir, base_schema or {}, edited)
 
         success(f"Edited and pushed RTC {filename} to {env}")
