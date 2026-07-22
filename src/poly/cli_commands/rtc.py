@@ -649,6 +649,10 @@ class RTCCommand(BaseCommand):
                     variables=variables,
                 )
             except requests.HTTPError as e:
+                # Schema was already pushed — update metadata so drift check
+                # doesn't falsely trigger on retry.
+                if last_response and last_response.get("lastUpdated"):
+                    _set_rtc_last_updated(project, env, last_response["lastUpdated"])
                 if not output_json and schema is not None:
                     error(f"Warning: schema was pushed to {env}, but variables update failed.")
                 return {

@@ -312,7 +312,10 @@ class PushCommand(BaseCommand):
                 from poly.cli_commands.rtc import RTCCommand
 
                 rtc_result = RTCCommand.rtc_push(
-                    base_path, env=rtc_env, force=force, output_json=output_json
+                    base_path,
+                    env=rtc_env,
+                    force=force,
+                    output_json=(output_json or output_commands),
                 )
                 json_output["rtc"] = rtc_result
                 if rtc_result and not rtc_result.get("success"):

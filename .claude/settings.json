@@ -40,7 +40,11 @@
       "mcp__GitHub__list_commits",
       "mcp__GitHub__get_commit",
       "mcp__GitHub__get_file_contents",
-      "mcp__GitHub__list_branches"
+      "mcp__GitHub__list_branches",
+      "Bash(ls /Users/miramilosavljevic/agent-deployments/agents/focaccia/firebirds-us/firebirds-usp/real_time_configuration/)",
+      "Read(//Users/miramilosavljevic/agent-deployments/agents/focaccia/firebirds-us/firebirds-usp/real_time_configuration/**)",
+      "Read(//Users/miramilosavljevic/agent-deployments/agents/focaccia/firebirds-us/firebirds-usp/_gen/**)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('rtc_metadata'\\), indent=2\\)\\)\")"
     ],
     "deny": [
       "Read(src/poly/handlers/protobuf/**)",
