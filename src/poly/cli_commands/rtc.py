@@ -268,6 +268,38 @@ class RTCCommand(BaseCommand):
             help="Push data only.",
         )
 
+        rtc_edit_parser = rtc_subparsers.add_parser(
+            "edit",
+            parents=[parents.path, parents.verbose, parents.debug],
+            help="Pull, edit, and push RTC in one step.",
+            description=(
+                "Pull the latest RTC config, open it in your editor, and push changes\n"
+                "back immediately. Set $EDITOR or $VISUAL to your preferred editor.\n\n"
+                "Examples:\n"
+                "  poly rtc edit --env sandbox\n"
+                "  poly rtc edit --env sandbox --schema\n"
+                "  poly rtc edit --env live --force\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        rtc_edit_parser.add_argument(
+            "--env",
+            type=str,
+            required=True,
+            choices=["sandbox", "pre-release", "live"],
+            help="Environment to edit.",
+        )
+        rtc_edit_parser.add_argument(
+            "--schema",
+            action="store_true",
+            help="Edit the schema instead of the data variables.",
+        )
+        rtc_edit_parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Skip confirmation prompt for live environment.",
+        )
+
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to the matching RTC sub-handler."""
@@ -312,6 +344,13 @@ class RTCCommand(BaseCommand):
                     error(result["error"])
                     sys.exit(1)
                 success(f"Pushed RTC to {args.env}")
+        elif args.rtc_subcommand == "edit":
+            cls.rtc_edit(
+                args.path,
+                args.env,
+                edit_schema=getattr(args, "schema", False),
+                force=getattr(args, "force", False),
+            )
 
     @classmethod
     def rtc_pull(
@@ -638,3 +677,123 @@ class RTCCommand(BaseCommand):
             "schema_file": os.path.join(env_dir, "schema.json"),
             "data_file": os.path.join(env_dir, "data.json"),
         }
+
+    @classmethod
+    def rtc_edit(
+        cls,
+        base_path: str,
+        env: str,
+        edit_schema: bool = False,
+        force: bool = False,
+    ) -> None:
+        """Pull latest RTC, open in editor, and push back.
+
+        Args:
+            base_path: Base path for the project.
+            env: Environment to edit.
+            edit_schema: If True, edit schema instead of data.
+            force: If True, skip confirmation for live environment.
+        """
+        project = load_project(base_path)
+        project_root = project.root_path
+
+        try:
+            config = AgentStudioInterface.get_rtc_config(
+                region=project.region,
+                project_id=project.project_id,
+                client_env=env,
+            )
+        except requests.HTTPError as e:
+            error(f"Failed to fetch RTC config: {e}")
+            sys.exit(1)
+
+        baseline_last_updated = config.get("lastUpdated")
+
+        if edit_schema:
+            content = config.get("schema", {})
+            filename = "schema.json"
+        else:
+            content = config.get("variables", {})
+            filename = "data.json"
+
+        content_str = json.dumps(content, indent=2, sort_keys=True) + "\n"
+
+        try:
+            edited_str = edit_in_editor(content_str, extension=".json", filename=filename)
+        except ValueError:
+            info("No changes made.")
+            return
+        except (FileNotFoundError, OSError) as e:
+            error(f"Could not open editor: {e}. Check your $EDITOR or $VISUAL setting.")
+            sys.exit(1)
+
+        try:
+            edited = json.loads(edited_str)
+        except json.JSONDecodeError as e:
+            error(f"Invalid JSON: {e}")
+            sys.exit(1)
+
+        # Race check: ensure remote hasn't changed while editing
+        try:
+            current_config = AgentStudioInterface.get_rtc_config(
+                region=project.region,
+                project_id=project.project_id,
+                client_env=env,
+            )
+        except requests.HTTPError as e:
+            error(f"Failed to check remote state: {e}")
+            sys.exit(1)
+
+        if current_config.get("lastUpdated") != baseline_last_updated:
+            error(
+                "Remote config was modified while you were editing. "
+                "Your changes have NOT been pushed. Please try again."
+            )
+            sys.exit(1)
+
+        if env == "live" and not force:
+            confirm = questionary.confirm(
+                f"Push RTC to {env}? This will update live configuration.",
+                auto_enter=False,
+                default=False,
+            ).ask()
+            if not confirm:
+                info("Push cancelled.")
+                return
+
+        try:
+            if edit_schema:
+                response = AgentStudioInterface.put_rtc_schema(
+                    region=project.region,
+                    project_id=project.project_id,
+                    client_env=env,
+                    schema=edited,
+                )
+            else:
+                response = AgentStudioInterface.patch_rtc_variables(
+                    region=project.region,
+                    project_id=project.project_id,
+                    client_env=env,
+                    variables=edited,
+                )
+        except requests.HTTPError as e:
+            error(f"Push failed: {e}")
+            sys.exit(1)
+
+        if response and response.get("lastUpdated"):
+            _set_rtc_last_updated(project, env, response["lastUpdated"])
+
+        # Update local files if the env directory exists
+        dir_name = RTC_ENV_TO_DIR[env]
+        env_dir = os.path.join(project_root, "real_time_configuration", dir_name)
+        if os.path.isdir(env_dir):
+            if edit_schema:
+                write_json_file(os.path.join(env_dir, "schema.json"), edited)
+                base_schema, base_variables = _load_rtc_base(env_dir)
+                _save_rtc_base(env_dir, edited, base_variables or {})
+            else:
+                write_json_file(os.path.join(env_dir, "data.json"), edited)
+                base_schema, base_variables = _load_rtc_base(env_dir)
+                _save_rtc_base(env_dir, base_schema or {}, edited)
+
+        success(f"Edited and pushed RTC {filename} to {env}")

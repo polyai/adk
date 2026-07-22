@@ -837,5 +837,214 @@ class TestIncludeRTC(unittest.TestCase):
         mock_rtc_push.assert_not_called()
 
 
+class TestRTCEdit(unittest.TestCase):
+    """Test suite for poly rtc edit command."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        self.temp_dir = tempfile.mkdtemp()
+        self.sandbox_dir = os.path.join(
+            self.temp_dir, "real_time_configuration", "draft_and_sandbox"
+        )
+        os.makedirs(self.sandbox_dir)
+
+    def tearDown(self):
+        """Clean up temporary files."""
+        import shutil
+
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
+    def test_edit_happy_path(self, mock_patch_vars, mock_get_rtc, mock_load_project, mock_editor):
+        """Verify edit pulls, opens editor, and pushes data."""
+        mock_project = MagicMock()
+        mock_project.region = "studio"
+        mock_project.project_id = "test-project"
+        mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = None
+        mock_load_project.return_value = mock_project
+
+        config = {
+            "schema": {"type": "object"},
+            "variables": {"flag": False},
+            "lastUpdated": "T1",
+        }
+        mock_get_rtc.return_value = config
+        mock_editor.return_value = '{\n  "flag": true\n}\n'
+        mock_patch_vars.return_value = {"lastUpdated": "T2"}
+
+        RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
+
+        mock_patch_vars.assert_called_once()
+        pushed = mock_patch_vars.call_args[1]["variables"]
+        self.assertEqual(pushed["flag"], True)
+
+    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.put_rtc_schema")
+    def test_edit_schema_flag(self, mock_put_schema, mock_get_rtc, mock_load_project, mock_editor):
+        """Verify --schema edits and pushes schema instead of data."""
+        mock_project = MagicMock()
+        mock_project.region = "studio"
+        mock_project.project_id = "test-project"
+        mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = None
+        mock_load_project.return_value = mock_project
+
+        config = {
+            "schema": {"type": "object"},
+            "variables": {"flag": False},
+            "lastUpdated": "T1",
+        }
+        mock_get_rtc.return_value = config
+        mock_editor.return_value = '{\n  "type": "object",\n  "title": "Config"\n}\n'
+        mock_put_schema.return_value = {"lastUpdated": "T2"}
+
+        RTCCommand.rtc_edit(self.temp_dir, env="sandbox", edit_schema=True)
+
+        mock_put_schema.assert_called_once()
+        pushed = mock_put_schema.call_args[1]["schema"]
+        self.assertEqual(pushed["title"], "Config")
+
+    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
+    def test_edit_no_changes(self, mock_patch_vars, mock_get_rtc, mock_load_project, mock_editor):
+        """Verify no push when editor reports no changes."""
+        mock_project = MagicMock()
+        mock_project.region = "studio"
+        mock_project.project_id = "test-project"
+        mock_project.root_path = self.temp_dir
+        mock_load_project.return_value = mock_project
+
+        mock_get_rtc.return_value = {
+            "schema": {},
+            "variables": {"flag": False},
+            "lastUpdated": "T1",
+        }
+        mock_editor.side_effect = ValueError("No changes")
+
+        RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
+
+        mock_patch_vars.assert_not_called()
+
+    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
+    def test_edit_invalid_json(self, mock_patch_vars, mock_get_rtc, mock_load_project, mock_editor):
+        """Verify no push when editor returns invalid JSON."""
+        mock_project = MagicMock()
+        mock_project.region = "studio"
+        mock_project.project_id = "test-project"
+        mock_project.root_path = self.temp_dir
+        mock_load_project.return_value = mock_project
+
+        mock_get_rtc.return_value = {
+            "schema": {},
+            "variables": {"flag": False},
+            "lastUpdated": "T1",
+        }
+        mock_editor.return_value = "not valid json {{"
+
+        with self.assertRaises(SystemExit):
+            RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
+
+        mock_patch_vars.assert_not_called()
+
+    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
+    def test_edit_race_detected(
+        self, mock_patch_vars, mock_get_rtc, mock_load_project, mock_editor
+    ):
+        """Verify push aborted when remote changed during editing."""
+        mock_project = MagicMock()
+        mock_project.region = "studio"
+        mock_project.project_id = "test-project"
+        mock_project.root_path = self.temp_dir
+        mock_load_project.return_value = mock_project
+
+        mock_get_rtc.side_effect = [
+            {"schema": {}, "variables": {"flag": False}, "lastUpdated": "T1"},
+            {"schema": {}, "variables": {"flag": False}, "lastUpdated": "T2"},
+        ]
+        mock_editor.return_value = '{"flag": true}'
+
+        with self.assertRaises(SystemExit):
+            RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
+
+        mock_patch_vars.assert_not_called()
+
+    @patch("poly.cli_commands.rtc.questionary")
+    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
+    def test_edit_live_declined(
+        self, mock_patch_vars, mock_get_rtc, mock_load_project, mock_editor, mock_questionary
+    ):
+        """Verify live edit cancelled when user declines confirmation."""
+        mock_project = MagicMock()
+        mock_project.region = "studio"
+        mock_project.project_id = "test-project"
+        mock_project.root_path = self.temp_dir
+        mock_load_project.return_value = mock_project
+        mock_questionary.confirm.return_value.ask.return_value = False
+
+        mock_get_rtc.return_value = {
+            "schema": {},
+            "variables": {"flag": False},
+            "lastUpdated": "T1",
+        }
+        mock_editor.return_value = '{"flag": true}'
+
+        RTCCommand.rtc_edit(self.temp_dir, env="live")
+
+        mock_patch_vars.assert_not_called()
+
+    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
+    def test_edit_updates_local_files(
+        self, mock_patch_vars, mock_get_rtc, mock_load_project, mock_editor
+    ):
+        """Verify edit updates local data.json and base file when env dir exists."""
+        mock_project = MagicMock()
+        mock_project.region = "studio"
+        mock_project.project_id = "test-project"
+        mock_project.root_path = self.temp_dir
+        mock_project.rtc_metadata = None
+        mock_load_project.return_value = mock_project
+
+        write_json_file(os.path.join(self.sandbox_dir, "data.json"), {"flag": False})
+        write_json_file(os.path.join(self.sandbox_dir, RTC_BASE_DATA_FILE), {"flag": False})
+        write_json_file(os.path.join(self.sandbox_dir, RTC_BASE_SCHEMA_FILE), {})
+
+        mock_get_rtc.return_value = {
+            "schema": {},
+            "variables": {"flag": False},
+            "lastUpdated": "T1",
+        }
+        mock_editor.return_value = '{\n  "flag": true\n}\n'
+        mock_patch_vars.return_value = {"lastUpdated": "T2"}
+
+        RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
+
+        with open(os.path.join(self.sandbox_dir, "data.json"), "r") as f:
+            local = json.load(f)
+        self.assertTrue(local["flag"])
+
+        _, base_vars = _load_rtc_base(self.sandbox_dir)
+        self.assertTrue(base_vars["flag"])
+
+
 if __name__ == "__main__":
     unittest.main()
