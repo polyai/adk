@@ -50,11 +50,12 @@ from poly.handlers.protobuf.flows_pb2 import (
     UpdateStep,
 )
 from poly.resources.entities import Entity
-from poly.resources.function import Function, FunctionType
+from poly.resources.function import Function, FunctionType, parse_latency_control
 from poly.resources.resource import (
     ResourceMapping,
     SubResource,
     YamlResource,
+    register_resource,
 )
 
 FUNCTION_REGEX = re.compile(r"{{f[nt]:([\w-]+)}}")
@@ -76,6 +77,7 @@ NO_CODE_STEP_REFERENCES = [
 ]
 
 
+@register_resource("flow_config")
 @dataclass
 class FlowConfig(YamlResource):
     """Flow configuration resource."""
@@ -99,6 +101,20 @@ class FlowConfig(YamlResource):
             "description": self.description,
             "start_step": self.start_step,
         }
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "FlowConfig"]:
+        """Parse flow configs from a projection dict."""
+        configs = {}
+        flows = projection.get("flows", {}).get("flows", {}).get("entities", {})
+        for flow_id, flow_data in flows.items():
+            configs[flow_id] = cls(
+                resource_id=flow_id,
+                name=flow_data["name"],
+                description=flow_data.get("description", ""),
+                start_step=flow_data.get("startStepId", ""),
+            )
+        return configs
 
     @classmethod
     def from_yaml_dict(cls, yaml_data: dict, resource_id: str, name: str, **kwargs) -> "FlowConfig":
@@ -291,6 +307,7 @@ class BaseFlowStep(ABC):
     position: dict[str, float]
 
 
+@register_resource("flow_steps")
 @dataclass
 class FlowStep(BaseFlowStep, YamlResource):
     """Flow step resource."""
@@ -354,6 +371,89 @@ class FlowStep(BaseFlowStep, YamlResource):
         ]
         self.prompt = prompt
         self.position = position or {}
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "FlowStep"]:
+        """Parse flow steps (non-function) from a projection dict."""
+        steps = {}
+        flows = projection.get("flows", {}).get("flows", {}).get("entities", {})
+        for flow_id, flow_data in flows.items():
+            for step_id, step in flow_data.get("steps", {}).get("entities", {}).items():
+                if step.get("type") == "function_step":
+                    continue
+
+                local_resource_id = f"{flow_id}_{step_id}"
+                asr_biasing_data = step.get("asrBiasing", {})
+                dtmf_config_data = step.get("dtmfConfig", {})
+                references = step.get("references", {})
+                extracted_entities = list(references.get("extractedEntities", {}).keys())
+
+                steps[local_resource_id] = cls(
+                    resource_id=local_resource_id,
+                    step_id=step_id,
+                    name=step["name"],
+                    flow_id=flow_id,
+                    flow_name=flow_data["name"],
+                    step_type=step.get("type"),
+                    asr_biasing=ASRBiasing(
+                        alphanumeric=asr_biasing_data.get("alphanumeric", False),
+                        name_spelling=asr_biasing_data.get("nameSpelling", False),
+                        numeric=asr_biasing_data.get("numeric", False),
+                        party_size=asr_biasing_data.get("partySize", False),
+                        precise_date=asr_biasing_data.get("preciseDate", False),
+                        relative_date=asr_biasing_data.get("relativeDate", False),
+                        single_number=asr_biasing_data.get("singleNumber", False),
+                        time=asr_biasing_data.get("time", False),
+                        yes_no=asr_biasing_data.get("yesNo", False),
+                        address=asr_biasing_data.get("address", False),
+                        custom_keywords=asr_biasing_data.get("customKeywords", []),
+                        is_enabled=asr_biasing_data.get("isEnabled", False),
+                        step_id=step_id,
+                        flow_id=flow_id,
+                    ),
+                    dtmf_config=DTMFConfig(
+                        is_enabled=dtmf_config_data.get("isEnabled", False),
+                        inter_digit_timeout=dtmf_config_data.get("interDigitTimeout", 0),
+                        max_digits=dtmf_config_data.get("maxDigits", 0),
+                        end_key=dtmf_config_data.get("endKey", ""),
+                        collect_while_agent_speaking=dtmf_config_data.get(
+                            "collectWhileAgentSpeaking", False
+                        ),
+                        is_pii=dtmf_config_data.get("isPii", False),
+                        step_id=step_id,
+                        flow_id=flow_id,
+                    ),
+                    prompt=step.get("prompt", ""),
+                    conditions=[
+                        Condition(
+                            resource_id=condition_data["id"],
+                            name=condition_data["config"]["value"]["details"]["label"],
+                            condition_type=condition_data["config"]["$case"],
+                            description=condition_data["config"]["value"]["details"].get(
+                                "description", ""
+                            ),
+                            required_entities=condition_data["config"]["value"]["details"].get(
+                                "requiredEntities", []
+                            ),
+                            child_step=condition_data["config"]["value"].get("childStepId", ""),
+                            step_id=step_id,
+                            flow_id=flow_id,
+                            ingress=condition_data["config"]["value"]["details"].get(
+                                "ingressPosition", "top"
+                            ),
+                            position=condition_data["config"]["value"]["details"].get(
+                                "position", {"x": 0.0, "y": 0.0}
+                            ),
+                            exit_flow_position=condition_data["config"]["value"].get(
+                                "exitFlowPosition", None
+                            ),
+                        )
+                        for condition_data in step.get("conditions", [])
+                    ],
+                    position=step.get("position"),
+                    extracted_entities=extracted_entities,
+                )
+        return steps
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
@@ -1342,6 +1442,7 @@ class Condition(SubResource):
             raise ValueError("Description cannot contain leading or trailing whitespace.")
 
 
+@register_resource("function_steps")
 @dataclass(init=False)
 class FunctionStep(Function, BaseFlowStep):
     """Dataclass representing a function step"""
@@ -1381,6 +1482,34 @@ class FunctionStep(Function, BaseFlowStep):
             function_type=FunctionType.FUNCTION_STEP,
             variable_references=variable_references,
         )
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "FunctionStep"]:
+        """Parse function steps from a projection dict."""
+        func_steps = {}
+        flows = projection.get("flows", {}).get("flows", {}).get("entities", {})
+        for flow_id, flow_data in flows.items():
+            for step_id, step in flow_data.get("steps", {}).get("entities", {}).items():
+                if step.get("type") != "function_step":
+                    continue
+
+                local_resource_id = f"{flow_id}_{step_id}"
+                function = step.get("function", {})
+                func_steps[local_resource_id] = cls(
+                    resource_id=local_resource_id,
+                    step_id=step_id,
+                    flow_id=flow_id,
+                    flow_name=flow_data["name"],
+                    name=step["name"],
+                    position=step.get("position"),
+                    code=function.get("code", ""),
+                    latency_control=parse_latency_control(
+                        function.get("latencyControl", function.get("latency_control"))
+                    ),
+                    parameters=[],
+                    function_id=function.get("id", ""),
+                )
+        return func_steps
 
     @cached_property
     def file_path(self) -> str:

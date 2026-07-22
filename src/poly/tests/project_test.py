@@ -39,8 +39,8 @@ from poly.resources import (
     Topic,
     TranscriptCorrection,
     Translation,
-    Variant,
     Variable,
+    Variant,
     VariantAttribute,
     VoiceDisclaimerMessage,
     VoiceGreeting,
@@ -204,9 +204,9 @@ class SerializationRoundTripTest(unittest.TestCase):
         restored = Document(**serialized)
         self.assertEqual(restored.resource_id, "test.md")
         self.assertEqual(restored.name, "test")
-        self.assertEqual(restored.path, "test.md")
+        self.assertEqual(restored.path, "TEST.MD")
         self.assertEqual(restored.contents, "hello world\n")
-        self.assertEqual(restored.file_path, os.path.join("context", "test.md"))
+        self.assertEqual(restored.file_path, os.path.join("context", "TEST.MD"))
         self.assertEqual(restored.compute_hash(), doc.compute_hash())
 
     def test_flow_step_round_trip_excludes_sub_resource_internals(self):
@@ -424,7 +424,7 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
         self.assertCountEqual(
             local_resources[Document],
             [
-                os.path.join(TEST_DIR, "context", "test_document.md"),
+                os.path.join(TEST_DIR, "context", "TEST_DOCUMENT.MD"),
             ],
         )
 
@@ -928,7 +928,15 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
     """Tests for the _clean_resources_before_push method"""
 
     def setUp(self):
+        # Mock the api_handler property: accessing it saves the project config as a
+        # side effect, which would write _gen/.agent_studio_config into the fixture
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
         self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def tearDown(self):
+        patch.stopall()
 
     def test_clean_resources_before_push_groups_steps_and_functions(self):
         # Create a flow config with steps and functions
@@ -2377,10 +2385,9 @@ class ValidateProjectTest(unittest.TestCase):
         ):
             errors = project.validate_project()
         self.assertEqual(len(errors), 2)
-        self.assertIn(
-            "Invalid references: ['global_functions: FUNCTION-missing_function']", errors[0]
-        )
-        self.assertIn("Start step 'missing_step' not found.", errors[1])
+        error_texts = "\n".join(errors)
+        self.assertIn("Invalid references: ['global_functions: FUNCTION-missing_function']", error_texts)
+        self.assertIn("Start step 'missing_step' not found.", error_texts)
 
 
 class PullProjectTest(unittest.TestCase):

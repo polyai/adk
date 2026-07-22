@@ -19,6 +19,7 @@ from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
     _parse_multi_resource_path,
+    register_resource,
 )
 
 LANGUAGES_FILE = os.path.join("agent_settings", "languages.yaml")
@@ -49,6 +50,7 @@ def _write_languages(
         cls.save_to_file(utils.dump_yaml(top_level), true_file_path)
 
 
+@register_resource("default_language")
 @dataclass
 class DefaultLanguage(MultiResourceYamlResource):
     """Resource representing the default language."""
@@ -71,6 +73,22 @@ class DefaultLanguage(MultiResourceYamlResource):
             resource_id=resource_id,
             name=yaml_dict.get("language_code", name),
         )
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "DefaultLanguage"]:
+        """Parse default language from a projection dict."""
+        language_data = projection.get("languages", {})
+        if not language_data:
+            return {}
+        default_code = language_data.get("defaultLanguageCode")
+        if not default_code:
+            return {}
+        return {
+            default_code: cls(
+                resource_id=default_code,
+                name=default_code,
+            )
+        }
 
     @property
     def command_type(self) -> str:
@@ -147,6 +165,7 @@ class DefaultLanguage(MultiResourceYamlResource):
                 )
 
 
+@register_resource("additional_languages")
 @dataclass
 class AdditionalLanguage(MultiResourceYamlResource):
     """Resource representing an additional language."""
@@ -168,6 +187,23 @@ class AdditionalLanguage(MultiResourceYamlResource):
             resource_id=resource_id,
             name=yaml_dict.get("language_code", name),
         )
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "AdditionalLanguage"]:
+        """Parse additional languages from a projection dict."""
+        language_data = projection.get("languages", {})
+        if not language_data:
+            return {}
+        additional_languages = {}
+        for lang_id, lang in (
+            language_data.get("additionalLanguages", {}).get("entities", {}).items()
+        ):
+            code = lang.get("code")
+            additional_languages[lang_id] = cls(
+                resource_id=lang_id,
+                name=code,
+            )
+        return additional_languages
 
     @property
     def command_type(self) -> str:

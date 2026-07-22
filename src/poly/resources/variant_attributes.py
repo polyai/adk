@@ -18,9 +18,10 @@ from poly.handlers.protobuf.variant_pb2 import (
     Variant_UpdateAttribute,
     VariantValues,
 )
-from poly.resources.resource import MultiResourceYamlResource, ResourceMapping
+from poly.resources.resource import MultiResourceYamlResource, ResourceMapping, register_resource
 
 
+@register_resource("variants")
 @dataclass
 class Variant(MultiResourceYamlResource):
     """Dataclass representing a variant"""
@@ -56,6 +57,20 @@ class Variant(MultiResourceYamlResource):
             name=yaml_dict.get("name") or name,
             is_default=yaml_dict.get("is_default", False),
         )
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "Variant"]:
+        """Parse variants from a projection dict."""
+        variants = {}
+        for variant_id, variant_data in (
+            projection.get("variantManagement", {}).get("variants", {}).get("entities", {}).items()
+        ):
+            variants[variant_id] = cls(
+                resource_id=variant_id,
+                name=variant_data["name"],
+                is_default=variant_data.get("isDefault", False),
+            )
+        return variants
 
     @property
     def file_path(self) -> str:
@@ -149,6 +164,7 @@ class Variant(MultiResourceYamlResource):
         return discovered_variants
 
 
+@register_resource("variant_attributes")
 @dataclass
 class VariantAttribute(MultiResourceYamlResource):
     """Dataclass representing a variant attribute"""
@@ -194,6 +210,36 @@ class VariantAttribute(MultiResourceYamlResource):
             name=yaml_dict.get("name") or name,
             mappings=clean_mapping,
         )
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "VariantAttribute"]:
+        """Parse variant attributes from a projection dict."""
+        variant_attributes = {}
+        for attribute_id, attribute_data in (
+            projection.get("variantManagement", {})
+            .get("attributes", {})
+            .get("entities", {})
+            .items()
+        ):
+            if attribute_data["archived"]:
+                continue
+            variant_attributes[attribute_id] = cls(
+                resource_id=attribute_id, name=attribute_data["name"], mappings={}
+            )
+        if not variant_attributes:
+            return {}
+
+        for variant_id, variant_attribute_values in (
+            projection.get("variantManagement", {})
+            .get("variantAttributeValues", {})
+            .get("entities", {})
+            .items()
+        ):
+            for attribute_id, attribute_value in variant_attribute_values.get("values", {}).items():
+                if attribute_id in variant_attributes:
+                    variant_attributes[attribute_id].mappings[variant_id] = attribute_value
+
+        return variant_attributes
 
     @staticmethod
     def to_pretty_dict(

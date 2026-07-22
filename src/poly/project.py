@@ -4,7 +4,6 @@ Copyright PolyAI Limited
 """
 
 import base64
-import copy
 import json
 import logging
 import os
@@ -22,7 +21,6 @@ import poly.utils as utils
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
-from poly.handlers.sync_client import SyncClientHandler
 from poly.migration_utils import (
     MigrationFlag,
     get_all_migration_flags,
@@ -30,101 +28,34 @@ from poly.migration_utils import (
     run_migrations,
 )
 from poly.resources import (
-    AdditionalLanguage,
-    ApiIntegration,
-    AsrSettings,
     BaseFlowStep,
-    ChatGreeting,
-    ChatSafetyFilters,
-    ChatStylePrompt,
-    Condition,
-    DefaultLanguage,
-    Entity,
-    ExperimentalConfig,
+    Document,
     FlowConfig,
     FlowStep,
     Function,
     FunctionStep,
-    GeneralSafetyFilters,
-    Handoff,
-    KeyphraseBoosting,
     MultiResourceYamlResource,
-    PhraseFilter,
     Pronunciation,
     Resource,
     ResourceMapping,
-    SettingsPersonality,
-    SettingsRole,
-    SettingsRules,
-    SMSTemplate,
-    StepType,
     SubResource,
     TestCase,
     Topic,
-    TranscriptCorrection,
-    Translation,
-    Variable,
-    Variant,
-    VariantAttribute,
-    VoiceDisclaimerMessage,
-    VoiceGreeting,
-    VoiceSafetyFilters,
-    VoiceStylePrompt,
-    Document,
 )
-from poly.resources.resource import _parse_multi_resource_path
-from poly.utils import compute_variable_references
+from poly.resources.resource import (
+    RESOURCE_CLASS_TO_NAME,
+    RESOURCE_NAME_TO_CLASS,
+    _parse_multi_resource_path,
+    load_resources_from_projection,
+)
+from poly.utils import prepush
 
 logger = logging.getLogger(__name__)
 
 PROJECT_CONFIG_FILE = "project.yaml"
 STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
 
-
-# New resources to be added here
-RESOURCE_NAME_TO_CLASS: dict[str, type[Resource]] = {
-    "api_integration": ApiIntegration,
-    "functions": Function,
-    "topics": Topic,
-    "personality": SettingsPersonality,
-    "role": SettingsRole,
-    "rules": SettingsRules,
-    "flow_steps": FlowStep,
-    "function_steps": FunctionStep,
-    "flow_config": FlowConfig,
-    "entities": Entity,
-    "experimental_config": ExperimentalConfig,
-    "safety_filters": GeneralSafetyFilters,
-    "sms_templates": SMSTemplate,
-    "handoffs": Handoff,
-    "variants": Variant,
-    "variant_attributes": VariantAttribute,
-    "variables": Variable,
-    "voice_greeting": VoiceGreeting,
-    "voice_safety_filters": VoiceSafetyFilters,
-    "voice_style_prompt": VoiceStylePrompt,
-    "voice_disclaimer": VoiceDisclaimerMessage,
-    "chat_greeting": ChatGreeting,
-    "chat_safety_filters": ChatSafetyFilters,
-    "chat_style_prompt": ChatStylePrompt,
-    "keyphrase_boosting": KeyphraseBoosting,
-    "transcript_corrections": TranscriptCorrection,
-    "asr_settings": AsrSettings,
-    "phrase_filtering": PhraseFilter,
-    "pronunciations": Pronunciation,
-    "test_cases": TestCase,
-    "translations": Translation,
-    "default_language": DefaultLanguage,
-    "additional_languages": AdditionalLanguage,
-    "documents": Document,
-}
-
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
-
-
-RESOURCE_CLASS_TO_NAME: dict[type[Resource], str] = {
-    v: k for k, v in RESOURCE_NAME_TO_CLASS.items()
-}
 
 ResourceType: TypeAlias = type[Resource]
 ResourceMap: TypeAlias = dict[ResourceType, dict[str, Resource]]
@@ -1491,306 +1422,45 @@ class AgentStudioProject:
         post_push_updated_resources: ResourceMap = {}
         post_push_deleted_resources: ResourceMap = {}
 
-        # If we are creating any Webchat config, instead enable Webchat and set
-        # the configs as update
-        if (
-            ChatGreeting in new_resources
-            or ChatSafetyFilters in new_resources
-            or ChatStylePrompt in new_resources
-        ):
-            self.api_handler.queue_command(
-                utils.create_command_webchat_channel_update_status(enabled=True)
-            )
-            # Move any Webchat config in new resources to updated resources
-            for resource_type in [ChatGreeting, ChatSafetyFilters, ChatStylePrompt]:
-                for resource_id, resource in new_resources.get(resource_type, {}).items():
-                    pre_push_updated_resources.setdefault(resource_type, {})[resource_id] = resource
-                if resource_type in new_resources:
-                    new_resources.pop(resource_type)
-
-        # When a function is deleted the backend prunes that function ID from all
-        # variable references. If the deleted function was the variable's only reference,
-        # the backend auto-deletes the variable, which causes an explicit delete command
-        # to fail and destroys any data on the variable.
-        # If we want to keep the variable (another function is being updated/created to reference it)
-        # Then it needs to be recreated after the function is deleted.
-        old_var_refs = compute_variable_references(
-            self.resources, self._make_resource_mappings(self.resources)
+        prepush.enable_webchat_channel(
+            new_resources,
+            pre_push_updated_resources,
+            # Lazy lambda: only touch the api_handler property (which saves config
+            # as a side effect) if a webchat command is actually queued
+            queue_command=lambda command: self.api_handler.queue_command(command),
         )
-        new_var_refs = compute_variable_references(state, self._make_resource_mappings(state))
-
-        deleted_fn_ids = set(deleted_resources.get(Function, {}).keys()) | set(
-            deleted_resources.get(FunctionStep, {}).keys()
+        prepush.fix_orphaned_variables(
+            state,
+            new_resources,
+            updated_resources,
+            deleted_resources,
+            current_resources=self.resources,
+            make_resource_mappings=self._make_resource_mappings,
         )
-
-        for var_id, old_refs in old_var_refs.items():
-            if var_id not in self.resources.get(Variable, {}):
-                continue  # Variable not in current state (e.g. new variable from linked project sync)
-            if var_id in deleted_resources.get(Variable, {}):
-                continue  # already being explicitly deleted
-            all_old_fn_ids = {fn_id for field_refs in old_refs.values() for fn_id in field_refs}
-            if all_old_fn_ids.issubset(deleted_fn_ids):
-                variable = self.resources[Variable][var_id]
-                deleted_resources.setdefault(Variable, {})[var_id] = variable
-                new_resources.setdefault(Variable, {})[var_id] = variable
-
-            # If the variable references have changed, update the variable references
-            new_refs = new_var_refs.get(var_id, {})
-            if old_refs != new_refs:
-                variable = self.resources[Variable][var_id]
-                variable.references = new_refs
-                updated_resources.setdefault(Variable, {})[var_id] = variable
-
-        # Update new variables with their references
-        for var_id, variable in new_resources.get(Variable, {}).items():
-            variable_refs = new_var_refs.get(var_id, {})
-            variable.references = variable_refs
-            updated_resources.setdefault(Variable, {})[var_id] = variable
-
-        # Create flow steps at same time as creating a flow
-        for flow_config_id, flow_config in new_resources.get(FlowConfig, {}).items():
-            if not isinstance(flow_config, FlowConfig):
-                raise TypeError(f"Flow config is not a FlowConfig: {flow_config}")
-            steps = []
-            functions = []
-            for resource_id, resource in list(new_resources.get(FlowStep, {}).items()):
-                if isinstance(resource, FlowStep) and resource.flow_id == flow_config_id:
-                    steps.append(resource)
-                    new_resources[FlowStep].pop(resource_id, None)
-                    if new_resources[FlowStep] == {}:
-                        new_resources.pop(FlowStep, None)
-
-            for resource_id, resource in list(new_resources.get(Function, {}).items()):
-                if isinstance(resource, Function) and resource.flow_id == flow_config_id:
-                    functions.append(resource)
-                    new_resources[Function].pop(resource_id, None)
-                    if new_resources[Function] == {}:
-                        new_resources.pop(Function, None)
-
-            flow_config.steps = steps
-            flow_config.functions = functions
-
-            function_start_step = next(
-                (
-                    step
-                    for step in new_resources.get(FunctionStep, {}).values()
-                    if step.step_id == flow_config.start_step
-                    and step.flow_id == flow_config.resource_id
-                ),
-                None,
-            )
-            if function_start_step:
-                # Create a dummy default step
-                dummy_step_id = f"{function_start_step.step_id}_start_step_temp"
-                dummy = FlowStep(
-                    resource_id=f"{flow_config.resource_id}_{dummy_step_id}",
-                    step_id=dummy_step_id,
-                    name=f"{flow_config.name}-temp",
-                    flow_id=flow_config.resource_id,
-                    flow_name=flow_config.name,
-                    step_type=StepType.DEFAULT_STEP,
-                    prompt="temp prompt",
-                )
-                push_flow_config = copy.deepcopy(flow_config)
-                push_flow_config.steps.append(dummy)
-                push_flow_config.start_step = dummy.step_id
-                new_resources[FlowConfig][flow_config_id] = push_flow_config
-                reset_flow_config = FlowConfig(
-                    resource_id=flow_config.resource_id,
-                    name=flow_config.name,
-                    description=flow_config.description,
-                    start_step=function_start_step.step_id,
-                )
-                updated_resources.setdefault(FlowConfig, {})[flow_config.resource_id] = (
-                    reset_flow_config
-                )
-                post_push_deleted_resources.setdefault(FlowStep, {})[dummy.resource_id] = dummy
-
-        # Deleting flow config deletes all its steps/functions, so we don't need to
-        for flow_config_id in deleted_resources.get(FlowConfig, {}):
-            for resource_type in [FlowStep, Function, FunctionStep]:
-                for resource_id, resource in list(deleted_resources.get(resource_type, {}).items()):
-                    if (
-                        isinstance(resource, (FlowStep, Function, FunctionStep))
-                        and resource.flow_id == flow_config_id
-                    ):
-                        deleted_resources[resource_type].pop(resource_id, None)
-
-        # If we are deleting a start step and updating the flow config to use a different step,
-        # we need to delete the start step after the creation of the new one
-        for flow_config_id, flow_config in updated_resources.get(FlowConfig, {}).items():
-            if flow_config_id in new_resources.get(FlowConfig, {}):
-                continue
-            old_flow_config = self.resources.get(FlowConfig, {}).get(flow_config_id)
-            old_step_resource_id = f"{old_flow_config.resource_id}_{old_flow_config.start_step}"
-
-            old_start_step = self.resources.get(FlowStep, {}).get(
-                old_step_resource_id
-            ) or self.resources.get(FunctionStep, {}).get(old_step_resource_id)
-            if not old_start_step:
-                raise ValueError(f"Old start step not found: {old_step_resource_id}")
-
-            if flow_config.start_step != old_start_step.step_id:
-                if old_start_step.resource_id in deleted_resources.get(type(old_start_step), {}):
-                    # If it's being recreated with the same name (sync ids) we need to create a dummy step
-                    new_step_resource_id = f"{flow_config.resource_id}_{flow_config.start_step}"
-                    if (
-                        (
-                            new_start_step := (
-                                new_resources.get(FlowStep, {}).get(new_step_resource_id)
-                                or new_resources.get(FunctionStep, {}).get(new_step_resource_id)
-                            )
-                        )
-                        and new_start_step.name == old_start_step.name
-                        and isinstance(new_start_step, type(old_start_step))
-                    ):
-                        dummy_step_id = f"{old_start_step.step_id}_temp"
-                        dummy = FlowStep(
-                            resource_id=f"{new_start_step.flow_id}_{dummy_step_id}",
-                            step_id=dummy_step_id,
-                            name=f"{new_start_step.name}-temp",
-                            flow_id=new_start_step.flow_id,
-                            flow_name=new_start_step.flow_name,
-                            step_type=StepType.DEFAULT_STEP,
-                            prompt="temp prompt",
-                        )
-                        flow_config_switch_to_dummy = FlowConfig(
-                            resource_id=flow_config.resource_id,
-                            name=flow_config.name,
-                            description=flow_config.description,
-                            start_step=dummy.step_id,
-                        )
-                        pre_push_new_resources.setdefault(FlowStep, {})[dummy.resource_id] = dummy
-                        pre_push_updated_resources.setdefault(FlowConfig, {})[
-                            flow_config.resource_id
-                        ] = flow_config_switch_to_dummy
-                        post_push_deleted_resources.setdefault(FlowStep, {})[dummy.resource_id] = (
-                            dummy
-                        )
-                        updated_resources.setdefault(FlowConfig, {})[flow_config.resource_id] = (
-                            flow_config
-                        )
-                    else:
-                        # Move the old start step to post-push deleted resources
-                        post_push_deleted_resources.setdefault(type(old_start_step), {})[
-                            old_start_step.resource_id
-                        ] = old_start_step
-                        deleted_resources.get(type(old_start_step), {}).pop(
-                            old_start_step.resource_id, None
-                        )
-
-        # If a flow step has changed type, we need to delete the old step and create a new one.
-        # For the start step, use a dummy workaround (empty default_step).
-        updated_flow_steps: list[tuple[str, FlowStep]] = list(
-            updated_resources.get(FlowStep, {}).items()
+        prepush.group_new_flow_resources(
+            new_resources, updated_resources, post_push_deleted_resources
         )
-        removed_flow_step_ids = []
-        for flow_step_id, flow_step in updated_flow_steps:
-            original_flow_step: FlowStep = self.resources.get(FlowStep, {}).get(flow_step_id)
-            if flow_step.step_type != original_flow_step.step_type:
-                flow_config = state.get(FlowConfig, {}).get(original_flow_step.flow_id)
-                is_start_step = (
-                    flow_config is not None and flow_config.start_step == original_flow_step.step_id
-                )
-                if is_start_step:
-                    dummy_step_id = f"{original_flow_step.step_id}_temp"
-                    dummy = FlowStep(
-                        resource_id=f"{original_flow_step.flow_id}_{dummy_step_id}",
-                        step_id=dummy_step_id,
-                        name=f"{original_flow_step.name}-temp",
-                        flow_id=original_flow_step.flow_id,
-                        flow_name=original_flow_step.flow_name,
-                        step_type=StepType.DEFAULT_STEP,
-                        prompt="temp prompt",
-                    )
-                    flow_config_switch_to_dummy = FlowConfig(
-                        resource_id=flow_config.resource_id,
-                        name=flow_config.name,
-                        description=flow_config.description,
-                        start_step=dummy.step_id,
-                    )
-                    pre_push_new_resources.setdefault(FlowStep, {})[dummy.resource_id] = dummy
-                    pre_push_updated_resources.setdefault(FlowConfig, {})[
-                        flow_config.resource_id
-                    ] = flow_config_switch_to_dummy
-                    updated_resources.setdefault(FlowConfig, {})[flow_config.resource_id] = (
-                        flow_config
-                    )
-                    post_push_deleted_resources.setdefault(FlowStep, {})[dummy.resource_id] = dummy
-                deleted_resources.setdefault(FlowStep, {})[flow_step_id] = original_flow_step
-                new_resources.setdefault(FlowStep, {})[flow_step_id] = flow_step
-                removed_flow_step_ids.append(flow_step_id)
-
-        for flow_step_id in removed_flow_step_ids:
-            updated_resources[FlowStep].pop(flow_step_id, None)
-
-        # Add known attributes to any new variant to give it a default value
-        deleted_attribute_ids = set(deleted_resources.get(VariantAttribute, {}).keys())
-        for variant in new_resources.get(Variant, {}).values():
-            if not isinstance(variant, Variant):
-                raise TypeError(f"Variant is not a Variant: {variant}")
-            attribute_ids = [
-                aid
-                for aid in self.resources.get(VariantAttribute, {}).keys()
-                if aid not in deleted_attribute_ids
-            ]
-            variant.attribute_ids = attribute_ids
-
-        # Only update the default variant if it's being enabled
-        updated_variants: list[Variant] = list(updated_resources.get(Variant, {}).values())
-        for variant in updated_variants:
-            if not variant.is_default:
-                updated_resources[Variant].pop(variant.resource_id, None)
-
-        # Don't delete condition if parent step is being deleted
-        for flow_step in list(deleted_resources.get(FlowStep, {}).values()):
-            for condition in flow_step.conditions:
-                deleted_resources.get(Condition, {}).pop(condition.resource_id, None)
-
-        # If we are deleting a step and pointing a condition to a different step, the delete will auto delete the condition so the update will fail. We should instead make it a create
-        deleted_steps = list(deleted_resources.get(FlowStep, {}).values()) + list(
-            deleted_resources.get(FunctionStep, {}).values()
+        prepush.prune_cascade_deleted_flow_children(deleted_resources)
+        prepush.replace_flow_steps_with_dummy_workaround(
+            state,
+            new_resources,
+            updated_resources,
+            deleted_resources,
+            pre_push_new_resources,
+            pre_push_updated_resources,
+            post_push_deleted_resources,
+            current_resources=self.resources,
         )
-        updated_conditions = list(updated_resources.get(Condition, {}).items())
-        if deleted_steps:
-            flows_with_deleted_steps = {deleted_step.flow_id for deleted_step in deleted_steps}
-            for condition_id, condition in updated_conditions:
-                if condition.flow_id not in flows_with_deleted_steps:
-                    continue
-                original_flow_step: FlowStep = next(
-                    (
-                        flow_step
-                        for flow_step in self.resources.get(FlowStep, {}).values()
-                        if flow_step.flow_id == condition.flow_id
-                        and flow_step.step_id == condition.step_id
-                    ),
-                    None,
-                )
-                if not original_flow_step:
-                    continue
-                original_condition: Condition = next(
-                    (
-                        cond
-                        for cond in original_flow_step.conditions
-                        if cond.resource_id == condition_id
-                    ),
-                    None,
-                )
-                if not original_condition:
-                    continue
-
-                deleted_original_step = next(
-                    (
-                        step
-                        for step in deleted_steps
-                        if step.flow_id == condition.flow_id
-                        and step.step_id == original_condition.child_step
-                    ),
-                    None,
-                )
-                if deleted_original_step:
-                    new_resources.setdefault(Condition, {})[condition_id] = condition
-                    updated_resources.get(Condition, {}).pop(condition_id, None)
+        prepush.default_new_variant_attributes(
+            new_resources, deleted_resources, current_resources=self.resources
+        )
+        prepush.filter_nondefault_variant_updates(updated_resources)
+        prepush.fix_conditions_for_deleted_steps(
+            new_resources,
+            updated_resources,
+            deleted_resources,
+            current_resources=self.resources,
+        )
 
         return PushPhaseChangeSet(
             main=ResourceChangeSet(
@@ -2088,8 +1758,8 @@ class AgentStudioProject:
 
         Empty projections are valid (e.g. diffing a branch against an empty main).
         """
-        before_resources = SyncClientHandler.load_resources_from_projection(before_projection)
-        after_resources = SyncClientHandler.load_resources_from_projection(after_projection)
+        before_resources = load_resources_from_projection(before_projection)
+        after_resources = load_resources_from_projection(after_projection)
         return self.diff_resource_maps(before_resources, after_resources)
 
     def diff_resource_maps(
@@ -2376,7 +2046,7 @@ class AgentStudioProject:
                     resource_id = self.generate_uuid(resource_type)
 
                     if resource_type == Document:
-                        resource_id = os.path.basename(file_path)
+                        resource_id = os.path.basename(file_path).upper()
 
                     if resource_type in (FlowStep, FunctionStep):
                         resource_id = f"{flow_id}_{resource_id}"
