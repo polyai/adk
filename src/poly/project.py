@@ -450,18 +450,11 @@ class AgentStudioProject:
         self._not_loaded_resources = []
         self.save_config()
 
-        # Delete all existing local resource files without parsing them.
-        # We avoid discover_local_resources() here because it parses YAML,
-        # which fails on files with merge conflict markers.
-        preserved = {"_gen", "project.yaml"}
-        for entry in os.listdir(self.root_path):
-            if entry in preserved or entry.startswith("."):
-                continue
-            entry_path = os.path.join(self.root_path, entry)
-            if os.path.isdir(entry_path):
-                shutil.rmtree(entry_path)
-            else:
-                os.remove(entry_path)
+        # Delete only ADK-managed resource files, leaving non-ADK files intact.
+        for resource_class in RESOURCE_NAME_TO_CLASS.values():
+            for path in resource_class.discover_resources(self.root_path):
+                if os.path.isfile(path):
+                    os.remove(path)
 
         empty_resources: ResourceMap = {}
         self._update_pulled_resources(
@@ -470,8 +463,11 @@ class AgentStudioProject:
             force=True,
         )
 
-        flow_folder = os.path.join(self.root_path, "flows")
-        self._delete_empty_folders(flow_folder)
+        # Clean up any directories left empty after resource deletion
+        for entry in os.listdir(self.root_path):
+            entry_path = os.path.join(self.root_path, entry)
+            if os.path.isdir(entry_path) and entry not in {"_gen", ".git"}:
+                self._delete_empty_folders(entry_path)
 
     def pull_project(
         self,

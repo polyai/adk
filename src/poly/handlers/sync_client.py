@@ -67,9 +67,6 @@ class SyncClientHandler:
                 self._sdk.branch_id = "main"
         return self.branch_id
 
-    def pull_deployment_projection(self, deployment_id: str) -> dict[str, Any]:
-        """Fetch the raw projection for a specific deployment.
-
     def list_template_projects(self) -> list[dict[str, Any]]:
         """List available template projects.
 
@@ -92,6 +89,10 @@ class SyncClientHandler:
             dict[str, Any]: The projection in sourcerer-compatible format.
         """
         return self.sdk.get_template_project_projection(template_id)
+
+    def pull_deployment_projection(self, deployment_id: str) -> dict[str, Any]:
+        """Fetch the raw projection for a specific deployment.
+
         Args:
             deployment_id: The deployment ID.
 
