@@ -246,6 +246,20 @@ class BranchCommand(BaseCommand):
 
         branch_history_parser.set_defaults(branch_subcommand="history")
 
+        branch_rename_parser = branch_subparsers.add_parser(
+            "rename",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Rename a current branch.",
+        )
+        branch_rename_parser.add_argument(
+            "new_branch_name",
+            type=str,
+            nargs="?",
+            default=None,
+            help="New name for the current branch.",
+        )
+        branch_rename_parser.set_defaults(branch_subcommand="rename")
+
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to the matching branch sub-handler."""
@@ -283,6 +297,9 @@ class BranchCommand(BaseCommand):
 
         elif args.branch_subcommand == "history":
             cls.branch_history(args.path, args.branch_name, args.json)
+
+        elif args.branch_subcommand == "rename":
+            cls.branch_rename(args.path, args.new_branch_name, args.json)
 
     @classmethod
     def branch_list(cls, base_path: str, output_json: bool = False) -> None:
@@ -967,3 +984,64 @@ class BranchCommand(BaseCommand):
 
         plain(f"History for branch '{branch_name}':")
         print_branch_history(history)
+
+    @classmethod
+    def branch_rename(
+        cls, base_path: str, new_branch_name: Optional[str] = None, output_json: bool = False
+    ) -> None:
+        """Rename the current branch in the Agent Studio project."""
+        from poly.output.console import error, success, warning
+
+        project = load_project(base_path, output_json=output_json)
+
+        current_branch = project.get_current_branch()
+        if not current_branch:
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "error": "Current branch doesn't exist. Create a new branch before renaming.",
+                    }
+                )
+            else:
+                warning("Current branch doesn't exist. Create a new branch before renaming.")
+            return
+
+        if current_branch == "main":
+            if output_json:
+                json_print({"success": False, "error": "Cannot rename the main branch."})
+            else:
+                error("Cannot rename the main branch.")
+            return
+
+        if not new_branch_name:
+            if output_json:
+                json_print({"success": False, "error": "No new branch name provided."})
+            else:
+                new_branch_name = input("Enter the new name for the current branch: ").strip()
+                if not new_branch_name:
+                    warning("No new branch name provided. Exiting.")
+                    return
+
+        try:
+            renamed = project.rename_branch(new_branch_name)
+        except (ValueError, Exception) as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(str(e))
+            return
+
+        if output_json:
+            json_print(
+                {
+                    "success": renamed,
+                    "old_branch_name": current_branch,
+                    "new_branch_name": new_branch_name,
+                }
+            )
+        else:
+            if renamed:
+                success(f"Renamed branch '{current_branch}' to '{new_branch_name}'.")
+            else:
+                error(f"Failed to rename branch '{current_branch}' to '{new_branch_name}'.")
