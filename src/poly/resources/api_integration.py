@@ -26,6 +26,7 @@ from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
     SubResource,
+    register_resource,
 )
 
 logger = logging.getLogger(__name__)
@@ -268,6 +269,7 @@ class ApiIntegrationOperation(SubResource):
         )
 
 
+@register_resource("api_integration")
 @dataclass
 class ApiIntegration(MultiResourceYamlResource):
     """Dataclass representing an API integration."""
@@ -277,6 +279,31 @@ class ApiIntegration(MultiResourceYamlResource):
     description: str = ""
     environments: ApiIntegrationEnvironments = field(default_factory=ApiIntegrationEnvironments)
     operations: list[ApiIntegrationOperation] = field(default_factory=list)
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "ApiIntegration"]:
+        """Parse API integrations from a projection dict."""
+        api_integrations = {}
+        for integration_id, integration_data in (
+            projection.get("apiIntegrations", {})
+            .get("apiIntegrations", {})
+            .get("entities", {})
+            .items()
+        ):
+            environments = ApiIntegrationEnvironments.from_dict(
+                integration_data.get("environments")
+            )
+            operations_raw = integration_data.get("operations") or {}
+            operations = [ApiIntegrationOperation.from_dict(v) for v in operations_raw.values()]
+
+            api_integrations[integration_id] = cls(
+                resource_id=integration_id,
+                name=integration_data.get("name", ""),
+                description=integration_data.get("description", ""),
+                environments=environments,
+                operations=operations,
+            )
+        return api_integrations
 
     def __init__(
         self,
@@ -328,7 +355,7 @@ class ApiIntegration(MultiResourceYamlResource):
         operations = [ApiIntegrationOperation.from_dict(o) for o in ops_data]
         return cls(
             resource_id=resource_id,
-            name=name,
+            name=yaml_dict.get("name") or name,
             description=yaml_dict.get("description", ""),
             environments=environments,
             operations=operations,

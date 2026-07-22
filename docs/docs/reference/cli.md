@@ -554,11 +554,37 @@ Examples:
 
 ~~~bash
 poly docs flows functions topics
+poly docs context
 poly docs --all
 poly docs --all --output rules.md
 ~~~
 
 Use `--output` to write the documentation to a local file. This is useful when working with AI coding tools — pass the output file as context to give the agent accurate knowledge of ADK resource types and conventions.
+
+Available resource names include:
+
+| Name | Description |
+|---|---|
+| `agent_settings` | Personality, role, rules |
+| `api_integrations` | External HTTP API definitions |
+| `chat_settings` | Chat greeting, style prompt |
+| `context` | Context files for agent knowledge |
+| `entities` | Structured data collection |
+| `experimental_config` | Feature flags |
+| `flows` | Multistep processes with steps, functions, conditions |
+| `handoffs` | SIP call transfers |
+| `functions` | Global and flow functions, decorators, state, metrics |
+| `languages` | Default and additional language configuration |
+| `tests` | Simulated conversation test cases |
+| `safety_filters` | Content moderation settings |
+| `sms` | Text message templates |
+| `speech_recognition` | ASR settings, keyphrase boosting, transcript corrections |
+| `response_control` | Pronunciations, phrase filters |
+| `topics` | Knowledge base for RAG |
+| `translations` | Localized text strings per language |
+| `variants` | Per-variant configuration |
+| `voice_settings` | Voice greeting, disclaimer, style prompt |
+| `variables` | State variables referenced in code |
 
 ### `poly deployments`
 

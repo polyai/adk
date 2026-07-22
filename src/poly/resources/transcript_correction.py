@@ -20,7 +20,7 @@ from poly.handlers.protobuf.transcript_corrections_pb2 import (
     TranscriptCorrections_UpdateTranscriptCorrections,
     TranscriptCorrectionsUpdateData,
 )
-from poly.resources.resource import MultiResourceYamlResource, ResourceMapping
+from poly.resources.resource import MultiResourceYamlResource, ResourceMapping, register_resource
 
 VALID_REPLACEMENT_TYPES = ("full", "partial", "substring")
 
@@ -62,6 +62,7 @@ class RegularExpressionRule:
         )
 
 
+@register_resource("transcript_corrections")
 @dataclass
 class TranscriptCorrection(MultiResourceYamlResource):
     """Dataclass representing an ASR Transcript Correction"""
@@ -87,6 +88,32 @@ class TranscriptCorrection(MultiResourceYamlResource):
             r if isinstance(r, RegularExpressionRule) else RegularExpressionRule.from_yaml_dict(r)
             for r in raw_rules
         ]
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "TranscriptCorrection"]:
+        """Parse transcript corrections from a projection dict."""
+        corrections = {}
+        for correction_id, correction_data in (
+            projection.get("transcriptCorrections", {})
+            .get("transcriptCorrections", {})
+            .get("entities", {})
+            .items()
+        ):
+            regular_expressions = [
+                RegularExpressionRule(
+                    regular_expression=r.get("regularExpression", ""),
+                    replacement=r.get("replacement", ""),
+                    replacement_type=r.get("replacementType", "full"),
+                )
+                for r in correction_data.get("regularExpressions", [])
+            ]
+            corrections[correction_id] = cls(
+                resource_id=correction_id,
+                name=correction_data.get("name", ""),
+                description=correction_data.get("description", ""),
+                regular_expressions=regular_expressions,
+            )
+        return corrections
 
     @property
     def file_path(self) -> str:

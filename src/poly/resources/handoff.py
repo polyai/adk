@@ -21,6 +21,7 @@ from poly.handlers.protobuf.handoff_pb2 import (
 )
 from poly.resources.resource import (
     MultiResourceYamlResource,
+    register_resource,
 )
 
 VALID_SIP_METHODS = ("invite", "refer", "bye")
@@ -62,6 +63,7 @@ class HandoffSipConfig:
         return SipConfig(bye=SipByeHandoffConfig())
 
 
+@register_resource("handoffs")
 @dataclass
 class Handoff(MultiResourceYamlResource):
     """Handoff resource for ADK."""
@@ -100,6 +102,39 @@ class Handoff(MultiResourceYamlResource):
         self.sip_config = sip_config
         self.sip_headers = sip_headers or []
 
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "Handoff"]:
+        """Parse handoffs from a projection dict."""
+        handoffs_projection = projection.get("handoff", {}).get("handoffs", {}).get("entities", {})
+        handoffs = {}
+        for handoff_id, handoff_data in handoffs_projection.items():
+            if not handoff_data.get("active", False):
+                continue
+
+            config = handoff_data.get("sipConfig", {}).get("config", {})
+            method = config.get("$case", "bye")
+            value = config.get("value", {})
+
+            sip_config = {"method": method}
+            if method == "invite":
+                sip_config["phone_number"] = value.get("phoneNumber", "")
+                sip_config["outbound_endpoint"] = value.get("outboundEndpoint", "")
+                sip_config["outbound_encryption"] = value.get("outboundEncryption", "")
+            elif method == "refer":
+                sip_config["phone_number"] = value.get("phoneNumber", "")
+
+            sip_headers = handoff_data.get("sipHeaders", {}).get("headers", [])
+
+            handoffs[handoff_id] = cls(
+                resource_id=handoff_id,
+                name=handoff_data.get("name", ""),
+                description=handoff_data.get("description", ""),
+                is_default=handoff_data.get("isDefault", False),
+                sip_config=sip_config,
+                sip_headers=sip_headers,
+            )
+        return handoffs
+
     def to_yaml_dict(self) -> dict:
         return {
             "name": self.name,
@@ -124,7 +159,7 @@ class Handoff(MultiResourceYamlResource):
     ) -> "Handoff":
         return cls(
             resource_id=resource_id,
-            name=name,
+            name=yaml_dict.get("name") or name,
             description=yaml_dict.get("description", ""),
             is_default=yaml_dict.get("is_default", False),
             sip_config=yaml_dict.get("sip_config", {}),

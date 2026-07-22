@@ -49,7 +49,7 @@ from poly.handlers.protobuf.start_function_pb2 import (
     StartFunction_Delete,
     StartFunction_Update,
 )
-from poly.resources.resource import Resource, ResourceMapping, SubResource
+from poly.resources.resource import Resource, ResourceMapping, SubResource, register_resource
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +115,41 @@ class FunctionLatencyControl:
         ]
 
 
+def parse_latency_control(latency_control_data: dict) -> FunctionLatencyControl:
+    """Parse latency control from a projection dictionary."""
+    if not latency_control_data:
+        return FunctionLatencyControl()
+
+    delay_responses = latency_control_data.get(
+        "delayResponses", latency_control_data.get("delay_responses", {})
+    )
+    if isinstance(delay_responses, dict):
+        delay_responses = list(
+            delay_responses.get("entities", delay_responses).values()
+            if "entities" in delay_responses
+            else delay_responses.values()
+        )
+
+    delay_responses = [
+        FunctionDelayResponse(
+            id=delay_response.get("id"),
+            message=delay_response.get("message", ""),
+            duration=delay_response.get("duration", 0),
+        )
+        for delay_response in delay_responses
+        if isinstance(delay_response, dict)
+    ]
+
+    return FunctionLatencyControl(
+        enabled=latency_control_data.get("enabled", False),
+        initial_delay=latency_control_data.get(
+            "initialDelay", latency_control_data.get("initial_delay", 0)
+        ),
+        interval=latency_control_data.get("interval", 0),
+        delay_responses=delay_responses,
+    )
+
+
 @dataclass
 class LatencyControl(SubResource):
     """Wrapper for Latency Control protos"""
@@ -175,6 +210,7 @@ class LatencyControl(SubResource):
         raise NotImplementedError("Latency Control does not support deletion")
 
 
+@register_resource("functions")
 @dataclass
 class Function(Resource):
     """Dataclass representing an Agent Studio function"""
@@ -231,6 +267,103 @@ class Function(Resource):
                 delay_responses=value.get("delay_responses", []),
             )
         return FunctionLatencyControl()
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "Function"]:
+        """Parse functions from a projection dict."""
+        functions = {}
+
+        special_functions = projection.get("specialFunctions", {})
+        for func_type_key, func in special_functions.items():
+            if func.get("archived", False):
+                continue
+
+            if func_type_key == "startFunction":
+                func_type = FunctionType.START
+            elif func_type_key == "endFunction":
+                func_type = FunctionType.END
+            else:
+                func_type = func_type_key
+
+            functions[func["id"]] = cls(
+                resource_id=func["id"],
+                name=func["name"],
+                description=func["description"],
+                code=func["code"],
+                parameters=[
+                    FunctionParameters(
+                        name=parameter.get("name"),
+                        type=parameter.get("type"),
+                        id=parameter.get("id"),
+                        description=parameter.get("description"),
+                    )
+                    for parameter in func.get("parameters", {}).get("entities", {}).values()
+                ],
+                latency_control=parse_latency_control(
+                    func.get("latencyControl", func.get("latency_control"))
+                ),
+                flow_id=None,
+                function_type=func_type,
+            )
+
+        flows = projection.get("flows", {}).get("flows", {}).get("entities", {})
+        for flow_id, flow_data in flows.items():
+            for func_id, func in (
+                flow_data.get("transitionFunctions", {}).get("entities", {}).items()
+            ):
+                if func.get("archived", False):
+                    continue
+
+                functions[func_id] = cls(
+                    resource_id=func_id,
+                    name=func["name"],
+                    description=func["description"],
+                    code=func["code"],
+                    parameters=[
+                        FunctionParameters(
+                            name=parameter.get("name"),
+                            type=parameter.get("type"),
+                            id=parameter.get("id"),
+                            description=parameter.get("description"),
+                        )
+                        for parameter in func.get("parameters", {}).get("entities", {}).values()
+                    ],
+                    latency_control=parse_latency_control(
+                        func.get("latencyControl", func.get("latency_control"))
+                    ),
+                    flow_id=flow_id,
+                    flow_name=flow_data["name"],
+                    function_type=FunctionType.TRANSITION,
+                )
+
+        for func_id, func in (
+            projection.get("functions", {}).get("functions", {}).get("entities", {}).items()
+        ):
+            if func.get("archived", False):
+                continue
+
+            functions[func_id] = cls(
+                resource_id=func_id,
+                name=func["name"],
+                description=func["description"],
+                code=func["code"],
+                parameters=[
+                    FunctionParameters(
+                        name=parameter.get("name"),
+                        type=parameter.get("type"),
+                        id=parameter.get("id"),
+                        description=parameter.get("description"),
+                    )
+                    for parameter in func.get("parameters", {}).get("entities", {}).values()
+                ],
+                latency_control=parse_latency_control(
+                    func.get("latencyControl", func.get("latency_control"))
+                ),
+                flow_id=None,
+                function_type=FunctionType.GLOBAL,
+            )
+
+        return functions
 
     @staticmethod
     def get_function_type(file_path: str) -> Optional[FunctionType]:
