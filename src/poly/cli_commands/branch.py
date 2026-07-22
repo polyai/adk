@@ -118,6 +118,11 @@ class BranchCommand(BaseCommand):
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
             help="List all branches in the project.",
         )
+        branch_list_parser.add_argument(
+            "--archived",
+            action="store_true",
+            help="Show soft-deleted (archived) branches instead of active ones.",
+        )
         branch_list_parser.set_defaults(branch_subcommand="list")
 
         branch_create_parser = branch_subparsers.add_parser(
@@ -260,11 +265,25 @@ class BranchCommand(BaseCommand):
         )
         branch_rename_parser.set_defaults(branch_subcommand="rename")
 
+        branch_restore_parser = branch_subparsers.add_parser(
+            "restore",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Restore a soft-deleted branch from the archive.",
+        )
+        branch_restore_parser.add_argument(
+            "branch_name",
+            type=str,
+            nargs="?",
+            default=None,
+            help="Name of the archived branch to restore.",
+        )
+        branch_restore_parser.set_defaults(branch_subcommand="restore")
+
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to the matching branch sub-handler."""
         if args.branch_subcommand == "list":
-            cls.branch_list(args.path, args.json)
+            cls.branch_list(args.path, args.json, getattr(args, "archived", False))
 
         elif args.branch_subcommand == "create":
             cls.branch_create(
@@ -301,12 +320,26 @@ class BranchCommand(BaseCommand):
         elif args.branch_subcommand == "rename":
             cls.branch_rename(args.path, args.new_branch_name, args.json)
 
+        elif args.branch_subcommand == "restore":
+            cls.branch_restore(args.path, args.branch_name, args.json)
+
     @classmethod
-    def branch_list(cls, base_path: str, output_json: bool = False) -> None:
+    def branch_list(cls, base_path: str, output_json: bool = False, archived: bool = False) -> None:
         """List branches in the Agent Studio project."""
-        from poly.output.console import plain, print_branches, warning
+        from poly.output.console import plain, print_archived_branches, print_branches, warning
 
         project = load_project(base_path, output_json=output_json)
+
+        if archived:
+            branches = project.list_archived_branches()
+            if output_json:
+                json_print({"archived_branches": branches})
+                return
+            if not branches:
+                plain("[muted]No archived branches found.[/muted]")
+                return
+            print_archived_branches(branches)
+            return
 
         current_branch, branches = project.get_branches()
 
@@ -1045,3 +1078,81 @@ class BranchCommand(BaseCommand):
                 success(f"Renamed branch '{current_branch}' to '{new_branch_name}'.")
             else:
                 error(f"Failed to rename branch '{current_branch}' to '{new_branch_name}'.")
+
+    @classmethod
+    def branch_restore(
+        cls,
+        base_path: str,
+        branch_name: Optional[str] = None,
+        output_json: bool = False,
+    ) -> None:
+        """Restore a soft-deleted branch from the archive."""
+        import questionary
+
+        from poly.output.console import error, plain, success, warning
+
+        project = load_project(base_path, output_json=output_json)
+
+        if not branch_name:
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "error": "branch restore with --json requires a branch name argument.",
+                    }
+                )
+                sys.exit(1)
+
+            archived = project.list_archived_branches()
+            if not archived:
+                plain("[muted]No archived branches to restore.[/muted]")
+                return
+
+            choices = []
+            branch_id_map: dict[str, str] = {}
+            for b in archived:
+                name = b.get("name", "—")
+                branch_id = b.get("branchId", "")
+                label = f"{name} ({branch_id})"
+                choices.append(label)
+                branch_id_map[label] = branch_id
+
+            selected = questionary.select(
+                "Select branch to restore",
+                choices=choices,
+                use_search_filter=True,
+                use_jk_keys=False,
+            ).ask()
+            if not selected:
+                warning("No branch selected. Exiting.")
+                return
+
+            selected_branch_id = branch_id_map[selected]
+            try:
+                restored = project.api_handler.restore_branch(selected_branch_id)
+            except (ValueError, Exception) as e:
+                error(str(e))
+                return
+            if restored:
+                branch_name = selected.split(" (")[0]
+                success(f"Branch '{branch_name}' restored.")
+            else:
+                error("Failed to restore selected branch.")
+            return
+
+        try:
+            restored = project.restore_branch(branch_name)
+        except (ValueError, Exception) as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(str(e))
+            return
+
+        if output_json:
+            json_print({"success": restored, "branch_name": branch_name})
+        else:
+            if restored:
+                success(f"Branch '{branch_name}' restored.")
+            else:
+                error(f"Failed to restore branch '{branch_name}'.")
