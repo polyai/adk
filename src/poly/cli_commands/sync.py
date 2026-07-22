@@ -308,7 +308,7 @@ class PushCommand(BaseCommand):
                 json_output["new_branch_id"] = project.branch_id
             if output_commands:
                 json_output["commands"] = commands_to_dicts(commands)
-            if include_rtc and push_ok:
+            if include_rtc and push_ok and not dry_run:
                 from poly.cli_commands.rtc import RTCCommand
 
                 rtc_result = RTCCommand.rtc_push(
@@ -333,7 +333,7 @@ class PushCommand(BaseCommand):
             error(f"Failed to push {project.account_id}/{project.project_id} to Agent Studio.")
             plain(output)
 
-        if include_rtc and push_ok:
+        if include_rtc and push_ok and not dry_run:
             from poly.cli_commands.rtc import RTCCommand
 
             rtc_result = RTCCommand.rtc_push(base_path, env=rtc_env, force=force)
