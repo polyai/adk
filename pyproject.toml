@@ -75,6 +75,7 @@ omit = [
 ]
 
 [tool.pytest.ini_options]
+testpaths = ["src/poly/tests"]
 norecursedirs = [
     "test_projects",
 ]
