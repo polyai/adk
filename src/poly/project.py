@@ -3113,6 +3113,11 @@ class AgentStudioProject:
             return []
 
         try:
+            jsonschema.Draft7Validator.check_schema(schema)
+        except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
+            return [f"Invalid schema: {e}"]
+
+        try:
             validator = jsonschema.Draft7Validator(schema)
             errors = sorted(
                 validator.iter_errors(data),
