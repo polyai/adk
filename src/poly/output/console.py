@@ -88,6 +88,7 @@ def print_status(
     parent_branch: str = None,
     created_by: str = None,
     is_diverged: bool = None,
+    title: str = "Project Status",
 ) -> None:
     """Print project status in a styled panel."""
     table = Table(show_header=False, box=None, padding=(0, 1))
@@ -106,7 +107,7 @@ def print_status(
         diverged_text = "Yes (parent has advanced past fork point)" if is_diverged else "No"
         table.add_row("Diverged", diverged_text)
 
-    console.print(Panel(table, title="[bold]Project Status[/bold]", border_style="cyan"))
+    console.print(Panel(table, title=f"[bold]{title}[/bold]", border_style="cyan"))
 
 
 def print_file_list(title: str, files: list[str], style: str) -> None:

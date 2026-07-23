@@ -1131,6 +1131,7 @@ class BranchCommand(BaseCommand):
             parent_branch=parent_name,
             created_by=created_by,
             is_diverged=is_diverged,
+            title="Branch Status",
         )
 
         print_file_list("New files", new_files, "filename.new")
