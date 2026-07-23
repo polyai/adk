@@ -194,7 +194,7 @@ def print_project_file_changes(
 ) -> None:
     """Print project status panel and local file changes.
 
-    Shared by ``poly status`` and ``poly branch status``.
+    Used by ``poly status``.
 
     Args:
         project: The loaded project.

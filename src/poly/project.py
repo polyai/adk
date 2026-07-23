@@ -1802,14 +1802,13 @@ class AgentStudioProject:
             ValueError: If on main with no branch specified, or the branch
                 does not exist.
         """
-        _, branches = self.get_branches()
+        current_name, branches = self.get_branches()
 
         if branch_name:
             if branch_name not in branches:
                 raise ValueError(f"Branch '{branch_name}' does not exist.")
             branch_meta = branches[branch_name]
         else:
-            current_name, _ = self.get_branches()
             if self.branch_id == "main" or current_name is None:
                 raise ValueError(
                     "Cannot diff main branch. Switch to a branch or specify a branch name."
