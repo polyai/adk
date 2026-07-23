@@ -62,8 +62,8 @@ class DeploymentsCommand(BaseCommand):
         deployment_list_parser.add_argument(
             "--limit",
             type=int,
-            default=10,
-            help="Number of versions to show. Defaults to 10.",
+            default=None,
+            help="Maximum number of versions to show. Shows all by default.",
         )
         deployment_list_parser.add_argument(
             "--offset",
@@ -479,7 +479,7 @@ class DeploymentsCommand(BaseCommand):
         cls,
         base_path: str,
         environment: str = "sandbox",
-        limit: int = 10,
+        limit: Optional[int] = None,
         offset: int = 0,
         version_hash: str = None,
         output_json: bool = False,
@@ -487,20 +487,20 @@ class DeploymentsCommand(BaseCommand):
     ) -> None:
         """List deployment history for the project.
 
-        By default shows the 10 most recent deployments for the sandbox environment.
+        By default shows all deployments for the sandbox environment.
         Pass version_hash to start the listing from a specific version. Use details for
         full per-deployment metadata.
 
         Args:
             base_path: Base path for the project.
             environment: Environment to query — sandbox, pre-release, or live.
-            limit: Maximum number of versions to show.
+            limit: Maximum number of versions to show. Shows all by default.
             offset: Number of versions to skip before showing results.
             version_hash: Start listing from this version hash (overrides offset).
             output_json: If True, print result as JSON instead of rich text.
             details: If True, print full metadata for each deployment.
         """
-        from poly.output.console import error, print_deployments
+        from poly.output.console import error, paged_output, print_deployments
 
         project = load_project(base_path)
         versions, active_deployment_hashes = project.get_deployments(client_env=environment)
@@ -524,7 +524,8 @@ class DeploymentsCommand(BaseCommand):
                 return
             offset = version_idx
 
-        versions = versions[offset : offset + limit]
+        end = offset + limit if limit is not None else None
+        versions = versions[offset:end]
         if output_json:
             json_output = {
                 "versions": versions,
@@ -532,7 +533,8 @@ class DeploymentsCommand(BaseCommand):
             }
             json_print(json_output)
         else:
-            print_deployments(versions, active_deployment_hashes, details=details)
+            with paged_output():
+                print_deployments(versions, active_deployment_hashes, details=details)
 
     @classmethod
     def deployments_show(
@@ -972,7 +974,7 @@ class DeploymentsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """List A/B tests for the project."""
-        from poly.output.console import print_ab_tests
+        from poly.output.console import paged_output, print_ab_tests
 
         project = load_project(base_path, output_json=output_json)
         ab_tests = project.list_ab_tests(limit=limit)
@@ -980,7 +982,8 @@ class DeploymentsCommand(BaseCommand):
             json_print({"success": True, "ab_tests": ab_tests})
         else:
             dep_map = cls._fetch_deployment_map(project) if ab_tests else {}
-            print_ab_tests(ab_tests, deployments=dep_map)
+            with paged_output():
+                print_ab_tests(ab_tests, deployments=dep_map)
 
     @classmethod
     def ab_test_active(

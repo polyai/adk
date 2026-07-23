@@ -1248,16 +1248,26 @@ class PrintDeploymentsTest(unittest.TestCase):
         self.assertIn("No versions found", mock_error.call_args[0][0])
 
     @patch("poly.output.console.print_deployments")
-    def test_default_call_shows_first_ten(self, mock_print_dep):
-        """Default call (no hash, no json) displays the first 10 versions."""
+    def test_default_call_shows_all(self, mock_print_dep):
+        """Default call (no hash, no json, no limit) displays all versions."""
         self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
 
         DeploymentsCommand.deployments_list(TEST_DIR)
 
         mock_print_dep.assert_called_once()
         displayed_versions = mock_print_dep.call_args[0][0]
-        self.assertEqual(len(displayed_versions), 10)
+        self.assertEqual(len(displayed_versions), 15)
         self.assertEqual(displayed_versions[0]["name"], "v0")
+
+    @patch("poly.output.console.print_deployments")
+    def test_explicit_limit(self, mock_print_dep):
+        """--limit caps the number of displayed versions."""
+        self.proj.get_deployments.return_value = (self.versions, self.active_hashes)
+
+        DeploymentsCommand.deployments_list(TEST_DIR, limit=5)
+
+        displayed_versions = mock_print_dep.call_args[0][0]
+        self.assertEqual(len(displayed_versions), 5)
 
     @patch("poly.cli_commands.deployments.json_print")
     def test_output_json_calls_json_print(self, mock_json_print):
@@ -1270,7 +1280,7 @@ class PrintDeploymentsTest(unittest.TestCase):
         output = mock_json_print.call_args[0][0]
         self.assertIn("versions", output)
         self.assertIn("active_deployment_hashes", output)
-        self.assertEqual(len(output["versions"]), 10)
+        self.assertEqual(len(output["versions"]), 15)
 
     @patch("poly.output.console.print_deployments")
     def test_hash_sets_offset(self, mock_print_dep):
@@ -2850,8 +2860,8 @@ class BranchHistoryTest(unittest.TestCase):
 
     @patch("poly.output.console.print_branch_history")
     @patch("poly.output.console.plain")
-    def test_default_limit_is_10(self, mock_plain, mock_print_history):
-        """Without --limit, history is capped at 10 entries."""
+    def test_no_limit_shows_all(self, mock_plain, mock_print_history):
+        """Without --limit, all history entries are shown."""
         self.proj.get_branch_history.return_value = [
             {"mergedAt": f"2026-07-{i:02d}"} for i in range(1, 21)
         ]
@@ -2860,7 +2870,7 @@ class BranchHistoryTest(unittest.TestCase):
 
         mock_print_history.assert_called_once()
         printed = mock_print_history.call_args[0][0]
-        self.assertEqual(len(printed), 10)
+        self.assertEqual(len(printed), 20)
 
     @patch("poly.cli_commands.branch.json_print")
     def test_limit_applies_to_json_output(self, mock_json):
@@ -2875,7 +2885,6 @@ class BranchHistoryTest(unittest.TestCase):
 
         payload = mock_json.call_args[0][0]
         self.assertEqual(len(payload["history"]), 3)
-
 
 class BranchRenameTest(unittest.TestCase):
     """Tests for BranchCommand.branch_rename CLI handler."""

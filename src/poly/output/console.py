@@ -9,6 +9,7 @@ import json
 import os
 import sys
 from collections.abc import Callable
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -49,6 +50,16 @@ def set_verbose(verbose: bool) -> None:
     """Enable or disable verbose (traceback) output."""
     global _verbose
     _verbose = verbose
+
+
+@contextmanager
+def paged_output(enabled: bool = True):
+    """Pipe output through the system pager when enabled and stdout is a TTY."""
+    if enabled and console.is_terminal:
+        with console.pager(styles=True):
+            yield
+    else:
+        yield
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

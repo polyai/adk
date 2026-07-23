@@ -252,7 +252,7 @@ class TestingCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """List test runs."""
-        from poly.output.console import print_test_run_list
+        from poly.output.console import paged_output, print_test_run_list
 
         project = load_project(base_path)
         result = project.list_test_runs(limit=limit, offset=offset)
@@ -261,7 +261,8 @@ class TestingCommand(BaseCommand):
             json_print({"success": True, "test_runs": result})
             return
 
-        print_test_run_list(result)
+        with paged_output():
+            print_test_run_list(result)
 
     @classmethod
     def testing_show(
