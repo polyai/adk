@@ -4,7 +4,6 @@ Copyright PolyAI Limited
 """
 
 import json
-import os
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from typing import Optional
@@ -14,12 +13,11 @@ import requests
 
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
-from poly.handlers.interface import AgentStudioInterface
 from poly.output.console import edit_in_editor, error, info, success, warning
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
 from poly.resources.resource_utils import contains_merge_conflict
-from poly.utils import diff_dicts, merge_rtc_dicts, write_json_file
+from poly.utils import merge_rtc_dicts
 
 
 def _to_sorted_json(data: dict) -> str:
@@ -320,9 +318,9 @@ class RTCCommand(BaseCommand):
                     error(result["error"])
                     sys.exit(1)
                 for f in result["files_written"]:
-                    if not data_only:
+                    if not data_only and "schema_file" in f:
                         success(f"Pulled {f['environment']} — {f['schema_file']}")
-                    if not schema_only:
+                    if not schema_only and "data_file" in f:
                         success(f"Pulled {f['environment']} — {f['data_file']}")
         elif args.rtc_subcommand == "push":
             result = cls.rtc_push(
@@ -345,12 +343,19 @@ class RTCCommand(BaseCommand):
                     sys.exit(1)
                 success(f"Pushed RTC to {args.env}")
         elif args.rtc_subcommand == "edit":
-            cls.rtc_edit(
+            result = cls.rtc_edit(
                 args.path,
                 args.env,
                 edit_schema=getattr(args, "schema", False),
                 force=getattr(args, "force", False),
             )
+            if result is None:
+                return
+            if not result["success"]:
+                error(result["error"])
+                sys.exit(1)
+            what = "schema.json" if getattr(args, "schema", False) else "data.json"
+            success(f"Edited and pushed RTC {what} to {args.env}")
         elif args.rtc_subcommand == "diff":
             result = cls.rtc_diff(args.path, args.env, output_json=args.json)
             if args.json:
@@ -420,28 +425,15 @@ class RTCCommand(BaseCommand):
             dict with success status, or None if the user cancelled interactively.
         """
         project = load_project(base_path, output_json=output_json)
-        env_dir = project._rtc_env_dir(env)
 
-        schema_path = os.path.join(env_dir, "schema.json")
-        data_path = os.path.join(env_dir, "data.json")
-
-        if not data_only and not os.path.exists(schema_path):
-            return {"success": False, "error": f"schema.json not found at {schema_path}"}
-
-        if not schema_only and not os.path.exists(data_path):
-            return {"success": False, "error": f"data.json not found at {data_path}"}
-
+        # Load local files
         try:
-            schema = None
-            variables = None
-            if not data_only:
-                with open(schema_path, "r", encoding="utf-8") as f:
-                    schema = json.load(f)
-            if not schema_only:
-                with open(data_path, "r", encoding="utf-8") as f:
-                    variables = json.load(f)
-        except json.JSONDecodeError as e:
-            return {"success": False, "error": f"Invalid JSON in local RTC file: {e}"}
+            local = project.rtc_load_local(env, schema_only=schema_only, data_only=data_only)
+        except (FileNotFoundError, ValueError) as e:
+            return {"success": False, "error": str(e)}
+
+        schema = local["schema"]
+        variables = local["variables"]
 
         # Schema validation
         if not skip_validation and schema is not None and variables is not None:
@@ -457,45 +449,37 @@ class RTCCommand(BaseCommand):
 
         # Drift protection
         if not force:
-            local_last_updated = project.get_rtc_last_updated(env)
-            if local_last_updated is None:
+            try:
+                drift = project.check_rtc_drift(env)
+            except requests.HTTPError as e:
+                return {"success": False, "error": f"Drift check failed: {e}"}
+
+            if drift["status"] == "no_metadata":
                 if not output_json:
                     info(
                         "No RTC metadata found; skipping drift check. "
                         "Run 'poly rtc pull' to enable drift protection."
                     )
-            else:
-                try:
-                    remote_config = AgentStudioInterface.get_rtc_config(
-                        region=project.region,
-                        project_id=project.project_id,
-                        client_env=env,
-                    )
-                    remote_last_updated = remote_config.get("lastUpdated")
-
-                    if remote_last_updated != local_last_updated:
-                        merge_result = cls._handle_drift(
-                            project=project,
-                            remote_config=remote_config,
-                            local_schema=schema,
-                            local_variables=variables,
-                            output_json=output_json,
-                            no_merge=no_merge,
-                            env=env,
-                            local_last_updated=local_last_updated,
-                            remote_last_updated=remote_last_updated,
-                        )
-                        if merge_result is None:
-                            return None
-                        if not merge_result["success"]:
-                            return merge_result
-                        if merge_result.get("schema") is not None:
-                            schema = merge_result["schema"]
-                        if merge_result.get("variables") is not None:
-                            variables = merge_result["variables"]
-
-                except requests.HTTPError as e:
-                    return {"success": False, "error": f"Drift check failed: {e}"}
+            elif drift["status"] == "drifted":
+                merge_result = cls._handle_drift(
+                    project=project,
+                    remote_config=drift["remote_config"],
+                    local_schema=schema,
+                    local_variables=variables,
+                    output_json=output_json,
+                    no_merge=no_merge,
+                    env=env,
+                    local_last_updated=drift["local_last_updated"],
+                    remote_last_updated=drift["remote_last_updated"],
+                )
+                if merge_result is None:
+                    return None
+                if not merge_result["success"]:
+                    return merge_result
+                if merge_result.get("schema") is not None:
+                    schema = merge_result["schema"]
+                if merge_result.get("variables") is not None:
+                    variables = merge_result["variables"]
 
         if env == "live" and not force:
             if output_json:
@@ -609,27 +593,28 @@ class RTCCommand(BaseCommand):
         env: str,
         edit_schema: bool = False,
         force: bool = False,
-    ) -> None:
-        """Pull latest RTC, open in editor, and push back."""
+    ) -> Optional[dict]:
+        """Pull latest RTC, open in editor, and push back.
+
+        Returns:
+            dict with success status, or None if cancelled/no changes.
+        """
         project = load_project(base_path)
 
         try:
-            config = AgentStudioInterface.get_rtc_config(
-                region=project.region,
-                project_id=project.project_id,
-                client_env=env,
-            )
+            config = project.rtc_fetch_config(env)
         except requests.HTTPError as e:
-            error(f"Failed to fetch RTC config: {e}")
-            sys.exit(1)
+            return {"success": False, "error": f"Failed to fetch RTC config: {e}"}
 
         baseline_last_updated = config.get("lastUpdated")
+        schema = config.get("schema", {})
+        variables = config.get("variables", {})
 
         if edit_schema:
-            content = config.get("schema", {})
+            content = schema
             filename = "schema.json"
         else:
-            content = config.get("variables", {})
+            content = variables
             filename = "data.json"
 
         content_str = json.dumps(content, indent=2, sort_keys=True) + "\n"
@@ -638,34 +623,41 @@ class RTCCommand(BaseCommand):
             edited_str = edit_in_editor(content_str, extension=".json", filename=filename)
         except ValueError:
             info("No changes made.")
-            return
+            return None
         except (FileNotFoundError, OSError) as e:
-            error(f"Could not open editor: {e}. Check your $EDITOR or $VISUAL setting.")
-            sys.exit(1)
+            return {
+                "success": False,
+                "error": f"Could not open editor: {e}. Check your $EDITOR or $VISUAL setting.",
+            }
 
         try:
             edited = json.loads(edited_str)
         except json.JSONDecodeError as e:
-            error(f"Invalid JSON: {e}")
-            sys.exit(1)
+            return {"success": False, "error": f"Invalid JSON: {e}"}
+
+        # Schema validation (validate edited data against schema, or check edited schema)
+        if not edit_schema and schema:
+            validation_errors = AgentStudioProject.validate_rtc_data(schema, edited)
+            if validation_errors:
+                err_lines = "\n  ".join(validation_errors)
+                return {
+                    "success": False,
+                    "error": f"RTC validation failed:\n  {err_lines}",
+                    "validation_errors": validation_errors,
+                }
 
         # Race check
         try:
-            current_config = AgentStudioInterface.get_rtc_config(
-                region=project.region,
-                project_id=project.project_id,
-                client_env=env,
-            )
+            current_config = project.rtc_fetch_config(env)
         except requests.HTTPError as e:
-            error(f"Failed to check remote state: {e}")
-            sys.exit(1)
+            return {"success": False, "error": f"Failed to check remote state: {e}"}
 
         if current_config.get("lastUpdated") != baseline_last_updated:
-            error(
-                "Remote config was modified while you were editing. "
-                "Your changes have NOT been pushed. Please try again."
-            )
-            sys.exit(1)
+            return {
+                "success": False,
+                "error": "Remote config was modified while you were editing. "
+                "Your changes have NOT been pushed. Please try again.",
+            }
 
         if env == "live" and not force:
             confirm = questionary.confirm(
@@ -675,44 +667,14 @@ class RTCCommand(BaseCommand):
             ).ask()
             if not confirm:
                 info("Push cancelled.")
-                return
+                return None
 
-        try:
-            if edit_schema:
-                response = AgentStudioInterface.put_rtc_schema(
-                    region=project.region,
-                    project_id=project.project_id,
-                    client_env=env,
-                    schema=edited,
-                )
-            else:
-                response = AgentStudioInterface.patch_rtc_variables(
-                    region=project.region,
-                    project_id=project.project_id,
-                    client_env=env,
-                    variables=edited,
-                )
-        except requests.HTTPError as e:
-            error(f"Push failed: {e}")
-            sys.exit(1)
-
-        if response and response.get("lastUpdated"):
-            project.set_rtc_last_updated(env, response["lastUpdated"])
-
-        # Update base and local files
         if edit_schema:
-            project.set_rtc_base(env, schema=edited)
+            result = project.rtc_push_to_api(env, schema=edited)
         else:
-            project.set_rtc_base(env, variables=edited)
+            result = project.rtc_push_to_api(env, variables=edited)
 
-        env_dir = project._rtc_env_dir(env)
-        if os.path.isdir(env_dir):
-            if edit_schema:
-                write_json_file(os.path.join(env_dir, "schema.json"), edited)
-            else:
-                write_json_file(os.path.join(env_dir, "data.json"), edited)
-
-        success(f"Edited and pushed RTC {filename} to {env}")
+        return result
 
     @classmethod
     def rtc_diff(
@@ -736,40 +698,13 @@ class RTCCommand(BaseCommand):
         diffs = []
         try:
             for client_env in envs_to_diff:
-                env_dir = project._rtc_env_dir(client_env)
-                schema_path = os.path.join(env_dir, "schema.json")
-                data_path = os.path.join(env_dir, "data.json")
-
-                if not os.path.exists(schema_path) and not os.path.exists(data_path):
-                    if not output_json:
-                        info(f"  {client_env}: no local files — run poly rtc pull first")
-                    diffs.append({"environment": client_env, "status": "no_local_files"})
-                    continue
-
-                remote_config = AgentStudioInterface.get_rtc_config(
-                    region=project.region,
-                    project_id=project.project_id,
-                    client_env=client_env,
-                )
-
-                env_diff = {"environment": client_env, "schema": [], "data": []}
-
-                if os.path.exists(schema_path):
-                    with open(schema_path, "r", encoding="utf-8") as f:
-                        local_schema = json.load(f)
-                    remote_schema = remote_config.get("schema", {})
-                    schema_changes = diff_dicts(local_schema, remote_schema)
-                    env_diff["schema"] = schema_changes
-
-                if os.path.exists(data_path):
-                    with open(data_path, "r", encoding="utf-8") as f:
-                        local_data = json.load(f)
-                    remote_data = remote_config.get("variables", {})
-                    data_changes = diff_dicts(local_data, remote_data)
-                    env_diff["data"] = data_changes
+                env_diff = project.rtc_diff_env(client_env)
 
                 if not output_json:
-                    _print_env_diff(client_env, env_diff)
+                    if env_diff.get("status") == "no_local_files":
+                        info(f"  {client_env}: no local files — run poly rtc pull first")
+                    else:
+                        _print_env_diff(client_env, env_diff)
 
                 diffs.append(env_diff)
 
@@ -801,52 +736,22 @@ class RTCCommand(BaseCommand):
         all_valid = True
 
         for client_env in envs_to_validate:
-            env_dir = project._rtc_env_dir(client_env)
-            schema_path = os.path.join(env_dir, "schema.json")
-            data_path = os.path.join(env_dir, "data.json")
+            result = project.rtc_validate_env(client_env)
 
-            if not os.path.exists(schema_path) or not os.path.exists(data_path):
+            if result.get("status") == "skipped":
                 if not output_json:
                     info(f"  {client_env}: skipped — missing local files")
-                results.append({"environment": client_env, "status": "skipped"})
-                continue
-
-            try:
-                with open(schema_path, "r", encoding="utf-8") as f:
-                    schema = json.load(f)
-                with open(data_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except json.JSONDecodeError as e:
+            elif result.get("valid") is False:
                 all_valid = False
-                results.append(
-                    {
-                        "environment": client_env,
-                        "valid": False,
-                        "errors": [f"Invalid JSON: {e}"],
-                    }
-                )
-                if not output_json:
-                    error(f"  {client_env}: invalid JSON — {e}")
-                continue
-
-            validation_errors = AgentStudioProject.validate_rtc_data(schema, data)
-            if validation_errors:
-                all_valid = False
-                results.append(
-                    {
-                        "environment": client_env,
-                        "valid": False,
-                        "errors": validation_errors,
-                    }
-                )
                 if not output_json:
                     error(f"  {client_env}: validation failed")
-                    for err in validation_errors:
+                    for err in result["errors"]:
                         error(f"    {err}")
             else:
-                results.append({"environment": client_env, "valid": True})
                 if not output_json:
                     success(f"  {client_env}: valid")
+
+            results.append(result)
 
         return {"success": all_valid, "results": results}
 

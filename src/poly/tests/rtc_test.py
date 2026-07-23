@@ -3,7 +3,6 @@
 Copyright PolyAI Limited
 """
 
-import json
 import os
 import tempfile
 import unittest
@@ -31,7 +30,7 @@ class TestRTC(unittest.TestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_env_mapping_roundtrip(self):
-        """Verify AgentStudioProject.RTC_ENV_TO_DIR and {v: k for k, v in AgentStudioProject.RTC_ENV_TO_DIR.items()} are consistent."""
+        """Verify AgentStudioProject.RTC_ENV_TO_DIR and reverse are consistent."""
         for env, dir_name in AgentStudioProject.RTC_ENV_TO_DIR.items():
             self.assertEqual(
                 {v: k for k, v in AgentStudioProject.RTC_ENV_TO_DIR.items()}[dir_name], env
@@ -125,27 +124,17 @@ class TestRTC(unittest.TestCase):
 
     @patch("poly.cli_commands.rtc.load_project")
     def test_rtc_push_schema_and_variables(self, mock_load_project):
-        """Verify rtc push reads files and calls rtc_push_to_api."""
+        """Verify rtc push loads local files and calls rtc_push_to_api."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_project.get_rtc_last_updated.return_value = None
-        mock_load_project.return_value = mock_project
-
-        sandbox_dir = os.path.join(self.temp_dir, "real_time_configuration", "draft_and_sandbox")
-        os.makedirs(sandbox_dir)
-        mock_project._rtc_env_dir.return_value = sandbox_dir
-
         schema_obj = {"type": "object"}
         variables_obj = {"mock_api": False}
-
-        with open(os.path.join(sandbox_dir, "schema.json"), "w") as f:
-            json.dump(schema_obj, f)
-        with open(os.path.join(sandbox_dir, "data.json"), "w") as f:
-            json.dump(variables_obj, f)
-
+        mock_project.rtc_load_local.return_value = {
+            "schema": schema_obj,
+            "variables": variables_obj,
+        }
+        mock_project.check_rtc_drift.return_value = {"status": "no_metadata"}
         mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
+        mock_load_project.return_value = mock_project
 
         RTCCommand.rtc_push(self.temp_dir, env="sandbox", output_json=True)
 
@@ -158,14 +147,10 @@ class TestRTC(unittest.TestCase):
     def test_rtc_push_missing_schema_returns_error(self, mock_load_project):
         """Verify rtc push returns error if schema.json is missing."""
         mock_project = MagicMock()
-        mock_project.root_path = self.temp_dir
-        sandbox_dir = os.path.join(self.temp_dir, "real_time_configuration", "draft_and_sandbox")
-        os.makedirs(sandbox_dir)
-        mock_project._rtc_env_dir.return_value = sandbox_dir
+        mock_project.rtc_load_local.side_effect = FileNotFoundError(
+            "schema.json not found at /path/schema.json"
+        )
         mock_load_project.return_value = mock_project
-
-        with open(os.path.join(sandbox_dir, "data.json"), "w") as f:
-            json.dump({}, f)
 
         result = RTCCommand.rtc_push(self.temp_dir, env="sandbox", output_json=True)
         self.assertFalse(result["success"])
@@ -175,14 +160,10 @@ class TestRTC(unittest.TestCase):
     def test_rtc_push_missing_data_returns_error(self, mock_load_project):
         """Verify rtc push returns error if data.json is missing."""
         mock_project = MagicMock()
-        mock_project.root_path = self.temp_dir
-        sandbox_dir = os.path.join(self.temp_dir, "real_time_configuration", "draft_and_sandbox")
-        os.makedirs(sandbox_dir)
-        mock_project._rtc_env_dir.return_value = sandbox_dir
+        mock_project.rtc_load_local.side_effect = FileNotFoundError(
+            "data.json not found at /path/data.json"
+        )
         mock_load_project.return_value = mock_project
-
-        with open(os.path.join(sandbox_dir, "schema.json"), "w") as f:
-            json.dump({}, f)
 
         result = RTCCommand.rtc_push(self.temp_dir, env="sandbox", output_json=True)
         self.assertFalse(result["success"])
@@ -192,17 +173,9 @@ class TestRTC(unittest.TestCase):
     def test_rtc_push_live_without_force_json_returns_error(self, mock_load_project):
         """Verify pushing to live in JSON mode without --force returns error."""
         mock_project = MagicMock()
-        mock_project.root_path = self.temp_dir
-        mock_project.get_rtc_last_updated.return_value = None
-        live_dir = os.path.join(self.temp_dir, "real_time_configuration", "live")
-        os.makedirs(live_dir)
-        mock_project._rtc_env_dir.return_value = live_dir
+        mock_project.rtc_load_local.return_value = {"schema": {}, "variables": {}}
+        mock_project.check_rtc_drift.return_value = {"status": "no_metadata"}
         mock_load_project.return_value = mock_project
-
-        with open(os.path.join(live_dir, "schema.json"), "w") as f:
-            json.dump({}, f)
-        with open(os.path.join(live_dir, "data.json"), "w") as f:
-            json.dump({}, f)
 
         result = RTCCommand.rtc_push(self.temp_dir, env="live", force=False, output_json=True)
         self.assertFalse(result["success"])
@@ -212,19 +185,12 @@ class TestRTC(unittest.TestCase):
     def test_rtc_push_live_with_force_succeeds(self, mock_load_project):
         """Verify pushing to live with --force bypasses the safety gate."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
+        mock_project.rtc_load_local.return_value = {
+            "schema": {"type": "object"},
+            "variables": {"key": "val"},
+        }
         mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "live"}
-        live_dir = os.path.join(self.temp_dir, "real_time_configuration", "live")
-        os.makedirs(live_dir)
-        mock_project._rtc_env_dir.return_value = live_dir
         mock_load_project.return_value = mock_project
-
-        with open(os.path.join(live_dir, "schema.json"), "w") as f:
-            json.dump({"type": "object"}, f)
-        with open(os.path.join(live_dir, "data.json"), "w") as f:
-            json.dump({"key": "val"}, f)
 
         result = RTCCommand.rtc_push(self.temp_dir, env="live", force=True, output_json=True)
         self.assertTrue(result["success"])
@@ -235,20 +201,13 @@ class TestRTC(unittest.TestCase):
     def test_rtc_push_live_interactive_confirm(self, mock_load_project, mock_questionary):
         """Verify interactive live push proceeds when user confirms."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_project.get_rtc_last_updated.return_value = None
+        mock_project.rtc_load_local.return_value = {
+            "schema": {"type": "object"},
+            "variables": {"key": "val"},
+        }
+        mock_project.check_rtc_drift.return_value = {"status": "no_metadata"}
         mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "live"}
         mock_questionary.confirm.return_value.ask.return_value = True
-
-        live_dir = os.path.join(self.temp_dir, "real_time_configuration", "live")
-        os.makedirs(live_dir)
-        mock_project._rtc_env_dir.return_value = live_dir
-        with open(os.path.join(live_dir, "schema.json"), "w") as f:
-            json.dump({"type": "object"}, f)
-        with open(os.path.join(live_dir, "data.json"), "w") as f:
-            json.dump({"key": "val"}, f)
         mock_load_project.return_value = mock_project
 
         RTCCommand.rtc_push(self.temp_dir, env="live", force=False, output_json=False)
@@ -261,19 +220,12 @@ class TestRTC(unittest.TestCase):
     def test_rtc_push_live_interactive_decline(self, mock_load_project, mock_questionary):
         """Verify interactive live push is cancelled when user declines."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_project.get_rtc_last_updated.return_value = None
+        mock_project.rtc_load_local.return_value = {
+            "schema": {"type": "object"},
+            "variables": {"key": "val"},
+        }
+        mock_project.check_rtc_drift.return_value = {"status": "no_metadata"}
         mock_questionary.confirm.return_value.ask.return_value = False
-
-        live_dir = os.path.join(self.temp_dir, "real_time_configuration", "live")
-        os.makedirs(live_dir)
-        mock_project._rtc_env_dir.return_value = live_dir
-        with open(os.path.join(live_dir, "schema.json"), "w") as f:
-            json.dump({"type": "object"}, f)
-        with open(os.path.join(live_dir, "data.json"), "w") as f:
-            json.dump({"key": "val"}, f)
         mock_load_project.return_value = mock_project
 
         RTCCommand.rtc_push(self.temp_dir, env="live", force=False, output_json=False)
@@ -288,14 +240,6 @@ class TestRTCDriftProtection(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.temp_dir = tempfile.mkdtemp()
-        self.sandbox_dir = os.path.join(
-            self.temp_dir, "real_time_configuration", "draft_and_sandbox"
-        )
-        os.makedirs(self.sandbox_dir)
-        with open(os.path.join(self.sandbox_dir, "schema.json"), "w") as f:
-            json.dump({"type": "object"}, f)
-        with open(os.path.join(self.sandbox_dir, "data.json"), "w") as f:
-            json.dump({"key": "value"}, f)
 
     def tearDown(self):
         """Clean up temporary files."""
@@ -321,38 +265,41 @@ class TestRTCDriftProtection(unittest.TestCase):
         )
 
     @patch("poly.cli_commands.rtc.load_project")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
-    def test_push_detects_drift(self, mock_get_rtc, mock_load_project):
+    def test_push_detects_drift(self, mock_load_project):
         """Verify push refuses when remote lastUpdated differs from local."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_project._rtc_env_dir.return_value = self.sandbox_dir
-        mock_project.get_rtc_last_updated.return_value = "T1"
+        mock_project.rtc_load_local.return_value = {
+            "schema": {"type": "object"},
+            "variables": {"key": "value"},
+        }
+        mock_project.check_rtc_drift.return_value = {
+            "status": "drifted",
+            "remote_config": {"lastUpdated": "T2"},
+            "local_last_updated": "T1",
+            "remote_last_updated": "T2",
+        }
         mock_project.get_rtc_base.return_value = (None, None)
         mock_load_project.return_value = mock_project
-
-        mock_get_rtc.return_value = {"lastUpdated": "T2"}
 
         result = RTCCommand.rtc_push(self.temp_dir, env="sandbox")
         self.assertFalse(result["success"])
         self.assertIn("no base version", result["error"])
 
     @patch("poly.cli_commands.rtc.load_project")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
-    def test_push_allows_when_no_drift(self, mock_get_rtc, mock_load_project):
+    def test_push_allows_when_no_drift(self, mock_load_project):
         """Verify push proceeds when remote lastUpdated matches local."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_project._rtc_env_dir.return_value = self.sandbox_dir
-        mock_project.get_rtc_last_updated.return_value = "T1"
+        mock_project.rtc_load_local.return_value = {
+            "schema": {"type": "object"},
+            "variables": {"key": "value"},
+        }
+        mock_project.check_rtc_drift.return_value = {
+            "status": "in_sync",
+            "local_last_updated": "T1",
+            "remote_last_updated": "T1",
+        }
         mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
         mock_load_project.return_value = mock_project
-
-        mock_get_rtc.return_value = {"lastUpdated": "T1"}
 
         result = RTCCommand.rtc_push(self.temp_dir, env="sandbox")
         self.assertTrue(result["success"])
@@ -362,26 +309,27 @@ class TestRTCDriftProtection(unittest.TestCase):
     def test_push_force_bypasses_drift_check(self, mock_load_project):
         """Verify --force skips drift check entirely."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_project._rtc_env_dir.return_value = self.sandbox_dir
+        mock_project.rtc_load_local.return_value = {
+            "schema": {"type": "object"},
+            "variables": {"key": "value"},
+        }
         mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
         mock_load_project.return_value = mock_project
 
         result = RTCCommand.rtc_push(self.temp_dir, env="sandbox", force=True)
         self.assertTrue(result["success"])
         mock_project.rtc_push_to_api.assert_called_once()
+        mock_project.check_rtc_drift.assert_not_called()
 
     @patch("poly.cli_commands.rtc.load_project")
     def test_push_no_metadata_warns_and_proceeds(self, mock_load_project):
         """Verify push proceeds with warning when no metadata exists."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_project._rtc_env_dir.return_value = self.sandbox_dir
-        mock_project.get_rtc_last_updated.return_value = None
+        mock_project.rtc_load_local.return_value = {
+            "schema": {"type": "object"},
+            "variables": {"key": "value"},
+        }
+        mock_project.check_rtc_drift.return_value = {"status": "no_metadata"}
         mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
         mock_load_project.return_value = mock_project
 
@@ -390,19 +338,20 @@ class TestRTCDriftProtection(unittest.TestCase):
         mock_project.rtc_push_to_api.assert_called_once()
 
     @patch("poly.cli_commands.rtc.load_project")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
-    def test_push_updates_metadata_after_success(self, mock_get_rtc, mock_load_project):
+    def test_push_updates_metadata_after_success(self, mock_load_project):
         """Verify push calls rtc_push_to_api which handles metadata update."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_project._rtc_env_dir.return_value = self.sandbox_dir
-        mock_project.get_rtc_last_updated.return_value = "T1"
+        mock_project.rtc_load_local.return_value = {
+            "schema": {"type": "object"},
+            "variables": {"key": "value"},
+        }
+        mock_project.check_rtc_drift.return_value = {
+            "status": "in_sync",
+            "local_last_updated": "T1",
+            "remote_last_updated": "T1",
+        }
         mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
         mock_load_project.return_value = mock_project
-
-        mock_get_rtc.return_value = {"lastUpdated": "T1"}
 
         result = RTCCommand.rtc_push(self.temp_dir, env="sandbox")
         self.assertTrue(result["success"])
@@ -415,10 +364,6 @@ class TestRTCMerge(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures."""
         self.temp_dir = tempfile.mkdtemp()
-        self.sandbox_dir = os.path.join(
-            self.temp_dir, "real_time_configuration", "draft_and_sandbox"
-        )
-        os.makedirs(self.sandbox_dir)
 
     def tearDown(self):
         """Clean up temporary files."""
@@ -440,7 +385,6 @@ class TestRTCMerge(unittest.TestCase):
         RTCCommand.rtc_pull(self.temp_dir, env="sandbox")
 
         mock_project.rtc_pull_env.assert_called_once()
-        # set_rtc_base is called inside rtc_pull_env on the real project
 
     def test_merge_clean_non_overlapping_changes(self):
         """Verify clean merge when local and remote change different fields."""
@@ -511,29 +455,26 @@ class TestRTCMerge(unittest.TestCase):
         self.assertIsNone(result)
 
     @patch("poly.cli_commands.rtc.load_project")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
-    def test_push_drift_clean_merge_succeeds(self, mock_get_rtc, mock_load_project):
+    def test_push_drift_clean_merge_succeeds(self, mock_load_project):
         """Verify push with clean merge auto-resolves and pushes."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_project._rtc_env_dir.return_value = self.sandbox_dir
-        mock_project.get_rtc_last_updated.return_value = "T1"
+        mock_project.rtc_load_local.return_value = {
+            "schema": {"type": "object"},
+            "variables": {"a": 10, "b": 2},
+        }
+        mock_project.check_rtc_drift.return_value = {
+            "status": "drifted",
+            "remote_config": {
+                "lastUpdated": "T2",
+                "schema": {"type": "object"},
+                "variables": {"a": 1, "b": 20},
+            },
+            "local_last_updated": "T1",
+            "remote_last_updated": "T2",
+        }
         mock_project.get_rtc_base.return_value = ({"type": "object"}, {"a": 1, "b": 2})
         mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
         mock_load_project.return_value = mock_project
-
-        with open(os.path.join(self.sandbox_dir, "schema.json"), "w") as f:
-            json.dump({"type": "object"}, f)
-        with open(os.path.join(self.sandbox_dir, "data.json"), "w") as f:
-            json.dump({"a": 10, "b": 2}, f)
-
-        mock_get_rtc.return_value = {
-            "lastUpdated": "T2",
-            "schema": {"type": "object"},
-            "variables": {"a": 1, "b": 20},
-        }
 
         result = RTCCommand.rtc_push(self.temp_dir, env="sandbox")
         self.assertTrue(result["success"])
@@ -543,47 +484,41 @@ class TestRTCMerge(unittest.TestCase):
         self.assertEqual(call_kwargs["variables"]["b"], 20)
 
     @patch("poly.cli_commands.rtc.load_project")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
-    def test_push_drift_no_base_returns_error(self, mock_get_rtc, mock_load_project):
+    def test_push_drift_no_base_returns_error(self, mock_load_project):
         """Verify push fails gracefully when no base copies exist."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_project._rtc_env_dir.return_value = self.sandbox_dir
-        mock_project.get_rtc_last_updated.return_value = "T1"
+        mock_project.rtc_load_local.return_value = {
+            "schema": {"type": "object"},
+            "variables": {"a": 10},
+        }
+        mock_project.check_rtc_drift.return_value = {
+            "status": "drifted",
+            "remote_config": {"lastUpdated": "T2", "schema": {}, "variables": {}},
+            "local_last_updated": "T1",
+            "remote_last_updated": "T2",
+        }
         mock_project.get_rtc_base.return_value = (None, None)
         mock_load_project.return_value = mock_project
-
-        with open(os.path.join(self.sandbox_dir, "schema.json"), "w") as f:
-            json.dump({"type": "object"}, f)
-        with open(os.path.join(self.sandbox_dir, "data.json"), "w") as f:
-            json.dump({"a": 10}, f)
-
-        mock_get_rtc.return_value = {"lastUpdated": "T2", "schema": {}, "variables": {}}
 
         result = RTCCommand.rtc_push(self.temp_dir, env="sandbox")
         self.assertFalse(result["success"])
         self.assertIn("no base version", result["error"])
 
     @patch("poly.cli_commands.rtc.load_project")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
-    def test_push_drift_no_merge_flag_hard_fails(self, mock_get_rtc, mock_load_project):
+    def test_push_drift_no_merge_flag_hard_fails(self, mock_load_project):
         """Verify --no-merge disables merge and hard-fails on drift."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_project._rtc_env_dir.return_value = self.sandbox_dir
-        mock_project.get_rtc_last_updated.return_value = "T1"
+        mock_project.rtc_load_local.return_value = {
+            "schema": {"type": "object"},
+            "variables": {"a": 10},
+        }
+        mock_project.check_rtc_drift.return_value = {
+            "status": "drifted",
+            "remote_config": {"lastUpdated": "T2"},
+            "local_last_updated": "T1",
+            "remote_last_updated": "T2",
+        }
         mock_load_project.return_value = mock_project
-
-        with open(os.path.join(self.sandbox_dir, "schema.json"), "w") as f:
-            json.dump({"type": "object"}, f)
-        with open(os.path.join(self.sandbox_dir, "data.json"), "w") as f:
-            json.dump({"a": 10}, f)
-
-        mock_get_rtc.return_value = {"lastUpdated": "T2"}
 
         result = RTCCommand.rtc_push(self.temp_dir, env="sandbox", no_merge=True)
         self.assertFalse(result["success"])
@@ -722,194 +657,152 @@ class TestRTCEdit(unittest.TestCase):
 
     @patch("poly.cli_commands.rtc.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
-    def test_edit_happy_path(self, mock_patch_vars, mock_get_rtc, mock_load_project, mock_editor):
+    def test_edit_happy_path(self, mock_load_project, mock_editor):
         """Verify edit pulls, opens editor, and pushes data."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_project.rtc_metadata = None
-        mock_load_project.return_value = mock_project
-
-        config = {
+        mock_project.rtc_fetch_config.return_value = {
             "schema": {"type": "object"},
             "variables": {"flag": False},
             "lastUpdated": "T1",
         }
-        mock_get_rtc.return_value = config
+        mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
+        mock_load_project.return_value = mock_project
         mock_editor.return_value = '{\n  "flag": true\n}\n'
-        mock_patch_vars.return_value = {"lastUpdated": "T2"}
 
         RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
 
-        mock_patch_vars.assert_called_once()
-        pushed = mock_patch_vars.call_args[1]["variables"]
-        self.assertEqual(pushed["flag"], True)
+        mock_project.rtc_push_to_api.assert_called_once()
+        call_kwargs = mock_project.rtc_push_to_api.call_args[1]
+        self.assertEqual(call_kwargs["variables"]["flag"], True)
 
     @patch("poly.cli_commands.rtc.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.put_rtc_schema")
-    def test_edit_schema_flag(self, mock_put_schema, mock_get_rtc, mock_load_project, mock_editor):
+    def test_edit_schema_flag(self, mock_load_project, mock_editor):
         """Verify --schema edits and pushes schema instead of data."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_project.rtc_metadata = None
-        mock_load_project.return_value = mock_project
-
-        config = {
+        mock_project.rtc_fetch_config.return_value = {
             "schema": {"type": "object"},
             "variables": {"flag": False},
             "lastUpdated": "T1",
         }
-        mock_get_rtc.return_value = config
+        mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
+        mock_load_project.return_value = mock_project
         mock_editor.return_value = '{\n  "type": "object",\n  "title": "Config"\n}\n'
-        mock_put_schema.return_value = {"lastUpdated": "T2"}
 
         RTCCommand.rtc_edit(self.temp_dir, env="sandbox", edit_schema=True)
 
-        mock_put_schema.assert_called_once()
-        pushed = mock_put_schema.call_args[1]["schema"]
-        self.assertEqual(pushed["title"], "Config")
+        mock_project.rtc_push_to_api.assert_called_once()
+        call_kwargs = mock_project.rtc_push_to_api.call_args[1]
+        self.assertEqual(call_kwargs["schema"]["title"], "Config")
 
     @patch("poly.cli_commands.rtc.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
-    def test_edit_no_changes(self, mock_patch_vars, mock_get_rtc, mock_load_project, mock_editor):
+    def test_edit_no_changes(self, mock_load_project, mock_editor):
         """Verify no push when editor reports no changes."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_load_project.return_value = mock_project
-
-        mock_get_rtc.return_value = {
+        mock_project.rtc_fetch_config.return_value = {
             "schema": {},
             "variables": {"flag": False},
             "lastUpdated": "T1",
         }
+        mock_load_project.return_value = mock_project
         mock_editor.side_effect = ValueError("No changes")
 
         RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
 
-        mock_patch_vars.assert_not_called()
+        mock_project.rtc_push_to_api.assert_not_called()
 
     @patch("poly.cli_commands.rtc.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
-    def test_edit_invalid_json(self, mock_patch_vars, mock_get_rtc, mock_load_project, mock_editor):
+    def test_edit_invalid_json(self, mock_load_project, mock_editor):
         """Verify no push when editor returns invalid JSON."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_load_project.return_value = mock_project
-
-        mock_get_rtc.return_value = {
+        mock_project.rtc_fetch_config.return_value = {
             "schema": {},
             "variables": {"flag": False},
             "lastUpdated": "T1",
         }
+        mock_load_project.return_value = mock_project
         mock_editor.return_value = "not valid json {{"
 
-        with self.assertRaises(SystemExit):
-            RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
-
-        mock_patch_vars.assert_not_called()
+        result = RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
+        self.assertFalse(result["success"])
+        self.assertIn("Invalid JSON", result["error"])
+        mock_project.rtc_push_to_api.assert_not_called()
 
     @patch("poly.cli_commands.rtc.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
-    def test_edit_race_detected(
-        self, mock_patch_vars, mock_get_rtc, mock_load_project, mock_editor
-    ):
+    def test_edit_race_detected(self, mock_load_project, mock_editor):
         """Verify push aborted when remote changed during editing."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_load_project.return_value = mock_project
-
-        mock_get_rtc.side_effect = [
+        mock_project.rtc_fetch_config.side_effect = [
             {"schema": {}, "variables": {"flag": False}, "lastUpdated": "T1"},
             {"schema": {}, "variables": {"flag": False}, "lastUpdated": "T2"},
         ]
+        mock_load_project.return_value = mock_project
         mock_editor.return_value = '{"flag": true}'
 
-        with self.assertRaises(SystemExit):
-            RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
-
-        mock_patch_vars.assert_not_called()
+        result = RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
+        self.assertFalse(result["success"])
+        self.assertIn("modified while you were editing", result["error"])
+        mock_project.rtc_push_to_api.assert_not_called()
 
     @patch("poly.cli_commands.rtc.questionary")
     @patch("poly.cli_commands.rtc.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
-    def test_edit_live_declined(
-        self, mock_patch_vars, mock_get_rtc, mock_load_project, mock_editor, mock_questionary
-    ):
+    def test_edit_live_declined(self, mock_load_project, mock_editor, mock_questionary):
         """Verify live edit cancelled when user declines confirmation."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_load_project.return_value = mock_project
-        mock_questionary.confirm.return_value.ask.return_value = False
-
-        mock_get_rtc.return_value = {
+        mock_project.rtc_fetch_config.return_value = {
             "schema": {},
             "variables": {"flag": False},
             "lastUpdated": "T1",
         }
+        mock_load_project.return_value = mock_project
+        mock_questionary.confirm.return_value.ask.return_value = False
         mock_editor.return_value = '{"flag": true}'
 
         RTCCommand.rtc_edit(self.temp_dir, env="live")
 
-        mock_patch_vars.assert_not_called()
+        mock_project.rtc_push_to_api.assert_not_called()
 
     @patch("poly.cli_commands.rtc.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.patch_rtc_variables")
-    def test_edit_updates_local_files(
-        self, mock_patch_vars, mock_get_rtc, mock_load_project, mock_editor
-    ):
-        """Verify edit updates local data.json and calls set_rtc_base."""
+    def test_edit_updates_via_rtc_push_to_api(self, mock_load_project, mock_editor):
+        """Verify edit delegates push to project.rtc_push_to_api."""
         mock_project = MagicMock()
-        mock_project.region = "studio"
-        mock_project.project_id = "test-project"
-        mock_project.root_path = self.temp_dir
-        mock_project._rtc_env_dir.return_value = self.sandbox_dir
-        mock_load_project.return_value = mock_project
-
-        with open(os.path.join(self.sandbox_dir, "data.json"), "w") as f:
-            json.dump({"flag": False}, f)
-
-        mock_get_rtc.return_value = {
+        mock_project.rtc_fetch_config.return_value = {
             "schema": {},
             "variables": {"flag": False},
             "lastUpdated": "T1",
         }
+        mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
+        mock_load_project.return_value = mock_project
         mock_editor.return_value = '{\n  "flag": true\n}\n'
-        mock_patch_vars.return_value = {"lastUpdated": "T2"}
 
         RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
 
-        with open(os.path.join(self.sandbox_dir, "data.json"), "r") as f:
-            local = json.load(f)
-        self.assertTrue(local["flag"])
-
-        mock_project.set_rtc_base.assert_called_once()
-        call_kwargs = mock_project.set_rtc_base.call_args[1]
+        mock_project.rtc_push_to_api.assert_called_once()
+        call_kwargs = mock_project.rtc_push_to_api.call_args[1]
         self.assertTrue(call_kwargs["variables"]["flag"])
+
+    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.cli_commands.rtc.load_project")
+    def test_edit_validates_data_against_schema(self, mock_load_project, mock_editor):
+        """Verify edit validates edited data against schema before pushing."""
+        mock_project = MagicMock()
+        mock_project.rtc_fetch_config.return_value = {
+            "schema": {"type": "object", "properties": {"flag": {"type": "boolean"}}},
+            "variables": {"flag": True},
+            "lastUpdated": "T1",
+        }
+        mock_load_project.return_value = mock_project
+        mock_editor.return_value = '{"flag": "not_a_boolean"}'
+
+        result = RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
+        self.assertFalse(result["success"])
+        self.assertIn("validation failed", result["error"])
+        mock_project.rtc_push_to_api.assert_not_called()
 
 
 class TestRTCDiff(unittest.TestCase):
@@ -958,39 +851,32 @@ class TestRTCDiff(unittest.TestCase):
         self.assertEqual(result[0]["path"], "config.b")
 
     @patch("poly.cli_commands.rtc.load_project")
-    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
-    def test_rtc_diff_command(self, mock_get_rtc, mock_load_project):
-        """Verify rtc diff fetches remote and compares."""
-        temp_dir = tempfile.mkdtemp()
-        try:
-            mock_project = MagicMock()
-            mock_project.region = "studio"
-            mock_project.project_id = "test-project"
-            sandbox_dir = os.path.join(temp_dir, "real_time_configuration", "draft_and_sandbox")
-            os.makedirs(sandbox_dir)
-            mock_project._rtc_env_dir.return_value = sandbox_dir
-            mock_load_project.return_value = mock_project
+    def test_rtc_diff_command(self, mock_load_project):
+        """Verify rtc diff delegates to project.rtc_diff_env."""
+        mock_project = MagicMock()
+        mock_project.rtc_diff_env.return_value = {
+            "environment": "sandbox",
+            "schema": [],
+            "data": [{"path": "flag", "type": "changed", "local": True, "remote": False}],
+        }
+        mock_load_project.return_value = mock_project
 
-            with open(os.path.join(sandbox_dir, "schema.json"), "w") as f:
-                json.dump({"type": "object"}, f)
-            with open(os.path.join(sandbox_dir, "data.json"), "w") as f:
-                json.dump({"flag": True, "timeout": 60}, f)
+        result = RTCCommand.rtc_diff(self.temp_dir, env="sandbox", output_json=True)
+        self.assertTrue(result["success"])
+        self.assertEqual(len(result["diffs"]), 1)
+        data_changes = result["diffs"][0]["data"]
+        self.assertEqual(len(data_changes), 1)
+        self.assertEqual(data_changes[0]["path"], "flag")
 
-            mock_get_rtc.return_value = {
-                "schema": {"type": "object"},
-                "variables": {"flag": False, "timeout": 60},
-            }
+    def setUp(self):
+        """Set up test fixtures."""
+        self.temp_dir = tempfile.mkdtemp()
 
-            result = RTCCommand.rtc_diff(temp_dir, env="sandbox", output_json=True)
-            self.assertTrue(result["success"])
-            self.assertEqual(len(result["diffs"]), 1)
-            data_changes = result["diffs"][0]["data"]
-            self.assertEqual(len(data_changes), 1)
-            self.assertEqual(data_changes[0]["path"], "flag")
-        finally:
-            import shutil
+    def tearDown(self):
+        """Clean up temporary files."""
+        import shutil
 
-            shutil.rmtree(temp_dir, ignore_errors=True)
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
 
 
 class TestRTCValidation(unittest.TestCase):
@@ -1036,67 +922,35 @@ class TestRTCValidation(unittest.TestCase):
     @patch("poly.cli_commands.rtc.load_project")
     def test_push_with_invalid_data_fails(self, mock_load_project):
         """Verify push refuses when data doesn't match schema."""
-        temp_dir = tempfile.mkdtemp()
-        try:
-            mock_project = MagicMock()
-            mock_project.region = "studio"
-            mock_project.project_id = "test-project"
-            mock_project.root_path = temp_dir
-            mock_project.get_rtc_last_updated.return_value = None
-            sandbox_dir = os.path.join(temp_dir, "real_time_configuration", "draft_and_sandbox")
-            os.makedirs(sandbox_dir)
-            mock_project._rtc_env_dir.return_value = sandbox_dir
-            mock_load_project.return_value = mock_project
+        mock_project = MagicMock()
+        mock_project.rtc_load_local.return_value = {
+            "schema": {"type": "object", "properties": {"flag": {"type": "boolean"}}},
+            "variables": {"flag": "not_a_boolean"},
+        }
+        mock_project.check_rtc_drift.return_value = {"status": "no_metadata"}
+        mock_load_project.return_value = mock_project
 
-            schema = {"type": "object", "properties": {"flag": {"type": "boolean"}}}
-            data = {"flag": "not_a_boolean"}
-
-            with open(os.path.join(sandbox_dir, "schema.json"), "w") as f:
-                json.dump(schema, f)
-            with open(os.path.join(sandbox_dir, "data.json"), "w") as f:
-                json.dump(data, f)
-
-            result = RTCCommand.rtc_push(temp_dir, env="sandbox", output_json=True)
-            self.assertFalse(result["success"])
-            self.assertIn("validation failed", result["error"])
-        finally:
-            import shutil
-
-            shutil.rmtree(temp_dir, ignore_errors=True)
+        result = RTCCommand.rtc_push("/tmp/test", env="sandbox", output_json=True)
+        self.assertFalse(result["success"])
+        self.assertIn("validation failed", result["error"])
 
     @patch("poly.cli_commands.rtc.load_project")
     def test_push_with_skip_validation_bypasses(self, mock_load_project):
         """Verify --skip-validation allows push with invalid data."""
-        temp_dir = tempfile.mkdtemp()
-        try:
-            mock_project = MagicMock()
-            mock_project.region = "studio"
-            mock_project.project_id = "test-project"
-            mock_project.root_path = temp_dir
-            mock_project.get_rtc_last_updated.return_value = None
-            mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
-            sandbox_dir = os.path.join(temp_dir, "real_time_configuration", "draft_and_sandbox")
-            os.makedirs(sandbox_dir)
-            mock_project._rtc_env_dir.return_value = sandbox_dir
-            mock_load_project.return_value = mock_project
+        mock_project = MagicMock()
+        mock_project.rtc_load_local.return_value = {
+            "schema": {"type": "object", "properties": {"flag": {"type": "boolean"}}},
+            "variables": {"flag": "not_a_boolean"},
+        }
+        mock_project.check_rtc_drift.return_value = {"status": "no_metadata"}
+        mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
+        mock_load_project.return_value = mock_project
 
-            schema = {"type": "object", "properties": {"flag": {"type": "boolean"}}}
-            data = {"flag": "not_a_boolean"}
-
-            with open(os.path.join(sandbox_dir, "schema.json"), "w") as f:
-                json.dump(schema, f)
-            with open(os.path.join(sandbox_dir, "data.json"), "w") as f:
-                json.dump(data, f)
-
-            result = RTCCommand.rtc_push(
-                temp_dir, env="sandbox", output_json=True, skip_validation=True
-            )
-            self.assertTrue(result["success"])
-            mock_project.rtc_push_to_api.assert_called_once()
-        finally:
-            import shutil
-
-            shutil.rmtree(temp_dir, ignore_errors=True)
+        result = RTCCommand.rtc_push(
+            "/tmp/test", env="sandbox", output_json=True, skip_validation=True
+        )
+        self.assertTrue(result["success"])
+        mock_project.rtc_push_to_api.assert_called_once()
 
 
 if __name__ == "__main__":

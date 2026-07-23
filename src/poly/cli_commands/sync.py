@@ -317,9 +317,13 @@ class PushCommand(BaseCommand):
                     force=force,
                     output_json=(output_json or output_commands),
                 )
-                json_output["rtc"] = rtc_result
-                if rtc_result and not rtc_result.get("success"):
+                if rtc_result is None:
+                    json_output["rtc"] = {"success": False, "error": "RTC push cancelled."}
                     json_output["success"] = False
+                else:
+                    json_output["rtc"] = rtc_result
+                    if not rtc_result.get("success"):
+                        json_output["success"] = False
             json_print(json_output)
             if not json_output["success"]:
                 sys.exit(1)
