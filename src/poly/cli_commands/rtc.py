@@ -550,7 +550,12 @@ class RTCCommand(BaseCommand):
             }
 
         base_schema, base_variables = project.get_rtc_base(env)
-        if base_schema is None or base_variables is None:
+
+        needs_schema_base = local_schema is not None
+        needs_data_base = local_variables is not None
+        if (needs_schema_base and base_schema is None) or (
+            needs_data_base and base_variables is None
+        ):
             return {
                 "success": False,
                 "error": drift_msg + "Cannot merge: no base version available. "
@@ -565,7 +570,7 @@ class RTCCommand(BaseCommand):
             info("Remote has changed since your last pull. Attempting merge...")
 
         merged_schema = local_schema
-        if local_schema is not None:
+        if local_schema is not None and base_schema is not None:
             merged_schema = _merge_rtc_file(
                 "schema.json", base_schema, local_schema, remote_schema, output_json
             )
@@ -579,7 +584,7 @@ class RTCCommand(BaseCommand):
                 }
 
         merged_variables = local_variables
-        if local_variables is not None:
+        if local_variables is not None and base_variables is not None:
             merged_variables = _merge_rtc_file(
                 "data.json", base_variables, local_variables, remote_variables, output_json
             )

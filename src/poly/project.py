@@ -3017,12 +3017,7 @@ class AgentStudioProject:
         if not schema_only:
             utils.write_json_file(data_path, variables)
 
-        base_schema, base_data = self.get_rtc_base(env)
-        self.set_rtc_base(
-            env,
-            schema=schema if not data_only else base_schema,
-            variables=variables if not schema_only else base_data,
-        )
+        self.set_rtc_base(env, schema=schema, variables=variables)
         self.set_rtc_last_updated(env, config.get("lastUpdated"))
 
         return {

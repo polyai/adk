@@ -338,7 +338,8 @@ class PushCommand(BaseCommand):
 
             rtc_result = RTCCommand.rtc_push(base_path, env=rtc_env, force=force)
             if rtc_result is None:
-                pass
+                error("RTC push cancelled.")
+                sys.exit(1)
             elif rtc_result["success"]:
                 success(f"Pushed RTC to {rtc_env}")
             else:
