@@ -3104,3 +3104,22 @@ class AgentStudioProject:
             "schema_file": os.path.join(env_dir, "schema.json"),
             "data_file": os.path.join(env_dir, "data.json"),
         }
+
+    @staticmethod
+    def validate_rtc_data(schema: dict, data: dict) -> list[str]:
+        """Validate RTC data against its schema using JSON Schema Draft 7.
+
+        Returns:
+            List of validation error messages, empty if valid.
+        """
+        import jsonschema
+
+        try:
+            validator = jsonschema.Draft7Validator(schema)
+            errors = sorted(validator.iter_errors(data), key=lambda e: list(e.path))
+            return [
+                f"{'.'.join(str(p) for p in e.absolute_path) or '(root)'}: {e.message}"
+                for e in errors
+            ]
+        except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
+            return [f"Invalid schema: {e}"]

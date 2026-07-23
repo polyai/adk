@@ -14,6 +14,7 @@ from poly.cli_commands.rtc import (
     _merge_rtc_file,
 )
 from poly.project import AgentStudioProject
+from poly.utils import diff_dicts
 
 
 class TestRTC(unittest.TestCase):
@@ -909,6 +910,193 @@ class TestRTCEdit(unittest.TestCase):
         mock_project.set_rtc_base.assert_called_once()
         call_kwargs = mock_project.set_rtc_base.call_args[1]
         self.assertTrue(call_kwargs["variables"]["flag"])
+
+
+class TestRTCDiff(unittest.TestCase):
+    """Test suite for poly rtc diff command."""
+
+    def test_diff_no_changes(self):
+        """Verify diff returns empty when local and remote are identical."""
+        local = {"flag": True, "timeout": 30}
+        remote = {"flag": True, "timeout": 30}
+        result = diff_dicts(local, remote)
+        self.assertEqual(result, [])
+
+    def test_diff_changed_field(self):
+        """Verify diff detects a changed field."""
+        local = {"flag": True}
+        remote = {"flag": False}
+        result = diff_dicts(local, remote)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["path"], "flag")
+        self.assertEqual(result[0]["type"], "changed")
+
+    def test_diff_added_locally(self):
+        """Verify diff detects a field added locally."""
+        local = {"flag": True, "new_field": "hello"}
+        remote = {"flag": True}
+        result = diff_dicts(local, remote)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["path"], "new_field")
+        self.assertEqual(result[0]["type"], "added_locally")
+
+    def test_diff_only_remote(self):
+        """Verify diff detects a field only on remote."""
+        local = {"flag": True}
+        remote = {"flag": True, "remote_field": "hello"}
+        result = diff_dicts(local, remote)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["path"], "remote_field")
+        self.assertEqual(result[0]["type"], "only_remote")
+
+    def test_diff_nested(self):
+        """Verify diff recurses into nested dicts."""
+        local = {"config": {"a": 1, "b": 2}}
+        remote = {"config": {"a": 1, "b": 20}}
+        result = diff_dicts(local, remote)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0]["path"], "config.b")
+
+    @patch("poly.cli_commands.rtc.load_project")
+    @patch("poly.cli_commands.rtc.AgentStudioInterface.get_rtc_config")
+    def test_rtc_diff_command(self, mock_get_rtc, mock_load_project):
+        """Verify rtc diff fetches remote and compares."""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            mock_project = MagicMock()
+            mock_project.region = "studio"
+            mock_project.project_id = "test-project"
+            sandbox_dir = os.path.join(temp_dir, "real_time_configuration", "draft_and_sandbox")
+            os.makedirs(sandbox_dir)
+            mock_project._rtc_env_dir.return_value = sandbox_dir
+            mock_load_project.return_value = mock_project
+
+            with open(os.path.join(sandbox_dir, "schema.json"), "w") as f:
+                json.dump({"type": "object"}, f)
+            with open(os.path.join(sandbox_dir, "data.json"), "w") as f:
+                json.dump({"flag": True, "timeout": 60}, f)
+
+            mock_get_rtc.return_value = {
+                "schema": {"type": "object"},
+                "variables": {"flag": False, "timeout": 60},
+            }
+
+            result = RTCCommand.rtc_diff(temp_dir, env="sandbox", output_json=True)
+            self.assertTrue(result["success"])
+            self.assertEqual(len(result["diffs"]), 1)
+            data_changes = result["diffs"][0]["data"]
+            self.assertEqual(len(data_changes), 1)
+            self.assertEqual(data_changes[0]["path"], "flag")
+        finally:
+            import shutil
+
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+
+class TestRTCValidation(unittest.TestCase):
+    """Test suite for RTC schema validation."""
+
+    def test_valid_data(self):
+        """Verify valid data passes validation."""
+        schema = {
+            "type": "object",
+            "properties": {"flag": {"type": "boolean"}, "timeout": {"type": "integer"}},
+        }
+        data = {"flag": True, "timeout": 30}
+        errors = AgentStudioProject.validate_rtc_data(schema, data)
+        self.assertEqual(errors, [])
+
+    def test_invalid_type(self):
+        """Verify wrong type is caught."""
+        schema = {"type": "object", "properties": {"flag": {"type": "boolean"}}}
+        data = {"flag": "not_a_boolean"}
+        errors = AgentStudioProject.validate_rtc_data(schema, data)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("flag", errors[0])
+
+    def test_missing_required_field(self):
+        """Verify missing required field is caught."""
+        schema = {
+            "type": "object",
+            "properties": {"flag": {"type": "boolean"}},
+            "required": ["flag"],
+        }
+        data = {}
+        errors = AgentStudioProject.validate_rtc_data(schema, data)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("flag", errors[0])
+
+    def test_invalid_schema(self):
+        """Verify invalid schema returns error."""
+        schema = {"type": "not_a_real_type"}
+        data = {"flag": True}
+        errors = AgentStudioProject.validate_rtc_data(schema, data)
+        self.assertTrue(len(errors) > 0)
+
+    @patch("poly.cli_commands.rtc.load_project")
+    def test_push_with_invalid_data_fails(self, mock_load_project):
+        """Verify push refuses when data doesn't match schema."""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            mock_project = MagicMock()
+            mock_project.region = "studio"
+            mock_project.project_id = "test-project"
+            mock_project.root_path = temp_dir
+            mock_project.get_rtc_last_updated.return_value = None
+            sandbox_dir = os.path.join(temp_dir, "real_time_configuration", "draft_and_sandbox")
+            os.makedirs(sandbox_dir)
+            mock_project._rtc_env_dir.return_value = sandbox_dir
+            mock_load_project.return_value = mock_project
+
+            schema = {"type": "object", "properties": {"flag": {"type": "boolean"}}}
+            data = {"flag": "not_a_boolean"}
+
+            with open(os.path.join(sandbox_dir, "schema.json"), "w") as f:
+                json.dump(schema, f)
+            with open(os.path.join(sandbox_dir, "data.json"), "w") as f:
+                json.dump(data, f)
+
+            result = RTCCommand.rtc_push(temp_dir, env="sandbox", output_json=True)
+            self.assertFalse(result["success"])
+            self.assertIn("validation failed", result["error"])
+        finally:
+            import shutil
+
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    @patch("poly.cli_commands.rtc.load_project")
+    def test_push_with_skip_validation_bypasses(self, mock_load_project):
+        """Verify --skip-validation allows push with invalid data."""
+        temp_dir = tempfile.mkdtemp()
+        try:
+            mock_project = MagicMock()
+            mock_project.region = "studio"
+            mock_project.project_id = "test-project"
+            mock_project.root_path = temp_dir
+            mock_project.get_rtc_last_updated.return_value = None
+            mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
+            sandbox_dir = os.path.join(temp_dir, "real_time_configuration", "draft_and_sandbox")
+            os.makedirs(sandbox_dir)
+            mock_project._rtc_env_dir.return_value = sandbox_dir
+            mock_load_project.return_value = mock_project
+
+            schema = {"type": "object", "properties": {"flag": {"type": "boolean"}}}
+            data = {"flag": "not_a_boolean"}
+
+            with open(os.path.join(sandbox_dir, "schema.json"), "w") as f:
+                json.dump(schema, f)
+            with open(os.path.join(sandbox_dir, "data.json"), "w") as f:
+                json.dump(data, f)
+
+            result = RTCCommand.rtc_push(
+                temp_dir, env="sandbox", output_json=True, skip_validation=True
+            )
+            self.assertTrue(result["success"])
+            mock_project.rtc_push_to_api.assert_called_once()
+        finally:
+            import shutil
+
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

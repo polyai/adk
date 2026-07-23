@@ -19,7 +19,7 @@ from poly.output.console import edit_in_editor, error, info, success, warning
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
 from poly.resources.resource_utils import contains_merge_conflict
-from poly.utils import merge_rtc_dicts, write_json_file
+from poly.utils import diff_dicts, merge_rtc_dicts, write_json_file
 
 
 def _to_sorted_json(data: dict) -> str:
@@ -210,6 +210,11 @@ class RTCCommand(BaseCommand):
             action="store_true",
             help="Disable automatic merge on drift; fail with error instead.",
         )
+        rtc_push_parser.add_argument(
+            "--skip-validation",
+            action="store_true",
+            help="Skip schema validation before pushing.",
+        )
         rtc_push_mode = rtc_push_parser.add_mutually_exclusive_group()
         rtc_push_mode.add_argument(
             "--schema",
@@ -254,6 +259,46 @@ class RTCCommand(BaseCommand):
             help="Skip confirmation prompt for live environment.",
         )
 
+        rtc_diff_parser = rtc_subparsers.add_parser(
+            "diff",
+            parents=[parents.path, parents.json, parents.verbose, parents.debug],
+            help="Show differences between local and remote RTC config.",
+            description=(
+                "Compare local RTC files against the remote Agent Studio config.\n\n"
+                "Examples:\n"
+                "  poly rtc diff --env sandbox\n"
+                "  poly rtc diff --env all\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        rtc_diff_parser.add_argument(
+            "--env",
+            type=str,
+            default="all",
+            choices=["sandbox", "pre-release", "live", "all"],
+            help="Environment to diff. Defaults to all.",
+        )
+
+        rtc_validate_parser = rtc_subparsers.add_parser(
+            "validate",
+            parents=[parents.path, parents.json, parents.verbose, parents.debug],
+            help="Validate local RTC data against its schema.",
+            description=(
+                "Validate that local data.json conforms to its schema.json.\n\n"
+                "Examples:\n"
+                "  poly rtc validate --env sandbox\n"
+                "  poly rtc validate --env all\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        rtc_validate_parser.add_argument(
+            "--env",
+            type=str,
+            default="all",
+            choices=["sandbox", "pre-release", "live", "all"],
+            help="Environment to validate. Defaults to all.",
+        )
+
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to the matching RTC sub-handler."""
@@ -288,6 +333,7 @@ class RTCCommand(BaseCommand):
                 no_merge=getattr(args, "no_merge", False),
                 schema_only=schema_only,
                 data_only=data_only,
+                skip_validation=getattr(args, "skip_validation", False),
             )
             if result is None:
                 return
@@ -305,6 +351,22 @@ class RTCCommand(BaseCommand):
                 edit_schema=getattr(args, "schema", False),
                 force=getattr(args, "force", False),
             )
+        elif args.rtc_subcommand == "diff":
+            result = cls.rtc_diff(args.path, args.env, output_json=args.json)
+            if args.json:
+                json_print(result)
+            else:
+                if not result["success"]:
+                    error(result["error"])
+                    sys.exit(1)
+        elif args.rtc_subcommand == "validate":
+            result = cls.rtc_validate(args.path, args.env, output_json=args.json)
+            if args.json:
+                json_print(result)
+            else:
+                if not result["success"]:
+                    error(result["error"])
+                    sys.exit(1)
 
     @classmethod
     def rtc_pull(
@@ -350,6 +412,7 @@ class RTCCommand(BaseCommand):
         no_merge: bool = False,
         schema_only: bool = False,
         data_only: bool = False,
+        skip_validation: bool = False,
     ) -> Optional[dict]:
         """Push RTC from local files to Agent Studio.
 
@@ -379,6 +442,18 @@ class RTCCommand(BaseCommand):
                     variables = json.load(f)
         except json.JSONDecodeError as e:
             return {"success": False, "error": f"Invalid JSON in local RTC file: {e}"}
+
+        # Schema validation
+        if not skip_validation and schema is not None and variables is not None:
+            validation_errors = AgentStudioProject.validate_rtc_data(schema, variables)
+            if validation_errors:
+                err_lines = "\n  ".join(validation_errors)
+                return {
+                    "success": False,
+                    "error": f"RTC validation failed:\n  {err_lines}\n"
+                    "Use --skip-validation to bypass.",
+                    "validation_errors": validation_errors,
+                }
 
         # Drift protection
         if not force:
@@ -633,3 +708,177 @@ class RTCCommand(BaseCommand):
                 write_json_file(os.path.join(env_dir, "data.json"), edited)
 
         success(f"Edited and pushed RTC {filename} to {env}")
+
+    @classmethod
+    def rtc_diff(
+        cls,
+        base_path: str,
+        env: str = "all",
+        output_json: bool = False,
+    ) -> dict:
+        """Show differences between local and remote RTC config.
+
+        Returns:
+            dict with success status and per-environment diffs.
+        """
+        project = load_project(base_path, output_json=output_json)
+
+        if env == "all":
+            envs_to_diff = list(AgentStudioProject.RTC_ENV_TO_DIR.keys())
+        else:
+            envs_to_diff = [env]
+
+        diffs = []
+        try:
+            for client_env in envs_to_diff:
+                env_dir = project._rtc_env_dir(client_env)
+                schema_path = os.path.join(env_dir, "schema.json")
+                data_path = os.path.join(env_dir, "data.json")
+
+                if not os.path.exists(schema_path) and not os.path.exists(data_path):
+                    if not output_json:
+                        info(f"  {client_env}: no local files — run poly rtc pull first")
+                    diffs.append({"environment": client_env, "status": "no_local_files"})
+                    continue
+
+                remote_config = AgentStudioInterface.get_rtc_config(
+                    region=project.region,
+                    project_id=project.project_id,
+                    client_env=client_env,
+                )
+
+                env_diff = {"environment": client_env, "schema": [], "data": []}
+
+                if os.path.exists(schema_path):
+                    with open(schema_path, "r", encoding="utf-8") as f:
+                        local_schema = json.load(f)
+                    remote_schema = remote_config.get("schema", {})
+                    schema_changes = diff_dicts(local_schema, remote_schema)
+                    env_diff["schema"] = schema_changes
+
+                if os.path.exists(data_path):
+                    with open(data_path, "r", encoding="utf-8") as f:
+                        local_data = json.load(f)
+                    remote_data = remote_config.get("variables", {})
+                    data_changes = diff_dicts(local_data, remote_data)
+                    env_diff["data"] = data_changes
+
+                if not output_json:
+                    _print_env_diff(client_env, env_diff)
+
+                diffs.append(env_diff)
+
+            return {"success": True, "diffs": diffs}
+
+        except requests.HTTPError as e:
+            return {"success": False, "error": str(e)}
+
+    @classmethod
+    def rtc_validate(
+        cls,
+        base_path: str,
+        env: str = "all",
+        output_json: bool = False,
+    ) -> dict:
+        """Validate local RTC data against its schema.
+
+        Returns:
+            dict with success status and per-environment validation results.
+        """
+        project = load_project(base_path, output_json=output_json)
+
+        if env == "all":
+            envs_to_validate = list(AgentStudioProject.RTC_ENV_TO_DIR.keys())
+        else:
+            envs_to_validate = [env]
+
+        results = []
+        all_valid = True
+
+        for client_env in envs_to_validate:
+            env_dir = project._rtc_env_dir(client_env)
+            schema_path = os.path.join(env_dir, "schema.json")
+            data_path = os.path.join(env_dir, "data.json")
+
+            if not os.path.exists(schema_path) or not os.path.exists(data_path):
+                if not output_json:
+                    info(f"  {client_env}: skipped — missing local files")
+                results.append({"environment": client_env, "status": "skipped"})
+                continue
+
+            try:
+                with open(schema_path, "r", encoding="utf-8") as f:
+                    schema = json.load(f)
+                with open(data_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except json.JSONDecodeError as e:
+                all_valid = False
+                results.append(
+                    {
+                        "environment": client_env,
+                        "valid": False,
+                        "errors": [f"Invalid JSON: {e}"],
+                    }
+                )
+                if not output_json:
+                    error(f"  {client_env}: invalid JSON — {e}")
+                continue
+
+            validation_errors = AgentStudioProject.validate_rtc_data(schema, data)
+            if validation_errors:
+                all_valid = False
+                results.append(
+                    {
+                        "environment": client_env,
+                        "valid": False,
+                        "errors": validation_errors,
+                    }
+                )
+                if not output_json:
+                    error(f"  {client_env}: validation failed")
+                    for err in validation_errors:
+                        error(f"    {err}")
+            else:
+                results.append({"environment": client_env, "valid": True})
+                if not output_json:
+                    success(f"  {client_env}: valid")
+
+        return {"success": all_valid, "results": results}
+
+
+def _print_env_diff(env: str, env_diff: dict) -> None:
+    """Print a human-readable diff for one environment."""
+    schema_changes = env_diff.get("schema", [])
+    data_changes = env_diff.get("data", [])
+
+    if not schema_changes and not data_changes:
+        success(f"  {env}: no changes")
+        return
+
+    info(f"  === {env} ===")
+    if schema_changes:
+        info("  schema.json:")
+        for c in schema_changes:
+            _print_change(c)
+    else:
+        info("  schema.json: (no changes)")
+
+    if data_changes:
+        info("  data.json:")
+        for c in data_changes:
+            _print_change(c)
+    else:
+        info("  data.json: (no changes)")
+
+
+def _print_change(change: dict) -> None:
+    """Print a single field-level change."""
+    path = change["path"]
+    change_type = change["type"]
+
+    if change_type == "added_locally":
+        info(f"    + {path}: {json.dumps(change['local'])}")
+    elif change_type == "only_remote":
+        info(f"    - {path}: {json.dumps(change['remote'])} (only on remote)")
+    elif change_type == "changed":
+        info(f"    ~ {path}: {json.dumps(change['remote'])} → {json.dumps(change['local'])}")

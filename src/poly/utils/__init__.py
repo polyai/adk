@@ -21,7 +21,7 @@ from poly.utils.decorators import (
     func_latency_control,
     func_parameter,
 )
-from poly.utils.json_io import read_json_file, write_json_file
+from poly.utils.json_io import diff_dicts, read_json_file, write_json_file
 from poly.utils.merge import merge_rtc_dicts, merge_strings
 from poly.utils.stub_gen import create_import_file_contents, save_imports
 from poly.utils.variable_references import (
@@ -34,6 +34,7 @@ __all__ = [
     "FUNCTION_TYPE_TO_VAR_REF_FIELD",
     "any_credentials_exist",
     "compute_variable_references",
+    "diff_dicts",
     "create_command_webchat_channel_update_status",
     "create_import_file_contents",
     "export_decorators",
