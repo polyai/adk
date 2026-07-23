@@ -3116,7 +3116,10 @@ class AgentStudioProject:
 
         try:
             validator = jsonschema.Draft7Validator(schema)
-            errors = sorted(validator.iter_errors(data), key=lambda e: list(e.path))
+            errors = sorted(
+                validator.iter_errors(data),
+                key=lambda e: [str(p) for p in e.absolute_path],
+            )
             return [
                 f"{'.'.join(str(p) for p in e.absolute_path) or '(root)'}: {e.message}"
                 for e in errors
