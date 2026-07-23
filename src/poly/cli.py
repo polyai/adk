@@ -18,6 +18,7 @@ from poly.cli_commands.branch import BranchCommand
 from poly.cli_commands.chat import ChatCommand
 from poly.cli_commands.conversations import ConversationsCommand
 from poly.cli_commands.deployments import DeploymentsCommand
+from poly.cli_commands.metrics import MetricsCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand, StudioCommand
 from poly.cli_commands.review import ReviewCommand
 from poly.cli_commands.sync import (
@@ -51,6 +52,7 @@ COMMANDS = [
     ReviewCommand,
     BranchCommand,
     DeploymentsCommand,
+    MetricsCommand,
     ConversationsCommand,
     TestingCommand,
     ChatCommand,
