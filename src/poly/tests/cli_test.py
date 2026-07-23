@@ -2834,6 +2834,48 @@ class BranchHistoryTest(unittest.TestCase):
         mock_warning.assert_called_once()
         self.assertIn("does not exist", mock_warning.call_args[0][0])
 
+    @patch("poly.output.console.print_branch_history")
+    @patch("poly.output.console.plain")
+    def test_limit_truncates_history(self, mock_plain, mock_print_history):
+        """--limit truncates history to the given number of entries."""
+        self.proj.get_branch_history.return_value = [
+            {"mergedAt": f"2026-07-{i:02d}"} for i in range(1, 21)
+        ]
+
+        BranchCommand.branch_history(TEST_DIR, branch_name="feature-a", limit=5)
+
+        mock_print_history.assert_called_once()
+        printed = mock_print_history.call_args[0][0]
+        self.assertEqual(len(printed), 5)
+
+    @patch("poly.output.console.print_branch_history")
+    @patch("poly.output.console.plain")
+    def test_default_limit_is_10(self, mock_plain, mock_print_history):
+        """Without --limit, history is capped at 10 entries."""
+        self.proj.get_branch_history.return_value = [
+            {"mergedAt": f"2026-07-{i:02d}"} for i in range(1, 21)
+        ]
+
+        BranchCommand.branch_history(TEST_DIR, branch_name="feature-a")
+
+        mock_print_history.assert_called_once()
+        printed = mock_print_history.call_args[0][0]
+        self.assertEqual(len(printed), 10)
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_limit_applies_to_json_output(self, mock_json):
+        """--limit also truncates history in JSON mode."""
+        self.proj.get_branch_history.return_value = [
+            {"mergedAt": f"2026-07-{i:02d}"} for i in range(1, 21)
+        ]
+
+        BranchCommand.branch_history(
+            TEST_DIR, branch_name="feature-a", output_json=True, limit=3
+        )
+
+        payload = mock_json.call_args[0][0]
+        self.assertEqual(len(payload["history"]), 3)
+
 
 class BranchRenameTest(unittest.TestCase):
     """Tests for BranchCommand.branch_rename CLI handler."""

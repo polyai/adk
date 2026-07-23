@@ -301,6 +301,12 @@ class BranchCommand(BaseCommand):
             default=None,
             help="Name of the branch to show history for. Defaults to the current branch.",
         )
+        branch_history_parser.add_argument(
+            "--limit",
+            type=int,
+            default=10,
+            help="Number of history entries to show. Defaults to 10.",
+        )
 
         branch_history_parser.set_defaults(branch_subcommand="history")
 
@@ -377,7 +383,7 @@ class BranchCommand(BaseCommand):
             cls.branch_status(args.path, args.branch_name, args.json)
 
         elif args.branch_subcommand == "history":
-            cls.branch_history(args.path, args.branch_name, args.json)
+            cls.branch_history(args.path, args.branch_name, args.json, args.limit)
 
         elif args.branch_subcommand == "rename":
             cls.branch_rename(args.path, args.new_branch_name, args.json)
@@ -1213,7 +1219,11 @@ class BranchCommand(BaseCommand):
 
     @classmethod
     def branch_history(
-        cls, base_path: str, branch_name: Optional[str] = None, output_json: bool = False
+        cls,
+        base_path: str,
+        branch_name: Optional[str] = None,
+        output_json: bool = False,
+        limit: int = 10,
     ) -> None:
         """Show the history of a branch in the Agent Studio project."""
         from poly.output.console import plain, print_branch_history, warning
@@ -1241,6 +1251,7 @@ class BranchCommand(BaseCommand):
             return
 
         history = project.get_branch_history(branch_id)
+        history = history[:limit]
 
         if output_json:
             json_print({"branch_name": branch_name, "branch_id": branch_id, "history": history})
