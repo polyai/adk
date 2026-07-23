@@ -1,15 +1,23 @@
-"""Metrics command family: create, list, and delete GitHub Gist metricss.
+"""Metrics command family: list, add, edit, and import custom metrics.
 
 Copyright PolyAI Limited
 """
 
+import logging
+import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 
 from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.shared import load_project
+from poly.output.json_output import json_print
+
+logger = logging.getLogger(__name__)
+
+VALID_METRIC_TYPES = ["string", "int", "bool", "float"]
 
 
 class MetricsCommand(BaseCommand):
-    """Manage Metrics in the Agent Studio project"""
+    """Manage custom metrics in the Agent Studio project."""
 
     command = "metrics"
 
@@ -18,15 +26,14 @@ class MetricsCommand(BaseCommand):
         """Register the ``metrics`` subcommand tree."""
         metrics_parser = subparsers.add_parser(
             "metrics",
-            parents=[parents.verbose, parents.json],
-            help="Manages Metrics in the Agent Studio project.",
+            parents=[parents.verbose],
+            help="Manage custom metrics in the Agent Studio project.",
             description=(
-                "Manage metrics in the Agent Studio project.\n\n"
+                "Manage custom metrics in the Agent Studio project.\n\n"
                 "Examples:\n"
                 "  poly metrics list\n"
-                "  poly metrics add --name SCORE --type int --description 'CSAT Score' \n"
-                "  poly metrics edit CSAT_OFFERED --active true \n"
-                "  poly metrics edit CARRIER_ID --description 'Carrier handling the shipment' \n"
+                "  poly metrics add --name SCORE --type int --description 'CSAT Score'\n"
+                "  poly metrics edit CSAT_OFFERED --no-active\n"
                 "  poly metrics import metrics.yaml"
             ),
             formatter_class=RawTextHelpFormatter,
@@ -34,73 +41,419 @@ class MetricsCommand(BaseCommand):
 
         metrics_subparsers = metrics_parser.add_subparsers(dest="metrics_subcommand", required=True)
 
-        metrics_list_parser = metrics_subparsers.add_parser(
+        # ── list ────────────────────────────────────────────────────────
+        metrics_subparsers.add_parser(
             "list",
-            parents=[parents.json],
-            help="Lists all metrics in the project.",
+            parents=[parents.path, parents.json],
+            help="List all custom metrics in the project.",
+            description="List all custom metrics for the current project.",
+            formatter_class=RawTextHelpFormatter,
         )
-        metrics_list_parser.set_defaults(metrics_subcommand="list")
 
-        metrics_add_parser = metrics_subparsers.add_parser(
+        # ── add ─────────────────────────────────────────────────────────
+        add_parser = metrics_subparsers.add_parser(
             "add",
-            parents=[parents.json],
-            help="Add new metric to project.",
+            parents=[parents.path, parents.json],
+            help="Create a new custom metric.",
+            description=(
+                "Create a new custom metric. Required fields prompt\n"
+                "interactively when omitted.\n\n"
+                "Examples:\n"
+                "  poly metrics add --name CALL_DURATION --type int"
+                " --description 'Duration in seconds'\n"
+                "  poly metrics add  # interactive mode\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
         )
-
-        metrics_add_parser.add_argument(
+        add_parser.add_argument(
             "--name",
             type=str,
-            help="Name of metric to add.",
+            help="Metric name (max 50 characters).",
         )
-
-        metrics_add_parser.add_argument(
+        add_parser.add_argument(
             "--type",
             type=str,
-            choices=["str", "bool", "int"],
-            help="Name of metric to add.",
+            dest="metric_type",
+            choices=VALID_METRIC_TYPES,
+            help="Metric value type: string, int, bool, or float.",
         )
-
-        metrics_add_parser.add_argument(
+        add_parser.add_argument(
             "--description",
             type=str,
-            help="Description of metric to add.",
+            default=None,
+            help="Optional description for the metric.",
+        )
+        add_parser.add_argument(
+            "--api",
+            action="store_true",
+            default=False,
+            help="Mark as an API metric.",
+        )
+        add_parser.add_argument(
+            "--expected-values",
+            type=str,
+            nargs="+",
+            default=None,
+            help="Expected values (only valid for string type).",
         )
 
-        metrics_add_parser.set_defaults(metrics_subcommand="add")
+        # ── edit ────────────────────────────────────────────────────────
+        edit_parser = metrics_subparsers.add_parser(
+            "edit",
+            parents=[parents.path, parents.json],
+            help="Update an existing custom metric.",
+            description=(
+                "Update an existing custom metric. At least one flag required.\n\n"
+                "Examples:\n"
+                "  poly metrics edit CARRIER_ID --description 'Carrier handling the shipment'\n"
+                "  poly metrics edit CSAT_OFFERED --no-active\n"
+                "  poly metrics edit SCORE --api\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        edit_parser.add_argument(
+            "name",
+            type=str,
+            help="Name of the metric to edit.",
+        )
+        edit_parser.add_argument(
+            "--description",
+            type=str,
+            default=None,
+            help="New description for the metric.",
+        )
+        edit_parser.add_argument(
+            "--api",
+            action="store_true",
+            default=None,
+            help="Mark as an API metric.",
+        )
+        edit_parser.add_argument(
+            "--no-api",
+            action="store_true",
+            default=None,
+            help="Unmark as an API metric.",
+        )
+        edit_parser.add_argument(
+            "--active",
+            action="store_true",
+            default=None,
+            help="Activate the metric.",
+        )
+        edit_parser.add_argument(
+            "--no-active",
+            action="store_true",
+            default=None,
+            help="Deactivate the metric.",
+        )
+        edit_parser.add_argument(
+            "--expected-values",
+            type=str,
+            nargs="+",
+            default=None,
+            help="Expected values (only valid for string type).",
+        )
+
+        # ── import ──────────────────────────────────────────────────────
+        import_parser = metrics_subparsers.add_parser(
+            "import",
+            parents=[parents.path, parents.json],
+            help="Bulk-import metrics from a YAML file.",
+            description=(
+                "Bulk-import metrics from a YAML file. Creates metrics that\n"
+                "don't already exist and skips those that do. Never deletes.\n\n"
+                "Examples:\n"
+                "  poly metrics import metrics.yaml\n"
+                "  poly metrics import metrics.yaml --dry-run\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        import_parser.add_argument(
+            "file",
+            type=str,
+            help="Path to the YAML file to import.",
+        )
+        import_parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Preview what would be created/skipped without making changes.",
+        )
 
     @classmethod
     def run(cls, args: Namespace) -> None:
-        """Manage Metrics in the Agent Studio project."""
+        """Dispatch to the matching metrics sub-handler."""
         if args.metrics_subcommand == "list":
-            cls.list_gists(output_json=args.json)
-        elif args.metrics_subcommand == "create":
-            cls.metrics(
-                base_path=args.path,
-                files=args.files,
-                version_hash=args.hash,
-                before=args.before,
-                after=args.after,
+            cls.metrics_list(args.path, output_json=args.json)
+        elif args.metrics_subcommand == "add":
+            cls.metrics_add(
+                args.path,
+                name=args.name,
+                metric_type=args.metric_type,
+                description=args.description,
+                api=args.api,
+                expected_values=args.expected_values,
+                output_json=args.json,
+            )
+        elif args.metrics_subcommand == "edit":
+            cls.metrics_edit(
+                args.path,
+                name=args.name,
+                description=args.description,
+                api=args.api,
+                no_api=args.no_api,
+                active=args.active,
+                no_active=args.no_active,
+                expected_values=args.expected_values,
+                output_json=args.json,
+            )
+        elif args.metrics_subcommand == "import":
+            cls.metrics_import(
+                args.path,
+                file_path=args.file,
+                dry_run=args.dry_run,
                 output_json=args.json,
             )
 
+    # ── sub-handlers ────────────────────────────────────────────────
+
     @classmethod
-    def metrics(
+    def metrics_list(cls, base_path: str, output_json: bool = False) -> None:
+        """List all custom metrics for the project."""
+        from poly.handlers.platform_api import PlatformAPIHandler
+        from poly.output.console import print_metrics
+
+        project = load_project(base_path, output_json=output_json)
+        metrics_dict = PlatformAPIHandler.export_custom_metrics(
+            project.region, project.account_id, project.project_id
+        )
+
+        # Export returns {name: {type, description, ...}} — flatten to list
+        metrics = []
+        for name, defn in metrics_dict.items():
+            metrics.append({"name": name, **(defn if isinstance(defn, dict) else {})})
+
+        if output_json:
+            json_print(metrics)
+        else:
+            print_metrics(metrics)
+
+    @classmethod
+    def metrics_add(
         cls,
+        base_path: str,
+        name: str | None = None,
+        metric_type: str | None = None,
+        description: str | None = None,
+        api: bool = False,
+        expected_values: list[str] | None = None,
+        output_json: bool = False,
     ) -> None:
-        """Create a GitHub gist for metricsing changes, similar to a pull request."""
+        """Create a new custom metric."""
+        from poly.handlers.platform_api import PlatformAPIHandler
+        from poly.output.console import error, success
+
+        project = load_project(base_path, output_json=output_json)
+
+        if name is None:
+            if output_json:
+                json_print({"success": False, "error": "--name is required when using --json."})
+                sys.exit(1)
+            name = input("Metric name: ").strip()
+            if not name:
+                error("Metric name is required.")
+                sys.exit(1)
+
+        if metric_type is None:
+            if output_json:
+                json_print({"success": False, "error": "--type is required when using --json."})
+                sys.exit(1)
+            metric_type = input(f"Type ({'/'.join(VALID_METRIC_TYPES)}): ").strip()
+            if metric_type not in VALID_METRIC_TYPES:
+                error(
+                    f"Invalid type '{metric_type}'. Must be one of: {', '.join(VALID_METRIC_TYPES)}"
+                )
+                sys.exit(1)
+
+        if description is None and not output_json:
+            description = input("Description (optional): ").strip() or None
+
+        if api is False and not output_json:
+            api_input = input("API metric? (y/N): ").strip().lower()
+            api = api_input in ("y", "yes")
+
+        data: dict = {"name": name, "type": metric_type}
+        if description:
+            data["description"] = description
+        if api:
+            data["api"] = True
+        if expected_values:
+            data["expected_values"] = expected_values
+
+        result = PlatformAPIHandler.create_custom_metric(
+            project.region, project.account_id, project.project_id, data
+        )
+
+        if output_json:
+            json_print({"success": True, "metric": result})
+        else:
+            success(f"Created metric {name} ({metric_type})")
 
     @classmethod
-    def metrics_list():
-        pass
+    def metrics_edit(
+        cls,
+        base_path: str,
+        name: str,
+        description: str | None = None,
+        api: bool | None = None,
+        no_api: bool | None = None,
+        active: bool | None = None,
+        no_active: bool | None = None,
+        expected_values: list[str] | None = None,
+        output_json: bool = False,
+    ) -> None:
+        """Update an existing custom metric."""
+        from poly.handlers.platform_api import PlatformAPIHandler
+        from poly.output.console import error, success
+
+        project = load_project(base_path, output_json=output_json)
+
+        data: dict = {}
+        if description is not None:
+            data["description"] = description
+        if api:
+            data["api"] = True
+        if no_api:
+            data["api"] = False
+        if active:
+            data["active"] = True
+        if no_active:
+            data["active"] = False
+        if expected_values is not None:
+            data["expected_values"] = expected_values
+
+        if not data:
+            msg = "At least one flag is required (--description, --api, --active, etc.)."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        result = PlatformAPIHandler.update_custom_metric(
+            project.region, project.account_id, project.project_id, name, data
+        )
+
+        if output_json:
+            json_print({"success": True, "metric": result})
+        else:
+            if data.get("active") is False:
+                success(f"Deactivated metric {name}")
+            else:
+                success(f"Updated metric {name}")
 
     @classmethod
-    def metrics_add():
-        pass
+    def metrics_import(
+        cls,
+        base_path: str,
+        file_path: str,
+        dry_run: bool = False,
+        output_json: bool = False,
+    ) -> None:
+        """Bulk-import metrics from a YAML file."""
+        import os
 
-    @classmethod
-    def metrics_edit():
-        pass
+        from poly.handlers.platform_api import PlatformAPIHandler
+        from poly.output.console import error, plain, success, warning
 
-    @classmethod
-    def metrics_import():
-        pass
+        project = load_project(base_path, output_json=output_json)
+
+        if not os.path.exists(file_path):
+            msg = f"File not found: {file_path}"
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        with open(file_path) as f:
+            yaml_content = f.read()
+
+        # Parse local YAML to get metric names for diffing
+        from ruamel.yaml import YAML, YAMLError
+
+        try:
+            ry = YAML()
+            local_metrics = ry.load(yaml_content) or {}
+        except YAMLError as e:
+            msg = f"Invalid YAML: {e}"
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
+        local_names = set(local_metrics.keys())
+
+        # Fetch current remote metrics for the no-delete warning
+        remote_metrics = PlatformAPIHandler.export_custom_metrics(
+            project.region, project.account_id, project.project_id
+        )
+        remote_names = set(remote_metrics.keys())
+        missing_from_file = remote_names - local_names
+
+        if dry_run:
+            would_create = local_names - remote_names
+            would_skip = local_names & remote_names
+
+            result = {
+                "dry_run": True,
+                "would_create": sorted(would_create),
+                "would_skip": sorted(would_skip),
+                "remote_only": sorted(missing_from_file),
+            }
+
+            if output_json:
+                json_print(result)
+            else:
+                plain("[dim]Dry run — no changes will be made.[/dim]")
+                if would_create:
+                    plain(f"Would create: {', '.join(sorted(would_create))}")
+                if would_skip:
+                    plain(f"Would skip (already exist): {', '.join(sorted(would_skip))}")
+                if missing_from_file:
+                    warning(
+                        f"Metrics on remote but not in file (will NOT be deleted):"
+                        f" {', '.join(sorted(missing_from_file))}"
+                    )
+            return
+
+        # Warn about metrics not in the file
+        if missing_from_file and not output_json:
+            warning(
+                f"Metrics on remote but not in file (not deleted):"
+                f" {', '.join(sorted(missing_from_file))}"
+            )
+
+        import_result = PlatformAPIHandler.import_custom_metrics(
+            project.region,
+            project.account_id,
+            project.project_id,
+            yaml_content,
+            dry_run=False,
+        )
+
+        if output_json:
+            json_print({"success": True, **import_result})
+        else:
+            metadata = import_result.get("metadata", {})
+            created = metadata.get("created", [])
+            ignored = metadata.get("ignored", [])
+
+            if created:
+                plain(f"Created: {', '.join(created)}")
+            if ignored:
+                plain(f"Skipped (already exist): {', '.join(ignored)}")
+
+            created_count = len(created)
+            skipped_count = len(ignored)
+            success(f"Imported {created_count} metrics ({skipped_count} skipped)")
