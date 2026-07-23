@@ -3114,6 +3114,9 @@ class AgentStudioProject:
         """
         import jsonschema
 
+        if not schema:
+            return []
+
         try:
             validator = jsonschema.Draft7Validator(schema)
             errors = sorted(

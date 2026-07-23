@@ -29,6 +29,8 @@ def diff_dicts(local: dict, remote: dict, prefix: str = "") -> list[dict]:
     Recurses into nested dicts. Each difference is a dict with 'path', 'type',
     and the relevant values.
     """
+    local = local or {}
+    remote = remote or {}
     changes = []
     all_keys = sorted(set(local) | set(remote))
 
