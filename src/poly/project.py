@@ -102,6 +102,7 @@ class AgentStudioProject:
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
+    rtc_metadata: Optional[dict[str, dict]] = None
 
     # Store resources that were not loaded from the status file
     # So they aren't considered locally deleted when pushing/pulling
@@ -218,6 +219,7 @@ class AgentStudioProject:
             account_name=config_dict.get("account_name") or status_dict.get("account_name"),
             _not_loaded_resources=not_loaded_resources,
             _migration_flags=migration_flags,
+            rtc_metadata=status_dict.get("rtc_metadata"),
         )
 
     def to_dict(self) -> dict:
@@ -240,6 +242,7 @@ class AgentStudioProject:
             "migration_flags": [flag.value for flag in self._migration_flags]
             if self._migration_flags
             else [],
+            "rtc_metadata": self.rtc_metadata or {},
         }
 
     @classmethod
@@ -265,6 +268,7 @@ class AgentStudioProject:
             account_name=data.get("account_name"),
             _migration_flags=migration_flags,
             _not_loaded_resources=not_loaded_resources,
+            rtc_metadata=data.get("rtc_metadata"),
         )
 
     @staticmethod
@@ -3055,3 +3059,381 @@ class AgentStudioProject:
             ab_test_id=ab_test_id,
             traffic_percentage=traffic_percentage,
         )
+
+    # ── RTC (Real-Time Configuration) ──
+
+    RTC_ENV_TO_DIR = {
+        "sandbox": "draft_and_sandbox",
+        "pre-release": "pre_release",
+        "live": "live",
+    }
+
+    def get_rtc_last_updated(self, env: str) -> Optional[str]:
+        """Get the stored lastUpdated for an RTC environment."""
+        if not self.rtc_metadata:
+            return None
+        env_meta = self.rtc_metadata.get(env)
+        if not env_meta:
+            return None
+        return env_meta.get("last_updated")
+
+    def set_rtc_last_updated(self, env: str, last_updated: Optional[str]) -> None:
+        """Set the lastUpdated for an RTC environment and save."""
+        self._update_rtc_metadata(env, last_updated=last_updated)
+
+    def get_rtc_base(self, env: str) -> tuple[Optional[dict], Optional[dict]]:
+        """Get the base copies of schema and data for an environment.
+
+        Returns:
+            (base_schema, base_data) or (None, None) if not stored.
+        """
+        if not self.rtc_metadata:
+            return None, None
+        env_meta = self.rtc_metadata.get(env)
+        if not env_meta:
+            return None, None
+        return env_meta.get("base_schema"), env_meta.get("base_data")
+
+    def set_rtc_base(
+        self,
+        env: str,
+        schema: Optional[dict] = None,
+        variables: Optional[dict] = None,
+    ) -> None:
+        """Set the base copies for an RTC environment.
+
+        Only updates the fields that are provided (not None).
+        """
+        self._update_rtc_metadata(env, schema=schema, variables=variables)
+
+    def _update_rtc_metadata(
+        self,
+        env: str,
+        last_updated: Optional[str] = None,
+        schema: Optional[dict] = None,
+        variables: Optional[dict] = None,
+    ) -> None:
+        """Update RTC metadata for an environment in a single write."""
+        if self.rtc_metadata is None:
+            self.rtc_metadata = {}
+        if env not in self.rtc_metadata:
+            self.rtc_metadata[env] = {}
+        if last_updated is not None:
+            self.rtc_metadata[env]["last_updated"] = last_updated
+        if schema is not None:
+            self.rtc_metadata[env]["base_schema"] = schema
+        if variables is not None:
+            self.rtc_metadata[env]["base_data"] = variables
+        self.save_config()
+
+    def _rtc_env_dir(self, env: str) -> str:
+        """Get the local directory path for an RTC environment."""
+        dir_name = self.RTC_ENV_TO_DIR[env]
+        return os.path.join(self.root_path, "real_time_configuration", dir_name)
+
+    def rtc_fetch_config(self, env: str) -> dict:
+        """Fetch RTC config for an environment from the API.
+
+        Args:
+            env: The environment (sandbox, pre-release, live).
+
+        Returns:
+            dict: The RTC config with schema, variables, clientEnv, lastUpdated.
+        """
+        return AgentStudioInterface.get_rtc_config(
+            region=self.region,
+            project_id=self.project_id,
+            client_env=env,
+        )
+
+    def rtc_load_local(
+        self,
+        env: str,
+        schema_only: bool = False,
+        data_only: bool = False,
+    ) -> dict:
+        """Load local RTC files for an environment.
+
+        Args:
+            env: The environment to load.
+            schema_only: If True, only load schema.
+            data_only: If True, only load data.
+
+        Returns:
+            dict with 'schema' and 'variables' keys (None if not loaded).
+
+        Raises:
+            FileNotFoundError: If required files are missing.
+            ValueError: If JSON is invalid.
+        """
+        env_dir = self._rtc_env_dir(env)
+        schema_path = os.path.join(env_dir, "schema.json")
+        data_path = os.path.join(env_dir, "data.json")
+
+        schema = None
+        variables = None
+
+        if not data_only:
+            if not os.path.exists(schema_path):
+                raise FileNotFoundError(f"schema.json not found at {schema_path}")
+            try:
+                with open(schema_path, "r", encoding="utf-8") as f:
+                    schema = json.load(f)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in {schema_path}: {e}") from e
+
+        if not schema_only:
+            if not os.path.exists(data_path):
+                raise FileNotFoundError(f"data.json not found at {data_path}")
+            try:
+                with open(data_path, "r", encoding="utf-8") as f:
+                    variables = json.load(f)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in {data_path}: {e}") from e
+
+        return {"schema": schema, "variables": variables}
+
+    def check_rtc_drift(self, env: str) -> dict:
+        """Check for drift between local and remote RTC config.
+
+        Args:
+            env: The environment to check.
+
+        Returns:
+            dict with:
+                - status: "no_metadata" | "in_sync" | "drifted"
+                - remote_config: dict (only when drifted)
+                - local_last_updated: str (when metadata exists)
+                - remote_last_updated: str (when metadata exists)
+        """
+        local_last_updated = self.get_rtc_last_updated(env)
+        if local_last_updated is None:
+            return {"status": "no_metadata"}
+
+        remote_config = self.rtc_fetch_config(env)
+        remote_last_updated = remote_config.get("lastUpdated")
+
+        if remote_last_updated == local_last_updated:
+            return {
+                "status": "in_sync",
+                "local_last_updated": local_last_updated,
+                "remote_last_updated": remote_last_updated,
+            }
+
+        return {
+            "status": "drifted",
+            "remote_config": remote_config,
+            "local_last_updated": local_last_updated,
+            "remote_last_updated": remote_last_updated,
+        }
+
+    def rtc_pull_env(
+        self,
+        env: str,
+        schema_only: bool = False,
+        data_only: bool = False,
+    ) -> dict:
+        """Pull RTC config for a single environment from the API and write to disk.
+
+        Args:
+            env: The environment to pull (sandbox, pre-release, live).
+            schema_only: If True, only pull schema.
+            data_only: If True, only pull data.
+
+        Returns:
+            dict with environment, schema_file, data_file paths.
+        """
+        config = self.rtc_fetch_config(env)
+
+        env_dir = self._rtc_env_dir(env)
+        os.makedirs(env_dir, exist_ok=True)
+
+        schema = config.get("schema", {})
+        variables = config.get("variables", {})
+
+        schema_path = os.path.join(env_dir, "schema.json")
+        data_path = os.path.join(env_dir, "data.json")
+
+        if not data_only:
+            utils.write_json_file(schema_path, schema)
+        if not schema_only:
+            utils.write_json_file(data_path, variables)
+
+        self._update_rtc_metadata(
+            env,
+            last_updated=config.get("lastUpdated"),
+            schema=schema,
+            variables=variables,
+        )
+
+        result = {"environment": env}
+        if not data_only:
+            result["schema_file"] = schema_path
+        if not schema_only:
+            result["data_file"] = data_path
+        return result
+
+    def rtc_push_to_api(
+        self,
+        env: str,
+        schema: Optional[dict] = None,
+        variables: Optional[dict] = None,
+        schema_only: bool = False,
+        data_only: bool = False,
+    ) -> dict:
+        """Push RTC config to the API and update local state.
+
+        Args:
+            env: The environment to push to.
+            schema: Schema dict to push (None to skip).
+            variables: Variables dict to push (None to skip).
+            schema_only: If True, only push schema.
+            data_only: If True, only push data.
+
+        Returns:
+            dict with success status.
+        """
+        import requests
+
+        last_response = None
+        if schema is not None and not data_only:
+            try:
+                last_response = AgentStudioInterface.put_rtc_schema(
+                    region=self.region,
+                    project_id=self.project_id,
+                    client_env=env,
+                    schema=schema,
+                )
+            except requests.HTTPError as e:
+                return {"success": False, "error": str(e), "step": "schema"}
+
+        if variables is not None and not schema_only:
+            try:
+                last_response = AgentStudioInterface.patch_rtc_variables(
+                    region=self.region,
+                    project_id=self.project_id,
+                    client_env=env,
+                    variables=variables,
+                )
+            except requests.HTTPError as e:
+                if last_response and last_response.get("lastUpdated"):
+                    self.set_rtc_last_updated(env, last_response["lastUpdated"])
+                return {
+                    "success": False,
+                    "error": f"Schema pushed but variables failed: {e}",
+                    "step": "variables",
+                }
+
+        base_schema, base_data = self.get_rtc_base(env)
+        self._update_rtc_metadata(
+            env,
+            last_updated=last_response.get("lastUpdated") if last_response else None,
+            schema=schema if schema is not None else base_schema,
+            variables=variables if variables is not None else base_data,
+        )
+
+        env_dir = self._rtc_env_dir(env)
+        os.makedirs(env_dir, exist_ok=True)
+        if schema is not None:
+            utils.write_json_file(os.path.join(env_dir, "schema.json"), schema)
+        if variables is not None:
+            utils.write_json_file(os.path.join(env_dir, "data.json"), variables)
+
+        return {
+            "success": True,
+            "environment": env,
+            "schema_file": os.path.join(env_dir, "schema.json"),
+            "data_file": os.path.join(env_dir, "data.json"),
+        }
+
+    def rtc_diff_env(self, env: str) -> dict:
+        """Compare local RTC files against remote for one environment.
+
+        Args:
+            env: The environment to diff.
+
+        Returns:
+            dict with environment, schema changes, data changes.
+        """
+        env_dir = self._rtc_env_dir(env)
+        schema_path = os.path.join(env_dir, "schema.json")
+        data_path = os.path.join(env_dir, "data.json")
+
+        if not os.path.exists(schema_path) and not os.path.exists(data_path):
+            return {"environment": env, "status": "no_local_files"}
+
+        remote_config = self.rtc_fetch_config(env)
+        env_diff: dict = {"environment": env, "schema": [], "data": []}
+
+        if os.path.exists(schema_path):
+            with open(schema_path, "r", encoding="utf-8") as f:
+                local_schema = json.load(f)
+            remote_schema = remote_config.get("schema", {})
+            env_diff["schema"] = utils.diff_dicts(local_schema, remote_schema)
+
+        if os.path.exists(data_path):
+            with open(data_path, "r", encoding="utf-8") as f:
+                local_data = json.load(f)
+            remote_data = remote_config.get("variables", {})
+            env_diff["data"] = utils.diff_dicts(local_data, remote_data)
+
+        return env_diff
+
+    def rtc_validate_env(self, env: str) -> dict:
+        """Validate local RTC data against its schema for one environment.
+
+        Args:
+            env: The environment to validate.
+
+        Returns:
+            dict with environment, valid status, and any errors.
+        """
+        env_dir = self._rtc_env_dir(env)
+        schema_path = os.path.join(env_dir, "schema.json")
+        data_path = os.path.join(env_dir, "data.json")
+
+        if not os.path.exists(schema_path) or not os.path.exists(data_path):
+            return {"environment": env, "status": "skipped"}
+
+        try:
+            with open(schema_path, "r", encoding="utf-8") as f:
+                schema = json.load(f)
+            with open(data_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except json.JSONDecodeError as e:
+            return {"environment": env, "valid": False, "errors": [f"Invalid JSON: {e}"]}
+
+        validation_errors = self.validate_rtc_data(schema, data)
+        if validation_errors:
+            return {"environment": env, "valid": False, "errors": validation_errors}
+        return {"environment": env, "valid": True}
+
+    @staticmethod
+    def validate_rtc_data(schema: dict, data: dict) -> list[str]:
+        """Validate RTC data against its schema using JSON Schema Draft 7.
+
+        Returns:
+            List of validation error messages, empty if valid.
+        """
+        import jsonschema
+
+        if not schema:
+            return []
+
+        try:
+            jsonschema.Draft7Validator.check_schema(schema)
+        except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
+            return [f"Invalid schema: {e}"]
+
+        try:
+            validator = jsonschema.Draft7Validator(schema)
+            errors = sorted(
+                validator.iter_errors(data),
+                key=lambda e: [str(p) for p in e.absolute_path],
+            )
+            return [
+                f"{'.'.join(str(p) for p in e.absolute_path) or '(root)'}: {e.message}"
+                for e in errors
+            ]
+        except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
+            return [f"Invalid schema: {e}"]

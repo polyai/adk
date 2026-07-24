@@ -1116,3 +1116,77 @@ class AgentStudioInterface:
             dict: The created test run response.
         """
         return PlatformAPIHandler.trigger_test_run(region, project_id, test_case_ids, branch_id)
+
+    @staticmethod
+    def list_rtc_configs(
+        region: str,
+        project_id: str,
+    ) -> dict:
+        """List all RTC config pages for a project.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+
+        Returns:
+            dict: The API response with all RTC configs.
+        """
+        return PlatformAPIHandler.list_rtc_configs(region, project_id)
+
+    @staticmethod
+    def get_rtc_config(
+        region: str,
+        project_id: str,
+        client_env: str,
+    ) -> dict:
+        """Get RTC config for a specific environment.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            client_env: The environment (sandbox, pre-release, live).
+
+        Returns:
+            dict: The RTC config with schema, variables, clientEnv, lastUpdated.
+        """
+        return PlatformAPIHandler.get_rtc_config(region, project_id, client_env)
+
+    @staticmethod
+    def put_rtc_schema(
+        region: str,
+        project_id: str,
+        client_env: str,
+        schema: dict,
+    ) -> dict:
+        """Update the RTC schema for an environment.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            client_env: The environment (sandbox, pre-release, live).
+            schema: The JSON Schema Draft 7 object.
+
+        Returns:
+            dict: The updated RTC config.
+        """
+        return PlatformAPIHandler.put_rtc_schema(region, project_id, client_env, schema)
+
+    @staticmethod
+    def patch_rtc_variables(
+        region: str,
+        project_id: str,
+        client_env: str,
+        variables: dict,
+    ) -> dict:
+        """Update the RTC variables (data) for an environment.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            client_env: The environment (sandbox, pre-release, live).
+            variables: The config variables object.
+
+        Returns:
+            dict: The updated RTC config.
+        """
+        return PlatformAPIHandler.patch_rtc_variables(region, project_id, client_env, variables)

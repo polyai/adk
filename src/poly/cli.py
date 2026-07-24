@@ -20,6 +20,7 @@ from poly.cli_commands.conversations import ConversationsCommand
 from poly.cli_commands.deployments import DeploymentsCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand, StudioCommand
 from poly.cli_commands.review import ReviewCommand
+from poly.cli_commands.rtc import RTCCommand
 from poly.cli_commands.sync import (
     DiffCommand,
     FormatCommand,
@@ -53,6 +54,7 @@ COMMANDS = [
     DeploymentsCommand,
     ConversationsCommand,
     TestingCommand,
+    RTCCommand,
     ChatCommand,
     DocsCommand,
     CompletionCommand,
