@@ -3,7 +3,6 @@
 Copyright PolyAI Limited
 """
 
-import logging
 import os
 import re
 import sys
@@ -15,8 +14,6 @@ from poly.cli_commands.shared import load_project, parse_from_projection_json
 from poly.handlers.interface import REGIONS, AgentStudioInterface
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
-
-logger = logging.getLogger(__name__)
 
 
 class ProjectCommand(BaseCommand):
@@ -402,7 +399,7 @@ class ProjectCommand(BaseCommand):
                 project_path = os.path.join(base_path, account_id, project_id)
                 TemplateCommand.offer_template_on_create(project_path, region)
             except Exception:
-                logger.debug("Template offering skipped", exc_info=True)
+                pass
 
     @classmethod
     def list_projects(
