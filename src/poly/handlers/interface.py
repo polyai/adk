@@ -562,6 +562,27 @@ class AgentStudioInterface:
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
+    def sync_branch(
+        self, conflict_resolutions: Optional[list[dict[str, Any]]] = None
+    ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
+        """Sync the current branch with it's parent.
+
+        Args:
+            conflict_resolutions (list[dict[str, Any]]): A list of conflict resolutions. Each resolution should have:
+                - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
+                - strategy: Resolution strategy - "ours", "theirs", or "base"
+                - value: Optional custom value (only used with custom strategy)
+
+        Returns:
+            success (bool): True if the sync was successful, False otherwise
+            list[dict[str, str]]: A list of conflict information if the merge failed, empty list if successful
+            list[dict[str, str]]: A list of error information if the merge failed, empty list if successful
+        """
+        try:
+            return self.sync_client.sync_branch(conflict_resolutions)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
     def delete_branch(self, branch_id: str) -> bool:
         """Delete a branch in the project.
 

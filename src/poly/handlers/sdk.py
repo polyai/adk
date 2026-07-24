@@ -151,6 +151,10 @@ class SourcererSDK:
         """Get the branch merge endpoint URL"""
         return f"{self.base_url}/accounts/{self.account_id}/projects/{self.project_id}/branches/{self.branch_id}/merge"
 
+    def _get_branch_sync_url(self) -> str:
+        """Get the branch merge endpoint URL"""
+        return f"{self.base_url}/accounts/{self.account_id}/projects/{self.project_id}/branches/{self.branch_id}/sync"
+
     def _initialize_branch(self) -> str:
         """Initialize branch_id by fetching existing branches or creating a new one"""
         try:
@@ -241,9 +245,9 @@ class SourcererSDK:
         deployment_message: str = "",
         conflict_resolutions: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
-        """Merge the current branch into the main branch
+        """Merge the current branch into the parent branch
 
-        This method merges changes from the current branch into the main branch.
+        This method merges changes from the current branch into it's parent branch.
         If conflicts are detected, they will be returned in the response for manual resolution.
         Once conflicts are resolved, call this method again with the conflict_resolutions parameter.
 
@@ -309,6 +313,108 @@ class SourcererSDK:
             logger.debug(f"Merge payload: {payload}")
 
             response = self.session.post(self._get_branch_merge_url(), json=payload)
+
+            # Handle conflict response (400 status with conflicts data)
+            if response.status_code == 400:
+                try:
+                    response_data = response.json()
+                    # Check if this is a conflict response
+                    if "conflicts" in response_data or "hasConflicts" in response_data:
+                        return response_data
+                    # Otherwise, it's a different error
+                    error_msg = f"API Error 400: {response_data}"
+                    raise SourcererAPIError(error_msg)
+                except (ValueError, KeyError):
+                    error_msg = f"API Error 400: {response.text}"
+                    raise SourcererAPIError(error_msg)
+
+            response.raise_for_status()
+
+            response_data = response.json()
+            logger.info(f"Branch merged successfully, sequence: {response_data.get('sequence')}")
+
+            return response_data
+
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
+                except (ValueError, KeyError):
+                    error_msg = f"API request failed: {e}"
+            else:
+                error_msg = f"Request failed: {e}"
+            raise SourcererAPIError(error_msg) from e
+
+    def sync_branch(
+        self,
+        conflict_resolutions: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
+        """Merge the parent branch into the current branch
+
+        This method merges changes from the current branch's parent into the current branch.
+        If conflicts are detected, they will be returned in the response for manual resolution.
+        Once conflicts are resolved, call this method again with the conflict_resolutions parameter.
+
+        Args:
+            conflict_resolutions: Optional list of conflict resolutions. Each resolution should have:
+                - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
+                - strategy: Resolution strategy - "ours", "theirs", or "base"
+                - value: Optional custom value (only used with custom strategy)
+
+        Returns:
+            Dictionary containing:
+            - If successful:
+                - sequence: The new sequence number after merge (as string)
+                - message: Success message
+                - testRunIds: List of test run IDs that were triggered
+            - If conflicts detected:
+                - hasConflicts: True
+                - conflicts: List of conflict objects, each containing:
+                    - path: Path to the conflicted field
+                    - baseValue: Original value from base
+                    - oursValue: Value from main branch
+                    - theirsValue: Value from the branch being merged
+                    - type: Type of conflict ("add", "modify", or "delete")
+
+        Raises:
+            SourcererAPIError: If the API request fails or sequence mismatch occurs
+
+        Example:
+            # Simple merge without conflicts
+            result = sdk.merge_branch()
+            if "hasConflicts" in result and result["hasConflicts"]:
+                print("Conflicts detected:", result["conflicts"])
+            else:
+                print("Merge successful, sequence:", result["sequence"])
+
+            # Merge with conflict resolution
+            resolutions = [
+                {
+                    "path": ["users", "1", "name"],
+                    "strategy": "ours",
+                },
+                {
+                    "path": ["settings", "theme"],
+                    "strategy": "theirs",
+                }
+            ]
+            result = sdk.merge_branch(
+                conflict_resolutions=resolutions
+            )
+        """
+        try:
+            payload = {
+                "expectedBranchSequence": self.get_last_known_sequence() or 0,
+            }
+
+            if conflict_resolutions is not None:
+                payload["conflictResolutions"] = conflict_resolutions
+
+            logger.info(f"Sync branch {self.branch_id} with parent")
+            logger.debug(f"Sync payload: {payload}")
+
+            response = self.session.post(self._get_branch_sync_url(), json=payload)
 
             # Handle conflict response (400 status with conflicts data)
             if response.status_code == 400:

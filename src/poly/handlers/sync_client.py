@@ -329,6 +329,49 @@ class SyncClientHandler:
         logger.info(f"Successfully merged branch '{self.sdk.branch_id}' into 'main'")
         return True, [], []
 
+    def sync_branch(
+        self, conflict_resolutions: Optional[list[dict[str, Any]]] = None
+    ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
+        """Merge the parent branch into the current branch.
+
+        Args:
+            conflict_resolutions (list[dict[str, Any]]): A list of conflict resolutions. Each resolution should have:
+                - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
+                - strategy: Resolution strategy - "ours", "theirs", or "base"
+                - value: Optional custom value (only used with custom strategy)
+
+        Returns:
+            success (bool): True if the sync was successful, False otherwise
+            list[dict[str, str]]: A list of conflict information if the merge failed, empty list if successful
+            list[dict[str, str]]: A list of error information if the merge failed, empty list if successful
+        """
+        self.assert_branch_exists()
+
+        if self.sdk.branch_id == "main":
+            logger.error("Cannot sync 'main' branch into")
+            return False, [], []
+
+        logger.info(f"Merging parent into '{self.sdk.branch_id}'")
+
+        try:
+            result = self.sdk.sync_branch(
+                conflict_resolutions=conflict_resolutions,
+            )
+        except SourcererAPIError as e:
+            logger.error(f"Failed to sync branch '{self.sdk.branch_id}': {e}")
+            return False, [], []
+
+        if result.get("hasConflicts", False) or result.get("errors", []):
+            logger.info(
+                f"Failed to sync branch '{self.sdk.branch_id}' to {len(result.get('conflicts', []))} conflicts and {len(result.get('errors', []))} errors"
+            )
+            conflicts = result.get("conflicts", [])
+            errors = result.get("errors", [])
+            return False, conflicts, errors
+
+        logger.info(f"Successfully synced branch '{self.sdk.branch_id}'")
+        return True, [], []
+
     def get_branch_chat_info(self, branch_id: str) -> dict[str, Any]:
         """Get deployment info needed to start a draft chat on a branch."""
         self.assert_branch_exists()

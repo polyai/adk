@@ -113,6 +113,7 @@ class BranchCommand(BaseCommand):
         )
         branch_subparsers = branches_parser.add_subparsers(dest="branch_subcommand", required=True)
 
+        # -- list --
         branch_list_parser = branch_subparsers.add_parser(
             "list",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -125,6 +126,7 @@ class BranchCommand(BaseCommand):
         )
         branch_list_parser.set_defaults(branch_subcommand="list")
 
+        # -- create --
         branch_create_parser = branch_subparsers.add_parser(
             "create",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -150,6 +152,7 @@ class BranchCommand(BaseCommand):
         )
         branch_create_parser.set_defaults(branch_subcommand="create")
 
+        # -- switch --
         branch_switch_parser = branch_subparsers.add_parser(
             "switch",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -184,6 +187,7 @@ class BranchCommand(BaseCommand):
         )
         branch_switch_parser.set_defaults(branch_subcommand="switch")
 
+        # -- current --
         branch_current_parser = branch_subparsers.add_parser(
             "current",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -191,6 +195,7 @@ class BranchCommand(BaseCommand):
         )
         branch_current_parser.set_defaults(branch_subcommand="current")
 
+        # -- delete --
         branch_delete_parser = branch_subparsers.add_parser(
             "delete",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -204,6 +209,7 @@ class BranchCommand(BaseCommand):
         ).completer = cls._branch_name_completer
         branch_delete_parser.set_defaults(branch_subcommand="delete")
 
+        # -- merge --
         branch_merge_parser = branch_subparsers.add_parser(
             "merge",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -235,6 +241,83 @@ class BranchCommand(BaseCommand):
         )
         branch_merge_parser.set_defaults(branch_subcommand="merge")
 
+        branch_merge_parser = branch_subparsers.add_parser(
+            "sync",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Sync branch with parent",
+        )
+        branch_merge_parser.add_argument(
+            "--interactive",
+            "-i",
+            action="store_true",
+            help="Enable interactive mode for resolving any merge conflicts. Set $EDITOR or $VISUAL to your preferred editor for editing merge conflict values if needed.",
+        )
+        branch_merge_parser.add_argument(
+            "--resolutions",
+            type=str,
+            default=None,
+            help=(
+                "Conflict resolutions as a JSON file path, inline JSON string, or '-' for stdin. "
+                "JSON should be an array of objects, each representing a conflict resolution:\n"
+                '- path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])\n'
+                '- strategy: Resolution strategy - "ours", "theirs", or "base"\n'
+                '- value: Optional custom value (use "theirs" strategy)'
+            ),
+        )
+        branch_merge_parser.set_defaults(branch_subcommand="sync")
+
+        # -- history --
+        branch_history_parser = branch_subparsers.add_parser(
+            "history",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Show the history of a branch.",
+        )
+
+        branch_history_parser.add_argument(
+            "--branch-name",
+            "-b",
+            type=str,
+            default=None,
+            help="Name of the branch to show history for. Defaults to the current branch.",
+        )
+        branch_history_parser.add_argument(
+            "--limit",
+            type=int,
+            default=10,
+            help="Number of history entries to show. Defaults to 10.",
+        )
+
+        branch_history_parser.set_defaults(branch_subcommand="history")
+
+        # -- rename --
+        branch_rename_parser = branch_subparsers.add_parser(
+            "rename",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Rename a current branch.",
+        )
+        branch_rename_parser.add_argument(
+            "new_branch_name",
+            type=str,
+            nargs="?",
+            default=None,
+            help="New name for the current branch.",
+        )
+        branch_rename_parser.set_defaults(branch_subcommand="rename")
+
+        # -- restore --
+        branch_restore_parser = branch_subparsers.add_parser(
+            "restore",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Restore a soft-deleted branch from the archive.",
+        )
+        branch_restore_parser.add_argument(
+            "branch_name",
+            type=str,
+            nargs="?",
+            default=None,
+            help="Name of the archived branch to restore.",
+        )
+        branch_restore_parser.set_defaults(branch_subcommand="restore")
         # ── diff ──
         branch_diff_parser = branch_subparsers.add_parser(
             "diff",
@@ -372,6 +455,18 @@ class BranchCommand(BaseCommand):
 
         elif args.branch_subcommand == "merge":
             cls.branch_merge(args.path, args.message, args.json, args.interactive, args.resolutions)
+
+        elif args.branch_subcommand == "sync":
+            cls.branch_sync(args.path, args.json, args.interactive, args.resolutions)
+
+        elif args.branch_subcommand == "history":
+            cls.branch_history(args.path, args.branch_name, args.json, args.limit)
+
+        elif args.branch_subcommand == "rename":
+            cls.branch_rename(args.path, args.new_branch_name, args.json)
+
+        elif args.branch_subcommand == "restore":
+            cls.branch_restore(args.path, args.branch_name, args.json)
 
         elif args.branch_subcommand == "diff":
             cls.branch_diff(args.path, args.branch_name, getattr(args, "files", None), args.json)
@@ -1216,6 +1311,147 @@ class BranchCommand(BaseCommand):
 
         if not new_files and not modified_files and not deleted_files:
             plain("\n[muted]No changes on this branch.[/muted]")
+
+    @classmethod
+    def branch_sync(
+        cls,
+        base_path: str,
+        output_json: bool = False,
+        interactive: bool = False,
+        resolutions_file: str = None,
+    ):
+        """Synch the current branch with it's parent, with optional conflict resolutions."""
+        from poly.output.console import (
+            console,
+            error,
+            output_merge_conflict_table,
+            plain,
+            success,
+            warning,
+        )
+
+        if interactive and output_json:
+            json_print(
+                {
+                    "success": False,
+                    "error": "--interactive and --json cannot be used together.",
+                }
+            )
+            sys.exit(1)
+
+        file_resolutions: list[dict[str, Any]] | None = None
+        if resolutions_file:
+            try:
+                if resolutions_file == "-":
+                    file_resolutions = json.load(sys.stdin)
+                elif resolutions_file.lstrip().startswith("["):
+                    file_resolutions = json.loads(resolutions_file)
+                else:
+                    with open(resolutions_file, encoding="utf-8") as f:
+                        file_resolutions = json.load(f)
+                if not isinstance(file_resolutions, list):
+                    raise ValueError("Resolutions must be a JSON array.")
+            except (OSError, json.JSONDecodeError, ValueError) as exc:
+                if output_json:
+                    json_print({"success": False, "error": f"Failed to parse resolutions: {exc}"})
+                else:
+                    error(f"Failed to parse resolutions: {exc}")
+                sys.exit(1)
+
+        project = load_project(base_path, output_json=output_json)
+
+        branch_name = project.get_current_branch()
+        ctx = console.status("[info]Syncing branch...[/info]") if not output_json else nullcontext()
+        with ctx:
+            merge_success, conflicts, errors = project.sync_branch(
+                conflict_resolutions=file_resolutions
+            )
+
+        if output_json:
+            output = {"success": merge_success}
+            if conflicts or errors:
+                output["conflicts"] = conflicts
+                output["errors"] = errors
+            json_print(output)
+            if not merge_success:
+                sys.exit(1)
+            return
+
+        if merge_success:
+            success(f"Branch '{branch_name}' synced successfully.")
+            return
+
+        # Failed branch sync
+        error(f"Failed to sync branch '{branch_name}'.")
+        if errors:
+            plain("\n[red]Errors:[/red]")
+            for err in errors:
+                error(f"- {err['path']}: {err['message']}")
+
+        enriched = enrich_branch_merge_conflicts(conflicts) if conflicts else []
+        display_conflict = [
+            c for c in enriched if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
+        ]
+        if display_conflict:
+            output_merge_conflict_table(
+                display_conflict, show_type=True, resolutions=file_resolutions
+            )
+
+        if errors:
+            sys.exit(1)
+
+        if not interactive:
+            plain(
+                "Merge conflicts detected. To resolve:\n"
+                "- Use 'poly branch sync -i' to resolve conflicts interactively\n"
+                "- Use 'poly branch sync --resolutions <file.json>' to provide pre-defined resolutions\n"
+                "- Merge manually on Agent Studio"
+            )
+            sys.exit(1)
+
+        existing_resolutions = {
+            os.sep.join(r["path"]): r for r in (file_resolutions or []) if "path" in r
+        }
+        while True:
+            resolutions = cls._merge_interactively(enriched, existing_resolutions, branch_name)
+            if not resolutions:
+                warning("No resolutions provided. Exiting.")
+                sys.exit(1)
+            ctx2 = (
+                console.status("[info]Sync branch...[/info]") if not output_json else nullcontext()
+            )
+            with ctx2:
+                merge_success, conflicts, errors = project.sync_branch(
+                    conflict_resolutions=resolutions
+                )
+            if merge_success:
+                success(f"Branch '{branch_name}' synced successfully.")
+                break
+            if errors:
+                error(f"Failed to sync branch '{branch_name}' after conflict resolution.")
+                plain("\n[red]Errors:[/red]")
+                for err in errors:
+                    error(f"- {err['path']}: {err['message']}")
+                sys.exit(1)
+            if not conflicts:
+                error(
+                    f"Failed to sync branch '{branch_name}' after conflict resolution "
+                    "(no conflicts or errors returned)."
+                )
+                sys.exit(1)
+            warning("Sync still blocked; resolve the remaining conflicts below.")
+            enriched = enrich_branch_merge_conflicts(conflicts)
+            display_conflict = [
+                c
+                for c in enriched
+                if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
+            ]
+            if display_conflict:
+                output_merge_conflict_table(
+                    display_conflict,
+                    show_type=True,
+                    panel_title="Remaining merge conflicts",
+                )
 
     @classmethod
     def branch_history(

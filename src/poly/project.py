@@ -2714,6 +2714,54 @@ class AgentStudioProject:
 
         return False, conflicts, errors
 
+    def sync_branch(
+        self, conflict_resolutions: list[dict[str, Any]] = None
+    ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
+        """Sync the current branch with its parent in the project.
+
+        Args:
+            conflict_resolutions (list[dict[str, Any]]): A list of conflict
+                resolutions. Each resolution should have:
+                - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
+                - strategy: Resolution strategy - "ours", "theirs", or "base"
+                - value: Optional custom value
+
+        Returns:
+            bool: True if the sync was successful, False otherwise
+            list[dict[str, str]]: A list of conflicts
+            list[dict[str, str]]: A list of errors
+        """
+        branches = self.api_handler.get_branches()
+        branch_ids = {meta["branchId"] for meta in branches.values()}
+        if self.branch_id not in branch_ids:
+            raise ValueError(f"Branch {self.branch_id} does not exist.")
+
+        if self.branch_id == "main":
+            raise ValueError("Syncing 'main' branch is not supported.")
+
+        if diffs := self.get_diffs():
+            raise ValueError(
+                f"Cannot sync branch with uncommitted changes, diffs: {list(diffs.keys())}"
+            )
+
+        for resolution in conflict_resolutions or []:
+            if "path" not in resolution or "strategy" not in resolution:
+                raise ValueError(f"Resolution must include 'path' and 'strategy': {resolution}")
+            if resolution["strategy"] not in {"ours", "theirs", "base"}:
+                raise ValueError(
+                    f"Invalid conflict resolution strategy: {resolution['strategy']} for path {resolution['path']}. "
+                    f"Must be one of 'ours', 'theirs', or 'base'."
+                )
+
+        success, conflicts, errors = self.api_handler.sync_branch(
+            conflict_resolutions=conflict_resolutions
+        )
+        if success:
+            self.pull_project(force=True)
+            return True, [], []
+
+        return False, conflicts, errors
+
     def delete_branch(self, branch_name: str) -> bool:
         """Delete a branch in the project.
 
