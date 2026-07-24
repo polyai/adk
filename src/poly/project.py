@@ -463,7 +463,9 @@ class AgentStudioProject:
 
         # Delete only ADK-managed resource files, leaving non-ADK files intact.
         for resource_class in RESOURCE_NAME_TO_CLASS.values():
-            for path in self._sort_paths_for_reverse_deletion(resource_class.discover_resources(self.root_path), resource_class):
+            for path in self._sort_paths_for_reverse_deletion(
+                resource_class.discover_resources(self.root_path), resource_class
+            ):
                 resource_class.delete_resource(path)
 
         # Empty original_resources so all template resources are treated as new
