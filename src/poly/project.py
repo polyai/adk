@@ -103,6 +103,7 @@ class AgentStudioProject:
     _api_handler: AgentStudioInterface = None
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
+    rtc_metadata: Optional[dict[str, dict]] = None
 
     # Store resources that were not loaded from the status file
     # So they aren't considered locally deleted when pushing/pulling
@@ -219,6 +220,7 @@ class AgentStudioProject:
             account_name=config_dict.get("account_name") or status_dict.get("account_name"),
             _not_loaded_resources=not_loaded_resources,
             _migration_flags=migration_flags,
+            rtc_metadata=status_dict.get("rtc_metadata"),
         )
 
     def to_dict(self) -> dict:
@@ -241,6 +243,7 @@ class AgentStudioProject:
             "migration_flags": [flag.value for flag in self._migration_flags]
             if self._migration_flags
             else [],
+            "rtc_metadata": self.rtc_metadata or {},
         }
 
     @classmethod
@@ -266,6 +269,7 @@ class AgentStudioProject:
             account_name=data.get("account_name"),
             _migration_flags=migration_flags,
             _not_loaded_resources=not_loaded_resources,
+            rtc_metadata=data.get("rtc_metadata"),
         )
 
     @staticmethod
@@ -1700,7 +1704,7 @@ class AgentStudioProject:
         # 2) Branch name -> branch resources (event sourcing only)
         branches = self.api_handler.get_branches()
         if name in branches:
-            branch_id = branches[name]
+            branch_id = branches[name]["branchId"]
             branch_api_handler = AgentStudioInterface(
                 self.region, self.account_id, self.project_id, branch_id
             )
@@ -1830,6 +1834,145 @@ class AgentStudioProject:
             return None
 
         return diffs
+
+    def _resolve_branch_fork_point(
+        self, branch_name: Optional[str] = None
+    ) -> tuple[ResourceMap, ResourceMap]:
+        """Fetch parent (at fork point) and branch (latest) resource maps.
+
+        Args:
+            branch_name: Name of the branch. Defaults to the current branch.
+
+        Returns:
+            (parent_resources, branch_resources) tuple.
+
+        Raises:
+            ValueError: If on main with no branch specified, or the branch
+                does not exist.
+        """
+        current_name, branches = self.get_branches()
+
+        if branch_name:
+            if branch_name not in branches:
+                raise ValueError(f"Branch '{branch_name}' does not exist.")
+            branch_meta = branches[branch_name]
+        else:
+            if self.branch_id == "main" or current_name is None:
+                raise ValueError(
+                    "Cannot diff main branch. Switch to a branch or specify a branch name."
+                )
+            branch_meta = branches[current_name]
+
+        branch_id = branch_meta["branchId"]
+        parent_branch_id = branch_meta.get("parentBranchId")
+        parent_sequence_raw = branch_meta.get("parentSequence")
+
+        parent_at_sequence: Optional[int] = None
+        if parent_sequence_raw is not None:
+            try:
+                parent_at_sequence = int(parent_sequence_raw)
+            except (TypeError, ValueError):
+                logger.warning(
+                    f"Invalid parentSequence '{parent_sequence_raw}', "
+                    "falling back to latest parent projection."
+                )
+
+        if parent_at_sequence is None:
+            logger.warning(
+                "Fork-point sequence unavailable; comparing against latest parent state."
+            )
+
+        parent_id = parent_branch_id or "main"
+        parent_resources = self.api_handler.pull_branch_resources(parent_id, parent_at_sequence)
+        branch_resources = self.api_handler.pull_branch_resources(branch_id)
+
+        return parent_resources, branch_resources
+
+    def diff_branch(
+        self,
+        branch_name: Optional[str] = None,
+        file_paths: Optional[list[str]] = None,
+    ) -> Optional[dict[str, str]]:
+        """Compute diffs showing what a branch changed relative to its fork point.
+
+        Args:
+            branch_name: Name of the branch to diff. Defaults to the current branch.
+            file_paths: When provided, only include diffs for these files.
+
+        Returns:
+            A mapping of file path to unified diff text, or None when there
+            are no differences.
+
+        Raises:
+            ValueError: If on main with no branch specified, or the branch
+                does not exist.
+        """
+        parent_resources, branch_resources = self._resolve_branch_fork_point(branch_name)
+        diffs = self.diff_resource_maps(parent_resources, branch_resources)
+
+        if diffs and file_paths:
+            diffs = {fp: d for fp, d in diffs.items() if fp in file_paths}
+            if not diffs:
+                return None
+
+        return diffs
+
+    def branch_status(
+        self, branch_name: Optional[str] = None
+    ) -> tuple[list[str], list[str], list[str]]:
+        """Categorize files changed on a branch relative to its fork point.
+
+        Args:
+            branch_name: Name of the branch. Defaults to the current branch.
+
+        Returns:
+            (new_files, modified_files, deleted_files) — lists of file paths.
+
+        Raises:
+            ValueError: If on main with no branch specified, or the branch
+                does not exist.
+        """
+        parent_resources, branch_resources = self._resolve_branch_fork_point(branch_name)
+
+        parent_by_path: dict[tuple, Resource] = {}
+        for resources_dict in parent_resources.values():
+            for resource in resources_dict.values():
+                parent_by_path[(type(resource), resource.file_path)] = resource
+
+        branch_by_path: dict[tuple, Resource] = {}
+        for resources_dict in branch_resources.values():
+            for resource in resources_dict.values():
+                branch_by_path[(type(resource), resource.file_path)] = resource
+
+        combined: ResourceMap = {}
+        for rt, rd in parent_resources.items():
+            combined[rt] = combined.get(rt, {})
+            combined[rt].update(rd)
+        for rt, rd in branch_resources.items():
+            combined[rt] = combined.get(rt, {})
+            combined[rt].update(rd)
+        resource_mappings = self._make_resource_mappings(combined)
+
+        new_files: list[str] = []
+        modified_files: list[str] = []
+        deleted_files: list[str] = []
+
+        all_keys = set(parent_by_path.keys()) | set(branch_by_path.keys())
+        for key in all_keys:
+            parent_r = parent_by_path.get(key)
+            branch_r = branch_by_path.get(key)
+
+            if parent_r and branch_r:
+                if parent_r.to_pretty(resource_mappings=resource_mappings) != branch_r.to_pretty(
+                    resource_mappings=resource_mappings
+                ):
+                    modified_files.append(branch_r.file_path)
+            elif branch_r and not parent_r:
+                new_files.append(branch_r.file_path)
+            elif parent_r and not branch_r:
+                deleted_files.append(parent_r.file_path)
+
+        return new_files, modified_files, deleted_files
 
     def discover_local_resources(self) -> DiscoveredResourcePaths:
         """Return a dict of all discovered resources locally
@@ -2123,16 +2266,17 @@ class AgentStudioProject:
             return f"{prefix}-{uuid.uuid4().hex[:8].upper()}"
         return f"{RESOURCE_CLASS_TO_NAME[resource_type].upper()}-{uuid.uuid4().hex[:8]}"
 
-    def get_branches(self) -> tuple[Optional[str], dict[str, str]]:
+    def get_branches(self) -> tuple[Optional[str], dict[str, dict[str, Any]]]:
         """Get a list of all branches in the (remote) project.
 
         Returns:
-            Optional[str], dict[str, str]: The current branch name and a dictionary mapping
-            branch names to branch IDs. First element is None if the current branch does not exist in the remote.
+            The current branch name (None if the local branch no longer exists
+            on the remote) and a dictionary mapping branch names to their full
+            metadata dicts (each containing at least ``branchId``).
         """
         branches = self.api_handler.get_branches()
         current_branch = next(
-            (name for name, branch_id in branches.items() if branch_id == self.branch_id),
+            (name for name, meta in branches.items() if meta["branchId"] == self.branch_id),
             None,
         )
         return current_branch, branches
@@ -2182,10 +2326,11 @@ class AgentStudioProject:
         branches = self.api_handler.get_branches()
         if branch_name not in branches:
             raise ValueError(f"Branch {branch_name} does not exist.")
-        success = self.api_handler.switch_branch(branches[branch_name])
+        branch_id = branches[branch_name]["branchId"]
+        success = self.api_handler.switch_branch(branch_id)
         projection = {}
         if success:
-            self.branch_id = branches[branch_name]
+            self.branch_id = branch_id
             _, projection = self.pull_project(
                 force=True, format=format, projection_json=projection_json, on_save=on_save
             )
@@ -2583,7 +2728,8 @@ class AgentStudioProject:
             list[dict[str, str]]: A list of errors
         """
         branches = self.api_handler.get_branches()
-        if self.branch_id not in branches.values():
+        branch_ids = {meta["branchId"] for meta in branches.values()}
+        if self.branch_id not in branch_ids:
             raise ValueError(f"Branch {self.branch_id} does not exist.")
 
         if self.branch_id == "main":
@@ -2628,8 +2774,9 @@ class AgentStudioProject:
         if branch_name == "main":
             raise ValueError("Deleting 'main' branch is not supported.")
 
-        success = self.api_handler.delete_branch(branches[branch_name])
-        if success and self.branch_id == branches[branch_name]:
+        branch_id = branches[branch_name]["branchId"]
+        success = self.api_handler.delete_branch(branch_id)
+        if success and self.branch_id == branch_id:
             self.switch_branch("main", force=True)
         return True
 
@@ -2956,3 +3103,381 @@ class AgentStudioProject:
             ab_test_id=ab_test_id,
             traffic_percentage=traffic_percentage,
         )
+
+    # ── RTC (Real-Time Configuration) ──
+
+    RTC_ENV_TO_DIR = {
+        "sandbox": "draft_and_sandbox",
+        "pre-release": "pre_release",
+        "live": "live",
+    }
+
+    def get_rtc_last_updated(self, env: str) -> Optional[str]:
+        """Get the stored lastUpdated for an RTC environment."""
+        if not self.rtc_metadata:
+            return None
+        env_meta = self.rtc_metadata.get(env)
+        if not env_meta:
+            return None
+        return env_meta.get("last_updated")
+
+    def set_rtc_last_updated(self, env: str, last_updated: Optional[str]) -> None:
+        """Set the lastUpdated for an RTC environment and save."""
+        self._update_rtc_metadata(env, last_updated=last_updated)
+
+    def get_rtc_base(self, env: str) -> tuple[Optional[dict], Optional[dict]]:
+        """Get the base copies of schema and data for an environment.
+
+        Returns:
+            (base_schema, base_data) or (None, None) if not stored.
+        """
+        if not self.rtc_metadata:
+            return None, None
+        env_meta = self.rtc_metadata.get(env)
+        if not env_meta:
+            return None, None
+        return env_meta.get("base_schema"), env_meta.get("base_data")
+
+    def set_rtc_base(
+        self,
+        env: str,
+        schema: Optional[dict] = None,
+        variables: Optional[dict] = None,
+    ) -> None:
+        """Set the base copies for an RTC environment.
+
+        Only updates the fields that are provided (not None).
+        """
+        self._update_rtc_metadata(env, schema=schema, variables=variables)
+
+    def _update_rtc_metadata(
+        self,
+        env: str,
+        last_updated: Optional[str] = None,
+        schema: Optional[dict] = None,
+        variables: Optional[dict] = None,
+    ) -> None:
+        """Update RTC metadata for an environment in a single write."""
+        if self.rtc_metadata is None:
+            self.rtc_metadata = {}
+        if env not in self.rtc_metadata:
+            self.rtc_metadata[env] = {}
+        if last_updated is not None:
+            self.rtc_metadata[env]["last_updated"] = last_updated
+        if schema is not None:
+            self.rtc_metadata[env]["base_schema"] = schema
+        if variables is not None:
+            self.rtc_metadata[env]["base_data"] = variables
+        self.save_config()
+
+    def _rtc_env_dir(self, env: str) -> str:
+        """Get the local directory path for an RTC environment."""
+        dir_name = self.RTC_ENV_TO_DIR[env]
+        return os.path.join(self.root_path, "real_time_configuration", dir_name)
+
+    def rtc_fetch_config(self, env: str) -> dict:
+        """Fetch RTC config for an environment from the API.
+
+        Args:
+            env: The environment (sandbox, pre-release, live).
+
+        Returns:
+            dict: The RTC config with schema, variables, clientEnv, lastUpdated.
+        """
+        return AgentStudioInterface.get_rtc_config(
+            region=self.region,
+            project_id=self.project_id,
+            client_env=env,
+        )
+
+    def rtc_load_local(
+        self,
+        env: str,
+        schema_only: bool = False,
+        data_only: bool = False,
+    ) -> dict:
+        """Load local RTC files for an environment.
+
+        Args:
+            env: The environment to load.
+            schema_only: If True, only load schema.
+            data_only: If True, only load data.
+
+        Returns:
+            dict with 'schema' and 'variables' keys (None if not loaded).
+
+        Raises:
+            FileNotFoundError: If required files are missing.
+            ValueError: If JSON is invalid.
+        """
+        env_dir = self._rtc_env_dir(env)
+        schema_path = os.path.join(env_dir, "schema.json")
+        data_path = os.path.join(env_dir, "data.json")
+
+        schema = None
+        variables = None
+
+        if not data_only:
+            if not os.path.exists(schema_path):
+                raise FileNotFoundError(f"schema.json not found at {schema_path}")
+            try:
+                with open(schema_path, "r", encoding="utf-8") as f:
+                    schema = json.load(f)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in {schema_path}: {e}") from e
+
+        if not schema_only:
+            if not os.path.exists(data_path):
+                raise FileNotFoundError(f"data.json not found at {data_path}")
+            try:
+                with open(data_path, "r", encoding="utf-8") as f:
+                    variables = json.load(f)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Invalid JSON in {data_path}: {e}") from e
+
+        return {"schema": schema, "variables": variables}
+
+    def check_rtc_drift(self, env: str) -> dict:
+        """Check for drift between local and remote RTC config.
+
+        Args:
+            env: The environment to check.
+
+        Returns:
+            dict with:
+                - status: "no_metadata" | "in_sync" | "drifted"
+                - remote_config: dict (only when drifted)
+                - local_last_updated: str (when metadata exists)
+                - remote_last_updated: str (when metadata exists)
+        """
+        local_last_updated = self.get_rtc_last_updated(env)
+        if local_last_updated is None:
+            return {"status": "no_metadata"}
+
+        remote_config = self.rtc_fetch_config(env)
+        remote_last_updated = remote_config.get("lastUpdated")
+
+        if remote_last_updated == local_last_updated:
+            return {
+                "status": "in_sync",
+                "local_last_updated": local_last_updated,
+                "remote_last_updated": remote_last_updated,
+            }
+
+        return {
+            "status": "drifted",
+            "remote_config": remote_config,
+            "local_last_updated": local_last_updated,
+            "remote_last_updated": remote_last_updated,
+        }
+
+    def rtc_pull_env(
+        self,
+        env: str,
+        schema_only: bool = False,
+        data_only: bool = False,
+    ) -> dict:
+        """Pull RTC config for a single environment from the API and write to disk.
+
+        Args:
+            env: The environment to pull (sandbox, pre-release, live).
+            schema_only: If True, only pull schema.
+            data_only: If True, only pull data.
+
+        Returns:
+            dict with environment, schema_file, data_file paths.
+        """
+        config = self.rtc_fetch_config(env)
+
+        env_dir = self._rtc_env_dir(env)
+        os.makedirs(env_dir, exist_ok=True)
+
+        schema = config.get("schema", {})
+        variables = config.get("variables", {})
+
+        schema_path = os.path.join(env_dir, "schema.json")
+        data_path = os.path.join(env_dir, "data.json")
+
+        if not data_only:
+            utils.write_json_file(schema_path, schema)
+        if not schema_only:
+            utils.write_json_file(data_path, variables)
+
+        self._update_rtc_metadata(
+            env,
+            last_updated=config.get("lastUpdated"),
+            schema=schema,
+            variables=variables,
+        )
+
+        result = {"environment": env}
+        if not data_only:
+            result["schema_file"] = schema_path
+        if not schema_only:
+            result["data_file"] = data_path
+        return result
+
+    def rtc_push_to_api(
+        self,
+        env: str,
+        schema: Optional[dict] = None,
+        variables: Optional[dict] = None,
+        schema_only: bool = False,
+        data_only: bool = False,
+    ) -> dict:
+        """Push RTC config to the API and update local state.
+
+        Args:
+            env: The environment to push to.
+            schema: Schema dict to push (None to skip).
+            variables: Variables dict to push (None to skip).
+            schema_only: If True, only push schema.
+            data_only: If True, only push data.
+
+        Returns:
+            dict with success status.
+        """
+        import requests
+
+        last_response = None
+        if schema is not None and not data_only:
+            try:
+                last_response = AgentStudioInterface.put_rtc_schema(
+                    region=self.region,
+                    project_id=self.project_id,
+                    client_env=env,
+                    schema=schema,
+                )
+            except requests.HTTPError as e:
+                return {"success": False, "error": str(e), "step": "schema"}
+
+        if variables is not None and not schema_only:
+            try:
+                last_response = AgentStudioInterface.patch_rtc_variables(
+                    region=self.region,
+                    project_id=self.project_id,
+                    client_env=env,
+                    variables=variables,
+                )
+            except requests.HTTPError as e:
+                if last_response and last_response.get("lastUpdated"):
+                    self.set_rtc_last_updated(env, last_response["lastUpdated"])
+                return {
+                    "success": False,
+                    "error": f"Schema pushed but variables failed: {e}",
+                    "step": "variables",
+                }
+
+        base_schema, base_data = self.get_rtc_base(env)
+        self._update_rtc_metadata(
+            env,
+            last_updated=last_response.get("lastUpdated") if last_response else None,
+            schema=schema if schema is not None else base_schema,
+            variables=variables if variables is not None else base_data,
+        )
+
+        env_dir = self._rtc_env_dir(env)
+        os.makedirs(env_dir, exist_ok=True)
+        if schema is not None:
+            utils.write_json_file(os.path.join(env_dir, "schema.json"), schema)
+        if variables is not None:
+            utils.write_json_file(os.path.join(env_dir, "data.json"), variables)
+
+        return {
+            "success": True,
+            "environment": env,
+            "schema_file": os.path.join(env_dir, "schema.json"),
+            "data_file": os.path.join(env_dir, "data.json"),
+        }
+
+    def rtc_diff_env(self, env: str) -> dict:
+        """Compare local RTC files against remote for one environment.
+
+        Args:
+            env: The environment to diff.
+
+        Returns:
+            dict with environment, schema changes, data changes.
+        """
+        env_dir = self._rtc_env_dir(env)
+        schema_path = os.path.join(env_dir, "schema.json")
+        data_path = os.path.join(env_dir, "data.json")
+
+        if not os.path.exists(schema_path) and not os.path.exists(data_path):
+            return {"environment": env, "status": "no_local_files"}
+
+        remote_config = self.rtc_fetch_config(env)
+        env_diff: dict = {"environment": env, "schema": [], "data": []}
+
+        if os.path.exists(schema_path):
+            with open(schema_path, "r", encoding="utf-8") as f:
+                local_schema = json.load(f)
+            remote_schema = remote_config.get("schema", {})
+            env_diff["schema"] = utils.diff_dicts(local_schema, remote_schema)
+
+        if os.path.exists(data_path):
+            with open(data_path, "r", encoding="utf-8") as f:
+                local_data = json.load(f)
+            remote_data = remote_config.get("variables", {})
+            env_diff["data"] = utils.diff_dicts(local_data, remote_data)
+
+        return env_diff
+
+    def rtc_validate_env(self, env: str) -> dict:
+        """Validate local RTC data against its schema for one environment.
+
+        Args:
+            env: The environment to validate.
+
+        Returns:
+            dict with environment, valid status, and any errors.
+        """
+        env_dir = self._rtc_env_dir(env)
+        schema_path = os.path.join(env_dir, "schema.json")
+        data_path = os.path.join(env_dir, "data.json")
+
+        if not os.path.exists(schema_path) or not os.path.exists(data_path):
+            return {"environment": env, "status": "skipped"}
+
+        try:
+            with open(schema_path, "r", encoding="utf-8") as f:
+                schema = json.load(f)
+            with open(data_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except json.JSONDecodeError as e:
+            return {"environment": env, "valid": False, "errors": [f"Invalid JSON: {e}"]}
+
+        validation_errors = self.validate_rtc_data(schema, data)
+        if validation_errors:
+            return {"environment": env, "valid": False, "errors": validation_errors}
+        return {"environment": env, "valid": True}
+
+    @staticmethod
+    def validate_rtc_data(schema: dict, data: dict) -> list[str]:
+        """Validate RTC data against its schema using JSON Schema Draft 7.
+
+        Returns:
+            List of validation error messages, empty if valid.
+        """
+        import jsonschema
+
+        if not schema:
+            return []
+
+        try:
+            jsonschema.Draft7Validator.check_schema(schema)
+        except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
+            return [f"Invalid schema: {e}"]
+
+        try:
+            validator = jsonschema.Draft7Validator(schema)
+            errors = sorted(
+                validator.iter_errors(data),
+                key=lambda e: [str(p) for p in e.absolute_path],
+            )
+            return [
+                f"{'.'.join(str(p) for p in e.absolute_path) or '(root)'}: {e.message}"
+                for e in errors
+            ]
+        except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
+            return [f"Invalid schema: {e}"]

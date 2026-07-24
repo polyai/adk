@@ -110,17 +110,35 @@ class SyncClientHandler:
         )
         return projection
 
+    def pull_branch_projection(
+        self, branch_id: str, at_sequence: Optional[int] = None
+    ) -> dict[str, Any]:
+        """Fetch projection for a specific branch, optionally at a historical sequence.
+
+        Args:
+            branch_id: The branch whose projection to fetch.
+            at_sequence: When provided, fetches the projection at this sequence number.
+
+        Returns:
+            The raw projection dict for the branch.
+        """
+        logger.info(
+            f"Fetching projection for branch {branch_id}"
+            + (f" at sequence {at_sequence}" if at_sequence is not None else "")
+        )
+        projection = self.sdk.fetch_projection(
+            force_refresh=True, branch_id=branch_id, at_sequence=at_sequence
+        )
+        return projection
+
     def pull_projection(self) -> dict[str, Any]:
         """Fetch the raw projection for the current branch.
 
         Returns:
             The raw projection dict.
         """
-        logger.info(
-            f"Fetching project data for project {self.project_id} on branch {self.sdk.branch_id}"
-        )
         self.assert_branch_exists()
-        projection = self.sdk.fetch_projection(force_refresh=True)
+        projection = self.pull_branch_projection(branch_id=self.sdk.branch_id)
         logger.debug(f"Projection: {projection}")
         logger.info(
             f"Successfully fetched project data for project {self.project_id} "
@@ -244,17 +262,22 @@ class SyncClientHandler:
         )
         return self.sdk.branch_id
 
-    def get_branches(self) -> dict[str, str]:
+    def get_branches(self) -> dict[str, dict[str, Any]]:
         """Get a list of all branches in the project.
 
         Returns:
-            dict[str, str]: A dictionary mapping branch names to branch IDs
+            A dictionary mapping branch names to their full metadata dicts.
+            Each value contains at least ``branchId``, ``parentBranchId``,
+            ``parentSequence``, ``isDiverged``, etc.  The ``main`` entry is
+            synthetic with ``branchId="main"`` and no parent info.
         """
-        branches = {"main": "main"}
+        branches: dict[str, dict[str, Any]] = {
+            "main": {"branchId": "main", "name": "main"},
+        }
         logger.info(f"Fetching branches for project {self.account_id}/{self.project_id}")
-        for branch in self.sdk.fetch_branches().get("branches"):
-            branches[branch.get("name")] = branch.get("branchId")
-        logger.info(f"Fetched {len(branches)} branches branches={branches!r}")
+        for branch in self.sdk.fetch_branches().get("branches", []):
+            branches[branch.get("name")] = branch
+        logger.info(f"Fetched {len(branches)} branches")
         return branches
 
     def delete_branch(self, branch_id: str) -> bool:
