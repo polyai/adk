@@ -79,12 +79,26 @@ A typical project structure looks like this:
 ├── functions/                          # Global functions
 ├── topics/                             # Knowledge base topics
 ├── test_suite/                         # Optional - simulated conversation tests
+├── real_time_configuration/            # Optional - created by poly rtc pull
+│   ├── draft_and_sandbox/
+│   │   ├── schema.json
+│   │   └── data.json
+│   ├── pre_release/
+│   │   ├── schema.json
+│   │   └── data.json
+│   └── live/
+│       ├── schema.json
+│       └── data.json
 └── project.yaml                        # Project metadata
 ~~~
 
 !!! info "Generated files"
 
     Files under `_gen/` are generated stubs and should not be edited directly.
+
+!!! info "Real-Time Configuration files"
+
+    The `real_time_configuration/` directory is created by `poly rtc pull`. It is not present until you run that command for the first time. See [`poly rtc`](../reference/cli.md#poly-rtc) for details.
 
 ## How local work maps to Agent Studio
 

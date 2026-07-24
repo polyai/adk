@@ -188,11 +188,16 @@ Examples:
 poly pull
 poly pull --force
 poly pull --format
+poly pull --include-rtc
 ~~~
 
 If the branch you are currently on no longer exists in Agent Studio, `poly pull` automatically switches to the `main` branch and displays a warning message with the new branch name.
 
 When using JSON output (`--json`), the response includes `new_branch_name` and `new_branch_id` fields if a branch switch occurred.
+
+| Flag | Description |
+|---|---|
+| `--include-rtc` | Also pull Real-Time Configuration for all environments alongside the normal project resources. Writes files to `real_time_configuration/`. |
 
 ### `poly push`
 
@@ -206,6 +211,8 @@ poly push --dry-run
 poly push --skip-validation
 poly push --force
 poly push --format
+poly push --include-rtc
+poly push --include-rtc --rtc-env live --force
 ~~~
 
 When pushing creates a new branch (for example, when pushing to Agent Studio for the first time on a branch), the CLI displays a message with the new branch name.
@@ -214,8 +221,10 @@ When pushing creates a new branch (for example, when pushing to Agent Studio for
 |---|---|
 | `--dry-run` | Run all validation and diff steps without sending changes to Agent Studio. |
 | `--skip-validation` | Bypass local validation. Use sparingly — for example, when a platform-generated resource fails a strict ADK check but is known to be valid on the platform. |
-| `--force`, `-f` | Force the push even when the local project diverges from the remote in unexpected ways. |
+| `--force`, `-f` | Force the push even when the local project diverges from the remote in unexpected ways. Also passed through to the RTC push when `--include-rtc` is used. |
 | `--format` | Run [`poly format`](#poly-format) over the project before pushing. |
+| `--include-rtc` | Also push Real-Time Configuration after pushing normal project resources. Defaults to the `sandbox` environment unless `--rtc-env` is specified. |
+| `--rtc-env` | RTC environment to push to when using `--include-rtc`. Choices: `sandbox`, `pre-release`, `live`. Defaults to `sandbox`. Has no effect without `--include-rtc`. |
 
 !!! info "Call Link URL in chat output may be malformed"
 
@@ -546,6 +555,141 @@ poly conversations get-audio <conversation_id> --json
 | `--path` | Base path to the project. Defaults to the current working directory. |
 | `--json` | Print a JSON summary on stdout instead of the success message (audio is still written to disk). |
 
+### `poly rtc`
+
+Manage Real-Time Configuration (RTC) for the project. RTC allows teams to version-control the schema and variable data that drives runtime configuration, and sync changes between local files and Agent Studio — with drift protection and conflict resolution built in.
+
+Local RTC files are written to:
+
+~~~text
+real_time_configuration/
+├── draft_and_sandbox/
+│   ├── schema.json
+│   └── data.json
+├── pre_release/
+│   ├── schema.json
+│   └── data.json
+└── live/
+    ├── schema.json
+    └── data.json
+~~~
+
+`schema.json` is a JSON Schema Draft 7 document describing the shape of the configuration. `data.json` contains the actual variable values for that environment.
+
+RTC metadata (last-updated timestamps and base copies for merge) is stored inside `.agent_studio_config` — no additional dotfiles are created.
+
+`poly rtc` requires a subcommand:
+
+~~~bash
+poly rtc pull
+poly rtc push --env sandbox
+poly rtc edit --env sandbox
+poly rtc diff
+poly rtc validate
+~~~
+
+#### `poly rtc pull`
+
+Fetch the RTC schema and data from Agent Studio and write them to local files.
+
+~~~bash
+poly rtc pull
+poly rtc pull --env sandbox
+poly rtc pull --env all
+poly rtc pull --env sandbox --schema
+poly rtc pull --env sandbox --data
+~~~
+
+| Flag | Default | Description |
+|---|---|---|
+| `--env` | `all` | Environment to pull. Choices: `sandbox`, `pre-release`, `live`, `all`. |
+| `--schema` | — | Pull schema only (mutually exclusive with `--data`). |
+| `--data` | — | Pull data only (mutually exclusive with `--schema`). |
+
+Pulling stores the fetched content as the merge **base** for future drift detection. Run `poly rtc pull` after every manual change in Agent Studio so that subsequent pushes can auto-merge cleanly.
+
+#### `poly rtc push`
+
+Upload local RTC files to Agent Studio.
+
+~~~bash
+poly rtc push --env sandbox
+poly rtc push --env sandbox --schema
+poly rtc push --env live --force
+poly rtc push --env sandbox --skip-validation
+poly rtc push --env sandbox --no-merge
+~~~
+
+| Flag | Default | Description |
+|---|---|---|
+| `--env` | required | Environment to push to. Choices: `sandbox`, `pre-release`, `live`. |
+| `--schema` | — | Push schema only (mutually exclusive with `--data`). |
+| `--data` | — | Push data only (mutually exclusive with `--schema`). |
+| `--force` | `false` | Skip drift protection check and the live-environment confirmation prompt. |
+| `--no-merge` | `false` | Disable automatic merge on drift; hard-fail instead. |
+| `--skip-validation` | `false` | Bypass JSON Schema validation of `data.json` against `schema.json` before pushing. |
+
+**Drift protection** — before pushing, the CLI compares the `lastUpdated` timestamp from the API against the value stored during the last pull. If the remote has changed:
+
+- The CLI attempts a **3-way merge** (local changes + remote changes, relative to the stored base).
+- Non-conflicting field changes are merged automatically and a summary is printed.
+- True conflicts (same field changed differently on both sides) are presented interactively: choose local, remote, base, or open the merged result in `$EDITOR`.
+- Pass `--no-merge` to skip merge and hard-fail instead; pass `--force` to skip drift detection entirely.
+
+**Live safety gate** — pushing to `live` without `--force` requires interactive confirmation. In JSON mode (`--json`), `--force` must be passed explicitly.
+
+**Schema validation** — before uploading, `data.json` is validated against `schema.json` using JSON Schema Draft 7. Use `--skip-validation` to bypass this check.
+
+#### `poly rtc edit`
+
+Pull the latest RTC config, open it in `$EDITOR` or `$VISUAL`, validate, and push back in one step.
+
+~~~bash
+poly rtc edit --env sandbox
+poly rtc edit --env sandbox --schema
+poly rtc edit --env live --force
+~~~
+
+| Flag | Default | Description |
+|---|---|---|
+| `--env` | required | Environment to edit. Choices: `sandbox`, `pre-release`, `live`. |
+| `--schema` | `false` | Edit `schema.json` instead of `data.json`. |
+| `--force` | `false` | Skip the live-environment confirmation prompt. |
+
+The command fetches the current remote config, opens it in your editor, validates the result (data against schema, or schema syntax), then re-fetches to detect race conditions before pushing. If the remote was modified while you were editing, the push is aborted and you are asked to try again.
+
+#### `poly rtc diff`
+
+Compare local RTC files against the remote Agent Studio config and show field-level changes.
+
+~~~bash
+poly rtc diff
+poly rtc diff --env sandbox
+poly rtc diff --env all
+~~~
+
+| Flag | Default | Description |
+|---|---|---|
+| `--env` | `all` | Environment to diff. Choices: `sandbox`, `pre-release`, `live`, `all`. |
+
+Output uses `+` for fields added locally, `-` for fields only on remote, and `~` for changed values (showing `remote → local`). If no local files exist for an environment, a prompt to run `poly rtc pull` is shown instead.
+
+#### `poly rtc validate`
+
+Validate local `data.json` against `schema.json` using JSON Schema Draft 7.
+
+~~~bash
+poly rtc validate
+poly rtc validate --env sandbox
+poly rtc validate --env all
+~~~
+
+| Flag | Default | Description |
+|---|---|---|
+| `--env` | `all` | Environment to validate. Choices: `sandbox`, `pre-release`, `live`, `all`. |
+
+Exits with a non-zero status code if any environment fails validation — suitable for use in CI pipelines.
+
 ### `poly docs`
 
 Output resource documentation.
@@ -705,6 +849,10 @@ poly deployments rollback --to <id> --force --json
 poly conversations list --json
 poly conversations get <conversation_id> --json
 poly conversations get-audio <conversation_id> --json
+poly rtc pull --json
+poly rtc push --env sandbox --json
+poly rtc diff --json
+poly rtc validate --json
 ~~~
 
 When `--json` is used:
@@ -721,6 +869,10 @@ When `--json` is used:
 
     When `--json` is used with `poly deployments promote` or `poly deployments rollback`, the confirmation prompt is automatically skipped (equivalent to passing `--force`).
 
+!!! info "`poly rtc push` to live requires `--force` in JSON mode"
+
+    When `--json` is used with `poly rtc push --env live`, you must also pass `--force`. The interactive confirmation prompt is not available in JSON mode.
+
 ### JSON output shapes
 
 The exact fields vary by command. Common fields include:
@@ -730,6 +882,8 @@ The exact fields vary by command. Common fields include:
 | `poly status --json` | `files_with_conflicts`, `modified_files`, `new_files`, `deleted_files` |
 | `poly push --json` | `success`, `message`, `dry_run` |
 | `poly pull --json` | `success`, `files_with_conflicts` |
+| `poly pull --include-rtc --json` | `success`, `files_with_conflicts`, `rtc` (nested RTC pull result) |
+| `poly push --include-rtc --json` | `success`, `message`, `rtc` (nested RTC push result) |
 | `poly validate --json` | `valid`, `errors` |
 | `poly diff --json` | `diffs` |
 | `poly revert --json` | `success`, `files_reverted` |
@@ -749,6 +903,10 @@ The exact fields vary by command. Common fields include:
 | `poly conversations list --json` | `conversations`, `count`, `limit`, `offset` |
 | `poly conversations get --json` | full conversation detail object |
 | `poly conversations get-audio --json` | `success`, `conversation_id`, `direction`, `redacted`, `output_path`, `size_bytes` |
+| `poly rtc pull --json` | `success`, `files_written` (array of `{environment, schema_file, data_file}`) |
+| `poly rtc push --json` | `success`, `environment`, `schema_file`, `data_file`; on error: `success`, `error` |
+| `poly rtc diff --json` | `success`, `diffs` (array of per-environment diff objects) |
+| `poly rtc validate --json` | `success`, `results` (array of per-environment validation results) |
 
 For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
 
@@ -881,6 +1039,8 @@ A typical CLI workflow looks like this:
 10. browse and debug conversations with `poly conversations list` and `poly conversations get`
 11. merge the branch with `poly branch merge '<message>'`
 12. promote to pre-release or live with `poly deployments promote`
+
+To include Real-Time Configuration in the standard workflow, add `poly rtc pull` after step 2 and `poly rtc push` (or `--include-rtc` on `poly push`) before or after step 7.
 
 !!! info "Run commands from the project folder"
 
