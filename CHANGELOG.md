@@ -1,6 +1,262 @@
 # CHANGELOG
 
 
+## v0.35.0 (2026-07-24)
+
+### Chores
+
+- Add testpaths to pytest config ([#234](https://github.com/polyai/adk/pull/234),
+  [`86a9c7e`](https://github.com/polyai/adk/commit/86a9c7ef088bba9d9fe3c01f095d91335d8d4b34))
+
+## Summary
+
+Add `testpaths` to pytest config so bare `uv run pytest` only collects from `src/poly/tests/`.
+
+## Motivation
+
+Running `uv run pytest` without an explicit path caused pytest to collect
+  `src/poly/resources/test_suite.py` as a test module (it matches the `test_*.py` pattern). This
+  interfered with `TestCase` resource registration and caused 6 tests to fail. Running `uv run
+  pytest src/poly/tests/` worked fine, masking the issue in CI.
+
+## Changes
+
+- Add `testpaths = ["src/poly/tests"]` to `[tool.pytest.ini_options]` in `pyproject.toml`
+
+## Test strategy
+
+- [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Features
+
+- Add branch diff, review, and status commands ([#227](https://github.com/polyai/adk/pull/227),
+  [`72887f4`](https://github.com/polyai/adk/commit/72887f4b57f987e8b9afc865f226a376c51eabd6))
+
+## Summary
+
+Add `poly branch diff`, `poly branch review`, and `poly branch status` commands that compare a
+  branch against its fork-point state, mirroring the UI's branch comparison screen.
+
+## Motivation
+
+The platform now shows branch comparisons relative to the fork point (not latest main), powered by
+  `?atSequence=` on the projection endpoint. ADK had no CLI equivalent — `poly diff` compares local
+  vs remote, not branch vs fork-point. These commands fill that gap as the "review before merge"
+  workflow alongside `branch merge`.
+
+## Changes
+
+- Add `poly branch diff` — prints fork-point diff to terminal (supports `--files`, `--json`) - Add
+  `poly branch review` — creates a GitHub Gist of the fork-point diff for sharing - Add `poly branch
+  status` — shows new/modified/deleted files on a branch vs fork point, same output format as `poly
+  status` with extra branch metadata in the header - Update `get_branches()` across the stack to
+  return `dict[str, dict[str, Any]]` (full branch metadata including `parentBranchId`,
+  `parentSequence`, `isDiverged`) instead of `dict[str, str]` - Add `branch_id` and `at_sequence`
+  params to `fetch_projection()` for fetching historical projections without cache mutation - Add
+  `pull_branch_resources()` to sync client and interface layers - Extract
+  `_resolve_branch_fork_point()` in project layer, shared by `diff_branch()` and `branch_status()` -
+  Refactor `StatusCommand.status()` to use shared helpers from `shared.py` - Fallback: when
+  `parentSequence` is null (older branches), compares against latest parent with a warning
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.34.7 (2026-07-21)
+
+### Bug Fixes
+
+- Use flow_id instead of flow_name in from_projection resource ID construction
+  ([#233](https://github.com/polyai/adk/pull/233),
+  [`34bdc2c`](https://github.com/polyai/adk/commit/34bdc2c0d9cbfe13a786108adebb8685eeb42641))
+
+## Summary
+
+Fix flow validation regression introduced in v0.34.6 where `poly validate` reports "Start step not
+  found" for all flows.
+
+## Motivation
+
+PR #216 introduced `from_projection` methods on `FlowStep` and `FunctionStep` that construct
+  resource IDs as `{flow_name}_{step_id}`. However, PR #220 had already changed the convention to
+  `{flow_id}_{step_id}`. The merge didn't produce a textual conflict, so the old convention slipped
+  through. `FlowConfig.validate` builds expected IDs with `flow_id`, so the lookup fails.
+
+## Changes
+
+- Changed `FlowStep.from_projection` to use `flow_id` instead of `flow_data['name']` for resource ID
+  prefix - Changed `FunctionStep.from_projection` to use `flow_id` instead of `flow_data['name']`
+  for resource ID prefix - Updated corresponding test assertions
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.34.6 (2026-07-21)
+
+### Bug Fixes
+
+- Remove unused `# type: ignore` from secret_vault.py types stub
+  ([#232](https://github.com/polyai/adk/pull/232),
+  [`6a39105`](https://github.com/polyai/adk/commit/6a391052de498db8b75e5526bbc08651776309b5))
+
+## Summary
+
+- Removes the blanket `# type: ignore` directive from `src/poly/types/secret_vault.py`
+
+The `# type: ignore` comment triggers an `unused-type-ignore-comment` warning with `ty`, which
+  `agent-deployments` uses as a pre-commit hook. This causes commits that touch
+  `_gen/secret_vault.py` to fail:
+
+``` warning[unused-type-ignore-comment]: Unused blanket `type: ignore` directive -->
+  agents/.../sticks-n-sushi-ukp/_gen/secret_vault.py:4:1 | 4 | # type: ignore | ^^^^^^^^^^^^^^ ```
+
+This will prevent having to manually delete that line of code every time you initialize a project.
+
+## Test plan
+
+- [x] Verified `ty check src/poly/types/secret_vault.py` passes after the change
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Refactoring
+
+- Clean up project.py, split poly.utils into focused modules and add API handler tests
+  ([#214](https://github.com/polyai/adk/pull/214),
+  [`e2d6402`](https://github.com/polyai/adk/commit/e2d6402d63af791dfc8cced43e848e332afb476a))
+
+## Summary
+
+Behaviour-preserving cleanup of the two largest maintenance hotspots — `project.py`'s duplicated
+  pull logic and 365-line `_clean_resources_before_push`, and the mixed-concern `poly/utils.py` —
+  plus a new test suite for the previously untested API handler layer.
+
+## Motivation
+
+`project.py` and `utils.py` had grown organically: the two pull methods shared ~40 duplicated lines
+  (acknowledged by an in-code comment), `_clean_resources_before_push` mixed eight distinct concerns
+  in one method, and `utils.py` bundled six unrelated utility groups. The handlers layer (~4,200
+  lines: platform_api, interface, sync_client, sdk, auth0_handler) had no tests at all, and test
+  runs were polluting the `test_project` fixture with a generated `.agent_studio_config`.
+
+## Changes
+
+- Extract `_apply_pulled_resources`, shared by `pull_project` and `pull_project_from_env` (public
+  signatures unchanged) - Split `poly/utils.py` into a `poly/utils/` package (`credentials`,
+  `merge`, `stub_gen`, `decorators`, `variable_references`, `commands`) with all public names
+  re-exported from `poly.utils`, so existing imports keep working - Split
+  `_clean_resources_before_push` into eight focused functions in `poly/utils/prepush.py`; the method
+  remains as a thin orchestrator with an unchanged contract - Stop tests writing
+  `_gen/.agent_studio_config` into the fixture project (mock the `api_handler` property, make the
+  prepush webchat step access it lazily, gitignore the file) - Add `src/poly/tests/api/` — 62 unit
+  tests for the handler layer (region/URL routing, request headers and error paths, error-code
+  mapping, projection parsing, command queue priority ordering, protobuf batch sending, device auth
+  flow), all HTTP mocked
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+833 tests + 30 subtests pass. Each commit was verified independently against the full suite. The new
+  handler tests also pass with `POLY_ADK_KEY` unset, proving no network access. After a full test
+  run, `git status` shows no fixture pollution.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+``` $ uv run pytest src/poly/tests/ -q 833 passed, 30 subtests passed in 7.41s ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+- Move projection parsing onto resource classes ([#216](https://github.com/polyai/adk/pull/216),
+  [`0417794`](https://github.com/polyai/adk/commit/0417794ad8c25fcc0a6e39807d480ec2470baefa))
+
+## Summary
+
+Move projection-parsing logic from `SyncClientHandler` onto each resource class via
+  `@register_resource`, and shift the Resources → Commands conversion into `AgentStudioInterface`.
+
+## Motivation
+
+`SyncClientHandler` mixed read (projection parsing) and write (command building) concerns, and owned
+  ~700 lines of `_read_*_from_projection` methods that were far from the resource classes they
+  construct. Adding a new resource type required editing `sync_client.py`. The
+  `SyncClientHandler`/`AgentStudioInterface` split was a remnant of a removed dual-backend feature
+  flag.
+
+## Changes
+
+- Each resource class now has a `from_projection()` classmethod registered via
+  `@register_resource("name")` decorator - `@register_resource` also populates
+  `RESOURCE_NAME_TO_CLASS` / `RESOURCE_CLASS_TO_NAME`, replacing the hardcoded dict in `project.py`
+  - `load_resources_from_projection()` is a standalone function in `resource.py` — no API
+  dependency, works offline - `SyncClientHandler` returns raw projection dicts;
+  `AgentStudioInterface` does the conversion - `queue_resources` (Resources → Commands) with
+  priority ordering moved to `AgentStudioInterface` - Shared helpers `parse_latency_control` and
+  `parse_safety_filter_config` moved to their respective resource modules
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.34.5 (2026-07-20)
 
 ### Bug Fixes

@@ -8466,8 +8466,8 @@ class FlowStepFromProjection(unittest.TestCase):
             }
         }
         steps = FlowStep.from_projection(projection)
-        # Key format is {flow_name}_{step_id}
-        expected_key = "Booking_STEP-A"
+        # Key format is {flow_id}_{step_id}
+        expected_key = "FLOW-1_STEP-A"
         self.assertEqual(list(steps), [expected_key])
         step = steps[expected_key]
         self.assertIsInstance(step, FlowStep)
@@ -8535,7 +8535,7 @@ class FunctionStepFromProjection(unittest.TestCase):
             }
         }
         func_steps = FunctionStep.from_projection(projection)
-        expected_key = "Booking_STEP-F"
+        expected_key = "FLOW-1_STEP-F"
         self.assertEqual(list(func_steps), [expected_key])
         fs = func_steps[expected_key]
         self.assertIsInstance(fs, FunctionStep)
