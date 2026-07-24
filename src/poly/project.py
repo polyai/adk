@@ -2936,12 +2936,7 @@ class AgentStudioProject:
 
     def set_rtc_last_updated(self, env: str, last_updated: Optional[str]) -> None:
         """Set the lastUpdated for an RTC environment and save."""
-        if self.rtc_metadata is None:
-            self.rtc_metadata = {}
-        if env not in self.rtc_metadata:
-            self.rtc_metadata[env] = {}
-        self.rtc_metadata[env]["last_updated"] = last_updated
-        self.save_config()
+        self._update_rtc_metadata(env, last_updated=last_updated)
 
     def get_rtc_base(self, env: str) -> tuple[Optional[dict], Optional[dict]]:
         """Get the base copies of schema and data for an environment.
@@ -2966,10 +2961,22 @@ class AgentStudioProject:
 
         Only updates the fields that are provided (not None).
         """
+        self._update_rtc_metadata(env, schema=schema, variables=variables)
+
+    def _update_rtc_metadata(
+        self,
+        env: str,
+        last_updated: Optional[str] = None,
+        schema: Optional[dict] = None,
+        variables: Optional[dict] = None,
+    ) -> None:
+        """Update RTC metadata for an environment in a single write."""
         if self.rtc_metadata is None:
             self.rtc_metadata = {}
         if env not in self.rtc_metadata:
             self.rtc_metadata[env] = {}
+        if last_updated is not None:
+            self.rtc_metadata[env]["last_updated"] = last_updated
         if schema is not None:
             self.rtc_metadata[env]["base_schema"] = schema
         if variables is not None:
@@ -3109,8 +3116,12 @@ class AgentStudioProject:
         if not schema_only:
             utils.write_json_file(data_path, variables)
 
-        self.set_rtc_base(env, schema=schema, variables=variables)
-        self.set_rtc_last_updated(env, config.get("lastUpdated"))
+        self._update_rtc_metadata(
+            env,
+            last_updated=config.get("lastUpdated"),
+            schema=schema,
+            variables=variables,
+        )
 
         result = {"environment": env}
         if not data_only:
@@ -3170,12 +3181,10 @@ class AgentStudioProject:
                     "step": "variables",
                 }
 
-        if last_response and last_response.get("lastUpdated"):
-            self.set_rtc_last_updated(env, last_response["lastUpdated"])
-
         base_schema, base_data = self.get_rtc_base(env)
-        self.set_rtc_base(
+        self._update_rtc_metadata(
             env,
+            last_updated=last_response.get("lastUpdated") if last_response else None,
             schema=schema if schema is not None else base_schema,
             variables=variables if variables is not None else base_data,
         )
