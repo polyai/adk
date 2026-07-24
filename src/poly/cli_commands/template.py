@@ -300,6 +300,10 @@ class TemplateCommand(BaseCommand):
         """Offer to load a template right after project creation."""
         import questionary
 
+        templates = cls._fetch_templates(region)
+        if not templates:
+            return
+
         should_load = questionary.confirm(
             "Would you like to load a template into this project?",
             default=False,
