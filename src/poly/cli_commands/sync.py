@@ -245,15 +245,10 @@ class PushCommand(BaseCommand):
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Execute the push command."""
-        include_rtc = getattr(args, "include_rtc", False)
-        rtc_env = getattr(args, "rtc_env", None)
-
-        if rtc_env is not None and not include_rtc:
+        if args.rtc_env is not None and not args.include_rtc:
             from poly.output.console import warning
 
             warning("--rtc-env has no effect without --include-rtc.")
-
-        rtc_env = rtc_env or "sandbox"
 
         cls.push(
             args.path,
@@ -264,8 +259,8 @@ class PushCommand(BaseCommand):
             args.from_projection,
             output_json=args.json,
             output_commands=args.output_json_commands,
-            include_rtc=include_rtc,
-            rtc_env=rtc_env,
+            include_rtc=args.include_rtc,
+            rtc_env=args.rtc_env or "sandbox",
         )
 
     @classmethod
