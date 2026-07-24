@@ -232,7 +232,8 @@ class AgentStudioInterface:
         """
         return PlatformAPIHandler.duplicate_project(region, project_id, new_name, new_id)
 
-    def list_template_projects(self, region: str) -> list[dict[str, Any]]:
+    @staticmethod
+    def list_template_projects(region: str) -> list[dict[str, Any]]:
         """List available template projects.
 
         Args:
