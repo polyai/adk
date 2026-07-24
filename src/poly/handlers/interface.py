@@ -232,7 +232,8 @@ class AgentStudioInterface:
         """
         return PlatformAPIHandler.duplicate_project(region, project_id, new_name, new_id)
 
-    def list_template_projects(self, region: str) -> list[dict[str, Any]]:
+    @staticmethod
+    def list_template_projects(region: str) -> list[dict[str, Any]]:
         """List available template projects.
 
         Args:
@@ -243,8 +244,9 @@ class AgentStudioInterface:
         """
         return SyncClientHandler(region=region).list_template_projects()
 
+    @staticmethod
     def get_template_resources(
-        self, template_id: str, region: str
+        template_id: str, region: str
     ) -> dict[type[Resource], dict[str, Resource]]:
         """Fetch a template and return its resources.
 

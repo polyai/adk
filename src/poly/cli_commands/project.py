@@ -399,7 +399,8 @@ class ProjectCommand(BaseCommand):
             try:
                 from poly.cli_commands.template import TemplateCommand
 
-                TemplateCommand.offer_template_on_create(base_path, region, account_id, project_id)
+                project_path = os.path.join(base_path, account_id, project_id)
+                TemplateCommand.offer_template_on_create(project_path, region)
             except Exception:
                 logger.debug("Template offering skipped", exc_info=True)
 

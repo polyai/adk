@@ -12,8 +12,8 @@ from contextlib import nullcontext
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project, read_project_config
 from poly.handlers.interface import REGIONS
-from poly.handlers.sync_client import SyncClientHandler
 from poly.output.json_output import json_print
+from poly.project import AgentStudioProject
 
 logger = logging.getLogger(__name__)
 
@@ -140,7 +140,7 @@ class TemplateCommand(BaseCommand):
     @classmethod
     def _fetch_templates(cls, region: str) -> list[dict]:
         """Fetch template projects from the API."""
-        return SyncClientHandler(region=region).list_template_projects()
+        return AgentStudioProject.list_templates(region)
 
     @classmethod
     def _pick_template(cls, templates: list[dict]) -> str | None:
@@ -250,11 +250,6 @@ class TemplateCommand(BaseCommand):
                 template = t
                 break
         if not template:
-            for t in templates:
-                if query in t.get("displayName", "").lower():
-                    template = t
-                    break
-        if not template:
             msg = f"Template '{template_name}' not found."
             if output_json:
                 json_print({"success": False, "error": msg})
@@ -299,3 +294,23 @@ class TemplateCommand(BaseCommand):
                 f"Loaded template [bold]{display_name}[/bold]"
                 f" into {project.account_id}/{project.project_id}"
             )
+
+    @classmethod
+    def offer_template_on_create(cls, path: str, region: str) -> None:
+        """Offer to load a template right after project creation."""
+        import questionary
+
+        should_load = questionary.confirm(
+            "Would you like to load a template into this project?",
+            default=False,
+            auto_enter=False,
+        ).ask()
+        if not should_load:
+            return
+
+        cls.load_template(
+            path=path,
+            region=region,
+            force=True,
+            output_json=False,
+        )
