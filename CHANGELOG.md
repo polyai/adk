@@ -1,6 +1,87 @@
 # CHANGELOG
 
 
+## v0.35.0 (2026-07-24)
+
+### Chores
+
+- Add testpaths to pytest config ([#234](https://github.com/polyai/adk/pull/234),
+  [`86a9c7e`](https://github.com/polyai/adk/commit/86a9c7ef088bba9d9fe3c01f095d91335d8d4b34))
+
+## Summary
+
+Add `testpaths` to pytest config so bare `uv run pytest` only collects from `src/poly/tests/`.
+
+## Motivation
+
+Running `uv run pytest` without an explicit path caused pytest to collect
+  `src/poly/resources/test_suite.py` as a test module (it matches the `test_*.py` pattern). This
+  interfered with `TestCase` resource registration and caused 6 tests to fail. Running `uv run
+  pytest src/poly/tests/` worked fine, masking the issue in CI.
+
+## Changes
+
+- Add `testpaths = ["src/poly/tests"]` to `[tool.pytest.ini_options]` in `pyproject.toml`
+
+## Test strategy
+
+- [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Features
+
+- Add branch diff, review, and status commands ([#227](https://github.com/polyai/adk/pull/227),
+  [`72887f4`](https://github.com/polyai/adk/commit/72887f4b57f987e8b9afc865f226a376c51eabd6))
+
+## Summary
+
+Add `poly branch diff`, `poly branch review`, and `poly branch status` commands that compare a
+  branch against its fork-point state, mirroring the UI's branch comparison screen.
+
+## Motivation
+
+The platform now shows branch comparisons relative to the fork point (not latest main), powered by
+  `?atSequence=` on the projection endpoint. ADK had no CLI equivalent — `poly diff` compares local
+  vs remote, not branch vs fork-point. These commands fill that gap as the "review before merge"
+  workflow alongside `branch merge`.
+
+## Changes
+
+- Add `poly branch diff` — prints fork-point diff to terminal (supports `--files`, `--json`) - Add
+  `poly branch review` — creates a GitHub Gist of the fork-point diff for sharing - Add `poly branch
+  status` — shows new/modified/deleted files on a branch vs fork point, same output format as `poly
+  status` with extra branch metadata in the header - Update `get_branches()` across the stack to
+  return `dict[str, dict[str, Any]]` (full branch metadata including `parentBranchId`,
+  `parentSequence`, `isDiverged`) instead of `dict[str, str]` - Add `branch_id` and `at_sequence`
+  params to `fetch_projection()` for fetching historical projections without cache mutation - Add
+  `pull_branch_resources()` to sync client and interface layers - Extract
+  `_resolve_branch_fork_point()` in project layer, shared by `diff_branch()` and `branch_status()` -
+  Refactor `StatusCommand.status()` to use shared helpers from `shared.py` - Fallback: when
+  `parentSequence` is null (older branches), compares against latest parent with a warning
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.34.7 (2026-07-21)
 
 ### Bug Fixes
