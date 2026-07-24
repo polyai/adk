@@ -1,6 +1,195 @@
 # CHANGELOG
 
 
+## v0.36.0 (2026-07-24)
+
+### Features
+
+- Add poly rtc pull/push commands ([#215](https://github.com/polyai/adk/pull/215),
+  [`493edaa`](https://github.com/polyai/adk/commit/493edaa15440ba22af92ea552899ece9c6e58cbe))
+
+## Summary
+
+Adds `poly rtc pull`, `push`, `edit`, `diff` and `validate` commands to sync Real-Time Configuration
+  between local files and Agent Studio, with drift protection, 3-way merge on conflicts, and
+  `--include-rtc` integration on existing pull/push.
+
+## Motivation
+
+RTC config is currently only manageable through the Agent Studio UI. This lets teams version-control
+  their RTC schema and variables alongside the rest of their agent project, and push changes from
+  the CLI — with safeguards against overwriting each other's changes.
+
+## Changes
+
+- poly rtc pull — fetches schema + variables per environment, writes schema.json and data.json to
+  real_time_configuration/<env>/ - poly rtc push — reads local files, validates data against schema,
+  and uploads to Agent Studio (schema via PUT, variables via PATCH) - poly rtc edit — pulls latest,
+  opens in $EDITOR, validates JSON, and pushes back in one step with race detection - poly rtc diff
+  — compares local files against remote config, shows field-level changes (added, removed, changed)
+  - poly rtc validate — validates local data.json against its schema.json using JSON Schema Draft 7
+  - --env sandbox|pre-release|live|all for pull, diff, and validate; --env required for push and
+  edit - --schema / --data flags for selective pull/push (mutually exclusive, default does both) -
+  --schema flag on edit to edit the schema instead of data variables - --skip-validation on push to
+  bypass schema validation - Live push/edit requires --force or interactive confirmation -
+  --include-rtc on regular poly pull / poly push to sync RTC alongside normal resources - Drift
+  protection — compares lastUpdated from API against stored metadata before pushing - 3-way merge
+  when drift is detected — auto-merges non-conflicting field changes (including nested dicts),
+  interactive resolution for true conflicts (local/remote/base/edit in $EDITOR) - --no-merge flag to
+  disable merge and hard-fail on drift - RTC metadata and base copies stored in .agent_studio_config
+  (no extra dotfiles for tracking) - Partial push failure updates metadata so retries don't falsely
+  trigger drift - RTC IO logic lives in project.py, CLI/interactive logic in cli_commands/rtc.py -
+  Helpers (write_json_file, read_json_file, diff_dicts, merge_rtc_dicts) in utils/json_io.py and
+  utils/merge.py - Schema validation (validate_rtc_data) as a static method on AgentStudioProject -
+  RTC failures propagate to the overall exit code for CI/automation
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly rtc pull`, `poly rtc push`) - [x]
+  Tested against a live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- TODO: add terminal output after manual testing --> ### push / pull <img width="1630"
+  height="98" alt="image (18)"
+  src="https://github.com/user-attachments/assets/3e30aaeb-73b5-4474-bb5b-990ca9510968" /> <img
+  width="1600" height="664" alt="image (17)"
+  src="https://github.com/user-attachments/assets/f9ee7e48-75b0-4a69-a258-65cf5aa82438" /> <img
+  width="591" height="299" alt="image"
+  src="https://github.com/user-attachments/assets/75524385-7137-4cc7-9069-31854a5a9606" />
+
+### rtc pull --data <img width="737" height="97" alt="image"
+  src="https://github.com/user-attachments/assets/41254f5c-05d4-4c8e-9529-2ff2bc3d8d05" />
+
+### edit command: <img width="796" height="399" alt="image"
+  src="https://github.com/user-attachments/assets/cabd353c-178b-4cf3-b302-64773fc6cd67" /> <img
+  width="672" height="151" alt="image"
+  src="https://github.com/user-attachments/assets/a323e579-7ef9-438d-a5aa-e9c4ed923348" />
+
+#### edit alidation <img width="651" height="60" alt="image"
+  src="https://github.com/user-attachments/assets/960e8217-84dc-4ab4-942b-07a9afe3245a" />
+
+tested with
+  [firebirds](https://jupiter.polyai.app/firebirds-us/firebirds-usp/real-time-configuration/sandbox?panel=config-builder):
+  <img width="767" height="290" alt="image"
+  src="https://github.com/user-attachments/assets/277116a4-de71-40e3-b570-0a8df28fae5c" />
+
+### diff <img width="651" height="125" alt="image"
+  src="https://github.com/user-attachments/assets/30490468-48e5-452d-8229-faeac5398621" /> <img
+  width="658" height="147" alt="image"
+  src="https://github.com/user-attachments/assets/1f48b816-174f-4565-8079-5a03b3ba11ea" /> <img
+  width="580" height="96" alt="image"
+  src="https://github.com/user-attachments/assets/a1d330e8-19dd-4fdc-aa62-bf1d795fec18" />
+
+### validate <img width="663" height="197" alt="image"
+  src="https://github.com/user-attachments/assets/02dd5cbf-a4d6-494d-bbcf-a8820887e5cc" /> <img
+  width="616" height="64" alt="image"
+  src="https://github.com/user-attachments/assets/d4e84680-f72d-46f5-b858-873fca070e77" /> <img
+  width="669" height="241" alt="image"
+  src="https://github.com/user-attachments/assets/6fb1e1e3-02ed-47e5-8a34-0d6519312f77" />
+
+**push with validation error** <img width="656" height="86" alt="image"
+  src="https://github.com/user-attachments/assets/9801d822-63b6-4301-95e4-6590a63456c2" />
+
+## Ticket and scoop
+
+https://poly-ai.atlassian.net/browse/TYT-1376?search_id=a334215f-41b7-4842-943d-f3d4cadc111b
+  https://poly-ai.atlassian.net/browse/TYT-1375
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+Co-authored-by: Copilot Autofix powered by AI <175728472+Copilot@users.noreply.github.com>
+
+
+## v0.35.0 (2026-07-24)
+
+### Chores
+
+- Add testpaths to pytest config ([#234](https://github.com/polyai/adk/pull/234),
+  [`86a9c7e`](https://github.com/polyai/adk/commit/86a9c7ef088bba9d9fe3c01f095d91335d8d4b34))
+
+## Summary
+
+Add `testpaths` to pytest config so bare `uv run pytest` only collects from `src/poly/tests/`.
+
+## Motivation
+
+Running `uv run pytest` without an explicit path caused pytest to collect
+  `src/poly/resources/test_suite.py` as a test module (it matches the `test_*.py` pattern). This
+  interfered with `TestCase` resource registration and caused 6 tests to fail. Running `uv run
+  pytest src/poly/tests/` worked fine, masking the issue in CI.
+
+## Changes
+
+- Add `testpaths = ["src/poly/tests"]` to `[tool.pytest.ini_options]` in `pyproject.toml`
+
+## Test strategy
+
+- [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Features
+
+- Add branch diff, review, and status commands ([#227](https://github.com/polyai/adk/pull/227),
+  [`72887f4`](https://github.com/polyai/adk/commit/72887f4b57f987e8b9afc865f226a376c51eabd6))
+
+## Summary
+
+Add `poly branch diff`, `poly branch review`, and `poly branch status` commands that compare a
+  branch against its fork-point state, mirroring the UI's branch comparison screen.
+
+## Motivation
+
+The platform now shows branch comparisons relative to the fork point (not latest main), powered by
+  `?atSequence=` on the projection endpoint. ADK had no CLI equivalent — `poly diff` compares local
+  vs remote, not branch vs fork-point. These commands fill that gap as the "review before merge"
+  workflow alongside `branch merge`.
+
+## Changes
+
+- Add `poly branch diff` — prints fork-point diff to terminal (supports `--files`, `--json`) - Add
+  `poly branch review` — creates a GitHub Gist of the fork-point diff for sharing - Add `poly branch
+  status` — shows new/modified/deleted files on a branch vs fork point, same output format as `poly
+  status` with extra branch metadata in the header - Update `get_branches()` across the stack to
+  return `dict[str, dict[str, Any]]` (full branch metadata including `parentBranchId`,
+  `parentSequence`, `isDiverged`) instead of `dict[str, str]` - Add `branch_id` and `at_sequence`
+  params to `fetch_projection()` for fetching historical projections without cache mutation - Add
+  `pull_branch_resources()` to sync client and interface layers - Extract
+  `_resolve_branch_fork_point()` in project layer, shared by `diff_branch()` and `branch_status()` -
+  Refactor `StatusCommand.status()` to use shared helpers from `shared.py` - Fallback: when
+  `parentSequence` is null (older branches), compares against latest parent with a warning
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.34.7 (2026-07-21)
 
 ### Bug Fixes

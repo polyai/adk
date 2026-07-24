@@ -531,14 +531,13 @@ class AgentStudioInterface:
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
-    def get_branches(self) -> dict[str, str]:
-        """Get a list of branches.
-
-        Args:
-            branch_name (str): The name of the branch
+    def get_branches(self) -> dict[str, dict[str, Any]]:
+        """Get a list of branches with full metadata.
 
         Returns:
-            dict[str, str]: A dictionary mapping branch names to branch IDs
+            A dictionary mapping branch names to their metadata dicts.
+            Each value contains at least ``branchId``, and may include
+            ``parentBranchId``, ``parentSequence``, ``isDiverged``, etc.
         """
         try:
             return self.sync_client.get_branches()
@@ -606,6 +605,26 @@ class AgentStudioInterface:
         """
         try:
             return self.sync_client.delete_branch(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def pull_branch_resources(
+        self, branch_id: str, at_sequence: Optional[int] = None
+    ) -> dict[type, dict[str, Any]]:
+        """Fetch resources for a branch, optionally at a historical sequence.
+
+        Args:
+            branch_id: The branch whose projection to fetch.
+            at_sequence: When provided, fetches the projection at this sequence number.
+
+        Returns:
+            A ResourceMap of the branch's resources.
+        """
+        from poly.resources.resource import load_resources_from_projection
+
+        try:
+            projection = self.sync_client.pull_branch_projection(branch_id, at_sequence)
+            return load_resources_from_projection(projection)
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
@@ -1129,3 +1148,77 @@ class AgentStudioInterface:
             dict: The created test run response.
         """
         return PlatformAPIHandler.trigger_test_run(region, project_id, test_case_ids, branch_id)
+
+    @staticmethod
+    def list_rtc_configs(
+        region: str,
+        project_id: str,
+    ) -> dict:
+        """List all RTC config pages for a project.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+
+        Returns:
+            dict: The API response with all RTC configs.
+        """
+        return PlatformAPIHandler.list_rtc_configs(region, project_id)
+
+    @staticmethod
+    def get_rtc_config(
+        region: str,
+        project_id: str,
+        client_env: str,
+    ) -> dict:
+        """Get RTC config for a specific environment.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            client_env: The environment (sandbox, pre-release, live).
+
+        Returns:
+            dict: The RTC config with schema, variables, clientEnv, lastUpdated.
+        """
+        return PlatformAPIHandler.get_rtc_config(region, project_id, client_env)
+
+    @staticmethod
+    def put_rtc_schema(
+        region: str,
+        project_id: str,
+        client_env: str,
+        schema: dict,
+    ) -> dict:
+        """Update the RTC schema for an environment.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            client_env: The environment (sandbox, pre-release, live).
+            schema: The JSON Schema Draft 7 object.
+
+        Returns:
+            dict: The updated RTC config.
+        """
+        return PlatformAPIHandler.put_rtc_schema(region, project_id, client_env, schema)
+
+    @staticmethod
+    def patch_rtc_variables(
+        region: str,
+        project_id: str,
+        client_env: str,
+        variables: dict,
+    ) -> dict:
+        """Update the RTC variables (data) for an environment.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            client_env: The environment (sandbox, pre-release, live).
+            variables: The config variables object.
+
+        Returns:
+            dict: The updated RTC config.
+        """
+        return PlatformAPIHandler.patch_rtc_variables(region, project_id, client_env, variables)
