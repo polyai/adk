@@ -278,6 +278,13 @@ poly branch merge 'Merge feature branch'
 poly branch merge 'Merge feature branch' --interactive
 poly branch delete
 poly branch delete my-feature
+poly branch diff
+poly branch diff my-feature
+poly branch diff my-feature --files topics/booking.yaml
+poly branch review
+poly branch review my-feature
+poly branch status
+poly branch status my-feature
 ~~~
 
 #### `poly branch merge`
@@ -334,6 +341,88 @@ When `--env live` or `--env pre-release` is specified:
 !!! info "Only one active branch is allowed at a time"
 
     Agent Studio supports one non-main branch per project. Attempting to create a second branch while one already exists returns an error. Merge or delete the existing branch in Agent Studio before creating a new one.
+
+#### `poly branch diff`
+
+Show what changed on a branch relative to its fork point — the state of the parent branch at the moment this branch was created. This mirrors the comparison shown in the Agent Studio branch review screen.
+
+By default, diffs against the current branch. Pass a branch name to diff a specific branch instead.
+
+~~~bash
+poly branch diff
+poly branch diff my-feature
+poly branch diff my-feature --files topics/booking.yaml functions/confirm.py
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `branch_name` | Branch to diff. Defaults to the current branch. |
+| `--files` | Only show changes for these specific files. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+
+Output shows a unified diff per file. When `--json` is used, see [JSON output shapes](#json-output-shapes) for the response format.
+
+!!! info "`poly branch diff` vs `poly diff`"
+
+    `poly diff` compares your **local** uncommitted changes against the remote branch. `poly branch diff` compares the branch's remote state against its **fork point** — useful for reviewing everything that changed on a branch before merging, regardless of what is uncommitted locally.
+
+#### `poly branch review`
+
+Create a private GitHub Gist containing the fork-point diff for a branch. Useful for sharing branch changes with teammates for review without requiring them to have local ADK access.
+
+Requires a GitHub token with Gist write access (`GITHUB_TOKEN` environment variable or configured in credentials).
+
+~~~bash
+poly branch review
+poly branch review my-feature
+poly branch review my-feature --files topics/booking.yaml
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `branch_name` | Branch to review. Defaults to the current branch. |
+| `--files` | Only include changes for these specific files. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+
+On success, prints a link to the created Gist. When `--json` is used, see [JSON output shapes](#json-output-shapes) for the response format.
+
+#### `poly branch status`
+
+Show what files have changed on a branch relative to its fork point, along with branch metadata (parent branch, creator, divergence status). The output format matches `poly status` but the comparison is branch-vs-fork-point rather than local-vs-remote.
+
+~~~bash
+poly branch status
+poly branch status my-feature
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `branch_name` | Branch to check. Defaults to the current branch. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+
+The console output displays a **Branch Status** panel with the following fields (where available):
+
+| Field | Description |
+|---|---|
+| Region | The project region. |
+| Account ID | The account ID. |
+| Project ID | The project ID. |
+| Last Pulled | Timestamp of the last local pull. |
+| Current Branch | The branch being inspected. |
+| Parent Branch | The branch this branch was created from. |
+| Created By | The user who created the branch. |
+| Diverged | Whether the parent branch has advanced past the fork point (`Yes` / `No`). |
+
+Below the panel, files are listed by category: **New files**, **Deleted files**, and **Modified files**.
+
+When `--json` is used, see [JSON output shapes](#json-output-shapes) for the response format.
+
+!!! tip "Use `poly branch status` before merging"
+
+    Running `poly branch status` before `poly branch merge` gives you a summary of everything that changed on a branch since it was created — the same view shown in the Agent Studio branch comparison screen.
 
 ### `poly format`
 
@@ -693,6 +782,12 @@ poly branch current --json
 poly branch delete --json
 poly branch delete my-feature --json
 poly branch merge 'Merge message' --json
+poly branch diff --json
+poly branch diff my-feature --json
+poly branch review --json
+poly branch review my-feature --json
+poly branch status --json
+poly branch status my-feature --json
 poly format --json
 poly init --region us-1 --account_id 123 --project_id my_project --json
 poly project create --region us-1 --account_id my-account --name my-project --json
@@ -739,6 +834,9 @@ The exact fields vary by command. Common fields include:
 | `poly branch current --json` | `current_branch` |
 | `poly branch delete --json` | `success`, `deleted` |
 | `poly branch merge --json` | `success`; on conflict: `conflicts`, `errors` |
+| `poly branch diff --json` | `success`, `diffs` |
+| `poly branch review --json` | `success`, `link` |
+| `poly branch status --json` | `branch`, `parent_branch`, `created_by`, `is_diverged`, `new_files`, `modified_files`, `deleted_files` |
 | `poly format --json` | `success`, `check_only`, `format_errors`, `affected`, `ty_ran`, `ty_returncode`, `ty_timed_out` |
 | `poly init --json` | `success`, `root_path` |
 | `poly project create --json` | `success`, `root_path` (via init); on error: `success`, `error` |
@@ -753,6 +851,18 @@ The exact fields vary by command. Common fields include:
 For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
 
 For `poly branch merge --json`, a successful merge returns `{ "success": true }`. When conflicts or errors are present, the response includes `"conflicts"` and `"errors"` arrays containing the raw conflict and error objects from the platform.
+
+For `poly branch diff --json`, a successful response with changes returns `{ "success": true, "diffs": { "<file_path>": "<unified_diff_text>", ... } }`. When there are no changes, `diffs` is an empty object (`{}`). On error, `{ "success": false, "error": "..." }` is returned.
+
+For `poly branch review --json`, a successful response returns `{ "success": true, "link": "<gist_url>" }`. When there are no changes to review, `{ "success": false, "message": "No changes to review." }` is returned. On error, `{ "success": false, "message": "..." }` is returned.
+
+For `poly branch status --json`, the response includes:
+
+- `branch` — name of the branch inspected.
+- `parent_branch` — name (or ID) of the parent branch.
+- `created_by` — user who created the branch (may be `null`).
+- `is_diverged` — whether the parent branch has advanced past the fork point (may be `null` for older branches).
+- `new_files`, `modified_files`, `deleted_files` — lists of file paths in each category.
 
 For `poly deployments show --json`, the response includes:
 
@@ -876,11 +986,12 @@ A typical CLI workflow looks like this:
 5. inspect changes with `poly status` and `poly diff`
 6. validate with `poly validate`
 7. push with `poly push`
-8. optionally review with `poly review`
-9. test or chat with the agent using `poly chat`
-10. browse and debug conversations with `poly conversations list` and `poly conversations get`
-11. merge the branch with `poly branch merge '<message>'`
-12. promote to pre-release or live with `poly deployments promote`
+8. optionally review with `poly review` or `poly branch review`
+9. check branch changes with `poly branch status` and `poly branch diff`
+10. test or chat with the agent using `poly chat`
+11. browse and debug conversations with `poly conversations list` and `poly conversations get`
+12. merge the branch with `poly branch merge '<message>'`
+13. promote to pre-release or live with `poly deployments promote`
 
 !!! info "Run commands from the project folder"
 
