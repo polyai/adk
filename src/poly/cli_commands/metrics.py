@@ -223,14 +223,9 @@ class MetricsCommand(BaseCommand):
         from poly.output.console import print_metrics
 
         project = load_project(base_path, output_json=output_json)
-        metrics_dict = PlatformAPIHandler.export_custom_metrics(
+        metrics = PlatformAPIHandler.get_custom_metrics(
             project.region, project.account_id, project.project_id
         )
-
-        # Export returns {name: {type, description, ...}} — flatten to list
-        metrics = []
-        for name, defn in metrics_dict.items():
-            metrics.append({"name": name, **(defn if isinstance(defn, dict) else {})})
 
         if output_json:
             json_print(metrics)
@@ -395,10 +390,10 @@ class MetricsCommand(BaseCommand):
         local_names = set(local_metrics.keys())
 
         # Fetch current remote metrics for the no-delete warning
-        remote_metrics = PlatformAPIHandler.export_custom_metrics(
+        remote_metrics = PlatformAPIHandler.get_custom_metrics(
             project.region, project.account_id, project.project_id
         )
-        remote_names = set(remote_metrics.keys())
+        remote_names = {m["name"] for m in remote_metrics if "name" in m}
         missing_from_file = remote_names - local_names
 
         if dry_run:

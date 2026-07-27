@@ -1097,6 +1097,24 @@ class PlatformAPIHandler:
         return dict(result) if result else {}
 
     @staticmethod
+    def get_custom_metrics(region: str, account_id: str, project_id: str) -> list[dict]:
+        """List all custom metrics for a project.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+
+        Returns:
+            list[dict]: List of custom metric records.
+        """
+        endpoint = CUSTOM_METRICS_URL.format(account_id=account_id, project_id=project_id)
+        result = PlatformAPIHandler.make_request(region, endpoint, "GET")
+        if isinstance(result, list):
+            return result
+        return result.get("metrics", result.get("data", []))
+
+    @staticmethod
     def create_custom_metric(region: str, account_id: str, project_id: str, data: dict) -> dict:
         """Create a new custom metric.
 
@@ -1172,16 +1190,20 @@ class PlatformAPIHandler:
         headers = {
             "X-API-KEY": retrieve_api_key(region),
             "X-PolyAI-Correlation-Id": f"adk-{uuid.uuid4()}",
-            "Content-Type": "application/x-yaml",
             "X-Poly-Source": "adk",
         }
 
-        api_response = requests.request(
-            method="POST",
+        import io
+
+        files = {
+            "yaml": ("metrics.yaml", io.BytesIO(yaml_content.encode("utf-8")), "application/x-yaml")
+        }
+
+        api_response = requests.post(
             url=url,
             headers=headers,
             params=params,
-            data=yaml_content.encode("utf-8"),
+            files=files,
             allow_redirects=False,
         )
         api_response.raise_for_status()
