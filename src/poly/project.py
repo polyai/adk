@@ -1462,10 +1462,8 @@ class AgentStudioProject:
                 - List of new files.
                 - List of deleted files.
         """
-        files_with_conflicts = []
+        files_with_conflicts: list[str] = []
         modified_files = []
-        new_files = []
-        deleted_files = []
 
         new_resources_mappings, kept_resources_mappings, deleted_resources_mappings = (
             self.find_new_kept_deleted(self.discover_local_resources())
@@ -1483,20 +1481,21 @@ class AgentStudioProject:
                 {},
             ).get("hash")
 
-            local_content = kept_local_resource_mapping.resource_type.read_from_file(
-                kept_local_resource_mapping.file_path
-            )
-            if resource_utils.contains_merge_conflict(local_content):
-                files_with_conflicts.append(kept_local_resource_mapping.file_path)
+            try:
+                local_resource = self.read_local_resource(
+                    resource=kept_local_resource_mapping,
+                    resource_mappings=local_resources_mappings,
+                )
+            except resource_utils.MergeConflictError as e:
+                files_with_conflicts.append(str(e))
                 continue
-
-            local_resource = self.read_local_resource(
-                resource=kept_local_resource_mapping, resource_mappings=local_resources_mappings
-            )
 
             modified = local_resource.is_modified(original_hash)
             if modified:
                 modified_files.append(kept_local_resource_mapping.file_path)
+
+        # dedupe: several resources can share one conflicted multi-resource file
+        files_with_conflicts = list(dict.fromkeys(files_with_conflicts))
 
         return files_with_conflicts, modified_files, new_files, deleted_files
 
@@ -1528,6 +1527,7 @@ class AgentStudioProject:
             dict[str, str]: A dictionary mapping resource file names to their diffs.
         """
         diffs = {}
+        conflict_files: list[str] = []
         all_files = not file_paths
         new_resources_mappings, kept_resources_mappings, deleted_resources_mappings = (
             self.find_new_kept_deleted(self.discover_local_resources())
@@ -1542,22 +1542,13 @@ class AgentStudioProject:
                 os.path.relpath(local_resource_mapping.file_path, self.root_path), {}
             ).get("hash")
 
-            local_content = local_resource_mapping.resource_type.read_from_file(
-                local_resource_mapping.file_path
-            )
-            if resource_utils.contains_merge_conflict(local_content):
-                original_resource = self.resources.get(
-                    local_resource_mapping.resource_type, {}
-                ).get(local_resource_mapping.resource_id)
-                original_content = original_resource.raw if original_resource else ""
-                diffs[local_resource_mapping.file_path] = resource_utils.get_diff(
-                    original_content, local_content
+            try:
+                local_resource = self.read_local_resource(
+                    resource=local_resource_mapping, resource_mappings=local_resources_mappings
                 )
+            except resource_utils.MergeConflictError as e:
+                conflict_files.append(str(e))
                 continue
-
-            local_resource = self.read_local_resource(
-                resource=local_resource_mapping, resource_mappings=local_resources_mappings
-            )
 
             modified = local_resource.is_modified(original_hash)
             if not modified:
@@ -1573,9 +1564,13 @@ class AgentStudioProject:
                 diffs[local_resource.file_path] = diff
 
         for resource_mapping in new_resources_mappings:
-            resource = self.read_local_resource(
-                resource=resource_mapping, resource_mappings=local_resources_mappings
-            )
+            try:
+                resource = self.read_local_resource(
+                    resource=resource_mapping, resource_mappings=local_resources_mappings
+                )
+            except resource_utils.MergeConflictError as e:
+                conflict_files.append(str(e))
+                continue
 
             diffs[resource.file_path] = resource_utils.get_diff(
                 "",
@@ -1585,6 +1580,8 @@ class AgentStudioProject:
                     resource_mappings=local_resources_mappings,
                 ),
             )
+
+        resource_utils.raise_if_merge_conflicts(conflict_files)
 
         for resource_mapping in deleted_resources_mappings:
             if not all_files and file_paths and resource_mapping.file_path not in file_paths:
@@ -2013,6 +2010,8 @@ class AgentStudioProject:
             raise FileNotFoundError(
                 f"File not found for resource {resource.resource_name} at {resource.file_path}"
             ) from e
+        except resource_utils.MergeConflictError:
+            raise
         except Exception as e:
             raise ValueError(
                 f"Error reading resource {resource.resource_name} at {resource.file_path}: {str(e)}"

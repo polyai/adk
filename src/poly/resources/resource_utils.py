@@ -153,6 +153,21 @@ def get_diff(original: str, updated: str) -> str:
     return "\n".join(diff)
 
 
+class MergeConflictError(ValueError):
+    """Raised when a resource file contains unresolved merge conflict markers."""
+
+
+def raise_if_merge_conflicts(conflict_files: list[str]) -> None:
+    """Raise a single aggregated error if any files contain merge conflict markers."""
+    if not conflict_files:
+        return
+    # dict.fromkeys dedupes (several resources can share one conflicted multi-resource file)
+    joined = "\n- ".join(dict.fromkeys(conflict_files))
+    raise MergeConflictError(
+        f"Merge conflict markers found — resolve before continuing:\n- {joined}"
+    )
+
+
 def contains_merge_conflict(string: str) -> bool:
     """Check if the string contains merge conflict markers."""
     has_start = False

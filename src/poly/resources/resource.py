@@ -136,6 +136,8 @@ class Resource(BaseResource, ABC):
     def read_to_raw(cls, file_path: str, **kwargs) -> str:
         """Read the resource from a local path."""
         contents = cls.read_from_file(file_path)
+        if utils.contains_merge_conflict(contents):
+            raise utils.MergeConflictError(file_path)
         return cls.from_pretty(contents, file_path=file_path, **kwargs)
 
     @abstractmethod
@@ -372,6 +374,8 @@ class YamlResource(Resource, ABC):
     def _read_yaml_dict(cls, file_path: str) -> dict:
         """Read and parse the resource's YAML file into a dict."""
         contents = cls.read_from_file(file_path)
+        if utils.contains_merge_conflict(contents):
+            raise utils.MergeConflictError(file_path)
         try:
             return utils.load_yaml(contents) or {}
         except Exception as e:
@@ -482,6 +486,8 @@ class MultiResourceYamlResource(YamlResource, ABC):
         if cached is not None and cached[0] == current_mtime:
             return cached[1]
         contents = super().read_from_file(true_file_path)
+        if utils.contains_merge_conflict(contents):
+            raise utils.MergeConflictError(true_file_path)
         top_level_yaml_dict = utils.load_yaml(contents) or {}
         cls._file_cache[true_file_path] = (current_mtime, top_level_yaml_dict)
         return top_level_yaml_dict
