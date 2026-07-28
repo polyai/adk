@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import io
 import json
 import logging
 import typing as ty
@@ -10,6 +11,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
+from ruamel.yaml import YAML
 
 from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
 from poly.utils import any_credentials_exist, retrieve_api_key
@@ -29,6 +31,16 @@ CHAT_END_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/chat/{conver
 AB_TESTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests"
 AB_TEST_ACTIVE_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/active"
 AB_TEST_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/{ab_test_id}"
+CUSTOM_METRICS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics"
+CUSTOM_METRIC_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics/{metric_name}"
+)
+CUSTOM_METRICS_EXPORT_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics/export"
+)
+CUSTOM_METRICS_IMPORT_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics/import"
+)
 # These use public APIs not /adk endpoints
 PROMOTE_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/promote"
 ROLLBACK_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/rollback"
@@ -42,17 +54,6 @@ TEST_RUNS_URL = "/v1/agents/{project_id}/testing/test-runs"
 TEST_RUN_URL = "/v1/agents/{project_id}/testing/test-runs/{test_run_id}"
 TEST_HISTORY_URL = "/v1/agents/{project_id}/testing/test-history"
 TRIGGER_TEST_RUN_URL = "/v1/agents/{project_id}/testing/test-runs/trigger"
-
-CUSTOM_METRICS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics"
-CUSTOM_METRIC_URL = (
-    "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics/{metric_name}"
-)
-CUSTOM_METRICS_EXPORT_URL = (
-    "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics/export"
-)
-CUSTOM_METRICS_IMPORT_URL = (
-    "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics/import"
-)
 
 
 class PlatformAPIHandler:
@@ -1073,8 +1074,6 @@ class PlatformAPIHandler:
         Returns:
             dict: Mapping of metric name to metric definition.
         """
-        from ruamel.yaml import YAML
-
         endpoint = CUSTOM_METRICS_EXPORT_URL.format(account_id=account_id, project_id=project_id)
         base_url = PlatformAPIHandler.get_base_url(region)
         url = base_url + endpoint
@@ -1118,9 +1117,6 @@ class PlatformAPIHandler:
     def create_custom_metric(region: str, account_id: str, project_id: str, data: dict) -> dict:
         """Create a new custom metric.
 
-        Note: Requires a Kong route for POST /adk/v1/.../custom-metrics
-        which is not yet deployed.
-
         Args:
             region: The region name.
             account_id: The account ID.
@@ -1142,9 +1138,6 @@ class PlatformAPIHandler:
         data: dict,
     ) -> dict:
         """Update an existing custom metric.
-
-        Note: Requires a Kong route for PATCH /adk/v1/.../custom-metrics/{name}
-        which is not yet deployed.
 
         Args:
             region: The region name.
@@ -1192,8 +1185,6 @@ class PlatformAPIHandler:
             "X-PolyAI-Correlation-Id": f"adk-{uuid.uuid4()}",
             "X-Poly-Source": "adk",
         }
-
-        import io
 
         files = {
             "yaml": ("metrics.yaml", io.BytesIO(yaml_content.encode("utf-8")), "application/x-yaml")

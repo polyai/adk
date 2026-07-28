@@ -4,11 +4,16 @@ Copyright PolyAI Limited
 """
 
 import logging
+import os
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 
+from ruamel.yaml import YAML, YAMLError
+
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
+from poly.handlers.platform_api import PlatformAPIHandler
+from poly.output.console import error, plain, print_metrics, success, warning
 from poly.output.json_output import json_print
 
 logger = logging.getLogger(__name__)
@@ -219,9 +224,6 @@ class MetricsCommand(BaseCommand):
     @classmethod
     def metrics_list(cls, base_path: str, output_json: bool = False) -> None:
         """List all custom metrics for the project."""
-        from poly.handlers.platform_api import PlatformAPIHandler
-        from poly.output.console import print_metrics
-
         project = load_project(base_path, output_json=output_json)
         metrics = PlatformAPIHandler.get_custom_metrics(
             project.region, project.account_id, project.project_id
@@ -244,9 +246,6 @@ class MetricsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Create a new custom metric."""
-        from poly.handlers.platform_api import PlatformAPIHandler
-        from poly.output.console import error, success
-
         project = load_project(base_path, output_json=output_json)
 
         if name is None:
@@ -307,9 +306,6 @@ class MetricsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Update an existing custom metric."""
-        from poly.handlers.platform_api import PlatformAPIHandler
-        from poly.output.console import error, success
-
         project = load_project(base_path, output_json=output_json)
 
         data: dict = {}
@@ -355,11 +351,6 @@ class MetricsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Bulk-import metrics from a YAML file."""
-        import os
-
-        from poly.handlers.platform_api import PlatformAPIHandler
-        from poly.output.console import error, plain, success, warning
-
         project = load_project(base_path, output_json=output_json)
 
         if not os.path.exists(file_path):
@@ -372,9 +363,6 @@ class MetricsCommand(BaseCommand):
 
         with open(file_path) as f:
             yaml_content = f.read()
-
-        # Parse local YAML to get metric names for diffing
-        from ruamel.yaml import YAML, YAMLError
 
         try:
             ry = YAML()
@@ -397,29 +385,7 @@ class MetricsCommand(BaseCommand):
         missing_from_file = remote_names - local_names
 
         if dry_run:
-            would_create = local_names - remote_names
-            would_skip = local_names & remote_names
-
-            result = {
-                "dry_run": True,
-                "would_create": sorted(would_create),
-                "would_skip": sorted(would_skip),
-                "remote_only": sorted(missing_from_file),
-            }
-
-            if output_json:
-                json_print(result)
-            else:
-                plain("[dim]Dry run — no changes will be made.[/dim]")
-                if would_create:
-                    plain(f"Would create: {', '.join(sorted(would_create))}")
-                if would_skip:
-                    plain(f"Would skip (already exist): {', '.join(sorted(would_skip))}")
-                if missing_from_file:
-                    warning(
-                        f"Metrics on remote but not in file (will NOT be deleted):"
-                        f" {', '.join(sorted(missing_from_file))}"
-                    )
+            cls._print_dry_run(local_names, remote_names, missing_from_file, output_json)
             return
 
         # Warn about metrics not in the file
@@ -452,3 +418,37 @@ class MetricsCommand(BaseCommand):
             created_count = len(created)
             skipped_count = len(ignored)
             success(f"Imported {created_count} metrics ({skipped_count} skipped)")
+
+    # ── helpers ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _print_dry_run(
+        local_names: set[str],
+        remote_names: set[str],
+        missing_from_file: set[str],
+        output_json: bool,
+    ) -> None:
+        """Display the results of a dry-run import."""
+        would_create = local_names - remote_names
+        would_skip = local_names & remote_names
+
+        result = {
+            "dry_run": True,
+            "would_create": sorted(would_create),
+            "would_skip": sorted(would_skip),
+            "remote_only": sorted(missing_from_file),
+        }
+
+        if output_json:
+            json_print(result)
+        else:
+            plain("[dim]Dry run — no changes will be made.[/dim]")
+            if would_create:
+                plain(f"Would create: {', '.join(sorted(would_create))}")
+            if would_skip:
+                plain(f"Would skip (already exist): {', '.join(sorted(would_skip))}")
+            if missing_from_file:
+                warning(
+                    f"Metrics on remote but not in file (will NOT be deleted):"
+                    f" {', '.join(sorted(missing_from_file))}"
+                )
