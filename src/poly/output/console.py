@@ -558,7 +558,7 @@ def _format_deployment_timestamp(created_at: str) -> str:
             dt = dt.replace(tzinfo=ZoneInfo("UTC"))
         dt = dt.astimezone()
         return dt.strftime("%d %b %y %H:%M %Z")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return "-"
 
 
@@ -813,7 +813,7 @@ def _format_iso_timestamp(ts: str) -> str:
     try:
         dt = datetime.fromisoformat(ts).astimezone()
         return dt.strftime("%d %b %y %H:%M %Z")
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return ts
 
 
@@ -828,7 +828,7 @@ def _extract_summary_heading(short_summary: Any) -> str:
         parsed = json.loads(text)
         if isinstance(parsed, dict):
             return parsed.get("heading") or "—"
-    except (json.JSONDecodeError, TypeError):
+    except json.JSONDecodeError, TypeError:
         pass
     return text
 
