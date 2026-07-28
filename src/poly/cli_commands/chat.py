@@ -417,7 +417,7 @@ class ChatCommand(BaseCommand):
                 else:
                     try:
                         user_input = input("\nYou: ").strip()
-                    except (KeyboardInterrupt, EOFError):
+                    except KeyboardInterrupt, EOFError:
                         if not output_json:
                             plain("")
                         break

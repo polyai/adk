@@ -27,7 +27,9 @@ from _gen import *  # <AUTO GENERATED>
     "Called when the caller has been offered the booking link by SMS or by speaking to an agent. "
     "wants_sms: True if they want the link by text, False if they want to speak to someone."
 )
-@func_parameter("wants_sms", "True if the caller wants the SMS link, False if they want to speak to an agent")
+@func_parameter(
+    "wants_sms", "True if the caller wants the SMS link, False if they want to speak to an agent"
+)
 def send_link_or_transfer(conv: Conversation, wants_sms: bool):
     if wants_sms:
         to_number = conv.state.caller_number
@@ -113,6 +115,7 @@ ENV_SENDER_NUMBERS = {
     "pre-release": "+442222222222",
     "live": "+443333333333",
 }
+
 
 def send_link_or_transfer(conv: Conversation, wants_sms: bool):
     if wants_sms:

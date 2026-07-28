@@ -91,7 +91,7 @@ def _signin(region: str) -> str:
             except requests.HTTPError as e:
                 try:
                     body = e.response.json()
-                except (ValueError, AttributeError):
+                except ValueError, AttributeError:
                     error(f"Authorization failed: {e}")
                     sys.exit(1)
                 err_code = body.get("error")

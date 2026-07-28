@@ -217,8 +217,7 @@ poly revert <file>
     The cleanest fix is to add `conv: Conversation` to the function signature yourself:
 
     ~~~python
-    def handoff(conv: Conversation):
-        ...
+    def handoff(conv: Conversation): ...
     ~~~
 
     Alternatively, skip local validation and let the platform validate the push instead:

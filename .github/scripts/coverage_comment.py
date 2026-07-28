@@ -17,7 +17,7 @@ def load_coverage(path: str) -> dict | None:
     try:
         with open(p) as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError, OSError:
         return None
 
 

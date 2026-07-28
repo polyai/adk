@@ -85,8 +85,5 @@ return {"content": f"Status: {data.get('status', 'unknown')}."}
 ```
 
 ```python
-response = conv.api.salesforce.update_contact(
-    params={"id": "123"},
-    json={"phone_number": "456"}
-)
+response = conv.api.salesforce.update_contact(params={"id": "123"}, json={"phone_number": "456"})
 ```

@@ -65,7 +65,7 @@ class AgentStudioInterface:
         if response is not None:
             try:
                 return response.json().get("error_code")
-            except (json.JSONDecodeError, ValueError, AttributeError):
+            except json.JSONDecodeError, ValueError, AttributeError:
                 pass
         return None
 
