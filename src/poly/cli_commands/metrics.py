@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 VALID_METRIC_TYPES = ["string", "int", "bool", "float"]
 
 
+def _parse_bool_flag(value: str) -> bool:
+    """Convert a string flag value to a boolean."""
+    if value.lower() in ("true", "1", "yes"):
+        return True
+    if value.lower() in ("false", "0", "no"):
+        return False
+    raise ValueError(f"Invalid boolean value: {value!r}. Use true/false.")
+
+
 class MetricsCommand(BaseCommand):
     """Manage custom metrics in the Agent Studio project."""
 
@@ -111,7 +120,7 @@ class MetricsCommand(BaseCommand):
                 "Update an existing custom metric. At least one flag required.\n\n"
                 "Examples:\n"
                 "  poly metrics edit CARRIER_ID --description 'Carrier handling the shipment'\n"
-                "  poly metrics edit CSAT_OFFERED --no-active\n"
+                "  poly metrics edit CSAT_OFFERED --active false\n"
                 "  poly metrics edit SCORE --api\n"
             ),
             formatter_class=RawTextHelpFormatter,
@@ -129,27 +138,19 @@ class MetricsCommand(BaseCommand):
         )
         edit_parser.add_argument(
             "--api",
-            action="store_true",
+            type=_parse_bool_flag,
+            nargs="?",
+            const=True,
             default=None,
-            help="Mark as an API metric.",
-        )
-        edit_parser.add_argument(
-            "--no-api",
-            action="store_true",
-            default=None,
-            help="Unmark as an API metric.",
+            help="Set API flag (true/false). Omit value to set true.",
         )
         edit_parser.add_argument(
             "--active",
-            action="store_true",
+            type=_parse_bool_flag,
+            nargs="?",
+            const=True,
             default=None,
-            help="Activate the metric.",
-        )
-        edit_parser.add_argument(
-            "--no-active",
-            action="store_true",
-            default=None,
-            help="Deactivate the metric.",
+            help="Set active state (true/false). Omit value to set true.",
         )
         edit_parser.add_argument(
             "--expected-values",
@@ -205,9 +206,7 @@ class MetricsCommand(BaseCommand):
                 name=args.name,
                 description=args.description,
                 api=args.api,
-                no_api=args.no_api,
                 active=args.active,
-                no_active=args.no_active,
                 expected_values=args.expected_values,
                 output_json=args.json,
             )
@@ -299,9 +298,7 @@ class MetricsCommand(BaseCommand):
         name: str,
         description: str | None = None,
         api: bool | None = None,
-        no_api: bool | None = None,
         active: bool | None = None,
-        no_active: bool | None = None,
         expected_values: list[str] | None = None,
         output_json: bool = False,
     ) -> None:
@@ -311,14 +308,10 @@ class MetricsCommand(BaseCommand):
         data: dict = {}
         if description is not None:
             data["description"] = description
-        if api:
-            data["api"] = True
-        if no_api:
-            data["api"] = False
-        if active:
-            data["active"] = True
-        if no_active:
-            data["active"] = False
+        if api is not None:
+            data["api"] = api
+        if active is not None:
+            data["active"] = active
         if expected_values is not None:
             data["expected_values"] = expected_values
 
