@@ -63,6 +63,26 @@ class MetricsCommand(BaseCommand):
             formatter_class=RawTextHelpFormatter,
         )
 
+        export_parser = metrics_subparsers.add_parser(
+            "export",
+            parents=[parents.path, parents.json],
+            help="Export all custom metrics as YAML.",
+            description=(
+                "Export all custom metrics as YAML.\n\n"
+                "Examples:\n"
+                "  poly metrics export\n"
+                "  poly metrics export metrics.yaml\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        export_parser.add_argument(
+            "file",
+            nargs="?",
+            default=None,
+            type=str,
+            help="Output file path. Prints to stdout when omitted.",
+        )
+
         add_parser = metrics_subparsers.add_parser(
             "add",
             parents=[parents.path, parents.json],
@@ -186,6 +206,8 @@ class MetricsCommand(BaseCommand):
         """Dispatch to the matching metrics sub-handler."""
         if args.metrics_subcommand == "list":
             cls.metrics_list(args.path, output_json=args.json)
+        elif args.metrics_subcommand == "export":
+            cls.metrics_export(args.path, file_path=args.file, output_json=args.json)
         elif args.metrics_subcommand == "add":
             cls.metrics_add(
                 args.path,
@@ -226,6 +248,31 @@ class MetricsCommand(BaseCommand):
             json_print(metrics)
         else:
             print_metrics(metrics)
+
+    @classmethod
+    def metrics_export(
+        cls,
+        base_path: str,
+        file_path: str | None = None,
+        output_json: bool = False,
+    ) -> None:
+        """Export all custom metrics as YAML."""
+        project = load_project(base_path, output_json=output_json)
+        metrics = AgentStudioInterface.export_custom_metrics(
+            project.region, project.account_id, project.project_id
+        )
+
+        if output_json:
+            json_print(metrics)
+            return
+
+        ry = YAML()
+        if file_path:
+            with open(file_path, "w") as f:
+                ry.dump(metrics, f)
+            success(f"Exported metrics to {file_path}")
+        else:
+            ry.dump(metrics, sys.stdout)
 
     @classmethod
     def metrics_add(
@@ -364,22 +411,19 @@ class MetricsCommand(BaseCommand):
 
         local_names = set(local_metrics.keys())
 
-        # Fetch current remote metrics for the no-delete warning
-        remote_metrics = AgentStudioInterface.get_custom_metrics(
-            project.region, project.account_id, project.project_id
+        preview = AgentStudioInterface.preview_metrics_import(
+            project.region, project.account_id, project.project_id, local_names
         )
-        remote_names = {m["name"] for m in remote_metrics if "name" in m}
-        missing_from_file = remote_names - local_names
 
         if dry_run:
-            cls._print_dry_run(local_names, remote_names, missing_from_file, output_json)
+            cls._print_dry_run(preview, output_json)
             return
 
         # Warn about metrics not in the file
-        if missing_from_file and not output_json:
+        if preview["remote_only"] and not output_json:
             warning(
                 f"Metrics on remote but not in file (not deleted):"
-                f" {', '.join(sorted(missing_from_file))}"
+                f" {', '.join(preview['remote_only'])}"
             )
 
         import_result = AgentStudioInterface.import_custom_metrics(
@@ -410,32 +454,20 @@ class MetricsCommand(BaseCommand):
 
     @staticmethod
     def _print_dry_run(
-        local_names: set[str],
-        remote_names: set[str],
-        missing_from_file: set[str],
+        preview: dict[str, list[str]],
         output_json: bool,
     ) -> None:
         """Display the results of a dry-run import."""
-        would_create = local_names - remote_names
-        would_skip = local_names & remote_names
-
-        result = {
-            "dry_run": True,
-            "would_create": sorted(would_create),
-            "would_skip": sorted(would_skip),
-            "remote_only": sorted(missing_from_file),
-        }
-
         if output_json:
-            json_print(result)
+            json_print({"dry_run": True, **preview})
         else:
             plain("[dim]Dry run — no changes will be made.[/dim]")
-            if would_create:
-                plain(f"Would create: {', '.join(sorted(would_create))}")
-            if would_skip:
-                plain(f"Would skip (already exist): {', '.join(sorted(would_skip))}")
-            if missing_from_file:
+            if preview["would_create"]:
+                plain(f"Would create: {', '.join(preview['would_create'])}")
+            if preview["would_skip"]:
+                plain(f"Would skip (already exist): {', '.join(preview['would_skip'])}")
+            if preview["remote_only"]:
                 warning(
                     f"Metrics on remote but not in file (will NOT be deleted):"
-                    f" {', '.join(sorted(missing_from_file))}"
+                    f" {', '.join(preview['remote_only'])}"
                 )
