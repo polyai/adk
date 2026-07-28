@@ -189,7 +189,7 @@ class SourcererSDK:
                 try:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
-                except ValueError, KeyError:
+                except (ValueError, KeyError):
                     error_msg = f"API request failed: {e}"
             else:
                 error_msg = f"Request failed: {e}"
@@ -230,7 +230,7 @@ class SourcererSDK:
                 try:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
-                except ValueError, KeyError:
+                except (ValueError, KeyError):
                     error_msg = f"API request failed: {e}"
             else:
                 error_msg = f"Request failed: {e}"
@@ -320,7 +320,7 @@ class SourcererSDK:
                     # Otherwise, it's a different error
                     error_msg = f"API Error 400: {response_data}"
                     raise SourcererAPIError(error_msg)
-                except ValueError, KeyError:
+                except (ValueError, KeyError):
                     error_msg = f"API Error 400: {response.text}"
                     raise SourcererAPIError(error_msg)
 
@@ -336,7 +336,7 @@ class SourcererSDK:
                 try:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
-                except ValueError, KeyError:
+                except (ValueError, KeyError):
                     error_msg = f"API request failed: {e}"
             else:
                 error_msg = f"Request failed: {e}"
@@ -366,7 +366,7 @@ class SourcererSDK:
                 try:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
-                except ValueError, KeyError:
+                except (ValueError, KeyError):
                     error_msg = f"API request failed: {e}"
             else:
                 error_msg = f"Request failed: {e}"
@@ -397,7 +397,7 @@ class SourcererSDK:
                 try:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
-                except ValueError, KeyError:
+                except (ValueError, KeyError):
                     error_msg = f"API request failed: {e}"
             else:
                 error_msg = f"Request failed: {e}"
@@ -461,7 +461,7 @@ class SourcererSDK:
                 try:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
-                except ValueError, KeyError:
+                except (ValueError, KeyError):
                     error_msg = f"API Error {e.response.status_code}: {e.response.text}"
             else:
                 error_msg = f"Request failed: {str(e)}"
@@ -488,7 +488,7 @@ class SourcererSDK:
                 try:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
-                except ValueError, KeyError:
+                except (ValueError, KeyError):
                     error_msg = f"API Error {e.response.status_code}: {e.response.text}"
             else:
                 error_msg = f"Request failed: {str(e)}"
@@ -603,7 +603,7 @@ class SourcererSDK:
             # Try to parse response as JSON, fallback to text
             try:
                 response_data = response.json()
-            except ValueError, json.JSONDecodeError:
+            except (ValueError, json.JSONDecodeError):
                 raise SourcererAPIError(f"Failed to parse response: {response.text}")
 
             if response_data.get("error"):
@@ -620,7 +620,7 @@ class SourcererSDK:
                 try:
                     error_detail = e.response.json()
                     error_msg = f"API Error {e.response.status_code}: {error_detail}"
-                except ValueError, KeyError:
+                except (ValueError, KeyError):
                     error_msg = f"API Error {e.response.status_code}: {e.response.text}"
             else:
                 error_msg = f"Request failed: {str(e)}"

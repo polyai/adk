@@ -39,17 +39,14 @@ from _gen import *  # <AUTO GENERATED>
 
 
 @func_description(
-    "Called when the caller is ready to end the call. Speaks the closing message and hangs up."
+    "Called when the caller is ready to end the call. "
+    "Speaks the closing message and hangs up."
 )
 def goodbye_and_hang_up(conv: Conversation):
     # Use a variant attribute for site-specific closings, or a plain string for a single site.
     # getattr guards against AttributeError if the attribute is missing for the current variant.
     default_closing = "Thanks for calling. Goodbye!"
-    closing = (
-        getattr(conv.variant, "closing_message", default_closing)
-        if conv.variant
-        else default_closing
-    )
+    closing = getattr(conv.variant, "closing_message", default_closing) if conv.variant else default_closing
     return {
         "utterance": closing,
         "hangup": True,

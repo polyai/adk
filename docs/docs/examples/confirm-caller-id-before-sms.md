@@ -47,10 +47,7 @@ from _gen import *  # <AUTO GENERATED>
     "provided_number: the number they provided if confirmed is False."
 )
 @func_parameter("confirmed", "Whether the caller confirmed the number on file")
-@func_parameter(
-    "provided_number",
-    "The number the caller provided if confirmed is False; pass an empty string if confirmed is True",
-)
+@func_parameter("provided_number", "The number the caller provided if confirmed is False; pass an empty string if confirmed is True")
 def caller_number_confirmed(conv: Conversation, confirmed: bool, provided_number: str):
     if confirmed and conv.state.caller_number:
         to_number = conv.state.caller_number

@@ -771,7 +771,7 @@ class AgentStudioProject:
                             format=format,
                             save_to_cache=True,
                         )
-                    except FileNotFoundError, ValueError, TypeError:
+                    except (FileNotFoundError, ValueError, TypeError):
                         continue
 
             local_file_contents = {
@@ -1827,7 +1827,7 @@ class AgentStudioProject:
         if parent_sequence_raw is not None:
             try:
                 parent_at_sequence = int(parent_sequence_raw)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 logger.warning(
                     f"Invalid parentSequence '{parent_sequence_raw}', "
                     "falling back to latest parent projection."
