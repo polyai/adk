@@ -292,7 +292,12 @@ class MetricsCommand(BaseCommand):
             if output_json:
                 json_print({"success": False, "error": "--name is required when using --json."})
                 sys.exit(1)
-            name = input("Metric name: ").strip()
+            import questionary
+
+            name = questionary.text("Metric name:").ask()
+            if name is None:
+                sys.exit(1)
+            name = name.strip()
             if not name:
                 error("Metric name is required.")
                 sys.exit(1)
@@ -301,19 +306,27 @@ class MetricsCommand(BaseCommand):
             if output_json:
                 json_print({"success": False, "error": "--type is required when using --json."})
                 sys.exit(1)
-            metric_type = input(f"Type ({'/'.join(VALID_METRIC_TYPES)}): ").strip()
-            if metric_type not in VALID_METRIC_TYPES:
-                error(
-                    f"Invalid type '{metric_type}'. Must be one of: {', '.join(VALID_METRIC_TYPES)}"
-                )
+            import questionary
+
+            metric_type = questionary.select("Metric type:", choices=VALID_METRIC_TYPES).ask()
+            if metric_type is None:
                 sys.exit(1)
 
         if description is None and not output_json:
-            description = input("Description (optional): ").strip() or None
+            import questionary
+
+            desc = questionary.text("Description (optional):").ask()
+            if desc is None:
+                sys.exit(1)
+            description = desc.strip() or None
 
         if api is False and not output_json:
-            api_input = input("API metric? (y/N): ").strip().lower()
-            api = api_input in ("y", "yes")
+            import questionary
+
+            api_result = questionary.confirm("API metric?", default=False).ask()
+            if api_result is None:
+                sys.exit(1)
+            api = api_result
 
         data: dict = {"name": name, "type": metric_type}
         if description:
