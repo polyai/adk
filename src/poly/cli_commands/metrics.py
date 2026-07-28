@@ -55,7 +55,6 @@ class MetricsCommand(BaseCommand):
 
         metrics_subparsers = metrics_parser.add_subparsers(dest="metrics_subcommand", required=True)
 
-        # ── list ────────────────────────────────────────────────────────
         metrics_subparsers.add_parser(
             "list",
             parents=[parents.path, parents.json],
@@ -64,7 +63,6 @@ class MetricsCommand(BaseCommand):
             formatter_class=RawTextHelpFormatter,
         )
 
-        # ── add ─────────────────────────────────────────────────────────
         add_parser = metrics_subparsers.add_parser(
             "add",
             parents=[parents.path, parents.json],
@@ -111,7 +109,6 @@ class MetricsCommand(BaseCommand):
             help="Expected values (only valid for string type).",
         )
 
-        # ── edit ────────────────────────────────────────────────────────
         edit_parser = metrics_subparsers.add_parser(
             "edit",
             parents=[parents.path, parents.json],
@@ -160,7 +157,6 @@ class MetricsCommand(BaseCommand):
             help="Expected values (only valid for string type).",
         )
 
-        # ── import ──────────────────────────────────────────────────────
         import_parser = metrics_subparsers.add_parser(
             "import",
             parents=[parents.path, parents.json],
@@ -217,8 +213,6 @@ class MetricsCommand(BaseCommand):
                 dry_run=args.dry_run,
                 output_json=args.json,
             )
-
-    # ── sub-handlers ────────────────────────────────────────────────
 
     @classmethod
     def metrics_list(cls, base_path: str, output_json: bool = False) -> None:
@@ -412,7 +406,7 @@ class MetricsCommand(BaseCommand):
             skipped_count = len(ignored)
             success(f"Imported {created_count} metrics ({skipped_count} skipped)")
 
-    # ── helpers ─────────────────────────────────────────────────────
+    # Helper function
 
     @staticmethod
     def _print_dry_run(
