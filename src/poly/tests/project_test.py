@@ -683,15 +683,12 @@ class ProjectStatusTest(unittest.TestCase):
         self.assertEqual(deleted_files, [])
 
     def test_project_status_merge_conflict_in_multi_resource_yaml(self):
-        """A conflicted multi-resource YAML file surfaces at discovery time.
+        """A conflicted multi-resource YAML file is listed (not raised) by project_status.
 
-        NOTE: this documents a product discrepancy. For single-file resources the
-        conflict is caught inside project_status and listed in files_with_conflicts
-        (see test_project_status_merge_conflict). For multi-resource YAML files the
-        guard fires earlier, inside discover_resources -> _get_top_level_data, which
-        is not wrapped by project_status's try/except, so project_status RAISES
-        MergeConflictError instead of returning the file in files_with_conflicts.
-        The reported path is the true on-disk yaml file.
+        The conflict is detected during discovery (discover_resources ->
+        _get_top_level_data); project_status collects the true file path into
+        files_with_conflicts and skips that file's resources instead of raising or
+        counting them as deleted.
         """
         project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
         entities_path = os.path.join(TEST_DIR, "config", "entities.yaml")
@@ -710,10 +707,13 @@ class ProjectStatusTest(unittest.TestCase):
         )
 
         with mock_read_from_file({entities_path: conflicted_entities}):
-            with self.assertRaises(resource_utils.MergeConflictError) as ctx:
+            files_with_conflicts, modified_files, new_files, deleted_files = (
                 project.project_status()
+            )
 
-        self.assertIn(entities_path, str(ctx.exception))
+        self.assertEqual(files_with_conflicts, [entities_path])
+        # The conflicted file's entities must not be reported as deleted.
+        self.assertFalse(any(entities_path in path for path in deleted_files))
 
     def test_project_status_mixed_changes(self):
         project_data = deepcopy(PROJECT_DATA)

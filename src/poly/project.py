@@ -1465,8 +1465,14 @@ class AgentStudioProject:
         files_with_conflicts: list[str] = []
         modified_files = []
 
+        # Multi-resource files that fail to parse (conflict markers) are collected here so
+        # their resources are skipped by the comparison rather than raising or being counted
+        # as deleted. Single-file conflicts are caught in the kept loop below.
         new_resources_mappings, kept_resources_mappings, deleted_resources_mappings = (
-            self.find_new_kept_deleted(self.discover_local_resources())
+            self.find_new_kept_deleted(
+                self.discover_local_resources(conflict_files=files_with_conflicts),
+                conflict_files=files_with_conflicts,
+            )
         )
 
         new_files = [resource.file_path for resource in new_resources_mappings]
@@ -1927,9 +1933,16 @@ class AgentStudioProject:
 
         return new_files, modified_files, deleted_files
 
-    def discover_local_resources(self) -> DiscoveredResourcePaths:
+    def discover_local_resources(
+        self, conflict_files: Optional[list[str]] = None
+    ) -> DiscoveredResourcePaths:
         """Return a dict of all discovered resources locally
         Using the resource name as the key
+
+        Args:
+            conflict_files (Optional[list[str]]): If provided, files whose discovery hits a
+                merge conflict are appended here and that resource type is skipped instead of
+                raising. If None, a MergeConflictError propagates.
 
         Returns:
             DiscoveredResourcePaths: A dictionary mapping resource types to
@@ -1937,7 +1950,13 @@ class AgentStudioProject:
         """
         discovered_resources: DiscoveredResourcePaths = {}
         for resource_class in RESOURCE_NAME_TO_CLASS.values():
-            discovered = resource_class.discover_resources(self.root_path)
+            try:
+                discovered = resource_class.discover_resources(self.root_path)
+            except resource_utils.MergeConflictError as e:
+                if conflict_files is None:
+                    raise
+                conflict_files.append(str(e))
+                continue
             discovered_resources[resource_class] = discovered or []
         return discovered_resources
 
@@ -2020,7 +2039,9 @@ class AgentStudioProject:
         return resource
 
     def find_new_kept_deleted(
-        self, discovered_resources: dict[type[Resource], list[str]]
+        self,
+        discovered_resources: dict[type[Resource], list[str]],
+        conflict_files: Optional[list[str]] = None,
     ) -> tuple[
         list[ResourceMapping],
         list[ResourceMapping],
@@ -2175,8 +2196,14 @@ class AgentStudioProject:
                         )
                     )
 
+        # Resources belonging to a conflicted (unparseable) file can't be enumerated, so
+        # they must not be counted as deleted just because discovery skipped them.
+        conflict_prefixes = tuple(f"{cf}{os.sep}" for cf in (conflict_files or []))
+
         deleted_file_paths = known_files - discovered_files
         for file_path in deleted_file_paths:
+            if file_path in (conflict_files or []) or file_path.startswith(conflict_prefixes):
+                continue
             resource_info = self.file_structure_info[os.path.relpath(file_path, self.root_path)]
             if resource_info["type"] not in RESOURCE_NAME_TO_CLASS:
                 continue
