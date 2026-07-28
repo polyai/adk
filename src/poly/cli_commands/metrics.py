@@ -12,7 +12,7 @@ from ruamel.yaml import YAML, YAMLError
 
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
-from poly.handlers.platform_api import PlatformAPIHandler
+from poly.handlers.interface import AgentStudioInterface
 from poly.output.console import error, plain, print_metrics, success, warning
 from poly.output.json_output import json_print
 
@@ -224,7 +224,7 @@ class MetricsCommand(BaseCommand):
     def metrics_list(cls, base_path: str, output_json: bool = False) -> None:
         """List all custom metrics for the project."""
         project = load_project(base_path, output_json=output_json)
-        metrics = PlatformAPIHandler.get_custom_metrics(
+        metrics = AgentStudioInterface.get_custom_metrics(
             project.region, project.account_id, project.project_id
         )
 
@@ -282,7 +282,7 @@ class MetricsCommand(BaseCommand):
         if expected_values:
             data["expected_values"] = expected_values
 
-        result = PlatformAPIHandler.create_custom_metric(
+        result = AgentStudioInterface.create_custom_metric(
             project.region, project.account_id, project.project_id, data
         )
 
@@ -323,7 +323,7 @@ class MetricsCommand(BaseCommand):
                 error(msg)
             sys.exit(1)
 
-        result = PlatformAPIHandler.update_custom_metric(
+        result = AgentStudioInterface.update_custom_metric(
             project.region, project.account_id, project.project_id, name, data
         )
 
@@ -371,7 +371,7 @@ class MetricsCommand(BaseCommand):
         local_names = set(local_metrics.keys())
 
         # Fetch current remote metrics for the no-delete warning
-        remote_metrics = PlatformAPIHandler.get_custom_metrics(
+        remote_metrics = AgentStudioInterface.get_custom_metrics(
             project.region, project.account_id, project.project_id
         )
         remote_names = {m["name"] for m in remote_metrics if "name" in m}
@@ -388,7 +388,7 @@ class MetricsCommand(BaseCommand):
                 f" {', '.join(sorted(missing_from_file))}"
             )
 
-        import_result = PlatformAPIHandler.import_custom_metrics(
+        import_result = AgentStudioInterface.import_custom_metrics(
             project.region,
             project.account_id,
             project.project_id,
