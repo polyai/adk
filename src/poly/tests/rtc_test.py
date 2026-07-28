@@ -804,6 +804,68 @@ class TestRTCEdit(unittest.TestCase):
         self.assertIn("validation failed", result["error"])
         mock_project.rtc_push_to_api.assert_not_called()
 
+    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.cli_commands.rtc.load_project")
+    def test_edit_null_variables_opens_empty_object_in_editor(self, mock_load_project, mock_editor):
+        """The editor gets {} when the API returns null variables, not literal null.
+
+        Projects with no RTC configured get explicit JSON null back from the API, and
+        editing "null" is not a usable starting point.
+        """
+        mock_project = MagicMock()
+        mock_project.rtc_fetch_config.return_value = {
+            "schema": None,
+            "variables": None,
+            "lastUpdated": "T1",
+        }
+        mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
+        mock_load_project.return_value = mock_project
+        mock_editor.return_value = '{"flag": true}'
+
+        RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
+
+        editor_content = mock_editor.call_args[0][0]
+        self.assertEqual(editor_content, "{}\n")
+
+    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.cli_commands.rtc.load_project")
+    def test_edit_schema_null_opens_empty_object_in_editor(self, mock_load_project, mock_editor):
+        """--schema gets {} in the editor when the API returns null schema."""
+        mock_project = MagicMock()
+        mock_project.rtc_fetch_config.return_value = {
+            "schema": None,
+            "variables": None,
+            "lastUpdated": "T1",
+        }
+        mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
+        mock_load_project.return_value = mock_project
+        mock_editor.return_value = '{"type": "object"}'
+
+        RTCCommand.rtc_edit(self.temp_dir, env="sandbox", edit_schema=True)
+
+        editor_content = mock_editor.call_args[0][0]
+        self.assertEqual(editor_content, "{}\n")
+
+    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.cli_commands.rtc.load_project")
+    def test_edit_null_schema_skips_data_validation(self, mock_load_project, mock_editor):
+        """With a null schema there is nothing to validate against, so the edit pushes."""
+        mock_project = MagicMock()
+        mock_project.rtc_fetch_config.return_value = {
+            "schema": None,
+            "variables": None,
+            "lastUpdated": "T1",
+        }
+        mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
+        mock_load_project.return_value = mock_project
+        mock_editor.return_value = '{"flag": true}'
+
+        result = RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
+
+        self.assertTrue(result["success"])
+        call_kwargs = mock_project.rtc_push_to_api.call_args[1]
+        self.assertEqual(call_kwargs["variables"], {"flag": True})
+
 
 class TestRTCDiff(unittest.TestCase):
     """Test suite for poly rtc diff command."""

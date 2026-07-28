@@ -607,8 +607,8 @@ class RTCCommand(BaseCommand):
             return {"success": False, "error": f"Failed to fetch RTC config: {e}"}
 
         baseline_last_updated = config.get("lastUpdated")
-        schema = config.get("schema", {})
-        variables = config.get("variables", {})
+        schema = config.get("schema") or {}
+        variables = config.get("variables") or {}
 
         if edit_schema:
             content = schema

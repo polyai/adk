@@ -3248,8 +3248,8 @@ class AgentStudioProject:
         env_dir = self._rtc_env_dir(env)
         os.makedirs(env_dir, exist_ok=True)
 
-        schema = config.get("schema", {})
-        variables = config.get("variables", {})
+        schema = config.get("schema") or {}
+        variables = config.get("variables") or {}
 
         schema_path = os.path.join(env_dir, "schema.json")
         data_path = os.path.join(env_dir, "data.json")
