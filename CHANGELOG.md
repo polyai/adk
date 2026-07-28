@@ -1,6 +1,52 @@
 # CHANGELOG
 
 
+## v0.36.1 (2026-07-28)
+
+### Bug Fixes
+
+- Write empty object instead of null for unset RTC schema/variables
+  ([#242](https://github.com/polyai/adk/pull/242),
+  [`c58e621`](https://github.com/polyai/adk/commit/c58e621553d167c3bfbb278020a64133fc26e20c))
+
+## Summary
+
+`poly rtc pull` wrote literal `null` into `schema.json`/`data.json` when a project had no RTC
+  configured. This now correctly writes `{}`.
+
+## Motivation
+
+The RTC API returns `schema`/`variables` as explicit JSON `null` (not omitted) when a project has no
+  RTC configured. `dict.get(key, {})` only substitutes the default when the key is *absent* — since
+  the key is present with value `null`, the code got `None` through, which was then written straight
+  to disk via `json.dump`, producing literal `null` instead of `{}`.
+
+## Changes
+
+- `src/poly/project.py`: `rtc_pull_env` now uses `config.get("schema") or {}` /
+  `config.get("variables") or {}` - `src/poly/cli_commands/rtc.py`: same fix applied to the
+  `rtc_edit` command path - Added regression tests in `src/poly/tests/project_test.py`
+  (`RtcPullEnvTest`) and `src/poly/tests/rtc_test.py`
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly rtc pull`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<img width="568" height="135" alt="image"
+  src="https://github.com/user-attachments/assets/fd561b64-e419-4406-8073-b7bf64b51960" />
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+
 ## v0.36.0 (2026-07-24)
 
 ### Features
