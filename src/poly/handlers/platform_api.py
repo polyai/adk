@@ -107,19 +107,28 @@ class PlatformAPIHandler:
         data: ty.Optional[dict] = None,
         params: ty.Optional[dict] = None,
         headers: ty.Optional[dict] = None,
+        files: ty.Optional[dict] = None,
+        response_format: str = "json",
         use_jupiter_api: bool = False,
     ) -> dict:
         """Make a request to the Platform API.
 
         Args:
-            region (str): The region name
-            endpoint (str): The API endpoint
-            method (str): The HTTP method
-            data (dict | None): The request body for POST/PUT requests
-            params (dict | None): Query string parameters
+            region (str): The region name.
+            endpoint (str): The API endpoint.
+            method (str): The HTTP method.
+            data (dict | None): The request body for POST/PUT requests.
+            params (dict | None): Query string parameters.
+            headers (dict | None): Override headers. Built automatically when None.
+            files (dict | None): Multipart file upload fields. When set, ``data``
+                is ignored and ``Content-Type`` is omitted so ``requests`` can set
+                the multipart boundary automatically.
+            response_format (str): How to parse the response — ``"json"`` (default)
+                or ``"yaml"``.
+            use_jupiter_api (bool): Whether to use the Jupiter API.
 
         Returns:
-            dict: The response JSON
+            dict: The parsed response.
         """
         url = PlatformAPIHandler.get_base_url(region, use_jupiter_api) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
@@ -128,20 +137,21 @@ class PlatformAPIHandler:
             headers = {
                 "X-API-KEY": retrieve_api_key(region),
                 "X-PolyAI-Correlation-Id": correlation_id,
-                "Content-Type": "application/json",
                 "X-Poly-Source": "adk",
             }
+            if not files:
+                headers["Content-Type"] = "application/json"
 
         logger.info(f"Making {method} request to {url}")
 
-        # Use requests.request() to handle all HTTP methods uniformly
         api_response = requests.request(
             method=method,
             url=url,
             headers=headers,
             params=params,
             allow_redirects=False,
-            data=json.dumps(data) if data else None,
+            files=files,
+            data=json.dumps(data) if data and not files else None,
         )
 
         logger.debug(
@@ -153,7 +163,8 @@ class PlatformAPIHandler:
             api_response.raise_for_status()
         except requests.HTTPError:
             logger.debug(
-                f"Error in request status_code={api_response.status_code!r} response={api_response.text!r}"
+                f"Error in request status_code={api_response.status_code!r}"
+                f" response={api_response.text!r}"
             )
             raise
 
@@ -161,13 +172,21 @@ class PlatformAPIHandler:
             logger.info(f"Request to {url} successful (no content)")
             return {}
 
+        if response_format == "yaml":
+            content = api_response.text.strip()
+            if not content:
+                return {}
+            ry = YAML()
+            result = ry.load(content)
+            return dict(result) if result else {}
+
         try:
-            api_response = api_response.json()
+            parsed = api_response.json()
         except json.JSONDecodeError as e:
             raise ValueError(f"Failed to parse JSON response: {e}")
 
         logger.info(f"Request to {url} successful")
-        return api_response
+        return parsed
 
     @staticmethod
     def get_accessible_regions(regions: list[str]) -> list[str]:
@@ -1063,10 +1082,7 @@ class PlatformAPIHandler:
 
     @staticmethod
     def export_custom_metrics(region: str, account_id: str, project_id: str) -> dict:
-        """Export all custom metrics for a project.
-
-        The export endpoint returns YAML, so this method handles
-        parsing separately from the standard JSON-based make_request.
+        """Export all custom metrics for a project as a YAML-parsed dict.
 
         Args:
             region: The region name.
@@ -1077,25 +1093,7 @@ class PlatformAPIHandler:
             dict: Mapping of metric name to metric definition.
         """
         endpoint = CUSTOM_METRICS_EXPORT_URL.format(account_id=account_id, project_id=project_id)
-        base_url = PlatformAPIHandler.get_base_url(region)
-        url = base_url + endpoint
-
-        headers = {
-            "X-API-KEY": retrieve_api_key(region),
-            "X-PolyAI-Correlation-Id": f"adk-{uuid.uuid4()}",
-            "X-Poly-Source": "adk",
-        }
-
-        api_response = requests.get(url, headers=headers, allow_redirects=False)
-        api_response.raise_for_status()
-
-        content = api_response.text.strip()
-        if not content:
-            return {}
-
-        ry = YAML()
-        result = ry.load(content)
-        return dict(result) if result else {}
+        return PlatformAPIHandler.make_request(region, endpoint, "GET", response_format="yaml")
 
     @staticmethod
     def get_custom_metrics(region: str, account_id: str, project_id: str) -> list[dict]:
@@ -1178,31 +1176,15 @@ class PlatformAPIHandler:
         """
         endpoint = CUSTOM_METRICS_IMPORT_URL.format(account_id=account_id, project_id=project_id)
         params = {"type": "yaml", "dry_run": str(dry_run).lower()}
-
-        base_url = PlatformAPIHandler.get_base_url(region)
-        url = base_url + endpoint
-
-        headers = {
-            "X-API-KEY": retrieve_api_key(region),
-            "X-PolyAI-Correlation-Id": f"adk-{uuid.uuid4()}",
-            "X-Poly-Source": "adk",
-        }
-
         files = {
-            "yaml": ("metrics.yaml", io.BytesIO(yaml_content.encode("utf-8")), "application/x-yaml")
+            "yaml": (
+                "metrics.yaml",
+                io.BytesIO(yaml_content.encode("utf-8")),
+                "application/x-yaml",
+            )
         }
+        return PlatformAPIHandler.make_request(region, endpoint, "POST", params=params, files=files)
 
-        api_response = requests.post(
-            url=url,
-            headers=headers,
-            params=params,
-            files=files,
-            allow_redirects=False,
-        )
-        api_response.raise_for_status()
-        return api_response.json()
-      
-     
     @staticmethod
     def list_rtc_configs(
         region: str,
