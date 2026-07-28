@@ -123,8 +123,8 @@ class PlatformAPIHandler:
             files (dict | None): Multipart file upload fields. When set, ``data``
                 is ignored and ``Content-Type`` is omitted so ``requests`` can set
                 the multipart boundary automatically.
-            response_format (str): How to parse the response — ``"json"`` (default)
-                or ``"yaml"``.
+            response_format (str): How to parse the response. "json" (default)
+                or "yaml".
             use_jupiter_api (bool): Whether to use the Jupiter API.
 
         Returns:
@@ -144,6 +144,7 @@ class PlatformAPIHandler:
 
         logger.info(f"Making {method} request to {url}")
 
+        # Use requests.request() to handle all HTTP methods uniformly
         api_response = requests.request(
             method=method,
             url=url,
