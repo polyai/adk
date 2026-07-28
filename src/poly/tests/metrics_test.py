@@ -66,6 +66,78 @@ class MetricsListTest(unittest.TestCase):
         mock_json.assert_called_once_with(metrics)
 
 
+class MetricsExportTest(unittest.TestCase):
+    """Tests for MetricsCommand.metrics_export."""
+
+    @patch("poly.cli_commands.metrics.json_print")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.export_custom_metrics")
+    @patch("poly.cli_commands.metrics.load_project")
+    def test_export_json_output(self, mock_load, mock_export, mock_json):
+        """In JSON mode, export passes the dict straight to json_print."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_load.return_value = project
+        data = {"SCORE": {"type": "int"}, "STATUS": {"type": "string"}}
+        mock_export.return_value = data
+
+        MetricsCommand.metrics_export("/fake/path", output_json=True)
+
+        mock_json.assert_called_once_with(data)
+
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.export_custom_metrics")
+    @patch("poly.cli_commands.metrics.load_project")
+    def test_export_to_stdout(self, mock_load, mock_export):
+        """Without a file path, YAML is dumped to stdout."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_load.return_value = project
+        mock_export.return_value = {"SCORE": {"type": "int"}}
+
+        with patch("poly.cli_commands.metrics.YAML") as mock_yaml_cls:
+            mock_ry = MagicMock()
+            mock_yaml_cls.return_value = mock_ry
+            MetricsCommand.metrics_export("/fake/path", file_path=None, output_json=False)
+
+            import sys
+
+            mock_ry.dump.assert_called_once_with({"SCORE": {"type": "int"}}, sys.stdout)
+
+    @patch("poly.cli_commands.metrics.success")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.export_custom_metrics")
+    @patch("poly.cli_commands.metrics.load_project")
+    def test_export_to_file(self, mock_load, mock_export, mock_success):
+        """With a file path, YAML is written to file and success message shown."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_load.return_value = project
+        mock_export.return_value = {"SCORE": {"type": "int"}}
+
+        with (
+            patch("poly.cli_commands.metrics.YAML") as mock_yaml_cls,
+            patch("builtins.open", unittest.mock.mock_open()) as mock_file,
+        ):
+            mock_ry = MagicMock()
+            mock_yaml_cls.return_value = mock_ry
+            MetricsCommand.metrics_export("/fake/path", file_path="out.yaml", output_json=False)
+
+            mock_file.assert_called_once_with("out.yaml", "w")
+            mock_ry.dump.assert_called_once()
+            mock_success.assert_called_once()
+            self.assertIn("out.yaml", mock_success.call_args[0][0])
+
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.export_custom_metrics")
+    @patch("poly.cli_commands.metrics.load_project")
+    def test_export_empty_metrics(self, mock_load, mock_export):
+        """Export with empty dict still dumps without error."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_load.return_value = project
+        mock_export.return_value = {}
+
+        with patch("poly.cli_commands.metrics.YAML") as mock_yaml_cls:
+            mock_ry = MagicMock()
+            mock_yaml_cls.return_value = mock_ry
+            MetricsCommand.metrics_export("/fake/path", output_json=False)
+
+            mock_ry.dump.assert_called_once_with({}, unittest.mock.ANY)
+
+
 class MetricsAddTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_add."""
 
