@@ -1191,8 +1191,6 @@ class AgentStudioInterface:
         """
         return PlatformAPIHandler.patch_rtc_variables(region, project_id, client_env, variables)
 
-    # ── Custom Metrics ─────────────────────────────────────────────
-
     @staticmethod
     def get_custom_metrics(
         region: str,
