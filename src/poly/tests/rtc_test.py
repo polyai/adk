@@ -196,9 +196,9 @@ class TestRTC(unittest.TestCase):
         self.assertTrue(result["success"])
         mock_project.rtc_push_to_api.assert_called_once()
 
-    @patch("poly.cli_commands.rtc.questionary")
+    @patch("questionary.confirm")
     @patch("poly.cli_commands.rtc.load_project")
-    def test_rtc_push_live_interactive_confirm(self, mock_load_project, mock_questionary):
+    def test_rtc_push_live_interactive_confirm(self, mock_load_project, mock_confirm):
         """Verify interactive live push proceeds when user confirms."""
         mock_project = MagicMock()
         mock_project.rtc_load_local.return_value = {
@@ -207,17 +207,17 @@ class TestRTC(unittest.TestCase):
         }
         mock_project.check_rtc_drift.return_value = {"status": "no_metadata"}
         mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "live"}
-        mock_questionary.confirm.return_value.ask.return_value = True
+        mock_confirm.return_value.ask.return_value = True
         mock_load_project.return_value = mock_project
 
         RTCCommand.rtc_push(self.temp_dir, env="live", force=False, output_json=False)
 
-        mock_questionary.confirm.assert_called_once()
+        mock_confirm.assert_called_once()
         mock_project.rtc_push_to_api.assert_called_once()
 
-    @patch("poly.cli_commands.rtc.questionary")
+    @patch("questionary.confirm")
     @patch("poly.cli_commands.rtc.load_project")
-    def test_rtc_push_live_interactive_decline(self, mock_load_project, mock_questionary):
+    def test_rtc_push_live_interactive_decline(self, mock_load_project, mock_confirm):
         """Verify interactive live push is cancelled when user declines."""
         mock_project = MagicMock()
         mock_project.rtc_load_local.return_value = {
@@ -225,12 +225,12 @@ class TestRTC(unittest.TestCase):
             "variables": {"key": "val"},
         }
         mock_project.check_rtc_drift.return_value = {"status": "no_metadata"}
-        mock_questionary.confirm.return_value.ask.return_value = False
+        mock_confirm.return_value.ask.return_value = False
         mock_load_project.return_value = mock_project
 
         RTCCommand.rtc_push(self.temp_dir, env="live", force=False, output_json=False)
 
-        mock_questionary.confirm.assert_called_once()
+        mock_confirm.assert_called_once()
         mock_project.rtc_push_to_api.assert_not_called()
 
 
@@ -747,10 +747,10 @@ class TestRTCEdit(unittest.TestCase):
         self.assertIn("modified while you were editing", result["error"])
         mock_project.rtc_push_to_api.assert_not_called()
 
-    @patch("poly.cli_commands.rtc.questionary")
+    @patch("questionary.confirm")
     @patch("poly.cli_commands.rtc.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
-    def test_edit_live_declined(self, mock_load_project, mock_editor, mock_questionary):
+    def test_edit_live_declined(self, mock_load_project, mock_editor, mock_confirm):
         """Verify live edit cancelled when user declines confirmation."""
         mock_project = MagicMock()
         mock_project.rtc_fetch_config.return_value = {
@@ -759,7 +759,7 @@ class TestRTCEdit(unittest.TestCase):
             "lastUpdated": "T1",
         }
         mock_load_project.return_value = mock_project
-        mock_questionary.confirm.return_value.ask.return_value = False
+        mock_confirm.return_value.ask.return_value = False
         mock_editor.return_value = '{"flag": true}'
 
         RTCCommand.rtc_edit(self.temp_dir, env="live")

@@ -21,7 +21,6 @@ from enum import Enum
 from io import StringIO
 from typing import TYPE_CHECKING, Optional, Union
 
-import langcodes
 import ruamel.yaml as yaml
 
 logger = logging.getLogger(__name__)
@@ -564,6 +563,8 @@ def convert_keys_to_snake_case(dict_obj: dict) -> dict:
 
 def is_valid_language_code(code: str) -> bool:
     """Check if the given code is a valid BCP 47 language code."""
+    import langcodes
+
     return langcodes.tag_is_valid(code)
 
 

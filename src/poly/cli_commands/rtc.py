@@ -8,9 +8,6 @@ import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from typing import Optional
 
-import questionary
-import requests
-
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
 from poly.output.console import edit_in_editor, error, info, success, warning
@@ -77,6 +74,8 @@ def _resolve_rtc_conflict_interactively(
     Returns:
         Resolved dict, or None if the user cancelled.
     """
+    import questionary
+
     while True:
         choices = [
             questionary.Choice("Use local version (yours)", value="local"),
@@ -387,6 +386,8 @@ class RTCCommand(BaseCommand):
         Returns:
             dict: Result with success status and files_written list.
         """
+        import requests
+
         project = load_project(base_path, output_json=output_json)
 
         if env == "all":
@@ -424,6 +425,9 @@ class RTCCommand(BaseCommand):
         Returns:
             dict with success status, or None if the user cancelled interactively.
         """
+        import questionary
+        import requests
+
         project = load_project(base_path, output_json=output_json)
 
         # Load local files
@@ -599,6 +603,9 @@ class RTCCommand(BaseCommand):
         Returns:
             dict with success status, or None if cancelled/no changes.
         """
+        import questionary
+        import requests
+
         project = load_project(base_path)
 
         try:
@@ -688,6 +695,8 @@ class RTCCommand(BaseCommand):
         Returns:
             dict with success status and per-environment diffs.
         """
+        import requests
+
         project = load_project(base_path, output_json=output_json)
 
         if env == "all":
