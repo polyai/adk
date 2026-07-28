@@ -63,7 +63,7 @@ class FetchProjection(unittest.TestCase):
         expected_url = (
             "https://sourcerer.test/accounts/acc-1/projects/proj-1/branches/branch-1/projection"
         )
-        session.get.assert_called_once_with(expected_url)
+        session.get.assert_called_once_with(expected_url, params=None)
 
     def test_cached_projection_returned_without_refetch(self):
         """A second call returns the cache without hitting the session again."""

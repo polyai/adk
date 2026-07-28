@@ -54,6 +54,10 @@ TEST_RUNS_URL = "/v1/agents/{project_id}/testing/test-runs"
 TEST_RUN_URL = "/v1/agents/{project_id}/testing/test-runs/{test_run_id}"
 TEST_HISTORY_URL = "/v1/agents/{project_id}/testing/test-history"
 TRIGGER_TEST_RUN_URL = "/v1/agents/{project_id}/testing/test-runs/trigger"
+RTC_CONFIGS_URL = "/v1/agents/{project_id}/real-time-configs"
+RTC_CONFIG_URL = "/v1/agents/{project_id}/real-time-configs/{client_env}"
+RTC_SCHEMA_URL = "/v1/agents/{project_id}/real-time-configs/{client_env}/schema"
+RTC_VARIABLES_URL = "/v1/agents/{project_id}/real-time-configs/{client_env}/variables"
 
 
 class PlatformAPIHandler:
@@ -1057,8 +1061,6 @@ class PlatformAPIHandler:
         }
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
-    # ── Custom Metrics ────────────────────────────────────────────────
-
     @staticmethod
     def export_custom_metrics(region: str, account_id: str, project_id: str) -> dict:
         """Export all custom metrics for a project.
@@ -1199,3 +1201,84 @@ class PlatformAPIHandler:
         )
         api_response.raise_for_status()
         return api_response.json()
+      
+     
+    @staticmethod
+    def list_rtc_configs(
+        region: str,
+        project_id: str,
+    ) -> dict:
+        """List all RTC config pages for a project.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+
+        Returns:
+            dict: The API response with all RTC configs.
+        """
+        endpoint = RTC_CONFIGS_URL.format(project_id=project_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")
+
+    @staticmethod
+    def get_rtc_config(
+        region: str,
+        project_id: str,
+        client_env: str,
+    ) -> dict:
+        """Get RTC config for a specific environment.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            client_env: The environment (sandbox, pre-release, live).
+
+        Returns:
+            dict: The RTC config with schema, variables, clientEnv, lastUpdated.
+        """
+        endpoint = RTC_CONFIG_URL.format(project_id=project_id, client_env=client_env)
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")
+
+    @staticmethod
+    def put_rtc_schema(
+        region: str,
+        project_id: str,
+        client_env: str,
+        schema: dict,
+    ) -> dict:
+        """Update the RTC schema for an environment.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            client_env: The environment (sandbox, pre-release, live).
+            schema: The JSON Schema Draft 7 object.
+
+        Returns:
+            dict: The updated RTC config.
+        """
+        endpoint = RTC_SCHEMA_URL.format(project_id=project_id, client_env=client_env)
+        data = {"schema": schema}
+        return PlatformAPIHandler.make_request(region, endpoint, "PUT", data=data)
+
+    @staticmethod
+    def patch_rtc_variables(
+        region: str,
+        project_id: str,
+        client_env: str,
+        variables: dict,
+    ) -> dict:
+        """Update the RTC variables (data) for an environment.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            client_env: The environment (sandbox, pre-release, live).
+            variables: The config variables object.
+
+        Returns:
+            dict: The updated RTC config.
+        """
+        endpoint = RTC_VARIABLES_URL.format(project_id=project_id, client_env=client_env)
+        data = {"variables": variables}
+        return PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=data)

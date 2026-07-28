@@ -168,3 +168,78 @@ def format_gist_choice(g: dict) -> str:
     date = g.get("created_at", "")[:10]
     parts = [p for p in [date, id_hint, g["description"]] if p]
     return "  ".join(parts)
+
+
+def resolve_account_name(project: AgentStudioProject) -> None:
+    """Resolve and cache the account name if not already set."""
+    if project.account_name:
+        return
+    try:
+        from poly.handlers.interface import AgentStudioInterface
+
+        api_handler = AgentStudioInterface()
+        accounts = api_handler.get_accounts(project.region)
+        project.account_name = accounts.get(project.account_id)
+        if project.account_name:
+            project.save_config()
+    except Exception:
+        pass
+
+
+def print_project_file_changes(
+    project: AgentStudioProject,
+    output_json: bool = False,
+    extra_json: Optional[dict[str, Any]] = None,
+    extra_status_kwargs: Optional[dict[str, Any]] = None,
+) -> None:
+    """Print project status panel and local file changes.
+
+    Used by ``poly status``.
+
+    Args:
+        project: The loaded project.
+        output_json: If True, output JSON and return.
+        extra_json: Additional keys to merge into the JSON output.
+        extra_status_kwargs: Additional kwargs passed to ``print_status()``
+            (e.g. ``parent_branch``, ``created_by``, ``is_diverged``).
+    """
+    from poly.output.console import plain, print_file_list, print_status
+
+    resolve_account_name(project)
+
+    files_with_conflicts, modified_files, new_files, deleted_files = project.project_status()
+
+    if output_json:
+        json_output = {
+            "account_name": project.account_name,
+            "project_name": project.project_name,
+            "files_with_conflicts": files_with_conflicts,
+            "modified_files": modified_files,
+            "new_files": new_files,
+            "deleted_files": deleted_files,
+        }
+        if extra_json:
+            json_output.update(extra_json)
+        json_print(json_output)
+        return
+
+    branch_info = project.get_current_branch()
+
+    print_status(
+        region=project.region,
+        account_id=project.account_id,
+        project_id=project.project_id,
+        last_updated=project.last_updated.isoformat(),
+        branch=branch_info,
+        account_name=project.account_name,
+        project_name=project.project_name,
+        **(extra_status_kwargs or {}),
+    )
+
+    print_file_list("Files with merge conflicts", files_with_conflicts, "filename.conflict")
+    print_file_list("New files", new_files, "filename.new")
+    print_file_list("Deleted files", deleted_files, "filename.deleted")
+    print_file_list("Modified files", modified_files, "filename.modified")
+
+    if not modified_files and not new_files and not deleted_files and not files_with_conflicts:
+        plain("\n[muted]No changes detected.[/muted]")
