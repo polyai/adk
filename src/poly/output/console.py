@@ -988,6 +988,12 @@ def handle_exception(exc: Exception) -> None:
                 prefix = msg
                 break
 
+        # MergeConflictError subclasses ValueError, so override the generic prefix.
+        from poly.resources.resource_utils import MergeConflictError
+
+        if isinstance(exc, MergeConflictError):
+            prefix = "Merge conflict"
+
         # requests.HTTPError
         try:
             import requests

@@ -1493,7 +1493,7 @@ class AgentStudioProject:
                     resource_mappings=local_resources_mappings,
                 )
             except resource_utils.MergeConflictError as e:
-                files_with_conflicts.append(str(e))
+                files_with_conflicts.extend(e.file_paths)
                 continue
 
             modified = local_resource.is_modified(original_hash)
@@ -1553,7 +1553,7 @@ class AgentStudioProject:
                     resource=local_resource_mapping, resource_mappings=local_resources_mappings
                 )
             except resource_utils.MergeConflictError as e:
-                conflict_files.append(str(e))
+                conflict_files.extend(e.file_paths)
                 continue
 
             modified = local_resource.is_modified(original_hash)
@@ -1575,7 +1575,7 @@ class AgentStudioProject:
                     resource=resource_mapping, resource_mappings=local_resources_mappings
                 )
             except resource_utils.MergeConflictError as e:
-                conflict_files.append(str(e))
+                conflict_files.extend(e.file_paths)
                 continue
 
             diffs[resource.file_path] = resource_utils.get_diff(
@@ -1955,7 +1955,7 @@ class AgentStudioProject:
             except resource_utils.MergeConflictError as e:
                 if conflict_files is None:
                     raise
-                conflict_files.append(str(e))
+                conflict_files.extend(e.file_paths)
                 continue
             discovered_resources[resource_class] = discovered or []
         return discovered_resources

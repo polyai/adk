@@ -154,18 +154,26 @@ def get_diff(original: str, updated: str) -> str:
 
 
 class MergeConflictError(ValueError):
-    """Raised when a resource file contains unresolved merge conflict markers."""
+    """Raised when resource file(s) contain unresolved merge conflict markers.
+
+    Callers pass the offending file path(s); the message is derived from them.
+    """
+
+    def __init__(self, file_paths: "str | list[str]"):
+        # dedupe: several resources can share one conflicted multi-resource file
+        paths = [file_paths] if isinstance(file_paths, str) else list(dict.fromkeys(file_paths))
+        self.file_paths = paths
+        if len(paths) == 1:
+            message = f"{paths[0]} — resolve the conflict markers before continuing"
+        else:
+            message = "resolve the conflict markers in:\n- " + "\n- ".join(paths)
+        super().__init__(message)
 
 
 def raise_if_merge_conflicts(conflict_files: list[str]) -> None:
     """Raise a single aggregated error if any files contain merge conflict markers."""
-    if not conflict_files:
-        return
-    # dict.fromkeys dedupes (several resources can share one conflicted multi-resource file)
-    joined = "\n- ".join(dict.fromkeys(conflict_files))
-    raise MergeConflictError(
-        f"Merge conflict markers found — resolve before continuing:\n- {joined}"
-    )
+    if conflict_files:
+        raise MergeConflictError(conflict_files)
 
 
 def contains_merge_conflict(string: str) -> bool:
