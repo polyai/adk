@@ -7,6 +7,8 @@ Copyright PolyAI Limited
 
 import json
 import os
+import shutil
+import tempfile
 import unittest
 from copy import deepcopy
 from unittest.mock import MagicMock, patch
@@ -2386,7 +2388,9 @@ class ValidateProjectTest(unittest.TestCase):
             errors = project.validate_project()
         self.assertEqual(len(errors), 2)
         error_texts = "\n".join(errors)
-        self.assertIn("Invalid references: ['global_functions: FUNCTION-missing_function']", error_texts)
+        self.assertIn(
+            "Invalid references: ['global_functions: FUNCTION-missing_function']", error_texts
+        )
         self.assertIn("Start step 'missing_step' not found.", error_texts)
 
 
@@ -3982,6 +3986,86 @@ class GetBranchesReturnTypeTest(unittest.TestCase):
 
         self.assertIsNone(current_name)
         self.assertEqual(len(branches), 1)
+
+
+class RtcPullEnvTest(unittest.TestCase):
+    """Tests for AgentStudioProject.rtc_pull_env writing RTC files to disk."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project = AgentStudioProject.from_dict(deepcopy(EMPTY_PROJECT_DATA), self.temp_dir)
+        self.env_dir = os.path.join(self.temp_dir, "real_time_configuration", "draft_and_sandbox")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _read_json(self, file_name: str) -> object:
+        with open(os.path.join(self.env_dir, file_name), "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_pull_env_writes_schema_and_data_returned_by_api(self):
+        """Schema and variables from the API are written to schema.json and data.json."""
+        config = {
+            "schema": {"type": "object", "properties": {"flag": {"type": "boolean"}}},
+            "variables": {"flag": True},
+            "lastUpdated": "2026-01-01T00:00:00Z",
+        }
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            result = self.project.rtc_pull_env("sandbox")
+
+        self.assertEqual(result["environment"], "sandbox")
+        self.assertEqual(self._read_json("schema.json"), config["schema"])
+        self.assertEqual(self._read_json("data.json"), config["variables"])
+
+    def test_pull_env_writes_empty_dicts_when_api_returns_null(self):
+        """A project with no RTC configured writes {} to disk, never literal null.
+
+        The API returns explicit JSON null (not a missing key) for schema/variables when
+        RTC has never been configured, and null is not valid content for these files.
+        """
+        config = {"schema": None, "variables": None, "lastUpdated": "2026-01-01T00:00:00Z"}
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            self.project.rtc_pull_env("sandbox")
+
+        self.assertEqual(self._read_json("schema.json"), {})
+        self.assertEqual(self._read_json("data.json"), {})
+
+    def test_pull_env_metadata_records_empty_dicts_when_api_returns_null(self):
+        """The stored baseline metadata is {} rather than being left unset on null."""
+        config = {"schema": None, "variables": None, "lastUpdated": "2026-01-01T00:00:00Z"}
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            self.project.rtc_pull_env("sandbox")
+
+        self.assertEqual(self.project.rtc_metadata["sandbox"]["base_schema"], {})
+        self.assertEqual(self.project.rtc_metadata["sandbox"]["base_data"], {})
+        self.assertEqual(
+            self.project.rtc_metadata["sandbox"]["last_updated"], "2026-01-01T00:00:00Z"
+        )
+
+    def test_pull_env_null_config_round_trips_through_rtc_load_local(self):
+        """Files written from a null API response can be read back as empty dicts."""
+        config = {"schema": None, "variables": None, "lastUpdated": "2026-01-01T00:00:00Z"}
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            self.project.rtc_pull_env("sandbox")
+
+        loaded = self.project.rtc_load_local("sandbox")
+
+        self.assertEqual(loaded, {"schema": {}, "variables": {}})
+
+    def test_pull_env_schema_only_does_not_write_data_file(self):
+        """schema_only writes schema.json and leaves data.json absent."""
+        config = {"schema": {"type": "object"}, "variables": {"flag": True}, "lastUpdated": "T1"}
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            result = self.project.rtc_pull_env("sandbox", schema_only=True)
+
+        self.assertNotIn("data_file", result)
+        self.assertTrue(os.path.exists(os.path.join(self.env_dir, "schema.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.env_dir, "data.json")))
 
 
 if __name__ == "__main__":
