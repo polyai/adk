@@ -1,6 +1,61 @@
 # CHANGELOG
 
 
+## v0.36.2 (2026-07-29)
+
+### Performance Improvements
+
+- Defer heavy CLI imports to speed up startup ([#243](https://github.com/polyai/adk/pull/243),
+  [`6b61d00`](https://github.com/polyai/adk/commit/6b61d00acd7b4ed46c2b4af0238728be03d87104))
+
+## Summary
+
+Defers heavy third-party imports out of CLI module load so `poly` commands don't pay for
+  dependencies they don't use. Cuts `import poly.cli` from ~284ms to ~180ms (~37%).
+
+## Motivation
+
+`poly`'s entrypoint imports every command module up front (to register argparse subcommands), so a
+  few heavy deps were loaded on *every* invocation regardless of the command: - `prompt_toolkit` +
+  `questionary` (~55ms) — interactive prompts, only used by `poly rtc` - `langcodes` (~16ms,
+  compiles regex/data tables at import) — language validation only - `jsonschema` (~20ms) —
+  experimental-config validation only
+
+A `poly diff`/`status`/`pull` never touches any of these, but paid ~90ms of import cost for them.
+
+## Changes
+
+Moved each import to point-of-use inside the function that needs it: -
+  `resources/resource_utils.py`: `langcodes` → inside `is_valid_language_code`. -
+  `resources/experimental_config.py`: `jsonschema` → inside `ExperimentalConfig.validate`. -
+  `cli_commands/rtc.py`: `questionary`/`requests` → local imports in the five methods that use them.
+  - `tests/rtc_test.py`: re-point three mock patches from `poly.cli_commands.rtc.questionary` (no
+  longer a module attribute) to `questionary.confirm`.
+
+No behavior change — purely where the imports happen.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly --help`, `poly diff` — verified
+  `prompt_toolkit`/`questionary`/`langcodes`/`jsonschema` no longer load at startup via `python -X
+  importtime`) - [ ] Tested against a live Agent Studio project - [ ] N/A
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (937 passed) - [x] No
+  breaking changes to the `poly` CLI interface - [x] Commit messages follow conventional commits
+
+## Screenshots / Logs
+
+`python -X importtime -c "import poly.cli"`:
+
+| | Before | After | |---|---|---| | `import poly.cli` cumulative | ~284ms | ~180ms | |
+  `prompt_toolkit`/`questionary` | loaded | not loaded | | `langcodes` | loaded | not loaded | |
+  `jsonschema` | loaded | not loaded |
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+
 ## v0.36.1 (2026-07-28)
 
 ### Bug Fixes
