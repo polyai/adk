@@ -206,6 +206,17 @@ When `--dont-poll` is used, the CLI prints the run ID and a `poly test show` com
 Use poly test show <run_id> to check the status of the test run.
 ~~~
 
+#### Transient error handling during polling
+
+While polling, `poly test run` tolerates transient network errors and server errors (such as a 500 response). Up to 5 consecutive poll failures are retried automatically; the error counter resets whenever a poll succeeds. If the threshold is exceeded, the CLI exits gracefully with a warning rather than crashing:
+
+~~~text
+Lost contact with the platform while polling test run <run_id> (5 consecutive failures).
+The run may still be in progress — check its status with poly test show <run_id>.
+~~~
+
+The test run itself continues executing server-side even if the CLI loses contact. Use `poly test show <run_id>` or `poly test list` to retrieve the final result.
+
 ### `poly test list`
 
 List past test runs for the current project and branch.
@@ -294,6 +305,7 @@ Good coverage of a project usually includes:
 - add a webchat and a voice variant of any critical path that runs on both channels
 - validate as part of the normal edit loop, not just before merge
 - combine the suite with `poly chat` and interactive review in Agent Studio when behavior depends on the full conversation flow
+- if `poly test run` exits early with a polling warning, use `poly test show <run_id>` or `poly test list` to retrieve results — the run itself continues on the platform
 
 ## Related pages
 
