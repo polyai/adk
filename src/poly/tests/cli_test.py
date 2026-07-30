@@ -781,6 +781,107 @@ class BranchMergeTest(unittest.TestCase):
         self.assertEqual(mock_json_print.call_args[0][0], {"success": True})
 
 
+class BranchSyncTest(unittest.TestCase):
+    """Tests for BranchCommand.branch_sync."""
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.get_current_branch.return_value = "feature-a"
+        self.proj.sync_branch.return_value = (True, [], [])
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.output.console.success")
+    def test_sync_success_reports_branch_name(self, mock_success):
+        """A successful sync reports the current branch name."""
+        BranchCommand.branch_sync(TEST_DIR)
+
+        self.proj.sync_branch.assert_called_once_with(conflict_resolutions=None)
+        self.assertIn("feature-a", mock_success.call_args[0][0])
+        self.assertIn("synced successfully", mock_success.call_args[0][0])
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_mode_reports_success(self, mock_json_print):
+        """JSON mode reports success without conflicts/errors keys."""
+        BranchCommand.branch_sync(TEST_DIR, output_json=True)
+
+        self.assertEqual(mock_json_print.call_args[0][0], {"success": True})
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_mode_reports_failure_and_exits(self, mock_json_print):
+        """JSON mode reports conflicts/errors and exits non-zero on failure."""
+        conflicts = [{"path": ["a"], "type": "modify"}]
+        self.proj.sync_branch.return_value = (False, conflicts, [])
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_sync(TEST_DIR, output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        output = mock_json_print.call_args[0][0]
+        self.assertEqual(output["success"], False)
+        self.assertEqual(output["conflicts"], conflicts)
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_interactive_and_json_together_is_rejected(self, mock_json_print):
+        """--interactive and --json cannot be combined."""
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_sync(TEST_DIR, output_json=True, interactive=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.proj.sync_branch.assert_not_called()
+        self.assertFalse(mock_json_print.call_args[0][0]["success"])
+
+    @patch("poly.output.console.error")
+    def test_non_interactive_conflicts_exit_with_guidance(self, mock_error):
+        """Non-interactive conflicts print guidance and exit non-zero, without merging further."""
+        conflicts = [{"path": ["a"], "type": "modify"}]
+        self.proj.sync_branch.return_value = (False, conflicts, [])
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_sync(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.proj.sync_branch.assert_called_once_with(conflict_resolutions=None)
+        mock_error.assert_any_call("Failed to sync branch 'feature-a'.")
+
+    @patch("poly.output.console.error")
+    def test_errors_exit_before_conflict_prompt(self, mock_error):
+        """A hard error (not just conflicts) exits immediately, even without --interactive."""
+        self.proj.sync_branch.return_value = (
+            False,
+            [],
+            [{"path": "x", "message": "boom"}],
+        )
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_sync(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_error.assert_any_call("- x: boom")
+
+    def test_invalid_resolutions_json_exits(self):
+        """An unparseable --resolutions value exits with an error before syncing."""
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_sync(TEST_DIR, resolutions_file="not-json")
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.proj.sync_branch.assert_not_called()
+
+    @patch("poly.output.console.success")
+    def test_inline_resolutions_json_is_parsed_and_forwarded(self, mock_success):
+        """An inline JSON array passed via --resolutions is forwarded to project.sync_branch."""
+        resolutions = [{"path": ["a"], "strategy": "ours"}]
+
+        BranchCommand.branch_sync(TEST_DIR, resolutions_file=str(resolutions).replace("'", '"'))
+
+        self.proj.sync_branch.assert_called_once_with(conflict_resolutions=resolutions)
+        mock_success.assert_called_once()
+
+
 class BranchMergeConflictHelpersTest(unittest.TestCase):
     """Branch merge conflict enrichment, resolution payload, and conflict table layout."""
 
