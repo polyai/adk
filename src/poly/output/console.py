@@ -172,9 +172,12 @@ def print_releases_branches(branches: dict[str, Any], current_branch: str | None
 
     def label(node: dict[str, Any]) -> str:
         name = node["name"]
+        text = f"[success]{name}[/success]" if name == current_branch else name
+        if tag := node["meta"].get("tag"):
+            text += f" [info]({tag})[/info]"
         if name == current_branch:
-            return f"[success]{name}[/success] [muted](current)[/muted]"
-        return name
+            text += " [muted](current)[/muted]"
+        return text
 
     def add(parent_tree: Tree, node: dict[str, Any]) -> None:
         branch_tree = parent_tree.add(label(node))

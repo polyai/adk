@@ -5,12 +5,14 @@ Copyright PolyAI Limited
 
 import unittest
 
-from poly.output.console import flatten_branch_tree
+from poly.output.console import console, flatten_branch_tree, print_releases_branches
 
 
-def _branch(branch_id: str, parent_branch_id: str | None = None) -> dict[str, str | None]:
+def _branch(
+    branch_id: str, parent_branch_id: str | None = None, tag: str | None = None
+) -> dict[str, str | None]:
     """Build the branch metadata shape returned by the platform for one branch."""
-    return {"branchId": branch_id, "parentBranchId": parent_branch_id}
+    return {"branchId": branch_id, "parentBranchId": parent_branch_id, "tag": tag}
 
 
 class FlattenBranchTreeTest(unittest.TestCase):
@@ -121,3 +123,46 @@ class FlattenBranchTreeTest(unittest.TestCase):
         values = [value for _, value in flatten_branch_tree(branches, current_branch="sub-a")]
 
         self.assertEqual(sorted(values), ["feature-a", "main", "sub-a"])
+
+
+class PrintReleasesBranchesTest(unittest.TestCase):
+    """Tests for print_releases_branches, the tree renderer used by `branch list`."""
+
+    def _render(self, branches: dict, current_branch: str | None = None) -> str:
+        with console.capture() as capture:
+            print_releases_branches(branches, current_branch)
+        return capture.get()
+
+    def test_tagged_branch_shows_tag_alongside_name(self):
+        """A branch with a tag renders '(tag)' after its name."""
+        branches = {
+            "main": _branch("id-main"),
+            "Release 1": _branch("id-release-1", "id-main", tag="staging"),
+        }
+
+        output = self._render(branches)
+
+        self.assertIn("Release 1 (staging)", output)
+
+    def test_untagged_branch_shows_no_tag_suffix(self):
+        """A branch with no tag renders its name with no trailing parenthetical."""
+        branches = {
+            "main": _branch("id-main"),
+            "Release 1": _branch("id-release-1", "id-main"),
+        }
+
+        output = self._render(branches)
+
+        self.assertIn("Release 1\n", output)
+        self.assertNotIn("(", output)
+
+    def test_current_and_tagged_branch_shows_both_markers(self):
+        """A branch that is both current and tagged shows the tag and '(current)'."""
+        branches = {
+            "main": _branch("id-main"),
+            "Release 1": _branch("id-release-1", "id-main", tag="staging"),
+        }
+
+        output = self._render(branches, current_branch="Release 1")
+
+        self.assertIn("Release 1 (staging) (current)", output)
