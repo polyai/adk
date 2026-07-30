@@ -17,6 +17,7 @@ from poly.cli_commands.project import InitCommand, ProjectCommand
 from poly.cli_commands.shared import compute_diff
 from poly.cli_commands.sync import FormatCommand, RevertCommand
 from poly.cli_commands.utils import CompletionCommand
+from poly.project import DeploymentMode
 from poly.tests.project_test import TEST_DIR
 
 
@@ -520,12 +521,13 @@ class BranchDeleteTest(unittest.TestCase):
     @patch("questionary.confirm")
     @patch("questionary.checkbox")
     @patch("poly.output.console.success")
-    def test_interactive_current_branch_label_stripped(
+    def test_interactive_current_branch_uses_choice_value(
         self, mock_success, mock_checkbox, mock_confirm
     ):
-        """The ' (current)' suffix is stripped from labels before calling delete_branch."""
+        """Selecting the current branch calls delete_branch with the plain Choice value."""
         self.proj.get_branches.return_value = ("feature-a", dict(self.SAMPLE_BRANCHES))
-        mock_checkbox.return_value.ask.return_value = ["feature-a (current)"]
+        # questionary.checkbox resolves selected Choices to their .value — mocked directly here.
+        mock_checkbox.return_value.ask.return_value = ["feature-a"]
         mock_confirm.return_value.ask.return_value = True
 
         BranchCommand.branch_delete(TEST_DIR)
@@ -567,6 +569,94 @@ class BranchDeleteTest(unittest.TestCase):
         mock_error.assert_called_once()
         mock_success.assert_called_once()
         self.assertIn("1 branch(es)", mock_success.call_args[0][0])
+
+
+class BranchSwitchInteractiveTest(unittest.TestCase):
+    """Tests for BranchCommand.branch_switch's interactive picker (no branch_name given)."""
+
+    # Branch metadata as returned by the platform: 'feature-a' was branched off 'main'.
+    BRANCH_TREE = {
+        "main": {"branchId": "id-main", "parentBranchId": None},
+        "feature-a": {"branchId": "id-a", "parentBranchId": "id-main"},
+    }
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.get_branches.return_value = ("main", dict(self.BRANCH_TREE))
+        self.proj.switch_branch.return_value = (True, None)
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _choices(self, mock_select) -> list[tuple[str, str]]:
+        """Return the (title, value) pairs of the choices passed to questionary.select."""
+        choices = mock_select.call_args.kwargs["choices"]
+        return [(choice.title, choice.value) for choice in choices]
+
+    @patch("questionary.select")
+    @patch("poly.output.console.success")
+    def test_releases_branches_mode_offers_tree_indented_choices(self, mock_success, mock_select):
+        """In releases_branches mode, choices show branch lineage but keep plain name values."""
+        self.proj.deployment_mode = DeploymentMode.RELEASES_BRANCHES
+        mock_select.return_value.ask.return_value = "feature-a"
+
+        BranchCommand.branch_switch(TEST_DIR)
+
+        self.assertEqual(
+            self._choices(mock_select),
+            [("main (current)", "main"), ("└─ feature-a", "feature-a")],
+        )
+        self.proj.switch_branch.assert_called_once()
+        self.assertEqual(self.proj.switch_branch.call_args[0][0], "feature-a")
+        self.assertIn("feature-a", mock_success.call_args[0][0])
+
+    @patch("questionary.select")
+    @patch("poly.output.console.success")
+    def test_simple_mode_offers_flat_choices(self, mock_success, mock_select):
+        """Outside releases_branches mode, choices are a flat list with no tree connectors."""
+        self.proj.deployment_mode = DeploymentMode.SIMPLE
+        self.proj.get_branches.return_value = (
+            "main",
+            {"main": "id-main", "feature-a": "id-a"},
+        )
+        mock_select.return_value.ask.return_value = "feature-a"
+
+        BranchCommand.branch_switch(TEST_DIR)
+
+        self.assertEqual(
+            self._choices(mock_select),
+            [("main (current)", "main"), ("feature-a", "feature-a")],
+        )
+        self.proj.switch_branch.assert_called_once()
+        self.assertEqual(self.proj.switch_branch.call_args[0][0], "feature-a")
+        self.assertIn("feature-a", mock_success.call_args[0][0])
+
+    @patch("questionary.select")
+    @patch("poly.output.console.warning")
+    def test_nothing_selected_shows_warning_and_does_not_switch(self, mock_warning, mock_select):
+        """Cancelling the picker warns the user and leaves the current branch alone."""
+        self.proj.deployment_mode = DeploymentMode.RELEASES_BRANCHES
+        mock_select.return_value.ask.return_value = None
+
+        BranchCommand.branch_switch(TEST_DIR)
+
+        self.proj.switch_branch.assert_not_called()
+        mock_warning.assert_called_once()
+        self.assertIn("No branch selected", mock_warning.call_args[0][0])
+
+    @patch("poly.output.console.plain")
+    def test_no_branches_shows_message_and_does_not_switch(self, mock_plain):
+        """When the project has no branches, a message is shown instead of a picker."""
+        self.proj.deployment_mode = DeploymentMode.RELEASES_BRANCHES
+        self.proj.get_branches.return_value = (None, {})
+
+        BranchCommand.branch_switch(TEST_DIR)
+
+        self.proj.switch_branch.assert_not_called()
+        self.assertIn("No branches found", mock_plain.call_args[0][0])
 
 
 class BranchMergeConflictHelpersTest(unittest.TestCase):

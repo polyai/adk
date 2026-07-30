@@ -571,7 +571,7 @@ class BranchCommand(BaseCommand):
         """Switch to a different branch in the Agent Studio project."""
         import questionary
 
-        from poly.output.console import console, error, plain, success, warning
+        from poly.output.console import console, error, flatten_branch_tree, plain, success, warning
 
         project = load_project(base_path, output_json=output_json)
 
@@ -590,24 +590,27 @@ class BranchCommand(BaseCommand):
                 plain("[muted]No branches found.[/muted]")
                 return
 
-            # Create menu options from branch names
-            menu_options = []
-            for name in branches.keys():
-                if name == current_branch:
-                    menu_options.append(f"{name} (current)")
-                else:
-                    menu_options.append(name)
+            if project.deployment_mode == DeploymentMode.RELEASES_BRANCHES:
+                # Show branch-from-branch lineage via indentation/connectors.
+                choices = [
+                    questionary.Choice(title=title, value=value)
+                    for title, value in flatten_branch_tree(branches, current_branch)
+                ]
+            else:
+                choices = [
+                    questionary.Choice(
+                        title=f"{name} (current)" if name == current_branch else name,
+                        value=name,
+                    )
+                    for name in branches.keys()
+                ]
 
-            branch_menu = questionary.select(
-                "Select Branch", choices=menu_options, use_search_filter=True, use_jk_keys=False
+            branch_name = questionary.select(
+                "Select Branch", choices=choices, use_search_filter=True, use_jk_keys=False
             ).ask()
-            if not branch_menu:
+            if not branch_name:
                 warning("No branch selected. Exiting.")
                 return
-
-            # Get the selected branch name (remove "(current)" suffix if present)
-            selected_option = branch_menu
-            branch_name = selected_option.replace(" (current)", "")
 
         projection_json = parse_from_projection_json(
             from_projection,
@@ -687,7 +690,7 @@ class BranchCommand(BaseCommand):
         """
         import questionary
 
-        from poly.output.console import error, info, plain, success, warning
+        from poly.output.console import error, flatten_branch_tree, info, plain, success, warning
 
         project = load_project(base_path, output_json=output_json)
         current_branch, branches = project.get_branches()
@@ -736,17 +739,31 @@ class BranchCommand(BaseCommand):
             plain("[muted]No deletable branches found.[/muted]")
             return
 
-        choices = []
-        for name in deletable:
-            label = f"{name} (current)" if name == current_branch else name
-            choices.append(label)
+        if project.deployment_mode == DeploymentMode.RELEASES_BRANCHES:
+            # Show 'main' as disabled tree context so lineage is visible, but not selectable.
+            choices = [
+                questionary.Choice(
+                    title=title,
+                    value=value,
+                    disabled="cannot delete main" if value == "main" else None,
+                )
+                for title, value in flatten_branch_tree(branches, current_branch)
+            ]
+        else:
+            choices = [
+                questionary.Choice(
+                    title=f"{name} (current)" if name == current_branch else name,
+                    value=name,
+                )
+                for name in deletable
+            ]
 
         selected = questionary.checkbox("Select branches to delete", choices=choices).ask()
         if not selected:
             warning("No branches selected. Exiting.")
             return
 
-        branch_names = [label.replace(" (current)", "") for label in selected]
+        branch_names = selected
         confirm_msg = f"Delete {len(branch_names)} branch(es): {', '.join(branch_names)}?"
         confirmed = questionary.confirm(confirm_msg, default=False).ask()
         if not confirmed:
@@ -755,8 +772,7 @@ class BranchCommand(BaseCommand):
 
         deleted_count = 0
         current_branch_deleted = False
-        for label in selected:
-            name = label.replace(" (current)", "")
+        for name in selected:
             try:
                 deleted = project.delete_branch(name)
                 if deleted:

@@ -188,6 +188,37 @@ def print_releases_branches(branches: dict[str, Any], current_branch: str | None
     console.print(tree)
 
 
+def flatten_branch_tree(
+    branches: dict[str, Any], current_branch: str | None
+) -> list[tuple[str, str]]:
+    """Flatten the parent/child branch tree into (display_title, branch_name) pairs.
+
+    For use in flat pickers (e.g. questionary) that have no native tree rendering —
+    hierarchy is conveyed via indentation and connector characters in the title,
+    while the value stays the plain branch name.
+    """
+
+    def label(name: str) -> str:
+        return f"{name} (current)" if name == current_branch else name
+
+    def walk(nodes: list[dict[str, Any]], indent: str) -> list[tuple[str, str]]:
+        lines = []
+        nodes = sorted(nodes, key=lambda n: n["name"])
+        for i, node in enumerate(nodes):
+            is_last = i == len(nodes) - 1
+            connector = "└─ " if is_last else "├─ "
+            lines.append((indent + connector + label(node["name"]), node["name"]))
+            extension = "   " if is_last else "│  "
+            lines.extend(walk(node["children"], indent + extension))
+        return lines
+
+    lines = []
+    for root in sorted(_convert_flat_branches_to_tree(branches), key=lambda n: n["name"]):
+        lines.append((label(root["name"]), root["name"]))
+        lines.extend(walk(root["children"], ""))
+    return lines
+
+
 def print_branches(branches: dict[str, Any] | list[str], current_branch: str | None) -> None:
     """Print branch list with current branch highlighted."""
     console.print("[label]Branches:[/label]")
