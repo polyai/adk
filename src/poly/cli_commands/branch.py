@@ -106,7 +106,8 @@ class BranchCommand(BaseCommand):
                 "  poly branch list\n"
                 "  poly branch create new-branch\n"
                 "  poly branch switch existing-branch\n"
-                "  poly branch merge 'Merge branch'"
+                "  poly branch merge 'Merge branch'\n"
+                "  poly branch sync\n"
                 "  poly branch current\n"
                 "  poly branch delete\n"
             ),
@@ -214,7 +215,7 @@ class BranchCommand(BaseCommand):
         branch_merge_parser = branch_subparsers.add_parser(
             "merge",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
-            help="Merge branch into main",
+            help="Merge branch into its parent branch",
         )
         branch_merge_parser.add_argument(
             "message",
@@ -301,7 +302,7 @@ class BranchCommand(BaseCommand):
         branch_rename_parser = branch_subparsers.add_parser(
             "rename",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
-            help="Rename a current branch.",
+            help="Rename the current branch.",
         )
         branch_rename_parser.add_argument(
             "new_branch_name",
