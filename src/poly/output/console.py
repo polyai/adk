@@ -22,6 +22,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
+from rich.tree import Tree
 
 # Global verbose flag — set by CLI before commands run
 _verbose = False
@@ -147,6 +148,46 @@ def print_agents(agents: list[dict[str, Any]]) -> None:
     console.print(table)
 
 
+def _convert_flat_branches_to_tree(branches: dict[str, Any]) -> list[dict[str, Any]]:
+    """Group a flat branches dict into a forest of nodes linked by parentBranchId.
+
+    Two passes are required: branches can be listed in any order — including a
+    child appearing before its own parent — so every node must exist before any
+    parent lookup runs.
+    """
+    nodes = {
+        meta.get("branchId"): {"name": name, "meta": meta, "children": []}
+        for name, meta in branches.items()
+    }
+
+    roots = []
+    for node in nodes.values():
+        parent = nodes.get(node["meta"].get("parentBranchId"))
+        (parent["children"] if parent is not None else roots).append(node)
+    return roots
+
+
+def print_releases_branches(branches: dict[str, Any], current_branch: str | None) -> None:
+    """Print branches as a tree reflecting parent/child (branch-from-branch) relationships."""
+
+    def label(node: dict[str, Any]) -> str:
+        name = node["name"]
+        if name == current_branch:
+            return f"[success]{name}[/success] [muted](current)[/muted]"
+        return name
+
+    def add(parent_tree: Tree, node: dict[str, Any]) -> None:
+        branch_tree = parent_tree.add(label(node))
+        for child in sorted(node["children"], key=lambda n: n["name"]):
+            add(branch_tree, child)
+
+    console.print("[label]Branches:[/label]")
+    tree = Tree("", hide_root=True, guide_style="dim")
+    for root in sorted(_convert_flat_branches_to_tree(branches), key=lambda n: n["name"]):
+        add(tree, root)
+    console.print(tree)
+
+
 def print_branches(branches: dict[str, Any] | list[str], current_branch: str | None) -> None:
     """Print branch list with current branch highlighted."""
     console.print("[label]Branches:[/label]")
@@ -158,7 +199,6 @@ def print_branches(branches: dict[str, Any] | list[str], current_branch: str | N
             console.print(f"    {name}")
 
 
-# {'merges': [{'branchId': 'BRANCH-RLX9GX78', 'branchName': 'Ruari Phipps / Release', 'mergedBy': 'ruari@poly-ai.com', 'mergedAt': '2026-07-21T14:07:06.909Z', 'source': None}], 'count': 1}
 def print_archived_branches(branches: list[dict[str, Any]]) -> None:
     """Print a table of archived (soft-deleted) branches."""
     table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))

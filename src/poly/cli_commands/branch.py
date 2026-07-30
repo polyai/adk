@@ -15,6 +15,7 @@ from typing import Any, Optional
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project, parse_from_projection_json, read_project_config
 from poly.output.json_output import json_print
+from poly.project import DeploymentMode
 from poly.resources.resource_utils import contains_merge_conflict
 from poly.utils import merge_strings
 
@@ -438,7 +439,13 @@ class BranchCommand(BaseCommand):
     @classmethod
     def branch_list(cls, base_path: str, output_json: bool = False, archived: bool = False) -> None:
         """List branches in the Agent Studio project."""
-        from poly.output.console import plain, print_archived_branches, print_branches, warning
+        from poly.output.console import (
+            plain,
+            print_archived_branches,
+            print_branches,
+            print_releases_branches,
+            warning,
+        )
 
         project = load_project(base_path, output_json=output_json)
 
@@ -467,7 +474,10 @@ class BranchCommand(BaseCommand):
             plain("[muted]No branches found.[/muted]")
             return
 
-        print_branches(branches, current_branch)
+        if project.deployment_mode == DeploymentMode.RELEASES_BRANCHES:
+            print_releases_branches(branches, current_branch)
+        else:
+            print_branches(branches, current_branch)
 
         if current_branch is None:
             warning(
