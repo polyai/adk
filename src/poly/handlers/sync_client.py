@@ -209,7 +209,9 @@ class SyncClientHandler:
                 return False
         return False
 
-    def create_branch(self, branch_name: Optional[str] = None) -> str:
+    def create_branch(
+        self, branch_name: Optional[str] = None, source_branch_id: Optional[str] = None
+    ) -> str:
         """Create a new branch for the project
 
         Args:
@@ -218,8 +220,9 @@ class SyncClientHandler:
         Returns:
             The ID of the created branch
         """
-        self.sdk.branch_id = "main"
-        self.sdk.get_project_data()
+        sequence_number = self.sdk.fetch_last_known_sequence_number(
+            branch_id=source_branch_id or "main"
+        )
 
         if branch_name is None:
             metadata = self.sdk.create_metadata()
@@ -228,11 +231,14 @@ class SyncClientHandler:
             suffix = f"{time_suffix}-{random_suffix}"  # to avoid duplicate names
             branch_name = f"ADK-{suffix}"
 
-        logger.info(f"Creating new branch '{branch_name}' from 'main' branch")
+        logger.info(
+            f"Creating new branch '{branch_name}' from branch '{source_branch_id or 'main'}'"
+        )
 
         self.sdk.branch_id = self.sdk.create_branch(
-            expected_main_last_known_sequence=self.sdk._last_known_sequence,
+            expected_main_last_known_sequence=sequence_number,
             branch_name=branch_name,
+            source_branch_id=source_branch_id,
         )
         logger.info(
             f"Created and switched to new branch. Name:'{branch_name}' ID:'{self.sdk.branch_id}'"

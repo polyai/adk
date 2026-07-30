@@ -489,21 +489,6 @@ class BranchCommand(BaseCommand):
 
         project = load_project(base_path, output_json=output_json)
 
-        if project.branch_id != "main":
-            if output_json:
-                json_print(
-                    {
-                        "success": False,
-                        "error": "Branches can only be created from the main branch (sandbox).",
-                    }
-                )
-            else:
-                error(
-                    "Branches can only be created from the [bold]main[/bold] branch (sandbox). "
-                    "Please switch and try again."
-                )
-            sys.exit(1)
-
         if env in ["pre-release", "live"]:
             # Checks for any local changes on main before creating env branch.
             if diffs := project.get_diffs():
@@ -528,11 +513,15 @@ class BranchCommand(BaseCommand):
                 warning("No branch name provided. Exiting.")
                 return
 
+        base_branch_id = project.branch_id
+        base_branch_name = project.get_current_branch()
         new_branch_id = project.create_branch(branch_name)
         if output_json:
             json_print(
                 {
                     "success": bool(new_branch_id),
+                    "base_branch_id": base_branch_id,
+                    "base_branch_name": base_branch_name,
                     "new_branch_id": new_branch_id,
                     "branch_name": branch_name,
                 }
@@ -542,7 +531,9 @@ class BranchCommand(BaseCommand):
             return
 
         if new_branch_id:
-            success(f"Branch '{branch_name}' created (ID: {new_branch_id})")
+            success(
+                f"Created new branch '{branch_name}' (ID: {new_branch_id}) from '{base_branch_name}'"
+            )
         else:
             error("Failed to create the branch.")
             sys.exit(1)

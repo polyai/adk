@@ -92,7 +92,7 @@ class DeploymentMode(Enum):
 
     SIMPLE = "simple"
     RELEASES = "releases"
-    RELEASES_BRANCHES = "release_branches"
+    RELEASES_BRANCHES = "releases_branches"
 
 
 @dataclass
@@ -2256,7 +2256,29 @@ class AgentStudioProject:
         Returns:
             str: The ID of the newly created branch
         """
-        branch_id = self.api_handler.create_branch(branch_name)
+        if self.deployment_mode == DeploymentMode.SIMPLE:
+            branches = self.api_handler.get_branches()
+            if len(branches) >= 2:
+                raise ValueError(
+                    "Cannot create more than one branch in simple deployment mode. Please delete/merge existing branches before creating a new one."
+                )
+        if self.deployment_mode == DeploymentMode.RELEASES:
+            if self.branch_id != "main":
+                raise ValueError(
+                    "Cannot create a new branch from a non-main branch in releases deployment mode."
+                )
+        if self.deployment_mode == DeploymentMode.RELEASES_BRANCHES:
+            branches = self.api_handler.get_branches()
+            current_branch_meta = next(
+                (meta for meta in branches.values() if meta["branchId"] == self.branch_id),
+                None,
+            )
+            if current_branch_meta is None or current_branch_meta.get("parentBranchId") != "main":
+                raise ValueError(
+                    "Cannot create a branch with depth above 2 in releases-branches deployment mode."
+                )
+
+        branch_id = self.api_handler.create_branch(branch_name, self.branch_id)
         self.branch_id = branch_id
         self.save_config()
         return branch_id
@@ -3574,7 +3596,8 @@ class AgentStudioProject:
         """
         return self.api_handler.get_project(self.region, self.account_id, self.project_id)
 
-    def get_deployment_mode(self) -> DeploymentMode:
+    @property
+    def deployment_mode(self) -> DeploymentMode:
         if self.__deployment_mode is None:
             cfg = self.get_project_info().get("config") or {}
             self.__deployment_mode = DeploymentMode(cfg.get("deployment_mode", "releases"))
