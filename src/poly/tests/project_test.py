@@ -4438,27 +4438,190 @@ class CreateBranchDeploymentModeTest(unittest.TestCase):
 
         self.mock_api.create_branch.assert_not_called()
 
-    def test_releases_branches_mode_currently_rejects_creating_from_main(self):
-        """LIKELY BUG, behavior pinned: branching from main is refused in this mode.
-
-        ``SyncClientHandler.get_branches`` injects a synthetic ``main`` entry that has
-        no ``parentBranchId`` key, so the depth check reads ``None``, compares it to
-        ``"main"``, and rejects the request. That blocks the ordinary case of creating
-        a branch from main in releases_branches mode; only branches that are already
-        direct children of main can be branched from today.
-
-        This test documents the current behavior so that fixing it has to be an
-        explicit, visible change rather than a silent one.
-        """
+    def test_releases_branches_mode_creates_branch_from_main(self):
+        """Main itself may be used as the source branch, even though it has no parent."""
         self._set_deployment_mode("releases_branches")
         self._set_current_branch("main")
         self.mock_api.get_branches.return_value = {"main": {"branchId": "main", "name": "main"}}
 
-        with self.assertRaises(ValueError) as ctx:
-            self.project.create_branch("my-feature")
+        new_branch_id = self.project.create_branch("my-feature")
 
-        self.assertIn("depth", str(ctx.exception))
-        self.mock_api.create_branch.assert_not_called()
+        self.assertEqual(new_branch_id, "new-branch-id")
+        self.mock_api.create_branch.assert_called_once_with("my-feature", "main")
+        self.assertEqual(self.project.branch_id, "new-branch-id")
+        self.mock_save_config.assert_called()
+
+
+class MergeBranchTest(unittest.TestCase):
+    """Tests for AgentStudioProject.merge_branch."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.merge_branch.return_value = (True, [], [])
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.mock_save_config = self.save_config_patcher.start()
+        # merge_branch refuses to run with uncommitted changes; default to a clean tree.
+        self.get_diffs_patcher = patch.object(AgentStudioProject, "get_diffs", return_value={})
+        self.mock_get_diffs = self.get_diffs_patcher.start()
+        # A successful merge switches to the parent branch; assert on the call, don't sync.
+        self.switch_branch_patcher = patch.object(
+            AgentStudioProject, "switch_branch", return_value=(True, {})
+        )
+        self.mock_switch_branch = self.switch_branch_patcher.start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _set_current_branch(self, branch_id: str) -> None:
+        """Put the project and its API handler on the given branch."""
+        self.project.branch_id = branch_id
+        self.mock_api.branch_id = branch_id
+
+    def test_merging_direct_child_of_main_switches_to_main(self):
+        """A branch whose parent is main lands the user back on main after merging."""
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {
+                "branchId": "branch-feature-a",
+                "name": "feature-a",
+                "parentBranchId": "main",
+            },
+        }
+
+        result = self.project.merge_branch("ship it")
+
+        self.assertEqual(result, (True, [], []))
+        self.mock_api.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None
+        )
+        self.mock_switch_branch.assert_called_once_with("main", force=True)
+
+    def test_merging_grandchild_switches_to_its_parent_branch(self):
+        """A branch nested under a release branch lands on that release branch, not main."""
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "Release 1": {
+                "branchId": "branch-release-1",
+                "name": "Release 1",
+                "parentBranchId": "main",
+            },
+            "feature-a": {
+                "branchId": "branch-feature-a",
+                "name": "feature-a",
+                "parentBranchId": "branch-release-1",
+            },
+        }
+
+        result = self.project.merge_branch("ship it")
+
+        self.assertEqual(result, (True, [], []))
+        self.mock_switch_branch.assert_called_once_with("Release 1", force=True)
+
+    def test_failed_merge_returns_conflicts_and_stays_on_branch(self):
+        """When the platform reports a failure, conflicts pass through and no switch happens."""
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {
+                "branchId": "branch-feature-a",
+                "name": "feature-a",
+                "parentBranchId": "main",
+            },
+        }
+        conflicts = [{"path": ["flows", "f1", "name"], "oursValue": "a", "theirsValue": "b"}]
+        errors = [{"path": ["flows", "f1"], "message": "boom"}]
+        self.mock_api.merge_branch.return_value = (False, conflicts, errors)
+
+        success, returned_conflicts, returned_errors = self.project.merge_branch("ship it")
+
+        self.assertFalse(success)
+        self.assertEqual(returned_conflicts, conflicts)
+        self.assertEqual(returned_errors, errors)
+        self.mock_switch_branch.assert_not_called()
+
+    def test_merging_from_main_is_rejected(self):
+        """Main has nothing to merge into, so merging from it is refused."""
+        self._set_current_branch("main")
+        self.mock_api.get_branches.return_value = {"main": {"branchId": "main", "name": "main"}}
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.merge_branch("ship it")
+
+        self.assertIn("main", str(ctx.exception))
+        self.mock_api.merge_branch.assert_not_called()
+
+    def test_merging_branch_missing_from_remote_is_rejected(self):
+        """A local branch that no longer exists remotely cannot be merged."""
+        self._set_current_branch("branch-deleted")
+        self.mock_api.get_branches.return_value = {"main": {"branchId": "main", "name": "main"}}
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.merge_branch("ship it")
+
+        self.assertIn("branch-deleted", str(ctx.exception))
+        self.mock_api.merge_branch.assert_not_called()
+
+    def test_merging_with_uncommitted_changes_is_rejected(self):
+        """Local edits must be pushed before merging."""
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {
+                "branchId": "branch-feature-a",
+                "name": "feature-a",
+                "parentBranchId": "main",
+            },
+        }
+        self.mock_get_diffs.return_value = {"flows/my_flow.yaml": "some diff"}
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.merge_branch("ship it")
+
+        self.assertIn("uncommitted", str(ctx.exception))
+        self.mock_api.merge_branch.assert_not_called()
+
+    def test_conflict_resolution_without_strategy_is_rejected(self):
+        """Every conflict resolution must say how the conflict should be resolved."""
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {
+                "branchId": "branch-feature-a",
+                "name": "feature-a",
+                "parentBranchId": "main",
+            },
+        }
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.merge_branch("ship it", conflict_resolutions=[{"path": ["flows", "f1"]}])
+
+        self.assertIn("strategy", str(ctx.exception))
+        self.mock_api.merge_branch.assert_not_called()
+
+    def test_conflict_resolution_with_unknown_strategy_is_rejected(self):
+        """Only 'ours', 'theirs', and 'base' are valid resolution strategies."""
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {
+                "branchId": "branch-feature-a",
+                "name": "feature-a",
+                "parentBranchId": "main",
+            },
+        }
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.merge_branch(
+                "ship it",
+                conflict_resolutions=[{"path": ["flows", "f1"], "strategy": "mine"}],
+            )
+
+        self.assertIn("mine", str(ctx.exception))
+        self.mock_api.merge_branch.assert_not_called()
 
 
 class RtcPullEnvTest(unittest.TestCase):

@@ -3614,4 +3614,4 @@ class AgentStudioProject:
     @property
     def using_simplified_deployments(self) -> bool:
         # TODO: Hook up to FF
-        return True
+        return False

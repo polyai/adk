@@ -659,6 +659,107 @@ class BranchSwitchInteractiveTest(unittest.TestCase):
         self.assertIn("No branches found", mock_plain.call_args[0][0])
 
 
+class BranchMergeTest(unittest.TestCase):
+    """Tests for BranchCommand.branch_merge's deploy confirmation and success messaging."""
+
+    # 'feature-a' sits directly under main; 'feature-a-child' sits under the 'Release 1' branch.
+    BRANCH_TREE = {
+        "main": {"branchId": "main", "name": "main"},
+        "Release 1": {"branchId": "id-release-1", "name": "Release 1", "parentBranchId": "main"},
+        "feature-a": {"branchId": "id-a", "name": "feature-a", "parentBranchId": "main"},
+        "feature-a-child": {
+            "branchId": "id-a-child",
+            "name": "feature-a-child",
+            "parentBranchId": "id-release-1",
+        },
+    }
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.using_simplified_deployments = True
+        self.proj.merge_branch.return_value = (True, [], [])
+        self._set_current_branch("feature-a")
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _set_current_branch(self, branch_name: str) -> None:
+        """Make the project report the given branch as checked out."""
+        self.proj.get_branches.return_value = (branch_name, dict(self.BRANCH_TREE))
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.info")
+    def test_merging_into_main_merges_after_deploy_confirmation(self, mock_info, mock_confirm):
+        """Merging into main warns about live deployment and proceeds once confirmed."""
+        mock_confirm.return_value.ask.return_value = True
+
+        BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        mock_confirm.assert_called_once()
+        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.assertIn("main", mock_info.call_args[0][0])
+
+    @patch("questionary.confirm")
+    def test_declining_deploy_confirmation_aborts_without_merging(self, mock_confirm):
+        """Answering no to the deployment prompt exits cleanly and leaves the branch unmerged."""
+        mock_confirm.return_value.ask.return_value = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.proj.merge_branch.assert_not_called()
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.info")
+    def test_force_skips_deploy_confirmation(self, mock_info, mock_confirm):
+        """--force merges into main without asking for deployment confirmation."""
+        BranchCommand.branch_merge(TEST_DIR, message="ship it", force=True)
+
+        mock_confirm.assert_not_called()
+        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.assertIn("main", mock_info.call_args[0][0])
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.info")
+    def test_simplified_deployments_off_skips_confirmation_for_main(self, mock_info, mock_confirm):
+        """With simplified deployments off, merging into main skips the deploy prompt too."""
+        self.proj.using_simplified_deployments = False
+
+        BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        mock_confirm.assert_not_called()
+        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.assertIn("main", mock_info.call_args[0][0])
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.info")
+    def test_merging_into_non_main_parent_skips_confirmation_and_names_parent(
+        self, mock_info, mock_confirm
+    ):
+        """Merging into a release branch deploys nothing live, so no prompt is shown."""
+        self._set_current_branch("feature-a-child")
+
+        BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        mock_confirm.assert_not_called()
+        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.assertIn("Release 1", mock_info.call_args[0][0])
+
+    @patch("questionary.confirm")
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_mode_merges_without_confirmation(self, mock_json_print, mock_confirm):
+        """JSON mode is non-interactive, so it merges without prompting and reports success."""
+        BranchCommand.branch_merge(TEST_DIR, message="ship it", output_json=True)
+
+        mock_confirm.assert_not_called()
+        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.assertEqual(mock_json_print.call_args[0][0], {"success": True})
+
+
 class BranchMergeConflictHelpersTest(unittest.TestCase):
     """Branch merge conflict enrichment, resolution payload, and conflict table layout."""
 
