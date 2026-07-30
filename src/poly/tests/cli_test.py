@@ -270,17 +270,62 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         self.proj.create_branch.assert_called_once_with("my-branch")
         self.proj.push_project.assert_not_called()
 
-    def test_branch_create_blocked_when_not_on_main(self):
-        """branch create from non-main branch exits with an error."""
+    def test_branch_create_surfaces_deployment_mode_rejection(self):
+        """A deployment-mode guard failure raised by the project reaches the caller.
+
+        The "which branches may be created from where" rules live in
+        AgentStudioProject.create_branch (they depend on the project's deployment
+        mode), so the CLI must let that ValueError propagate rather than swallow it.
+        """
         self.proj.branch_id = "example-feature-branch"
+        self.proj.create_branch.side_effect = ValueError(
+            "Cannot create a new branch from a non-main branch in releases deployment mode."
+        )
 
-        with self.assertRaises(SystemExit) as ctx:
-            BranchCommand.branch_create(TEST_DIR, "my-branch", env="live", force=False)
+        with self.assertRaises(ValueError) as ctx:
+            BranchCommand.branch_create(TEST_DIR, "my-branch", env=None, force=False)
 
-        self.assertEqual(ctx.exception.code, 1)
-        self.proj.pull_project_from_env.assert_not_called()
-        self.proj.create_branch.assert_not_called()
+        self.assertIn("non-main branch", str(ctx.exception))
         self.proj.push_project.assert_not_called()
+
+    @patch("poly.output.console.success")
+    def test_branch_create_reports_branch_it_was_created_from(self, mock_success):
+        """The success message names the branch that was current before creation."""
+        self.proj.branch_id = "branch-a-id"
+        self.proj.get_current_branch.return_value = "feature-a"
+
+        BranchCommand.branch_create(TEST_DIR, "my-branch", env=None, force=False)
+
+        # No source branch is passed: the CLI relies on the project's own branch state.
+        self.proj.create_branch.assert_called_once_with("my-branch")
+        message = mock_success.call_args[0][0]
+        self.assertIn("my-branch", message)
+        self.assertIn("feature-a", message)
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_branch_create_json_reports_base_branch_from_before_the_switch(self, mock_json):
+        """JSON output describes the base branch as it was before create_branch switched."""
+        self.proj.branch_id = "branch-a-id"
+        self.proj.get_current_branch.return_value = "feature-a"
+
+        def create_and_switch(_branch_name):
+            self.proj.branch_id = "new-branch-id"
+            return "new-branch-id"
+
+        self.proj.create_branch.side_effect = create_and_switch
+
+        BranchCommand.branch_create(TEST_DIR, "my-branch", output_json=True)
+
+        self.assertEqual(
+            mock_json.call_args[0][0],
+            {
+                "success": True,
+                "base_branch_id": "branch-a-id",
+                "base_branch_name": "feature-a",
+                "new_branch_id": "new-branch-id",
+                "branch_name": "my-branch",
+            },
+        )
 
     def test_branch_create_env_none_behaves_like_normal(self):
         """branch create with env=None skips env pull (default behavior)."""
@@ -2869,9 +2914,7 @@ class BranchHistoryTest(unittest.TestCase):
             {"mergedAt": f"2026-07-{i:02d}"} for i in range(1, 21)
         ]
 
-        BranchCommand.branch_history(
-            TEST_DIR, branch_name="feature-a", output_json=True, limit=3
-        )
+        BranchCommand.branch_history(TEST_DIR, branch_name="feature-a", output_json=True, limit=3)
 
         payload = mock_json.call_args[0][0]
         self.assertEqual(len(payload["history"]), 3)

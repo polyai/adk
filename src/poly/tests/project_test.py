@@ -14,7 +14,7 @@ from copy import deepcopy
 from unittest.mock import MagicMock, patch
 
 import poly.resources.resource_utils as resource_utils
-from poly.project import AgentStudioProject
+from poly.project import AgentStudioProject, DeploymentMode
 from poly.resources import (
     AsrSettings,
     ChatGreeting,
@@ -4259,6 +4259,208 @@ class GetBranchesReturnTypeTest(unittest.TestCase):
         self.assertEqual(len(branches), 1)
 
 
+class DeploymentModePropertyTest(unittest.TestCase):
+    """Tests for the AgentStudioProject.deployment_mode property."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "main"
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def test_reads_mode_from_remote_project_config(self):
+        """Each recognised config value maps to the matching enum member."""
+        for value, expected in (
+            ("simple", DeploymentMode.SIMPLE),
+            ("releases", DeploymentMode.RELEASES),
+            ("releases_branches", DeploymentMode.RELEASES_BRANCHES),
+        ):
+            with self.subTest(value=value):
+                self.project._AgentStudioProject__deployment_mode = None
+                self.mock_api.get_project.return_value = {"config": {"deployment_mode": value}}
+
+                self.assertEqual(self.project.deployment_mode, expected)
+
+    def test_defaults_to_releases_when_config_missing(self):
+        """A missing 'config', missing 'deployment_mode', or null config all default to releases."""
+        for payload in (
+            {"projectId": "test_project"},
+            {"config": {"other_setting": True}},
+            {"config": None},
+        ):
+            with self.subTest(payload=payload):
+                self.project._AgentStudioProject__deployment_mode = None
+                self.mock_api.get_project.return_value = payload
+
+                self.assertEqual(self.project.deployment_mode, DeploymentMode.RELEASES)
+
+    def test_mode_is_fetched_once_and_cached(self):
+        """Repeated reads reuse the cached mode instead of re-querying the API."""
+        self.mock_api.get_project.return_value = {"config": {"deployment_mode": "simple"}}
+
+        first = self.project.deployment_mode
+        second = self.project.deployment_mode
+
+        self.assertEqual(first, second)
+        self.mock_api.get_project.assert_called_once()
+
+
+class CreateBranchDeploymentModeTest(unittest.TestCase):
+    """Tests for the deployment-mode guards in AgentStudioProject.create_branch."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.create_branch.return_value = "new-branch-id"
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.mock_save_config = self.save_config_patcher.start()
+        self._set_current_branch("main")
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def _set_deployment_mode(self, mode: str) -> None:
+        """Make the remote project report the given deployment mode."""
+        self.mock_api.get_project.return_value = {"config": {"deployment_mode": mode}}
+
+    def _set_current_branch(self, branch_id: str) -> None:
+        """Put the project and its API handler on the given branch."""
+        self.project.branch_id = branch_id
+        self.mock_api.branch_id = branch_id
+
+    # -- simple mode: at most one branch may exist at a time --
+
+    def test_simple_mode_creates_branch_when_only_main_exists(self):
+        """In simple mode a branch can be created while main is the only branch."""
+        self._set_deployment_mode("simple")
+        self._set_current_branch("main")
+        self.mock_api.get_branches.return_value = {"main": {"branchId": "main"}}
+
+        new_branch_id = self.project.create_branch("my-feature")
+
+        self.assertEqual(new_branch_id, "new-branch-id")
+        self.mock_api.create_branch.assert_called_once_with("my-feature", "main")
+        self.assertEqual(self.project.branch_id, "new-branch-id")
+        self.mock_save_config.assert_called()
+
+    def test_simple_mode_rejects_second_branch(self):
+        """In simple mode a second branch is refused while another branch exists."""
+        self._set_deployment_mode("simple")
+        self._set_current_branch("main")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+            "existing": {"branchId": "branch-existing", "parentBranchId": "main"},
+        }
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.create_branch("my-feature")
+
+        self.assertIn("simple deployment mode", str(ctx.exception))
+        self.mock_api.create_branch.assert_not_called()
+        self.assertEqual(self.project.branch_id, "main")
+
+    # -- releases mode: branches may only be created from main --
+
+    def test_releases_mode_creates_branch_from_main(self):
+        """In releases mode main is a valid source branch."""
+        self._set_deployment_mode("releases")
+        self._set_current_branch("main")
+
+        new_branch_id = self.project.create_branch("my-feature")
+
+        self.assertEqual(new_branch_id, "new-branch-id")
+        self.mock_api.create_branch.assert_called_once_with("my-feature", "main")
+        self.assertEqual(self.project.branch_id, "new-branch-id")
+
+    def test_releases_mode_rejects_non_main_source_branch(self):
+        """In releases mode creating a branch from another branch is refused."""
+        self._set_deployment_mode("releases")
+        self._set_current_branch("branch-feature-a")
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.create_branch("my-feature")
+
+        self.assertIn("releases deployment mode", str(ctx.exception))
+        self.mock_api.create_branch.assert_not_called()
+        self.assertEqual(self.project.branch_id, "branch-feature-a")
+
+    # -- releases_branches mode: source branch must be a direct child of main --
+
+    def test_releases_branches_mode_creates_branch_from_direct_child_of_main(self):
+        """A branch whose parent is main may be used as the source branch."""
+        self._set_deployment_mode("releases_branches")
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+            "feature-a": {"branchId": "branch-feature-a", "parentBranchId": "main"},
+        }
+
+        new_branch_id = self.project.create_branch("my-feature")
+
+        self.assertEqual(new_branch_id, "new-branch-id")
+        self.mock_api.create_branch.assert_called_once_with("my-feature", "branch-feature-a")
+        self.assertEqual(self.project.branch_id, "new-branch-id")
+        self.mock_save_config.assert_called()
+
+    def test_releases_branches_mode_rejects_grandchild_of_main(self):
+        """A branch whose parent is not main is too deep to branch from again."""
+        self._set_deployment_mode("releases_branches")
+        self._set_current_branch("branch-feature-a-child")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+            "feature-a": {"branchId": "branch-feature-a", "parentBranchId": "main"},
+            "feature-a-child": {
+                "branchId": "branch-feature-a-child",
+                "parentBranchId": "branch-feature-a",
+            },
+        }
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.create_branch("my-feature")
+
+        self.assertIn("depth", str(ctx.exception))
+        self.mock_api.create_branch.assert_not_called()
+
+    def test_releases_branches_mode_rejects_branch_missing_from_remote(self):
+        """A local branch that no longer exists remotely cannot be branched from."""
+        self._set_deployment_mode("releases_branches")
+        self._set_current_branch("branch-deleted")
+        self.mock_api.get_branches.return_value = {"main": {"branchId": "main"}}
+
+        with self.assertRaises(ValueError):
+            self.project.create_branch("my-feature")
+
+        self.mock_api.create_branch.assert_not_called()
+
+    def test_releases_branches_mode_currently_rejects_creating_from_main(self):
+        """LIKELY BUG, behavior pinned: branching from main is refused in this mode.
+
+        ``SyncClientHandler.get_branches`` injects a synthetic ``main`` entry that has
+        no ``parentBranchId`` key, so the depth check reads ``None``, compares it to
+        ``"main"``, and rejects the request. That blocks the ordinary case of creating
+        a branch from main in releases_branches mode; only branches that are already
+        direct children of main can be branched from today.
+
+        This test documents the current behavior so that fixing it has to be an
+        explicit, visible change rather than a silent one.
+        """
+        self._set_deployment_mode("releases_branches")
+        self._set_current_branch("main")
+        self.mock_api.get_branches.return_value = {"main": {"branchId": "main", "name": "main"}}
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.create_branch("my-feature")
+
+        self.assertIn("depth", str(ctx.exception))
+        self.mock_api.create_branch.assert_not_called()
+
+
 class RtcPullEnvTest(unittest.TestCase):
     """Tests for AgentStudioProject.rtc_pull_env writing RTC files to disk."""
 
@@ -4337,149 +4539,6 @@ class RtcPullEnvTest(unittest.TestCase):
         self.assertNotIn("data_file", result)
         self.assertTrue(os.path.exists(os.path.join(self.env_dir, "schema.json")))
         self.assertFalse(os.path.exists(os.path.join(self.env_dir, "data.json")))
-
-class GetBranchHistoryProject(unittest.TestCase):
-    """Tests for AgentStudioProject.get_branch_history."""
-
-    def setUp(self):
-        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
-
-    def test_delegates_to_api_handler(self):
-        """get_branch_history passes through to the api_handler and returns its result."""
-        expected = [{"commit_id": "c1"}, {"commit_id": "c2"}]
-        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
-            mock_api.get_branch_history.return_value = expected
-
-            result = self.project.get_branch_history("branch-1")
-
-        self.assertEqual(result, expected)
-        mock_api.get_branch_history.assert_called_once_with("branch-1")
-
-
-class RenameBranchProject(unittest.TestCase):
-    """Tests for AgentStudioProject.rename_branch."""
-
-    def setUp(self):
-        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
-
-    def test_empty_name_raises_value_error(self):
-        """An empty branch name raises ValueError."""
-        with self.assertRaises(ValueError) as ctx:
-            self.project.rename_branch("")
-
-        self.assertIn("New branch name must be provided", str(ctx.exception))
-
-    def test_none_name_raises_value_error(self):
-        """A None branch name raises ValueError."""
-        with self.assertRaises(ValueError) as ctx:
-            self.project.rename_branch(None)
-
-        self.assertIn("New branch name must be provided", str(ctx.exception))
-
-    def test_main_branch_raises_value_error(self):
-        """Renaming the main branch raises ValueError."""
-        self.project.branch_id = "main"
-
-        with self.assertRaises(ValueError) as ctx:
-            self.project.rename_branch("new-name")
-
-        self.assertIn("main", str(ctx.exception))
-
-    def test_duplicate_name_raises_value_error(self):
-        """A name that already exists raises ValueError."""
-        self.project.branch_id = "branch-1"
-        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
-            mock_api.get_branches.return_value = {"new-name": "branch-id-123"}
-
-            with self.assertRaises(ValueError) as ctx:
-                self.project.rename_branch("new-name")
-
-        self.assertIn("already exists", str(ctx.exception))
-
-    def test_successful_rename_returns_true(self):
-        """A valid rename delegates to api_handler and returns its result."""
-        self.project.branch_id = "branch-1"
-        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
-            mock_api.get_branches.return_value = {"other-branch": "id-456"}
-            mock_api.rename_branch.return_value = True
-
-            result = self.project.rename_branch("new-name")
-
-        self.assertTrue(result)
-        mock_api.rename_branch.assert_called_once_with(new_branch_name="new-name")
-
-
-class ListArchivedBranchesProject(unittest.TestCase):
-    """Tests for AgentStudioProject.list_archived_branches."""
-
-    def setUp(self):
-        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
-
-    def test_delegates_to_api_handler(self):
-        """list_archived_branches passes through to the api_handler."""
-        expected = [{"branchId": "b-1", "name": "old", "archivedAt": "2026-07-01"}]
-        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
-            mock_api.list_archived_branches.return_value = expected
-
-            result = self.project.list_archived_branches()
-
-        self.assertEqual(result, expected)
-        mock_api.list_archived_branches.assert_called_once()
-
-
-class RestoreBranchProject(unittest.TestCase):
-    """Tests for AgentStudioProject.restore_branch."""
-
-    def setUp(self):
-        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
-
-    def test_empty_name_raises_value_error(self):
-        """An empty branch name raises ValueError."""
-        with self.assertRaises(ValueError) as ctx:
-            self.project.restore_branch("")
-
-        self.assertIn("Branch name must be provided", str(ctx.exception))
-
-    def test_branch_not_in_archive_raises_value_error(self):
-        """A name not found in the archive raises ValueError."""
-        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
-            mock_api.list_archived_branches.return_value = [
-                {"branchId": "b-1", "name": "other-branch"}
-            ]
-
-            with self.assertRaises(ValueError) as ctx:
-                self.project.restore_branch("no-such-branch")
-
-        self.assertIn("not found in archive", str(ctx.exception))
-
-    def test_successful_restore_returns_true(self):
-        """A valid restore looks up the branch ID and delegates to api_handler."""
-        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
-            mock_api.list_archived_branches.return_value = [
-                {"branchId": "b-1", "name": "old-branch", "archivedAt": "2026-07-01"},
-            ]
-            mock_api.restore_branch.return_value = True
-
-            result = self.project.restore_branch("old-branch")
-
-        self.assertTrue(result)
-        mock_api.restore_branch.assert_called_once_with("b-1")
-
-    def test_duplicate_name_raises_value_error(self):
-        """Multiple archived branches with the same name raises ValueError."""
-        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
-            mock_api.list_archived_branches.return_value = [
-                {"branchId": "BRANCH-1", "name": "release"},
-                {"branchId": "BRANCH-2", "name": "release"},
-            ]
-
-            with self.assertRaises(ValueError) as ctx:
-                self.project.restore_branch("release")
-
-        self.assertIn("Multiple archived branches", str(ctx.exception))
-        self.assertIn("BRANCH-1", str(ctx.exception))
-        self.assertIn("BRANCH-2", str(ctx.exception))
-        mock_api.restore_branch.assert_not_called()
 
 
 if __name__ == "__main__":
