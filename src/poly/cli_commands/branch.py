@@ -249,18 +249,18 @@ class BranchCommand(BaseCommand):
 
         branch_merge_parser.set_defaults(branch_subcommand="merge")
 
-        branch_merge_parser = branch_subparsers.add_parser(
+        branch_sync_parser = branch_subparsers.add_parser(
             "sync",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
             help="Sync branch with parent",
         )
-        branch_merge_parser.add_argument(
+        branch_sync_parser.add_argument(
             "--interactive",
             "-i",
             action="store_true",
             help="Enable interactive mode for resolving any merge conflicts. Set $EDITOR or $VISUAL to your preferred editor for editing merge conflict values if needed.",
         )
-        branch_merge_parser.add_argument(
+        branch_sync_parser.add_argument(
             "--resolutions",
             type=str,
             default=None,
@@ -272,14 +272,7 @@ class BranchCommand(BaseCommand):
                 '- value: Optional custom value (use "theirs" strategy)'
             ),
         )
-        branch_merge_parser.add_argument(
-            "--force",
-            "-f",
-            action="store_true",
-            default=False,
-            help="Deploy to main without confirmation prompt when it will deploy to live",
-        )
-        branch_merge_parser.set_defaults(branch_subcommand="sync")
+        branch_sync_parser.set_defaults(branch_subcommand="sync")
 
         # -- history --
         branch_history_parser = branch_subparsers.add_parser(
@@ -443,15 +436,6 @@ class BranchCommand(BaseCommand):
 
         elif args.branch_subcommand == "status":
             cls.branch_status(args.path, args.branch_name, args.json)
-
-        elif args.branch_subcommand == "history":
-            cls.branch_history(args.path, args.branch_name, args.json, args.limit)
-
-        elif args.branch_subcommand == "rename":
-            cls.branch_rename(args.path, args.new_branch_name, args.json)
-
-        elif args.branch_subcommand == "restore":
-            cls.branch_restore(args.path, args.branch_name, args.json)
 
     @classmethod
     def branch_list(cls, base_path: str, output_json: bool = False, archived: bool = False) -> None:
@@ -1506,10 +1490,14 @@ class BranchCommand(BaseCommand):
                 )
             else:
                 warning("No current branch found. Please specify a branch name.")
+            return
 
-        branch_id = branches.get(branch_name)
+        branch_id = branches.get(branch_name, {}).get("branchId")
         if not branch_id:
-            warning(f"Branch '{branch_name}' does not exist.")
+            if output_json:
+                json_print({"success": False, "error": f"Branch '{branch_name}' does not exist."})
+            else:
+                warning(f"Branch '{branch_name}' does not exist.")
             return
 
         history = project.get_branch_history(branch_id)

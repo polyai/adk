@@ -356,7 +356,7 @@ class SyncClientHandler:
         self.assert_branch_exists()
 
         if self.sdk.branch_id == "main":
-            logger.error("Cannot sync 'main' branch into")
+            logger.error("Cannot sync 'main' branch — it has no parent to sync from.")
             return False, [], []
 
         logger.info(f"Merging parent into '{self.sdk.branch_id}'")

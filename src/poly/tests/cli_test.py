@@ -3025,7 +3025,10 @@ class ConversationsCommandTest(unittest.TestCase):
 class BranchHistoryTest(unittest.TestCase):
     """Tests for BranchCommand.branch_history CLI handler."""
 
-    SAMPLE_BRANCHES = {"main": "main-id", "feature-a": "branch-a-id"}
+    SAMPLE_BRANCHES = {
+        "main": {"branchId": "main-id"},
+        "feature-a": {"branchId": "branch-a-id"},
+    }
 
     def setUp(self):
         self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")

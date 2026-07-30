@@ -152,7 +152,7 @@ class SourcererSDK:
         return f"{self.base_url}/accounts/{self.account_id}/projects/{self.project_id}/branches/{self.branch_id}/merge"
 
     def _get_branch_sync_url(self) -> str:
-        """Get the branch merge endpoint URL"""
+        """Get the branch sync endpoint URL"""
         return f"{self.base_url}/accounts/{self.account_id}/projects/{self.project_id}/branches/{self.branch_id}/sync"
 
     def _initialize_branch(self) -> str:
@@ -356,7 +356,7 @@ class SourcererSDK:
         self,
         conflict_resolutions: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
-        """Merge the parent branch into the current branch
+        """Sync the current branch with its parent
 
         This method merges changes from the current branch's parent into the current branch.
         If conflicts are detected, they will be returned in the response for manual resolution.
@@ -387,14 +387,14 @@ class SourcererSDK:
             SourcererAPIError: If the API request fails or sequence mismatch occurs
 
         Example:
-            # Simple merge without conflicts
-            result = sdk.merge_branch()
+            # Simple sync without conflicts
+            result = sdk.sync_branch()
             if "hasConflicts" in result and result["hasConflicts"]:
                 print("Conflicts detected:", result["conflicts"])
             else:
-                print("Merge successful, sequence:", result["sequence"])
+                print("Sync successful, sequence:", result["sequence"])
 
-            # Merge with conflict resolution
+            # Sync with conflict resolution
             resolutions = [
                 {
                     "path": ["users", "1", "name"],
@@ -405,7 +405,7 @@ class SourcererSDK:
                     "strategy": "theirs",
                 }
             ]
-            result = sdk.merge_branch(
+            result = sdk.sync_branch(
                 conflict_resolutions=resolutions
             )
         """
