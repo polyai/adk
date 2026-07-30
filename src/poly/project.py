@@ -2273,7 +2273,10 @@ class AgentStudioProject:
                 (meta for meta in branches.values() if meta["branchId"] == self.branch_id),
                 None,
             )
-            if current_branch_meta is None or current_branch_meta.get("parentBranchId") != "main":
+            if current_branch_meta is None or (
+                not current_branch_meta.get("branchId") == "main"
+                and current_branch_meta.get("parentBranchId") != "main"
+            ):
                 raise ValueError(
                     "Cannot create a branch with depth above 2 in releases-branches deployment mode."
                 )
