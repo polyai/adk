@@ -137,6 +137,20 @@ class AgentStudioInterface:
         return PlatformAPIHandler.get_accounts(region)
 
     @staticmethod
+    def get_project(region: str, account_id: str, project_id: str) -> dict[str, Any]:
+        """Get the details of a specific project.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+            project_id (str): The project ID
+
+        Returns:
+            dict[str, Any]: A dictionary containing the project's details
+        """
+        return PlatformAPIHandler.get_project(region, account_id, project_id)
+
+    @staticmethod
     def get_projects(region: str, account_id: str) -> dict[str, str]:
         """Get the projects for a given account.
 

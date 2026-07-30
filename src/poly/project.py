@@ -3555,3 +3555,11 @@ class AgentStudioProject:
             )
 
         return self.api_handler.restore_branch(matches[0]["branchId"])
+
+    def get_project_info(self) -> dict[str, Any]:
+        """Get basic information about the project from the API.
+
+        Returns:
+            dict[str, Any]: A dictionary containing project information.
+        """
+        return self.api_handler.get_project(self.region, self.account_id, self.project_id)
