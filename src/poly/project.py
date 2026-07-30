@@ -2716,8 +2716,10 @@ class AgentStudioProject:
             list[dict[str, str]]: A list of errors
         """
         branches = self.api_handler.get_branches()
-        branch_ids = {meta["branchId"] for meta in branches.values()}
-        if self.branch_id not in branch_ids:
+        branch_meta = {meta["branchId"]: meta for meta in branches.values()}
+        current_branch_meta = branch_meta.get(self.branch_id)
+
+        if not current_branch_meta:
             raise ValueError(f"Branch {self.branch_id} does not exist.")
 
         if self.branch_id == "main":
@@ -2741,7 +2743,10 @@ class AgentStudioProject:
             message=message, conflict_resolutions=conflict_resolutions
         )
         if success:
-            self.switch_branch("main", force=True)
+            parent_branch_id = current_branch_meta.get("parentBranchId") or "main"
+            parent_branch_meta = branch_meta.get(parent_branch_id) or {}
+            parent_branch_name = parent_branch_meta.get("name") or "main"
+            self.switch_branch(parent_branch_name, force=True)
             return True, [], []
 
         return False, conflicts, errors
@@ -3602,3 +3607,8 @@ class AgentStudioProject:
             cfg = self.get_project_info().get("config") or {}
             self.__deployment_mode = DeploymentMode(cfg.get("deployment_mode", "releases"))
         return self.__deployment_mode
+
+    @property
+    def using_simplified_deployments(self) -> bool:
+        # TODO: Hook up to FF
+        return True

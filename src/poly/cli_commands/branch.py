@@ -240,6 +240,13 @@ class BranchCommand(BaseCommand):
                 '- value: Optional custom value (use "theirs" strategy)'
             ),
         )
+        branch_merge_parser.add_argument(
+            "--force",
+            "-f",
+            action="store_true",
+            help="Skip the confirmation prompt when merging into main deploys to a live environment.",
+        )
+
         branch_merge_parser.set_defaults(branch_subcommand="merge")
 
         branch_merge_parser = branch_subparsers.add_parser(
@@ -264,6 +271,13 @@ class BranchCommand(BaseCommand):
                 '- strategy: Resolution strategy - "ours", "theirs", or "base"\n'
                 '- value: Optional custom value (use "theirs" strategy)'
             ),
+        )
+        branch_merge_parser.add_argument(
+            "--force",
+            "-f",
+            action="store_true",
+            default=False,
+            help="Deploy to main without confirmation prompt when it will deploy to live",
         )
         branch_merge_parser.set_defaults(branch_subcommand="sync")
 
@@ -319,6 +333,7 @@ class BranchCommand(BaseCommand):
             help="Name of the archived branch to restore.",
         )
         branch_restore_parser.set_defaults(branch_subcommand="restore")
+
         # ── diff ──
         branch_diff_parser = branch_subparsers.add_parser(
             "diff",
@@ -404,7 +419,9 @@ class BranchCommand(BaseCommand):
             cls.branch_delete(args.path, args.branch_name, args.json)
 
         elif args.branch_subcommand == "merge":
-            cls.branch_merge(args.path, args.message, args.json, args.interactive, args.resolutions)
+            cls.branch_merge(
+                args.path, args.message, args.json, args.interactive, args.resolutions, args.force
+            )
 
         elif args.branch_subcommand == "sync":
             cls.branch_sync(args.path, args.json, args.interactive, args.resolutions)
@@ -959,8 +976,11 @@ class BranchCommand(BaseCommand):
         output_json: bool = False,
         interactive: bool = False,
         resolutions_file: str = None,
+        force: bool = False,
     ):
         """Merge the current branch into main, with optional conflict resolutions."""
+        import questionary
+
         from poly.output.console import (
             console,
             error,
@@ -1008,8 +1028,30 @@ class BranchCommand(BaseCommand):
 
         project = load_project(base_path, output_json=output_json)
 
-        branch_name = project.get_current_branch()
-        ctx = console.status("[info]Merging branch...[/info]") if not output_json else nullcontext()
+        current_branch_name, branches = project.get_branches()
+        current_branch_meta = branches.get(current_branch_name, {})
+        parent_branch_id = current_branch_meta.get("parentBranchId") or None
+        parent_branch_name = next(
+            (name for name, meta in branches.items() if meta.get("branchId") == parent_branch_id),
+            "main",
+        )
+
+        if parent_branch_name == "main" and project.using_simplified_deployments:
+            if not output_json and not force:
+                warning("Merging into 'main' will deploy changes into live environment")
+                if not questionary.confirm(
+                    "Confirm Deployment?", default=False, auto_enter=False
+                ).ask():
+                    warning("Aborted.")
+                    sys.exit(0)
+
+        ctx = (
+            console.status(
+                f"[info]Merging branch '{current_branch_name}' into '{parent_branch_name}'...[/info]"
+            )
+            if not output_json
+            else nullcontext()
+        )
         with ctx:
             merge_success, conflicts, errors = project.merge_branch(
                 message=message, conflict_resolutions=file_resolutions
@@ -1026,12 +1068,12 @@ class BranchCommand(BaseCommand):
             return
 
         if merge_success:
-            success(f"Branch '{branch_name}' merged successfully.")
-            info('Switched to "main" branch after merge.')
+            success(f"Branch '{current_branch_name}' merged successfully.")
+            info(f"Switched to '{parent_branch_name}' branch after merge.")
             return
 
         # Failed branch merge
-        error(f"Failed to merge branch '{branch_name}'.")
+        error(f"Failed to merge branch '{current_branch_name}'.")
         if errors:
             plain("\n[red]Errors:[/red]")
             for err in errors:
@@ -1062,7 +1104,9 @@ class BranchCommand(BaseCommand):
             os.sep.join(r["path"]): r for r in (file_resolutions or []) if "path" in r
         }
         while True:
-            resolutions = cls._merge_interactively(enriched, existing_resolutions, branch_name)
+            resolutions = cls._merge_interactively(
+                enriched, existing_resolutions, current_branch_name
+            )
             if not resolutions:
                 warning("No resolutions provided. Exiting.")
                 sys.exit(1)
@@ -1076,18 +1120,18 @@ class BranchCommand(BaseCommand):
                     message=message, conflict_resolutions=resolutions
                 )
             if merge_success:
-                success(f"Branch '{branch_name}' merged successfully.")
-                info('Switched to "main" branch after merge.')
+                success(f"Branch '{current_branch_name}' merged successfully.")
+                info(f"Switched to '{parent_branch_name}' branch after merge.")
                 break
             if errors:
-                error(f"Failed to merge branch '{branch_name}' after conflict resolution.")
+                error(f"Failed to merge branch '{current_branch_name}' after conflict resolution.")
                 plain("\n[red]Errors:[/red]")
                 for err in errors:
                     error(f"- {err['path']}: {err['message']}")
                 sys.exit(1)
             if not conflicts:
                 error(
-                    f"Failed to merge branch '{branch_name}' after conflict resolution "
+                    f"Failed to merge branch '{current_branch_name}' after conflict resolution "
                     "(no conflicts or errors returned)."
                 )
                 sys.exit(1)
