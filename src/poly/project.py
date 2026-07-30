@@ -12,6 +12,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, fields
 from datetime import datetime
+from enum import Enum
 from typing import Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
@@ -86,6 +87,14 @@ class PushPhaseChangeSet:
     post: ResourceChangeSet
 
 
+class DeploymentMode(Enum):
+    """Deployment mode for the project"""
+
+    SIMPLE = "simple"
+    RELEASES = "releases"
+    RELEASES_BRANCHES = "release_branches"
+
+
 @dataclass
 class AgentStudioProject:
     """Dataclass representing an Agent Studio Project"""
@@ -103,6 +112,7 @@ class AgentStudioProject:
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
     rtc_metadata: Optional[dict[str, dict]] = None
+    __deployment_mode: Optional[DeploymentMode] = None
 
     # Store resources that were not loaded from the status file
     # So they aren't considered locally deleted when pushing/pulling
@@ -3563,3 +3573,9 @@ class AgentStudioProject:
             dict[str, Any]: A dictionary containing project information.
         """
         return self.api_handler.get_project(self.region, self.account_id, self.project_id)
+
+    def get_deployment_mode(self) -> DeploymentMode:
+        if self.__deployment_mode is None:
+            cfg = self.get_project_info().get("config") or {}
+            self.__deployment_mode = DeploymentMode(cfg.get("deployment_mode", "releases"))
+        return self.__deployment_mode
