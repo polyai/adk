@@ -197,6 +197,21 @@ class BranchCommand(BaseCommand):
         )
         branch_current_parser.set_defaults(branch_subcommand="current")
 
+        # -- rename --
+        branch_rename_parser = branch_subparsers.add_parser(
+            "rename",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Rename the current branch.",
+        )
+        branch_rename_parser.add_argument(
+            "new_branch_name",
+            type=str,
+            nargs="?",
+            default=None,
+            help="New name for the current branch.",
+        )
+        branch_rename_parser.set_defaults(branch_subcommand="rename")
+
         # -- delete --
         branch_delete_parser = branch_subparsers.add_parser(
             "delete",
@@ -210,6 +225,21 @@ class BranchCommand(BaseCommand):
             help="Name of the branch to delete directly, skipping the interactive prompt.",
         ).completer = cls._branch_name_completer
         branch_delete_parser.set_defaults(branch_subcommand="delete")
+
+        # -- restore --
+        branch_restore_parser = branch_subparsers.add_parser(
+            "restore",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Restore a soft-deleted branch from the archive.",
+        )
+        branch_restore_parser.add_argument(
+            "branch_name",
+            type=str,
+            nargs="?",
+            default=None,
+            help="Name of the archived branch to restore.",
+        )
+        branch_restore_parser.set_defaults(branch_subcommand="restore")
 
         # -- merge --
         branch_merge_parser = branch_subparsers.add_parser(
@@ -247,9 +277,9 @@ class BranchCommand(BaseCommand):
             action="store_true",
             help="Skip the confirmation prompt when merging into main deploys to a live environment.",
         )
-
         branch_merge_parser.set_defaults(branch_subcommand="merge")
 
+        # -- sync --
         branch_sync_parser = branch_subparsers.add_parser(
             "sync",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -275,60 +305,7 @@ class BranchCommand(BaseCommand):
         )
         branch_sync_parser.set_defaults(branch_subcommand="sync")
 
-        # -- history --
-        branch_history_parser = branch_subparsers.add_parser(
-            "history",
-            parents=[parents.path, parents.verbose, parents.json, parents.debug],
-            help="Show the history of a branch.",
-        )
-
-        branch_history_parser.add_argument(
-            "--branch-name",
-            "-b",
-            type=str,
-            default=None,
-            help="Name of the branch to show history for. Defaults to the current branch.",
-        )
-        branch_history_parser.add_argument(
-            "--limit",
-            type=int,
-            default=10,
-            help="Number of history entries to show. Defaults to 10.",
-        )
-
-        branch_history_parser.set_defaults(branch_subcommand="history")
-
-        # -- rename --
-        branch_rename_parser = branch_subparsers.add_parser(
-            "rename",
-            parents=[parents.path, parents.verbose, parents.json, parents.debug],
-            help="Rename the current branch.",
-        )
-        branch_rename_parser.add_argument(
-            "new_branch_name",
-            type=str,
-            nargs="?",
-            default=None,
-            help="New name for the current branch.",
-        )
-        branch_rename_parser.set_defaults(branch_subcommand="rename")
-
-        # -- restore --
-        branch_restore_parser = branch_subparsers.add_parser(
-            "restore",
-            parents=[parents.path, parents.verbose, parents.json, parents.debug],
-            help="Restore a soft-deleted branch from the archive.",
-        )
-        branch_restore_parser.add_argument(
-            "branch_name",
-            type=str,
-            nargs="?",
-            default=None,
-            help="Name of the archived branch to restore.",
-        )
-        branch_restore_parser.set_defaults(branch_subcommand="restore")
-
-        # ── diff ──
+        # -- diff --
         branch_diff_parser = branch_subparsers.add_parser(
             "diff",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -347,7 +324,7 @@ class BranchCommand(BaseCommand):
         )
         branch_diff_parser.set_defaults(branch_subcommand="diff")
 
-        # ── review ──
+        # -- review --
         branch_review_parser = branch_subparsers.add_parser(
             "review",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -366,7 +343,7 @@ class BranchCommand(BaseCommand):
         )
         branch_review_parser.set_defaults(branch_subcommand="review")
 
-        # ── status ──
+        # -- status --
         branch_status_parser = branch_subparsers.add_parser(
             "status",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -379,6 +356,27 @@ class BranchCommand(BaseCommand):
             help="Branch to check status for. Defaults to the current branch.",
         ).completer = cls._branch_name_completer
         branch_status_parser.set_defaults(branch_subcommand="status")
+
+        # -- history --
+        branch_history_parser = branch_subparsers.add_parser(
+            "history",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Show the history of a branch.",
+        )
+        branch_history_parser.add_argument(
+            "--branch-name",
+            "-b",
+            type=str,
+            default=None,
+            help="Name of the branch to show history for. Defaults to the current branch.",
+        )
+        branch_history_parser.add_argument(
+            "--limit",
+            type=int,
+            default=10,
+            help="Number of history entries to show. Defaults to 10.",
+        )
+        branch_history_parser.set_defaults(branch_subcommand="history")
 
     @classmethod
     def run(cls, args: Namespace) -> None:
