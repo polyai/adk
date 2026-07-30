@@ -542,7 +542,14 @@ class BranchCommand(BaseCommand):
 
         base_branch_id = project.branch_id
         base_branch_name = project.get_current_branch()
-        new_branch_id = project.create_branch(branch_name)
+        try:
+            new_branch_id = project.create_branch(branch_name)
+        except ValueError as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(str(e))
+            sys.exit(1)
         if output_json:
             json_print(
                 {
@@ -1036,7 +1043,18 @@ class BranchCommand(BaseCommand):
             "main",
         )
 
-        if parent_branch_name == "main" and project.using_simplified_deployments:
+        is_live_deploy = parent_branch_name == "main" and project.using_simplified_deployments
+
+        def _report_merge_success() -> None:
+            if is_live_deploy:
+                success(
+                    f"Branch '{current_branch_name}' merged into main — your changes are now live."
+                )
+            else:
+                success(f"Branch '{current_branch_name}' merged successfully.")
+            info(f"Switched to '{parent_branch_name}' branch after merge.")
+
+        if is_live_deploy:
             if not output_json and not force:
                 warning("Merging into 'main' will deploy changes into live environment")
                 if not questionary.confirm(
@@ -1068,8 +1086,7 @@ class BranchCommand(BaseCommand):
             return
 
         if merge_success:
-            success(f"Branch '{current_branch_name}' merged successfully.")
-            info(f"Switched to '{parent_branch_name}' branch after merge.")
+            _report_merge_success()
             return
 
         # Failed branch merge
@@ -1120,8 +1137,7 @@ class BranchCommand(BaseCommand):
                     message=message, conflict_resolutions=resolutions
                 )
             if merge_success:
-                success(f"Branch '{current_branch_name}' merged successfully.")
-                info(f"Switched to '{parent_branch_name}' branch after merge.")
+                _report_merge_success()
                 break
             if errors:
                 error(f"Failed to merge branch '{current_branch_name}' after conflict resolution.")

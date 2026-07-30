@@ -271,23 +271,44 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         self.proj.create_branch.assert_called_once_with("my-branch")
         self.proj.push_project.assert_not_called()
 
-    def test_branch_create_surfaces_deployment_mode_rejection(self):
-        """A deployment-mode guard failure raised by the project reaches the caller.
+    @patch("poly.output.console.error")
+    def test_branch_create_surfaces_deployment_mode_rejection(self, mock_error):
+        """A deployment-mode guard failure raised by the project is shown cleanly, not crashed.
 
         The "which branches may be created from where" rules live in
         AgentStudioProject.create_branch (they depend on the project's deployment
-        mode), so the CLI must let that ValueError propagate rather than swallow it.
+        mode); the CLI catches that ValueError and reports it via error()/exit(1)
+        instead of letting it propagate as an unhandled exception.
         """
         self.proj.branch_id = "example-feature-branch"
         self.proj.create_branch.side_effect = ValueError(
             "Cannot create a new branch from a non-main branch in releases deployment mode."
         )
 
-        with self.assertRaises(ValueError) as ctx:
+        with self.assertRaises(SystemExit) as ctx:
             BranchCommand.branch_create(TEST_DIR, "my-branch", env=None, force=False)
 
-        self.assertIn("non-main branch", str(ctx.exception))
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("non-main branch", mock_error.call_args[0][0])
         self.proj.push_project.assert_not_called()
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_branch_create_json_mode_surfaces_deployment_mode_rejection(self, mock_json):
+        """In --json mode, a deployment-mode guard failure is reported as JSON, not a crash."""
+        self.proj.branch_id = "example-feature-branch"
+        self.proj.create_branch.side_effect = ValueError(
+            "Cannot create a new branch from a non-main branch in releases deployment mode."
+        )
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_create(
+                TEST_DIR, "my-branch", output_json=True, env=None, force=False
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("non-main branch", payload["error"])
 
     @patch("poly.output.console.success")
     def test_branch_create_reports_branch_it_was_created_from(self, mock_success):
@@ -691,8 +712,8 @@ class BranchMergeTest(unittest.TestCase):
         self.proj.get_branches.return_value = (branch_name, dict(self.BRANCH_TREE))
 
     @patch("questionary.confirm")
-    @patch("poly.output.console.info")
-    def test_merging_into_main_merges_after_deploy_confirmation(self, mock_info, mock_confirm):
+    @patch("poly.output.console.success")
+    def test_merging_into_main_merges_after_deploy_confirmation(self, mock_success, mock_confirm):
         """Merging into main warns about live deployment and proceeds once confirmed."""
         mock_confirm.return_value.ask.return_value = True
 
@@ -700,7 +721,7 @@ class BranchMergeTest(unittest.TestCase):
 
         mock_confirm.assert_called_once()
         self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
-        self.assertIn("main", mock_info.call_args[0][0])
+        self.assertIn("now live", mock_success.call_args[0][0])
 
     @patch("questionary.confirm")
     def test_declining_deploy_confirmation_aborts_without_merging(self, mock_confirm):
@@ -714,14 +735,14 @@ class BranchMergeTest(unittest.TestCase):
         self.proj.merge_branch.assert_not_called()
 
     @patch("questionary.confirm")
-    @patch("poly.output.console.info")
-    def test_force_skips_deploy_confirmation(self, mock_info, mock_confirm):
+    @patch("poly.output.console.success")
+    def test_force_skips_deploy_confirmation(self, mock_success, mock_confirm):
         """--force merges into main without asking for deployment confirmation."""
         BranchCommand.branch_merge(TEST_DIR, message="ship it", force=True)
 
         mock_confirm.assert_not_called()
         self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
-        self.assertIn("main", mock_info.call_args[0][0])
+        self.assertIn("now live", mock_success.call_args[0][0])
 
     @patch("questionary.confirm")
     @patch("poly.output.console.info")

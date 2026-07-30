@@ -293,7 +293,7 @@ class SyncClientHandler:
     def merge_branch(
         self, message: str, conflict_resolutions: Optional[list[dict[str, Any]]] = None
     ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
-        """Merge the current branch into main.
+        """Merge the current branch into its parent branch.
 
         Args:
             message (str): The merge commit message
@@ -313,7 +313,7 @@ class SyncClientHandler:
             logger.error("Cannot merge 'main' branch into itself.")
             return False, [], []
 
-        logger.info(f"Merging branch '{self.sdk.branch_id}' into 'main'")
+        logger.info(f"Merging branch '{self.sdk.branch_id}' into its parent branch")
 
         try:
             result = self.sdk.merge_branch(
@@ -321,18 +321,20 @@ class SyncClientHandler:
                 conflict_resolutions=conflict_resolutions,
             )
         except SourcererAPIError as e:
-            logger.error(f"Failed to merge branch '{self.sdk.branch_id}' into 'main': {e}")
+            logger.error(
+                f"Failed to merge branch '{self.sdk.branch_id}' into its parent branch: {e}"
+            )
             return False, [], []
 
         if result.get("hasConflicts", False) or result.get("errors", []):
             logger.info(
-                f"Failed to merge branch '{self.sdk.branch_id}' into 'main' due to {len(result.get('conflicts', []))} conflicts and {len(result.get('errors', []))} errors"
+                f"Failed to merge branch '{self.sdk.branch_id}' into its parent branch due to {len(result.get('conflicts', []))} conflicts and {len(result.get('errors', []))} errors"
             )
             conflicts = result.get("conflicts", [])
             errors = result.get("errors", [])
             return False, conflicts, errors
 
-        logger.info(f"Successfully merged branch '{self.sdk.branch_id}' into 'main'")
+        logger.info(f"Successfully merged branch '{self.sdk.branch_id}' into its parent branch")
         return True, [], []
 
     def sync_branch(
