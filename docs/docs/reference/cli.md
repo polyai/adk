@@ -444,6 +444,37 @@ poly chat --push -m 'Hello'
 
 If the push fails, the command exits without starting the chat session.
 
+#### Agentic dial and warm transfers
+
+Use `--multi-leg` (or `--multileg`) to supervise the whole call graph instead of ending
+the command when one conversation leg ends:
+
+~~~bash
+poly chat --multi-leg
+poly chat --multi-leg --environment sandbox
+~~~
+
+When the parent agent dials another agent, ADK starts a child chat with the resolved
+project, integration attributes, and agentic-dial headers. A parent branch prefers a
+matching sibling child project and that child's own current branch; deployed parents use
+the child environment resolved by the platform.
+
+Input targets the active leg. These commands control the simulation:
+
+| Command | Description |
+|---|---|
+| `/legs` | List parent and child legs with their current status. |
+| `/parent` | Target subsequent input at the parent agent. |
+| `/leg <dial-or-destination>` | Target a child by dial ID, prefix, or destination. |
+| `/fail [reason]` | Simulate a terminal child status such as `busy` or `no-answer`. |
+| `/hangup`, `/bridge-end` | End the simulated call and trigger any bridge-ended callback. |
+| `/restart` | End all legs and begin a new supervised call. |
+| `/exit` | End all legs and exit. |
+
+Once the platform returns a bridge instruction, agent turns pause while the supervisor
+keeps the bridged call open. Use `/hangup` to finish it; ending the child conversation by
+itself does not drop the parent or terminate another live leg.
+
 #### Language flags
 
 Use language flags to specify the expected input and output language when chatting against multilingual agents. If not specified, the project default is used.
@@ -464,6 +495,7 @@ Use language flags to specify the expected input and output language when chatti
 | `-m`, `--message MSG` | Send a message non-interactively (repeatable). |
 | `--input-file FILE` | Read messages line-by-line from a file (`-` for stdin). |
 | `--conversation-id`, `--conv-id` | Resume an existing conversation by ID. |
+| `--multi-leg`, `--multileg` | Supervise agentic-dial child legs, messages, failures, and bridges. |
 | `--json` | Emit a single JSON object when the session ends (see below). |
 | `--environment` | Target environment. Choices: `branch`, `sandbox`, `pre-release`, `live`. Defaults to `branch`. `branch` chats against the last **pushed** state of your current branch (not local uncommitted changes); on main it falls back to `sandbox`. Use `--push` to push local changes before chatting. |
 | `--channel` | Channel to use (e.g. `webchat`, `voice`). |
@@ -743,6 +775,7 @@ The exact fields vary by command. Common fields include:
 | `poly init --json` | `success`, `root_path` |
 | `poly project create --json` | `success`, `root_path` (via init); on error: `success`, `error` |
 | `poly chat --json` | `conversations` (array); optional `push` (when `--push` is used) |
+| `poly chat --multi-leg --json` | `multi_leg_sessions` (array); optional `push` (when `--push` is used) |
 | `poly deployments show --json` | `success`, `deployment`, `active_deployment_hashes`, `included_deployments`, `is_rollback` |
 | `poly deployments promote --json` | `success`, `from_hash`, `to_env`, `message`, `included_deployments`; `dry_run` when `--dry-run` is used |
 | `poly deployments rollback --json` | `success`, `target_hash`, `message`, `reverted_deployments`; `dry_run` when `--dry-run` is used |

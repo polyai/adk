@@ -1103,6 +1103,28 @@ class ChatCommandTest(unittest.TestCase):
 
         self.assertEqual(self.proj.send_message.call_count, 2)
 
+    @patch("poly.cli_commands.multi_leg_chat.MultiLegChatSupervisor")
+    def test_multi_leg_mode_delegates_to_supervisor(self, mock_supervisor):
+        """multi_leg=True runs the call-graph supervisor instead of the single chat loop."""
+        mock_supervisor.return_value.run.return_value = (
+            False,
+            {"success": True, "legs": []},
+        )
+        messages = ["Hello"]
+
+        ChatCommand.chat(
+            TEST_DIR,
+            environment="sandbox",
+            input_messages=messages,
+            multi_leg=True,
+        )
+
+        mock_supervisor.assert_called_once()
+        self.assertIs(mock_supervisor.call_args.kwargs["project"], self.proj)
+        self.assertEqual(mock_supervisor.call_args.kwargs["environment"], "sandbox")
+        mock_supervisor.return_value.run.assert_called_once_with(input_messages=messages)
+        self.proj.create_chat_session.assert_not_called()
+
     def test_push_before_chat_calls_push_project(self):
         """push_before_chat=True calls push_project before creating the chat session."""
         self.proj.push_project.return_value = (True, "Pushed successfully", None)

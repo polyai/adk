@@ -2336,6 +2336,8 @@ class AgentStudioProject:
         variant: Optional[str],
         input_lang: Optional[str] = None,
         output_lang: Optional[str] = None,
+        integration_attributes: Optional[dict] = None,
+        custom_sip_headers: Optional[dict[str, str]] = None,
     ) -> dict:
         """Create a chat session (standard or draft).
 
@@ -2348,6 +2350,8 @@ class AgentStudioProject:
             variant (ty.Optional[str]): The variant ID to create the chat session in.
             input_lang (str): Optional. The language code for the input messages, e.g. "en-GB" or "fr-FR".
             output_lang (str): Optional. The language code for the agent's responses, e.g. "en-GB" or "fr-FR".
+            integration_attributes (dict): Optional attributes exposed to project functions.
+            custom_sip_headers (dict): Optional SIP headers exposed to the conversation.
 
         Returns:
             dict: API response with conversation_id and initial greeting.
@@ -2374,6 +2378,8 @@ class AgentStudioProject:
                 variant_id=variant,
                 input_lang=input_lang,
                 output_lang=output_lang,
+                integration_attributes=integration_attributes,
+                custom_sip_headers=custom_sip_headers,
             )
 
         return AgentStudioInterface.create_chat(
@@ -2385,6 +2391,8 @@ class AgentStudioProject:
             channel=channel,
             input_lang=input_lang,
             output_lang=output_lang,
+            integration_attributes=integration_attributes,
+            custom_sip_headers=custom_sip_headers,
         )
 
     def send_message(
@@ -2394,6 +2402,7 @@ class AgentStudioProject:
         environment: str,
         input_lang: str = None,
         output_lang: str = None,
+        external_events: Optional[list[dict]] = None,
     ) -> dict:
         """Send a message to an active chat conversation.
 
@@ -2403,6 +2412,7 @@ class AgentStudioProject:
             environment (str): The environment of the conversation: draft, sandbox, pre-release or live.
             input_lang (str): Optional. The language code of the input message, e.g. "en-GB" or "fr-FR".
             output_lang (str): Optional. The language code for the agent's response, e.g. "en-GB" or "fr-FR".
+            external_events (list[dict]): Optional structured events received this turn.
 
         Returns:
             dict: API response with the agent's reply.
@@ -2419,6 +2429,7 @@ class AgentStudioProject:
                 text=text,
                 input_lang=input_lang,
                 output_lang=output_lang,
+                external_events=external_events,
             )
         return AgentStudioInterface.send_chat_message(
             region=self.region,
@@ -2429,6 +2440,7 @@ class AgentStudioProject:
             environment=environment,
             input_lang=input_lang,
             output_lang=output_lang,
+            external_events=external_events,
         )
 
     def end_chat(
@@ -2454,6 +2466,22 @@ class AgentStudioProject:
             project_id=self.project_id,
             conversation_id=conversation_id,
             environment=environment,
+        )
+
+    def bridge_ended(
+        self,
+        conversation_id: str,
+        bridge_duration_seconds: int = 0,
+        call_duration_seconds: int = 0,
+    ) -> dict:
+        """Trigger the callback registered for the end of a bridged debug call."""
+        return AgentStudioInterface.bridge_ended(
+            region=self.region,
+            account_id=self.account_id,
+            project_id=self.project_id,
+            conversation_id=conversation_id,
+            bridge_duration_seconds=bridge_duration_seconds,
+            call_duration_seconds=call_duration_seconds,
         )
 
     @property
