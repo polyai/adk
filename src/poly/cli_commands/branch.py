@@ -663,26 +663,44 @@ class BranchCommand(BaseCommand):
 
     @classmethod
     def get_current_branch(cls, base_path: str, output_json: bool = False) -> None:
-        """Get the current branch of the Agent Studio project."""
+        """Get the current branch of the Agent Studio project, and its parent if it has one."""
         from poly.output.console import plain, warning
 
         project = load_project(base_path, output_json=output_json)
 
-        current_branch = project.get_current_branch()
-        if output_json:
-            json_output = {
-                "current_branch": current_branch,
-            }
-            json_print(json_output)
-            return
+        current_branch, branches = project.get_branches()
 
         if current_branch is None:
-            warning(
-                "Current local branch does not exist in Agent Studio. "
-                "It may have been deleted or merged."
-            )
+            if output_json:
+                json_print({"current_branch": None, "parent_branch": None})
+            else:
+                warning(
+                    "Current local branch does not exist in Agent Studio. "
+                    "It may have been deleted or merged."
+                )
             return
+
+        parent_branch_id = branches.get(current_branch, {}).get("parentBranchId")
+        parent_branch = (
+            next(
+                (
+                    name
+                    for name, meta in branches.items()
+                    if meta.get("branchId") == parent_branch_id
+                ),
+                parent_branch_id,
+            )
+            if parent_branch_id
+            else None
+        )
+
+        if output_json:
+            json_print({"current_branch": current_branch, "parent_branch": parent_branch})
+            return
+
         plain(f"Current branch: [bold]{current_branch}[/bold]")
+        if parent_branch:
+            plain(f"Parent branch: [bold]{parent_branch}[/bold]")
 
     @classmethod
     def branch_delete(

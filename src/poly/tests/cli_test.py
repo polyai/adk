@@ -592,6 +592,77 @@ class BranchDeleteTest(unittest.TestCase):
         self.assertIn("1 branch(es)", mock_success.call_args[0][0])
 
 
+class BranchCurrentTest(unittest.TestCase):
+    """Tests for BranchCommand.get_current_branch."""
+
+    BRANCH_TREE = {
+        "main": {"branchId": "main"},
+        "feature-a": {"branchId": "id-a", "parentBranchId": "main"},
+    }
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _set_current_branch(self, branch_name: str | None) -> None:
+        self.proj.get_branches.return_value = (branch_name, dict(self.BRANCH_TREE))
+
+    @patch("poly.output.console.plain")
+    def test_shows_parent_branch_when_present(self, mock_plain):
+        """A branch with a parent shows both the current and parent branch."""
+        self._set_current_branch("feature-a")
+
+        BranchCommand.get_current_branch(TEST_DIR)
+
+        lines = [call.args[0] for call in mock_plain.call_args_list]
+        self.assertTrue(any("feature-a" in line for line in lines))
+        self.assertTrue(any("main" in line for line in lines))
+
+    @patch("poly.output.console.plain")
+    def test_main_has_no_parent_branch_line(self, mock_plain):
+        """main has no parent, so only the current branch is shown."""
+        self._set_current_branch("main")
+
+        BranchCommand.get_current_branch(TEST_DIR)
+
+        mock_plain.assert_called_once()
+        self.assertIn("main", mock_plain.call_args[0][0])
+
+    @patch("poly.output.console.warning")
+    def test_no_current_branch_shows_warning(self, mock_warning):
+        """When the local branch no longer exists remotely, a warning is shown."""
+        self._set_current_branch(None)
+
+        BranchCommand.get_current_branch(TEST_DIR)
+
+        mock_warning.assert_called_once()
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_mode_includes_parent_branch(self, mock_json_print):
+        """JSON mode includes both current_branch and parent_branch."""
+        self._set_current_branch("feature-a")
+
+        BranchCommand.get_current_branch(TEST_DIR, output_json=True)
+
+        mock_json_print.assert_called_once_with(
+            {"current_branch": "feature-a", "parent_branch": "main"}
+        )
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_mode_main_has_null_parent(self, mock_json_print):
+        """JSON mode for main reports a null parent_branch."""
+        self._set_current_branch("main")
+
+        BranchCommand.get_current_branch(TEST_DIR, output_json=True)
+
+        mock_json_print.assert_called_once_with({"current_branch": "main", "parent_branch": None})
+
+
 class BranchSwitchInteractiveTest(unittest.TestCase):
     """Tests for BranchCommand.branch_switch's interactive picker (no branch_name given)."""
 
