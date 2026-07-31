@@ -598,6 +598,7 @@ class BranchCurrentTest(unittest.TestCase):
     BRANCH_TREE = {
         "main": {"branchId": "main"},
         "feature-a": {"branchId": "id-a", "parentBranchId": "main"},
+        "feature-b": {"branchId": "id-b", "parentBranchId": "feature-a"},
     }
 
     def setUp(self):
@@ -613,7 +614,7 @@ class BranchCurrentTest(unittest.TestCase):
         self.proj.get_branches.return_value = (branch_name, dict(self.BRANCH_TREE))
 
     @patch("poly.output.console.plain")
-    def test_shows_parent_branch_when_present(self, mock_plain):
+    def test_does_not_show_parent_branch_when_parent_is_main(self, mock_plain):
         """A branch with a parent shows both the current and parent branch."""
         self._set_current_branch("feature-a")
 
@@ -621,7 +622,18 @@ class BranchCurrentTest(unittest.TestCase):
 
         lines = [call.args[0] for call in mock_plain.call_args_list]
         self.assertTrue(any("feature-a" in line for line in lines))
-        self.assertTrue(any("main" in line for line in lines))
+        self.assertFalse(any("main" in line for line in lines))
+
+    @patch("poly.output.console.plain")
+    def test_shows_parent_branch_when_present_and_not_main(self, mock_plain):
+        """A branch with a parent shows both the current and parent branch."""
+        self._set_current_branch("feature-b")
+
+        BranchCommand.get_current_branch(TEST_DIR)
+
+        lines = [call.args[0] for call in mock_plain.call_args_list]
+        self.assertTrue(any("feature-b" in line for line in lines))
+        self.assertTrue(any("feature-a" in line for line in lines))
 
     @patch("poly.output.console.plain")
     def test_main_has_no_parent_branch_line(self, mock_plain):

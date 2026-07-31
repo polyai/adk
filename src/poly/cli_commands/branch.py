@@ -699,7 +699,7 @@ class BranchCommand(BaseCommand):
             return
 
         plain(f"Current branch: [bold]{current_branch}[/bold]")
-        if parent_branch:
+        if parent_branch and parent_branch != "main":
             plain(f"Parent branch: [bold]{parent_branch}[/bold]")
 
     @classmethod
