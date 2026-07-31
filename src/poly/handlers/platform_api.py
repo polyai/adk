@@ -26,6 +26,9 @@ DRAFT_CHAT_CONVERSATION_URL = (
     "/adk/v1/accounts/{account_id}/projects/{project_id}/draft/chat/{conversation_id}"
 )
 CHAT_END_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/chat/{conversation_id}/end"
+CHAT_BRIDGE_ENDED_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/chat/{conversation_id}/bridge-ended"
+)
 AB_TESTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests"
 AB_TEST_ACTIVE_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/active"
 AB_TEST_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/{ab_test_id}"
@@ -426,6 +429,8 @@ class PlatformAPIHandler:
         channel: str = "chat.polyai",
         input_lang: ty.Optional[str] = None,
         output_lang: ty.Optional[str] = None,
+        integration_attributes: ty.Optional[dict] = None,
+        custom_sip_headers: ty.Optional[dict[str, str]] = None,
     ) -> dict:
         """Create a new chat conversation.
 
@@ -438,6 +443,8 @@ class PlatformAPIHandler:
             channel: The channel identifier (e.g. 'chat.polyai', 'webchat.polyai')
             input_lang: Optional language code of the input message, e.g. "en-GB" or "fr-FR"
             output_lang: Optional language code for the agent's response,
+            integration_attributes: Optional attributes exposed to project functions
+            custom_sip_headers: Optional SIP headers exposed to the child conversation
 
         Returns:
             dict: The API response containing the conversation ID
@@ -453,6 +460,10 @@ class PlatformAPIHandler:
             data["asr_lang_code"] = input_lang
         if output_lang:
             data["tts_lang_code"] = output_lang
+        if integration_attributes is not None:
+            data["integration_attributes"] = integration_attributes
+        if custom_sip_headers is not None:
+            data["custom_sip_headers"] = custom_sip_headers
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
     @staticmethod
@@ -465,6 +476,7 @@ class PlatformAPIHandler:
         environment: str = "sandbox",
         input_lang: str = None,
         output_lang: str = None,
+        external_events: ty.Optional[list[dict]] = None,
     ) -> dict:
         """Send a message to an existing chat conversation.
 
@@ -477,6 +489,7 @@ class PlatformAPIHandler:
             environment: The environment (sandbox, pre-release, live)
             input_lang: Optional language code of the input message, e.g. "en-GB" or "fr-FR"
             output_lang: Optional language code for the agent's response, e.g. "en-
+            external_events: Optional structured events to deliver with this turn
 
         Returns:
             dict: The API response containing the assistant's reply
@@ -491,6 +504,8 @@ class PlatformAPIHandler:
             data["asr_lang_code"] = input_lang
         if output_lang:
             data["tts_lang_code"] = output_lang
+        if external_events is not None:
+            data["external_events"] = external_events
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
     @staticmethod
@@ -526,6 +541,31 @@ class PlatformAPIHandler:
         )
 
     @staticmethod
+    def bridge_ended(
+        region: str,
+        account_id: str,
+        project_id: str,
+        conversation_id: str,
+        bridge_duration_seconds: int = 0,
+        call_duration_seconds: int = 0,
+    ) -> dict:
+        """Trigger the callback registered for the end of a bridged debug call."""
+        endpoint = CHAT_BRIDGE_ENDED_URL.format(
+            account_id=account_id,
+            project_id=project_id,
+            conversation_id=conversation_id,
+        )
+        return PlatformAPIHandler.make_request(
+            region,
+            endpoint,
+            "POST",
+            data={
+                "bridge_duration_seconds": bridge_duration_seconds,
+                "call_duration_seconds": call_duration_seconds,
+            },
+        )
+
+    @staticmethod
     def create_draft_chat(
         region: str,
         account_id: str,
@@ -536,6 +576,8 @@ class PlatformAPIHandler:
         variant_id: ty.Optional[str] = None,
         input_lang: ty.Optional[str] = None,
         output_lang: ty.Optional[str] = None,
+        integration_attributes: ty.Optional[dict] = None,
+        custom_sip_headers: ty.Optional[dict[str, str]] = None,
     ) -> dict:
         """Create a new chat conversation against a branch deployment.
 
@@ -565,6 +607,10 @@ class PlatformAPIHandler:
             data["asr_lang_code"] = input_lang
         if output_lang:
             data["tts_lang_code"] = output_lang
+        if integration_attributes is not None:
+            data["integration_attributes"] = integration_attributes
+        if custom_sip_headers is not None:
+            data["custom_sip_headers"] = custom_sip_headers
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
     @staticmethod
@@ -576,6 +622,7 @@ class PlatformAPIHandler:
         text: str,
         input_lang: str = None,
         output_lang: str = None,
+        external_events: ty.Optional[list[dict]] = None,
     ) -> dict:
         """Send a message to an existing draft chat conversation.
 
@@ -601,6 +648,8 @@ class PlatformAPIHandler:
             data["asr_lang_code"] = input_lang
         if output_lang:
             data["tts_lang_code"] = output_lang
+        if external_events is not None:
+            data["external_events"] = external_events
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
     @staticmethod

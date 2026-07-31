@@ -44,6 +44,9 @@ class ChatCommand(BaseCommand):
                 "  poly chat --conv-id <conversation_id>\n"
                 "  poly chat --conv-id <conversation_id> -m 'Follow-up message'\n"
                 "\n"
+                "Agentic dial and warm transfer supervision:\n"
+                "  poly chat --multi-leg\n"
+                "\n"
                 "Machine-readable output (emits a single JSON object when done):\n"
                 "  poly chat --json -m 'Hello'\n"
                 "  poly chat --json --input-file ./script.txt\n"
@@ -144,6 +147,16 @@ class ChatCommand(BaseCommand):
             default=None,
             help="Reuse an existing conversation ID instead of starting a new conversation.",
         )
+        chat_parser.add_argument(
+            "--multi-leg",
+            "--multileg",
+            action="store_true",
+            dest="multi_leg",
+            help=(
+                "Supervise agentic-dial child conversations and bridges instead of "
+                "ending when one leg ends."
+            ),
+        )
 
     @classmethod
     def run(cls, args: Namespace) -> None:
@@ -191,6 +204,7 @@ class ChatCommand(BaseCommand):
             input_messages=input_messages,
             conversation_id=args.conversation_id,
             output_json=args.json,
+            multi_leg=args.multi_leg,
         )
 
     @classmethod
@@ -209,6 +223,7 @@ class ChatCommand(BaseCommand):
         output_json: bool = False,
         input_messages: Optional[list[str]] = None,
         conversation_id: Optional[str] = None,
+        multi_leg: bool = False,
     ) -> None:
         """Start an interactive chat session with the agent."""
         import requests
@@ -276,6 +291,41 @@ class ChatCommand(BaseCommand):
             label += f" variant=[bold]{variant}[/bold]"
         if not output_json:
             info(f"Starting chat for {label}...")
+
+        if multi_leg:
+            from poly.cli_commands.multi_leg_chat import MultiLegChatSupervisor
+
+            sessions = []
+            while True:
+                supervisor = MultiLegChatSupervisor(
+                    project=project,
+                    environment=environment,
+                    channel=channel,
+                    variant=variant,
+                    input_lang=input_lang,
+                    output_lang=output_lang,
+                    show_functions=show_functions,
+                    show_flow=show_flow,
+                    show_state=show_state,
+                    output_json=output_json,
+                    conversation_id=conversation_id,
+                    reply_processor=lambda reply: cls._process_json_multi_leg_reply(
+                        reply,
+                        show_functions,
+                        show_flow,
+                        show_state,
+                    ),
+                )
+                restart, session = supervisor.run(input_messages=input_messages)
+                sessions.append(session)
+                if not restart:
+                    if output_json:
+                        json_output["multi_leg_sessions"] = sessions
+                        json_print(json_output)
+                    return
+                conversation_id = None
+                if not output_json:
+                    info("Restarting multi-leg chat session...")
 
         conversations: list[dict] = []
         while True:
@@ -540,3 +590,28 @@ class ChatCommand(BaseCommand):
                 processed_json["state_changes"] = state_reply
 
         return processed_json
+
+    @classmethod
+    def _process_json_multi_leg_reply(
+        cls,
+        reply: dict,
+        show_functions: bool,
+        show_flow: bool,
+        show_state: bool,
+    ) -> dict:
+        """Filter a reply while always retaining multi-leg control instructions."""
+        processed = cls._process_json_chat_reply(
+            reply,
+            show_functions,
+            show_flow,
+            show_state,
+        )
+        metadata = reply.get("metadata") or {}
+        control = {
+            key: metadata[key]
+            for key in ("agentic_dials", "bridge")
+            if metadata.get(key) is not None
+        }
+        if control:
+            processed["control"] = control
+        return processed

@@ -606,6 +606,8 @@ class AgentStudioInterface:
         channel: str = "chat.polyai",
         input_lang: Optional[str] = None,
         output_lang: Optional[str] = None,
+        integration_attributes: Optional[dict] = None,
+        custom_sip_headers: Optional[dict[str, str]] = None,
     ) -> dict:
         """Create a new chat conversation.
 
@@ -629,6 +631,8 @@ class AgentStudioInterface:
             channel,
             input_lang=input_lang,
             output_lang=output_lang,
+            integration_attributes=integration_attributes,
+            custom_sip_headers=custom_sip_headers,
         )
 
     @staticmethod
@@ -641,6 +645,7 @@ class AgentStudioInterface:
         environment: str = "sandbox",
         input_lang: str = None,
         output_lang: str = None,
+        external_events: Optional[list[dict]] = None,
     ) -> dict:
         """Send a message to an existing chat conversation.
 
@@ -664,6 +669,7 @@ class AgentStudioInterface:
             environment,
             input_lang=input_lang,
             output_lang=output_lang,
+            external_events=external_events,
         )
 
     def get_branch_chat_info(self, branch_id: str) -> dict:
@@ -695,6 +701,8 @@ class AgentStudioInterface:
         variant_id: Optional[str] = None,
         input_lang: str = None,
         output_lang: str = None,
+        integration_attributes: Optional[dict] = None,
+        custom_sip_headers: Optional[dict[str, str]] = None,
     ) -> dict:
         """Create a new chat conversation against a branch deployment.
 
@@ -720,6 +728,8 @@ class AgentStudioInterface:
             variant_id,
             input_lang=input_lang,
             output_lang=output_lang,
+            integration_attributes=integration_attributes,
+            custom_sip_headers=custom_sip_headers,
         )
 
     @staticmethod
@@ -731,6 +741,7 @@ class AgentStudioInterface:
         text: str,
         input_lang: str = None,
         output_lang: str = None,
+        external_events: Optional[list[dict]] = None,
     ) -> dict:
         """Send a message to an existing draft chat conversation.
 
@@ -752,6 +763,7 @@ class AgentStudioInterface:
             text,
             input_lang=input_lang,
             output_lang=output_lang,
+            external_events=external_events,
         )
 
     @staticmethod
@@ -776,6 +788,25 @@ class AgentStudioInterface:
         """
         return PlatformAPIHandler.end_chat(
             region, account_id, project_id, conversation_id, environment
+        )
+
+    @staticmethod
+    def bridge_ended(
+        region: str,
+        account_id: str,
+        project_id: str,
+        conversation_id: str,
+        bridge_duration_seconds: int = 0,
+        call_duration_seconds: int = 0,
+    ) -> dict:
+        """Trigger the callback registered for the end of a bridged debug call."""
+        return PlatformAPIHandler.bridge_ended(
+            region=region,
+            account_id=account_id,
+            project_id=project_id,
+            conversation_id=conversation_id,
+            bridge_duration_seconds=bridge_duration_seconds,
+            call_duration_seconds=call_duration_seconds,
         )
 
     @staticmethod

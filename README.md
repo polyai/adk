@@ -202,7 +202,12 @@ poly chat
 poly chat --environment live
 poly chat --channel webchat
 poly chat --metadata   # show functions, flows, and state each turn
+poly chat --multi-leg  # supervise agentic-dial and warm-transfer legs
 ```
+
+Multi-leg mode starts child agent conversations, routes dial status and agent messages
+between them, and keeps a bridge open until `/hangup`. Use `/legs`, `/parent`, and
+`/leg <dial-or-destination>` to inspect or select a leg.
 
 ### `poly docs`
 

@@ -197,6 +197,80 @@ class GetProjects(unittest.TestCase):
         self.assertEqual(projects, {"p1": "Project One", "p2": "Project Two"})
 
 
+class MultiLegChatRequests(unittest.TestCase):
+    """Tests for multi-leg fields sent through the low-level chat API."""
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_create_chat_sends_child_context(self, mock_make_request):
+        PlatformAPIHandler.create_chat(
+            "us-1",
+            "account-1",
+            "project-1",
+            integration_attributes={"patient": "Ada"},
+            custom_sip_headers={"X-Dial-ID": "dial-1"},
+        )
+
+        mock_make_request.assert_called_once_with(
+            "us-1",
+            "/adk/v1/accounts/account-1/projects/project-1/chat",
+            "POST",
+            data={
+                "client_env": "sandbox",
+                "channel": "chat.polyai",
+                "integration_attributes": {"patient": "Ada"},
+                "custom_sip_headers": {"X-Dial-ID": "dial-1"},
+            },
+        )
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_send_message_sends_structured_external_events(self, mock_make_request):
+        external_events = [
+            {
+                "ext_event_id": "dial-1",
+                "data": '{"event_type":"dial_status","status":"answered"}',
+            }
+        ]
+
+        PlatformAPIHandler.send_chat_message(
+            "us-1",
+            "account-1",
+            "project-1",
+            "conversation-1",
+            "",
+            external_events=external_events,
+        )
+
+        mock_make_request.assert_called_once_with(
+            "us-1",
+            "/adk/v1/accounts/account-1/projects/project-1/chat/conversation-1",
+            "POST",
+            data={
+                "message": "",
+                "client_env": "sandbox",
+                "external_events": external_events,
+            },
+        )
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_bridge_ended_sends_call_durations(self, mock_make_request):
+        PlatformAPIHandler.bridge_ended(
+            "us-1",
+            "account-1",
+            "project-1",
+            "conversation-1",
+            bridge_duration_seconds=42,
+            call_duration_seconds=64,
+        )
+
+        mock_make_request.assert_called_once_with(
+            "us-1",
+            "/adk/v1/accounts/account-1/projects/project-1/chat/"
+            "conversation-1/bridge-ended",
+            "POST",
+            data={"bridge_duration_seconds": 42, "call_duration_seconds": 64},
+        )
+
+
 class GetConversationAudio(unittest.TestCase):
     """Tests for PlatformAPIHandler.get_conversation_audio."""
 
