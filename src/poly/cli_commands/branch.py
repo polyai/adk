@@ -1370,6 +1370,7 @@ class BranchCommand(BaseCommand):
         resolutions_file: str = None,
     ):
         """Synch the current branch with it's parent, with optional conflict resolutions."""
+        from poly.cli_commands.shared import require_deployment_simplification
         from poly.output.console import (
             console,
             error,
@@ -1409,17 +1410,7 @@ class BranchCommand(BaseCommand):
 
         project = load_project(base_path, output_json=output_json)
 
-        if not project.using_simplified_deployments:
-            if output_json:
-                json_print(
-                    {
-                        "success": False,
-                        "error": "Branch sync is only available for projects using simplified deployments.",
-                    }
-                )
-            else:
-                error("Branch sync is only available for projects using simplified deployments.")
-            sys.exit(1)
+        require_deployment_simplification(project, output_json=output_json)
 
         branch_name = project.get_current_branch()
         ctx = console.status("[info]Syncing branch...[/info]") if not output_json else nullcontext()
@@ -1711,9 +1702,11 @@ class BranchCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Tag the current branch with a new tag."""
+        from poly.cli_commands.shared import require_deployment_simplification
         from poly.output.console import error, success
 
         project = load_project(base_path, output_json=output_json)
+        require_deployment_simplification(project, output_json=output_json)
 
         tagged = project.tag_branch()
 
@@ -1732,9 +1725,11 @@ class BranchCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """Remove a tag from the current branch."""
+        from poly.cli_commands.shared import require_deployment_simplification
         from poly.output.console import error, success
 
         project = load_project(base_path, output_json=output_json)
+        require_deployment_simplification(project, output_json=output_json)
 
         untagged = project.untag_branch()
 
