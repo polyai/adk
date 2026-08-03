@@ -13,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, fields
 from datetime import datetime
 from enum import Enum
+from functools import cached_property
 from typing import Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
@@ -3611,7 +3612,11 @@ class AgentStudioProject:
             self.__deployment_mode = DeploymentMode(cfg.get("deployment_mode", "releases"))
         return self.__deployment_mode
 
-    @property
+    @cached_property
     def using_simplified_deployments(self) -> bool:
-        # TODO: Hook up to FF
-        return False
+        return self.api_handler.feature_flag_enabled(
+            key="deployment_simplification",
+            region=self.region,
+            project_id=self.project_id,
+            default=False,
+        )

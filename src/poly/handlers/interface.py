@@ -10,6 +10,7 @@ import requests
 from google.protobuf.message import Message
 
 from poly.handlers.platform_api import PlatformAPIHandler
+from poly.handlers.posthog import PosthogHandler
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.protobuf.handoff_pb2 import Handoff_SetDefault
 from poly.handlers.sdk import SourcererAPIError
@@ -1281,3 +1282,30 @@ class AgentStudioInterface:
             return self.sync_client.restore_branch(branch_id)
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
+
+    def feature_flag_enabled(
+        self,
+        key: str,
+        identity: Optional[str] = None,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        default: bool = False,
+    ) -> bool:
+        """Check if a feature flag is enabled for a given identity.
+
+        Args:
+            key (str): The feature flag key to check.
+            identity (Optional[str]): The unique identifier for the user or entity.
+            region (Optional[str]): The region name for grouping.
+            project_id (Optional[str]): The project ID for grouping.
+            default (bool): The default value to return if the flag cannot be evaluated.
+
+        Returns:
+            bool: True if the feature flag is enabled, False otherwise.
+        """
+        return PosthogHandler.is_feature_enabled(
+            region=region,
+            key=key,
+            default=default,
+            project_id=project_id,
+        )

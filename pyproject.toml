@@ -175,7 +175,8 @@ dependencies = [
     "ruff>=0.14.0",
     "ty",
     "argcomplete>=3.0.0",
-    "langcodes==3.5.1"
+    "langcodes==3.5.1",
+    "posthog==7.35.4"
 ]
 
 [project.license]
