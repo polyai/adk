@@ -1387,6 +1387,18 @@ class BranchCommand(BaseCommand):
 
         project = load_project(base_path, output_json=output_json)
 
+        if not project.using_simplified_deployments:
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "error": "Branch sync is only available for projects using simplified deployments.",
+                    }
+                )
+            else:
+                error("Branch sync is only available for projects using simplified deployments.")
+            sys.exit(1)
+
         branch_name = project.get_current_branch()
         ctx = console.status("[info]Syncing branch...[/info]") if not output_json else nullcontext()
         with ctx:

@@ -2261,12 +2261,12 @@ class AgentStudioProject:
             branches = self.api_handler.get_branches()
             if len(branches) >= 2:
                 raise ValueError(
-                    "Cannot create more than one branch in simple deployment mode. Please delete/merge existing branches before creating a new one."
+                    "Cannot create branch. Only one branch is allowed in simple deployment mode. Please delete/merge existing branches before creating a new one."
                 )
         if self.deployment_mode == DeploymentMode.RELEASES:
             if self.branch_id != "main":
                 raise ValueError(
-                    "Cannot create a new branch from a non-main branch in releases deployment mode."
+                    "Cannot create branch. Branches can only be created from the main branch in releases deployment mode."
                 )
         if self.deployment_mode == DeploymentMode.RELEASES_BRANCHES:
             branches = self.api_handler.get_branches()
@@ -2279,7 +2279,7 @@ class AgentStudioProject:
                 and current_branch_meta.get("parentBranchId") != "main"
             ):
                 raise ValueError(
-                    "Cannot create a branch with depth above 2 in releases-branches deployment mode."
+                    "Cannot create branch. Branches with depth above 2 are not allowed in releases-branches deployment mode."
                 )
 
         branch_id = self.api_handler.create_branch(branch_name, self.branch_id)
@@ -3615,7 +3615,7 @@ class AgentStudioProject:
     @cached_property
     def using_simplified_deployments(self) -> bool:
         return self.api_handler.feature_flag_enabled(
-            key="deployment_simplification",
+            key="deployment-simplification",
             region=self.region,
             project_id=self.project_id,
             default=False,
