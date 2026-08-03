@@ -14,7 +14,7 @@ from poly.cli_commands.chat import ChatCommand
 from poly.cli_commands.conversations import ConversationsCommand
 from poly.cli_commands.deployments import DeploymentsCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand
-from poly.cli_commands.shared import compute_diff
+from poly.cli_commands.shared import compute_diff, require_deployment_simplification
 from poly.cli_commands.sync import FormatCommand, RevertCommand
 from poly.cli_commands.utils import CompletionCommand
 from poly.project import DeploymentMode
@@ -871,12 +871,38 @@ class BranchSyncTest(unittest.TestCase):
         self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
         self.mock_load = self.mock_load_patcher.start()
         self.proj = MagicMock()
+        self.proj.using_simplified_deployments = True
         self.proj.get_current_branch.return_value = "feature-a"
         self.proj.sync_branch.return_value = (True, [], [])
         self.mock_load.return_value = self.proj
 
     def tearDown(self):
         patch.stopall()
+
+    @patch("poly.output.console.error")
+    def test_sync_blocked_without_simplified_deployments(self, mock_error):
+        """Sync is refused locally rather than surfacing the platform's 404."""
+        self.proj.using_simplified_deployments = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_sync(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("simplified deployments", mock_error.call_args[0][0])
+        self.proj.sync_branch.assert_not_called()
+        self.proj.get_current_branch.assert_not_called()
+
+    @patch("poly.cli_commands.shared.json_print")
+    def test_sync_blocked_without_simplified_deployments_json(self, mock_json_print):
+        """The refusal is reported as JSON when --json is set."""
+        self.proj.using_simplified_deployments = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_sync(TEST_DIR, output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertFalse(mock_json_print.call_args[0][0]["success"])
+        self.proj.sync_branch.assert_not_called()
 
     @patch("poly.output.console.success")
     def test_sync_success_reports_branch_name(self, mock_success):
@@ -3666,3 +3692,138 @@ class BranchRestoreTest(unittest.TestCase):
 
         mock_error.assert_called_once()
         self.assertIn("Failed to restore", mock_error.call_args[0][0])
+
+
+class RequireDeploymentSimplificationTest(unittest.TestCase):
+    """Tests for the require_deployment_simplification CLI gate."""
+
+    def setUp(self):
+        self.proj = MagicMock()
+
+    @patch("poly.output.console.error")
+    def test_returns_silently_when_enabled(self, mock_error):
+        """An enabled project passes through without output or exit."""
+        self.proj.using_simplified_deployments = True
+
+        require_deployment_simplification(self.proj)
+
+        mock_error.assert_not_called()
+
+    @patch("poly.output.console.error")
+    def test_exits_with_error_when_disabled(self, mock_error):
+        """A disabled project is refused on stderr with exit code 1."""
+        self.proj.using_simplified_deployments = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            require_deployment_simplification(self.proj)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("simplified deployments", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.shared.json_print")
+    def test_reports_failure_as_json(self, mock_json_print):
+        """In JSON mode the refusal is a machine-readable payload, not stderr text."""
+        self.proj.using_simplified_deployments = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            require_deployment_simplification(self.proj, output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json_print.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("simplified deployments", payload["error"])
+
+    @patch("poly.cli_commands.shared.json_print")
+    def test_json_payload_carries_no_rich_markup(self, mock_json_print):
+        """The JSON error stays markup-free so consumers get plain text."""
+        self.proj.using_simplified_deployments = False
+
+        with self.assertRaises(SystemExit):
+            require_deployment_simplification(self.proj, output_json=True)
+
+        self.assertNotIn("[bold]", mock_json_print.call_args[0][0]["error"])
+
+
+class BranchTagTest(unittest.TestCase):
+    """Tests for BranchCommand.branch_tag and branch_untag."""
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.using_simplified_deployments = True
+        self.proj.get_current_branch.return_value = "feature-a"
+        self.proj.tag_branch.return_value = True
+        self.proj.untag_branch.return_value = True
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.output.console.success")
+    def test_tag_success_reports_branch_name(self, mock_success):
+        """A successful tag names the branch that was staged."""
+        BranchCommand.branch_tag(TEST_DIR)
+
+        self.proj.tag_branch.assert_called_once_with()
+        self.assertIn("feature-a", mock_success.call_args[0][0])
+
+    @patch("poly.output.console.success")
+    def test_untag_success_reports_branch_name(self, mock_success):
+        """A successful untag names the branch whose tag was removed."""
+        BranchCommand.branch_untag(TEST_DIR)
+
+        self.proj.untag_branch.assert_called_once_with()
+        self.assertIn("feature-a", mock_success.call_args[0][0])
+
+    @patch("poly.output.console.error")
+    def test_tag_failure_is_reported(self, mock_error):
+        """A False from the project layer surfaces as an error."""
+        self.proj.tag_branch.return_value = False
+
+        BranchCommand.branch_tag(TEST_DIR)
+
+        self.assertIn("Failed to tag", mock_error.call_args[0][0])
+
+    @patch("poly.output.console.error")
+    def test_untag_failure_is_reported(self, mock_error):
+        """A False from the project layer surfaces as an error."""
+        self.proj.untag_branch.return_value = False
+
+        BranchCommand.branch_untag(TEST_DIR)
+
+        self.assertIn("Failed to remove tag", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_mode_reports_outcome(self, mock_json_print):
+        """JSON mode reports the boolean outcome for both commands."""
+        BranchCommand.branch_tag(TEST_DIR, output_json=True)
+        self.assertEqual(mock_json_print.call_args[0][0], {"success": True})
+
+        self.proj.untag_branch.return_value = False
+        BranchCommand.branch_untag(TEST_DIR, output_json=True)
+        self.assertEqual(mock_json_print.call_args[0][0], {"success": False})
+
+    @patch("poly.output.console.error")
+    def test_tag_blocked_without_simplified_deployments(self, mock_error):
+        """Staging tags only exist under simplified deployments, so tag is gated."""
+        self.proj.using_simplified_deployments = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_tag(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("simplified deployments", mock_error.call_args[0][0])
+        self.proj.tag_branch.assert_not_called()
+
+    @patch("poly.output.console.error")
+    def test_untag_blocked_without_simplified_deployments(self, mock_error):
+        """Untag is gated on the same flag as tag."""
+        self.proj.using_simplified_deployments = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_untag(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("simplified deployments", mock_error.call_args[0][0])
+        self.proj.untag_branch.assert_not_called()

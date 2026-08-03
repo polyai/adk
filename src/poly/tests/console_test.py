@@ -5,7 +5,13 @@ Copyright PolyAI Limited
 
 import unittest
 
-from poly.output.console import console, flatten_branch_tree, print_releases_branches
+from poly.output.console import (
+    console,
+    flatten_branch_tree,
+    print_archived_branches,
+    print_branch_history,
+    print_releases_branches,
+)
 
 
 def _branch(
@@ -166,3 +172,90 @@ class PrintReleasesBranchesTest(unittest.TestCase):
         output = self._render(branches, current_branch="Release 1")
 
         self.assertIn("Release 1 (staging) (current)", output)
+
+
+class PrintArchivedBranchesTest(unittest.TestCase):
+    """Tests for print_archived_branches, the table used by `branch list --archived`."""
+
+    def _render(self, branches: list[dict]) -> str:
+        with console.capture() as capture:
+            print_archived_branches(branches)
+        return capture.get()
+
+    def test_renders_a_row_per_archived_branch(self):
+        """Each archived branch contributes its name and id to the table."""
+        output = self._render(
+            [
+                {"name": "old-a", "branchId": "b-a", "archivedAt": "", "daysLeft": 30},
+                {"name": "old-b", "branchId": "b-b", "archivedAt": "", "daysLeft": 2},
+            ]
+        )
+
+        for expected in ("old-a", "b-a", "old-b", "b-b"):
+            self.assertIn(expected, output)
+
+    def test_shows_remaining_days_before_permanent_deletion(self):
+        """daysLeft is rendered so users know how long they have to restore."""
+        output = self._render([{"name": "old", "branchId": "b-1", "daysLeft": 7}])
+
+        self.assertIn("7 days left", output)
+
+    def test_missing_expiry_renders_a_placeholder(self):
+        """A branch with no daysLeft shows a dash rather than 'None'."""
+        output = self._render([{"name": "old", "branchId": "b-1"}])
+
+        self.assertNotIn("None", output)
+        self.assertIn("—", output)
+
+    def test_zero_days_left_is_rendered_not_treated_as_missing(self):
+        """daysLeft of 0 is a real value — the last day — and must still show."""
+        output = self._render([{"name": "old", "branchId": "b-1", "daysLeft": 0}])
+
+        self.assertIn("0 days left", output)
+
+    def test_missing_fields_render_placeholders(self):
+        """A row missing name and id degrades to dashes instead of raising."""
+        output = self._render([{}])
+
+        self.assertIn("—", output)
+
+    def test_empty_list_renders_headers_only(self):
+        """With nothing archived the table still renders its headers."""
+        output = self._render([])
+
+        self.assertIn("Branch", output)
+        self.assertIn("Expires", output)
+
+
+class PrintBranchHistoryTest(unittest.TestCase):
+    """Tests for print_branch_history, the table used by `branch history`."""
+
+    def _render(self, commits: list[dict]) -> str:
+        with console.capture() as capture:
+            print_branch_history(commits)
+        return capture.get()
+
+    def test_renders_a_row_per_merge(self):
+        """Each merge contributes its source branch and author to the table."""
+        output = self._render(
+            [
+                {"mergedAt": "", "branchName": "feature-a", "mergedBy": "ada@example.com"},
+                {"mergedAt": "", "branchName": "feature-b", "mergedBy": "grace@example.com"},
+            ]
+        )
+
+        for expected in ("feature-a", "ada@example.com", "feature-b", "grace@example.com"):
+            self.assertIn(expected, output)
+
+    def test_empty_history_reports_no_commits(self):
+        """An empty history is explained rather than rendered as a blank table."""
+        output = self._render([])
+
+        self.assertIn("No commits found for this branch.", output)
+
+    def test_missing_fields_render_placeholders(self):
+        """A merge record missing its branch or author degrades to dashes."""
+        output = self._render([{"mergedAt": ""}])
+
+        self.assertIn("—", output)
+        self.assertNotIn("None", output)

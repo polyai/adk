@@ -4259,6 +4259,174 @@ class GetBranchesReturnTypeTest(unittest.TestCase):
         self.assertEqual(len(branches), 1)
 
 
+class BranchTaggingTest(unittest.TestCase):
+    """Tests for AgentStudioProject.tag_branch and untag_branch."""
+
+    BRANCHES = {
+        "main": {"branchId": "main"},
+        "feature-a": {"branchId": "branch-a", "parentBranchId": "main"},
+    }
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.get_branches.return_value = deepcopy(self.BRANCHES)
+        self.mock_api.tag_branch.return_value = True
+        self.mock_api.untag_branch.return_value = True
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+        self._set_current_branch("branch-a")
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def _set_current_branch(self, branch_id: str) -> None:
+        """Put the project and its API handler on the given branch.
+
+        The ``api_handler`` property re-reads ``branch_id`` from the handler on
+        every access, so both sides have to agree.
+        """
+        self.project.branch_id = branch_id
+        self.mock_api.branch_id = branch_id
+
+    def test_tags_current_branch_by_default(self):
+        """With no branch name the current branch's id is tagged."""
+        self.assertTrue(self.project.tag_branch())
+
+        self.mock_api.tag_branch.assert_called_once_with("branch-a")
+
+    def test_untags_current_branch_by_default(self):
+        """With no branch name the current branch's id is untagged."""
+        self.assertTrue(self.project.untag_branch())
+
+        self.mock_api.untag_branch.assert_called_once_with("branch-a")
+
+    def test_named_branch_is_resolved_to_its_id(self):
+        """An explicit branch name is resolved to the branch id before the API call."""
+        self._set_current_branch("main")
+
+        self.project.tag_branch("feature-a")
+
+        self.mock_api.tag_branch.assert_called_once_with("branch-a")
+
+    def test_rejects_unknown_branch_name(self):
+        """A name that is not in the branch list is refused before any API call."""
+        for method in (self.project.tag_branch, self.project.untag_branch):
+            with self.subTest(method=method.__name__):
+                with self.assertRaises(ValueError) as ctx:
+                    method("no-such-branch")
+
+                self.assertIn("no-such-branch", str(ctx.exception))
+
+        self.mock_api.tag_branch.assert_not_called()
+        self.mock_api.untag_branch.assert_not_called()
+
+    def test_rejects_current_branch_missing_from_branch_list(self):
+        """A local branch id with no remote counterpart is reported rather than tagged."""
+        self._set_current_branch("branch-gone")
+
+        for method in (self.project.tag_branch, self.project.untag_branch):
+            with self.subTest(method=method.__name__):
+                with self.assertRaises(ValueError) as ctx:
+                    method()
+
+                self.assertIn("branch-gone", str(ctx.exception))
+
+    def test_rejects_main_branch(self):
+        """Main carries the live deployment, so it can be neither tagged nor untagged."""
+        self._set_current_branch("main")
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.tag_branch()
+        self.assertIn("Tagging 'main' branch is not supported", str(ctx.exception))
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.untag_branch()
+        self.assertIn("Untagging 'main' branch is not supported", str(ctx.exception))
+
+        self.mock_api.tag_branch.assert_not_called()
+        self.mock_api.untag_branch.assert_not_called()
+
+    def test_rejects_main_when_named_explicitly(self):
+        """Naming main explicitly is refused the same way as being on it."""
+        self._set_current_branch("branch-a")
+
+        with self.assertRaises(ValueError):
+            self.project.tag_branch("main")
+
+        self.mock_api.tag_branch.assert_not_called()
+
+    def test_api_failure_is_returned_to_the_caller(self):
+        """A False from the API layer is passed through, not raised."""
+        self.mock_api.tag_branch.return_value = False
+        self.mock_api.untag_branch.return_value = False
+
+        self.assertFalse(self.project.tag_branch())
+        self.assertFalse(self.project.untag_branch())
+
+
+class UsingSimplifiedDeploymentsTest(unittest.TestCase):
+    """Tests for the AgentStudioProject.using_simplified_deployments property."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "main"
+        self.mock_api.feature_flag_enabled.return_value = True
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def _build_project(self, flag_value: bool) -> AgentStudioProject:
+        """Build a fresh project whose flag resolves to the given value.
+
+        A fresh instance is required per value because the property is cached.
+        """
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        api = MagicMock()
+        api.branch_id = "main"
+        api.feature_flag_enabled.return_value = flag_value
+        project._api_handler = api
+        return project
+
+    def test_reads_the_deployment_simplification_flag_for_this_project(self):
+        """The flag is looked up by key and scoped to the project's region and id."""
+        self.assertTrue(self.project.using_simplified_deployments)
+
+        self.mock_api.feature_flag_enabled.assert_called_once_with(
+            key="deployment-simplification",
+            region=self.project.region,
+            project_id=self.project.project_id,
+            default=False,
+        )
+
+    def test_defaults_to_disabled_when_the_flag_cannot_be_read(self):
+        """`default=False` is passed so an unreachable PostHog gates the new commands off."""
+        self.project.using_simplified_deployments
+
+        self.assertFalse(self.mock_api.feature_flag_enabled.call_args.kwargs["default"])
+
+    def test_returns_the_flag_value(self):
+        """Whatever the flag resolves to is what the property reports."""
+        for value in (True, False):
+            with self.subTest(value=value):
+                project = self._build_project(value)
+
+                self.assertEqual(project.using_simplified_deployments, value)
+
+    def test_flag_is_evaluated_once_and_cached(self):
+        """Repeated reads reuse the cached value instead of re-evaluating the flag."""
+        first = self.project.using_simplified_deployments
+        second = self.project.using_simplified_deployments
+
+        self.assertEqual(first, second)
+        self.mock_api.feature_flag_enabled.assert_called_once()
+
+
 class DeploymentModePropertyTest(unittest.TestCase):
     """Tests for the AgentStudioProject.deployment_mode property."""
 
