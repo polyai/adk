@@ -925,3 +925,61 @@ class SourcererSDK:
             else:
                 error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
+
+    def tag_branch(self, branch_id: str) -> dict[str, Any]:
+        """Tag a branch for staging
+
+        Args:
+            branch_id: The ID of the branch to tag.
+
+        Returns:
+            A dictionary containing the updated branch information.
+
+        Raises:
+            SourcererAPIError: If the API request fails or if there is no current branch.
+        """
+        try:
+            url = f"{self._get_branches_url()}/{branch_id}/tag"
+            payload = {"tag": "staging"}
+            response = self.session.put(url, json=payload)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
+                except (ValueError, KeyError):
+                    error_msg = f"API request failed: {e}"
+            else:
+                error_msg = f"Request failed: {e}"
+            raise SourcererAPIError(error_msg) from e
+
+    def untag_branch(self, branch_id: str) -> dict[str, Any]:
+        """Untag a branch for staging
+
+        Args:
+            branch_id: The ID of the branch to untag.
+
+        Returns:
+            A dictionary containing the updated branch information.
+
+        Raises:
+            SourcererAPIError: If the API request fails or if there is no current branch.
+        """
+
+        try:
+            url = f"{self._get_branches_url()}/{branch_id}/tag"
+            response = self.session.delete(url)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
+                except (ValueError, KeyError):
+                    error_msg = f"API request failed: {e}"
+            else:
+                error_msg = f"Request failed: {e}"
+            raise SourcererAPIError(error_msg) from e

@@ -305,6 +305,22 @@ class BranchCommand(BaseCommand):
         )
         branch_sync_parser.set_defaults(branch_subcommand="sync")
 
+        # -- tag --
+        branch_tag_parser = branch_subparsers.add_parser(
+            "tag",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Tag the current branch and deploy to staging environment. Tagging 'main' branch is not supported.",
+        )
+        branch_tag_parser.set_defaults(branch_subcommand="tag")
+
+        # -- untag --
+        branch_untag_parser = branch_subparsers.add_parser(
+            "untag",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Remove a tag from the current branch. Untagging 'main' branch is not supported.",
+        )
+        branch_untag_parser.set_defaults(branch_subcommand="untag")
+
         # -- diff --
         branch_diff_parser = branch_subparsers.add_parser(
             "diff",
@@ -426,6 +442,12 @@ class BranchCommand(BaseCommand):
 
         elif args.branch_subcommand == "restore":
             cls.branch_restore(args.path, args.branch_name, args.json)
+
+        elif args.branch_subcommand == "tag":
+            cls.branch_tag(args.path, args.json)
+
+        elif args.branch_subcommand == "untag":
+            cls.branch_untag(args.path, args.json)
 
         elif args.branch_subcommand == "diff":
             cls.branch_diff(args.path, args.branch_name, getattr(args, "files", None), args.json)
@@ -1681,3 +1703,45 @@ class BranchCommand(BaseCommand):
                 success(f"Branch '{branch_name}' restored.")
             else:
                 error(f"Failed to restore branch '{branch_name}'.")
+
+    @classmethod
+    def branch_tag(
+        cls,
+        base_path: str,
+        output_json: bool = False,
+    ) -> None:
+        """Tag the current branch with a new tag."""
+        from poly.output.console import error, success
+
+        project = load_project(base_path, output_json=output_json)
+
+        tagged = project.tag_branch()
+
+        if output_json:
+            json_print({"success": tagged})
+        else:
+            if tagged:
+                success(f"Current branch '{project.get_current_branch()}' tagged successfully.")
+            else:
+                error("Failed to tag the current branch.")
+
+    @classmethod
+    def branch_untag(
+        cls,
+        base_path: str,
+        output_json: bool = False,
+    ) -> None:
+        """Remove a tag from the current branch."""
+        from poly.output.console import error, success
+
+        project = load_project(base_path, output_json=output_json)
+
+        untagged = project.untag_branch()
+
+        if output_json:
+            json_print({"success": untagged})
+        else:
+            if untagged:
+                success(f"Tag removed from current branch '{project.get_current_branch()}'.")
+            else:
+                error("Failed to remove tag from the current branch.")

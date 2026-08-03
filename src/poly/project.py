@@ -3597,6 +3597,60 @@ class AgentStudioProject:
 
         return self.api_handler.restore_branch(matches[0]["branchId"])
 
+    def tag_branch(self, branch_name: str = None) -> bool:
+        """Tag the current branch with a new tag.
+
+        Args:
+            branch_name (str): The name of the branch to tag. If None, tags the current branch.
+        Returns:
+            bool: True if the tagging was successful, False otherwise.
+        """
+        branches = self.api_handler.get_branches()
+        if branch_name is None:
+            branch_id = self.branch_id
+            branch_name = next(
+                (name for name, meta in branches.items() if meta["branchId"] == branch_id), None
+            )
+            if branch_name is None:
+                raise ValueError(f"Current branch ID {branch_id} does not exist.")
+        else:
+            if branch_name not in branches:
+                raise ValueError(f"Branch {branch_name} does not exist.")
+            branch_id = branches[branch_name]["branchId"]
+
+        if branch_id == "main":
+            raise ValueError("Tagging 'main' branch is not supported.")
+
+        success = self.api_handler.tag_branch(branch_id)
+        return success
+
+    def untag_branch(self, branch_name: str = None) -> bool:
+        """Remove a tag from a branch.
+
+        Args:
+            branch_name (str): The name of the branch to untag. If None, untags the current branch.
+        Returns:
+            bool: True if the untagging was successful, False otherwise.
+        """
+        branches = self.api_handler.get_branches()
+        if branch_name is None:
+            branch_id = self.branch_id
+            branch_name = next(
+                (name for name, meta in branches.items() if meta["branchId"] == branch_id), None
+            )
+            if branch_name is None:
+                raise ValueError(f"Current branch ID {branch_id} does not exist.")
+        else:
+            if branch_name not in branches:
+                raise ValueError(f"Branch {branch_name} does not exist.")
+            branch_id = branches[branch_name]["branchId"]
+
+        if branch_id == "main":
+            raise ValueError("Untagging 'main' branch is not supported.")
+
+        success = self.api_handler.untag_branch(branch_id)
+        return success
+
     def get_project_info(self) -> dict[str, Any]:
         """Get basic information about the project from the API.
 

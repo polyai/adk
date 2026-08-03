@@ -1283,6 +1283,34 @@ class AgentStudioInterface:
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
+    def tag_branch(self, branch_id: str) -> bool:
+        """Tag the current branch with a specific tag name.
+
+        Args:
+            branch_id (str): The ID of the branch to tag.
+
+        Returns:
+            bool: True if the branch was tagged successfully, False otherwise.
+        """
+        try:
+            return self.sync_client.tag_branch(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def untag_branch(self, branch_id: str) -> bool:
+        """Remove a specific tag from the current branch.
+
+        Args:
+            branch_id (str): The ID of the branch to untag.
+
+        Returns:
+            bool: True if the branch was untagged successfully, False otherwise.
+        """
+        try:
+            return self.sync_client.untag_branch(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
     def feature_flag_enabled(
         self,
         key: str,

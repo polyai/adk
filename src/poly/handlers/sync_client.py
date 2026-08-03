@@ -455,3 +455,41 @@ class SyncClientHandler:
 
         logger.info(f"Successfully restored branch ID:'{branch_id}'")
         return True
+
+    def tag_branch(self, branch_id: str) -> bool:
+        """Tag a branch with staging tag
+
+        Args:
+            branch_id (str): The ID of the branch to tag.
+        Returns:
+            bool: True if the tagging was successful, False otherwise.
+        """
+        logger.info(f"Tagging branch ID:'{branch_id}' with staging tag")
+
+        try:
+            self.sdk.tag_branch(branch_id)
+        except SourcererAPIError as e:
+            logger.error(f"Failed to tag branch ID:'{branch_id}': {e}")
+            return False
+
+        logger.info(f"Successfully tagged branch ID:'{branch_id}' with staging tag")
+        return True
+
+    def untag_branch(self, branch_id: str) -> bool:
+        """Remove staging tag from a branch
+
+        Args:
+            branch_id (str): The ID of the branch to untag.
+        Returns:
+            bool: True if the untagging was successful, False otherwise.
+        """
+        logger.info(f"Removing staging tag from branch ID:'{branch_id}'")
+
+        try:
+            self.sdk.untag_branch(branch_id)
+        except SourcererAPIError as e:
+            logger.error(f"Failed to remove staging tag from branch ID:'{branch_id}': {e}")
+            return False
+
+        logger.info(f"Successfully removed staging tag from branch ID:'{branch_id}'")
+        return True
