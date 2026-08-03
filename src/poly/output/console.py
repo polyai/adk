@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 """
 
 import json
+import logging
 import os
 import sys
 from collections.abc import Callable
@@ -44,6 +45,8 @@ _theme = Theme(
 
 console = Console(theme=_theme, stderr=False)
 err_console = Console(theme=_theme, stderr=True)
+
+logger = logging.getLogger(__name__)
 
 
 def set_verbose(verbose: bool) -> None:
@@ -1425,19 +1428,29 @@ def poll_test_run_live(
     test_run_id: str,
     matched_tests: list,
     poll_interval: int = 5,
+    max_consecutive_errors: int = 5,
 ) -> dict:
     """Poll a test run with a live-updating display.
+
+    Transient errors from `get_test_run` (e.g. a 500 while the run is still
+    in progress on the platform) are tolerated up to `max_consecutive_errors`
+    in a row before giving up, since the run itself keeps going server-side
+    even if a status poll fails.
 
     Args:
         get_test_run: Callable that takes a test run ID and returns the run dict.
         test_run_id: The test run ID to poll.
         matched_tests: List of TestCase objects (must have resource_id and name).
         poll_interval: Seconds between polls.
+        max_consecutive_errors: Consecutive failed polls tolerated before giving up.
 
     Returns:
-        dict: The final test run response.
+        dict: The final test run response, or {} if polling was abandoned
+        without ever receiving a successful response.
     """
     import time
+
+    import requests
 
     total = len(matched_tests)
     test_names = {t.resource_id: t.name for t in matched_tests}
@@ -1448,6 +1461,8 @@ def poll_test_run_live(
     completed_ordered: list[dict] = []
 
     merged = pending_results
+    result: dict = {}
+    consecutive_errors = 0
     initial = (
         _build_compact_display([], total, test_names)
         if compact
@@ -1456,7 +1471,26 @@ def poll_test_run_live(
     with Live(initial, console=console, refresh_per_second=10) as live:
         while True:
             time.sleep(poll_interval)
-            result = get_test_run(test_run_id)
+
+            try:
+                result = get_test_run(test_run_id)
+            except requests.exceptions.RequestException as exc:
+                consecutive_errors += 1
+                logger.warning(
+                    f"Poll {consecutive_errors}/{max_consecutive_errors} for test run "
+                    f"{test_run_id} failed: {exc}"
+                )
+                if consecutive_errors >= max_consecutive_errors:
+                    warning(
+                        f"Lost contact with the platform while polling test run "
+                        f"{test_run_id} ({consecutive_errors} consecutive failures). "
+                        f"The run may still be in progress — check its status with "
+                        f"[bold]poly test show {test_run_id}[/bold]."
+                    )
+                    return result
+                continue
+
+            consecutive_errors = 0
             test_results = result.get("testHistory", [])
 
             actual_by_id = {r.get("testCaseId"): r for r in test_results}

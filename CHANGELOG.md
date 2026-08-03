@@ -1,6 +1,48 @@
 # CHANGELOG
 
 
+## v0.36.3 (2026-07-29)
+
+### Bug Fixes
+
+- Tolerate transient errors while polling test run status
+  ([#244](https://github.com/polyai/adk/pull/244),
+  [`5c65ccb`](https://github.com/polyai/adk/commit/5c65ccb5d2aa5b6c9ef177ed8b7694379f4f7482))
+
+## Summary
+
+`poly test run` polls a test run's status in a loop; a single transient network/5xx error from that
+  poll used to crash the whole command, even though the run kept executing and completing
+  server-side.
+
+## Motivation
+
+Observed a case where `poly test run` errored out mid-poll with `500 Server Error`, but the run
+  itself later showed as `completed` via `poly test list` — the CLI gave up on a recoverable,
+  transient failure instead of retrying.
+
+## Changes
+
+- `poll_test_run_live` now catches `requests.exceptions.RequestException` around each status poll. -
+  Tolerates up to 5 consecutive failed polls (configurable via `max_consecutive_errors`), resetting
+  the counter on any successful poll. - If the failure threshold is exceeded, it stops gracefully
+  with a warning pointing to `poly test show <test_run_id>` instead of raising.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New tests in `src/poly/tests/console_test.py` cover: transient-error recovery, error counter reset
+  on success, give-up after sustained failures, and the unchanged happy path.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.36.2 (2026-07-29)
 
 ### Performance Improvements
