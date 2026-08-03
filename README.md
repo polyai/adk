@@ -143,12 +143,29 @@ poly revert file1.yaml file2.yaml  # revert specific files
 Manage branches (default branch is `main`):
 
 ```bash
-poly branch list
+poly branch list                       # active branches
+poly branch list --archived            # soft-deleted branches
 poly branch current
 poly branch create my-feature
 poly branch switch my-feature
 poly branch switch my-feature --force  # discard uncommitted changes
+poly branch rename my-feature-v2       # rename the current branch
+poly branch merge 'Merge my-feature'   # merge into the parent branch
+poly branch sync                       # pull the parent branch's changes in
+poly branch history                    # merge history for the current branch
+poly branch delete                     # soft-delete, restorable for 30 days
+poly branch restore my-feature         # restore a soft-deleted branch
 ```
+
+Projects using simplified deployments can also stage a branch:
+
+```bash
+poly branch tag                        # tag the current branch, deploying it to staging
+poly branch untag                      # remove the tag
+```
+
+`poly branch sync`, `tag`, and `untag` are only available on projects with simplified deployments
+enabled; they exit with an error otherwise.
 
 ### `poly format`
 

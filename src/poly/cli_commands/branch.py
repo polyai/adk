@@ -104,12 +104,18 @@ class BranchCommand(BaseCommand):
                 "Manage branches in the Agent Studio project.\n\n"
                 "Examples:\n"
                 "  poly branch list\n"
+                "  poly branch list --archived\n"
                 "  poly branch create new-branch\n"
                 "  poly branch switch existing-branch\n"
+                "  poly branch rename new-name\n"
                 "  poly branch merge 'Merge branch'\n"
                 "  poly branch sync\n"
+                "  poly branch history\n"
                 "  poly branch current\n"
                 "  poly branch delete\n"
+                "  poly branch restore archived-branch\n"
+                "  poly branch tag\n"
+                "  poly branch untag\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
