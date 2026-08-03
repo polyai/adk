@@ -10,6 +10,7 @@ import requests
 from google.protobuf.message import Message
 
 from poly.handlers.platform_api import PlatformAPIHandler
+from poly.handlers.posthog import PosthogHandler
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.protobuf.handoff_pb2 import Handoff_SetDefault
 from poly.handlers.sdk import SourcererAPIError
@@ -135,6 +136,20 @@ class AgentStudioInterface:
             dict[str, str]: A dictionary mapping account ids to account names
         """
         return PlatformAPIHandler.get_accounts(region)
+
+    @staticmethod
+    def get_project(region: str, account_id: str, project_id: str) -> dict[str, Any]:
+        """Get the details of a specific project.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+            project_id (str): The project ID
+
+        Returns:
+            dict[str, Any]: A dictionary containing the project's details
+        """
+        return PlatformAPIHandler.get_project(region, account_id, project_id)
 
     @staticmethod
     def get_projects(region: str, account_id: str) -> dict[str, str]:
@@ -1190,3 +1205,30 @@ class AgentStudioInterface:
             dict: The updated RTC config.
         """
         return PlatformAPIHandler.patch_rtc_variables(region, project_id, client_env, variables)
+
+    def feature_flag_enabled(
+        self,
+        key: str,
+        identity: Optional[str] = None,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        default: bool = False,
+    ) -> bool:
+        """Check if a feature flag is enabled for a given identity.
+
+        Args:
+            key (str): The feature flag key to check.
+            identity (Optional[str]): The unique identifier for the user or entity.
+            region (Optional[str]): The region name for grouping.
+            project_id (Optional[str]): The project ID for grouping.
+            default (bool): The default value to return if the flag cannot be evaluated.
+
+        Returns:
+            bool: True if the feature flag is enabled, False otherwise.
+        """
+        return PosthogHandler.is_feature_enabled(
+            region=region,
+            key=key,
+            default=default,
+            project_id=project_id,
+        )

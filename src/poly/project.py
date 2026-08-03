@@ -12,6 +12,8 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, fields
 from datetime import datetime
+from enum import Enum
+from functools import cached_property
 from typing import Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
@@ -86,6 +88,14 @@ class PushPhaseChangeSet:
     post: ResourceChangeSet
 
 
+class DeploymentMode(Enum):
+    """Deployment mode for the project"""
+
+    SIMPLE = "simple"
+    RELEASES = "releases"
+    RELEASES_BRANCHES = "releases_branches"
+
+
 @dataclass
 class AgentStudioProject:
     """Dataclass representing an Agent Studio Project"""
@@ -103,6 +113,7 @@ class AgentStudioProject:
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
     rtc_metadata: Optional[dict[str, dict]] = None
+    __deployment_mode: Optional[DeploymentMode] = None
 
     # Store resources that were not loaded from the status file
     # So they aren't considered locally deleted when pushing/pulling
@@ -3061,7 +3072,6 @@ class AgentStudioProject:
         )
 
     # ── RTC (Real-Time Configuration) ──
-
     RTC_ENV_TO_DIR = {
         "sandbox": "draft_and_sandbox",
         "pre-release": "pre_release",
@@ -3437,3 +3447,27 @@ class AgentStudioProject:
             ]
         except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
             return [f"Invalid schema: {e}"]
+
+    def get_project_info(self) -> dict[str, Any]:
+        """Get basic information about the project from the API.
+
+        Returns:
+            dict[str, Any]: A dictionary containing project information.
+        """
+        return self.api_handler.get_project(self.region, self.account_id, self.project_id)
+
+    @property
+    def deployment_mode(self) -> DeploymentMode:
+        if self.__deployment_mode is None:
+            cfg = self.get_project_info().get("config") or {}
+            self.__deployment_mode = DeploymentMode(cfg.get("deployment_mode", "releases"))
+        return self.__deployment_mode
+
+    @cached_property
+    def using_simplified_deployments(self) -> bool:
+        return self.api_handler.feature_flag_enabled(
+            key="deployment-simplification",
+            region=self.region,
+            project_id=self.project_id,
+            default=False,
+        )

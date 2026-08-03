@@ -14,7 +14,7 @@ from copy import deepcopy
 from unittest.mock import MagicMock, patch
 
 import poly.resources.resource_utils as resource_utils
-from poly.project import AgentStudioProject
+from poly.project import AgentStudioProject, DeploymentMode
 from poly.resources import (
     AsrSettings,
     ChatGreeting,
@@ -3986,6 +3986,118 @@ class GetBranchesReturnTypeTest(unittest.TestCase):
 
         self.assertIsNone(current_name)
         self.assertEqual(len(branches), 1)
+
+
+class UsingSimplifiedDeploymentsTest(unittest.TestCase):
+    """Tests for the AgentStudioProject.using_simplified_deployments property."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "main"
+        self.mock_api.feature_flag_enabled.return_value = True
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def _build_project(self, flag_value: bool) -> AgentStudioProject:
+        """Build a fresh project whose flag resolves to the given value.
+
+        A fresh instance is required per value because the property is cached.
+        """
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        api = MagicMock()
+        api.branch_id = "main"
+        api.feature_flag_enabled.return_value = flag_value
+        project._api_handler = api
+        return project
+
+    def test_reads_the_deployment_simplification_flag_for_this_project(self):
+        """The flag is looked up by key and scoped to the project's region and id."""
+        self.assertTrue(self.project.using_simplified_deployments)
+
+        self.mock_api.feature_flag_enabled.assert_called_once_with(
+            key="deployment-simplification",
+            region=self.project.region,
+            project_id=self.project.project_id,
+            default=False,
+        )
+
+    def test_defaults_to_disabled_when_the_flag_cannot_be_read(self):
+        """`default=False` is passed so an unreachable PostHog gates the new commands off."""
+        self.project.using_simplified_deployments
+
+        self.assertFalse(self.mock_api.feature_flag_enabled.call_args.kwargs["default"])
+
+    def test_returns_the_flag_value(self):
+        """Whatever the flag resolves to is what the property reports."""
+        for value in (True, False):
+            with self.subTest(value=value):
+                project = self._build_project(value)
+
+                self.assertEqual(project.using_simplified_deployments, value)
+
+    def test_flag_is_evaluated_once_and_cached(self):
+        """Repeated reads reuse the cached value instead of re-evaluating the flag."""
+        first = self.project.using_simplified_deployments
+        second = self.project.using_simplified_deployments
+
+        self.assertEqual(first, second)
+        self.mock_api.feature_flag_enabled.assert_called_once()
+
+
+class DeploymentModePropertyTest(unittest.TestCase):
+    """Tests for the AgentStudioProject.deployment_mode property."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "main"
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def test_reads_mode_from_remote_project_config(self):
+        """Each recognised config value maps to the matching enum member."""
+        for value, expected in (
+            ("simple", DeploymentMode.SIMPLE),
+            ("releases", DeploymentMode.RELEASES),
+            ("releases_branches", DeploymentMode.RELEASES_BRANCHES),
+        ):
+            with self.subTest(value=value):
+                self.project._AgentStudioProject__deployment_mode = None
+                self.mock_api.get_project.return_value = {"config": {"deployment_mode": value}}
+
+                self.assertEqual(self.project.deployment_mode, expected)
+
+    def test_defaults_to_releases_when_config_missing(self):
+        """A missing 'config', missing 'deployment_mode', or null config all default to releases."""
+        for payload in (
+            {"projectId": "test_project"},
+            {"config": {"other_setting": True}},
+            {"config": None},
+        ):
+            with self.subTest(payload=payload):
+                self.project._AgentStudioProject__deployment_mode = None
+                self.mock_api.get_project.return_value = payload
+
+                self.assertEqual(self.project.deployment_mode, DeploymentMode.RELEASES)
+
+    def test_mode_is_fetched_once_and_cached(self):
+        """Repeated reads reuse the cached mode instead of re-querying the API."""
+        self.mock_api.get_project.return_value = {"config": {"deployment_mode": "simple"}}
+
+        first = self.project.deployment_mode
+        second = self.project.deployment_mode
+
+        self.assertEqual(first, second)
+        self.mock_api.get_project.assert_called_once()
 
 
 class RtcPullEnvTest(unittest.TestCase):
