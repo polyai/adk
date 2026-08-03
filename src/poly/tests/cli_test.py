@@ -17,6 +17,7 @@ from poly.cli_commands.project import InitCommand, ProjectCommand
 from poly.cli_commands.shared import compute_diff
 from poly.cli_commands.sync import FormatCommand, RevertCommand
 from poly.cli_commands.utils import CompletionCommand
+from poly.project import DeploymentMode
 from poly.tests.project_test import TEST_DIR
 
 
@@ -270,17 +271,83 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         self.proj.create_branch.assert_called_once_with("my-branch")
         self.proj.push_project.assert_not_called()
 
-    def test_branch_create_blocked_when_not_on_main(self):
-        """branch create from non-main branch exits with an error."""
+    @patch("poly.output.console.error")
+    def test_branch_create_surfaces_deployment_mode_rejection(self, mock_error):
+        """A deployment-mode guard failure raised by the project is shown cleanly, not crashed.
+
+        The "which branches may be created from where" rules live in
+        AgentStudioProject.create_branch (they depend on the project's deployment
+        mode); the CLI catches that ValueError and reports it via error()/exit(1)
+        instead of letting it propagate as an unhandled exception.
+        """
         self.proj.branch_id = "example-feature-branch"
+        self.proj.create_branch.side_effect = ValueError(
+            "Cannot create a new branch from a non-main branch in releases deployment mode."
+        )
 
         with self.assertRaises(SystemExit) as ctx:
-            BranchCommand.branch_create(TEST_DIR, "my-branch", env="live", force=False)
+            BranchCommand.branch_create(TEST_DIR, "my-branch", env=None, force=False)
 
         self.assertEqual(ctx.exception.code, 1)
-        self.proj.pull_project_from_env.assert_not_called()
-        self.proj.create_branch.assert_not_called()
+        self.assertIn("non-main branch", mock_error.call_args[0][0])
         self.proj.push_project.assert_not_called()
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_branch_create_json_mode_surfaces_deployment_mode_rejection(self, mock_json):
+        """In --json mode, a deployment-mode guard failure is reported as JSON, not a crash."""
+        self.proj.branch_id = "example-feature-branch"
+        self.proj.create_branch.side_effect = ValueError(
+            "Cannot create a new branch from a non-main branch in releases deployment mode."
+        )
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_create(
+                TEST_DIR, "my-branch", output_json=True, env=None, force=False
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("non-main branch", payload["error"])
+
+    @patch("poly.output.console.success")
+    def test_branch_create_reports_branch_it_was_created_from(self, mock_success):
+        """The success message names the branch that was current before creation."""
+        self.proj.branch_id = "branch-a-id"
+        self.proj.get_current_branch.return_value = "feature-a"
+
+        BranchCommand.branch_create(TEST_DIR, "my-branch", env=None, force=False)
+
+        # No source branch is passed: the CLI relies on the project's own branch state.
+        self.proj.create_branch.assert_called_once_with("my-branch")
+        message = mock_success.call_args[0][0]
+        self.assertIn("my-branch", message)
+        self.assertIn("feature-a", message)
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_branch_create_json_reports_base_branch_from_before_the_switch(self, mock_json):
+        """JSON output describes the base branch as it was before create_branch switched."""
+        self.proj.branch_id = "branch-a-id"
+        self.proj.get_current_branch.return_value = "feature-a"
+
+        def create_and_switch(_branch_name):
+            self.proj.branch_id = "new-branch-id"
+            return "new-branch-id"
+
+        self.proj.create_branch.side_effect = create_and_switch
+
+        BranchCommand.branch_create(TEST_DIR, "my-branch", output_json=True)
+
+        self.assertEqual(
+            mock_json.call_args[0][0],
+            {
+                "success": True,
+                "base_branch_id": "branch-a-id",
+                "base_branch_name": "feature-a",
+                "new_branch_id": "new-branch-id",
+                "branch_name": "my-branch",
+            },
+        )
 
     def test_branch_create_env_none_behaves_like_normal(self):
         """branch create with env=None skips env pull (default behavior)."""
@@ -475,12 +542,13 @@ class BranchDeleteTest(unittest.TestCase):
     @patch("questionary.confirm")
     @patch("questionary.checkbox")
     @patch("poly.output.console.success")
-    def test_interactive_current_branch_label_stripped(
+    def test_interactive_current_branch_uses_choice_value(
         self, mock_success, mock_checkbox, mock_confirm
     ):
-        """The ' (current)' suffix is stripped from labels before calling delete_branch."""
+        """Selecting the current branch calls delete_branch with the plain Choice value."""
         self.proj.get_branches.return_value = ("feature-a", dict(self.SAMPLE_BRANCHES))
-        mock_checkbox.return_value.ask.return_value = ["feature-a (current)"]
+        # questionary.checkbox resolves selected Choices to their .value — mocked directly here.
+        mock_checkbox.return_value.ask.return_value = ["feature-a"]
         mock_confirm.return_value.ask.return_value = True
 
         BranchCommand.branch_delete(TEST_DIR)
@@ -522,6 +590,280 @@ class BranchDeleteTest(unittest.TestCase):
         mock_error.assert_called_once()
         mock_success.assert_called_once()
         self.assertIn("1 branch(es)", mock_success.call_args[0][0])
+
+
+class BranchCurrentTest(unittest.TestCase):
+    """Tests for BranchCommand.get_current_branch."""
+
+    BRANCH_TREE = {
+        "main": {"branchId": "main"},
+        "feature-a": {"branchId": "id-a", "parentBranchId": "main"},
+        "feature-b": {"branchId": "id-b", "parentBranchId": "feature-a"},
+    }
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _set_current_branch(self, branch_name: str | None) -> None:
+        self.proj.get_branches.return_value = (branch_name, dict(self.BRANCH_TREE))
+
+    @patch("poly.output.console.plain")
+    def test_does_not_show_parent_branch_when_parent_is_main(self, mock_plain):
+        """A branch with a parent shows both the current and parent branch."""
+        self._set_current_branch("feature-a")
+
+        BranchCommand.get_current_branch(TEST_DIR)
+
+        lines = [call.args[0] for call in mock_plain.call_args_list]
+        self.assertTrue(any("feature-a" in line for line in lines))
+        self.assertFalse(any("main" in line for line in lines))
+
+    @patch("poly.output.console.plain")
+    def test_shows_parent_branch_when_present_and_not_main(self, mock_plain):
+        """A branch with a parent shows both the current and parent branch."""
+        self._set_current_branch("feature-b")
+
+        BranchCommand.get_current_branch(TEST_DIR)
+
+        lines = [call.args[0] for call in mock_plain.call_args_list]
+        self.assertTrue(any("feature-b" in line for line in lines))
+        self.assertTrue(any("feature-a" in line for line in lines))
+
+    @patch("poly.output.console.plain")
+    def test_main_has_no_parent_branch_line(self, mock_plain):
+        """main has no parent, so only the current branch is shown."""
+        self._set_current_branch("main")
+
+        BranchCommand.get_current_branch(TEST_DIR)
+
+        mock_plain.assert_called_once()
+        self.assertIn("main", mock_plain.call_args[0][0])
+
+    @patch("poly.output.console.warning")
+    def test_no_current_branch_shows_warning(self, mock_warning):
+        """When the local branch no longer exists remotely, a warning is shown."""
+        self._set_current_branch(None)
+
+        BranchCommand.get_current_branch(TEST_DIR)
+
+        mock_warning.assert_called_once()
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_mode_includes_parent_branch(self, mock_json_print):
+        """JSON mode includes both current_branch and parent_branch."""
+        self._set_current_branch("feature-a")
+
+        BranchCommand.get_current_branch(TEST_DIR, output_json=True)
+
+        mock_json_print.assert_called_once_with(
+            {"current_branch": "feature-a", "parent_branch": "main"}
+        )
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_mode_main_has_null_parent(self, mock_json_print):
+        """JSON mode for main reports a null parent_branch."""
+        self._set_current_branch("main")
+
+        BranchCommand.get_current_branch(TEST_DIR, output_json=True)
+
+        mock_json_print.assert_called_once_with({"current_branch": "main", "parent_branch": None})
+
+
+class BranchSwitchInteractiveTest(unittest.TestCase):
+    """Tests for BranchCommand.branch_switch's interactive picker (no branch_name given)."""
+
+    # Branch metadata as returned by the platform: 'feature-a' was branched off 'main'.
+    BRANCH_TREE = {
+        "main": {"branchId": "id-main", "parentBranchId": None},
+        "feature-a": {"branchId": "id-a", "parentBranchId": "id-main"},
+    }
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.get_branches.return_value = ("main", dict(self.BRANCH_TREE))
+        self.proj.switch_branch.return_value = (True, None)
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _choices(self, mock_select) -> list[tuple[str, str]]:
+        """Return the (title, value) pairs of the choices passed to questionary.select."""
+        choices = mock_select.call_args.kwargs["choices"]
+        return [(choice.title, choice.value) for choice in choices]
+
+    @patch("questionary.select")
+    @patch("poly.output.console.success")
+    def test_releases_branches_mode_offers_tree_indented_choices(self, mock_success, mock_select):
+        """In releases_branches mode, choices show branch lineage but keep plain name values."""
+        self.proj.deployment_mode = DeploymentMode.RELEASES_BRANCHES
+        mock_select.return_value.ask.return_value = "feature-a"
+
+        BranchCommand.branch_switch(TEST_DIR)
+
+        self.assertEqual(
+            self._choices(mock_select),
+            [("main (current)", "main"), ("└─ feature-a", "feature-a")],
+        )
+        self.proj.switch_branch.assert_called_once()
+        self.assertEqual(self.proj.switch_branch.call_args[0][0], "feature-a")
+        self.assertIn("feature-a", mock_success.call_args[0][0])
+
+    @patch("questionary.select")
+    @patch("poly.output.console.success")
+    def test_simple_mode_offers_flat_choices(self, mock_success, mock_select):
+        """Outside releases_branches mode, choices are a flat list with no tree connectors."""
+        self.proj.deployment_mode = DeploymentMode.SIMPLE
+        self.proj.get_branches.return_value = (
+            "main",
+            {"main": "id-main", "feature-a": "id-a"},
+        )
+        mock_select.return_value.ask.return_value = "feature-a"
+
+        BranchCommand.branch_switch(TEST_DIR)
+
+        self.assertEqual(
+            self._choices(mock_select),
+            [("main (current)", "main"), ("feature-a", "feature-a")],
+        )
+        self.proj.switch_branch.assert_called_once()
+        self.assertEqual(self.proj.switch_branch.call_args[0][0], "feature-a")
+        self.assertIn("feature-a", mock_success.call_args[0][0])
+
+    @patch("questionary.select")
+    @patch("poly.output.console.warning")
+    def test_nothing_selected_shows_warning_and_does_not_switch(self, mock_warning, mock_select):
+        """Cancelling the picker warns the user and leaves the current branch alone."""
+        self.proj.deployment_mode = DeploymentMode.RELEASES_BRANCHES
+        mock_select.return_value.ask.return_value = None
+
+        BranchCommand.branch_switch(TEST_DIR)
+
+        self.proj.switch_branch.assert_not_called()
+        mock_warning.assert_called_once()
+        self.assertIn("No branch selected", mock_warning.call_args[0][0])
+
+    @patch("poly.output.console.plain")
+    def test_no_branches_shows_message_and_does_not_switch(self, mock_plain):
+        """When the project has no branches, a message is shown instead of a picker."""
+        self.proj.deployment_mode = DeploymentMode.RELEASES_BRANCHES
+        self.proj.get_branches.return_value = (None, {})
+
+        BranchCommand.branch_switch(TEST_DIR)
+
+        self.proj.switch_branch.assert_not_called()
+        self.assertIn("No branches found", mock_plain.call_args[0][0])
+
+
+class BranchMergeTest(unittest.TestCase):
+    """Tests for BranchCommand.branch_merge's deploy confirmation and success messaging."""
+
+    # 'feature-a' sits directly under main; 'feature-a-child' sits under the 'Release 1' branch.
+    BRANCH_TREE = {
+        "main": {"branchId": "main", "name": "main"},
+        "Release 1": {"branchId": "id-release-1", "name": "Release 1", "parentBranchId": "main"},
+        "feature-a": {"branchId": "id-a", "name": "feature-a", "parentBranchId": "main"},
+        "feature-a-child": {
+            "branchId": "id-a-child",
+            "name": "feature-a-child",
+            "parentBranchId": "id-release-1",
+        },
+    }
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.using_simplified_deployments = True
+        self.proj.merge_branch.return_value = (True, [], [])
+        self._set_current_branch("feature-a")
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _set_current_branch(self, branch_name: str) -> None:
+        """Make the project report the given branch as checked out."""
+        self.proj.get_branches.return_value = (branch_name, dict(self.BRANCH_TREE))
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.success")
+    def test_merging_into_main_merges_after_deploy_confirmation(self, mock_success, mock_confirm):
+        """Merging into main warns about live deployment and proceeds once confirmed."""
+        mock_confirm.return_value.ask.return_value = True
+
+        BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        mock_confirm.assert_called_once()
+        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.assertIn("now live", mock_success.call_args[0][0])
+
+    @patch("questionary.confirm")
+    def test_declining_deploy_confirmation_aborts_without_merging(self, mock_confirm):
+        """Answering no to the deployment prompt exits cleanly and leaves the branch unmerged."""
+        mock_confirm.return_value.ask.return_value = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.proj.merge_branch.assert_not_called()
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.success")
+    def test_force_skips_deploy_confirmation(self, mock_success, mock_confirm):
+        """--force merges into main without asking for deployment confirmation."""
+        BranchCommand.branch_merge(TEST_DIR, message="ship it", force=True)
+
+        mock_confirm.assert_not_called()
+        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.assertIn("now live", mock_success.call_args[0][0])
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.info")
+    def test_simplified_deployments_off_skips_confirmation_for_main(self, mock_info, mock_confirm):
+        """With simplified deployments off, merging into main skips the deploy prompt too."""
+        self.proj.using_simplified_deployments = False
+
+        BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        mock_confirm.assert_not_called()
+        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.assertIn("main", mock_info.call_args[0][0])
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.info")
+    def test_merging_into_non_main_parent_skips_confirmation_and_names_parent(
+        self, mock_info, mock_confirm
+    ):
+        """Merging into a release branch deploys nothing live, so no prompt is shown."""
+        self._set_current_branch("feature-a-child")
+
+        BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        mock_confirm.assert_not_called()
+        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.assertIn("Release 1", mock_info.call_args[0][0])
+
+    @patch("questionary.confirm")
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_mode_merges_without_confirmation(self, mock_json_print, mock_confirm):
+        """JSON mode is non-interactive, so it merges without prompting and reports success."""
+        BranchCommand.branch_merge(TEST_DIR, message="ship it", output_json=True)
+
+        mock_confirm.assert_not_called()
+        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.assertEqual(mock_json_print.call_args[0][0], {"success": True})
+
+
 
 
 class BranchMergeConflictHelpersTest(unittest.TestCase):
@@ -2886,3 +3228,15 @@ class ConversationsCommandTest(unittest.TestCase):
         )
         mock_success.assert_called_once()
         self.assertIn("2.0 MB", mock_success.call_args[0][0])
+
+
+
+
+
+
+
+
+
+
+
+

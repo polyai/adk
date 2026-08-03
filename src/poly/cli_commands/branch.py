@@ -15,6 +15,7 @@ from typing import Any, Optional
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project, parse_from_projection_json, read_project_config
 from poly.output.json_output import json_print
+from poly.project import DeploymentMode
 from poly.resources.resource_utils import contains_merge_conflict
 from poly.utils import merge_strings
 
@@ -105,7 +106,7 @@ class BranchCommand(BaseCommand):
                 "  poly branch list\n"
                 "  poly branch create new-branch\n"
                 "  poly branch switch existing-branch\n"
-                "  poly branch merge 'Merge branch'"
+                "  poly branch merge 'Merge branch'\n"
                 "  poly branch current\n"
                 "  poly branch delete\n"
             ),
@@ -113,6 +114,7 @@ class BranchCommand(BaseCommand):
         )
         branch_subparsers = branches_parser.add_subparsers(dest="branch_subcommand", required=True)
 
+        # -- list --
         branch_list_parser = branch_subparsers.add_parser(
             "list",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -120,6 +122,7 @@ class BranchCommand(BaseCommand):
         )
         branch_list_parser.set_defaults(branch_subcommand="list")
 
+        # -- create --
         branch_create_parser = branch_subparsers.add_parser(
             "create",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -145,6 +148,7 @@ class BranchCommand(BaseCommand):
         )
         branch_create_parser.set_defaults(branch_subcommand="create")
 
+        # -- switch --
         branch_switch_parser = branch_subparsers.add_parser(
             "switch",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -179,6 +183,7 @@ class BranchCommand(BaseCommand):
         )
         branch_switch_parser.set_defaults(branch_subcommand="switch")
 
+        # -- current --
         branch_current_parser = branch_subparsers.add_parser(
             "current",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -186,6 +191,7 @@ class BranchCommand(BaseCommand):
         )
         branch_current_parser.set_defaults(branch_subcommand="current")
 
+        # -- delete --
         branch_delete_parser = branch_subparsers.add_parser(
             "delete",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -199,10 +205,11 @@ class BranchCommand(BaseCommand):
         ).completer = cls._branch_name_completer
         branch_delete_parser.set_defaults(branch_subcommand="delete")
 
+        # -- merge --
         branch_merge_parser = branch_subparsers.add_parser(
             "merge",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
-            help="Merge branch into main",
+            help="Merge branch into its parent branch",
         )
         branch_merge_parser.add_argument(
             "message",
@@ -228,9 +235,15 @@ class BranchCommand(BaseCommand):
                 '- value: Optional custom value (use "theirs" strategy)'
             ),
         )
+        branch_merge_parser.add_argument(
+            "--force",
+            "-f",
+            action="store_true",
+            help="Skip the confirmation prompt when merging into main deploys to a live environment.",
+        )
         branch_merge_parser.set_defaults(branch_subcommand="merge")
 
-        # ── diff ──
+        # -- diff --
         branch_diff_parser = branch_subparsers.add_parser(
             "diff",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -249,7 +262,7 @@ class BranchCommand(BaseCommand):
         )
         branch_diff_parser.set_defaults(branch_subcommand="diff")
 
-        # ── review ──
+        # -- review --
         branch_review_parser = branch_subparsers.add_parser(
             "review",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -268,7 +281,7 @@ class BranchCommand(BaseCommand):
         )
         branch_review_parser.set_defaults(branch_subcommand="review")
 
-        # ── status ──
+        # -- status --
         branch_status_parser = branch_subparsers.add_parser(
             "status",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -315,7 +328,9 @@ class BranchCommand(BaseCommand):
             cls.branch_delete(args.path, args.branch_name, args.json)
 
         elif args.branch_subcommand == "merge":
-            cls.branch_merge(args.path, args.message, args.json, args.interactive, args.resolutions)
+            cls.branch_merge(
+                args.path, args.message, args.json, args.interactive, args.resolutions, args.force
+            )
 
         elif args.branch_subcommand == "diff":
             cls.branch_diff(args.path, args.branch_name, getattr(args, "files", None), args.json)
@@ -329,7 +344,12 @@ class BranchCommand(BaseCommand):
     @classmethod
     def branch_list(cls, base_path: str, output_json: bool = False) -> None:
         """List branches in the Agent Studio project."""
-        from poly.output.console import plain, print_branches, warning
+        from poly.output.console import (
+            plain,
+            print_branches,
+            print_releases_branches,
+            warning,
+        )
 
         project = load_project(base_path, output_json=output_json)
 
@@ -347,7 +367,10 @@ class BranchCommand(BaseCommand):
             plain("[muted]No branches found.[/muted]")
             return
 
-        print_branches(branches, current_branch)
+        if project.deployment_mode == DeploymentMode.RELEASES_BRANCHES:
+            print_releases_branches(branches, current_branch)
+        else:
+            print_branches(branches, current_branch)
 
         if current_branch is None:
             warning(
@@ -368,21 +391,6 @@ class BranchCommand(BaseCommand):
         from poly.output.console import error, success, warning
 
         project = load_project(base_path, output_json=output_json)
-
-        if project.branch_id != "main":
-            if output_json:
-                json_print(
-                    {
-                        "success": False,
-                        "error": "Branches can only be created from the main branch (sandbox).",
-                    }
-                )
-            else:
-                error(
-                    "Branches can only be created from the [bold]main[/bold] branch (sandbox). "
-                    "Please switch and try again."
-                )
-            sys.exit(1)
 
         if env in ["pre-release", "live"]:
             # Checks for any local changes on main before creating env branch.
@@ -408,11 +416,22 @@ class BranchCommand(BaseCommand):
                 warning("No branch name provided. Exiting.")
                 return
 
-        new_branch_id = project.create_branch(branch_name)
+        base_branch_id = project.branch_id
+        base_branch_name = project.get_current_branch()
+        try:
+            new_branch_id = project.create_branch(branch_name)
+        except ValueError as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(str(e))
+            sys.exit(1)
         if output_json:
             json_print(
                 {
                     "success": bool(new_branch_id),
+                    "base_branch_id": base_branch_id,
+                    "base_branch_name": base_branch_name,
                     "new_branch_id": new_branch_id,
                     "branch_name": branch_name,
                 }
@@ -422,7 +441,9 @@ class BranchCommand(BaseCommand):
             return
 
         if new_branch_id:
-            success(f"Branch '{branch_name}' created (ID: {new_branch_id})")
+            success(
+                f"Created new branch '{branch_name}' (ID: {new_branch_id}) from '{base_branch_name}'"
+            )
         else:
             error("Failed to create the branch.")
             sys.exit(1)
@@ -450,7 +471,7 @@ class BranchCommand(BaseCommand):
         """Switch to a different branch in the Agent Studio project."""
         import questionary
 
-        from poly.output.console import console, error, plain, success, warning
+        from poly.output.console import console, error, flatten_branch_tree, plain, success, warning
 
         project = load_project(base_path, output_json=output_json)
 
@@ -469,24 +490,27 @@ class BranchCommand(BaseCommand):
                 plain("[muted]No branches found.[/muted]")
                 return
 
-            # Create menu options from branch names
-            menu_options = []
-            for name in branches.keys():
-                if name == current_branch:
-                    menu_options.append(f"{name} (current)")
-                else:
-                    menu_options.append(name)
+            if project.deployment_mode == DeploymentMode.RELEASES_BRANCHES:
+                # Show branch-from-branch lineage via indentation/connectors.
+                choices = [
+                    questionary.Choice(title=title, value=value)
+                    for title, value in flatten_branch_tree(branches, current_branch)
+                ]
+            else:
+                choices = [
+                    questionary.Choice(
+                        title=f"{name} (current)" if name == current_branch else name,
+                        value=name,
+                    )
+                    for name in branches.keys()
+                ]
 
-            branch_menu = questionary.select(
-                "Select Branch", choices=menu_options, use_search_filter=True, use_jk_keys=False
+            branch_name = questionary.select(
+                "Select Branch", choices=choices, use_search_filter=True, use_jk_keys=False
             ).ask()
-            if not branch_menu:
+            if not branch_name:
                 warning("No branch selected. Exiting.")
                 return
-
-            # Get the selected branch name (remove "(current)" suffix if present)
-            selected_option = branch_menu
-            branch_name = selected_option.replace(" (current)", "")
 
         projection_json = parse_from_projection_json(
             from_projection,
@@ -532,26 +556,44 @@ class BranchCommand(BaseCommand):
 
     @classmethod
     def get_current_branch(cls, base_path: str, output_json: bool = False) -> None:
-        """Get the current branch of the Agent Studio project."""
+        """Get the current branch of the Agent Studio project, and its parent if it has one."""
         from poly.output.console import plain, warning
 
         project = load_project(base_path, output_json=output_json)
 
-        current_branch = project.get_current_branch()
-        if output_json:
-            json_output = {
-                "current_branch": current_branch,
-            }
-            json_print(json_output)
-            return
+        current_branch, branches = project.get_branches()
 
         if current_branch is None:
-            warning(
-                "Current local branch does not exist in Agent Studio. "
-                "It may have been deleted or merged."
-            )
+            if output_json:
+                json_print({"current_branch": None, "parent_branch": None})
+            else:
+                warning(
+                    "Current local branch does not exist in Agent Studio. "
+                    "It may have been deleted or merged."
+                )
             return
+
+        parent_branch_id = branches.get(current_branch, {}).get("parentBranchId")
+        parent_branch = (
+            next(
+                (
+                    name
+                    for name, meta in branches.items()
+                    if meta.get("branchId") == parent_branch_id
+                ),
+                parent_branch_id,
+            )
+            if parent_branch_id
+            else None
+        )
+
+        if output_json:
+            json_print({"current_branch": current_branch, "parent_branch": parent_branch})
+            return
+
         plain(f"Current branch: [bold]{current_branch}[/bold]")
+        if parent_branch and parent_branch != "main":
+            plain(f"Parent branch: [bold]{parent_branch}[/bold]")
 
     @classmethod
     def branch_delete(
@@ -566,7 +608,7 @@ class BranchCommand(BaseCommand):
         """
         import questionary
 
-        from poly.output.console import error, info, plain, success, warning
+        from poly.output.console import error, flatten_branch_tree, info, plain, success, warning
 
         project = load_project(base_path, output_json=output_json)
         current_branch, branches = project.get_branches()
@@ -615,17 +657,31 @@ class BranchCommand(BaseCommand):
             plain("[muted]No deletable branches found.[/muted]")
             return
 
-        choices = []
-        for name in deletable:
-            label = f"{name} (current)" if name == current_branch else name
-            choices.append(label)
+        if project.deployment_mode == DeploymentMode.RELEASES_BRANCHES:
+            # Show 'main' as disabled tree context so lineage is visible, but not selectable.
+            choices = [
+                questionary.Choice(
+                    title=title,
+                    value=value,
+                    disabled="cannot delete main" if value == "main" else None,
+                )
+                for title, value in flatten_branch_tree(branches, current_branch)
+            ]
+        else:
+            choices = [
+                questionary.Choice(
+                    title=f"{name} (current)" if name == current_branch else name,
+                    value=name,
+                )
+                for name in deletable
+            ]
 
         selected = questionary.checkbox("Select branches to delete", choices=choices).ask()
         if not selected:
             warning("No branches selected. Exiting.")
             return
 
-        branch_names = [label.replace(" (current)", "") for label in selected]
+        branch_names = selected
         confirm_msg = f"Delete {len(branch_names)} branch(es): {', '.join(branch_names)}?"
         confirmed = questionary.confirm(confirm_msg, default=False).ask()
         if not confirmed:
@@ -634,8 +690,7 @@ class BranchCommand(BaseCommand):
 
         deleted_count = 0
         current_branch_deleted = False
-        for label in selected:
-            name = label.replace(" (current)", "")
+        for name in selected:
             try:
                 deleted = project.delete_branch(name)
                 if deleted:
@@ -822,8 +877,11 @@ class BranchCommand(BaseCommand):
         output_json: bool = False,
         interactive: bool = False,
         resolutions_file: str = None,
+        force: bool = False,
     ):
         """Merge the current branch into main, with optional conflict resolutions."""
+        import questionary
+
         from poly.output.console import (
             console,
             error,
@@ -871,8 +929,41 @@ class BranchCommand(BaseCommand):
 
         project = load_project(base_path, output_json=output_json)
 
-        branch_name = project.get_current_branch()
-        ctx = console.status("[info]Merging branch...[/info]") if not output_json else nullcontext()
+        current_branch_name, branches = project.get_branches()
+        current_branch_meta = branches.get(current_branch_name, {})
+        parent_branch_id = current_branch_meta.get("parentBranchId") or None
+        parent_branch_name = next(
+            (name for name, meta in branches.items() if meta.get("branchId") == parent_branch_id),
+            "main",
+        )
+
+        is_live_deploy = parent_branch_name == "main" and project.using_simplified_deployments
+
+        def _report_merge_success() -> None:
+            if is_live_deploy:
+                success(
+                    f"Branch '{current_branch_name}' merged into main — your changes are now live."
+                )
+            else:
+                success(f"Branch '{current_branch_name}' merged successfully.")
+            info(f"Switched to '{parent_branch_name}' branch after merge.")
+
+        if is_live_deploy:
+            if not output_json and not force:
+                warning("Merging into 'main' will deploy changes into live environment")
+                if not questionary.confirm(
+                    "Confirm Deployment?", default=False, auto_enter=False
+                ).ask():
+                    warning("Aborted.")
+                    sys.exit(0)
+
+        ctx = (
+            console.status(
+                f"[info]Merging branch '{current_branch_name}' into '{parent_branch_name}'...[/info]"
+            )
+            if not output_json
+            else nullcontext()
+        )
         with ctx:
             merge_success, conflicts, errors = project.merge_branch(
                 message=message, conflict_resolutions=file_resolutions
@@ -889,12 +980,11 @@ class BranchCommand(BaseCommand):
             return
 
         if merge_success:
-            success(f"Branch '{branch_name}' merged successfully.")
-            info('Switched to "main" branch after merge.')
+            _report_merge_success()
             return
 
         # Failed branch merge
-        error(f"Failed to merge branch '{branch_name}'.")
+        error(f"Failed to merge branch '{current_branch_name}'.")
         if errors:
             plain("\n[red]Errors:[/red]")
             for err in errors:
@@ -925,7 +1015,9 @@ class BranchCommand(BaseCommand):
             os.sep.join(r["path"]): r for r in (file_resolutions or []) if "path" in r
         }
         while True:
-            resolutions = cls._merge_interactively(enriched, existing_resolutions, branch_name)
+            resolutions = cls._merge_interactively(
+                enriched, existing_resolutions, current_branch_name
+            )
             if not resolutions:
                 warning("No resolutions provided. Exiting.")
                 sys.exit(1)
@@ -939,18 +1031,17 @@ class BranchCommand(BaseCommand):
                     message=message, conflict_resolutions=resolutions
                 )
             if merge_success:
-                success(f"Branch '{branch_name}' merged successfully.")
-                info('Switched to "main" branch after merge.')
+                _report_merge_success()
                 break
             if errors:
-                error(f"Failed to merge branch '{branch_name}' after conflict resolution.")
+                error(f"Failed to merge branch '{current_branch_name}' after conflict resolution.")
                 plain("\n[red]Errors:[/red]")
                 for err in errors:
                     error(f"- {err['path']}: {err['message']}")
                 sys.exit(1)
             if not conflicts:
                 error(
-                    f"Failed to merge branch '{branch_name}' after conflict resolution "
+                    f"Failed to merge branch '{current_branch_name}' after conflict resolution "
                     "(no conflicts or errors returned)."
                 )
                 sys.exit(1)

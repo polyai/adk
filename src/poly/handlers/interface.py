@@ -527,17 +527,20 @@ class AgentStudioInterface:
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
-    def create_branch(self, branch_name: Optional[str] = None) -> str:
+    def create_branch(
+        self, branch_name: Optional[str] = None, source_branch_id: Optional[str] = None
+    ) -> str:
         """Create a new branch in the project.
 
         Args:
             branch_name (str): The name of the new branch
+            source_branch_id (str): The ID of the source branch to create the new branch from. Defaults to 'main' if not provided.
 
         Returns:
             str: The ID of the newly created branch
         """
         try:
-            return self.sync_client.create_branch(branch_name)
+            return self.sync_client.create_branch(branch_name, source_branch_id=source_branch_id)
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 

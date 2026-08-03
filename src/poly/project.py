@@ -2257,7 +2257,32 @@ class AgentStudioProject:
         Returns:
             str: The ID of the newly created branch
         """
-        branch_id = self.api_handler.create_branch(branch_name)
+        if self.deployment_mode == DeploymentMode.SIMPLE:
+            branches = self.api_handler.get_branches()
+            if len(branches) >= 2:
+                raise ValueError(
+                    "Cannot create branch. Only one branch is allowed in simple deployment mode. Please delete/merge existing branches before creating a new one."
+                )
+        if self.deployment_mode == DeploymentMode.RELEASES:
+            if self.branch_id != "main":
+                raise ValueError(
+                    "Cannot create branch. Branches can only be created from the main branch in releases deployment mode."
+                )
+        if self.deployment_mode == DeploymentMode.RELEASES_BRANCHES:
+            branches = self.api_handler.get_branches()
+            current_branch_meta = next(
+                (meta for meta in branches.values() if meta["branchId"] == self.branch_id),
+                None,
+            )
+            if current_branch_meta is None or (
+                not current_branch_meta.get("branchId") == "main"
+                and current_branch_meta.get("parentBranchId") != "main"
+            ):
+                raise ValueError(
+                    "Cannot create branch. Branches with depth above 2 are not allowed in releases-branches deployment mode."
+                )
+
+        branch_id = self.api_handler.create_branch(branch_name, self.branch_id)
         self.branch_id = branch_id
         self.save_config()
         return branch_id
@@ -2695,8 +2720,10 @@ class AgentStudioProject:
             list[dict[str, str]]: A list of errors
         """
         branches = self.api_handler.get_branches()
-        branch_ids = {meta["branchId"] for meta in branches.values()}
-        if self.branch_id not in branch_ids:
+        branch_meta = {meta["branchId"]: meta for meta in branches.values()}
+        current_branch_meta = branch_meta.get(self.branch_id)
+
+        if not current_branch_meta:
             raise ValueError(f"Branch {self.branch_id} does not exist.")
 
         if self.branch_id == "main":
@@ -2720,7 +2747,10 @@ class AgentStudioProject:
             message=message, conflict_resolutions=conflict_resolutions
         )
         if success:
-            self.switch_branch("main", force=True)
+            parent_branch_id = current_branch_meta.get("parentBranchId") or "main"
+            parent_branch_meta = branch_meta.get(parent_branch_id) or {}
+            parent_branch_name = parent_branch_meta.get("name") or "main"
+            self.switch_branch(parent_branch_name, force=True)
             return True, [], []
 
         return False, conflicts, errors

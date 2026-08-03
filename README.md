@@ -143,11 +143,13 @@ poly revert file1.yaml file2.yaml  # revert specific files
 Manage branches (default branch is `main`):
 
 ```bash
-poly branch list
+poly branch list                       # active branches
 poly branch current
 poly branch create my-feature
 poly branch switch my-feature
 poly branch switch my-feature --force  # discard uncommitted changes
+poly branch merge 'Merge my-feature'   # merge into the parent branch
+poly branch delete
 ```
 
 ### `poly format`

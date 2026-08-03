@@ -199,12 +199,14 @@ class SourcererSDK:
         self,
         expected_main_last_known_sequence: int = 0,
         branch_name: Optional[str] = None,
+        source_branch_id: Optional[str] = None,
     ) -> str:
         """Create a new branch for the project
 
         Args:
             expected_main_last_known_sequence: The expected sequence number from main branch
             branch_name: Optional name for the branch. If not provided, will generate a default name
+            source_branch_id: Optional source branch ID to create the new branch from. Defaults to main if not provided.
 
         Returns:
             The ID of the created branch
@@ -221,6 +223,10 @@ class SourcererSDK:
                 "expectedMainLastKnownSequence": expected_main_last_known_sequence,
                 "branchName": branch_name or f"sdk-branch-{os.urandom(4).hex()}",
             }
+
+            if source_branch_id is not None and source_branch_id != "main":
+                payload["sourceBranchId"] = source_branch_id
+
             response = self.session.post(self._get_branches_url(), json=payload)
             response.raise_for_status()
             branch_data = response.json()
@@ -241,9 +247,9 @@ class SourcererSDK:
         deployment_message: str = "",
         conflict_resolutions: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
-        """Merge the current branch into the main branch
+        """Merge the current branch into the parent branch
 
-        This method merges changes from the current branch into the main branch.
+        This method merges changes from the current branch into it's parent branch.
         If conflicts are detected, they will be returned in the response for manual resolution.
         Once conflicts are resolved, call this method again with the conflict_resolutions parameter.
 
