@@ -1720,7 +1720,9 @@ class BranchCommand(BaseCommand):
             json_print({"success": tagged})
         else:
             if tagged:
-                success(f"Current branch '{project.get_current_branch()}' tagged successfully.")
+                success(
+                    f"Current branch '{project.get_current_branch()}' tagged and deployed to staging."
+                )
             else:
                 error("Failed to tag the current branch.")
 
@@ -1743,6 +1745,8 @@ class BranchCommand(BaseCommand):
             json_print({"success": untagged})
         else:
             if untagged:
-                success(f"Tag removed from current branch '{project.get_current_branch()}'.")
+                success(
+                    f"Staging tag removed from current branch '{project.get_current_branch()}'."
+                )
             else:
                 error("Failed to remove tag from the current branch.")
