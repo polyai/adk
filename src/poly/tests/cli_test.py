@@ -3614,6 +3614,7 @@ class BranchListArchivedTest(unittest.TestCase):
             {
                 "branchId": "BRANCH-1",
                 "name": "old-prompts",
+                "parentBranchId": "main",
                 "archivedAt": "2026-07-05",
                 "daysLeft": 15,
             },
@@ -3623,7 +3624,7 @@ class BranchListArchivedTest(unittest.TestCase):
         BranchCommand.branch_list(TEST_DIR, archived=True)
 
         self.proj.list_archived_branches.assert_called_once()
-        mock_print.assert_called_once_with(archived)
+        mock_print.assert_called_once_with(archived, {"BRANCH-1": "old-prompts"})
 
     @patch("poly.output.console.plain")
     def test_archived_empty_shows_message(self, mock_plain):
@@ -3674,7 +3675,7 @@ class BranchRestoreTest(unittest.TestCase):
     @patch("poly.output.console.success")
     def test_successful_restore(self, mock_success):
         """A successful restore prints a success message."""
-        BranchCommand.branch_restore(TEST_DIR, branch_name="old-branch")
+        BranchCommand.branch_restore(TEST_DIR, branch_id="old-branch")
 
         self.proj.restore_branch.assert_called_once_with("old-branch")
         mock_success.assert_called_once()
@@ -3683,19 +3684,19 @@ class BranchRestoreTest(unittest.TestCase):
     @patch("poly.cli_commands.branch.json_print")
     def test_successful_restore_json(self, mock_json):
         """JSON mode outputs success and the branch name."""
-        BranchCommand.branch_restore(TEST_DIR, branch_name="old-branch", output_json=True)
+        BranchCommand.branch_restore(TEST_DIR, branch_id="old-branch", output_json=True)
 
         mock_json.assert_called_once()
         payload = mock_json.call_args[0][0]
         self.assertTrue(payload["success"])
-        self.assertEqual(payload["branch_name"], "old-branch")
+        self.assertEqual(payload["branch_id"], "old-branch")
 
     @patch("poly.output.console.error")
     def test_restore_failure(self, mock_error):
         """When restore_branch returns False, a failure message is shown."""
         self.proj.restore_branch.return_value = False
 
-        BranchCommand.branch_restore(TEST_DIR, branch_name="old-branch")
+        BranchCommand.branch_restore(TEST_DIR, branch_id="old-branch")
 
         mock_error.assert_called_once()
         self.assertIn("Failed to restore", mock_error.call_args[0][0])
@@ -3705,7 +3706,7 @@ class BranchRestoreTest(unittest.TestCase):
         """When the branch isn't in the archive, the ValueError is shown."""
         self.proj.restore_branch.side_effect = ValueError("not found in archive")
 
-        BranchCommand.branch_restore(TEST_DIR, branch_name="no-such-branch")
+        BranchCommand.branch_restore(TEST_DIR, branch_id="no-such-branch")
 
         mock_error.assert_called_once()
         self.assertIn("not found in archive", mock_error.call_args[0][0])
@@ -3715,7 +3716,7 @@ class BranchRestoreTest(unittest.TestCase):
         """JSON mode outputs the error when restore_branch raises."""
         self.proj.restore_branch.side_effect = ValueError("not found in archive")
 
-        BranchCommand.branch_restore(TEST_DIR, branch_name="no-such-branch", output_json=True)
+        BranchCommand.branch_restore(TEST_DIR, branch_id="no-such-branch", output_json=True)
 
         mock_json.assert_called_once()
         payload = mock_json.call_args[0][0]
@@ -3723,48 +3724,22 @@ class BranchRestoreTest(unittest.TestCase):
         self.assertIn("not found in archive", payload["error"])
 
     @patch("poly.cli_commands.branch.json_print")
-    def test_duplicate_name_json(self, mock_json):
-        """JSON mode outputs the error when restore_branch raises for duplicate names."""
-        self.proj.restore_branch.side_effect = ValueError(
-            "Multiple archived branches named 'release' found"
-        )
-
-        BranchCommand.branch_restore(TEST_DIR, branch_name="release", output_json=True)
-
-        mock_json.assert_called_once()
-        payload = mock_json.call_args[0][0]
-        self.assertFalse(payload["success"])
-        self.assertIn("Multiple archived branches", payload["error"])
-
-    @patch("poly.output.console.error")
-    def test_duplicate_name_shows_error(self, mock_error):
-        """When multiple archived branches share a name, the error is shown."""
-        self.proj.restore_branch.side_effect = ValueError(
-            "Multiple archived branches named 'release' found"
-        )
-
-        BranchCommand.branch_restore(TEST_DIR, branch_name="release")
-
-        mock_error.assert_called_once()
-        self.assertIn("Multiple archived branches", mock_error.call_args[0][0])
-
-    @patch("poly.cli_commands.branch.json_print")
     def test_no_name_json_mode_exits(self, mock_json):
         """JSON mode without a branch name prints error and exits."""
         with self.assertRaises(SystemExit):
-            BranchCommand.branch_restore(TEST_DIR, branch_name=None, output_json=True)
+            BranchCommand.branch_restore(TEST_DIR, branch_id=None, output_json=True)
 
         mock_json.assert_called_once()
         payload = mock_json.call_args[0][0]
         self.assertFalse(payload["success"])
-        self.assertIn("requires a branch name", payload["error"])
+        self.assertIn("requires a branch id", payload["error"])
 
     @patch("poly.output.console.plain")
     def test_no_name_empty_archive_shows_message(self, mock_plain):
         """Interactive mode with no archived branches shows a message."""
         self.proj.list_archived_branches.return_value = []
 
-        BranchCommand.branch_restore(TEST_DIR, branch_name=None)
+        BranchCommand.branch_restore(TEST_DIR, branch_id=None)
 
         mock_plain.assert_called_once()
         self.assertIn("No archived branches", mock_plain.call_args[0][0])
@@ -3779,7 +3754,7 @@ class BranchRestoreTest(unittest.TestCase):
         ]
         mock_select.return_value.ask.return_value = None
 
-        BranchCommand.branch_restore(TEST_DIR, branch_name=None)
+        BranchCommand.branch_restore(TEST_DIR, branch_id=None)
 
         mock_warning.assert_called_once()
         self.assertIn("No branch selected", mock_warning.call_args[0][0])
@@ -3789,15 +3764,18 @@ class BranchRestoreTest(unittest.TestCase):
     def test_no_name_interactive_success(self, mock_success, mock_select):
         """Interactive mode selects a branch and restores it."""
         self.proj.list_archived_branches.return_value = [
-            {"branchId": "BRANCH-1", "name": "old-branch"},
-            {"branchId": "BRANCH-2", "name": "old-branch"},
+            {"branchId": "BRANCH-1", "name": "old-branch", "parentBranchId": "main"},
+            {"branchId": "BRANCH-2", "name": "old-branch", "parentBranchId": "BRANCH-1"},
         ]
-        mock_select.return_value.ask.return_value = "old-branch (BRANCH-2)"
-        self.proj.api_handler.restore_branch.return_value = True
+        # BRANCH-1 is the parent and is itself archived, so the label marks it.
+        mock_select.return_value.ask.return_value = (
+            "old-branch (BRANCH-2) — parent: old-branch (archived)"
+        )
+        self.proj.restore_branch.return_value = True
 
-        BranchCommand.branch_restore(TEST_DIR, branch_name=None)
+        BranchCommand.branch_restore(TEST_DIR, branch_id=None)
 
-        self.proj.api_handler.restore_branch.assert_called_once_with("BRANCH-2")
+        self.proj.restore_branch.assert_called_once_with("BRANCH-2")
         mock_success.assert_called_once()
         self.assertIn("old-branch", mock_success.call_args[0][0])
 
@@ -3806,12 +3784,12 @@ class BranchRestoreTest(unittest.TestCase):
     def test_no_name_interactive_restore_fails(self, mock_error, mock_select):
         """Interactive mode shows error when restore returns False."""
         self.proj.list_archived_branches.return_value = [
-            {"branchId": "BRANCH-1", "name": "old-branch"},
+            {"branchId": "BRANCH-1", "name": "old-branch", "parentBranchId": "main"},
         ]
-        mock_select.return_value.ask.return_value = "old-branch (BRANCH-1)"
-        self.proj.api_handler.restore_branch.return_value = False
+        mock_select.return_value.ask.return_value = "old-branch (BRANCH-1) — parent: main"
+        self.proj.restore_branch.return_value = False
 
-        BranchCommand.branch_restore(TEST_DIR, branch_name=None)
+        BranchCommand.branch_restore(TEST_DIR, branch_id=None)
 
         mock_error.assert_called_once()
         self.assertIn("Failed to restore", mock_error.call_args[0][0])

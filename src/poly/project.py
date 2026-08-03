@@ -3568,34 +3568,30 @@ class AgentStudioProject:
         """
         return self.api_handler.list_archived_branches()
 
-    def restore_branch(self, branch_name: str) -> bool:
+    def restore_branch(self, branch_id: str) -> bool:
         """Restore a soft-deleted branch from the archive.
 
+        Identified by id rather than name because archived names are not unique —
+        the same branch name can be archived repeatedly. Use
+        ``list_archived_branches`` to find the id.
+
         Args:
-            branch_name (str): The name of the branch to restore.
+            branch_id (str): The branch id of the archived branch to restore.
 
         Returns:
             bool: True if the branch was restored successfully, False otherwise.
         """
-        if not branch_name:
-            raise ValueError("Branch name must be provided.")
+        if not branch_id:
+            raise ValueError("Branch id must be provided.")
 
         archived = self.api_handler.list_archived_branches()
-        matches = [b for b in archived if b.get("name") == branch_name]
-        if not matches:
+        if not any(branch.get("branchId") == branch_id for branch in archived):
             raise ValueError(
-                f"Branch '{branch_name}' not found in archive. "
+                f"Branch '{branch_id}' not found in archive. "
                 "Use 'poly branch list --archived' to see available branches."
             )
 
-        if len(matches) > 1:
-            branch_ids = ", ".join(b["branchId"] for b in matches)
-            raise ValueError(
-                f"Multiple archived branches named '{branch_name}' found ({branch_ids}). "
-                "Use the interactive picker (poly branch restore) to select the correct one."
-            )
-
-        return self.api_handler.restore_branch(matches[0]["branchId"])
+        return self.api_handler.restore_branch(branch_id)
 
     def tag_branch(self, branch_name: str = None) -> bool:
         """Tag the current branch with a new tag.

@@ -3934,53 +3934,62 @@ class RestoreBranchProject(unittest.TestCase):
     def setUp(self):
         self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
-    def test_empty_name_raises_value_error(self):
-        """An empty branch name raises ValueError."""
-        with self.assertRaises(ValueError) as ctx:
-            self.project.restore_branch("")
-
-        self.assertIn("Branch name must be provided", str(ctx.exception))
-
-    def test_branch_not_in_archive_raises_value_error(self):
-        """A name not found in the archive raises ValueError."""
+    def test_empty_branch_id_raises_value_error(self):
+        """An empty branch id raises ValueError before any API call."""
         with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
-            mock_api.list_archived_branches.return_value = [
-                {"branchId": "b-1", "name": "other-branch"}
-            ]
-
             with self.assertRaises(ValueError) as ctx:
-                self.project.restore_branch("no-such-branch")
+                self.project.restore_branch("")
 
-        self.assertIn("not found in archive", str(ctx.exception))
+        self.assertIn("Branch id must be provided", str(ctx.exception))
+        mock_api.restore_branch.assert_not_called()
 
-    def test_successful_restore_returns_true(self):
-        """A valid restore looks up the branch ID and delegates to api_handler."""
+    def test_restore_delegates_the_branch_id_to_the_api(self):
+        """A branch id present in the archive is restored."""
         with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
             mock_api.list_archived_branches.return_value = [
-                {"branchId": "b-1", "name": "old-branch", "archivedAt": "2026-07-01"},
+                {"branchId": "BRANCH-1", "name": "old-branch"},
             ]
             mock_api.restore_branch.return_value = True
 
-            result = self.project.restore_branch("old-branch")
+            result = self.project.restore_branch("BRANCH-1")
 
         self.assertTrue(result)
-        mock_api.restore_branch.assert_called_once_with("b-1")
+        mock_api.restore_branch.assert_called_once_with("BRANCH-1")
 
-    def test_duplicate_name_raises_value_error(self):
-        """Multiple archived branches with the same name raises ValueError."""
+    def test_branch_id_not_in_archive_raises_value_error(self):
+        """An id that is not archived is refused before any restore is attempted."""
         with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
             mock_api.list_archived_branches.return_value = [
-                {"branchId": "BRANCH-1", "name": "release"},
-                {"branchId": "BRANCH-2", "name": "release"},
+                {"branchId": "BRANCH-1", "name": "old-branch"},
             ]
 
             with self.assertRaises(ValueError) as ctx:
-                self.project.restore_branch("release")
+                self.project.restore_branch("BRANCH-NOPE")
 
-        self.assertIn("Multiple archived branches", str(ctx.exception))
-        self.assertIn("BRANCH-1", str(ctx.exception))
-        self.assertIn("BRANCH-2", str(ctx.exception))
+        self.assertIn("not found in archive", str(ctx.exception))
         mock_api.restore_branch.assert_not_called()
+
+    def test_matching_is_by_id_not_name(self):
+        """A branch name is not accepted, even when it is unique in the archive."""
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.list_archived_branches.return_value = [
+                {"branchId": "BRANCH-1", "name": "old-branch"},
+            ]
+
+            with self.assertRaises(ValueError):
+                self.project.restore_branch("old-branch")
+
+        mock_api.restore_branch.assert_not_called()
+
+    def test_api_failure_is_returned_to_the_caller(self):
+        """A False from the API layer is passed through rather than raised."""
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.list_archived_branches.return_value = [
+                {"branchId": "BRANCH-1", "name": "old-branch"},
+            ]
+            mock_api.restore_branch.return_value = False
+
+            self.assertFalse(self.project.restore_branch("BRANCH-1"))
 
 
 class DiffBranchTest(unittest.TestCase):

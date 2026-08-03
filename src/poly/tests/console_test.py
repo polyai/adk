@@ -11,6 +11,7 @@ from poly.output.console import (
     print_archived_branches,
     print_branch_history,
     print_releases_branches,
+    resolve_parent_branch_label,
 )
 
 
@@ -259,3 +260,123 @@ class PrintBranchHistoryTest(unittest.TestCase):
 
         self.assertIn("—", output)
         self.assertNotIn("None", output)
+
+
+class ResolveParentBranchLabelTest(unittest.TestCase):
+    """Tests for resolve_parent_branch_label, which names an archived branch's parent."""
+
+    def test_main_parent_is_named_directly(self):
+        """A top-level branch reports main without needing a lookup."""
+        label = resolve_parent_branch_label({"parentBranchId": "main"})
+
+        self.assertEqual(label, "main")
+
+    def test_parent_id_is_resolved_to_a_name(self):
+        """A sub-branch's parent id is resolved through the lookup."""
+        label = resolve_parent_branch_label(
+            {"parentBranchId": "BRANCH-P"}, {"BRANCH-P": "Release 1"}
+        )
+
+        self.assertEqual(label, "Release 1")
+
+    def test_unknown_parent_id_falls_back_to_the_id(self):
+        """An unresolvable parent shows its id rather than going blank."""
+        label = resolve_parent_branch_label({"parentBranchId": "BRANCH-GONE"}, {})
+
+        self.assertEqual(label, "BRANCH-GONE")
+
+    def test_missing_parent_renders_a_placeholder(self):
+        """An entry with no parent at all renders a dash."""
+        for branch in ({}, {"parentBranchId": None}, {"parentBranchId": ""}):
+            with self.subTest(branch=branch):
+                self.assertEqual(resolve_parent_branch_label(branch), "—")
+
+
+class PrintArchivedBranchesParentColumnTest(unittest.TestCase):
+    """Tests for the parent column in print_archived_branches."""
+
+    def _render(self, branches: list[dict], name_by_branch_id: dict | None = None) -> str:
+        with console.capture() as capture:
+            print_archived_branches(branches, name_by_branch_id)
+        return capture.get()
+
+    def test_parent_column_is_shown(self):
+        """The table gains a Parent header so lineage is visible."""
+        output = self._render([{"name": "old", "branchId": "b-1", "parentBranchId": "main"}])
+
+        self.assertIn("Parent", output)
+        self.assertIn("main", output)
+
+    def test_sub_branch_shows_its_parent_name(self):
+        """A branch archived under another branch names that parent, not its id."""
+        output = self._render(
+            [{"name": "child", "branchId": "b-2", "parentBranchId": "b-1"}],
+            {"b-1": "Release 1"},
+        )
+
+        self.assertIn("Release 1", output)
+
+    def test_renders_without_a_lookup(self):
+        """Omitting the lookup still renders, falling back to raw parent ids."""
+        output = self._render([{"name": "child", "branchId": "b-2", "parentBranchId": "b-1"}])
+
+        self.assertIn("b-1", output)
+
+
+class ArchivedParentMarkerTest(unittest.TestCase):
+    """Tests for marking a parent that is itself archived."""
+
+    def _render(self, branches: list[dict], name_by_branch_id: dict | None = None) -> str:
+        with console.capture() as capture:
+            print_archived_branches(branches, name_by_branch_id)
+        return capture.get()
+
+    def test_archived_parent_is_marked(self):
+        """A parent that is also in the archive is flagged, since restoring a child
+        does not bring the parent back."""
+        label = resolve_parent_branch_label(
+            {"parentBranchId": "b-1"}, {"b-1": "Release 1"}, {"b-1"}
+        )
+
+        self.assertEqual(label, "Release 1 (archived)")
+
+    def test_live_parent_is_not_marked(self):
+        """A parent that is still active is left unmarked."""
+        label = resolve_parent_branch_label({"parentBranchId": "b-1"}, {"b-1": "Release 1"}, set())
+
+        self.assertEqual(label, "Release 1")
+
+    def test_main_is_never_marked_archived(self):
+        """Main cannot be archived, so it is never flagged even if ids are passed."""
+        label = resolve_parent_branch_label({"parentBranchId": "main"}, {}, {"main"})
+
+        self.assertEqual(label, "main")
+
+    def test_unresolved_archived_parent_marks_the_raw_id(self):
+        """An archived parent with no known name still gets the marker."""
+        label = resolve_parent_branch_label({"parentBranchId": "b-9"}, {}, {"b-9"})
+
+        self.assertEqual(label, "b-9 (archived)")
+
+    def test_table_marks_parents_present_in_the_same_listing(self):
+        """The table derives the archived set from its own rows, so a parent listed
+        alongside its child is marked without the caller passing anything extra."""
+        output = self._render(
+            [
+                {"name": "Release 1", "branchId": "b-1", "parentBranchId": "main"},
+                {"name": "child", "branchId": "b-2", "parentBranchId": "b-1"},
+            ],
+            {"b-1": "Release 1", "b-2": "child"},
+        )
+
+        self.assertIn("(archived)", output)
+
+    def test_table_does_not_mark_a_live_parent(self):
+        """A parent absent from the listing is still live, so it is not marked."""
+        output = self._render(
+            [{"name": "child", "branchId": "b-2", "parentBranchId": "b-live"}],
+            {"b-live": "Active Release"},
+        )
+
+        self.assertIn("Active Release", output)
+        self.assertNotIn("(archived)", output)
