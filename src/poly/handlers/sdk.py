@@ -151,6 +151,10 @@ class SourcererSDK:
         """Get the branch merge endpoint URL"""
         return f"{self.base_url}/accounts/{self.account_id}/projects/{self.project_id}/branches/{self.branch_id}/merge"
 
+    def _get_branch_sync_url(self) -> str:
+        """Get the branch sync endpoint URL"""
+        return f"{self.base_url}/accounts/{self.account_id}/projects/{self.project_id}/branches/{self.branch_id}/sync"
+
     def _initialize_branch(self) -> str:
         """Initialize branch_id by fetching existing branches or creating a new one"""
         try:
@@ -315,6 +319,108 @@ class SourcererSDK:
             logger.debug(f"Merge payload: {payload}")
 
             response = self.session.post(self._get_branch_merge_url(), json=payload)
+
+            # Handle conflict response (400 status with conflicts data)
+            if response.status_code == 400:
+                try:
+                    response_data = response.json()
+                    # Check if this is a conflict response
+                    if "conflicts" in response_data or "hasConflicts" in response_data:
+                        return response_data
+                    # Otherwise, it's a different error
+                    error_msg = f"API Error 400: {response_data}"
+                    raise SourcererAPIError(error_msg)
+                except (ValueError, KeyError):
+                    error_msg = f"API Error 400: {response.text}"
+                    raise SourcererAPIError(error_msg)
+
+            response.raise_for_status()
+
+            response_data = response.json()
+            logger.info(f"Branch merged successfully, sequence: {response_data.get('sequence')}")
+
+            return response_data
+
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
+                except (ValueError, KeyError):
+                    error_msg = f"API request failed: {e}"
+            else:
+                error_msg = f"Request failed: {e}"
+            raise SourcererAPIError(error_msg) from e
+
+    def sync_branch(
+        self,
+        conflict_resolutions: Optional[list[dict[str, Any]]] = None,
+    ) -> dict[str, Any]:
+        """Sync the current branch with its parent
+
+        This method merges changes from the current branch's parent into the current branch.
+        If conflicts are detected, they will be returned in the response for manual resolution.
+        Once conflicts are resolved, call this method again with the conflict_resolutions parameter.
+
+        Args:
+            conflict_resolutions: Optional list of conflict resolutions. Each resolution should have:
+                - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
+                - strategy: Resolution strategy - "ours", "theirs", or "base"
+                - value: Optional custom value (only used with custom strategy)
+
+        Returns:
+            Dictionary containing:
+            - If successful:
+                - sequence: The new sequence number after merge (as string)
+                - message: Success message
+                - testRunIds: List of test run IDs that were triggered
+            - If conflicts detected:
+                - hasConflicts: True
+                - conflicts: List of conflict objects, each containing:
+                    - path: Path to the conflicted field
+                    - baseValue: Original value from base
+                    - oursValue: Value from main branch
+                    - theirsValue: Value from the branch being merged
+                    - type: Type of conflict ("add", "modify", or "delete")
+
+        Raises:
+            SourcererAPIError: If the API request fails or sequence mismatch occurs
+
+        Example:
+            # Simple sync without conflicts
+            result = sdk.sync_branch()
+            if "hasConflicts" in result and result["hasConflicts"]:
+                print("Conflicts detected:", result["conflicts"])
+            else:
+                print("Sync successful, sequence:", result["sequence"])
+
+            # Sync with conflict resolution
+            resolutions = [
+                {
+                    "path": ["users", "1", "name"],
+                    "strategy": "ours",
+                },
+                {
+                    "path": ["settings", "theme"],
+                    "strategy": "theirs",
+                }
+            ]
+            result = sdk.sync_branch(
+                conflict_resolutions=resolutions
+            )
+        """
+        try:
+            payload = {
+                "expectedBranchSequence": self.get_last_known_sequence() or 0,
+            }
+
+            if conflict_resolutions is not None:
+                payload["conflictResolutions"] = conflict_resolutions
+
+            logger.info(f"Sync branch {self.branch_id} with parent")
+            logger.debug(f"Sync payload: {payload}")
+
+            response = self.session.post(self._get_branch_sync_url(), json=payload)
 
             # Handle conflict response (400 status with conflicts data)
             if response.status_code == 400:
@@ -707,3 +813,173 @@ class SourcererSDK:
             "projection": self._projection_cache,
             "last_known_sequence": self._last_known_sequence,
         }
+
+    def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
+        """Get the history of commands for a specific branch.
+
+        Args:
+            branch_id: The branch ID to fetch history for.
+
+        Returns:
+            A list of dictionaries containing commit information for the branch.
+        Raises:
+            SourcererAPIError: If the API request fails.
+        """
+        try:
+            url = f"{self._get_branches_url()}/{branch_id}/merge-history"
+            response = self.session.get(url)
+            response.raise_for_status()
+            return response.json().get("merges", [])
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
+                except (ValueError, KeyError):
+                    error_msg = f"API request failed: {e}"
+            else:
+                error_msg = f"Request failed: {e}"
+            raise SourcererAPIError(error_msg) from e
+
+    def list_archived_branches(self) -> list[dict[str, Any]]:
+        """List soft-deleted (archived) branches for the project.
+
+        Returns:
+            A list of dictionaries containing archived branch information.
+
+        Raises:
+            SourcererAPIError: If the API request fails.
+        """
+        try:
+            url = f"{self._get_branches_url()}/archive"
+            response = self.session.get(url)
+            response.raise_for_status()
+            return response.json().get("branches", [])
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
+                except (ValueError, KeyError):
+                    error_msg = f"API request failed: {e}"
+            else:
+                error_msg = f"Request failed: {e}"
+            raise SourcererAPIError(error_msg) from e
+
+    def restore_branch(self, branch_id: str) -> dict[str, Any]:
+        """Restore a soft-deleted branch from the archive.
+
+        Args:
+            branch_id: The ID of the branch to restore.
+
+        Returns:
+            A dictionary containing the restored branch information.
+
+        Raises:
+            SourcererAPIError: If the API request fails.
+        """
+        try:
+            url = f"{self._get_branches_url()}/{branch_id}/restore"
+            response = self.session.post(url)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
+                except (ValueError, KeyError):
+                    error_msg = f"API request failed: {e}"
+            else:
+                error_msg = f"Request failed: {e}"
+            raise SourcererAPIError(error_msg) from e
+
+    def rename_branch(self, new_branch_name: str) -> dict[str, Any]:
+        """Rename the current branch.
+
+        Args:
+            new_branch_name: The new name for the current branch.
+
+        Returns:
+            A dictionary containing the updated branch information.
+
+        Raises:
+            SourcererAPIError: If the API request fails or if there is no current branch.
+        """
+        if not self.branch_id:
+            raise SourcererAPIError("No current branch found. Cannot rename.")
+
+        try:
+            url = f"{self._get_branches_url()}/{self.branch_id}"
+            payload = {"name": new_branch_name}
+            response = self.session.patch(url, json=payload)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
+                except (ValueError, KeyError):
+                    error_msg = f"API request failed: {e}"
+            else:
+                error_msg = f"Request failed: {e}"
+            raise SourcererAPIError(error_msg) from e
+
+    def tag_branch(self, branch_id: str) -> dict[str, Any]:
+        """Tag a branch for staging
+
+        Args:
+            branch_id: The ID of the branch to tag.
+
+        Returns:
+            A dictionary containing the updated branch information.
+
+        Raises:
+            SourcererAPIError: If the API request fails or if there is no current branch.
+        """
+        try:
+            url = f"{self._get_branches_url()}/{branch_id}/tag"
+            payload = {"tag": "staging"}
+            response = self.session.put(url, json=payload)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
+                except (ValueError, KeyError):
+                    error_msg = f"API request failed: {e}"
+            else:
+                error_msg = f"Request failed: {e}"
+            raise SourcererAPIError(error_msg) from e
+
+    def untag_branch(self, branch_id: str) -> dict[str, Any]:
+        """Untag a branch for staging
+
+        Args:
+            branch_id: The ID of the branch to untag.
+
+        Returns:
+            A dictionary containing the updated branch information.
+
+        Raises:
+            SourcererAPIError: If the API request fails or if there is no current branch.
+        """
+
+        try:
+            url = f"{self._get_branches_url()}/{branch_id}/tag"
+            response = self.session.delete(url)
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            if hasattr(e, "response") and e.response is not None:
+                try:
+                    error_detail = e.response.json()
+                    error_msg = f"API Error {e.response.status_code}: {error_detail}"
+                except (ValueError, KeyError):
+                    error_msg = f"API request failed: {e}"
+            else:
+                error_msg = f"Request failed: {e}"
+            raise SourcererAPIError(error_msg) from e

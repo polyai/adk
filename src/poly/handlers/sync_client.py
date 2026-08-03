@@ -337,7 +337,159 @@ class SyncClientHandler:
         logger.info(f"Successfully merged branch '{self.sdk.branch_id}' into its parent branch")
         return True, [], []
 
+    def sync_branch(
+        self, conflict_resolutions: Optional[list[dict[str, Any]]] = None
+    ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
+        """Merge the parent branch into the current branch.
+
+        Args:
+            conflict_resolutions (list[dict[str, Any]]): A list of conflict resolutions. Each resolution should have:
+                - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
+                - strategy: Resolution strategy - "ours", "theirs", or "base"
+                - value: Optional custom value (only used with custom strategy)
+
+        Returns:
+            success (bool): True if the sync was successful, False otherwise
+            list[dict[str, str]]: A list of conflict information if the merge failed, empty list if successful
+            list[dict[str, str]]: A list of error information if the merge failed, empty list if successful
+        """
+        self.assert_branch_exists()
+
+        if self.sdk.branch_id == "main":
+            logger.error("Cannot sync 'main' branch — it has no parent to sync from.")
+            return False, [], []
+
+        logger.info(f"Merging parent into '{self.sdk.branch_id}'")
+
+        try:
+            result = self.sdk.sync_branch(
+                conflict_resolutions=conflict_resolutions,
+            )
+        except SourcererAPIError as e:
+            logger.error(f"Failed to sync branch '{self.sdk.branch_id}': {e}")
+            return False, [], []
+
+        if result.get("hasConflicts", False) or result.get("errors", []):
+            logger.info(
+                f"Failed to sync branch '{self.sdk.branch_id}' to {len(result.get('conflicts', []))} conflicts and {len(result.get('errors', []))} errors"
+            )
+            conflicts = result.get("conflicts", [])
+            errors = result.get("errors", [])
+            return False, conflicts, errors
+
+        logger.info(f"Successfully synced branch '{self.sdk.branch_id}'")
+        return True, [], []
+
     def get_branch_chat_info(self, branch_id: str) -> dict[str, Any]:
         """Get deployment info needed to start a draft chat on a branch."""
         self.assert_branch_exists()
         return self.sdk.get_branch_chat_info(branch_id)
+
+    def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
+        """Get the history of a specific branch.
+
+        Args:
+            branch_id (str): The ID of the branch to retrieve history for.
+
+        Returns:
+            list[dict[str, Any]]: A list of dictionaries containing commit information for the branch.
+        """
+        logger.info(f"Fetching history for branch ID:'{branch_id}'")
+        history = self.sdk.get_branch_history(branch_id)
+        logger.info(f"Fetched {len(history)} commits for branch ID:'{branch_id}'")
+        return history
+
+    def rename_branch(self, new_branch_name: str) -> bool:
+        """Rename the current branch.
+
+        Args:
+            new_branch_name (str): The new name for the current branch.
+
+        Returns:
+            bool: True if the rename was successful, False otherwise.
+        """
+        self.assert_branch_exists()
+
+        if self.sdk.branch_id == "main":
+            logger.error("Cannot rename 'main' branch.")
+            return False
+
+        logger.info(f"Renaming branch ID:'{self.sdk.branch_id}' to '{new_branch_name}'")
+
+        try:
+            self.sdk.rename_branch(new_branch_name=new_branch_name)
+        except SourcererAPIError as e:
+            logger.error(f"Failed to rename branch ID:'{self.sdk.branch_id}': {e}")
+            return False
+
+        logger.info(f"Successfully renamed branch ID:'{self.sdk.branch_id}' to '{new_branch_name}'")
+        return True
+
+    def list_archived_branches(self) -> list[dict[str, Any]]:
+        """List soft-deleted (archived) branches for the project.
+
+        Returns:
+            list[dict[str, Any]]: A list of dictionaries containing archived branch information.
+        """
+        logger.info("Fetching archived branches")
+        branches = self.sdk.list_archived_branches()
+        logger.info(f"Fetched {len(branches)} archived branches")
+        return branches
+
+    def restore_branch(self, branch_id: str) -> bool:
+        """Restore a soft-deleted branch from the archive.
+
+        Args:
+            branch_id (str): The ID of the branch to restore.
+
+        Returns:
+            bool: True if the restore was successful, False otherwise.
+        """
+        logger.info(f"Restoring branch ID:'{branch_id}'")
+
+        try:
+            self.sdk.restore_branch(branch_id)
+        except SourcererAPIError as e:
+            logger.error(f"Failed to restore branch ID:'{branch_id}': {e}")
+            return False
+
+        logger.info(f"Successfully restored branch ID:'{branch_id}'")
+        return True
+
+    def tag_branch(self, branch_id: str) -> bool:
+        """Tag a branch with staging tag
+
+        Args:
+            branch_id (str): The ID of the branch to tag.
+        Returns:
+            bool: True if the tagging was successful, False otherwise.
+        """
+        logger.info(f"Tagging branch ID:'{branch_id}' with staging tag")
+
+        try:
+            self.sdk.tag_branch(branch_id)
+        except SourcererAPIError as e:
+            logger.error(f"Failed to tag branch ID:'{branch_id}': {e}")
+            return False
+
+        logger.info(f"Successfully tagged branch ID:'{branch_id}' with staging tag")
+        return True
+
+    def untag_branch(self, branch_id: str) -> bool:
+        """Remove staging tag from a branch
+
+        Args:
+            branch_id (str): The ID of the branch to untag.
+        Returns:
+            bool: True if the untagging was successful, False otherwise.
+        """
+        logger.info(f"Removing staging tag from branch ID:'{branch_id}'")
+
+        try:
+            self.sdk.untag_branch(branch_id)
+        except SourcererAPIError as e:
+            logger.error(f"Failed to remove staging tag from branch ID:'{branch_id}': {e}")
+            return False
+
+        logger.info(f"Successfully removed staging tag from branch ID:'{branch_id}'")
+        return True

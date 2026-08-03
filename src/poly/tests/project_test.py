@@ -3712,14 +3712,284 @@ class MigrateFlowStepResourceIdsTest(unittest.TestCase):
         self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
 
 
+class SyncBranchProject(unittest.TestCase):
+    """Tests for AgentStudioProject.sync_branch."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def _make_branches(self, *branch_ids):
+        """Build a branches dict with the given branch IDs."""
+        return {bid: {"branchId": bid, "name": f"name-{bid}"} for bid in branch_ids}
+
+    def test_branch_not_found_raises(self):
+        """A branch_id not present in any branch metadata raises ValueError."""
+        self.project.branch_id = "nonexistent-branch"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main", "branch-1")
+
+            with self.assertRaises(ValueError) as ctx:
+                self.project.sync_branch()
+
+        self.assertIn("nonexistent-branch", str(ctx.exception))
+        self.assertIn("does not exist", str(ctx.exception))
+
+    def test_main_branch_raises(self):
+        """Syncing the main branch raises ValueError."""
+        self.project.branch_id = "main"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main")
+
+            with self.assertRaises(ValueError) as ctx:
+                self.project.sync_branch()
+
+        self.assertIn("main", str(ctx.exception))
+        self.assertIn("not supported", str(ctx.exception))
+
+    def test_uncommitted_changes_raises(self):
+        """Uncommitted changes (non-empty get_diffs) raises ValueError listing the diffs."""
+        self.project.branch_id = "branch-1"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main", "branch-1")
+            with patch.object(self.project, "get_diffs", return_value={"topic/foo": "modified"}):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.sync_branch()
+
+        self.assertIn("uncommitted changes", str(ctx.exception))
+        self.assertIn("topic/foo", str(ctx.exception))
+
+    def test_invalid_resolution_missing_path(self):
+        """A resolution dict missing 'path' raises ValueError."""
+        self.project.branch_id = "branch-1"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main", "branch-1")
+            with patch.object(self.project, "get_diffs", return_value=None):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.sync_branch(conflict_resolutions=[{"strategy": "ours"}])
+
+        self.assertIn("path", str(ctx.exception))
+        self.assertIn("strategy", str(ctx.exception))
+
+    def test_invalid_resolution_missing_strategy(self):
+        """A resolution dict missing 'strategy' raises ValueError."""
+        self.project.branch_id = "branch-1"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main", "branch-1")
+            with patch.object(self.project, "get_diffs", return_value=None):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.sync_branch(conflict_resolutions=[{"path": ["users", "name"]}])
+
+        self.assertIn("path", str(ctx.exception))
+        self.assertIn("strategy", str(ctx.exception))
+
+    def test_invalid_resolution_bad_strategy(self):
+        """A strategy not in {ours, theirs, base} raises ValueError."""
+        self.project.branch_id = "branch-1"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main", "branch-1")
+            with patch.object(self.project, "get_diffs", return_value=None):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.sync_branch(
+                        conflict_resolutions=[{"path": ["users", "name"], "strategy": "invalid"}]
+                    )
+
+        self.assertIn("Invalid conflict resolution strategy", str(ctx.exception))
+        self.assertIn("invalid", str(ctx.exception))
+
+    def test_successful_sync_pulls_and_returns_true(self):
+        """On success, pull_project(force=True) is called and (True, [], []) is returned."""
+        self.project.branch_id = "branch-1"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main", "branch-1")
+            mock_api.sync_branch.return_value = (True, [], [])
+            with patch.object(self.project, "get_diffs", return_value=None):
+                with patch.object(self.project, "pull_project") as mock_pull:
+                    result = self.project.sync_branch()
+
+        self.assertEqual(result, (True, [], []))
+        mock_pull.assert_called_once_with(force=True)
+        mock_api.sync_branch.assert_called_once_with(conflict_resolutions=None)
+
+    def test_sync_with_conflicts_returns_false(self):
+        """When the API reports conflicts, returns (False, conflicts, errors) without pulling."""
+        self.project.branch_id = "branch-1"
+        conflicts = [{"path": "topic/foo", "type": "content"}]
+        errors = [{"message": "merge error"}]
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main", "branch-1")
+            mock_api.sync_branch.return_value = (False, conflicts, errors)
+            with patch.object(self.project, "get_diffs", return_value=None):
+                with patch.object(self.project, "pull_project") as mock_pull:
+                    result = self.project.sync_branch()
+
+        self.assertEqual(result, (False, conflicts, errors))
+        mock_pull.assert_not_called()
+
+    def test_none_resolutions_accepted(self):
+        """Passing None for conflict_resolutions skips validation and works."""
+        self.project.branch_id = "branch-1"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main", "branch-1")
+            mock_api.sync_branch.return_value = (True, [], [])
+            with patch.object(self.project, "get_diffs", return_value=None):
+                with patch.object(self.project, "pull_project"):
+                    result = self.project.sync_branch(conflict_resolutions=None)
+
+        self.assertEqual(result, (True, [], []))
+        mock_api.sync_branch.assert_called_once_with(conflict_resolutions=None)
 
 
+class GetBranchHistoryProject(unittest.TestCase):
+    """Tests for AgentStudioProject.get_branch_history."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def test_delegates_to_api_handler(self):
+        """get_branch_history passes through to the api_handler and returns its result."""
+        expected = [{"commit_id": "c1"}, {"commit_id": "c2"}]
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branch_history.return_value = expected
+
+            result = self.project.get_branch_history("branch-1")
+
+        self.assertEqual(result, expected)
+        mock_api.get_branch_history.assert_called_once_with("branch-1")
 
 
+class RenameBranchProject(unittest.TestCase):
+    """Tests for AgentStudioProject.rename_branch."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def test_empty_name_raises_value_error(self):
+        """An empty branch name raises ValueError."""
+        with self.assertRaises(ValueError) as ctx:
+            self.project.rename_branch("")
+
+        self.assertIn("New branch name must be provided", str(ctx.exception))
+
+    def test_none_name_raises_value_error(self):
+        """A None branch name raises ValueError."""
+        with self.assertRaises(ValueError) as ctx:
+            self.project.rename_branch(None)
+
+        self.assertIn("New branch name must be provided", str(ctx.exception))
+
+    def test_main_branch_raises_value_error(self):
+        """Renaming the main branch raises ValueError."""
+        self.project.branch_id = "main"
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.rename_branch("new-name")
+
+        self.assertIn("main", str(ctx.exception))
+
+    def test_duplicate_name_raises_value_error(self):
+        """A name that already exists raises ValueError."""
+        self.project.branch_id = "branch-1"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = {"new-name": "branch-id-123"}
+
+            with self.assertRaises(ValueError) as ctx:
+                self.project.rename_branch("new-name")
+
+        self.assertIn("already exists", str(ctx.exception))
+
+    def test_successful_rename_returns_true(self):
+        """A valid rename delegates to api_handler and returns its result."""
+        self.project.branch_id = "branch-1"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = {"other-branch": "id-456"}
+            mock_api.rename_branch.return_value = True
+
+            result = self.project.rename_branch("new-name")
+
+        self.assertTrue(result)
+        mock_api.rename_branch.assert_called_once_with(new_branch_name="new-name")
 
 
+class ListArchivedBranchesProject(unittest.TestCase):
+    """Tests for AgentStudioProject.list_archived_branches."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def test_delegates_to_api_handler(self):
+        """list_archived_branches passes through to the api_handler."""
+        expected = [{"branchId": "b-1", "name": "old", "archivedAt": "2026-07-01"}]
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.list_archived_branches.return_value = expected
+
+            result = self.project.list_archived_branches()
+
+        self.assertEqual(result, expected)
+        mock_api.list_archived_branches.assert_called_once()
 
 
+class RestoreBranchProject(unittest.TestCase):
+    """Tests for AgentStudioProject.restore_branch."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def test_empty_branch_id_raises_value_error(self):
+        """An empty branch id raises ValueError before any API call."""
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            with self.assertRaises(ValueError) as ctx:
+                self.project.restore_branch("")
+
+        self.assertIn("Branch id must be provided", str(ctx.exception))
+        mock_api.restore_branch.assert_not_called()
+
+    def test_restore_delegates_the_branch_id_to_the_api(self):
+        """A branch id present in the archive is restored."""
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.list_archived_branches.return_value = [
+                {"branchId": "BRANCH-1", "name": "old-branch"},
+            ]
+            mock_api.restore_branch.return_value = True
+
+            result = self.project.restore_branch("BRANCH-1")
+
+        self.assertTrue(result)
+        mock_api.restore_branch.assert_called_once_with("BRANCH-1")
+
+    def test_branch_id_not_in_archive_raises_value_error(self):
+        """An id that is not archived is refused before any restore is attempted."""
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.list_archived_branches.return_value = [
+                {"branchId": "BRANCH-1", "name": "old-branch"},
+            ]
+
+            with self.assertRaises(ValueError) as ctx:
+                self.project.restore_branch("BRANCH-NOPE")
+
+        self.assertIn("not found in archive", str(ctx.exception))
+        mock_api.restore_branch.assert_not_called()
+
+    def test_matching_is_by_id_not_name(self):
+        """A branch name is not accepted, even when it is unique in the archive."""
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.list_archived_branches.return_value = [
+                {"branchId": "BRANCH-1", "name": "old-branch"},
+            ]
+
+            with self.assertRaises(ValueError):
+                self.project.restore_branch("old-branch")
+
+        mock_api.restore_branch.assert_not_called()
+
+    def test_api_failure_is_returned_to_the_caller(self):
+        """A False from the API layer is passed through rather than raised."""
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.list_archived_branches.return_value = [
+                {"branchId": "BRANCH-1", "name": "old-branch"},
+            ]
+            mock_api.restore_branch.return_value = False
+
+            self.assertFalse(self.project.restore_branch("BRANCH-1"))
 
 
 class DiffBranchTest(unittest.TestCase):
@@ -3998,6 +4268,111 @@ class GetBranchesReturnTypeTest(unittest.TestCase):
         self.assertEqual(len(branches), 1)
 
 
+class BranchTaggingTest(unittest.TestCase):
+    """Tests for AgentStudioProject.tag_branch and untag_branch."""
+
+    BRANCHES = {
+        "main": {"branchId": "main"},
+        "feature-a": {"branchId": "branch-a", "parentBranchId": "main"},
+    }
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.get_branches.return_value = deepcopy(self.BRANCHES)
+        self.mock_api.tag_branch.return_value = True
+        self.mock_api.untag_branch.return_value = True
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+        self._set_current_branch("branch-a")
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def _set_current_branch(self, branch_id: str) -> None:
+        """Put the project and its API handler on the given branch.
+
+        The ``api_handler`` property re-reads ``branch_id`` from the handler on
+        every access, so both sides have to agree.
+        """
+        self.project.branch_id = branch_id
+        self.mock_api.branch_id = branch_id
+
+    def test_tags_current_branch_by_default(self):
+        """With no branch name the current branch's id is tagged."""
+        self.assertTrue(self.project.tag_branch())
+
+        self.mock_api.tag_branch.assert_called_once_with("branch-a")
+
+    def test_untags_current_branch_by_default(self):
+        """With no branch name the current branch's id is untagged."""
+        self.assertTrue(self.project.untag_branch())
+
+        self.mock_api.untag_branch.assert_called_once_with("branch-a")
+
+    def test_named_branch_is_resolved_to_its_id(self):
+        """An explicit branch name is resolved to the branch id before the API call."""
+        self._set_current_branch("main")
+
+        self.project.tag_branch("feature-a")
+
+        self.mock_api.tag_branch.assert_called_once_with("branch-a")
+
+    def test_rejects_unknown_branch_name(self):
+        """A name that is not in the branch list is refused before any API call."""
+        for method in (self.project.tag_branch, self.project.untag_branch):
+            with self.subTest(method=method.__name__):
+                with self.assertRaises(ValueError) as ctx:
+                    method("no-such-branch")
+
+                self.assertIn("no-such-branch", str(ctx.exception))
+
+        self.mock_api.tag_branch.assert_not_called()
+        self.mock_api.untag_branch.assert_not_called()
+
+    def test_rejects_current_branch_missing_from_branch_list(self):
+        """A local branch id with no remote counterpart is reported rather than tagged."""
+        self._set_current_branch("branch-gone")
+
+        for method in (self.project.tag_branch, self.project.untag_branch):
+            with self.subTest(method=method.__name__):
+                with self.assertRaises(ValueError) as ctx:
+                    method()
+
+                self.assertIn("branch-gone", str(ctx.exception))
+
+    def test_rejects_main_branch(self):
+        """Main carries the live deployment, so it can be neither tagged nor untagged."""
+        self._set_current_branch("main")
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.tag_branch()
+        self.assertIn("Tagging 'main' branch is not supported", str(ctx.exception))
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.untag_branch()
+        self.assertIn("Untagging 'main' branch is not supported", str(ctx.exception))
+
+        self.mock_api.tag_branch.assert_not_called()
+        self.mock_api.untag_branch.assert_not_called()
+
+    def test_rejects_main_when_named_explicitly(self):
+        """Naming main explicitly is refused the same way as being on it."""
+        self._set_current_branch("branch-a")
+
+        with self.assertRaises(ValueError):
+            self.project.tag_branch("main")
+
+        self.mock_api.tag_branch.assert_not_called()
+
+    def test_api_failure_is_returned_to_the_caller(self):
+        """A False from the API layer is passed through, not raised."""
+        self.mock_api.tag_branch.return_value = False
+        self.mock_api.untag_branch.return_value = False
+
+        self.assertFalse(self.project.tag_branch())
+        self.assertFalse(self.project.untag_branch())
 
 
 class UsingSimplifiedDeploymentsTest(unittest.TestCase):

@@ -580,6 +580,27 @@ class AgentStudioInterface:
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
+    def sync_branch(
+        self, conflict_resolutions: Optional[list[dict[str, Any]]] = None
+    ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
+        """Sync the current branch with it's parent.
+
+        Args:
+            conflict_resolutions (list[dict[str, Any]]): A list of conflict resolutions. Each resolution should have:
+                - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
+                - strategy: Resolution strategy - "ours", "theirs", or "base"
+                - value: Optional custom value (only used with custom strategy)
+
+        Returns:
+            success (bool): True if the sync was successful, False otherwise
+            list[dict[str, str]]: A list of conflict information if the merge failed, empty list if successful
+            list[dict[str, str]]: A list of error information if the merge failed, empty list if successful
+        """
+        try:
+            return self.sync_client.sync_branch(conflict_resolutions)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
     def delete_branch(self, branch_id: str) -> bool:
         """Delete a branch in the project.
 
@@ -1208,6 +1229,87 @@ class AgentStudioInterface:
             dict: The updated RTC config.
         """
         return PlatformAPIHandler.patch_rtc_variables(region, project_id, client_env, variables)
+
+    def get_branch_history(self, branch_name: str) -> list[dict[str, Any]]:
+        """Get the history of a specific branch.
+
+        Args:
+            branch_name (str): The name of the branch
+
+        Returns:
+            list[dict[str, Any]]: A list of commit history entries for the branch
+        """
+        try:
+            return self.sync_client.get_branch_history(branch_name)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def rename_branch(self, new_branch_name: str) -> bool:
+        """Rename the current branch to a new name.
+
+        Args:
+            new_branch_name (str): The new name for the current branch
+
+        Returns:
+            bool: True if the branch was renamed successfully, False otherwise
+        """
+        try:
+            return self.sync_client.rename_branch(new_branch_name)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def list_archived_branches(self) -> list[dict[str, Any]]:
+        """List soft-deleted (archived) branches for the project.
+
+        Returns:
+            list[dict[str, Any]]: A list of archived branch entries.
+        """
+        try:
+            return self.sync_client.list_archived_branches()
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def restore_branch(self, branch_id: str) -> bool:
+        """Restore a soft-deleted branch from the archive.
+
+        Args:
+            branch_id (str): The ID of the branch to restore.
+
+        Returns:
+            bool: True if the branch was restored successfully, False otherwise.
+        """
+        try:
+            return self.sync_client.restore_branch(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def tag_branch(self, branch_id: str) -> bool:
+        """Tag the current branch with a specific tag name.
+
+        Args:
+            branch_id (str): The ID of the branch to tag.
+
+        Returns:
+            bool: True if the branch was tagged successfully, False otherwise.
+        """
+        try:
+            return self.sync_client.tag_branch(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def untag_branch(self, branch_id: str) -> bool:
+        """Remove a specific tag from the current branch.
+
+        Args:
+            branch_id (str): The ID of the branch to untag.
+
+        Returns:
+            bool: True if the branch was untagged successfully, False otherwise.
+        """
+        try:
+            return self.sync_client.untag_branch(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
 
     def feature_flag_enabled(
         self,
