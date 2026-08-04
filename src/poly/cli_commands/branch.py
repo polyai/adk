@@ -297,7 +297,7 @@ class BranchCommand(BaseCommand):
             "message",
             nargs="?",
             default=None,
-            help="Message for the merge.",
+            help="Message for the merge. Required when merging into main.",
         )
         branch_merge_parser.add_argument(
             "--interactive",
@@ -1065,13 +1065,6 @@ class BranchCommand(BaseCommand):
             warning,
         )
 
-        if message is None or (isinstance(message, str) and not message.strip()):
-            if output_json:
-                json_print({"success": False, "error": "Merge message is required."})
-            else:
-                error("Merge message is required.")
-            sys.exit(1)
-
         if interactive and output_json:
             json_print(
                 {
@@ -1109,6 +1102,17 @@ class BranchCommand(BaseCommand):
             (name for name, meta in branches.items() if meta.get("branchId") == parent_branch_id),
             "main",
         )
+
+        if parent_branch_name == "main" and (
+            message is None or (isinstance(message, str) and not message.strip())
+        ):
+            if output_json:
+                json_print(
+                    {"success": False, "error": "Merge message is required when merging into main."}
+                )
+            else:
+                error("Merge message is required when merging into main.")
+            sys.exit(1)
 
         is_live_deploy = parent_branch_name == "main" and project.using_simplified_deployments
 

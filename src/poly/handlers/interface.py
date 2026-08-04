@@ -559,13 +559,13 @@ class AgentStudioInterface:
             self._handle_api_error(e)
 
     def merge_branch(
-        self, message: str, conflict_resolutions: Optional[list[dict[str, Any]]] = None
+        self, message: Optional[str], conflict_resolutions: Optional[list[dict[str, Any]]] = None
     ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
         """Merge the current branch into main.
 
         Args:
-            message (str): The merge commit message
-            conflict_resolutions (list[dict[str, Any]]): A list of conflict resolutions. Each resolution should have:
+            message (Optional[str]): The merge commit message
+            conflict_resolutions (Optional[list[dict[str, Any]]]): A list of conflict resolutions. Each resolution should have:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
                 - value: Optional custom value (only used with custom strategy)

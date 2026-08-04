@@ -309,8 +309,10 @@ class SourcererSDK:
         try:
             payload = {
                 "expectedBranchLastKnownSequence": self.get_last_known_sequence() or 0,
-                "deploymentMessage": deployment_message,
             }
+
+            if deployment_message:
+                payload["deploymentMessage"] = deployment_message
 
             if conflict_resolutions is not None:
                 payload["conflictResolutions"] = conflict_resolutions
