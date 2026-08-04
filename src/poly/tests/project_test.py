@@ -682,6 +682,39 @@ class ProjectStatusTest(unittest.TestCase):
         self.assertEqual(new_files, [])
         self.assertEqual(deleted_files, [])
 
+    def test_project_status_merge_conflict_in_multi_resource_yaml(self):
+        """A conflicted multi-resource YAML file is listed (not raised) by project_status.
+
+        The conflict is detected during discovery (discover_resources ->
+        _get_top_level_data); project_status collects the true file path into
+        files_with_conflicts and skips that file's resources instead of raising or
+        counting them as deleted.
+        """
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        entities_path = os.path.join(TEST_DIR, "config", "entities.yaml")
+        # The multi-resource file is cached by mtime; clear it so the mock is read.
+        Entity._file_cache.clear()
+
+        conflicted_entities = (
+            "entities:\n"
+            "<<<<<<<\n"
+            "  - name: customer_name\n"
+            "    entity_type: name_config\n"
+            "=======\n"
+            "  - name: caller_name\n"
+            "    entity_type: name_config\n"
+            ">>>>>>>\n"
+        )
+
+        with mock_read_from_file({entities_path: conflicted_entities}):
+            files_with_conflicts, modified_files, new_files, deleted_files = (
+                project.project_status()
+            )
+
+        self.assertEqual(files_with_conflicts, [entities_path])
+        # The conflicted file's entities must not be reported as deleted.
+        self.assertFalse(any(entities_path in path for path in deleted_files))
+
     def test_project_status_mixed_changes(self):
         project_data = deepcopy(PROJECT_DATA)
         # Remove a function so it seems there's a new one
@@ -924,6 +957,93 @@ class GetDiffsTest(unittest.TestCase):
             "flows", "test_flow_with_punctuation!", "steps", "welcome_step.yaml"
         )
         self.assertNotIn(step_path, diffs)
+
+    def test_get_diffs_raises_when_single_file_resource_has_conflict(self):
+        """A merge conflict in a function .py file makes get_diffs raise."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        func_path = os.path.join(TEST_DIR, "functions", "test_function.py")
+
+        conflicted_code = (
+            "from _gen import *  # <AUTO GENERATED>\n\n"
+            "def test_function(conv: Conversation):\n"
+            "<<<<<<<\n"
+            '    return "ours"\n'
+            "=======\n"
+            '    return "theirs"\n'
+            ">>>>>>>\n"
+        )
+
+        with mock_read_from_file({func_path: conflicted_code}):
+            with self.assertRaises(resource_utils.MergeConflictError) as ctx:
+                project.get_diffs()
+
+        self.assertIn(func_path, str(ctx.exception))
+
+    def test_get_diffs_raises_when_multi_resource_yaml_has_conflict(self):
+        """A conflict in a multi-resource YAML file makes get_diffs raise.
+
+        For multi-resource YAML files the guard fires during discovery
+        (discover_resources -> _get_top_level_data), before get_diffs reaches its
+        own conflict-collecting loops, so the error is raised with the true on-disk
+        .yaml path rather than a synthetic sub-resource path.
+        """
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        entities_path = os.path.join(TEST_DIR, "config", "entities.yaml")
+        # The multi-resource file is cached by mtime; clear it so the mock is read.
+        Entity._file_cache.clear()
+
+        conflicted_entities = (
+            "entities:\n"
+            "<<<<<<<\n"
+            "  - name: customer_name\n"
+            "    entity_type: name_config\n"
+            "=======\n"
+            "  - name: caller_name\n"
+            "    entity_type: name_config\n"
+            ">>>>>>>\n"
+        )
+
+        with mock_read_from_file({entities_path: conflicted_entities}):
+            with self.assertRaises(resource_utils.MergeConflictError) as ctx:
+                project.get_diffs()
+
+        # The reported path is the true .yaml file, not a synthetic sub-resource path.
+        self.assertIn(entities_path, str(ctx.exception))
+
+    def test_get_diffs_aggregates_conflicts_from_multiple_files(self):
+        """When two single-file resources conflict, the raised error lists both paths."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        func_path = os.path.join(TEST_DIR, "functions", "test_function.py")
+        other_func_path = os.path.join(TEST_DIR, "functions", "validate_email.py")
+
+        conflicted_code = (
+            "from _gen import *  # <AUTO GENERATED>\n\n"
+            "def test_function(conv: Conversation):\n"
+            "<<<<<<<\n"
+            '    return "ours"\n'
+            "=======\n"
+            '    return "theirs"\n'
+            ">>>>>>>\n"
+        )
+        other_conflicted_code = (
+            "from _gen import *  # <AUTO GENERATED>\n\n"
+            "def validate_email(conv: Conversation):\n"
+            "<<<<<<<\n"
+            "    return True\n"
+            "=======\n"
+            "    return False\n"
+            ">>>>>>>\n"
+        )
+
+        with mock_read_from_file(
+            {func_path: conflicted_code, other_func_path: other_conflicted_code}
+        ):
+            with self.assertRaises(resource_utils.MergeConflictError) as ctx:
+                project.get_diffs()
+
+        message = str(ctx.exception)
+        self.assertIn(func_path, message)
+        self.assertIn(other_func_path, message)
 
 
 class CleanResourcesBeforePushTest(unittest.TestCase):

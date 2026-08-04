@@ -1462,13 +1462,17 @@ class AgentStudioProject:
                 - List of new files.
                 - List of deleted files.
         """
-        files_with_conflicts = []
+        files_with_conflicts: list[str] = []
         modified_files = []
-        new_files = []
-        deleted_files = []
 
+        # Multi-resource files that fail to parse (conflict markers) are collected here so
+        # their resources are skipped by the comparison rather than raising or being counted
+        # as deleted. Single-file conflicts are caught in the kept loop below.
         new_resources_mappings, kept_resources_mappings, deleted_resources_mappings = (
-            self.find_new_kept_deleted(self.discover_local_resources())
+            self.find_new_kept_deleted(
+                self.discover_local_resources(conflict_files=files_with_conflicts),
+                conflict_files=files_with_conflicts,
+            )
         )
 
         new_files = [resource.file_path for resource in new_resources_mappings]
@@ -1483,20 +1487,21 @@ class AgentStudioProject:
                 {},
             ).get("hash")
 
-            local_content = kept_local_resource_mapping.resource_type.read_from_file(
-                kept_local_resource_mapping.file_path
-            )
-            if resource_utils.contains_merge_conflict(local_content):
-                files_with_conflicts.append(kept_local_resource_mapping.file_path)
+            try:
+                local_resource = self.read_local_resource(
+                    resource=kept_local_resource_mapping,
+                    resource_mappings=local_resources_mappings,
+                )
+            except resource_utils.MergeConflictError as e:
+                files_with_conflicts.extend(e.file_paths)
                 continue
-
-            local_resource = self.read_local_resource(
-                resource=kept_local_resource_mapping, resource_mappings=local_resources_mappings
-            )
 
             modified = local_resource.is_modified(original_hash)
             if modified:
                 modified_files.append(kept_local_resource_mapping.file_path)
+
+        # dedupe: several resources can share one conflicted multi-resource file
+        files_with_conflicts = list(dict.fromkeys(files_with_conflicts))
 
         return files_with_conflicts, modified_files, new_files, deleted_files
 
@@ -1528,6 +1533,7 @@ class AgentStudioProject:
             dict[str, str]: A dictionary mapping resource file names to their diffs.
         """
         diffs = {}
+        conflict_files: list[str] = []
         all_files = not file_paths
         new_resources_mappings, kept_resources_mappings, deleted_resources_mappings = (
             self.find_new_kept_deleted(self.discover_local_resources())
@@ -1542,22 +1548,13 @@ class AgentStudioProject:
                 os.path.relpath(local_resource_mapping.file_path, self.root_path), {}
             ).get("hash")
 
-            local_content = local_resource_mapping.resource_type.read_from_file(
-                local_resource_mapping.file_path
-            )
-            if resource_utils.contains_merge_conflict(local_content):
-                original_resource = self.resources.get(
-                    local_resource_mapping.resource_type, {}
-                ).get(local_resource_mapping.resource_id)
-                original_content = original_resource.raw if original_resource else ""
-                diffs[local_resource_mapping.file_path] = resource_utils.get_diff(
-                    original_content, local_content
+            try:
+                local_resource = self.read_local_resource(
+                    resource=local_resource_mapping, resource_mappings=local_resources_mappings
                 )
+            except resource_utils.MergeConflictError as e:
+                conflict_files.extend(e.file_paths)
                 continue
-
-            local_resource = self.read_local_resource(
-                resource=local_resource_mapping, resource_mappings=local_resources_mappings
-            )
 
             modified = local_resource.is_modified(original_hash)
             if not modified:
@@ -1573,9 +1570,13 @@ class AgentStudioProject:
                 diffs[local_resource.file_path] = diff
 
         for resource_mapping in new_resources_mappings:
-            resource = self.read_local_resource(
-                resource=resource_mapping, resource_mappings=local_resources_mappings
-            )
+            try:
+                resource = self.read_local_resource(
+                    resource=resource_mapping, resource_mappings=local_resources_mappings
+                )
+            except resource_utils.MergeConflictError as e:
+                conflict_files.extend(e.file_paths)
+                continue
 
             diffs[resource.file_path] = resource_utils.get_diff(
                 "",
@@ -1585,6 +1586,8 @@ class AgentStudioProject:
                     resource_mappings=local_resources_mappings,
                 ),
             )
+
+        resource_utils.raise_if_merge_conflicts(conflict_files)
 
         for resource_mapping in deleted_resources_mappings:
             if not all_files and file_paths and resource_mapping.file_path not in file_paths:
@@ -1930,9 +1933,16 @@ class AgentStudioProject:
 
         return new_files, modified_files, deleted_files
 
-    def discover_local_resources(self) -> DiscoveredResourcePaths:
+    def discover_local_resources(
+        self, conflict_files: Optional[list[str]] = None
+    ) -> DiscoveredResourcePaths:
         """Return a dict of all discovered resources locally
         Using the resource name as the key
+
+        Args:
+            conflict_files (Optional[list[str]]): If provided, files whose discovery hits a
+                merge conflict are appended here and that resource type is skipped instead of
+                raising. If None, a MergeConflictError propagates.
 
         Returns:
             DiscoveredResourcePaths: A dictionary mapping resource types to
@@ -1940,7 +1950,13 @@ class AgentStudioProject:
         """
         discovered_resources: DiscoveredResourcePaths = {}
         for resource_class in RESOURCE_NAME_TO_CLASS.values():
-            discovered = resource_class.discover_resources(self.root_path)
+            try:
+                discovered = resource_class.discover_resources(self.root_path)
+            except resource_utils.MergeConflictError as e:
+                if conflict_files is None:
+                    raise
+                conflict_files.extend(e.file_paths)
+                continue
             discovered_resources[resource_class] = discovered or []
         return discovered_resources
 
@@ -2013,6 +2029,8 @@ class AgentStudioProject:
             raise FileNotFoundError(
                 f"File not found for resource {resource.resource_name} at {resource.file_path}"
             ) from e
+        except resource_utils.MergeConflictError:
+            raise
         except Exception as e:
             raise ValueError(
                 f"Error reading resource {resource.resource_name} at {resource.file_path}: {str(e)}"
@@ -2021,7 +2039,9 @@ class AgentStudioProject:
         return resource
 
     def find_new_kept_deleted(
-        self, discovered_resources: dict[type[Resource], list[str]]
+        self,
+        discovered_resources: dict[type[Resource], list[str]],
+        conflict_files: Optional[list[str]] = None,
     ) -> tuple[
         list[ResourceMapping],
         list[ResourceMapping],
@@ -2176,8 +2196,14 @@ class AgentStudioProject:
                         )
                     )
 
+        # Resources belonging to a conflicted (unparseable) file can't be enumerated, so
+        # they must not be counted as deleted just because discovery skipped them.
+        conflict_prefixes = tuple(f"{cf}{os.sep}" for cf in (conflict_files or []))
+
         deleted_file_paths = known_files - discovered_files
         for file_path in deleted_file_paths:
+            if file_path in (conflict_files or []) or file_path.startswith(conflict_prefixes):
+                continue
             resource_info = self.file_structure_info[os.path.relpath(file_path, self.root_path)]
             if resource_info["type"] not in RESOURCE_NAME_TO_CLASS:
                 continue
