@@ -220,5 +220,208 @@ class GetConversationAudio(unittest.TestCase):
             PlatformAPIHandler.get_conversation_audio("studio", "agent-1", "conv-1")
 
 
+class ListAudioCache(unittest.TestCase):
+    """Tests for PlatformAPIHandler.list_audio_cache."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_sends_limit_offset_and_sort_params(self, mock_request, _mock_key):
+        """limit/offset/sort are forwarded as query params when provided."""
+        mock_request.return_value = make_mock_response(
+            200, json_body={"entries": [], "total_count": 0}
+        )
+
+        PlatformAPIHandler.list_audio_cache(
+            "studio", "agent-1", limit=20, offset=5, sort="hit_count:desc"
+        )
+
+        params = mock_request.call_args.kwargs["params"]
+        self.assertEqual(params, {"limit": 20, "offset": 5, "sort": "hit_count:desc"})
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_omits_sort_when_not_provided(self, mock_request, _mock_key):
+        """sort is left out of the query params entirely when None."""
+        mock_request.return_value = make_mock_response(
+            200, json_body={"entries": [], "total_count": 0}
+        )
+
+        PlatformAPIHandler.list_audio_cache("studio", "agent-1")
+
+        params = mock_request.call_args.kwargs["params"]
+        self.assertNotIn("sort", params)
+
+
+class GetAudioCacheFile(unittest.TestCase):
+    """Tests for PlatformAPIHandler.get_audio_cache_file."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.get")
+    def test_returns_raw_audio_bytes(self, mock_get, _mock_key):
+        """The raw response content is returned as bytes."""
+        mock_get.return_value = make_mock_response(200, content=b"RIFF-audio-data")
+
+        audio = PlatformAPIHandler.get_audio_cache_file("studio", "agent-1", "entry-1")
+
+        self.assertEqual(audio, b"RIFF-audio-data")
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.get")
+    def test_error_status_raises_http_error(self, mock_get, _mock_key):
+        """A failing file request propagates as requests.HTTPError."""
+        mock_get.return_value = make_mock_response(404, content=b"not found")
+
+        with self.assertRaises(requests.HTTPError):
+            PlatformAPIHandler.get_audio_cache_file("studio", "agent-1", "entry-1")
+
+
+class UpdateAudioCacheFile(unittest.TestCase):
+    """Tests for PlatformAPIHandler.update_audio_cache_file."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_sends_raw_bytes_with_wav_content_type(self, mock_request, _mock_key):
+        """The raw audio bytes are sent as the body with a WAV content type."""
+        mock_request.return_value = make_mock_response(204)
+
+        PlatformAPIHandler.update_audio_cache_file(
+            "studio", "agent-1", "entry-1", b"RIFF-new-audio", filename="clip.wav"
+        )
+
+        call = mock_request.call_args
+        self.assertEqual(call.kwargs["method"], "PATCH")
+        self.assertEqual(call.kwargs["data"], b"RIFF-new-audio")
+        self.assertEqual(call.kwargs["headers"]["Content-Type"], "audio/wav")
+        self.assertEqual(call.kwargs["headers"]["X-Filename"], "clip.wav")
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_omits_filename_header_when_not_provided(self, mock_request, _mock_key):
+        """X-Filename is left out of headers entirely when no filename is given."""
+        mock_request.return_value = make_mock_response(204)
+
+        PlatformAPIHandler.update_audio_cache_file("studio", "agent-1", "entry-1", b"data")
+
+        self.assertNotIn("X-Filename", mock_request.call_args.kwargs["headers"])
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_error_status_raises_http_error(self, mock_request, _mock_key):
+        """A failing update propagates as requests.HTTPError."""
+        mock_request.return_value = make_mock_response(400, json_body={"error": "too big"})
+
+        with self.assertRaises(requests.HTTPError):
+            PlatformAPIHandler.update_audio_cache_file("studio", "agent-1", "entry-1", b"data")
+
+
+class UpdateAudioCacheDetails(unittest.TestCase):
+    """Tests for PlatformAPIHandler.update_audio_cache_details."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_sends_multipart_file_and_settings(self, mock_request, _mock_key):
+        """The audio bytes and JSON-encoded settings are sent as multipart form data."""
+        mock_request.return_value = make_mock_response(204)
+
+        PlatformAPIHandler.update_audio_cache_details(
+            "studio",
+            "agent-1",
+            "entry-1",
+            b"RIFF-new-audio",
+            {"text": "hello", "config": {"stability": 0.5}},
+            filename="clip.wav",
+        )
+
+        call = mock_request.call_args
+        self.assertEqual(call.kwargs["method"], "PUT")
+        self.assertEqual(call.kwargs["files"]["file"][0], "clip.wav")
+        self.assertEqual(call.kwargs["files"]["file"][1], b"RIFF-new-audio")
+        sent_settings = json.loads(call.kwargs["data"]["settings"])
+        self.assertEqual(sent_settings, {"text": "hello", "config": {"stability": 0.5}})
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_error_status_raises_http_error(self, mock_request, _mock_key):
+        """A failing update propagates as requests.HTTPError."""
+        mock_request.return_value = make_mock_response(400, json_body={"error": "bad settings"})
+
+        with self.assertRaises(requests.HTTPError):
+            PlatformAPIHandler.update_audio_cache_details(
+                "studio", "agent-1", "entry-1", b"data", {"text": "hi", "config": {}}
+            )
+
+
+class DeleteAudioCacheEntry(unittest.TestCase):
+    """Tests for PlatformAPIHandler.delete_audio_cache_entry."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_sends_delete_to_entry_endpoint(self, mock_request, _mock_key):
+        """DELETE is sent to the entry-specific endpoint."""
+        mock_request.return_value = make_mock_response(200, json_body={"success": True})
+
+        result = PlatformAPIHandler.delete_audio_cache_entry("studio", "agent-1", "entry-1")
+
+        self.assertEqual(mock_request.call_args.kwargs["method"], "DELETE")
+        self.assertIn("/agents/agent-1/audio-cache/entry-1", mock_request.call_args.kwargs["url"])
+        self.assertEqual(result, {"success": True})
+
+
+class BulkDeleteAudioCache(unittest.TestCase):
+    """Tests for PlatformAPIHandler.bulk_delete_audio_cache."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_sends_ids_in_body(self, mock_request, _mock_key):
+        """The list of IDs is JSON-encoded into the request body."""
+        mock_request.return_value = make_mock_response(
+            200, json_body={"deleted": ["1", "2"], "failed": []}
+        )
+
+        result = PlatformAPIHandler.bulk_delete_audio_cache("studio", "agent-1", ["1", "2"])
+
+        sent = json.loads(mock_request.call_args.kwargs["data"])
+        self.assertEqual(sent, {"ids": ["1", "2"]})
+        self.assertEqual(result, {"deleted": ["1", "2"], "failed": []})
+
+
+class SynthesizeAudioCache(unittest.TestCase):
+    """Tests for PlatformAPIHandler.synthesize_audio_cache."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_returns_raw_audio_bytes(self, mock_request, _mock_key):
+        """The raw response content is returned as bytes."""
+        mock_request.return_value = make_mock_response(200, content=b"RIFF-preview-audio")
+
+        audio = PlatformAPIHandler.synthesize_audio_cache(
+            "studio", "agent-1", "entry-1", "hello there", {"stability": 0.5}
+        )
+
+        self.assertEqual(audio, b"RIFF-preview-audio")
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_includes_language_when_provided(self, mock_request, _mock_key):
+        """language is included in the JSON body only when provided."""
+        mock_request.return_value = make_mock_response(200, content=b"audio")
+
+        PlatformAPIHandler.synthesize_audio_cache(
+            "studio", "agent-1", "entry-1", "hi", {}, language="en-US"
+        )
+
+        sent = json.loads(mock_request.call_args.kwargs["data"])
+        self.assertEqual(sent["language"], "en-US")
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_error_status_raises_http_error(self, mock_request, _mock_key):
+        """A failing synthesis request propagates as requests.HTTPError."""
+        mock_request.return_value = make_mock_response(422, json_body={"error": "bad text"})
+
+        with self.assertRaises(requests.HTTPError):
+            PlatformAPIHandler.synthesize_audio_cache("studio", "agent-1", "entry-1", "hi", {})
+
+
 if __name__ == "__main__":
     unittest.main()

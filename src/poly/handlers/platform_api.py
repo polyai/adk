@@ -35,6 +35,12 @@ ROLLBACK_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/rollback"
 CONVERSATIONS_URL = "/v1/agents/{project_id}/conversations"
 CONVERSATION_URL = "/v1/agents/{project_id}/conversations/{conversation_id}"
 CONVERSATION_AUDIO_URL = "/v1/agents/{project_id}/conversations/{conversation_id}/audio"
+AUDIO_CACHE_URL = "/v1/agents/{project_id}/audio-cache"
+AUDIO_CACHE_ENTRY_URL = "/v1/agents/{project_id}/audio-cache/{entry_id}"
+AUDIO_CACHE_FILE_URL = "/v1/agents/{project_id}/audio-cache/{entry_id}/file"
+AUDIO_CACHE_DETAILS_URL = "/v1/agents/{project_id}/audio-cache/{entry_id}/details"
+AUDIO_CACHE_SYNTHESIZE_URL = "/v1/agents/{project_id}/audio-cache/{entry_id}/synthesize"
+AUDIO_CACHE_BULK_DELETE_URL = "/v1/agents/{project_id}/audio-cache/bulk-delete"
 LIST_AGENTS_URL = "/v1/accounts/{account_id}/agents"
 DELETE_AGENT_URL = "/v1/agents/{project_id}"
 DUPLICATE_AGENT_URL = "/v1/agents/{project_id}/duplicate"
@@ -929,6 +935,254 @@ class PlatformAPIHandler:
 
         logger.info(f"Making GET request to {url}")
         response = requests.get(url, headers=headers, params=params, allow_redirects=False)
+
+        logger.debug(
+            f"Request/response url={url!r}"
+            f" status_code={response.status_code!r} content_length={len(response.content)}"
+        )
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError:
+            logger.debug(
+                f"Error in request status_code={response.status_code!r} response={response.text!r}"
+            )
+            raise
+
+        return response.content
+
+    @staticmethod
+    def list_audio_cache(
+        region: str,
+        project_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        sort: ty.Optional[str] = None,
+    ) -> dict:
+        """List cached TTS audio entries for an agent.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            limit: Max entries to return (1-200).
+            offset: Pagination offset.
+            sort: Optional sort expression, e.g. "hit_count:desc".
+
+        Returns:
+            dict: The API response with entries and total_count.
+        """
+        endpoint = AUDIO_CACHE_URL.format(project_id=project_id)
+        params: dict = {"limit": limit, "offset": offset}
+        if sort:
+            params["sort"] = sort
+        return PlatformAPIHandler.make_request(region, endpoint, "GET", params=params)
+
+    @staticmethod
+    def get_audio_cache_file(region: str, project_id: str, entry_id: str) -> bytes:
+        """Download the cached audio file for an audio cache entry.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID.
+
+        Returns:
+            bytes: The raw WAV audio data.
+        """
+        endpoint = AUDIO_CACHE_FILE_URL.format(project_id=project_id, entry_id=entry_id)
+        url = PlatformAPIHandler.get_base_url(region) + endpoint
+        correlation_id = f"adk-{uuid.uuid4()}"
+        headers = {
+            "X-API-KEY": retrieve_api_key(region),
+            "X-PolyAI-Correlation-Id": correlation_id,
+            "X-Poly-Source": "adk",
+        }
+
+        logger.info(f"Making GET request to {url}")
+        response = requests.get(url, headers=headers, allow_redirects=False)
+
+        logger.debug(
+            f"Request/response url={url!r}"
+            f" status_code={response.status_code!r} content_length={len(response.content)}"
+        )
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError:
+            logger.debug(
+                f"Error in request status_code={response.status_code!r} response={response.text!r}"
+            )
+            raise
+
+        return response.content
+
+    @staticmethod
+    def update_audio_cache_file(
+        region: str,
+        project_id: str,
+        entry_id: str,
+        audio_bytes: bytes,
+        filename: ty.Optional[str] = None,
+    ) -> None:
+        """Replace the audio file for an existing cache entry.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID.
+            audio_bytes: Raw WAV audio bytes (max 6MB).
+            filename: Optional filename, sent via the X-Filename header.
+        """
+        endpoint = AUDIO_CACHE_FILE_URL.format(project_id=project_id, entry_id=entry_id)
+        url = PlatformAPIHandler.get_base_url(region) + endpoint
+        correlation_id = f"adk-{uuid.uuid4()}"
+        headers = {
+            "X-API-KEY": retrieve_api_key(region),
+            "X-PolyAI-Correlation-Id": correlation_id,
+            "X-Poly-Source": "adk",
+            "Content-Type": "audio/wav",
+        }
+        if filename:
+            headers["X-Filename"] = filename
+
+        logger.info(f"Making PATCH request to {url}")
+        response = requests.request(
+            method="PATCH", url=url, headers=headers, data=audio_bytes, allow_redirects=False
+        )
+
+        logger.debug(
+            f"Request/response url={url!r}"
+            f" status_code={response.status_code!r} response={response.text!r}"
+        )
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError:
+            logger.debug(
+                f"Error in request status_code={response.status_code!r} response={response.text!r}"
+            )
+            raise
+
+    @staticmethod
+    def update_audio_cache_details(
+        region: str,
+        project_id: str,
+        entry_id: str,
+        audio_bytes: bytes,
+        settings: dict,
+        filename: str = "audio.wav",
+    ) -> None:
+        """Replace both the audio file and voice tuning settings for a cache entry.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID.
+            audio_bytes: Raw WAV audio bytes (max 6MB).
+            settings: Dict with "text" and "config" keys (voice tuning settings).
+            filename: Filename to use for the multipart file part.
+        """
+        endpoint = AUDIO_CACHE_DETAILS_URL.format(project_id=project_id, entry_id=entry_id)
+        url = PlatformAPIHandler.get_base_url(region) + endpoint
+        correlation_id = f"adk-{uuid.uuid4()}"
+        headers = {
+            "X-API-KEY": retrieve_api_key(region),
+            "X-PolyAI-Correlation-Id": correlation_id,
+            "X-Poly-Source": "adk",
+        }
+
+        logger.info(f"Making PUT request to {url}")
+        response = requests.request(
+            method="PUT",
+            url=url,
+            headers=headers,
+            files={"file": (filename, audio_bytes, "audio/wav")},
+            data={"settings": json.dumps(settings)},
+            allow_redirects=False,
+        )
+
+        logger.debug(
+            f"Request/response url={url!r}"
+            f" status_code={response.status_code!r} response={response.text!r}"
+        )
+
+        try:
+            response.raise_for_status()
+        except requests.HTTPError:
+            logger.debug(
+                f"Error in request status_code={response.status_code!r} response={response.text!r}"
+            )
+            raise
+
+    @staticmethod
+    def delete_audio_cache_entry(region: str, project_id: str, entry_id: str) -> dict:
+        """Delete a cached audio entry and its associated audio file.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID.
+
+        Returns:
+            dict: The API response, e.g. {"success": True}.
+        """
+        endpoint = AUDIO_CACHE_ENTRY_URL.format(project_id=project_id, entry_id=entry_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "DELETE")
+
+    @staticmethod
+    def bulk_delete_audio_cache(region: str, project_id: str, ids: list[str]) -> dict:
+        """Delete multiple audio cache entries by ID in a single request.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            ids: List of audio cache entry IDs to delete (max 20).
+
+        Returns:
+            dict: The API response with "deleted" and "failed" ID lists.
+        """
+        endpoint = AUDIO_CACHE_BULK_DELETE_URL.format(project_id=project_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "POST", data={"ids": ids})
+
+    @staticmethod
+    def synthesize_audio_cache(
+        region: str,
+        project_id: str,
+        entry_id: str,
+        text: str,
+        config: dict,
+        language: ty.Optional[str] = None,
+    ) -> bytes:
+        """Generate a TTS audio preview using an existing cache entry's voice config.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID whose voice/provider config to use.
+            text: Text to synthesize.
+            config: Provider-specific voice tuning settings.
+            language: Optional BCP-47 language tag, e.g. "en-US".
+
+        Returns:
+            bytes: The raw WAV audio data (preview only, not saved to cache).
+        """
+        endpoint = AUDIO_CACHE_SYNTHESIZE_URL.format(project_id=project_id, entry_id=entry_id)
+        url = PlatformAPIHandler.get_base_url(region) + endpoint
+        correlation_id = f"adk-{uuid.uuid4()}"
+        headers = {
+            "X-API-KEY": retrieve_api_key(region),
+            "X-PolyAI-Correlation-Id": correlation_id,
+            "X-Poly-Source": "adk",
+            "Content-Type": "application/json",
+        }
+        body: dict = {"text": text, "config": config}
+        if language:
+            body["language"] = language
+
+        logger.info(f"Making POST request to {url}")
+        response = requests.request(
+            method="POST", url=url, headers=headers, data=json.dumps(body), allow_redirects=False
+        )
 
         logger.debug(
             f"Request/response url={url!r}"

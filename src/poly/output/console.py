@@ -854,6 +854,40 @@ def print_conversations(
     console.print(table)
 
 
+def print_audio_cache_entries(entries: list[dict[str, Any]]) -> None:
+    """Print a table of audio cache entry summaries.
+
+    Args:
+        entries: List of audio cache entry dicts (as returned by the
+            audio cache list API).
+    """
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("ID", style="bold yellow", no_wrap=True)
+    table.add_column("Transcript", overflow="fold")
+    table.add_column("Provider", no_wrap=True)
+    table.add_column("Voice", no_wrap=True)
+    table.add_column("Duration", no_wrap=True, justify="right")
+    table.add_column("Hits", no_wrap=True, justify="right")
+    table.add_column("Cached At", no_wrap=True)
+
+    for e in entries:
+        cached_at = e.get("cached_at") or "—"
+        if cached_at != "—":
+            cached_at = _format_iso_timestamp(cached_at)
+        duration = f"{e.get('duration', 0):.1f}s"
+        table.add_row(
+            str(e.get("id", "—")),
+            e.get("transcript", "—"),
+            e.get("provider", "—"),
+            e.get("provider_voice_id", "—"),
+            duration,
+            str(e.get("hit_count", 0)),
+            cached_at,
+        )
+
+    console.print(table)
+
+
 def print_conversation_detail(conversation: dict[str, Any], studio_url: str | None = None) -> None:
     """Print detailed conversation information including turns.
 
