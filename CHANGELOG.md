@@ -1,6 +1,252 @@
 # CHANGELOG
 
 
+## v0.37.2 (2026-08-04)
+
+### Performance Improvements
+
+- Error on merge conflicts instead of dumping every resource
+  ([#240](https://github.com/polyai/adk/pull/240),
+  [`3933d4f`](https://github.com/polyai/adk/commit/3933d4f7496279bae6141d7e98c9784da9c802c0))
+
+## Summary
+
+Makes `poly diff` / `poly status` error clearly on files with unresolved merge conflict markers
+  instead of dumping every resource to scan for them. Removes the last redundant `dump_yaml` from
+  the diff read path.
+
+> Stacked on #239 — this PR targets that branch. Retarget to `main` once #239 merges.
+
+## Motivation
+
+`get_diffs` and `project_status` called `read_from_file` on every kept resource purely to run
+  `contains_merge_conflict`. For multi-resource types that re-serialized the cached sub-dict
+  (`dump_yaml`) — ~892 calls / ~3.4s on a large project — while the check itself is free. It was
+  also the wrong mechanism: a file with conflict markers isn't valid YAML/Python, so it can't be
+  parsed at all. The intended behaviour is to error, not to attempt a diff.
+
+## Changes
+
+- `resources/resource_utils.py`: add `MergeConflictError(ValueError)` and
+  `raise_if_merge_conflicts(files)` (single aggregated, deduped error). - `resources/resource.py`:
+  guard the three parse-read points so a conflicted file raises `MergeConflictError` *before*
+  parsing — `Resource.read_to_raw` (code/doc resources), `YamlResource._read_yaml_dict` (single-file
+  YAML), `MultiResourceYamlResource._get_top_level_data` (multi-resource YAML). Each piggybacks a
+  read already performed (no extra I/O). Deliberately **not** added to the raw
+  `Resource.read_from_file`, which `pull`'s 3-way text merge relies on. - `project.py`:
+  `read_local_resource` re-raises `MergeConflictError` ahead of its generic handler; `get_diffs`
+  collects conflicts across the kept/new loops and raises one aggregated error; `project_status`
+  catches per-resource and still lists conflicted single-file resources.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly diff` / `poly status` on a large
+  project) - [ ] Tested against a live Agent Studio project - [ ] N/A
+
+New tests: `get_diffs` raises for a conflicted single-file resource, for a conflicted multi-resource
+  YAML file, and aggregates multiple conflicted files into one error; `project_status` surfaces a
+  conflicted multi-resource file. Existing pull-with-conflict tests still pass unchanged (pull is
+  untouched).
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (950 passed) - [x] No
+  breaking changes to the `poly` CLI interface - [x] Commit messages follow conventional commits
+
+## Screenshots / Logs
+
+`time poly diff` on a large project (median of 5 warm runs), continuing from #239's baseline:
+
+| | #239 baseline | this PR | |---|---|---| | Wall time | **1.75s** | **0.74s** |
+
+~2.4× faster on top of #239 (and ~5.4× vs. `main`'s 3.97s). Output unchanged (`No changes
+  detected.`).
+
+## Behaviour on conflict
+
+All paths surface a clean, actionable CLI error (no traceback) — e.g. `Merge conflict:
+  config/entities.yaml — resolve the conflict markers before continuing`. The message is derived
+  from the offending path(s) by `MergeConflictError` itself.
+
+- `diff` raises a clear `MergeConflictError` listing every conflicted file (it can't produce a diff
+  of an unparseable file). - `status` lists conflicted files under "Files with merge conflicts" —
+  including multi-resource YAML files (detected at discovery), whose resources are excluded from the
+  new/kept/deleted comparison rather than miscounted as deleted. - `push` raises the same clear
+  error when it reads a conflicted resource, so a half-resolved file is never pushed. - `pull`'s
+  3-way text merge is unchanged (it reads conflicted files as raw text to re-merge); if it needs to
+  *parse* a conflicted local file it raises the same clear error.
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+
+## v0.37.1 (2026-08-04)
+
+### Performance Improvements
+
+- Avoid YAML serialize/reparse roundtrip in multi-resource reads
+  ([#239](https://github.com/polyai/adk/pull/239),
+  [`59be491`](https://github.com/polyai/adk/commit/59be491a16aa3834f174a9b3e1c921a585fbd767))
+
+## Summary
+
+Removes a redundant YAML serialize→reparse roundtrip from the resource read path. Multi-resource
+  reads now use the already-parsed cached dict directly, cutting `poly diff` on a large project from
+  ~4.0s to ~1.8s (2.3×, measured with `time poly diff`).
+
+## Motivation
+
+Profiling `poly diff` on a large agent project showed the time dominated by ruamel.yaml (serialize +
+  parse). The cause: `MultiResourceYamlResource` caches each file already parsed as a dict, but on
+  every resource read it dumped the matching sub-dict back to a YAML string just so the string-based
+  name→ID replacement could run, then immediately reparsed that string into a dict. The dict was
+  squeezed through a string and reconstituted for no benefit (the loader is `typ="safe"`, so no
+  comments/formatting are preserved).
+
+## Changes
+
+- `resource_utils.py`: add `replace_resource_names_with_ids_in_data`, a dict/list-walking equivalent
+  of the existing string replacement; factor the shared lookup/replacer into
+  `_build_reference_replacer` (behaviour of the two string functions is unchanged). - `resource.py`:
+  add a `_read_yaml_dict` read seam. `MultiResourceYamlResource` returns its cached sub-dict via a
+  single `_get_matching` seam that both `read_from_file` (string) and `_read_yaml_dict` (dict)
+  derive from. Move the generic name→ID replacement into the base `from_pretty_dict` (it now walks
+  the dict and returns fresh containers), instead of a whole-string pass in `read_local_resource`. -
+  `flows.py`, `test_suite.py`, `phrase_filter.py`, `variant_attributes.py`: the four
+  `from_pretty_dict` overrides now call `super().from_pretty_dict()` first so they keep the generic
+  replacement. - `languages.py`: `DefaultLanguage` / `AdditionalLanguage` override `_get_matching`
+  (their on-disk form is a bare scalar) instead of `read_from_file`, removing the need for a
+  special-case flag.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly diff` on a large project — output
+  byte-identical, "No changes detected.") - [x] Tested against a live Agent Studio project - [ ] N/A
+  (docs, config, or trivial change)
+
+New unit tests assert the dict-walking replacement matches the old string-path result on nested
+  structures, preserves non-string leaves and keys, does not mutate its input, and honours
+  flow-scoped mappings.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (946 passed) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`time poly diff` on a large project (median of 5 warm runs):
+
+| | Before | After | |---|---|---| | Wall time | **3.97s** | **1.75s** |
+
+~2.3× faster; output unchanged (`No changes detected.`).
+
+_(Earlier drafts of this PR quoted cProfile totals, which inflate ruamel's per-call cost; the above
+  are real `time poly diff` wall-clock numbers.)_
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+
+## v0.37.0 (2026-08-04)
+
+### Continuous Integration
+
+- Add TruffleHog secret scanning on PRs and pushes to main
+  ([#248](https://github.com/polyai/adk/pull/248),
+  [`33ad68f`](https://github.com/polyai/adk/commit/33ad68f11d0d277db550a1c6d95f88c1faec0d2f))
+
+## Summary
+
+Adds automated secret scanning so committed credentials get caught on PRs and on direct pushes to
+  `main`.
+
+## Motivation
+
+Native GitHub secret scanning/push protection are repo-level metadata settings — they don't travel
+  when this repo is forked/copied for integrator engagements, and don't apply to private copies
+  without an org-wide GHAS security configuration. A workflow file lives in repo content instead, so
+  it copies automatically with the repo regardless of where it ends up.
+
+## Changes
+
+- New `.github/workflows/secret-scanning.yml` running [TruffleHog
+  OSS](https://github.com/trufflesecurity/trufflehog) (pinned by commit SHA to `v3.96.0`, not
+  `@main`) on `pull_request` and on `push` to `main`. - Uses `--results=verified,unknown` — flags
+  confirmed-live secrets plus unverifiable-but-suspicious matches, filtering out ones TruffleHog can
+  positively confirm are already dead. - Since a lot of contributors push directly to `main` without
+  going through a PR, a failed scan on a `push` event also opens a GitHub issue, assigns the pusher,
+  and labels it `secret-leak`/`security`, with instructions to rotate the credential immediately
+  (it's already in git history even once removed from `HEAD`).
+
+Out of scope: this detects post-push, it doesn't block the push itself — true prevention needs
+  native GitHub push protection or a required-status-check + branch protection setup, which needs
+  repo admin access to configure separately.
+
+## Test strategy
+
+- [ ] N/A (docs, config, or trivial change)
+
+Workflow syntax has not been exercised against a live PR in this repo yet — first run against this
+  PR itself will be the validation.
+
+## Checklist
+
+- [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/) - [ ]
+  `ruff check .` and `ruff format --check .` pass (no Python changed) - [ ] `pytest` passes (no
+  Python changed) - [ ] No breaking changes to the `poly` CLI interface (or migration path
+  documented) — N/A
+
+### Features
+
+- Add poly audio-cache CLI commands (DEVP-377) ([#246](https://github.com/polyai/adk/pull/246),
+  [`f682c99`](https://github.com/polyai/adk/commit/f682c999c0278cf6dcc4553ff648c1dfc1e28d2f))
+
+## Summary
+
+Adds `poly audio-cache` CLI commands wrapping the Audio Cache public API (poly_core PR #42487) so
+  developers can manage an agent's cached TTS audio without hand-rolled HTTP calls.
+
+## Motivation
+
+[DEVP-377: Create ADK CLI commands for voice cache
+  API](https://linear.app/poly-ai/issue/DEVP-377/create-adk-cli-commands-for-voice-cache-api)
+
+Closes DEVP-377
+
+## Changes
+
+- `poly audio-cache list` — list cached entries with pagination/sorting - `poly audio-cache
+  get-file` — download the cached WAV file - `poly audio-cache update-file` — replace the audio file
+  for an entry - `poly audio-cache update-details` — replace audio + voice tuning settings together
+  - `poly audio-cache delete` / `bulk-delete` — remove one or many entries - `poly audio-cache
+  synthesize` — preview TTS audio without saving to cache - New
+  `PlatformAPIHandler`/`AgentStudioInterface` methods for the above, following the existing
+  `conversations` command pattern (including binary upload/download support, which is new) -
+  `print_audio_cache_entries` table helper in `console.py` - Unit tests for the handler layer
+  (`platform_api_test.py`) and CLI layer (`cli_test.py`) - `cli.md` reference docs for the new
+  command family
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly audio-cache --help` and all
+  subcommand `--help` variants, plus a local file-read/write smoke test) - [ ] Tested against a live
+  Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (974 passed) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow conventional commits
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+
 ## v0.36.3 (2026-07-29)
 
 ### Bug Fixes

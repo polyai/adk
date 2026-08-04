@@ -175,6 +175,9 @@ class FlowConfig(YamlResource):
         **kwargs,
     ) -> dict:
         """Replace start_step name with ID in a parsed YAML dict."""
+        yaml_dict = super().from_pretty_dict(
+            yaml_dict, resource_mappings=resource_mappings, resource_name=resource_name, **kwargs
+        )
         start_step_name = yaml_dict.get("start_step")
         if start_step_name:
             for resource in resource_mappings or []:

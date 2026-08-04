@@ -19,7 +19,7 @@ from dataclasses import fields, is_dataclass
 from difflib import unified_diff
 from enum import Enum
 from io import StringIO
-from typing import TYPE_CHECKING, Optional, Union
+from typing import TYPE_CHECKING, Callable, Optional, Union
 
 import ruamel.yaml as yaml
 
@@ -153,6 +153,29 @@ def get_diff(original: str, updated: str) -> str:
     return "\n".join(diff)
 
 
+class MergeConflictError(ValueError):
+    """Raised when resource file(s) contain unresolved merge conflict markers.
+
+    Callers pass the offending file path(s); the message is derived from them.
+    """
+
+    def __init__(self, file_paths: "str | list[str]"):
+        # dedupe: several resources can share one conflicted multi-resource file
+        paths = [file_paths] if isinstance(file_paths, str) else list(dict.fromkeys(file_paths))
+        self.file_paths = paths
+        if len(paths) == 1:
+            message = f"{paths[0]} — resolve the conflict markers before continuing"
+        else:
+            message = "resolve the conflict markers in:\n- " + "\n- ".join(paths)
+        super().__init__(message)
+
+
+def raise_if_merge_conflicts(conflict_files: list[str]) -> None:
+    """Raise a single aggregated error if any files contain merge conflict markers."""
+    if conflict_files:
+        raise MergeConflictError(conflict_files)
+
+
 def contains_merge_conflict(string: str) -> bool:
     """Check if the string contains merge conflict markers."""
     has_start = False
@@ -278,27 +301,47 @@ def validate_references(
     return len(invalid_references) == 0, invalid_references
 
 
+def _build_reference_replacer(
+    resource_mappings: list["ResourceMapping"],
+    flow_folder_name: str = None,
+    *,
+    names_to_ids: bool,
+) -> "Callable[[re.Match], str]":
+    """Build a regex replacer that rewrites {{prefix:from}} references to {{prefix:to}}.
+
+    Args:
+        resource_mappings: Mappings providing the name<->id lookup.
+        flow_folder_name: Restricts flow-scoped mappings to the current flow.
+        names_to_ids: When True, map names -> ids; when False, ids -> names.
+    """
+    # Build dict for O(1) lookups: (prefix, from) -> to
+    lookup: dict[tuple[str, str], str] = {}
+    for rm in resource_mappings:
+        if rm.flow_name and clean_name(rm.flow_name) not in (None, flow_folder_name):
+            continue
+        if rm.resource_prefix:
+            if names_to_ids:
+                lookup[(rm.resource_prefix, rm.resource_name)] = rm.resource_id
+            else:
+                lookup[(rm.resource_prefix, rm.resource_id)] = rm.resource_name
+
+    def _replacer(match: re.Match) -> str:
+        key = (match.group(1), match.group(2))
+        if key in lookup:
+            return f"{{{{{key[0]}:{lookup[key]}}}}}"
+        return match.group(0)
+
+    return _replacer
+
+
 def replace_resource_ids_with_names(
     prompt: str,
     resource_mappings: list["ResourceMapping"],
     flow_folder_name: str = None,
 ) -> str:
     """Replace resource IDs with names in the prompt string."""
-    # Build dict for O(1) lookups: (prefix, id) -> name
-    id_to_name: dict[tuple[str, str], str] = {}
-    for rm in resource_mappings:
-        if rm.flow_name and clean_name(rm.flow_name) not in (None, flow_folder_name):
-            continue
-        if rm.resource_prefix:
-            id_to_name[(rm.resource_prefix, rm.resource_id)] = rm.resource_name
-
-    def _replacer(match: re.Match) -> str:
-        key = (match.group(1), match.group(2))
-        if key in id_to_name:
-            return f"{{{{{key[0]}:{id_to_name[key]}}}}}"
-        return match.group(0)
-
-    return _REFERENCE_PATTERN.sub(_replacer, prompt)
+    replacer = _build_reference_replacer(resource_mappings, flow_folder_name, names_to_ids=False)
+    return _REFERENCE_PATTERN.sub(replacer, prompt)
 
 
 def replace_resource_names_with_ids(
@@ -307,21 +350,33 @@ def replace_resource_names_with_ids(
     flow_folder_name: str = None,
 ) -> str:
     """Replace resource names with IDs in the prompt string."""
-    # Build dict for O(1) lookups: (prefix, name) -> id
-    name_to_id: dict[tuple[str, str], str] = {}
-    for rm in resource_mappings:
-        if rm.flow_name and clean_name(rm.flow_name) not in (None, flow_folder_name):
-            continue
-        if rm.resource_prefix:
-            name_to_id[(rm.resource_prefix, rm.resource_name)] = rm.resource_id
+    replacer = _build_reference_replacer(resource_mappings, flow_folder_name, names_to_ids=True)
+    return _REFERENCE_PATTERN.sub(replacer, prompt)
 
-    def _replacer(match: re.Match) -> str:
-        key = (match.group(1), match.group(2))
-        if key in name_to_id:
-            return f"{{{{{key[0]}:{name_to_id[key]}}}}}"
-        return match.group(0)
 
-    return _REFERENCE_PATTERN.sub(_replacer, prompt)
+def replace_resource_names_with_ids_in_data(
+    data: object,
+    resource_mappings: list["ResourceMapping"],
+    flow_folder_name: str = None,
+) -> object:
+    """Replace resource names with IDs in every scalar string leaf of a parsed structure.
+
+    Recursively walks dicts and lists, rewriting {{prefix:name}} references in string
+    values; keys and non-string values are left unchanged. Returns freshly constructed
+    dict/list containers.
+    """
+    replacer = _build_reference_replacer(resource_mappings, flow_folder_name, names_to_ids=True)
+
+    def _walk(node: object) -> object:
+        if isinstance(node, dict):
+            return {k: _walk(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [_walk(item) for item in node]
+        if isinstance(node, str):
+            return _REFERENCE_PATTERN.sub(replacer, node)
+        return node
+
+    return _walk(data)
 
 
 def get_flow_id_from_flow_name(
