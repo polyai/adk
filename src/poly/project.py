@@ -2753,9 +2753,11 @@ class AgentStudioProject:
             parent_branch_meta = branch_meta.get(parent_branch_id) or {}
             parent_branch_name = parent_branch_meta.get("name")
             if not parent_branch_name:
-                raise ValueError(
-                    f"Could not find parent branch name for branch ID {parent_branch_id}."
+                logger.warning(
+                    f"Could not resolve parent branch for '{self.branch_id}' "
+                    f"(parentBranchId={parent_branch_id!r}); defaulting to 'main'."
                 )
+                parent_branch_name = "main"
             success, _ = self.switch_branch(parent_branch_name, force=True)
             return success, [], []
 

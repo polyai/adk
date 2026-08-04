@@ -4676,6 +4676,23 @@ class MergeBranchTest(unittest.TestCase):
         )
         self.mock_switch_branch.assert_called_once_with("main", force=True)
 
+    def test_merging_with_unresolvable_parent_falls_back_to_main(self):
+        """If parentBranchId is missing/unresolvable, the merge still succeeds and lands on main."""
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {
+                "branchId": "branch-feature-a",
+                "name": "feature-a",
+                # No parentBranchId — simulates a branch created before lineage tracking existed.
+            },
+        }
+
+        result = self.project.merge_branch("ship it")
+
+        self.assertEqual(result, (True, [], []))
+        self.mock_switch_branch.assert_called_once_with("main", force=True)
+
     def test_merging_grandchild_switches_to_its_parent_branch(self):
         """A branch nested under a release branch lands on that release branch, not main."""
         self._set_current_branch("branch-feature-a")
