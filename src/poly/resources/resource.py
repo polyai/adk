@@ -532,6 +532,7 @@ class MultiResourceYamlResource(YamlResource, ABC):
 
     @classmethod
     def read_from_file(cls, file_path: str) -> str:
+        """Read a single resource's contents from its multi-resource file, as YAML."""
         return utils.dump_yaml(cls._get_matching(file_path))
 
     @classmethod
