@@ -442,21 +442,23 @@ class BranchDeleteTest(unittest.TestCase):
     @patch("questionary.confirm")
     @patch("poly.output.console.error")
     def test_direct_delete_when_project_raises_shows_error(self, mock_error, mock_confirm):
-        """If project.delete_branch raises, the error is shown to the user."""
+        """If project.delete_branch raises, the error is shown to the user and the command exits 1."""
         mock_confirm.return_value.ask.return_value = True
         self.proj.delete_branch.side_effect = ValueError("API failure")
 
-        BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a")
 
         mock_error.assert_called_once()
         self.assertIn("API failure", mock_error.call_args[0][0])
 
     @patch("poly.cli_commands.branch.json_print")
     def test_direct_delete_when_project_raises_json_mode(self, mock_json):
-        """If project.delete_branch raises in JSON mode, error is printed as JSON."""
+        """If project.delete_branch raises in JSON mode, error is printed as JSON and exits 1."""
         self.proj.delete_branch.side_effect = ValueError("API failure")
 
-        BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a", output_json=True)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a", output_json=True)
 
         mock_json.assert_called_once()
         payload = mock_json.call_args[0][0]
@@ -3564,7 +3566,8 @@ class BranchRenameTest(unittest.TestCase):
         """JSON mode outputs error when no name is provided."""
         self.proj.rename_branch.side_effect = ValueError("New branch name must be provided.")
 
-        BranchCommand.branch_rename(TEST_DIR, new_branch_name=None, output_json=True)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_rename(TEST_DIR, new_branch_name=None, output_json=True)
 
         calls = mock_json.call_args_list
         self.assertEqual(len(calls), 2)
@@ -3574,20 +3577,22 @@ class BranchRenameTest(unittest.TestCase):
 
     @patch("poly.output.console.error")
     def test_rename_exception_shows_error(self, mock_error):
-        """When rename_branch raises, the error message is shown."""
+        """When rename_branch raises, the error message is shown and the command exits 1."""
         self.proj.rename_branch.side_effect = ValueError("Branch already exists.")
 
-        BranchCommand.branch_rename(TEST_DIR, new_branch_name="existing")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_rename(TEST_DIR, new_branch_name="existing")
 
         mock_error.assert_called_once()
         self.assertIn("Branch already exists", mock_error.call_args[0][0])
 
     @patch("poly.cli_commands.branch.json_print")
     def test_rename_exception_json(self, mock_json):
-        """JSON mode outputs the error when rename_branch raises."""
+        """JSON mode outputs the error when rename_branch raises, and exits 1."""
         self.proj.rename_branch.side_effect = ValueError("Branch already exists.")
 
-        BranchCommand.branch_rename(TEST_DIR, new_branch_name="existing", output_json=True)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_rename(TEST_DIR, new_branch_name="existing", output_json=True)
 
         mock_json.assert_called_once()
         payload = mock_json.call_args[0][0]
@@ -3703,20 +3708,22 @@ class BranchRestoreTest(unittest.TestCase):
 
     @patch("poly.output.console.error")
     def test_restore_not_found_shows_error(self, mock_error):
-        """When the branch isn't in the archive, the ValueError is shown."""
+        """When the branch isn't in the archive, the ValueError is shown and the command exits 1."""
         self.proj.restore_branch.side_effect = ValueError("not found in archive")
 
-        BranchCommand.branch_restore(TEST_DIR, branch_id="no-such-branch")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_restore(TEST_DIR, branch_id="no-such-branch")
 
         mock_error.assert_called_once()
         self.assertIn("not found in archive", mock_error.call_args[0][0])
 
     @patch("poly.cli_commands.branch.json_print")
     def test_restore_not_found_json(self, mock_json):
-        """JSON mode outputs the error when restore_branch raises."""
+        """JSON mode outputs the error when restore_branch raises, and exits 1."""
         self.proj.restore_branch.side_effect = ValueError("not found in archive")
 
-        BranchCommand.branch_restore(TEST_DIR, branch_id="no-such-branch", output_json=True)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_restore(TEST_DIR, branch_id="no-such-branch", output_json=True)
 
         mock_json.assert_called_once()
         payload = mock_json.call_args[0][0]

@@ -439,7 +439,7 @@ class SourcererSDK:
             response.raise_for_status()
 
             response_data = response.json()
-            logger.info(f"Branch merged successfully, sequence: {response_data.get('sequence')}")
+            logger.info(f"Branch synced successfully, sequence: {response_data.get('sequence')}")
 
             return response_data
 

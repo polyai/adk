@@ -1230,17 +1230,17 @@ class AgentStudioInterface:
         """
         return PlatformAPIHandler.patch_rtc_variables(region, project_id, client_env, variables)
 
-    def get_branch_history(self, branch_name: str) -> list[dict[str, Any]]:
+    def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
         """Get the history of a specific branch.
 
         Args:
-            branch_name (str): The name of the branch
+            branch_id (str): The ID of the branch
 
         Returns:
             list[dict[str, Any]]: A list of commit history entries for the branch
         """
         try:
-            return self.sync_client.get_branch_history(branch_name)
+            return self.sync_client.get_branch_history(branch_id)
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 

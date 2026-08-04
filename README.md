@@ -154,7 +154,7 @@ poly branch merge 'Merge my-feature'   # merge into the parent branch
 poly branch sync                       # pull the parent branch's changes in
 poly branch history                    # merge history for the current branch
 poly branch delete                     # soft-delete, restorable for 30 days
-poly branch restore my-feature         # restore a soft-deleted branch
+poly branch restore my-feature-id      # restore a soft-deleted branch
 ```
 
 Projects using simplified deployments can also stage a branch:

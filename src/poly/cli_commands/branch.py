@@ -806,12 +806,12 @@ class BranchCommand(BaseCommand):
                     return
             try:
                 deleted = project.delete_branch(branch_name)
-            except (ValueError, Exception) as e:
+            except ValueError as e:
                 if output_json:
                     json_print({"success": False, "message": str(e)})
                 else:
                     error(str(e))
-                return
+                sys.exit(1)
             if output_json:
                 result = {"success": deleted}
                 if deleted and branch_name == current_branch:
@@ -877,7 +877,7 @@ class BranchCommand(BaseCommand):
                 else:
                     if not output_json:
                         error(f"Failed to delete branch '{name}'.")
-            except (ValueError, Exception) as e:
+            except ValueError as e:
                 if not output_json:
                     error(str(e))
 
@@ -1640,12 +1640,12 @@ class BranchCommand(BaseCommand):
 
         try:
             renamed = project.rename_branch(new_branch_name)
-        except (ValueError, Exception) as e:
+        except ValueError as e:
             if output_json:
                 json_print({"success": False, "error": str(e)})
             else:
                 error(str(e))
-            return
+            sys.exit(1)
 
         if output_json:
             json_print(
@@ -1723,9 +1723,9 @@ class BranchCommand(BaseCommand):
             selected_branch = branch_by_label[selected]
             try:
                 restored = project.restore_branch(selected_branch["branchId"])
-            except (ValueError, Exception) as e:
+            except ValueError as e:
                 error(str(e))
-                return
+                sys.exit(1)
             if restored:
                 success(f"Branch '{selected_branch.get('name', '—')}' restored.")
             else:
@@ -1734,12 +1734,12 @@ class BranchCommand(BaseCommand):
 
         try:
             restored = project.restore_branch(branch_id)
-        except (ValueError, Exception) as e:
+        except ValueError as e:
             if output_json:
                 json_print({"success": False, "error": str(e)})
             else:
                 error(str(e))
-            return
+            sys.exit(1)
 
         if output_json:
             json_print({"success": restored, "branch_id": branch_id})

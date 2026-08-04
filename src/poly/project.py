@@ -2256,6 +2256,9 @@ class AgentStudioProject:
 
         Returns:
             str: The ID of the newly created branch
+
+        Raises:
+            ValueError: If the branch cannot be created due to deployment mode restrictions
         """
         if self.deployment_mode == DeploymentMode.SIMPLE:
             branches = self.api_handler.get_branches()
@@ -2275,8 +2278,7 @@ class AgentStudioProject:
                 None,
             )
             if current_branch_meta is None or (
-                not current_branch_meta.get("branchId") == "main"
-                and current_branch_meta.get("parentBranchId") != "main"
+                not self.branch_id == "main" and current_branch_meta.get("parentBranchId") != "main"
             ):
                 raise ValueError(
                     "Cannot create branch. Branches with depth above 2 are not allowed in releases-branches deployment mode."
@@ -3661,6 +3663,7 @@ class AgentStudioProject:
 
     @property
     def deployment_mode(self) -> DeploymentMode:
+        """Get the deployment mode for the project."""
         if self._deployment_mode is None:
             cfg = self.get_project_info().get("config") or {}
             self._deployment_mode = DeploymentMode(cfg.get("deployment_mode", "releases"))
@@ -3668,6 +3671,7 @@ class AgentStudioProject:
 
     @cached_property
     def using_simplified_deployments(self) -> bool:
+        """Check if the project is using simplified deployments."""
         return self.api_handler.feature_flag_enabled(
             key="deployment-simplification",
             region=self.region,
