@@ -54,7 +54,7 @@ class TestCaseAssertion(_message.Message):
     def __init__(self, prompt: _Optional[_Union[PromptAssertion, _Mapping]] = ..., function_call: _Optional[_Union[FunctionCallAssertion, _Mapping]] = ...) -> None: ...
 
 class TestCase(_message.Message):
-    __slots__ = ("id", "name", "scenario", "variant_id", "language", "created_by", "created_at", "updated_by", "updated_at", "tags", "simulated_at", "assertions", "channel")
+    __slots__ = ("id", "name", "scenario", "variant_id", "language", "created_by", "created_at", "updated_by", "updated_at", "tags", "simulated_at", "assertions", "channel", "severity")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     SCENARIO_FIELD_NUMBER: _ClassVar[int]
@@ -68,6 +68,7 @@ class TestCase(_message.Message):
     SIMULATED_AT_FIELD_NUMBER: _ClassVar[int]
     ASSERTIONS_FIELD_NUMBER: _ClassVar[int]
     CHANNEL_FIELD_NUMBER: _ClassVar[int]
+    SEVERITY_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     scenario: str
@@ -81,7 +82,8 @@ class TestCase(_message.Message):
     simulated_at: _timestamp_pb2.Timestamp
     assertions: _containers.RepeatedCompositeFieldContainer[TestCaseAssertion]
     channel: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., scenario: _Optional[str] = ..., variant_id: _Optional[str] = ..., language: _Optional[str] = ..., created_by: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., tags: _Optional[_Iterable[str]] = ..., simulated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., assertions: _Optional[_Iterable[_Union[TestCaseAssertion, _Mapping]]] = ..., channel: _Optional[str] = ...) -> None: ...
+    severity: str
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., scenario: _Optional[str] = ..., variant_id: _Optional[str] = ..., language: _Optional[str] = ..., created_by: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., tags: _Optional[_Iterable[str]] = ..., simulated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., assertions: _Optional[_Iterable[_Union[TestCaseAssertion, _Mapping]]] = ..., channel: _Optional[str] = ..., severity: _Optional[str] = ...) -> None: ...
 
 class Create_TestCase(_message.Message):
     __slots__ = ("id", "name", "scenario", "variant_id", "language", "simulated_at", "channel")
@@ -140,3 +142,11 @@ class SetTestCaseTags(_message.Message):
     id: str
     tags: _containers.RepeatedScalarFieldContainer[str]
     def __init__(self, id: _Optional[str] = ..., tags: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class SetTestCaseSeverity(_message.Message):
+    __slots__ = ("id", "severity")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    SEVERITY_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    severity: str
+    def __init__(self, id: _Optional[str] = ..., severity: _Optional[str] = ...) -> None: ...
