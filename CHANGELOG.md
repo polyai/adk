@@ -1,6 +1,102 @@
 # CHANGELOG
 
 
+## v0.37.0 (2026-08-04)
+
+### Continuous Integration
+
+- Add TruffleHog secret scanning on PRs and pushes to main
+  ([#248](https://github.com/polyai/adk/pull/248),
+  [`33ad68f`](https://github.com/polyai/adk/commit/33ad68f11d0d277db550a1c6d95f88c1faec0d2f))
+
+## Summary
+
+Adds automated secret scanning so committed credentials get caught on PRs and on direct pushes to
+  `main`.
+
+## Motivation
+
+Native GitHub secret scanning/push protection are repo-level metadata settings — they don't travel
+  when this repo is forked/copied for integrator engagements, and don't apply to private copies
+  without an org-wide GHAS security configuration. A workflow file lives in repo content instead, so
+  it copies automatically with the repo regardless of where it ends up.
+
+## Changes
+
+- New `.github/workflows/secret-scanning.yml` running [TruffleHog
+  OSS](https://github.com/trufflesecurity/trufflehog) (pinned by commit SHA to `v3.96.0`, not
+  `@main`) on `pull_request` and on `push` to `main`. - Uses `--results=verified,unknown` — flags
+  confirmed-live secrets plus unverifiable-but-suspicious matches, filtering out ones TruffleHog can
+  positively confirm are already dead. - Since a lot of contributors push directly to `main` without
+  going through a PR, a failed scan on a `push` event also opens a GitHub issue, assigns the pusher,
+  and labels it `secret-leak`/`security`, with instructions to rotate the credential immediately
+  (it's already in git history even once removed from `HEAD`).
+
+Out of scope: this detects post-push, it doesn't block the push itself — true prevention needs
+  native GitHub push protection or a required-status-check + branch protection setup, which needs
+  repo admin access to configure separately.
+
+## Test strategy
+
+- [ ] N/A (docs, config, or trivial change)
+
+Workflow syntax has not been exercised against a live PR in this repo yet — first run against this
+  PR itself will be the validation.
+
+## Checklist
+
+- [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/) - [ ]
+  `ruff check .` and `ruff format --check .` pass (no Python changed) - [ ] `pytest` passes (no
+  Python changed) - [ ] No breaking changes to the `poly` CLI interface (or migration path
+  documented) — N/A
+
+### Features
+
+- Add poly audio-cache CLI commands (DEVP-377) ([#246](https://github.com/polyai/adk/pull/246),
+  [`f682c99`](https://github.com/polyai/adk/commit/f682c999c0278cf6dcc4553ff648c1dfc1e28d2f))
+
+## Summary
+
+Adds `poly audio-cache` CLI commands wrapping the Audio Cache public API (poly_core PR #42487) so
+  developers can manage an agent's cached TTS audio without hand-rolled HTTP calls.
+
+## Motivation
+
+[DEVP-377: Create ADK CLI commands for voice cache
+  API](https://linear.app/poly-ai/issue/DEVP-377/create-adk-cli-commands-for-voice-cache-api)
+
+Closes DEVP-377
+
+## Changes
+
+- `poly audio-cache list` — list cached entries with pagination/sorting - `poly audio-cache
+  get-file` — download the cached WAV file - `poly audio-cache update-file` — replace the audio file
+  for an entry - `poly audio-cache update-details` — replace audio + voice tuning settings together
+  - `poly audio-cache delete` / `bulk-delete` — remove one or many entries - `poly audio-cache
+  synthesize` — preview TTS audio without saving to cache - New
+  `PlatformAPIHandler`/`AgentStudioInterface` methods for the above, following the existing
+  `conversations` command pattern (including binary upload/download support, which is new) -
+  `print_audio_cache_entries` table helper in `console.py` - Unit tests for the handler layer
+  (`platform_api_test.py`) and CLI layer (`cli_test.py`) - `cli.md` reference docs for the new
+  command family
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly audio-cache --help` and all
+  subcommand `--help` variants, plus a local file-read/write smoke test) - [ ] Tested against a live
+  Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (974 passed) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow conventional commits
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+
 ## v0.36.3 (2026-07-29)
 
 ### Bug Fixes
