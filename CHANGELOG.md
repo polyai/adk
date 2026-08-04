@@ -1,6 +1,86 @@
 # CHANGELOG
 
 
+## v0.37.2 (2026-08-04)
+
+### Performance Improvements
+
+- Error on merge conflicts instead of dumping every resource
+  ([#240](https://github.com/polyai/adk/pull/240),
+  [`3933d4f`](https://github.com/polyai/adk/commit/3933d4f7496279bae6141d7e98c9784da9c802c0))
+
+## Summary
+
+Makes `poly diff` / `poly status` error clearly on files with unresolved merge conflict markers
+  instead of dumping every resource to scan for them. Removes the last redundant `dump_yaml` from
+  the diff read path.
+
+> Stacked on #239 — this PR targets that branch. Retarget to `main` once #239 merges.
+
+## Motivation
+
+`get_diffs` and `project_status` called `read_from_file` on every kept resource purely to run
+  `contains_merge_conflict`. For multi-resource types that re-serialized the cached sub-dict
+  (`dump_yaml`) — ~892 calls / ~3.4s on a large project — while the check itself is free. It was
+  also the wrong mechanism: a file with conflict markers isn't valid YAML/Python, so it can't be
+  parsed at all. The intended behaviour is to error, not to attempt a diff.
+
+## Changes
+
+- `resources/resource_utils.py`: add `MergeConflictError(ValueError)` and
+  `raise_if_merge_conflicts(files)` (single aggregated, deduped error). - `resources/resource.py`:
+  guard the three parse-read points so a conflicted file raises `MergeConflictError` *before*
+  parsing — `Resource.read_to_raw` (code/doc resources), `YamlResource._read_yaml_dict` (single-file
+  YAML), `MultiResourceYamlResource._get_top_level_data` (multi-resource YAML). Each piggybacks a
+  read already performed (no extra I/O). Deliberately **not** added to the raw
+  `Resource.read_from_file`, which `pull`'s 3-way text merge relies on. - `project.py`:
+  `read_local_resource` re-raises `MergeConflictError` ahead of its generic handler; `get_diffs`
+  collects conflicts across the kept/new loops and raises one aggregated error; `project_status`
+  catches per-resource and still lists conflicted single-file resources.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly diff` / `poly status` on a large
+  project) - [ ] Tested against a live Agent Studio project - [ ] N/A
+
+New tests: `get_diffs` raises for a conflicted single-file resource, for a conflicted multi-resource
+  YAML file, and aggregates multiple conflicted files into one error; `project_status` surfaces a
+  conflicted multi-resource file. Existing pull-with-conflict tests still pass unchanged (pull is
+  untouched).
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (950 passed) - [x] No
+  breaking changes to the `poly` CLI interface - [x] Commit messages follow conventional commits
+
+## Screenshots / Logs
+
+`time poly diff` on a large project (median of 5 warm runs), continuing from #239's baseline:
+
+| | #239 baseline | this PR | |---|---|---| | Wall time | **1.75s** | **0.74s** |
+
+~2.4× faster on top of #239 (and ~5.4× vs. `main`'s 3.97s). Output unchanged (`No changes
+  detected.`).
+
+## Behaviour on conflict
+
+All paths surface a clean, actionable CLI error (no traceback) — e.g. `Merge conflict:
+  config/entities.yaml — resolve the conflict markers before continuing`. The message is derived
+  from the offending path(s) by `MergeConflictError` itself.
+
+- `diff` raises a clear `MergeConflictError` listing every conflicted file (it can't produce a diff
+  of an unparseable file). - `status` lists conflicted files under "Files with merge conflicts" —
+  including multi-resource YAML files (detected at discovery), whose resources are excluded from the
+  new/kept/deleted comparison rather than miscounted as deleted. - `push` raises the same clear
+  error when it reads a conflicted resource, so a half-resolved file is never pushed. - `pull`'s
+  3-way text merge is unchanged (it reads conflicted files as raw text to re-merge); if it needs to
+  *parse* a conflicted local file it raises the same clear error.
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+
 ## v0.37.1 (2026-08-04)
 
 ### Performance Improvements
