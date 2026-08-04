@@ -1,6 +1,76 @@
 # CHANGELOG
 
 
+## v0.37.1 (2026-08-04)
+
+### Performance Improvements
+
+- Avoid YAML serialize/reparse roundtrip in multi-resource reads
+  ([#239](https://github.com/polyai/adk/pull/239),
+  [`59be491`](https://github.com/polyai/adk/commit/59be491a16aa3834f174a9b3e1c921a585fbd767))
+
+## Summary
+
+Removes a redundant YAML serialize→reparse roundtrip from the resource read path. Multi-resource
+  reads now use the already-parsed cached dict directly, cutting `poly diff` on a large project from
+  ~4.0s to ~1.8s (2.3×, measured with `time poly diff`).
+
+## Motivation
+
+Profiling `poly diff` on a large agent project showed the time dominated by ruamel.yaml (serialize +
+  parse). The cause: `MultiResourceYamlResource` caches each file already parsed as a dict, but on
+  every resource read it dumped the matching sub-dict back to a YAML string just so the string-based
+  name→ID replacement could run, then immediately reparsed that string into a dict. The dict was
+  squeezed through a string and reconstituted for no benefit (the loader is `typ="safe"`, so no
+  comments/formatting are preserved).
+
+## Changes
+
+- `resource_utils.py`: add `replace_resource_names_with_ids_in_data`, a dict/list-walking equivalent
+  of the existing string replacement; factor the shared lookup/replacer into
+  `_build_reference_replacer` (behaviour of the two string functions is unchanged). - `resource.py`:
+  add a `_read_yaml_dict` read seam. `MultiResourceYamlResource` returns its cached sub-dict via a
+  single `_get_matching` seam that both `read_from_file` (string) and `_read_yaml_dict` (dict)
+  derive from. Move the generic name→ID replacement into the base `from_pretty_dict` (it now walks
+  the dict and returns fresh containers), instead of a whole-string pass in `read_local_resource`. -
+  `flows.py`, `test_suite.py`, `phrase_filter.py`, `variant_attributes.py`: the four
+  `from_pretty_dict` overrides now call `super().from_pretty_dict()` first so they keep the generic
+  replacement. - `languages.py`: `DefaultLanguage` / `AdditionalLanguage` override `_get_matching`
+  (their on-disk form is a bare scalar) instead of `read_from_file`, removing the need for a
+  special-case flag.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly diff` on a large project — output
+  byte-identical, "No changes detected.") - [x] Tested against a live Agent Studio project - [ ] N/A
+  (docs, config, or trivial change)
+
+New unit tests assert the dict-walking replacement matches the old string-path result on nested
+  structures, preserves non-string leaves and keys, does not mutate its input, and honours
+  flow-scoped mappings.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (946 passed) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`time poly diff` on a large project (median of 5 warm runs):
+
+| | Before | After | |---|---|---| | Wall time | **3.97s** | **1.75s** |
+
+~2.3× faster; output unchanged (`No changes detected.`).
+
+_(Earlier drafts of this PR quoted cProfile totals, which inflate ruamel's per-call cost; the above
+  are real `time poly diff` wall-clock numbers.)_
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+
 ## v0.37.0 (2026-08-04)
 
 ### Continuous Integration
