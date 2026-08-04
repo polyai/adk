@@ -28,7 +28,10 @@ from poly.resources import (
     Variant,
     VariantAttribute,
 )
-from poly.utils.commands import create_command_webchat_channel_update_status
+from poly.utils.commands import (
+    create_command_clear_flow_settings,
+    create_command_webchat_channel_update_status,
+)
 from poly.utils.variable_references import compute_variable_references
 
 ResourceMap: TypeAlias = dict[type[Resource], dict[str, Resource]]
@@ -407,3 +410,37 @@ def fix_conditions_for_deleted_steps(
             if deleted_original_step:
                 new_resources.setdefault(Condition, {})[condition_id] = condition
                 updated_resources.get(Condition, {}).pop(condition_id, None)
+
+
+def clear_unused_settings_from_flow_step(
+    updated_resources: ResourceMap,
+    current_resources: ResourceMap,
+    queue_command: Callable[..., None],
+):
+    """If a flow step settings is being updated and a setting is cleared it isn't sent in the proto update command.
+    The backend will read this as not updated rather than cleared.
+
+    This function queues a new update command with the cleared settings to ensure they are cleared in the backend.
+    """
+    for flow_step_id, updated_step in updated_resources.get(FlowStep, {}).items():
+        updated_step: FlowStep
+        original_step: FlowStep = current_resources.get(FlowStep, {}).get(flow_step_id)
+        if not original_step:
+            continue  # Step not in current state (e.g. new step from linked project sync)
+        if not original_step.settings and not updated_step.settings:
+            continue  # No settings to compare
+
+        cleared_settings = set()
+        if original_step.settings and updated_step.settings:
+            original_keys = set(original_step.settings.to_yaml_dict().keys())
+            updated_keys = set(updated_step.settings.to_yaml_dict().keys())
+            cleared_settings = original_keys - updated_keys
+
+        if cleared_settings:
+            queue_command(
+                create_command_clear_flow_settings(
+                    flow_id=updated_step.flow_id,
+                    step_id=updated_step.step_id,
+                    cleared_fields=list(cleared_settings),
+                )
+            )
