@@ -8,7 +8,7 @@ import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from typing import Optional
 
-from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project
 from poly.output.console import edit_in_editor, error, info, success, warning
 from poly.output.json_output import json_print
@@ -123,6 +123,8 @@ class RTCCommand(BaseCommand):
     """Manage Real-Time Configuration for the project."""
 
     command = "rtc"
+
+    group = BUILDER_API_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:

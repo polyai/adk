@@ -11,7 +11,7 @@ import sys
 from argparse import SUPPRESS, ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from contextlib import nullcontext
 
-from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.base import PROJECT_SYNC_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import (
     compute_diff,
     load_project,
@@ -27,6 +27,8 @@ class PullCommand(BaseCommand):
     """Pull the latest project configuration from Agent Studio."""
 
     command = "pull"
+
+    group = PROJECT_SYNC_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
@@ -180,6 +182,8 @@ class PushCommand(BaseCommand):
     """Push the project configuration to Agent Studio."""
 
     command = "push"
+
+    group = PROJECT_SYNC_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
@@ -365,6 +369,8 @@ class StatusCommand(BaseCommand):
 
     command = "status"
 
+    group = PROJECT_SYNC_GROUP
+
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
         """Register the ``status`` subcommand."""
@@ -400,6 +406,8 @@ class RevertCommand(BaseCommand):
     """Revert changes in the project."""
 
     command = "revert"
+
+    group = PROJECT_SYNC_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
@@ -465,6 +473,8 @@ class DiffCommand(BaseCommand):
     """Show the changes made to the project."""
 
     command = "diff"
+
+    group = PROJECT_SYNC_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
@@ -566,6 +576,8 @@ class FormatCommand(BaseCommand):
     """Format project resources (Python via ruff, YAML/JSON via in-process formatting)."""
 
     command = "format"
+
+    group = PROJECT_SYNC_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
@@ -760,6 +772,8 @@ class ValidateCommand(BaseCommand):
     """Validate the project configuration locally."""
 
     command = "validate"
+
+    group = PROJECT_SYNC_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:

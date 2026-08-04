@@ -11,17 +11,57 @@ import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from typing import Any, Optional
 
-from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.base import (
+    BUILDER_API_GROUP,
+    BaseCommand,
+    GroupedRawTextHelpFormatter,
+    Parents,
+    add_grouped_subparsers,
+    group_subcommands,
+)
 from poly.cli_commands.shared import load_project
 from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.platform_api import FunctionConflictError
 from poly.output.json_output import json_print
+
+# Section headers for `poly functions --help`: CRUD on individual functions,
+# then running/inspecting them, then deploying, then the branch lifecycle hooks.
+FUNCTIONS_MANAGE_GROUP = "Manage"
+FUNCTIONS_RUN_GROUP = "Run and inspect"
+FUNCTIONS_DEPLOY_GROUP = "Deploy"
+FUNCTIONS_HOOKS_GROUP = "Lifecycle hooks"
+
+FUNCTIONS_SUBCOMMAND_GROUP_ORDER = [
+    FUNCTIONS_MANAGE_GROUP,
+    FUNCTIONS_RUN_GROUP,
+    FUNCTIONS_DEPLOY_GROUP,
+    FUNCTIONS_HOOKS_GROUP,
+]
+
+FUNCTIONS_SUBCOMMAND_GROUPS = {
+    "list": FUNCTIONS_MANAGE_GROUP,
+    "get": FUNCTIONS_MANAGE_GROUP,
+    "create": FUNCTIONS_MANAGE_GROUP,
+    "update": FUNCTIONS_MANAGE_GROUP,
+    "delete": FUNCTIONS_MANAGE_GROUP,
+    "duplicate": FUNCTIONS_MANAGE_GROUP,
+    "execute": FUNCTIONS_RUN_GROUP,
+    "references": FUNCTIONS_RUN_GROUP,
+    "type-definitions": FUNCTIONS_RUN_GROUP,
+    "validate": FUNCTIONS_DEPLOY_GROUP,
+    "deploy": FUNCTIONS_DEPLOY_GROUP,
+    "deployments": FUNCTIONS_DEPLOY_GROUP,
+    "start": FUNCTIONS_HOOKS_GROUP,
+    "end": FUNCTIONS_HOOKS_GROUP,
+}
 
 
 class FunctionsCommand(BaseCommand):
     """Manage Functions via the public Functions REST API."""
 
     command = "functions"
+
+    group = BUILDER_API_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
@@ -40,11 +80,11 @@ class FunctionsCommand(BaseCommand):
                 "  poly functions execute <function_id> --args '{\"x\": 1}'\n"
                 "  poly functions deploy\n"
             ),
-            formatter_class=RawTextHelpFormatter,
+            formatter_class=GroupedRawTextHelpFormatter,
         )
 
-        functions_subparsers = functions_parser.add_subparsers(
-            dest="functions_subcommand", required=True
+        functions_subparsers = add_grouped_subparsers(
+            functions_parser, dest="functions_subcommand", metavar="<subcommand>"
         )
 
         list_parser = functions_subparsers.add_parser(
@@ -348,6 +388,10 @@ class FunctionsCommand(BaseCommand):
             metavar="FILE",
             dest="code_file",
             help="Local path to the replacement end_function source.",
+        )
+
+        group_subcommands(
+            functions_subparsers, FUNCTIONS_SUBCOMMAND_GROUPS, FUNCTIONS_SUBCOMMAND_GROUP_ORDER
         )
 
     @classmethod

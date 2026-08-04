@@ -7,7 +7,7 @@ import os
 import sys
 from argparse import ArgumentParser, Namespace, _SubParsersAction
 
-from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.project import ProjectCommand
 from poly.handlers.auth0_handler import Auth0Handler
 from poly.handlers.interface import REGIONS, AgentStudioInterface
@@ -115,6 +115,8 @@ class StartCommand(BaseCommand):
     """Create a new Agent Studio account, set up API key, and create a first project."""
 
     command = "start"
+
+    group = GETTING_STARTED_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
@@ -225,6 +227,8 @@ class LoginCommand(BaseCommand):
     """Log in to an existing Agent Studio account and save API key credentials."""
 
     command = "login"
+
+    group = GETTING_STARTED_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:

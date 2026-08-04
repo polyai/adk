@@ -5,16 +5,35 @@ Copyright PolyAI Limited
 
 import os
 import unittest
+from argparse import ArgumentParser, _SubParsersAction
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
 from poly.cli import AgentStudioCLI
 from poly.cli_commands.audio_cache import AudioCacheCommand
-from poly.cli_commands.branch import BranchCommand
+from poly.cli_commands.base import (
+    BUILDER_API_GROUP,
+    COMMAND_GROUP_ORDER,
+    OTHER_GROUP,
+    GroupedHelpFormatter,
+    add_grouped_subparsers,
+    group_subcommands,
+)
+from poly.cli_commands.branch import (
+    BRANCH_INSPECT_GROUP,
+    BRANCH_LIFECYCLE_GROUP,
+    BRANCH_SUBCOMMAND_GROUPS,
+    BranchCommand,
+)
 from poly.cli_commands.chat import ChatCommand
 from poly.cli_commands.conversations import ConversationsCommand
 from poly.cli_commands.deployments import DeploymentsCommand
-from poly.cli_commands.functions import FunctionsCommand
+from poly.cli_commands.functions import (
+    FUNCTIONS_HOOKS_GROUP,
+    FUNCTIONS_SUBCOMMAND_GROUP_ORDER,
+    FUNCTIONS_SUBCOMMAND_GROUPS,
+    FunctionsCommand,
+)
 from poly.cli_commands.project import InitCommand, ProjectCommand
 from poly.cli_commands.shared import compute_diff
 from poly.cli_commands.sync import FormatCommand, RevertCommand
@@ -3405,3 +3424,212 @@ class FunctionsCommandTest(unittest.TestCase):
             FunctionsCommand.functions_start_update(TEST_DIR, "/tmp/missing.py")
 
         mock_error.assert_called_once()
+
+
+# argparse wraps the usage line to the terminal width, which differs between the
+# Linux and Windows CI runners. Pin it so grouped-help assertions are stable.
+HELP_TEST_COLUMNS = "100"
+
+
+def _format_help_at_fixed_width(parser) -> str:
+    """Render a parser's help text at a fixed terminal width."""
+    with patch.dict(os.environ, {"COLUMNS": HELP_TEST_COLUMNS}):
+        return parser.format_help()
+
+
+def _help_body(help_text: str) -> str:
+    """Return the help text after the usage block, which may wrap over lines."""
+    _usage, _, body = help_text.partition("\n\n")
+    return body
+
+
+class GroupedHelpOutputTest(unittest.TestCase):
+    """Tests for the grouped section headers in `poly --help`."""
+
+    def setUp(self):
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        self.commands = cli.commands
+        self.help_text = _format_help_at_fixed_width(cli._create_parser())
+
+    def test_every_command_has_a_known_group(self):
+        """A command with a typo'd group would be silently dropped from its section."""
+        for command in self.commands:
+            self.assertIn(command.group, COMMAND_GROUP_ORDER, msg=command.command)
+
+    def test_every_command_is_listed_once(self):
+        """No command disappears from the help output when it is regrouped."""
+        for command in self.commands:
+            with self.subTest(command=command.command):
+                self.assertIn(f"    {command.command} ", self.help_text)
+
+    def test_headers_appear_in_declared_order(self):
+        """Sections render in COMMAND_GROUP_ORDER, not registration order."""
+        positions = [
+            self.help_text.index(f"\n{title}:")
+            for title in COMMAND_GROUP_ORDER
+            if f"\n{title}:" in self.help_text
+        ]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_builder_api_group_lists_api_backed_commands(self):
+        """The Builder API section holds the REST-API-backed command families."""
+        section = self.help_text.split(f"\n{BUILDER_API_GROUP}:")[1]
+        section = section.split(f"\n{OTHER_GROUP}:")[0]
+
+        for command in ["functions", "conversations", "audio-cache", "deployments"]:
+            self.assertIn(command, section)
+        self.assertNotIn("pull", section)
+
+    def test_commands_are_listed_before_options(self):
+        """Commands matter more than -h/-v, so they come first."""
+        self.assertLess(
+            self.help_text.index(f"{COMMAND_GROUP_ORDER[0]}:"),
+            self.help_text.index("options:"),
+        )
+
+    def test_no_trailing_whitespace_or_blank_runs(self):
+        """The header mechanism must not leave ragged whitespace behind."""
+        lines = self.help_text.split("\n")
+        self.assertEqual([line for line in lines if line != line.rstrip()], [])
+        self.assertNotIn("\n\n\n", self.help_text)
+
+    def test_subparsers_placeholder_line_is_hidden(self):
+        """The <command> metavar belongs in the usage line, not the body."""
+        self.assertIn("<command>", self.help_text.partition("\n\n")[0])
+        self.assertNotIn("<command>", _help_body(self.help_text))
+
+    def test_unknown_group_still_renders(self):
+        """A subcommand with an unrecognised group is shown rather than dropped."""
+        parser = ArgumentParser(formatter_class=GroupedHelpFormatter)
+        subparsers = add_grouped_subparsers(parser, dest="command", metavar="<command>")
+        subparsers.add_parser("known", help="A grouped command.")
+        subparsers.add_parser("stray", help="A stray command.")
+
+        group_subcommands(
+            subparsers,
+            {"known": BUILDER_API_GROUP, "stray": "Not A Real Group"},
+            [BUILDER_API_GROUP],
+        )
+
+        help_text = parser.format_help()
+        self.assertIn("stray", help_text)
+        self.assertIn(f"{OTHER_GROUP}:", help_text)
+
+    def test_unmapped_subcommand_falls_back(self):
+        """A subcommand absent from the mapping still appears, under the fallback."""
+        parser = ArgumentParser(formatter_class=GroupedHelpFormatter)
+        subparsers = add_grouped_subparsers(parser, dest="command", metavar="<command>")
+        subparsers.add_parser("forgotten", help="Never assigned a group.")
+
+        group_subcommands(subparsers, {}, [BUILDER_API_GROUP], fallback_group="Leftovers")
+
+        help_text = parser.format_help()
+        self.assertIn("Leftovers:", help_text)
+        self.assertIn("forgotten", help_text)
+
+
+class GroupedBranchHelpOutputTest(unittest.TestCase):
+    """Tests for the grouped section headers in `poly branch --help`."""
+
+    def setUp(self):
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        parser = cli._create_parser()
+        branch_action = [a for a in parser._actions if isinstance(a, _SubParsersAction)][0]
+        self.help_text = _format_help_at_fixed_width(branch_action.choices["branch"])
+
+    def test_every_branch_subcommand_is_grouped(self):
+        """The mapping must cover every registered branch subcommand."""
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        parser = cli._create_parser()
+        branch_action = [a for a in parser._actions if isinstance(a, _SubParsersAction)][0]
+        branch_parser = branch_action.choices["branch"]
+        registered = [
+            a for a in branch_parser._actions if isinstance(a, _SubParsersAction)
+        ][0].choices
+
+        self.assertEqual(set(registered), set(BRANCH_SUBCOMMAND_GROUPS))
+
+    def test_lifecycle_and_inspect_sections_render(self):
+        """Both sections appear, lifecycle first."""
+        self.assertIn(f"{BRANCH_LIFECYCLE_GROUP}:", self.help_text)
+        self.assertIn(f"{BRANCH_INSPECT_GROUP}:", self.help_text)
+        self.assertLess(
+            self.help_text.index(f"{BRANCH_LIFECYCLE_GROUP}:"),
+            self.help_text.index(f"{BRANCH_INSPECT_GROUP}:"),
+        )
+
+    def test_inspect_section_holds_read_only_subcommands(self):
+        """diff/review/status are grouped as inspection, not lifecycle."""
+        inspect_section = self.help_text.split(f"{BRANCH_INSPECT_GROUP}:")[1]
+
+        for subcommand in ["diff", "review", "status"]:
+            self.assertIn(subcommand, inspect_section)
+        for subcommand in ["create", "switch", "merge"]:
+            self.assertNotIn(f"    {subcommand} ", inspect_section)
+
+    def test_description_examples_are_still_raw(self):
+        """The hand-formatted example block must survive the grouped formatter."""
+        self.assertIn("  poly branch create new-branch", self.help_text)
+
+    def test_no_placeholder_or_ragged_whitespace(self):
+        """Same cleanup guarantees as the root parser."""
+        self.assertNotIn("<subcommand>", _help_body(self.help_text))
+        self.assertNotIn("positional arguments:", self.help_text)
+        self.assertNotIn("\n\n\n", self.help_text)
+        lines = self.help_text.split("\n")
+        self.assertEqual([line for line in lines if line != line.rstrip()], [])
+
+
+class GroupedFunctionsHelpOutputTest(unittest.TestCase):
+    """Tests for the grouped section headers in `poly functions --help`."""
+
+    def _functions_parser(self):
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        parser = cli._create_parser()
+        root = [a for a in parser._actions if isinstance(a, _SubParsersAction)][0]
+        return root.choices["functions"]
+
+    def setUp(self):
+        self.help_text = _format_help_at_fixed_width(self._functions_parser())
+
+    def test_every_functions_subcommand_is_grouped(self):
+        """The mapping must cover every registered functions subcommand."""
+        functions_parser = self._functions_parser()
+        registered = [
+            a for a in functions_parser._actions if isinstance(a, _SubParsersAction)
+        ][0].choices
+
+        self.assertEqual(set(registered), set(FUNCTIONS_SUBCOMMAND_GROUPS))
+
+    def test_all_sections_render_in_order(self):
+        """Every section appears, in the declared order."""
+        positions = []
+        for title in FUNCTIONS_SUBCOMMAND_GROUP_ORDER:
+            self.assertIn(f"{title}:", self.help_text)
+            positions.append(self.help_text.index(f"{title}:"))
+
+        self.assertEqual(positions, sorted(positions))
+
+    def test_lifecycle_hooks_section_holds_start_and_end(self):
+        """start/end are the branch hooks, not per-function operations."""
+        hooks_section = self.help_text.split(f"{FUNCTIONS_HOOKS_GROUP}:")[1]
+
+        self.assertIn("start", hooks_section)
+        self.assertIn("end", hooks_section)
+        self.assertNotIn("    create ", hooks_section)
+
+    def test_description_examples_are_still_raw(self):
+        """The hand-formatted example block must survive the grouped formatter."""
+        self.assertIn("  poly functions get <function_id>", self.help_text)
+
+    def test_no_placeholder_or_ragged_whitespace(self):
+        """Same cleanup guarantees as the other grouped parsers."""
+        self.assertNotIn("<subcommand>", _help_body(self.help_text))
+        self.assertNotIn("positional arguments:", self.help_text)
+        self.assertNotIn("\n\n\n", self.help_text)
+        lines = self.help_text.split("\n")
+        self.assertEqual([line for line in lines if line != line.rstrip()], [])

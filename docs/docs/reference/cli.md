@@ -16,6 +16,15 @@ To see all available commands and options:
 poly --help
 ~~~
 
+Commands are listed under section headers so related ones stay together:
+
+| Section | Commands |
+|---|---|
+| Getting started | `init`, `start`, `login`, `studio`, `project` |
+| Project sync | `pull`, `push`, `status`, `revert`, `format`, `validate`, `diff`, `review`, `branch` |
+| Builder API | `deployments`, `conversations`, `audio-cache`, `functions`, `test`, `rtc`, `chat` |
+| Other | `docs`, `completion` |
+
 Each command also supports its own help output. For example:
 
 ~~~bash
@@ -262,7 +271,9 @@ poly revert file1.yaml file2.yaml
 
 ### `poly branch`
 
-Manage project branches.
+Manage project branches. `poly branch --help` splits its subcommands into
+**Branch lifecycle** (`list`, `create`, `switch`, `current`, `delete`, `merge`)
+and **Inspect** (`diff`, `review`, `status`).
 
 Examples:
 
@@ -687,7 +698,14 @@ Manage Functions using the public Functions REST API, scoped to the project's cu
 
     This is a different mechanism from the local `functions/*.py` files synced by `poly pull` / `poly push` (see [Functions](functions.md)). `poly functions` talks to the Functions REST API directly and does not read or write local function files.
 
-`poly functions` requires a subcommand: `list`, `get`, `create`, `update`, `delete`, `execute`, `duplicate`, `deploy`, `validate`, `references`, `type-definitions`, `deployments`, `start`, or `end`.
+`poly functions --help` splits its subcommands into four sections:
+
+| Section | Subcommands |
+|---|---|
+| Manage | `list`, `get`, `create`, `update`, `delete`, `duplicate` |
+| Run and inspect | `execute`, `references`, `type-definitions` |
+| Deploy | `validate`, `deploy`, `deployments` |
+| Lifecycle hooks | `start`, `end` |
 
 Examples:
 

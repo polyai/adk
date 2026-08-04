@@ -14,7 +14,14 @@ import argcomplete
 
 from poly.cli_commands.audio_cache import AudioCacheCommand
 from poly.cli_commands.auth import LoginCommand, StartCommand
-from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.base import (
+    COMMAND_GROUP_ORDER,
+    BaseCommand,
+    GroupedHelpFormatter,
+    Parents,
+    add_grouped_subparsers,
+    group_subcommands,
+)
 from poly.cli_commands.branch import BranchCommand
 from poly.cli_commands.chat import ChatCommand
 from poly.cli_commands.conversations import ConversationsCommand
@@ -79,7 +86,7 @@ class AgentStudioCLI:
             _version = get_package_version("polyai-adk")
         except Exception:
             _version = "unknown"
-        parser = ArgumentParser()
+        parser = ArgumentParser(formatter_class=GroupedHelpFormatter)
         parser.add_argument(
             "-v",
             "--version",
@@ -123,10 +130,17 @@ class AgentStudioCLI:
             verbose=verbose_parent, json=json_parent, debug=debug_parent, path=path_parent
         )
 
-        subparsers = parser.add_subparsers(dest="command", required=True)
+        subparsers = add_grouped_subparsers(parser, dest="command", metavar="<command>")
 
         for command in self.commands:
             command.add_arguments(subparsers, parents=parents)
+
+        # Split the (long) flat command list into titled sections for --help.
+        group_subcommands(
+            subparsers,
+            {command.command: command.group for command in self.commands},
+            COMMAND_GROUP_ORDER,
+        )
 
         return parser
 
