@@ -119,6 +119,7 @@ class DefaultLanguage(MultiResourceYamlResource):
 
     @classmethod
     def _get_matching(cls, file_path: str) -> dict:
+        """Return the default language as a dict, reshaped from its bare scalar on-disk form."""
         true_file_path, _ = _parse_multi_resource_path(file_path)
         value = cls._get_top_level_data(true_file_path).get("default_language")
         if not value:
@@ -240,6 +241,8 @@ class AdditionalLanguage(MultiResourceYamlResource):
 
     @classmethod
     def _get_matching(cls, file_path: str) -> dict:
+        """Return the named additional language as a dict, reshaped from its bare scalar
+        on-disk form."""
         true_file_path, segments = _parse_multi_resource_path(file_path)
         resource_name = segments[-1]
         additional = cls._get_top_level_data(true_file_path).get("additional_languages") or []

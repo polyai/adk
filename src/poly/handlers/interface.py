@@ -1028,6 +1028,140 @@ class AgentStudioInterface:
         )
 
     @staticmethod
+    def list_audio_cache(
+        region: str,
+        project_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        sort: Optional[str] = None,
+    ) -> dict:
+        """List cached TTS audio entries for an agent.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            limit: Max entries to return (1-200).
+            offset: Pagination offset.
+            sort: Optional sort expression, e.g. "hit_count:desc".
+
+        Returns:
+            dict: The API response with entries and total_count.
+        """
+        return PlatformAPIHandler.list_audio_cache(region, project_id, limit, offset, sort)
+
+    @staticmethod
+    def get_audio_cache_file(region: str, project_id: str, entry_id: str) -> bytes:
+        """Download the cached audio file for an audio cache entry.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID.
+
+        Returns:
+            bytes: The raw WAV audio data.
+        """
+        return PlatformAPIHandler.get_audio_cache_file(region, project_id, entry_id)
+
+    @staticmethod
+    def update_audio_cache_file(
+        region: str,
+        project_id: str,
+        entry_id: str,
+        audio_bytes: bytes,
+        filename: Optional[str] = None,
+    ) -> None:
+        """Replace the audio file for an existing cache entry.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID.
+            audio_bytes: Raw WAV audio bytes (max 6MB).
+            filename: Optional filename, sent via the X-Filename header.
+        """
+        PlatformAPIHandler.update_audio_cache_file(
+            region, project_id, entry_id, audio_bytes, filename
+        )
+
+    @staticmethod
+    def update_audio_cache_details(
+        region: str,
+        project_id: str,
+        entry_id: str,
+        audio_bytes: bytes,
+        settings: dict,
+        filename: str = "audio.wav",
+    ) -> None:
+        """Replace both the audio file and voice tuning settings for a cache entry.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID.
+            audio_bytes: Raw WAV audio bytes (max 6MB).
+            settings: Dict with "text" and "config" keys (voice tuning settings).
+            filename: Filename to use for the multipart file part.
+        """
+        PlatformAPIHandler.update_audio_cache_details(
+            region, project_id, entry_id, audio_bytes, settings, filename
+        )
+
+    @staticmethod
+    def delete_audio_cache_entry(region: str, project_id: str, entry_id: str) -> dict:
+        """Delete a cached audio entry and its associated audio file.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID.
+
+        Returns:
+            dict: The API response, e.g. {"success": True}.
+        """
+        return PlatformAPIHandler.delete_audio_cache_entry(region, project_id, entry_id)
+
+    @staticmethod
+    def bulk_delete_audio_cache(region: str, project_id: str, ids: list[str]) -> dict:
+        """Delete multiple audio cache entries by ID in a single request.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            ids: List of audio cache entry IDs to delete (max 20).
+
+        Returns:
+            dict: The API response with "deleted" and "failed" ID lists.
+        """
+        return PlatformAPIHandler.bulk_delete_audio_cache(region, project_id, ids)
+
+    @staticmethod
+    def synthesize_audio_cache(
+        region: str,
+        project_id: str,
+        entry_id: str,
+        text: str,
+        config: dict,
+        language: Optional[str] = None,
+    ) -> bytes:
+        """Generate a TTS audio preview using an existing cache entry's voice config.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID whose voice/provider config to use.
+            text: Text to synthesize.
+            config: Provider-specific voice tuning settings.
+            language: Optional BCP-47 language tag, e.g. "en-US".
+
+        Returns:
+            bytes: The raw WAV audio data (preview only, not saved to cache).
+        """
+        return PlatformAPIHandler.synthesize_audio_cache(
+            region, project_id, entry_id, text, config, language
+        )
+
+    @staticmethod
     def list_test_runs(
         region: str,
         project_id: str,
