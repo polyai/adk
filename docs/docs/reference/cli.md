@@ -225,6 +225,16 @@ When pushing creates a new branch (for example, when pushing to Agent Studio for
 
     If there are no local changes, `poly push` prints `Error: Failed to push` and `No changes detected`. The exit code is 0, so CI scripts that check return codes are not affected. The message is misleading but the command has not actually failed.
 
+!!! warning "`poly push` raises a clear error for files with merge conflict markers"
+
+    If any local resource file contains unresolved merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`), `poly push` raises a `Merge conflict` error before reading the resource — for example:
+
+    ~~~text
+    Merge conflict: config/entities.yaml — resolve the conflict markers before continuing
+    ~~~
+
+    Resolve the markers in the listed file(s) before pushing.
+
 When using JSON output (`--json`), the response includes `new_branch_name` and `new_branch_id` fields if a new branch was created.
 
 ### `poly status`
@@ -234,6 +244,17 @@ View changed, new, and deleted files in your project.
 ~~~bash
 poly status
 ~~~
+
+`poly status` checks local files against the remote state and reports:
+
+- **Files with merge conflicts** — files containing unresolved merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`). These are listed separately and their resources are excluded from the new/kept/deleted comparison so they are never miscounted as deleted.
+- **Modified files** — files whose content differs from the remote.
+- **New files** — files that exist locally but not on the remote.
+- **Deleted files** — files that exist on the remote but not locally.
+
+!!! warning "Merge conflicts in multi-resource YAML files"
+
+    If a multi-resource YAML file (such as `config/entities.yaml`) contains conflict markers, `poly status` lists the file under "Files with merge conflicts" and excludes all of its resources from the status comparison. The resources are not reported as deleted. Resolve the conflict markers before re-running `poly status`.
 
 ### `poly diff`
 
@@ -246,6 +267,16 @@ poly diff
 poly diff --files file1.yaml
 poly diff --before main --after my-feature
 ~~~
+
+!!! warning "`poly diff` raises an error for files with merge conflict markers"
+
+    If any local resource file contains unresolved merge conflict markers, `poly diff` raises a `Merge conflict` error rather than attempting to diff an unparseable file — for example:
+
+    ~~~text
+    Merge conflict: config/entities.yaml — resolve the conflict markers before continuing
+    ~~~
+
+    If multiple files are conflicted, all paths are listed in a single error. Resolve the conflict markers in each file before running `poly diff`.
 
 ### `poly revert`
 
