@@ -210,6 +210,24 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         self.proj.create_branch.assert_not_called()
         self.proj.push_project.assert_not_called()
 
+    def test_branch_create_env_creates_branch_before_pulling(self):
+        """The branch must exist before env state is pulled into it.
+
+        Regression test pinning the call order explicitly: the branch is created
+        first, then env resources are pulled into it, then pushed. Checking call
+        counts/args alone wouldn't catch a reorder of these two calls.
+        """
+        manager = MagicMock()
+        manager.attach_mock(self.proj.create_branch, "create_branch")
+        manager.attach_mock(self.proj.pull_project_from_env, "pull_project_from_env")
+
+        BranchCommand.branch_create(TEST_DIR, "my-branch", env="live", force=False)
+
+        self.assertEqual(
+            [call[0] for call in manager.mock_calls],
+            ["create_branch", "pull_project_from_env"],
+        )
+
     def test_branch_create_env_force_bypasses_check(self):
         """branch create --env live --force proceeds despite local changes."""
         self.proj.get_diffs.return_value = {"file.py": "example diff"}
@@ -247,7 +265,11 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         )
 
     def test_branch_create_env_raises_when_live_deployment_missing(self):
-        """If live (or pre-release) has no active deployment, pull_project_from_env raises."""
+        """If live (or pre-release) has no active deployment, pull_project_from_env raises.
+
+        The branch has already been created by this point (pull happens after
+        creation), so the raise leaves a branch behind with no env state pushed.
+        """
         self.proj.get_diffs.return_value = {}
         self.proj.pull_project_from_env.side_effect = ValueError(
             "No resources returned from environment 'live'."
@@ -257,11 +279,11 @@ class BranchCreateFromEnvTest(unittest.TestCase):
             BranchCommand.branch_create(TEST_DIR, "my-branch", env="live", force=False)
 
         self.assertIn("No resources returned from environment 'live'", str(ctx.exception))
+        self.proj.create_branch.assert_called_once_with("my-branch")
         self.proj.pull_project_from_env.assert_called_once()
         pull_kwargs = self.proj.pull_project_from_env.call_args[1]
         self.assertEqual(pull_kwargs["env"], "live")
         self.assertIs(pull_kwargs["format"], False)
-        self.proj.create_branch.assert_not_called()
         self.proj.push_project.assert_not_called()
 
     def test_branch_create_env_sandbox_skips_env_pull(self):
@@ -359,7 +381,7 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         self.proj.push_project.assert_not_called()
 
     def test_branch_create_env_does_not_push_when_create_branch_fails(self):
-        """After failed branch creation, push_project is not called and process exits."""
+        """After failed branch creation, neither the env pull nor push happen."""
         self.proj.get_diffs.return_value = {}
         self.proj.create_branch.return_value = None
 
@@ -367,9 +389,8 @@ class BranchCreateFromEnvTest(unittest.TestCase):
             BranchCommand.branch_create(TEST_DIR, "my-branch", env="live", force=False)
 
         self.assertEqual(ctx.exception.code, 1)
-        self.proj.pull_project_from_env.assert_called_once()
-        self.assertIs(self.proj.pull_project_from_env.call_args[1]["format"], False)
         self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.pull_project_from_env.assert_not_called()
         self.proj.push_project.assert_not_called()
 
 
