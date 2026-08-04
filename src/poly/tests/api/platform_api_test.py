@@ -9,7 +9,11 @@ from unittest.mock import patch
 
 import requests
 
-from poly.handlers.platform_api import ACCOUNTS_URL, PlatformAPIHandler
+from poly.handlers.platform_api import (
+    ACCOUNTS_URL,
+    FunctionConflictError,
+    PlatformAPIHandler,
+)
 from poly.tests.testing_utils import make_mock_response
 
 
@@ -421,6 +425,380 @@ class SynthesizeAudioCache(unittest.TestCase):
 
         with self.assertRaises(requests.HTTPError):
             PlatformAPIHandler.synthesize_audio_cache("studio", "agent-1", "entry-1", "hi", {})
+
+
+SAMPLE_FUNCTION = {
+    "function_id": "fn-1",
+    "name": "my_func",
+    "description": "desc",
+    "parameters": [{"name": "x", "type": "string", "description": "an x"}],
+    "code": "def my_func(conv, x: str):\n    pass\n",
+    "active": True,
+    "usage_count": 2,
+}
+
+
+class ListFunctions(unittest.TestCase):
+    """Tests for PlatformAPIHandler.list_functions."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_calls_branch_scoped_endpoint(self, mock_request, _mock_key):
+        """The request is a GET against the branch-scoped functions endpoint."""
+        mock_request.return_value = make_mock_response(
+            200, json_body={"functions": [SAMPLE_FUNCTION]}
+        )
+
+        result = PlatformAPIHandler.list_functions("studio", "agent-1", "branch-1")
+
+        self.assertEqual(result, {"functions": [SAMPLE_FUNCTION]})
+        self.assertEqual(mock_request.call_args.kwargs["method"], "GET")
+        self.assertIn(
+            "/v1/agents/agent-1/branches/branch-1/functions",
+            mock_request.call_args.kwargs["url"],
+        )
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_passes_pagination_params(self, mock_request, _mock_key):
+        """limit and offset are sent as query parameters."""
+        mock_request.return_value = make_mock_response(200, json_body={"functions": []})
+
+        PlatformAPIHandler.list_functions("studio", "agent-1", "branch-1", limit=50, offset=10)
+
+        self.assertEqual(mock_request.call_args.kwargs["params"], {"limit": 50, "offset": 10})
+
+
+class GetFunction(unittest.TestCase):
+    """Tests for PlatformAPIHandler.get_function."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_returns_function_payload(self, mock_request, _mock_key):
+        """The function payload is returned unchanged."""
+        mock_request.return_value = make_mock_response(200, json_body=SAMPLE_FUNCTION)
+
+        result = PlatformAPIHandler.get_function("studio", "agent-1", "branch-1", "fn-1")
+
+        self.assertEqual(result, SAMPLE_FUNCTION)
+        self.assertIn(
+            "/v1/agents/agent-1/branches/branch-1/functions/fn-1",
+            mock_request.call_args.kwargs["url"],
+        )
+
+
+class CreateFunction(unittest.TestCase):
+    """Tests for PlatformAPIHandler.create_function."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_posts_function_body(self, mock_request, _mock_key):
+        """name, description, code and parameters are sent in the body."""
+        mock_request.return_value = make_mock_response(201, json_body=SAMPLE_FUNCTION)
+
+        PlatformAPIHandler.create_function(
+            "studio", "agent-1", "branch-1", "my_func", "desc", "code", parameters=[{"name": "x"}]
+        )
+
+        sent = json.loads(mock_request.call_args.kwargs["data"])
+        self.assertEqual(mock_request.call_args.kwargs["method"], "POST")
+        self.assertEqual(
+            sent,
+            {
+                "name": "my_func",
+                "description": "desc",
+                "code": "code",
+                "parameters": [{"name": "x"}],
+            },
+        )
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_omits_delay_control_when_not_given(self, mock_request, _mock_key):
+        """delay_control is only sent when provided."""
+        mock_request.return_value = make_mock_response(201, json_body=SAMPLE_FUNCTION)
+
+        PlatformAPIHandler.create_function("studio", "agent-1", "branch-1", "f", "d", "code")
+
+        sent = json.loads(mock_request.call_args.kwargs["data"])
+        self.assertNotIn("delay_control", sent)
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_name_collision_raises_conflict(self, mock_request, _mock_key):
+        """A 409 name collision is translated into FunctionConflictError."""
+        mock_request.return_value = make_mock_response(
+            409, json_body={"message": "Name already exists", "orphaned_references": []}
+        )
+
+        with self.assertRaises(FunctionConflictError) as ctx:
+            PlatformAPIHandler.create_function("studio", "agent-1", "branch-1", "dup", "d", "code")
+
+        self.assertEqual(str(ctx.exception), "Name already exists")
+        self.assertEqual(ctx.exception.orphaned_references, [])
+
+
+class UpdateFunction(unittest.TestCase):
+    """Tests for PlatformAPIHandler.update_function."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_patches_only_supplied_updates(self, mock_request, _mock_key):
+        """Only the supplied fields are sent, and force is omitted by default."""
+        mock_request.return_value = make_mock_response(200, json_body=SAMPLE_FUNCTION)
+
+        PlatformAPIHandler.update_function(
+            "studio", "agent-1", "branch-1", "fn-1", {"description": "new"}
+        )
+
+        sent = json.loads(mock_request.call_args.kwargs["data"])
+        self.assertEqual(mock_request.call_args.kwargs["method"], "PATCH")
+        self.assertEqual(sent, {"description": "new"})
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_force_is_sent_in_body(self, mock_request, _mock_key):
+        """force=True is added to the request body."""
+        mock_request.return_value = make_mock_response(200, json_body=SAMPLE_FUNCTION)
+
+        PlatformAPIHandler.update_function(
+            "studio", "agent-1", "branch-1", "fn-1", {"name": "renamed"}, force=True
+        )
+
+        sent = json.loads(mock_request.call_args.kwargs["data"])
+        self.assertEqual(sent, {"name": "renamed", "force": True})
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_orphaned_reference_conflict_carries_references(self, mock_request, _mock_key):
+        """A 409 exposes the orphaned flow-step references to the caller."""
+        references = [{"flow_id": "flow-1", "flow_name": "Main", "step_name": "step-1"}]
+        mock_request.return_value = make_mock_response(
+            409, json_body={"message": "Orphaned references", "orphaned_references": references}
+        )
+
+        with self.assertRaises(FunctionConflictError) as ctx:
+            PlatformAPIHandler.update_function(
+                "studio", "agent-1", "branch-1", "fn-1", {"name": "renamed"}
+            )
+
+        self.assertEqual(ctx.exception.orphaned_references, references)
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_conflict_without_json_body_still_raises(self, mock_request, _mock_key):
+        """A 409 with an unparseable body falls back to a generic conflict message."""
+        mock_request.return_value = make_mock_response(409)
+
+        with self.assertRaises(FunctionConflictError) as ctx:
+            PlatformAPIHandler.update_function(
+                "studio", "agent-1", "branch-1", "fn-1", {"name": "renamed"}
+            )
+
+        self.assertEqual(str(ctx.exception), "Conflict")
+        self.assertEqual(ctx.exception.orphaned_references, [])
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_non_conflict_error_propagates_as_http_error(self, mock_request, _mock_key):
+        """Non-409 failures are left as requests.HTTPError."""
+        mock_request.return_value = make_mock_response(500, json_body={"error": "boom"})
+
+        with self.assertRaises(requests.HTTPError):
+            PlatformAPIHandler.update_function(
+                "studio", "agent-1", "branch-1", "fn-1", {"name": "renamed"}
+            )
+
+
+class DeleteFunction(unittest.TestCase):
+    """Tests for PlatformAPIHandler.delete_function."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_empty_204_body_returns_empty_dict(self, mock_request, _mock_key):
+        """A 204 No Content delete does not raise a JSON decode error."""
+        mock_request.return_value = make_mock_response(204)
+
+        result = PlatformAPIHandler.delete_function("studio", "agent-1", "branch-1", "fn-1")
+
+        self.assertEqual(result, {})
+        self.assertEqual(mock_request.call_args.kwargs["method"], "DELETE")
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_sends_force_flag(self, mock_request, _mock_key):
+        """force is always sent in the delete body."""
+        mock_request.return_value = make_mock_response(204)
+
+        PlatformAPIHandler.delete_function("studio", "agent-1", "branch-1", "fn-1", force=True)
+
+        self.assertEqual(json.loads(mock_request.call_args.kwargs["data"]), {"force": True})
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_conflict_raises_function_conflict_error(self, mock_request, _mock_key):
+        """Deleting a referenced function without --force raises a conflict."""
+        references = [{"flow_id": "flow-1", "flow_name": "Main", "step_name": "step-1"}]
+        mock_request.return_value = make_mock_response(
+            409, json_body={"message": "Still referenced", "orphaned_references": references}
+        )
+
+        with self.assertRaises(FunctionConflictError) as ctx:
+            PlatformAPIHandler.delete_function("studio", "agent-1", "branch-1", "fn-1")
+
+        self.assertEqual(ctx.exception.orphaned_references, references)
+
+
+class ExecuteFunction(unittest.TestCase):
+    """Tests for PlatformAPIHandler.execute_function."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_wraps_args_in_body_and_returns_result(self, mock_request, _mock_key):
+        """Arguments are wrapped in an "args" object and the result is returned."""
+        payload = {"body": {"ok": True}, "logs": ["line"], "runtime": 12}
+        mock_request.return_value = make_mock_response(200, json_body=payload)
+
+        result = PlatformAPIHandler.execute_function(
+            "studio", "agent-1", "branch-1", "fn-1", {"x": 1}
+        )
+
+        self.assertEqual(result, payload)
+        self.assertEqual(json.loads(mock_request.call_args.kwargs["data"]), {"args": {"x": 1}})
+        self.assertIn("/functions/fn-1/execute", mock_request.call_args.kwargs["url"])
+
+
+class DuplicateFunction(unittest.TestCase):
+    """Tests for PlatformAPIHandler.duplicate_function."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_omits_body_when_no_name_given(self, mock_request, _mock_key):
+        """Without an explicit name the server generates one, so no body is sent."""
+        mock_request.return_value = make_mock_response(201, json_body=SAMPLE_FUNCTION)
+
+        PlatformAPIHandler.duplicate_function("studio", "agent-1", "branch-1", "fn-1")
+
+        self.assertIsNone(mock_request.call_args.kwargs["data"])
+        self.assertIn("/functions/fn-1/duplicate", mock_request.call_args.kwargs["url"])
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_name_collision_raises_conflict(self, mock_request, _mock_key):
+        """A 409 on an explicit-name collision is translated, not left as an HTTPError."""
+        mock_request.return_value = make_mock_response(
+            409, json_body={"message": "Name already exists", "orphaned_references": []}
+        )
+
+        with self.assertRaises(FunctionConflictError):
+            PlatformAPIHandler.duplicate_function(
+                "studio", "agent-1", "branch-1", "fn-1", name="taken"
+            )
+
+
+class DeployAndValidateFunctions(unittest.TestCase):
+    """Tests for the functions deploy/validate/deployments endpoints."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_deploy_posts_to_deploy_endpoint(self, mock_request, _mock_key):
+        """Deploy is a POST returning the new deployment record."""
+        payload = {"deployment_version": "v3", "function_ids": ["fn-1"], "deployed_at": "now"}
+        mock_request.return_value = make_mock_response(200, json_body=payload)
+
+        result = PlatformAPIHandler.deploy_functions("studio", "agent-1", "branch-1")
+
+        self.assertEqual(result, payload)
+        self.assertEqual(mock_request.call_args.kwargs["method"], "POST")
+        self.assertIn("/functions/deploy", mock_request.call_args.kwargs["url"])
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_validate_returns_valid_and_issues(self, mock_request, _mock_key):
+        """Validate returns the raw {"valid": ..., "issues": [...]} payload."""
+        payload = {"valid": False, "issues": [{"type": "syntax_error", "function_id": "fn-1"}]}
+        mock_request.return_value = make_mock_response(200, json_body=payload)
+
+        result = PlatformAPIHandler.validate_functions("studio", "agent-1", "branch-1")
+
+        self.assertEqual(result, payload)
+        self.assertIn("/functions/validate", mock_request.call_args.kwargs["url"])
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_list_deployments_uses_deployments_endpoint(self, mock_request, _mock_key):
+        """Deployment history is a GET against the deployments endpoint."""
+        mock_request.return_value = make_mock_response(200, json_body={"deployments": []})
+
+        PlatformAPIHandler.list_function_deployments("studio", "agent-1", "branch-1")
+
+        self.assertEqual(mock_request.call_args.kwargs["method"], "GET")
+        self.assertIn("/functions/deployments", mock_request.call_args.kwargs["url"])
+
+
+class FunctionReferencesAndTypeDefinitions(unittest.TestCase):
+    """Tests for the function references and type-definitions endpoints."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_references_endpoint(self, mock_request, _mock_key):
+        """References are fetched from the per-function references endpoint."""
+        mock_request.return_value = make_mock_response(200, json_body={"references": []})
+
+        PlatformAPIHandler.get_function_references("studio", "agent-1", "branch-1", "fn-1")
+
+        self.assertIn("/functions/fn-1/references", mock_request.call_args.kwargs["url"])
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_type_definitions_endpoint(self, mock_request, _mock_key):
+        """Type stubs are fetched from the per-function type_definitions endpoint."""
+        mock_request.return_value = make_mock_response(200, json_body={"code": "class Conv: ..."})
+
+        result = PlatformAPIHandler.get_function_type_definitions(
+            "studio", "agent-1", "branch-1", "fn-1"
+        )
+
+        self.assertEqual(result, {"code": "class Conv: ..."})
+        self.assertIn("/functions/fn-1/type_definitions", mock_request.call_args.kwargs["url"])
+
+
+class StartAndEndFunctions(unittest.TestCase):
+    """Tests for the branch start_function/end_function endpoints."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_get_start_function(self, mock_request, _mock_key):
+        """start_function is fetched with a GET."""
+        mock_request.return_value = make_mock_response(200, json_body={"code": "pass", "version": "1"})
+
+        result = PlatformAPIHandler.get_start_function("studio", "agent-1", "branch-1")
+
+        self.assertEqual(result["code"], "pass")
+        self.assertEqual(mock_request.call_args.kwargs["method"], "GET")
+        self.assertIn("/functions/start", mock_request.call_args.kwargs["url"])
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_update_start_function_puts_code(self, mock_request, _mock_key):
+        """start_function is replaced with a PUT carrying the new code."""
+        mock_request.return_value = make_mock_response(200, json_body={"code": "new"})
+
+        PlatformAPIHandler.update_start_function("studio", "agent-1", "branch-1", "new")
+
+        self.assertEqual(mock_request.call_args.kwargs["method"], "PUT")
+        self.assertEqual(json.loads(mock_request.call_args.kwargs["data"]), {"code": "new"})
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_update_end_function_puts_code(self, mock_request, _mock_key):
+        """end_function is replaced with a PUT against the end endpoint."""
+        mock_request.return_value = make_mock_response(200, json_body={"code": "new"})
+
+        PlatformAPIHandler.update_end_function("studio", "agent-1", "branch-1", "new")
+
+        self.assertEqual(mock_request.call_args.kwargs["method"], "PUT")
+        self.assertIn("/functions/end", mock_request.call_args.kwargs["url"])
 
 
 if __name__ == "__main__":

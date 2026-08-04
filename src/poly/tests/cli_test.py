@@ -14,10 +14,12 @@ from poly.cli_commands.branch import BranchCommand
 from poly.cli_commands.chat import ChatCommand
 from poly.cli_commands.conversations import ConversationsCommand
 from poly.cli_commands.deployments import DeploymentsCommand
+from poly.cli_commands.functions import FunctionsCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand
 from poly.cli_commands.shared import compute_diff
 from poly.cli_commands.sync import FormatCommand, RevertCommand
 from poly.cli_commands.utils import CompletionCommand
+from poly.handlers.platform_api import FunctionConflictError
 from poly.tests.project_test import TEST_DIR
 
 
@@ -3085,3 +3087,321 @@ class AudioCacheCommandTest(unittest.TestCase):
         )
         mock_success.assert_called_once()
         self.assertIn("entry-1-preview.wav", mock_success.call_args[0][0])
+
+
+class FunctionsCommandTest(unittest.TestCase):
+    """Tests for the functions CLI commands (public Functions REST API)."""
+
+    SAMPLE_FUNCTION = {
+        "function_id": "fn-1",
+        "name": "my_func",
+        "description": "desc",
+        "parameters": [{"name": "x", "type": "string", "description": "an x"}],
+        "code": "def my_func(conv, x: str):\n    pass\n",
+        "active": True,
+        "usage_count": 2,
+    }
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.functions.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.region = "us-1"
+        self.proj.project_id = "test-project"
+        self.proj.branch_id = "branch-1"
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.list_functions")
+    @patch("poly.output.console.print_functions")
+    def test_list_calls_api_with_branch_and_pagination(self, mock_print, mock_api):
+        """functions list scopes the call to the current branch and passes pagination."""
+        mock_api.return_value = {"functions": [self.SAMPLE_FUNCTION]}
+
+        FunctionsCommand.functions_list(TEST_DIR, limit=50, offset=10)
+
+        mock_api.assert_called_once_with(
+            region="us-1",
+            project_id="test-project",
+            branch_id="branch-1",
+            limit=50,
+            offset=10,
+        )
+        mock_print.assert_called_once()
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.list_functions")
+    @patch("poly.cli_commands.functions.json_print")
+    def test_list_json_outputs_raw_response(self, mock_json, mock_api):
+        """functions list --json outputs the full API response."""
+        payload = {"functions": [self.SAMPLE_FUNCTION]}
+        mock_api.return_value = payload
+
+        FunctionsCommand.functions_list(TEST_DIR, output_json=True)
+
+        mock_json.assert_called_once_with(payload)
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.list_functions")
+    @patch("poly.output.console.info")
+    def test_list_empty_shows_info(self, mock_info, mock_api):
+        """functions list with no results shows an info message."""
+        mock_api.return_value = {"functions": []}
+
+        FunctionsCommand.functions_list(TEST_DIR)
+
+        mock_info.assert_called_once()
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.get_function")
+    @patch("poly.output.console.print_function_detail")
+    def test_get_prints_detail(self, mock_print, mock_api):
+        """functions get renders the function detail view."""
+        mock_api.return_value = self.SAMPLE_FUNCTION
+
+        FunctionsCommand.functions_get(TEST_DIR, "fn-1")
+
+        mock_api.assert_called_once_with(
+            region="us-1", project_id="test-project", branch_id="branch-1", function_id="fn-1"
+        )
+        mock_print.assert_called_once_with(self.SAMPLE_FUNCTION)
+
+    @patch("builtins.open", create=True)
+    @patch("poly.cli_commands.functions.AgentStudioInterface.create_function")
+    @patch("poly.output.console.success")
+    def test_create_reads_code_file_and_parses_parameters(self, mock_success, mock_api, mock_open):
+        """functions create sends the file contents and the parsed --parameters JSON."""
+        mock_open.return_value.__enter__.return_value.read.return_value = "def f(conv):\n    pass\n"
+        mock_open.return_value.__exit__ = MagicMock(return_value=False)
+        mock_api.return_value = self.SAMPLE_FUNCTION
+
+        FunctionsCommand.functions_create(
+            TEST_DIR,
+            "my_func",
+            "desc",
+            "/tmp/func.py",
+            parameters='[{"name": "x", "type": "string", "description": "an x"}]',
+        )
+
+        mock_api.assert_called_once_with(
+            region="us-1",
+            project_id="test-project",
+            branch_id="branch-1",
+            name="my_func",
+            description="desc",
+            code="def f(conv):\n    pass\n",
+            parameters=[{"name": "x", "type": "string", "description": "an x"}],
+        )
+        mock_success.assert_called_once()
+
+    @patch("builtins.open", create=True)
+    @patch("poly.output.console.error")
+    def test_create_invalid_parameters_json_exits(self, mock_error, mock_open):
+        """functions create rejects malformed --parameters JSON before calling the API."""
+        mock_open.return_value.__enter__.return_value.read.return_value = "code"
+        mock_open.return_value.__exit__ = MagicMock(return_value=False)
+
+        with self.assertRaises(SystemExit):
+            FunctionsCommand.functions_create(
+                TEST_DIR, "my_func", "desc", "/tmp/func.py", parameters="{not json"
+            )
+
+        mock_error.assert_called_once()
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.update_function")
+    @patch("poly.output.console.success")
+    def test_update_sends_only_supplied_fields(self, mock_success, mock_api):
+        """functions update only sends the fields the user supplied."""
+        mock_api.return_value = self.SAMPLE_FUNCTION
+
+        FunctionsCommand.functions_update(TEST_DIR, "fn-1", description="new desc")
+
+        mock_api.assert_called_once_with(
+            region="us-1",
+            project_id="test-project",
+            branch_id="branch-1",
+            function_id="fn-1",
+            updates={"description": "new desc"},
+            force=False,
+        )
+        mock_success.assert_called_once()
+
+    @patch("poly.output.console.error")
+    def test_update_without_fields_exits(self, mock_error):
+        """functions update with no fields is rejected rather than sending an empty patch."""
+        with self.assertRaises(SystemExit):
+            FunctionsCommand.functions_update(TEST_DIR, "fn-1")
+
+        mock_error.assert_called_once()
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.update_function")
+    @patch("poly.output.console.error")
+    def test_update_conflict_reports_orphaned_references_and_exits(self, mock_error, mock_api):
+        """A conflict is reported with its orphaned references and exits non-zero."""
+        mock_api.side_effect = FunctionConflictError(
+            "Orphaned references",
+            [{"flow_id": "flow-1", "flow_name": "Main", "step_name": "step-1"}],
+        )
+
+        with self.assertRaises(SystemExit):
+            FunctionsCommand.functions_update(TEST_DIR, "fn-1", name="renamed")
+
+        mock_error.assert_called_once_with("Orphaned references")
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.update_function")
+    @patch("poly.cli_commands.functions.json_print")
+    def test_update_conflict_json_includes_references(self, mock_json, mock_api):
+        """--json conflict output carries the orphaned references for machine consumers."""
+        references = [{"flow_id": "flow-1", "flow_name": "Main", "step_name": "step-1"}]
+        mock_api.side_effect = FunctionConflictError("Orphaned references", references)
+
+        with self.assertRaises(SystemExit):
+            FunctionsCommand.functions_update(
+                TEST_DIR, "fn-1", name="renamed", output_json=True
+            )
+
+        mock_json.assert_called_once_with(
+            {
+                "success": False,
+                "error": "Orphaned references",
+                "orphaned_references": references,
+            }
+        )
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.delete_function")
+    @patch("poly.output.console.success")
+    def test_delete_passes_force(self, mock_success, mock_api):
+        """functions delete --force forwards the flag to the API."""
+        FunctionsCommand.functions_delete(TEST_DIR, "fn-1", force=True)
+
+        mock_api.assert_called_once_with(
+            region="us-1",
+            project_id="test-project",
+            branch_id="branch-1",
+            function_id="fn-1",
+            force=True,
+        )
+        mock_success.assert_called_once()
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.execute_function")
+    def test_execute_parses_args_json(self, mock_api):
+        """functions execute parses --args into an object before calling the API."""
+        mock_api.return_value = {"body": {"ok": True}, "logs": [], "runtime": 5}
+
+        FunctionsCommand.functions_execute(TEST_DIR, "fn-1", '{"x": 1}')
+
+        mock_api.assert_called_once_with(
+            region="us-1",
+            project_id="test-project",
+            branch_id="branch-1",
+            function_id="fn-1",
+            args={"x": 1},
+        )
+
+    @patch("poly.output.console.error")
+    def test_execute_invalid_args_json_exits(self, mock_error):
+        """functions execute rejects malformed --args JSON."""
+        with self.assertRaises(SystemExit):
+            FunctionsCommand.functions_execute(TEST_DIR, "fn-1", "{not json")
+
+        mock_error.assert_called_once()
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.duplicate_function")
+    @patch("poly.output.console.error")
+    def test_duplicate_conflict_exits(self, mock_error, mock_api):
+        """A duplicate name collision is surfaced as an error, not a traceback."""
+        mock_api.side_effect = FunctionConflictError("Name already exists", [])
+
+        with self.assertRaises(SystemExit):
+            FunctionsCommand.functions_duplicate(TEST_DIR, "fn-1", name="taken")
+
+        mock_error.assert_called_once_with("Name already exists")
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.deploy_functions")
+    @patch("poly.output.console.success")
+    def test_deploy_reports_version(self, mock_success, mock_api):
+        """functions deploy reports the resulting deployment version."""
+        mock_api.return_value = {"deployment_version": "v3", "function_ids": ["fn-1"]}
+
+        FunctionsCommand.functions_deploy(TEST_DIR)
+
+        self.assertIn("v3", mock_success.call_args[0][0])
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.validate_functions")
+    @patch("poly.output.console.print_function_validation_issues")
+    def test_validate_passes_valid_and_issues(self, mock_print, mock_api):
+        """functions validate hands the valid flag and issues to the printer."""
+        issues = [{"type": "syntax_error", "function_id": "fn-1"}]
+        mock_api.return_value = {"valid": False, "issues": issues}
+
+        FunctionsCommand.functions_validate(TEST_DIR)
+
+        mock_print.assert_called_once_with(False, issues)
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.get_function_references")
+    @patch("poly.output.console.print_function_references")
+    def test_references_prints_reference_list(self, mock_print, mock_api):
+        """functions references renders the reference list."""
+        references = [{"flow_id": "flow-1", "flow_name": "Main", "step_name": "step-1"}]
+        mock_api.return_value = {"references": references}
+
+        FunctionsCommand.functions_references(TEST_DIR, "fn-1")
+
+        mock_print.assert_called_once_with(references)
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.get_function_type_definitions")
+    @patch("poly.output.console.print_code")
+    def test_type_definitions_prints_code_without_line_numbers(self, mock_print, mock_api):
+        """Type stubs print unnumbered so they can be piped into a file."""
+        mock_api.return_value = {"code": "class Conversation: ..."}
+
+        FunctionsCommand.functions_type_definitions(TEST_DIR, "fn-1")
+
+        mock_print.assert_called_once_with("class Conversation: ...", line_numbers=False)
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.list_function_deployments")
+    @patch("poly.output.console.info")
+    def test_deployments_empty_shows_info(self, mock_info, mock_api):
+        """functions deployments with no history shows an info message."""
+        mock_api.return_value = {"deployments": []}
+
+        FunctionsCommand.functions_deployments(TEST_DIR)
+
+        mock_info.assert_called_once()
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.get_start_function")
+    @patch("poly.output.console.print_code")
+    def test_start_get_prints_code(self, mock_print, mock_api):
+        """functions start get prints the start_function source."""
+        mock_api.return_value = {"code": "def start(conv):\n    pass\n"}
+
+        FunctionsCommand.functions_start_get(TEST_DIR)
+
+        mock_print.assert_called_once_with("def start(conv):\n    pass\n")
+
+    @patch("builtins.open", create=True)
+    @patch("poly.cli_commands.functions.AgentStudioInterface.update_end_function")
+    @patch("poly.output.console.success")
+    def test_end_update_sends_file_contents(self, mock_success, mock_api, mock_open):
+        """functions end update sends the local file's contents as the new code."""
+        mock_open.return_value.__enter__.return_value.read.return_value = "def end(conv):\n    pass\n"
+        mock_open.return_value.__exit__ = MagicMock(return_value=False)
+        mock_api.return_value = {"code": "def end(conv):\n    pass\n"}
+
+        FunctionsCommand.functions_end_update(TEST_DIR, "/tmp/end.py")
+
+        mock_api.assert_called_once_with(
+            region="us-1",
+            project_id="test-project",
+            branch_id="branch-1",
+            code="def end(conv):\n    pass\n",
+        )
+        mock_success.assert_called_once()
+
+    @patch("builtins.open", side_effect=OSError("No such file"))
+    @patch("poly.output.console.error")
+    def test_unreadable_code_file_exits_with_error(self, mock_error, _mock_open):
+        """An unreadable --code-file is reported clearly instead of raising OSError."""
+        with self.assertRaises(SystemExit):
+            FunctionsCommand.functions_start_update(TEST_DIR, "/tmp/missing.py")
+
+        mock_error.assert_called_once()

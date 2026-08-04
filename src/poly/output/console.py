@@ -127,6 +127,11 @@ def print_diff(diff: str) -> None:
     console.print(Syntax(diff, "diff", theme="ansi_dark", line_numbers=False))
 
 
+def print_code(code: str, line_numbers: bool = True) -> None:
+    """Print Python code with syntax highlighting."""
+    console.print(Syntax(code, "python", theme="ansi_dark", line_numbers=line_numbers))
+
+
 def print_agents(agents: list[dict[str, Any]]) -> None:
     """Print a table of agents.
 
@@ -886,6 +891,132 @@ def print_audio_cache_entries(entries: list[dict[str, Any]]) -> None:
         )
 
     console.print(table)
+
+
+def print_functions(functions: list[dict[str, Any]]) -> None:
+    """Print a table of Functions (from the public Functions API).
+
+    Args:
+        functions: List of function dicts (as returned by the functions list API).
+    """
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Function ID", style="bold yellow", no_wrap=True)
+    table.add_column("Name", no_wrap=True)
+    table.add_column("Type", no_wrap=True)
+    table.add_column("Active", no_wrap=True)
+    table.add_column("Usage", no_wrap=True, justify="right")
+    table.add_column("Description", overflow="fold")
+
+    for fn in functions:
+        table.add_row(
+            str(fn.get("function_id", "—")),
+            fn.get("name", "—"),
+            fn.get("function_type") or "—",
+            "yes" if fn.get("active") else "no",
+            str(fn.get("usage_count", 0)),
+            fn.get("description") or "—",
+        )
+
+    console.print(table)
+
+
+def print_function_detail(fn: dict[str, Any]) -> None:
+    """Print detailed information for a single Function.
+
+    Args:
+        fn: The function dict (as returned by the functions get API).
+    """
+    console.print(
+        f"[bold]Function[/bold] [yellow]{fn.get('name', '—')}[/yellow] "
+        f"({fn.get('function_id', '—')})"
+    )
+    console.print(f"Type: {fn.get('function_type') or '—'}")
+    console.print(f"Description: {fn.get('description') or '—'}")
+    console.print(f"Active: {'yes' if fn.get('active') else 'no'}")
+    console.print(f"Usage count: {fn.get('usage_count', 0)}")
+    console.print(f"Version: {fn.get('version') or '—'}")
+
+    if parameters := fn.get("parameters"):
+        console.print("Parameters:")
+        for p in parameters:
+            console.print(
+                f"  - {p.get('name')} ({p.get('type')}): {p.get('description', '')}".rstrip()
+            )
+
+    if errors := fn.get("errors"):
+        console.print("[error]Errors:[/error]")
+        for err in errors:
+            console.print(f"  [error]-[/error] line {err.get('lineno')}: {err.get('message')}")
+
+    console.print()
+    print_code(fn.get("code", ""))
+
+
+def print_function_references(references: list[dict[str, Any]]) -> None:
+    """Print the flow steps that reference a Function.
+
+    Args:
+        references: List of flow step reference dicts.
+    """
+    if not references:
+        console.print("[muted]No references.[/muted]")
+        return
+
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Flow", no_wrap=True)
+    table.add_column("Step", no_wrap=True)
+
+    for ref in references:
+        table.add_row(ref.get("flow_name", "—"), ref.get("step_name", "—"))
+
+    console.print(table)
+
+
+def print_function_deployments(deployments: list[dict[str, Any]]) -> None:
+    """Print the deployment history for a project's functions.
+
+    Args:
+        deployments: List of function deployment record dicts.
+    """
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Environment", style="cyan", no_wrap=True)
+    table.add_column("Deployment Version", style="bold yellow", no_wrap=True)
+    table.add_column("Deployed At", no_wrap=True)
+    table.add_column("Functions", overflow="fold")
+
+    for d in deployments:
+        deployed_at = d.get("deployed_at") or "—"
+        if deployed_at != "—":
+            deployed_at = _format_iso_timestamp(deployed_at)
+        table.add_row(
+            d.get("environment", "—"),
+            str(d.get("deployment_version", "—")),
+            deployed_at,
+            ", ".join(d.get("function_ids", [])) or "—",
+        )
+
+    console.print(table)
+
+
+def print_function_validation_issues(valid: bool, issues: list[dict[str, Any]]) -> None:
+    """Print the result of validating a branch's functions.
+
+    Args:
+        valid: Whether the branch's functions passed validation.
+        issues: The reported issue dicts, if any.
+    """
+    if valid:
+        success("Functions are valid.")
+        return
+
+    error("Functions failed validation.")
+    for issue in issues:
+        name = issue.get("function_name")
+        location = f" ({name})" if name else ""
+        detail = {
+            k: v for k, v in issue.items() if k not in ("type", "function_id", "function_name")
+        }
+        console.print(f"  [error]-[/error] {issue.get('type', 'unknown')}{location}: {detail}")
 
 
 def print_conversation_detail(conversation: dict[str, Any], studio_url: str | None = None) -> None:
