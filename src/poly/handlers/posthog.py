@@ -67,13 +67,10 @@ class PosthogHandler:
         """Evaluate a boolean feature flag against PostHog.
 
         Args:
+            region: The region the user is in, used to determine the PostHog cluster.
             key: The PostHog feature flag key.
             default: Returned whenever the flag cannot be evaluated. Pick the
                 safe state for the gated code path.
-            email: The requesting user's email, used as the PostHog
-                distinct_id. Required — without it, percentage rollouts
-                would bucket all reads together, so reads with no email
-                return `default` without evaluating.
             project_id: The project ID (`project` group key). Workspace
                 targeting goes through the `project` group — the workspace id
                 lives on it as a group property in PostHog.
@@ -81,15 +78,14 @@ class PosthogHandler:
         Returns:
             The flag value, or `default` if it cannot be evaluated.
         """
-        client = get_posthog_client()
-        if not client:
-            return default
-
-        groups = {"cluster": region_to_posthog_cluster.get(region, region)}
-        if project_id:
-            groups["project"] = project_id
-
         try:
+            client = get_posthog_client()
+            if not client:
+                return default
+
+            groups = {"cluster": region_to_posthog_cluster.get(region, region)}
+            if project_id:
+                groups["project"] = project_id
             result = client.feature_enabled(
                 key,
                 distinct_id=get_user_identity(),

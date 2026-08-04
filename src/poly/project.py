@@ -113,7 +113,7 @@ class AgentStudioProject:
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
     rtc_metadata: Optional[dict[str, dict]] = None
-    __deployment_mode: Optional[DeploymentMode] = None
+    _deployment_mode: Optional[DeploymentMode] = None
 
     # Store resources that were not loaded from the status file
     # So they aren't considered locally deleted when pushing/pulling
@@ -2747,11 +2747,15 @@ class AgentStudioProject:
             message=message, conflict_resolutions=conflict_resolutions
         )
         if success:
-            parent_branch_id = current_branch_meta.get("parentBranchId") or "main"
+            parent_branch_id = current_branch_meta.get("parentBranchId")
             parent_branch_meta = branch_meta.get(parent_branch_id) or {}
-            parent_branch_name = parent_branch_meta.get("name") or "main"
-            self.switch_branch(parent_branch_name, force=True)
-            return True, [], []
+            parent_branch_name = parent_branch_meta.get("name")
+            if not parent_branch_name:
+                raise ValueError(
+                    f"Could not find parent branch name for branch ID {parent_branch_id}."
+                )
+            success, _ = self.switch_branch(parent_branch_name, force=True)
+            return success, [], []
 
         return False, conflicts, errors
 
@@ -3657,10 +3661,10 @@ class AgentStudioProject:
 
     @property
     def deployment_mode(self) -> DeploymentMode:
-        if self.__deployment_mode is None:
+        if self._deployment_mode is None:
             cfg = self.get_project_info().get("config") or {}
-            self.__deployment_mode = DeploymentMode(cfg.get("deployment_mode", "releases"))
-        return self.__deployment_mode
+            self._deployment_mode = DeploymentMode(cfg.get("deployment_mode", "releases"))
+        return self._deployment_mode
 
     @cached_property
     def using_simplified_deployments(self) -> bool:

@@ -571,11 +571,7 @@ class BranchCommand(BaseCommand):
             # Checks for any local changes on main before creating env branch.
             if diffs := project.get_diffs():
                 if not force:
-                    raise ValueError(
-                        f"Uncommitted changes on main branch, diffs: {list(diffs.keys())}"
-                    )
-            project.pull_project_from_env(env=env, format=False)
-            success(f"Pulled {project.account_id}/{project.project_id}")
+                    raise ValueError(f"Uncommitted changes on main, diffs: {list(diffs.keys())}")
 
         if not branch_name:
             if output_json:
@@ -625,6 +621,8 @@ class BranchCommand(BaseCommand):
 
         # Pushes existing state of env to provide clean slate for hotfixes.
         if env in ["pre-release", "live"]:
+            project.pull_project_from_env(env=env, format=False)
+            success(f"Pulled {project.account_id}/{project.project_id}")
             project.push_project(
                 force=True,
                 skip_validation=True,
@@ -1415,7 +1413,7 @@ class BranchCommand(BaseCommand):
         interactive: bool = False,
         resolutions_file: str = None,
     ):
-        """Synch the current branch with it's parent, with optional conflict resolutions."""
+        """Sync the current branch with it's parent, with optional conflict resolutions."""
         from poly.cli_commands.shared import require_deployment_simplification
         from poly.output.console import (
             console,
