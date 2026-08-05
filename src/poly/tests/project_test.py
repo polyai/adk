@@ -4578,7 +4578,7 @@ class DeploymentModePropertyTest(unittest.TestCase):
             ("releases_branches", DeploymentMode.RELEASES_BRANCHES),
         ):
             with self.subTest(value=value):
-                self.project._AgentStudioProject_deployment_mode = None
+                self.project._deployment_mode = None
                 self.mock_api.get_project.return_value = {"config": {"deployment_mode": value}}
 
                 self.assertEqual(self.project.deployment_mode, expected)
@@ -4591,7 +4591,7 @@ class DeploymentModePropertyTest(unittest.TestCase):
             {"config": None},
         ):
             with self.subTest(payload=payload):
-                self.project._AgentStudioProject_deployment_mode = None
+                self.project._deployment_mode = None
                 self.mock_api.get_project.return_value = payload
 
                 self.assertEqual(self.project.deployment_mode, DeploymentMode.RELEASES)
