@@ -35,7 +35,7 @@ from poly.cli_commands.functions import (
     FunctionsCommand,
 )
 from poly.cli_commands.project import InitCommand, ProjectCommand
-from poly.cli_commands.shared import compute_diff
+from poly.cli_commands.shared import compute_diff, resolve_project_scope
 from poly.cli_commands.sync import FormatCommand, RevertCommand
 from poly.cli_commands.utils import CompletionCommand
 from poly.handlers.platform_api import FunctionConflictError
@@ -1214,6 +1214,53 @@ class CompletionCommandTest(unittest.TestCase):
         """Parser rejects shell choices outside bash/zsh/fish."""
         with self.assertRaises(SystemExit):
             AgentStudioCLI().main(sys_args=["completion", "powershell"])
+
+
+class ResolveProjectScopeTest(unittest.TestCase):
+    """Tests for resolve_project_scope, used by headless-friendly commands."""
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.shared.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.region = "us-1"
+        self.proj.project_id = "local-project"
+        self.proj.branch_id = "local-branch"
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_all_explicit_bypasses_local_project(self):
+        """When all three are given, the local project is never read."""
+        result = resolve_project_scope(TEST_DIR, "eu-1", "explicit-project", "explicit-branch")
+
+        self.assertEqual(result, ("eu-1", "explicit-project", "explicit-branch"))
+        self.mock_load.assert_not_called()
+
+    def test_none_given_falls_back_to_local_project(self):
+        """With nothing explicit, falls back to the local project config."""
+        result = resolve_project_scope(TEST_DIR, None, None, None)
+
+        self.assertEqual(result, ("us-1", "local-project", "local-branch"))
+        self.mock_load.assert_called_once_with(TEST_DIR, output_json=False)
+
+    def test_partial_args_exits_with_clear_error(self):
+        """Giving only some of the three exits rather than silently mixing sources."""
+        with patch("poly.output.console.error") as mock_error:
+            with self.assertRaises(SystemExit):
+                resolve_project_scope(TEST_DIR, "eu-1", None, None)
+            mock_error.assert_called_once()
+        self.mock_load.assert_not_called()
+
+    def test_partial_args_json_mode_exits_with_json_error(self):
+        """The JSON-output path reports the same error as a JSON payload."""
+        with patch("poly.cli_commands.shared.json_print") as mock_json:
+            with self.assertRaises(SystemExit):
+                resolve_project_scope(TEST_DIR, "eu-1", "explicit-project", None, output_json=True)
+            mock_json.assert_called_once()
+            self.assertFalse(mock_json.call_args[0][0]["success"])
+        self.mock_load.assert_not_called()
 
 
 class ComputeDiffTest(unittest.TestCase):
@@ -3122,13 +3169,9 @@ class FunctionsCommandTest(unittest.TestCase):
     }
 
     def setUp(self):
-        self.mock_load_patcher = patch("poly.cli_commands.functions.load_project")
-        self.mock_load = self.mock_load_patcher.start()
-        self.proj = MagicMock()
-        self.proj.region = "us-1"
-        self.proj.project_id = "test-project"
-        self.proj.branch_id = "branch-1"
-        self.mock_load.return_value = self.proj
+        self.mock_scope_patcher = patch("poly.cli_commands.functions.resolve_project_scope")
+        self.mock_scope = self.mock_scope_patcher.start()
+        self.mock_scope.return_value = ("us-1", "test-project", "branch-1")
 
     def tearDown(self):
         patch.stopall()
@@ -3171,6 +3214,20 @@ class FunctionsCommandTest(unittest.TestCase):
 
         mock_info.assert_called_once()
 
+    @patch("poly.cli_commands.functions.AgentStudioInterface.list_functions")
+    @patch("poly.output.console.print_functions")
+    def test_list_passes_explicit_scope_through(self, mock_print, mock_api):
+        """functions list forwards explicit --region/--project_id/--branch_id flags."""
+        mock_api.return_value = {"functions": [self.SAMPLE_FUNCTION]}
+
+        FunctionsCommand.functions_list(
+            TEST_DIR, region="eu-1", project_id="explicit-project", branch_id="explicit-branch"
+        )
+
+        self.mock_scope.assert_called_once_with(
+            TEST_DIR, "eu-1", "explicit-project", "explicit-branch", output_json=False
+        )
+
     @patch("poly.cli_commands.functions.AgentStudioInterface.get_function")
     @patch("poly.output.console.print_function_detail")
     def test_get_prints_detail(self, mock_print, mock_api):
@@ -3183,6 +3240,20 @@ class FunctionsCommandTest(unittest.TestCase):
             region="us-1", project_id="test-project", branch_id="branch-1", function_id="fn-1"
         )
         mock_print.assert_called_once_with(self.SAMPLE_FUNCTION)
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.get_function")
+    @patch("poly.output.console.print_function_detail")
+    def test_get_passes_explicit_scope_through(self, mock_print, mock_api):
+        """functions get forwards explicit --region/--project_id/--branch_id flags."""
+        mock_api.return_value = self.SAMPLE_FUNCTION
+
+        FunctionsCommand.functions_get(
+            TEST_DIR, "fn-1", region="eu-1", project_id="explicit-project", branch_id="explicit-branch"
+        )
+
+        self.mock_scope.assert_called_once_with(
+            TEST_DIR, "eu-1", "explicit-project", "explicit-branch", output_json=False
+        )
 
     @patch("builtins.open", create=True)
     @patch("poly.cli_commands.functions.AgentStudioInterface.create_function")
@@ -3480,6 +3551,10 @@ class GroupedHelpOutputTest(unittest.TestCase):
         for command in ["functions", "conversations", "audio-cache", "deployments"]:
             self.assertIn(command, section)
         self.assertNotIn("pull", section)
+        # rtc/test/chat operate on local project/branch state, not pure remote
+        # API calls, so they belong in Project sync instead.
+        for command in ["rtc", "test", "chat"]:
+            self.assertNotIn(f"    {command} ", section)
 
     def test_commands_are_listed_before_options(self):
         """Commands matter more than -h/-v, so they come first."""

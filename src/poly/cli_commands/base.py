@@ -45,6 +45,7 @@ class Parents:
     json: ArgumentParser
     debug: ArgumentParser
     path: ArgumentParser
+    scope: ArgumentParser
 
 
 class BaseCommand(ABC):

@@ -19,7 +19,7 @@ from poly.cli_commands.base import (
     add_grouped_subparsers,
     group_subcommands,
 )
-from poly.cli_commands.shared import load_project
+from poly.cli_commands.shared import resolve_project_scope
 from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.platform_api import FunctionConflictError
 from poly.output.json_output import json_print
@@ -89,7 +89,7 @@ class FunctionsCommand(BaseCommand):
 
         list_parser = functions_subparsers.add_parser(
             "list",
-            parents=[parents.path, parents.json, parents.verbose],
+            parents=[parents.path, parents.scope, parents.json, parents.verbose],
             help="List functions on the current branch.",
             description=(
                 "List the Functions defined on the project's current branch.\n\n"
@@ -114,7 +114,7 @@ class FunctionsCommand(BaseCommand):
 
         get_parser = functions_subparsers.add_parser(
             "get",
-            parents=[parents.path, parents.json, parents.verbose],
+            parents=[parents.path, parents.scope, parents.json, parents.verbose],
             help="Get a single function by ID.",
             description=(
                 "Show a function's metadata, parameters and code.\n\n"
@@ -127,7 +127,7 @@ class FunctionsCommand(BaseCommand):
 
         create_parser = functions_subparsers.add_parser(
             "create",
-            parents=[parents.path, parents.json, parents.verbose],
+            parents=[parents.path, parents.scope, parents.json, parents.verbose],
             help="Create a new function.",
             description=(
                 "Create a new Function on the current branch from a local code file.\n\n"
@@ -164,7 +164,7 @@ class FunctionsCommand(BaseCommand):
 
         update_parser = functions_subparsers.add_parser(
             "update",
-            parents=[parents.path, parents.json, parents.verbose],
+            parents=[parents.path, parents.scope, parents.json, parents.verbose],
             help="Update an existing function.",
             description=(
                 "Update a Function's name, description, code or parameters. At least\n"
@@ -201,7 +201,7 @@ class FunctionsCommand(BaseCommand):
 
         delete_parser = functions_subparsers.add_parser(
             "delete",
-            parents=[parents.path, parents.json, parents.verbose],
+            parents=[parents.path, parents.scope, parents.json, parents.verbose],
             help="Delete a function.",
             description=(
                 "Delete a Function from the current branch.\n\n"
@@ -221,7 +221,7 @@ class FunctionsCommand(BaseCommand):
 
         execute_parser = functions_subparsers.add_parser(
             "execute",
-            parents=[parents.path, parents.json, parents.verbose],
+            parents=[parents.path, parents.scope, parents.json, parents.verbose],
             help="Execute a function with the given arguments.",
             description=(
                 "Execute a Function and print its return value, logs and runtime.\n\n"
@@ -241,7 +241,7 @@ class FunctionsCommand(BaseCommand):
 
         duplicate_parser = functions_subparsers.add_parser(
             "duplicate",
-            parents=[parents.path, parents.json, parents.verbose],
+            parents=[parents.path, parents.scope, parents.json, parents.verbose],
             help="Duplicate a function.",
             description=(
                 "Copy a Function on the current branch.\n\n"
@@ -261,7 +261,7 @@ class FunctionsCommand(BaseCommand):
 
         functions_subparsers.add_parser(
             "deploy",
-            parents=[parents.path, parents.json, parents.verbose],
+            parents=[parents.path, parents.scope, parents.json, parents.verbose],
             help="Deploy all draft functions on the current branch.",
             description=(
                 "Deploy every draft Function on the current branch.\n\n"
@@ -273,7 +273,7 @@ class FunctionsCommand(BaseCommand):
 
         functions_subparsers.add_parser(
             "validate",
-            parents=[parents.path, parents.json, parents.verbose],
+            parents=[parents.path, parents.scope, parents.json, parents.verbose],
             help="Validate all functions on the current branch.",
             description=(
                 "Check every Function on the current branch for syntax errors and\n"
@@ -286,7 +286,7 @@ class FunctionsCommand(BaseCommand):
 
         references_parser = functions_subparsers.add_parser(
             "references",
-            parents=[parents.path, parents.json, parents.verbose],
+            parents=[parents.path, parents.scope, parents.json, parents.verbose],
             help="Show flow steps that reference a function.",
             description=(
                 "List the flow steps that call a Function.\n\n"
@@ -299,7 +299,7 @@ class FunctionsCommand(BaseCommand):
 
         type_definitions_parser = functions_subparsers.add_parser(
             "type-definitions",
-            parents=[parents.path, parents.json, parents.verbose],
+            parents=[parents.path, parents.scope, parents.json, parents.verbose],
             help="Show Python type stubs for a function, for IDE autocomplete.",
             description=(
                 "Print the Conversation/Flow type stubs available to a Function, for\n"
@@ -314,7 +314,7 @@ class FunctionsCommand(BaseCommand):
 
         functions_subparsers.add_parser(
             "deployments",
-            parents=[parents.path, parents.json, parents.verbose],
+            parents=[parents.path, parents.scope, parents.json, parents.verbose],
             help="List function deployment history across environments.",
             description=(
                 "Show the deployment history for the project's Functions.\n\n"
@@ -341,12 +341,12 @@ class FunctionsCommand(BaseCommand):
         )
         start_subparsers.add_parser(
             "get",
-            parents=[parents.path, parents.json, parents.verbose],
+            parents=[parents.path, parents.scope, parents.json, parents.verbose],
             help="Get the branch's start_function code.",
         )
         start_update_parser = start_subparsers.add_parser(
             "update",
-            parents=[parents.path, parents.json, parents.verbose],
+            parents=[parents.path, parents.scope, parents.json, parents.verbose],
             help="Update the branch's start_function code from a local file.",
         )
         start_update_parser.add_argument(
@@ -373,12 +373,12 @@ class FunctionsCommand(BaseCommand):
         end_subparsers = end_parser.add_subparsers(dest="functions_end_subcommand", required=True)
         end_subparsers.add_parser(
             "get",
-            parents=[parents.path, parents.json, parents.verbose],
+            parents=[parents.path, parents.scope, parents.json, parents.verbose],
             help="Get the branch's end_function code.",
         )
         end_update_parser = end_subparsers.add_parser(
             "update",
-            parents=[parents.path, parents.json, parents.verbose],
+            parents=[parents.path, parents.scope, parents.json, parents.verbose],
             help="Update the branch's end_function code from a local file.",
         )
         end_update_parser.add_argument(
@@ -397,15 +397,17 @@ class FunctionsCommand(BaseCommand):
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to the matching functions sub-handler."""
+        scope = dict(region=args.region, project_id=args.project_id, branch_id=args.branch_id)
         if args.functions_subcommand == "list":
             cls.functions_list(
                 args.path,
                 limit=args.limit,
                 offset=args.offset,
                 output_json=args.json,
+                **scope,
             )
         elif args.functions_subcommand == "get":
-            cls.functions_get(args.path, args.function_id, output_json=args.json)
+            cls.functions_get(args.path, args.function_id, output_json=args.json, **scope)
         elif args.functions_subcommand == "create":
             cls.functions_create(
                 args.path,
@@ -414,6 +416,7 @@ class FunctionsCommand(BaseCommand):
                 args.code_file,
                 parameters=args.parameters,
                 output_json=args.json,
+                **scope,
             )
         elif args.functions_subcommand == "update":
             cls.functions_update(
@@ -425,6 +428,7 @@ class FunctionsCommand(BaseCommand):
                 parameters=args.parameters,
                 force=args.force,
                 output_json=args.json,
+                **scope,
             )
         elif args.functions_subcommand == "delete":
             cls.functions_delete(
@@ -432,6 +436,7 @@ class FunctionsCommand(BaseCommand):
                 args.function_id,
                 force=args.force,
                 output_json=args.json,
+                **scope,
             )
         elif args.functions_subcommand == "execute":
             cls.functions_execute(
@@ -439,6 +444,7 @@ class FunctionsCommand(BaseCommand):
                 args.function_id,
                 args.args,
                 output_json=args.json,
+                **scope,
             )
         elif args.functions_subcommand == "duplicate":
             cls.functions_duplicate(
@@ -446,27 +452,32 @@ class FunctionsCommand(BaseCommand):
                 args.function_id,
                 name=args.name,
                 output_json=args.json,
+                **scope,
             )
         elif args.functions_subcommand == "deploy":
-            cls.functions_deploy(args.path, output_json=args.json)
+            cls.functions_deploy(args.path, output_json=args.json, **scope)
         elif args.functions_subcommand == "validate":
-            cls.functions_validate(args.path, output_json=args.json)
+            cls.functions_validate(args.path, output_json=args.json, **scope)
         elif args.functions_subcommand == "references":
-            cls.functions_references(args.path, args.function_id, output_json=args.json)
+            cls.functions_references(args.path, args.function_id, output_json=args.json, **scope)
         elif args.functions_subcommand == "type-definitions":
-            cls.functions_type_definitions(args.path, args.function_id, output_json=args.json)
+            cls.functions_type_definitions(
+                args.path, args.function_id, output_json=args.json, **scope
+            )
         elif args.functions_subcommand == "deployments":
-            cls.functions_deployments(args.path, output_json=args.json)
+            cls.functions_deployments(args.path, output_json=args.json, **scope)
         elif args.functions_subcommand == "start":
             if args.functions_start_subcommand == "get":
-                cls.functions_start_get(args.path, output_json=args.json)
+                cls.functions_start_get(args.path, output_json=args.json, **scope)
             elif args.functions_start_subcommand == "update":
-                cls.functions_start_update(args.path, args.code_file, output_json=args.json)
+                cls.functions_start_update(
+                    args.path, args.code_file, output_json=args.json, **scope
+                )
         elif args.functions_subcommand == "end":
             if args.functions_end_subcommand == "get":
-                cls.functions_end_get(args.path, output_json=args.json)
+                cls.functions_end_get(args.path, output_json=args.json, **scope)
             elif args.functions_end_subcommand == "update":
-                cls.functions_end_update(args.path, args.code_file, output_json=args.json)
+                cls.functions_end_update(args.path, args.code_file, output_json=args.json, **scope)
 
     @staticmethod
     def _handle_conflict(e: FunctionConflictError, output_json: bool) -> None:
@@ -547,6 +558,9 @@ class FunctionsCommand(BaseCommand):
         limit: int = 20,
         offset: int = 0,
         output_json: bool = False,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        branch_id: Optional[str] = None,
     ) -> None:
         """List functions on the project's current branch.
 
@@ -555,14 +569,19 @@ class FunctionsCommand(BaseCommand):
             limit: Max number of functions to return.
             offset: Number of functions to skip.
             output_json: If True, emit machine-readable JSON.
+            region: Explicit region, bypassing the local project.
+            project_id: Explicit project ID, bypassing the local project.
+            branch_id: Explicit branch ID, bypassing the local project.
         """
         from poly.output.console import info, print_functions
 
-        project = load_project(base_path, output_json=output_json)
+        region, project_id, branch_id = resolve_project_scope(
+            base_path, region, project_id, branch_id, output_json=output_json
+        )
         result = AgentStudioInterface.list_functions(
-            region=project.region,
-            project_id=project.project_id,
-            branch_id=project.branch_id,
+            region=region,
+            project_id=project_id,
+            branch_id=branch_id,
             limit=limit,
             offset=offset,
         )
@@ -577,21 +596,34 @@ class FunctionsCommand(BaseCommand):
             print_functions(functions)
 
     @classmethod
-    def functions_get(cls, base_path: str, function_id: str, output_json: bool = False) -> None:
+    def functions_get(
+        cls,
+        base_path: str,
+        function_id: str,
+        output_json: bool = False,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        branch_id: Optional[str] = None,
+    ) -> None:
         """Show a single function by ID.
 
         Args:
             base_path: Base path for the project.
             function_id: The function ID.
             output_json: If True, emit machine-readable JSON.
+            region: Explicit region, bypassing the local project.
+            project_id: Explicit project ID, bypassing the local project.
+            branch_id: Explicit branch ID, bypassing the local project.
         """
         from poly.output.console import print_function_detail
 
-        project = load_project(base_path, output_json=output_json)
+        region, project_id, branch_id = resolve_project_scope(
+            base_path, region, project_id, branch_id, output_json=output_json
+        )
         function = AgentStudioInterface.get_function(
-            region=project.region,
-            project_id=project.project_id,
-            branch_id=project.branch_id,
+            region=region,
+            project_id=project_id,
+            branch_id=branch_id,
             function_id=function_id,
         )
 
@@ -609,6 +641,9 @@ class FunctionsCommand(BaseCommand):
         code_file: str,
         parameters: Optional[str] = None,
         output_json: bool = False,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        branch_id: Optional[str] = None,
     ) -> None:
         """Create a new function from a local code file.
 
@@ -619,10 +654,15 @@ class FunctionsCommand(BaseCommand):
             code_file: Local path to the function's Python source.
             parameters: Optional JSON list of parameter specs.
             output_json: If True, emit machine-readable JSON.
+            region: Explicit region, bypassing the local project.
+            project_id: Explicit project ID, bypassing the local project.
+            branch_id: Explicit branch ID, bypassing the local project.
         """
         from poly.output.console import success
 
-        project = load_project(base_path, output_json=output_json)
+        region, project_id, branch_id = resolve_project_scope(
+            base_path, region, project_id, branch_id, output_json=output_json
+        )
         code = cls._read_code_file(code_file, output_json)
         parsed_parameters = (
             cls._parse_json_arg(parameters, "--parameters", output_json) if parameters else None
@@ -630,9 +670,9 @@ class FunctionsCommand(BaseCommand):
 
         try:
             function = AgentStudioInterface.create_function(
-                region=project.region,
-                project_id=project.project_id,
-                branch_id=project.branch_id,
+                region=region,
+                project_id=project_id,
+                branch_id=branch_id,
                 name=name,
                 description=description,
                 code=code,
@@ -661,6 +701,9 @@ class FunctionsCommand(BaseCommand):
         parameters: Optional[str] = None,
         force: bool = False,
         output_json: bool = False,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        branch_id: Optional[str] = None,
     ) -> None:
         """Update an existing function.
 
@@ -673,10 +716,15 @@ class FunctionsCommand(BaseCommand):
             parameters: JSON list of parameter specs.
             force: Override an orphaned-reference conflict.
             output_json: If True, emit machine-readable JSON.
+            region: Explicit region, bypassing the local project.
+            project_id: Explicit project ID, bypassing the local project.
+            branch_id: Explicit branch ID, bypassing the local project.
         """
         from poly.output.console import error, success
 
-        project = load_project(base_path, output_json=output_json)
+        region, project_id, branch_id = resolve_project_scope(
+            base_path, region, project_id, branch_id, output_json=output_json
+        )
 
         updates: dict[str, Any] = {}
         if name is not None:
@@ -698,9 +746,9 @@ class FunctionsCommand(BaseCommand):
 
         try:
             function = AgentStudioInterface.update_function(
-                region=project.region,
-                project_id=project.project_id,
-                branch_id=project.branch_id,
+                region=region,
+                project_id=project_id,
+                branch_id=branch_id,
                 function_id=function_id,
                 updates=updates,
                 force=force,
@@ -724,6 +772,9 @@ class FunctionsCommand(BaseCommand):
         function_id: str,
         force: bool = False,
         output_json: bool = False,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        branch_id: Optional[str] = None,
     ) -> None:
         """Delete a function.
 
@@ -732,16 +783,21 @@ class FunctionsCommand(BaseCommand):
             function_id: The function ID.
             force: Override an orphaned-reference conflict.
             output_json: If True, emit machine-readable JSON.
+            region: Explicit region, bypassing the local project.
+            project_id: Explicit project ID, bypassing the local project.
+            branch_id: Explicit branch ID, bypassing the local project.
         """
         from poly.output.console import success
 
-        project = load_project(base_path, output_json=output_json)
+        region, project_id, branch_id = resolve_project_scope(
+            base_path, region, project_id, branch_id, output_json=output_json
+        )
 
         try:
             AgentStudioInterface.delete_function(
-                region=project.region,
-                project_id=project.project_id,
-                branch_id=project.branch_id,
+                region=region,
+                project_id=project_id,
+                branch_id=branch_id,
                 function_id=function_id,
                 force=force,
             )
@@ -761,6 +817,9 @@ class FunctionsCommand(BaseCommand):
         function_id: str,
         args_json: str = "{}",
         output_json: bool = False,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        branch_id: Optional[str] = None,
     ) -> None:
         """Execute a function with the given JSON arguments.
 
@@ -769,16 +828,21 @@ class FunctionsCommand(BaseCommand):
             function_id: The function ID.
             args_json: JSON object of arguments to pass.
             output_json: If True, emit machine-readable JSON.
+            region: Explicit region, bypassing the local project.
+            project_id: Explicit project ID, bypassing the local project.
+            branch_id: Explicit branch ID, bypassing the local project.
         """
         from poly.output.console import console
 
-        project = load_project(base_path, output_json=output_json)
+        region, project_id, branch_id = resolve_project_scope(
+            base_path, region, project_id, branch_id, output_json=output_json
+        )
         args = cls._parse_json_arg(args_json, "--args", output_json)
 
         result = AgentStudioInterface.execute_function(
-            region=project.region,
-            project_id=project.project_id,
-            branch_id=project.branch_id,
+            region=region,
+            project_id=project_id,
+            branch_id=branch_id,
             function_id=function_id,
             args=args,
         )
@@ -798,6 +862,9 @@ class FunctionsCommand(BaseCommand):
         function_id: str,
         name: Optional[str] = None,
         output_json: bool = False,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        branch_id: Optional[str] = None,
     ) -> None:
         """Duplicate a function, optionally with a new name.
 
@@ -806,16 +873,21 @@ class FunctionsCommand(BaseCommand):
             function_id: The function ID to copy.
             name: Name for the copy.
             output_json: If True, emit machine-readable JSON.
+            region: Explicit region, bypassing the local project.
+            project_id: Explicit project ID, bypassing the local project.
+            branch_id: Explicit branch ID, bypassing the local project.
         """
         from poly.output.console import success
 
-        project = load_project(base_path, output_json=output_json)
+        region, project_id, branch_id = resolve_project_scope(
+            base_path, region, project_id, branch_id, output_json=output_json
+        )
 
         try:
             function = AgentStudioInterface.duplicate_function(
-                region=project.region,
-                project_id=project.project_id,
-                branch_id=project.branch_id,
+                region=region,
+                project_id=project_id,
+                branch_id=branch_id,
                 function_id=function_id,
                 name=name,
             )
@@ -832,20 +904,32 @@ class FunctionsCommand(BaseCommand):
             )
 
     @classmethod
-    def functions_deploy(cls, base_path: str, output_json: bool = False) -> None:
+    def functions_deploy(
+        cls,
+        base_path: str,
+        output_json: bool = False,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        branch_id: Optional[str] = None,
+    ) -> None:
         """Deploy all draft functions on the current branch.
 
         Args:
             base_path: Base path for the project.
             output_json: If True, emit machine-readable JSON.
+            region: Explicit region, bypassing the local project.
+            project_id: Explicit project ID, bypassing the local project.
+            branch_id: Explicit branch ID, bypassing the local project.
         """
         from poly.output.console import success
 
-        project = load_project(base_path, output_json=output_json)
+        region, project_id, branch_id = resolve_project_scope(
+            base_path, region, project_id, branch_id, output_json=output_json
+        )
         result = AgentStudioInterface.deploy_functions(
-            region=project.region,
-            project_id=project.project_id,
-            branch_id=project.branch_id,
+            region=region,
+            project_id=project_id,
+            branch_id=branch_id,
         )
 
         if output_json:
@@ -854,20 +938,32 @@ class FunctionsCommand(BaseCommand):
             success(f"Deployed functions (version {result.get('deployment_version', 'unknown')}).")
 
     @classmethod
-    def functions_validate(cls, base_path: str, output_json: bool = False) -> None:
+    def functions_validate(
+        cls,
+        base_path: str,
+        output_json: bool = False,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        branch_id: Optional[str] = None,
+    ) -> None:
         """Validate all functions on the current branch.
 
         Args:
             base_path: Base path for the project.
             output_json: If True, emit machine-readable JSON.
+            region: Explicit region, bypassing the local project.
+            project_id: Explicit project ID, bypassing the local project.
+            branch_id: Explicit branch ID, bypassing the local project.
         """
         from poly.output.console import print_function_validation_issues
 
-        project = load_project(base_path, output_json=output_json)
+        region, project_id, branch_id = resolve_project_scope(
+            base_path, region, project_id, branch_id, output_json=output_json
+        )
         result = AgentStudioInterface.validate_functions(
-            region=project.region,
-            project_id=project.project_id,
-            branch_id=project.branch_id,
+            region=region,
+            project_id=project_id,
+            branch_id=branch_id,
         )
 
         if output_json:
@@ -877,7 +973,13 @@ class FunctionsCommand(BaseCommand):
 
     @classmethod
     def functions_references(
-        cls, base_path: str, function_id: str, output_json: bool = False
+        cls,
+        base_path: str,
+        function_id: str,
+        output_json: bool = False,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        branch_id: Optional[str] = None,
     ) -> None:
         """Show the flow steps that reference a function.
 
@@ -885,14 +987,19 @@ class FunctionsCommand(BaseCommand):
             base_path: Base path for the project.
             function_id: The function ID.
             output_json: If True, emit machine-readable JSON.
+            region: Explicit region, bypassing the local project.
+            project_id: Explicit project ID, bypassing the local project.
+            branch_id: Explicit branch ID, bypassing the local project.
         """
         from poly.output.console import print_function_references
 
-        project = load_project(base_path, output_json=output_json)
+        region, project_id, branch_id = resolve_project_scope(
+            base_path, region, project_id, branch_id, output_json=output_json
+        )
         result = AgentStudioInterface.get_function_references(
-            region=project.region,
-            project_id=project.project_id,
-            branch_id=project.branch_id,
+            region=region,
+            project_id=project_id,
+            branch_id=branch_id,
             function_id=function_id,
         )
 
@@ -903,7 +1010,13 @@ class FunctionsCommand(BaseCommand):
 
     @classmethod
     def functions_type_definitions(
-        cls, base_path: str, function_id: str, output_json: bool = False
+        cls,
+        base_path: str,
+        function_id: str,
+        output_json: bool = False,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        branch_id: Optional[str] = None,
     ) -> None:
         """Show Python type stubs for a function, for IDE autocomplete.
 
@@ -911,14 +1024,19 @@ class FunctionsCommand(BaseCommand):
             base_path: Base path for the project.
             function_id: The function ID.
             output_json: If True, emit machine-readable JSON.
+            region: Explicit region, bypassing the local project.
+            project_id: Explicit project ID, bypassing the local project.
+            branch_id: Explicit branch ID, bypassing the local project.
         """
         from poly.output.console import print_code
 
-        project = load_project(base_path, output_json=output_json)
+        region, project_id, branch_id = resolve_project_scope(
+            base_path, region, project_id, branch_id, output_json=output_json
+        )
         result = AgentStudioInterface.get_function_type_definitions(
-            region=project.region,
-            project_id=project.project_id,
-            branch_id=project.branch_id,
+            region=region,
+            project_id=project_id,
+            branch_id=branch_id,
             function_id=function_id,
         )
 
@@ -928,20 +1046,32 @@ class FunctionsCommand(BaseCommand):
             print_code(result.get("code", ""), line_numbers=False)
 
     @classmethod
-    def functions_deployments(cls, base_path: str, output_json: bool = False) -> None:
+    def functions_deployments(
+        cls,
+        base_path: str,
+        output_json: bool = False,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        branch_id: Optional[str] = None,
+    ) -> None:
         """List function deployment history across environments.
 
         Args:
             base_path: Base path for the project.
             output_json: If True, emit machine-readable JSON.
+            region: Explicit region, bypassing the local project.
+            project_id: Explicit project ID, bypassing the local project.
+            branch_id: Explicit branch ID, bypassing the local project.
         """
         from poly.output.console import info, print_function_deployments
 
-        project = load_project(base_path, output_json=output_json)
+        region, project_id, branch_id = resolve_project_scope(
+            base_path, region, project_id, branch_id, output_json=output_json
+        )
         result = AgentStudioInterface.list_function_deployments(
-            region=project.region,
-            project_id=project.project_id,
-            branch_id=project.branch_id,
+            region=region,
+            project_id=project_id,
+            branch_id=branch_id,
         )
         deployments = result.get("deployments", [])
 
@@ -954,20 +1084,32 @@ class FunctionsCommand(BaseCommand):
             print_function_deployments(deployments)
 
     @classmethod
-    def functions_start_get(cls, base_path: str, output_json: bool = False) -> None:
+    def functions_start_get(
+        cls,
+        base_path: str,
+        output_json: bool = False,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        branch_id: Optional[str] = None,
+    ) -> None:
         """Show the branch's start_function code.
 
         Args:
             base_path: Base path for the project.
             output_json: If True, emit machine-readable JSON.
+            region: Explicit region, bypassing the local project.
+            project_id: Explicit project ID, bypassing the local project.
+            branch_id: Explicit branch ID, bypassing the local project.
         """
         from poly.output.console import print_code
 
-        project = load_project(base_path, output_json=output_json)
+        region, project_id, branch_id = resolve_project_scope(
+            base_path, region, project_id, branch_id, output_json=output_json
+        )
         result = AgentStudioInterface.get_start_function(
-            region=project.region,
-            project_id=project.project_id,
-            branch_id=project.branch_id,
+            region=region,
+            project_id=project_id,
+            branch_id=branch_id,
         )
 
         if output_json:
@@ -977,7 +1119,13 @@ class FunctionsCommand(BaseCommand):
 
     @classmethod
     def functions_start_update(
-        cls, base_path: str, code_file: str, output_json: bool = False
+        cls,
+        base_path: str,
+        code_file: str,
+        output_json: bool = False,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        branch_id: Optional[str] = None,
     ) -> None:
         """Update the branch's start_function code from a local file.
 
@@ -985,16 +1133,21 @@ class FunctionsCommand(BaseCommand):
             base_path: Base path for the project.
             code_file: Local path to the replacement source.
             output_json: If True, emit machine-readable JSON.
+            region: Explicit region, bypassing the local project.
+            project_id: Explicit project ID, bypassing the local project.
+            branch_id: Explicit branch ID, bypassing the local project.
         """
         from poly.output.console import success
 
-        project = load_project(base_path, output_json=output_json)
+        region, project_id, branch_id = resolve_project_scope(
+            base_path, region, project_id, branch_id, output_json=output_json
+        )
         code = cls._read_code_file(code_file, output_json)
 
         result = AgentStudioInterface.update_start_function(
-            region=project.region,
-            project_id=project.project_id,
-            branch_id=project.branch_id,
+            region=region,
+            project_id=project_id,
+            branch_id=branch_id,
             code=code,
         )
 
@@ -1004,20 +1157,32 @@ class FunctionsCommand(BaseCommand):
             success("Updated start_function.")
 
     @classmethod
-    def functions_end_get(cls, base_path: str, output_json: bool = False) -> None:
+    def functions_end_get(
+        cls,
+        base_path: str,
+        output_json: bool = False,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        branch_id: Optional[str] = None,
+    ) -> None:
         """Show the branch's end_function code.
 
         Args:
             base_path: Base path for the project.
             output_json: If True, emit machine-readable JSON.
+            region: Explicit region, bypassing the local project.
+            project_id: Explicit project ID, bypassing the local project.
+            branch_id: Explicit branch ID, bypassing the local project.
         """
         from poly.output.console import print_code
 
-        project = load_project(base_path, output_json=output_json)
+        region, project_id, branch_id = resolve_project_scope(
+            base_path, region, project_id, branch_id, output_json=output_json
+        )
         result = AgentStudioInterface.get_end_function(
-            region=project.region,
-            project_id=project.project_id,
-            branch_id=project.branch_id,
+            region=region,
+            project_id=project_id,
+            branch_id=branch_id,
         )
 
         if output_json:
@@ -1027,7 +1192,13 @@ class FunctionsCommand(BaseCommand):
 
     @classmethod
     def functions_end_update(
-        cls, base_path: str, code_file: str, output_json: bool = False
+        cls,
+        base_path: str,
+        code_file: str,
+        output_json: bool = False,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        branch_id: Optional[str] = None,
     ) -> None:
         """Update the branch's end_function code from a local file.
 
@@ -1035,16 +1206,21 @@ class FunctionsCommand(BaseCommand):
             base_path: Base path for the project.
             code_file: Local path to the replacement source.
             output_json: If True, emit machine-readable JSON.
+            region: Explicit region, bypassing the local project.
+            project_id: Explicit project ID, bypassing the local project.
+            branch_id: Explicit branch ID, bypassing the local project.
         """
         from poly.output.console import success
 
-        project = load_project(base_path, output_json=output_json)
+        region, project_id, branch_id = resolve_project_scope(
+            base_path, region, project_id, branch_id, output_json=output_json
+        )
         code = cls._read_code_file(code_file, output_json)
 
         result = AgentStudioInterface.update_end_function(
-            region=project.region,
-            project_id=project.project_id,
-            branch_id=project.branch_id,
+            region=region,
+            project_id=project_id,
+            branch_id=branch_id,
             code=code,
         )
 

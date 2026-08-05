@@ -41,6 +41,7 @@ from poly.cli_commands.sync import (
 )
 from poly.cli_commands.testing import TestingCommand
 from poly.cli_commands.utils import CompletionCommand, DocsCommand
+from poly.handlers.interface import REGIONS
 from poly.output.json_output import json_print
 
 logger = logging.getLogger(__name__)
@@ -126,8 +127,36 @@ class AgentStudioCLI:
             help="Base path to the project. Defaults to current working directory.",
         )
 
+        scope_parent = ArgumentParser(add_help=False)
+        scope_parent.add_argument(
+            "--region",
+            type=str,
+            choices=REGIONS,
+            default=None,
+            help="Region, for headless use without a local project. Requires "
+            "--project_id and --branch_id.",
+        )
+        scope_parent.add_argument(
+            "--project_id",
+            type=str,
+            default=None,
+            help="Project ID (agent ID), for headless use without a local project. "
+            "Requires --region and --branch_id.",
+        )
+        scope_parent.add_argument(
+            "--branch_id",
+            type=str,
+            default=None,
+            help="Branch ID, for headless use without a local project. Requires "
+            "--region and --project_id.",
+        )
+
         parents = Parents(
-            verbose=verbose_parent, json=json_parent, debug=debug_parent, path=path_parent
+            verbose=verbose_parent,
+            json=json_parent,
+            debug=debug_parent,
+            path=path_parent,
+            scope=scope_parent,
         )
 
         subparsers = add_grouped_subparsers(parser, dest="command", metavar="<command>")

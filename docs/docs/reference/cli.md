@@ -21,8 +21,8 @@ Commands are listed under section headers so related ones stay together:
 | Section | Commands |
 |---|---|
 | Getting started | `init`, `start`, `login`, `studio`, `project` |
-| Project sync | `pull`, `push`, `status`, `revert`, `format`, `validate`, `diff`, `review`, `branch` |
-| Builder API | `deployments`, `conversations`, `audio-cache`, `functions`, `test`, `rtc`, `chat` |
+| Project sync | `pull`, `push`, `status`, `revert`, `format`, `validate`, `diff`, `review`, `branch`, `test`, `rtc`, `chat` |
+| Builder API | `deployments`, `conversations`, `audio-cache`, `functions` |
 | Other | `docs`, `completion` |
 
 Each command also supports its own help output. For example:
@@ -697,6 +697,14 @@ Manage Functions using the public Functions REST API, scoped to the project's cu
 !!! note
 
     This is a different mechanism from the local `functions/*.py` files synced by `poly pull` / `poly push` (see [Functions](functions.md)). `poly functions` talks to the Functions REST API directly and does not read or write local function files.
+
+Every subcommand also accepts `--region`, `--project_id` and `--branch_id` directly, so `poly functions` can run headlessly (CI, scripts) without a local project checkout:
+
+~~~bash
+poly functions list --region us-1 --project_id abc123 --branch_id main
+~~~
+
+All three must be given together — if any one is set, all three are required. With none set, the current local project's region/project/branch are used, as before.
 
 `poly functions --help` splits its subcommands into four sections:
 

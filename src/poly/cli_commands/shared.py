@@ -76,6 +76,50 @@ def load_project(base_path: str, output_json: bool = False) -> AgentStudioProjec
     return project
 
 
+def resolve_project_scope(
+    base_path: str,
+    region: Optional[str],
+    project_id: Optional[str],
+    branch_id: Optional[str],
+    output_json: bool = False,
+) -> tuple[str, str, str]:
+    """Resolve region/project_id/branch_id from explicit flags or the local project.
+
+    Lets headless callers (CI, scripts) skip the local project checkout
+    entirely by passing all three explicitly, instead of requiring
+    ``load_project`` to read one from disk.
+
+    Args:
+        base_path: Base path for the local project, used as a fallback.
+        region: Explicit region, if given.
+        project_id: Explicit project ID, if given.
+        branch_id: Explicit branch ID, if given.
+        output_json: If True, print JSON and exit on error instead of a message.
+
+    Returns:
+        The resolved (region, project_id, branch_id).
+    """
+    from poly.output.console import error
+
+    explicit = (region, project_id, branch_id)
+    if all(value is not None for value in explicit):
+        return region, project_id, branch_id
+
+    if any(value is not None for value in explicit):
+        message = (
+            "--region, --project_id and --branch_id must all be given together, "
+            "or all omitted to use the local project."
+        )
+        if output_json:
+            json_print({"success": False, "error": message})
+            sys.exit(1)
+        error(message)
+        sys.exit(1)
+
+    project = load_project(base_path, output_json=output_json)
+    return project.region, project.project_id, project.branch_id
+
+
 def compute_diff(
     base_path: str,
     files: list[str] = None,

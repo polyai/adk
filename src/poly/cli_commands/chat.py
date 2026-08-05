@@ -10,7 +10,7 @@ from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParser
 from contextlib import nullcontext
 from typing import Optional
 
-from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
+from poly.cli_commands.base import PROJECT_SYNC_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
@@ -21,7 +21,7 @@ class ChatCommand(BaseCommand):
 
     command = "chat"
 
-    group = BUILDER_API_GROUP
+    group = PROJECT_SYNC_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
