@@ -1,6 +1,94 @@
 # CHANGELOG
 
 
+## v0.37.3 (2026-08-05)
+
+### Bug Fixes
+
+- Stop id sync rewriting every function in the project
+  ([#255](https://github.com/polyai/adk/pull/255),
+  [`c2ef04d`](https://github.com/polyai/adk/commit/c2ef04da90de4c1fe927633c3d70768b5eb7c968))
+
+## Summary
+
+`sync_ids_with_sandbox` was rewriting every function in the project on every id sync, because two
+  `Function` dataclass fields are populated asymmetrically by `read_local_resource` and
+  `from_projection` and both count toward the generated `__eq__`. This makes disk-read and
+  projection-read functions compare unequal regardless of content.
+
+## Motivation
+
+`sync_ids_with_sandbox` is the **only** code path that decides what changed by comparing whole
+  `Resource` objects (`resource != branch_resource`, `project.py:2850`). `push_project` gates on a
+  rendered-file hash first (`project.py:1163-1171`), and `get_diffs` uses that same hash
+  short-circuit plus a *text* diff of rendered output (`project.py:1547-1570`). So an asymmetric
+  field is invisible everywhere except this one path — which is why this went unnoticed.
+
+The two asymmetric fields were:
+
+| Field | `read_local_resource` | `from_projection` | |---|---|---| | `variable_references` | always
+  derives it from code — a dict, initialised to `{}`, never `None` | never sets it → `None` | |
+  `description` | `_extract_decorators` returned `None` with no `@func_description` |
+  `func["description"]`, which Agent Studio stores as `""` |
+
+This caused a real incident on a customer project. A merge-time id sync — invoked to repair a
+  handful of duplicate-name errors after resources were re-created under fresh ADK ids — emitted
+  **155 commands, 63 of which were these false positives**: 36 global functions + 25 flow transition
+  functions from `variable_references`, and the 2 special functions from `description`. That is
+  every function in the project. Not one `create_function` or `delete_function` was in the batch, so
+  all 63 kept their ids and were rewritten for no reason.
+
+It matters beyond noise because Agent Studio wraps a command batch in a single transaction, so 63
+  pointless commands are 63 extra chances to roll back the id repair that was the point of the sync;
+  and it inflates the Agent Studio merge diff far past the corresponding git PR diff, which is what
+  made the incident hard to spot.
+
+`variable_references` is marked `compare=False` rather than populated from the projection, because
+  it is derived from `code` — which *is* compared — so no real signal is lost. Transition functions
+  never push their references at all (see below), so Agent Studio has nothing stored for them and it
+  would have left 25 of the 63 false positives in place.
+
+## Changes
+
+- `Function.variable_references` is now `field(default_factory=dict, compare=False)` — excluded from
+  the generated `__eq__`. - `Function._extract_decorators` defaults `description` to `""` instead of
+  `None`, matching how Agent Studio stores an absent description. Return annotation tightened from
+  `Optional[str]` to `str`. - Two regression tests in `src/poly/tests/resources_test.py`, both
+  verified to fail without the fix.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+**Round-trip sweep across every resource type.** Build every resource from a real project
+  projection, write it out with its own `save()`, read it back through the same path push and sync
+  use, and diff the compared dataclass fields. Using `save()` rather than a mocked read is what
+  makes multi-resource YAML files work — variant attributes, pronunciations, keyphrases and voice
+  config are 180 of the 506 resources and were being silently skipped otherwise.
+
+| Projection | Resources | Equal | Differ | |---|---|---|---| | feature branch | 506 across 24 types
+  | 506 | **0** | | main | 507 across 24 types | 507 | **0** |
+
+Before the fix, `Function` was 0/63. A static sweep was attempted first and abandoned as inadequate:
+  only 6 of the 34 registered types define both `from_projection` and `read_local_resource` locally
+  with a simple constructor call — the rest inherit the generic `YamlResource.read_local_resource`
+  or build via helpers.
+
+**Both new tests fail without the fix:**
+
+``` FAILED
+  src/poly/tests/resources_test.py::FunctionTests::test_equality_ignores_variable_references FAILED
+  src/poly/tests/resources_test.py::FunctionTests::test_missing_description_reads_as_empty_string 2
+  failed, 391 deselected ```
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes — 989 passed, 30
+  subtests - [x] No breaking changes to the `poly` CLI interface (or migration path documented) -
+  [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.37.2 (2026-08-04)
 
 ### Performance Improvements
