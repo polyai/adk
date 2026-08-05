@@ -626,8 +626,18 @@ class DeleteFunction(unittest.TestCase):
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
     @patch("poly.handlers.platform_api.requests.request")
+    def test_omits_body_when_force_not_given(self, mock_request, _mock_key):
+        """Without force=True, no body is sent (matching other DELETE calls)."""
+        mock_request.return_value = make_mock_response(204)
+
+        PlatformAPIHandler.delete_function("studio", "agent-1", "branch-1", "fn-1")
+
+        self.assertIsNone(mock_request.call_args.kwargs["data"])
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
     def test_sends_force_flag(self, mock_request, _mock_key):
-        """force is always sent in the delete body."""
+        """force=True is sent in the delete body."""
         mock_request.return_value = make_mock_response(204)
 
         PlatformAPIHandler.delete_function("studio", "agent-1", "branch-1", "fn-1", force=True)
@@ -694,6 +704,16 @@ class DuplicateFunction(unittest.TestCase):
             PlatformAPIHandler.duplicate_function(
                 "studio", "agent-1", "branch-1", "fn-1", name="taken"
             )
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_sends_body_for_explicit_empty_name(self, mock_request, _mock_key):
+        """An explicit empty-string name is distinct from omitting the argument."""
+        mock_request.return_value = make_mock_response(201, json_body=SAMPLE_FUNCTION)
+
+        PlatformAPIHandler.duplicate_function("studio", "agent-1", "branch-1", "fn-1", name="")
+
+        self.assertEqual(json.loads(mock_request.call_args.kwargs["data"]), {"name": ""})
 
 
 class DeployAndValidateFunctions(unittest.TestCase):
@@ -770,7 +790,9 @@ class StartAndEndFunctions(unittest.TestCase):
     @patch("poly.handlers.platform_api.requests.request")
     def test_get_start_function(self, mock_request, _mock_key):
         """start_function is fetched with a GET."""
-        mock_request.return_value = make_mock_response(200, json_body={"code": "pass", "version": "1"})
+        mock_request.return_value = make_mock_response(
+            200, json_body={"code": "pass", "version": "1"}
+        )
 
         result = PlatformAPIHandler.get_start_function("studio", "agent-1", "branch-1")
 

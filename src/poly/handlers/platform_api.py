@@ -1585,8 +1585,9 @@ class PlatformAPIHandler:
         endpoint = FUNCTION_URL.format(
             project_id=project_id, branch_id=branch_id, function_id=function_id
         )
+        data = {"force": True} if force else None
         return PlatformAPIHandler._request_translating_conflicts(
-            region, endpoint, "DELETE", data={"force": force}
+            region, endpoint, "DELETE", data=data
         )
 
     @staticmethod
@@ -1640,7 +1641,7 @@ class PlatformAPIHandler:
         endpoint = FUNCTION_DUPLICATE_URL.format(
             project_id=project_id, branch_id=branch_id, function_id=function_id
         )
-        data = {"name": name} if name else None
+        data = {"name": name} if name is not None else None
         return PlatformAPIHandler._request_translating_conflicts(
             region, endpoint, "POST", data=data
         )
