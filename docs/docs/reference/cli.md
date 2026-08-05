@@ -398,6 +398,7 @@ Examples:
 poly chat
 poly chat --environment live
 poly chat --channel webchat
+poly chat --sip-header X-Customer-ID=12345
 poly chat --sip-header X-Customer-ID=12345 --sip-header X-Language=en-GB
 poly chat --metadata
 poly chat --lang fr-FR
@@ -460,7 +461,14 @@ Use language flags to specify the expected input and output language when chatti
 #### Simulating SIP headers
 
 Use `--sip-header NAME=VALUE` to simulate a SIP header when starting a conversation.
-Repeat the flag to provide multiple headers:
+
+Single header:
+
+~~~bash
+poly chat --sip-header X-Customer-ID=12345
+~~~
+
+Multiple headers are supported by repeating the flag:
 
 ~~~bash
 poly chat --sip-header X-Customer-ID=12345 --sip-header X-Language=en-GB

@@ -52,6 +52,7 @@ class ChatCommand(BaseCommand):
                 "  poly chat --environment live\n"
                 "  poly chat --path /path/to/project -e sandbox\n"
                 "  poly chat --sip-header X-Customer-ID=12345\n"
+                "  poly chat --sip-header X-Customer-ID=12345 --sip-header X-Language=en-GB\n"
                 "\n"
                 "Non-interactive (scripted) mode:\n"
                 "  poly chat -m 'Hello' -m 'What can you help with?'\n"
