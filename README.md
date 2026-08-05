@@ -201,8 +201,13 @@ Start an interactive chat session with your agent:
 poly chat
 poly chat --environment live
 poly chat --channel webchat
+poly chat --sip-header X-Customer-ID=12345 --sip-header X-Language=en-GB
 poly chat --metadata   # show functions, flows, and state each turn
 ```
+
+`--sip-header NAME=VALUE` is repeatable and simulates headers exposed to project
+functions through `conv.sip_headers`. It does not create a SIP call or reproduce
+carrier-level SIP behaviour.
 
 ### `poly docs`
 

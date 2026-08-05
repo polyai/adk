@@ -6,7 +6,13 @@ Copyright PolyAI Limited
 import json
 import os
 import sys
-from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
+from argparse import (
+    ArgumentParser,
+    ArgumentTypeError,
+    Namespace,
+    RawTextHelpFormatter,
+    _SubParsersAction,
+)
 from contextlib import nullcontext
 from typing import Optional
 
@@ -14,6 +20,17 @@ from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
+
+
+def _parse_sip_header(value: str) -> tuple[str, str]:
+    """Parse a SIP header supplied as NAME=VALUE."""
+    name, separator, header_value = value.partition("=")
+    name = name.strip()
+    if not separator or not name:
+        raise ArgumentTypeError("SIP headers must use NAME=VALUE format")
+    if "\r" in value or "\n" in value:
+        raise ArgumentTypeError("SIP headers cannot contain newlines")
+    return name, header_value
 
 
 class ChatCommand(BaseCommand):
@@ -34,6 +51,7 @@ class ChatCommand(BaseCommand):
                 "  poly chat\n"
                 "  poly chat --environment live\n"
                 "  poly chat --path /path/to/project -e sandbox\n"
+                "  poly chat --sip-header X-Customer-ID=12345\n"
                 "\n"
                 "Non-interactive (scripted) mode:\n"
                 "  poly chat -m 'Hello' -m 'What can you help with?'\n"
@@ -91,6 +109,14 @@ class ChatCommand(BaseCommand):
             default="voice",
             choices=["voice", "webchat"],
             help="Channel to chat against. Defaults to voice.",
+        )
+        chat_parser.add_argument(
+            "--sip-header",
+            dest="sip_headers",
+            action="append",
+            type=_parse_sip_header,
+            metavar="NAME=VALUE",
+            help=("Simulate a SIP header at conversation start. Repeat for multiple headers."),
         )
         chat_parser.add_argument(
             "--functions",
@@ -184,6 +210,7 @@ class ChatCommand(BaseCommand):
             args.channel,
             input_lang=input_lang,
             output_lang=output_lang,
+            sip_headers=dict(args.sip_headers or []) or None,
             show_functions=show_all or args.functions,
             show_flow=show_all or args.flows,
             show_state=show_all or args.state,
@@ -203,6 +230,7 @@ class ChatCommand(BaseCommand):
         input_lang: str = None,
         push_before_chat: bool = False,
         output_lang: str = None,
+        sip_headers: Optional[dict[str, str]] = None,
         show_functions: bool = False,
         show_flow: bool = False,
         show_state: bool = False,
@@ -293,6 +321,7 @@ class ChatCommand(BaseCommand):
                         variant,
                         input_lang,
                         output_lang,
+                        sip_headers=sip_headers,
                     )
                 except (requests.HTTPError, ValueError) as e:
                     if output_json:

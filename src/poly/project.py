@@ -2362,6 +2362,7 @@ class AgentStudioProject:
         variant: Optional[str],
         input_lang: Optional[str] = None,
         output_lang: Optional[str] = None,
+        sip_headers: Optional[dict[str, str]] = None,
     ) -> dict:
         """Create a chat session (standard or draft).
 
@@ -2374,6 +2375,8 @@ class AgentStudioProject:
             variant (ty.Optional[str]): The variant ID to create the chat session in.
             input_lang (str): Optional. The language code for the input messages, e.g. "en-GB" or "fr-FR".
             output_lang (str): Optional. The language code for the agent's responses, e.g. "en-GB" or "fr-FR".
+            sip_headers (dict[str, str]): Optional. Simulated SIP headers exposed to
+                project functions through conv.sip_headers.
 
         Returns:
             dict: API response with conversation_id and initial greeting.
@@ -2400,6 +2403,7 @@ class AgentStudioProject:
                 variant_id=variant,
                 input_lang=input_lang,
                 output_lang=output_lang,
+                sip_headers=sip_headers,
             )
 
         return AgentStudioInterface.create_chat(
@@ -2411,6 +2415,7 @@ class AgentStudioProject:
             channel=channel,
             input_lang=input_lang,
             output_lang=output_lang,
+            sip_headers=sip_headers,
         )
 
     def send_message(
