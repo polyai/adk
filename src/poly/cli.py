@@ -12,7 +12,6 @@ from importlib.metadata import version as get_package_version
 
 import argcomplete
 
-from poly.cli_commands.assistant import AssistantCommand
 from poly.cli_commands.audio_cache import AudioCacheCommand
 from poly.cli_commands.auth import LoginCommand, StartCommand
 from poly.cli_commands.base import BaseCommand, Parents
@@ -34,6 +33,7 @@ from poly.cli_commands.sync import (
 )
 from poly.cli_commands.testing import TestingCommand
 from poly.cli_commands.utils import CompletionCommand, DocsCommand
+from poly.cli_commands.wren import WrenCommand
 from poly.output.json_output import json_print
 
 logger = logging.getLogger(__name__)
@@ -58,7 +58,7 @@ COMMANDS = [
     AudioCacheCommand,
     TestingCommand,
     RTCCommand,
-    AssistantCommand,
+    WrenCommand,
     ChatCommand,
     DocsCommand,
     CompletionCommand,

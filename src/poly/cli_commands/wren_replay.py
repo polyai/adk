@@ -1,8 +1,8 @@
-"""Replay downloaded Studio Assistant conversations through the CLI renderer.
+"""Replay downloaded Wren conversations through the CLI renderer.
 
 Converts the persisted conversation-export shape (as downloaded from Studio)
 back into the synthetic streaming events the live SSE path produces, so the
-assistant UX can be exercised offline against real conversations.
+wren UX can be exercised offline against real conversations.
 
 Copyright PolyAI Limited
 """

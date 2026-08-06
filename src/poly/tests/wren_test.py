@@ -1,4 +1,4 @@
-"""Tests for the assistant command module.
+"""Tests for the wren command module.
 
 Copyright PolyAI Limited
 """
@@ -6,7 +6,7 @@ Copyright PolyAI Limited
 import unittest
 from unittest.mock import MagicMock, patch
 
-from poly.cli_commands.assistant import (
+from poly.cli_commands.wren import (
     _format_change_summary,
     _parse_apply_changes,
     _stream_turn,
@@ -105,7 +105,7 @@ class ToolActivityTests(unittest.TestCase):
 
     def test_prefers_ui_description(self) -> None:
         """ui_description from tool arguments wins over tool names."""
-        from poly.cli_commands.assistant import _tool_activity
+        from poly.cli_commands.wren import _tool_activity
 
         message = {
             "content": [
@@ -120,7 +120,7 @@ class ToolActivityTests(unittest.TestCase):
 
     def test_falls_back_to_tool_names(self) -> None:
         """Without descriptions, tool names are shown."""
-        from poly.cli_commands.assistant import _tool_activity
+        from poly.cli_commands.wren import _tool_activity
 
         message = {
             "content": [
@@ -132,7 +132,7 @@ class ToolActivityTests(unittest.TestCase):
 
     def test_no_tools_returns_none(self) -> None:
         """Text-only messages yield no activity."""
-        from poly.cli_commands.assistant import _tool_activity
+        from poly.cli_commands.wren import _tool_activity
 
         self.assertIsNone(_tool_activity({"content": [{"type": "text", "text": "hi"}]}))
         self.assertIsNone(_tool_activity({}))
@@ -142,7 +142,7 @@ class ToolActivityTests(unittest.TestCase):
 class StreamTurnTests(unittest.TestCase):
     """Tests for _stream_turn event handling."""
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_complete_is_not_fatal(self, mock_stream: MagicMock) -> None:
         """A complete event should not set fatal — the REPL continues."""
         mock_stream.return_value = iter(
@@ -156,7 +156,7 @@ class StreamTurnTests(unittest.TestCase):
         self.assertFalse(result.fatal)
         self.assertEqual(result.session_id, "sess-1")
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_multi_turn_session_preserved(self, mock_stream: MagicMock) -> None:
         """Session ID should be preserved across turns."""
         mock_stream.return_value = iter(
@@ -173,7 +173,7 @@ class StreamTurnTests(unittest.TestCase):
         self.assertEqual(result.session_id, "sess-abc")
         self.assertEqual(result.messages, ["Hi"])
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_apply_sets_changes_applied(self, mock_stream: MagicMock) -> None:
         """A successful apply tool should set changes_applied."""
         mock_stream.return_value = iter(
@@ -195,7 +195,7 @@ class StreamTurnTests(unittest.TestCase):
         self.assertTrue(result.changes_applied)
         self.assertEqual(result.changes, {"modified": 1, "added": 0, "deleted": 0})
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_apply_zero_changes_not_flagged(self, mock_stream: MagicMock) -> None:
         """Apply with no actual changes should not set changes_applied."""
         mock_stream.return_value = iter(
@@ -214,7 +214,7 @@ class StreamTurnTests(unittest.TestCase):
         result = _stream_turn(project, "key", "do stuff", None, json_mode=True)
         self.assertFalse(result.changes_applied)
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_error_not_fatal_after_first_turn(self, mock_stream: MagicMock) -> None:
         """Error events should not be fatal (user can retry)."""
         mock_stream.return_value = iter(
@@ -231,7 +231,7 @@ class StreamTurnTests(unittest.TestCase):
         self.assertFalse(result.fatal)
         self.assertIsNotNone(result.error)
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_unauthorized_fatal_on_first_turn(self, mock_stream: MagicMock) -> None:
         """Unauthorized on first turn should be fatal."""
         mock_stream.return_value = iter(
@@ -247,7 +247,7 @@ class StreamTurnTests(unittest.TestCase):
         result = _stream_turn(project, "key", "hello", None, json_mode=True, first_turn=True)
         self.assertTrue(result.fatal)
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_aborted_not_fatal(self, mock_stream: MagicMock) -> None:
         """Aborted events should not be fatal."""
         mock_stream.return_value = iter([{"type": "aborted", "reason": "user_aborted"}])
@@ -256,7 +256,7 @@ class StreamTurnTests(unittest.TestCase):
         self.assertFalse(result.fatal)
         self.assertEqual(result.error["code"], "aborted")
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_unknown_events_ignored(self, mock_stream: MagicMock) -> None:
         """Unknown event types should be silently ignored."""
         mock_stream.return_value = iter(
@@ -270,7 +270,7 @@ class StreamTurnTests(unittest.TestCase):
         self.assertFalse(result.fatal)
         self.assertIsNone(result.error)
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_branch_change_switches_project(self, mock_stream: MagicMock) -> None:
         """Branch change event should switch the project's branch."""
         mock_stream.return_value = iter(
@@ -291,7 +291,7 @@ class StreamTurnTests(unittest.TestCase):
         self.assertEqual(result.branch_info["id"], "BRANCH-NEW")
         self.assertEqual(result.branch_info["name"], "my-branch")
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_branch_name_lookup_failure_uses_id(self, mock_stream: MagicMock) -> None:
         """If branch name lookup fails, should use ID only."""
         mock_stream.return_value = iter(
@@ -307,7 +307,7 @@ class StreamTurnTests(unittest.TestCase):
         self.assertEqual(result.branch_info["id"], "BRANCH-UNKNOWN")
         self.assertNotIn("name", result.branch_info)
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_user_input_required_captured(self, mock_stream: MagicMock) -> None:
         """A non-auto user_input_required should be captured as pending_input."""
         mock_stream.return_value = iter(
@@ -325,7 +325,7 @@ class StreamTurnTests(unittest.TestCase):
         self.assertIsNotNone(result.pending_input)
         self.assertEqual(result.pending_input["inputKind"], "question")
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_auto_gate_is_not_pending_input(self, mock_stream: MagicMock) -> None:
         """An auto-flagged gate is informational — the run continues without us."""
         mock_stream.return_value = iter(
@@ -352,7 +352,7 @@ class StreamTurnTests(unittest.TestCase):
         self.assertIsNone(result.pending_input)
         self.assertIsNone(result.error)
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_http_401_is_fatal(self, mock_stream: MagicMock) -> None:
         """HTTP 401 should set fatal=True."""
         import requests
@@ -364,7 +364,7 @@ class StreamTurnTests(unittest.TestCase):
         result = _stream_turn(project, "key", "hello", None, json_mode=True)
         self.assertTrue(result.fatal)
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_connection_error_is_fatal(self, mock_stream: MagicMock) -> None:
         """ConnectionError should set fatal=True."""
         import requests
@@ -374,7 +374,7 @@ class StreamTurnTests(unittest.TestCase):
         result = _stream_turn(project, "key", "hello", None, json_mode=True)
         self.assertTrue(result.fatal)
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_http_409_is_run_in_progress_not_fatal(self, mock_stream: MagicMock) -> None:
         """HTTP 409 should map to run_in_progress and not be fatal."""
         import requests
@@ -387,7 +387,7 @@ class StreamTurnTests(unittest.TestCase):
         self.assertFalse(result.fatal)
         self.assertEqual(result.error["code"], "run_in_progress")
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_suspended_complete_captured(self, mock_stream: MagicMock) -> None:
         """A complete event with suspended=true should set result.suspended."""
         mock_stream.return_value = iter(
@@ -398,7 +398,7 @@ class StreamTurnTests(unittest.TestCase):
         self.assertTrue(result.suspended)
         self.assertFalse(result.fatal)
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_subagent_messages_not_accumulated(self, mock_stream: MagicMock) -> None:
         """Message text from depth > 0 (subagents) should not be accumulated."""
         mock_stream.return_value = iter(
@@ -416,7 +416,7 @@ class StreamTurnTests(unittest.TestCase):
         result = _stream_turn(project, "key", "hello", None, json_mode=True)
         self.assertEqual(result.messages, ["top-level text"])
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_empty_messages_not_accumulated(self, mock_stream: MagicMock) -> None:
         """Tool-only messages (no text deltas) should not produce entries."""
         mock_stream.return_value = iter(
@@ -444,13 +444,13 @@ def _fake_sse_response(events: list[dict]) -> MagicMock:
     return response
 
 
-class StreamAssistantTurnTests(unittest.TestCase):
+class StreamWrenTurnTests(unittest.TestCase):
     """Tests for the SSE client's terminal-event semantics."""
 
-    @patch("poly.handlers.assistant_api.requests.post")
+    @patch("poly.handlers.wren_api.requests.post")
     def test_continues_past_mid_chain_completes(self, mock_post: MagicMock) -> None:
         """Suspended and depth>0 completes must not end the stream."""
-        from poly.handlers.assistant_api import stream_assistant_turn
+        from poly.handlers.wren_api import stream_wren_turn
 
         mock_post.return_value = _fake_sse_response(
             [
@@ -461,7 +461,7 @@ class StreamAssistantTurnTests(unittest.TestCase):
                 {"type": "message_delta", "depth": 0, "delta": "after terminal"},
             ]
         )
-        events = list(stream_assistant_turn("studio", "key", "hi", {"accountId": "a"}))
+        events = list(stream_wren_turn("studio", "key", "hi", {"accountId": "a"}))
         types = [(e.get("type"), e.get("depth")) for e in events]
         # Stops at the depth-0 non-suspended complete; the late frame is not read.
         self.assertEqual(
@@ -474,10 +474,10 @@ class StreamAssistantTurnTests(unittest.TestCase):
             ],
         )
 
-    @patch("poly.handlers.assistant_api.requests.post")
+    @patch("poly.handlers.wren_api.requests.post")
     def test_continues_past_auto_gate(self, mock_post: MagicMock) -> None:
         """Auto-flagged user_input_required must not end the stream."""
-        from poly.handlers.assistant_api import stream_assistant_turn
+        from poly.handlers.wren_api import stream_wren_turn
 
         mock_post.return_value = _fake_sse_response(
             [
@@ -486,13 +486,13 @@ class StreamAssistantTurnTests(unittest.TestCase):
                 {"type": "complete", "depth": 0},
             ]
         )
-        events = list(stream_assistant_turn("studio", "key", "hi", {"accountId": "a"}))
+        events = list(stream_wren_turn("studio", "key", "hi", {"accountId": "a"}))
         self.assertEqual(len(events), 3)
 
-    @patch("poly.handlers.assistant_api.requests.post")
+    @patch("poly.handlers.wren_api.requests.post")
     def test_non_auto_gate_is_terminal(self, mock_post: MagicMock) -> None:
         """A non-auto user_input_required still ends the stream."""
-        from poly.handlers.assistant_api import stream_assistant_turn
+        from poly.handlers.wren_api import stream_wren_turn
 
         mock_post.return_value = _fake_sse_response(
             [
@@ -500,14 +500,14 @@ class StreamAssistantTurnTests(unittest.TestCase):
                 {"type": "message_delta", "depth": 0, "delta": "should not arrive"},
             ]
         )
-        events = list(stream_assistant_turn("studio", "key", "hi", {"accountId": "a"}))
+        events = list(stream_wren_turn("studio", "key", "hi", {"accountId": "a"}))
         self.assertEqual(len(events), 1)
 
 
 class ReportAndPlanTests(unittest.TestCase):
     """Tests for submit_report capture and subagent failure quieting."""
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_submit_report_captured(self, mock_stream: MagicMock) -> None:
         """The submit_report result should be captured on TurnResult.report."""
         mock_stream.return_value = iter(
@@ -530,7 +530,7 @@ class ReportAndPlanTests(unittest.TestCase):
         self.assertEqual(result.report["title"], "Quiz flow built")
         self.assertIn("quiz flow", result.report["text"])
 
-    @patch("poly.cli_commands.assistant.stream_assistant_turn")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
     def test_subagent_tool_failure_not_recorded_as_error(self, mock_stream: MagicMock) -> None:
         """A depth>0 tool failure is agent-internal — no TurnResult error."""
         mock_stream.return_value = iter(
@@ -560,7 +560,7 @@ class MermaidLinkTests(unittest.TestCase):
         import json
         import zlib
 
-        from poly.cli_commands.assistant import _mermaid_live_url
+        from poly.cli_commands.wren import _mermaid_live_url
 
         code = "graph TD\n  A --> B"
         url = _mermaid_live_url(code)
@@ -575,7 +575,7 @@ class ReplayAdapterTests(unittest.TestCase):
 
     def test_turn_end_synthesizes_stream(self) -> None:
         """A persisted turn_end becomes message events + tool_execution_ends."""
-        from poly.cli_commands.assistant_replay import synthesize_turn_events
+        from poly.cli_commands.wren_replay import synthesize_turn_events
 
         turn_end = {
             "type": "turn_end",
@@ -613,7 +613,7 @@ class ReplayAdapterTests(unittest.TestCase):
 
     def test_segments_split_on_user_messages(self) -> None:
         """Conversation splits into per-user-prompt segments."""
-        from poly.cli_commands.assistant_replay import replay_segments
+        from poly.cli_commands.wren_replay import replay_segments
 
         conv = {
             "messages": [
@@ -632,8 +632,8 @@ class ReplayAdapterTests(unittest.TestCase):
 
     def test_replayed_conv_renders_through_real_renderer(self) -> None:
         """A minimal conversation renders via _render_events without errors."""
-        from poly.cli_commands.assistant import TurnResult, _render_events, _TurnDisplay
-        from poly.cli_commands.assistant_replay import replay_segments, segment_events
+        from poly.cli_commands.wren import TurnResult, _render_events, _TurnDisplay
+        from poly.cli_commands.wren_replay import replay_segments, segment_events
 
         conv = {
             "messages": [
@@ -669,10 +669,10 @@ class ReplayAdapterTests(unittest.TestCase):
 class TurnWithRetryTests(unittest.TestCase):
     """Tests for the run_in_progress wait-and-retry wrapper."""
 
-    @patch("poly.cli_commands.assistant._stream_turn")
+    @patch("poly.cli_commands.wren._stream_turn")
     def test_retries_while_busy(self, mock_turn: MagicMock) -> None:
         """run_in_progress results should be retried until the turn succeeds."""
-        from poly.cli_commands.assistant import TurnResult, _turn_with_retry
+        from poly.cli_commands.wren import TurnResult, _turn_with_retry
 
         busy = TurnResult(error={"code": "run_in_progress", "message": "busy"})
         done = TurnResult(session_id="sess-1")
@@ -683,10 +683,10 @@ class TurnWithRetryTests(unittest.TestCase):
         self.assertEqual(result.session_id, "sess-1")
         self.assertEqual(mock_turn.call_count, 3)
 
-    @patch("poly.cli_commands.assistant._stream_turn")
+    @patch("poly.cli_commands.wren._stream_turn")
     def test_no_retry_on_other_errors(self, mock_turn: MagicMock) -> None:
         """Non-busy errors should be returned immediately."""
-        from poly.cli_commands.assistant import TurnResult, _turn_with_retry
+        from poly.cli_commands.wren import TurnResult, _turn_with_retry
 
         failed = TurnResult(error={"code": "llm_internal", "message": "boom"})
         mock_turn.return_value = failed

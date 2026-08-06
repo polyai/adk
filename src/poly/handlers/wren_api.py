@@ -1,4 +1,4 @@
-"""SSE client for the Studio Assistant (glot) endpoint.
+"""SSE client for the Wren (glot) endpoint.
 
 Copyright PolyAI Limited
 """
@@ -13,25 +13,25 @@ from poly.handlers.platform_api import PlatformAPIHandler
 
 logger = logging.getLogger(__name__)
 
-ASSISTANT_TURN_PATH = "/v1/studio-assistant/turn"
+WREN_TURN_PATH = "/v1/studio-assistant/turn"
 
 TERMINAL_EVENT_TYPES = frozenset({"complete", "error", "aborted", "user_input_required"})
 
 
-def _get_assistant_url(region: str) -> str:
+def _get_wren_url(region: str) -> str:
     """Resolve the full SSE endpoint URL for the given region."""
     base_url = PlatformAPIHandler.get_base_url(region)
-    return f"{base_url}{ASSISTANT_TURN_PATH}"
+    return f"{base_url}{WREN_TURN_PATH}"
 
 
-def stream_assistant_turn(
+def stream_wren_turn(
     region: str,
     api_key: str,
     prompt: str,
     context: dict[str, str],
     session_id: str | None = None,
 ) -> Generator[dict[str, Any], None, None]:
-    """POST to the assistant SSE endpoint and yield parsed events.
+    """POST to the wren SSE endpoint and yield parsed events.
 
     Args:
         region: Project region (used to resolve the API host).
@@ -46,7 +46,7 @@ def stream_assistant_turn(
     Raises:
         requests.HTTPError: On non-2xx responses before the stream opens.
     """
-    url = _get_assistant_url(region)
+    url = _get_wren_url(region)
 
     body: dict[str, Any] = {"prompt": prompt, "context": context}
     if session_id:

@@ -1,4 +1,4 @@
-"""Assistant command: interactive AI-assisted agent editing via Studio Assistant.
+"""Wren command: interactive AI-assisted agent editing via Wren.
 
 Copyright PolyAI Limited
 """
@@ -13,7 +13,7 @@ import requests
 
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
-from poly.handlers.assistant_api import stream_assistant_turn
+from poly.handlers.wren_api import stream_wren_turn
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
 from poly.utils import retrieve_api_key
@@ -30,9 +30,9 @@ _ABORT_REASONS: dict[str, str] = {
 }
 
 _ERROR_MESSAGES: dict[str, str] = {
-    "llm_rate_limited": "The assistant is rate-limited — try again in a moment.",
-    "llm_unavailable": "The assistant service is unavailable — try again.",
-    "llm_internal": "The assistant service is unavailable — try again.",
+    "llm_rate_limited": "Wren is rate-limited — try again in a moment.",
+    "llm_unavailable": "The Wren service is unavailable — try again.",
+    "llm_internal": "The Wren service is unavailable — try again.",
     "run_in_progress": "A run is already in progress for this session — wait for it to finish.",
     "unauthorized": "Not authorized for this project. Check your login (poly login) and project access.",
 }
@@ -40,7 +40,7 @@ _ERROR_MESSAGES: dict[str, str] = {
 
 @dataclass
 class TurnResult:
-    """Result of a single assistant turn."""
+    """Result of a single wren turn."""
 
     session_id: str | None = None
     changes_applied: bool = False
@@ -275,7 +275,7 @@ class _TurnDisplay:
             self._spinner = None
 
     def start_message(self) -> None:
-        """Reset the message buffer for a new assistant message."""
+        """Reset the message buffer for a new wren message."""
         self._buffer = ""
 
     def append_delta(self, delta: str) -> None:
@@ -289,7 +289,7 @@ class _TurnDisplay:
             # Piped output: plain streaming, no live region.
             if not self._raw_prefix_printed:
                 self._stop_spinner()
-                console.print("[bold]Assistant:[/bold] ", end="")
+                console.print("[bold]Wren:[/bold] ", end="")
                 self._raw_prefix_printed = True
             console.print(delta, end="", highlight=False, markup=False)
             return
@@ -301,7 +301,7 @@ class _TurnDisplay:
             from rich.live import Live
 
             console.print()
-            console.print("[bold]Assistant:[/bold]")
+            console.print("[bold]Wren:[/bold]")
             self._live = Live(
                 Markdown(self._buffer),
                 console=console,
@@ -346,7 +346,7 @@ def _print_header(
     session_id: str | None = None,
     hints: bool = True,
 ) -> None:
-    """Print the Studio Assistant header panel and key hints."""
+    """Print the Wren header panel and key hints."""
     from rich.panel import Panel
     from rich.table import Table
 
@@ -361,9 +361,7 @@ def _print_header(
         table.add_row("Branch", branch)
     if session_id:
         table.add_row("Session", session_id)
-    console.print(
-        Panel(table, title="[bold]Studio Assistant[/bold]", border_style="cyan", expand=False)
-    )
+    console.print(Panel(table, title="[bold]Wren[/bold]", border_style="cyan", expand=False))
     if hints:
         console.print("[muted]  Enter send · Ctrl+J newline · /exit quit[/muted]")
 
@@ -375,7 +373,7 @@ def _print_exit_summary(session_id: str | None) -> None:
     if session_id:
         plain(
             f"\n[muted]  session {session_id} — resume with: "
-            f"poly assistant --session-id {session_id}[/muted]"
+            f"poly wren --session-id {session_id}[/muted]"
         )
 
 
@@ -393,7 +391,7 @@ def _collect_user_input(event: dict[str, Any]) -> str | None:
         questions = event.get("questions", [])
         if not questions:
             return None
-        plain("[info]The assistant needs input:[/info]")
+        plain("[info]Wren needs input:[/info]")
         answers = []
         for q in questions:
             question_text = q.get("question", "")
@@ -433,7 +431,7 @@ def _collect_user_input(event: dict[str, Any]) -> str | None:
 
     elif input_kind in ("secret", "edit-secret", "delete-secret"):
         warning(
-            "The assistant needs a secret configured — "
+            "Wren needs a secret configured — "
             "this isn't supported in the CLI. Use Agent Studio, then continue here."
         )
         return None
@@ -452,7 +450,7 @@ def _render_events(
     on_branch_change: Callable[[str, str], dict[str, str] | None] | None = None,
     on_changes_applied: Callable[[], None] | None = None,
 ) -> None:
-    """Render a stream of assistant events to the console, updating result.
+    """Render a stream of wren events to the console, updating result.
 
     The event source may be the live SSE generator or a replayed conversation;
     side effects (branch switching) go through on_branch_change so replays can
@@ -518,7 +516,7 @@ def _render_events(
                 display.clear()
                 if is_error:
                     if not json_mode:
-                        warning("Apply failed — the assistant may retry.")
+                        warning("Apply failed — wren may retry.")
                 else:
                     counts = _parse_apply_changes(tool_result)
                     total = sum(counts.values())
@@ -564,7 +562,7 @@ def _render_events(
             is_error = event.get("isError", False)
             if is_error and not json_mode:
                 display.clear()
-                warning("Assistant workspace sync failed.")
+                warning("Wren workspace sync failed.")
             elif reason != "initial" and verbose and not json_mode:
                 display.clear()
                 plain(f"[muted]  workspace synced ({reason})[/muted]")
@@ -596,7 +594,7 @@ def _render_events(
             display.clear()
             error_code = event.get("errorCode", "")
             msg = event.get("message", "Unknown error")
-            friendly = _ERROR_MESSAGES.get(error_code, f"Assistant error: {msg}")
+            friendly = _ERROR_MESSAGES.get(error_code, f"Wren error: {msg}")
             result.error = {"code": error_code, "message": msg}
             # run_in_progress is handled by the caller's wait-and-retry loop.
             if not json_mode and error_code != "run_in_progress":
@@ -717,7 +715,7 @@ def _stream_turn(
     first_turn: bool = True,
     no_pull: bool = False,
 ) -> TurnResult:
-    """Stream a single assistant turn, rendering events to the console.
+    """Stream a single wren turn, rendering events to the console.
 
     Args:
         project: The loaded project.
@@ -744,7 +742,7 @@ def _stream_turn(
 
     try:
         _render_events(
-            stream_assistant_turn(
+            stream_wren_turn(
                 region=project.region,
                 api_key=api_key,
                 prompt=prompt,
@@ -778,7 +776,7 @@ def _stream_turn(
         display.clear()
         result.error = {"code": "connection_error", "message": "Connection failed"}
         if not json_mode:
-            error("Could not connect to Studio Assistant. Check your network and region.")
+            error("Could not connect to Wren. Check your network and region.")
         result.fatal = True
     finally:
         display.clear()
@@ -857,10 +855,10 @@ def _turn_with_retry(
         attempts += 1
         if attempts > _BUSY_RETRY_LIMIT:
             if not json_mode:
-                warning("The assistant is still busy — try again shortly.")
+                warning("Wren is still busy — try again shortly.")
             return result
         if attempts == 1 and not json_mode:
-            plain("[muted]  Assistant is busy — waiting for the current run to finish…[/muted]")
+            plain("[muted]  Wren is busy — waiting for the current run to finish…[/muted]")
         time.sleep(_BUSY_RETRY_DELAY_S)
 
 
@@ -894,28 +892,28 @@ def _make_prompt_session() -> Any:
     )
 
 
-class AssistantCommand(BaseCommand):
-    """Start an AI-assisted editing session with the Studio Assistant."""
+class WrenCommand(BaseCommand):
+    """Start an AI-assisted editing session with Wren."""
 
-    command = "assistant"
+    command = "wren"
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
-        """Register the assistant subcommand and hidden glot alias."""
-        for name, help_text in [("assistant", "AI-assisted agent editing."), ("glot", SUPPRESS)]:
+        """Register the wren subcommand and hidden glot alias."""
+        for name, help_text in [("wren", "AI-assisted agent editing."), ("glot", SUPPRESS)]:
             parser = subparsers.add_parser(
                 name,
                 parents=[parents.verbose, parents.debug, parents.json],
                 help=help_text,
                 description=(
-                    "Start an AI-assisted editing session with the Studio Assistant.\n\n"
-                    "The assistant works remotely on a branch. When it finishes,\n"
+                    "Start an AI-assisted editing session with Wren.\n\n"
+                    "Wren works remotely on a branch. When it finishes,\n"
                     "changes are pulled to your local workspace.\n\n"
                     "Examples:\n"
-                    "  poly assistant\n"
-                    "  poly assistant -m 'Add a transfer flow for billing'\n"
-                    "  poly assistant --json -m 'Add an FAQ topic'\n"
-                    "  poly assistant --session-id <id>\n"
+                    "  poly wren\n"
+                    "  poly wren -m 'Add a transfer flow for billing'\n"
+                    "  poly wren --json -m 'Add an FAQ topic'\n"
+                    "  poly wren --session-id <id>\n"
                 ),
                 formatter_class=RawTextHelpFormatter,
             )
@@ -936,7 +934,7 @@ class AssistantCommand(BaseCommand):
                 "--session-id",
                 type=str,
                 default=None,
-                help="Resume an existing assistant session.",
+                help="Resume an existing wren session.",
             )
             parser.add_argument(
                 "--no-pull",
@@ -958,7 +956,7 @@ class AssistantCommand(BaseCommand):
 
     @classmethod
     def run(cls, args: Namespace) -> None:
-        """Run the assistant command."""
+        """Run the wren command."""
         import os
 
         from poly.output.console import error
@@ -987,7 +985,7 @@ class AssistantCommand(BaseCommand):
                 diffs = project.get_diffs()
                 if diffs:
                     msg = (
-                        "You have local changes that would be overwritten by the assistant. "
+                        "You have local changes that would be overwritten by wren. "
                         "Push or revert them first, or re-run with --force to discard them."
                     )
                     if json_mode:
@@ -1019,7 +1017,7 @@ class AssistantCommand(BaseCommand):
         """Render a downloaded conversation JSON through the live renderer."""
         from rich.markup import escape
 
-        from poly.cli_commands.assistant_replay import (
+        from poly.cli_commands.wren_replay import (
             load_conversation,
             replay_segments,
             segment_events,
@@ -1141,7 +1139,7 @@ class AssistantCommand(BaseCommand):
         )
         if result.suspended:
             plain(
-                "[muted]  The assistant is continuing to work remotely — "
+                "[muted]  Wren is continuing to work remotely — "
                 "run 'poly pull' later or resume with --session-id to see the result.[/muted]"
             )
         _print_exit_summary(result.session_id)
@@ -1207,7 +1205,7 @@ class AssistantCommand(BaseCommand):
                     # The run keeps working server-side after the stream closes;
                     # the next message waits on it via the 409 retry loop.
                     plain(
-                        "[muted]  The assistant is continuing to work remotely — "
+                        "[muted]  Wren is continuing to work remotely — "
                         "your next message will wait for it to finish.[/muted]"
                     )
                     pending_pull = not no_pull
