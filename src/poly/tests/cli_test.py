@@ -1013,6 +1013,31 @@ class ChatLoopTest(unittest.TestCase):
         self.assertIn("error", conversation["turns"][0])
 
 
+class ChatArgumentsTest(unittest.TestCase):
+    """Tests for chat-specific CLI argument parsing."""
+
+    @patch("poly.cli_commands.chat.ChatCommand.chat")
+    def test_sip_headers_are_parsed_and_forwarded(self, mock_chat):
+        AgentStudioCLI().main(
+            [
+                "chat",
+                "--sip-header",
+                "X-Customer-ID=12345",
+                "--sip-header",
+                "X-Token=part=two",
+            ]
+        )
+
+        self.assertEqual(
+            mock_chat.call_args.kwargs["sip_headers"],
+            {"X-Customer-ID": "12345", "X-Token": "part=two"},
+        )
+
+    def test_invalid_sip_header_is_rejected(self):
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI().main(["chat", "--sip-header", "X-Customer-ID"])
+
+
 class ChatCommandTest(unittest.TestCase):
     """Tests for ChatCommand.chat.
 
@@ -1059,6 +1084,25 @@ class ChatCommandTest(unittest.TestCase):
         )
 
         self.proj.create_chat_session.assert_called_once()
+
+    def test_sip_headers_are_forwarded_when_creating_session(self):
+        sip_headers = {"X-Customer-ID": "12345"}
+
+        ChatCommand.chat(
+            TEST_DIR,
+            environment="sandbox",
+            sip_headers=sip_headers,
+            input_messages=[],
+        )
+
+        self.proj.create_chat_session.assert_called_once_with(
+            "sandbox",
+            "chat.polyai",
+            None,
+            None,
+            None,
+            sip_headers=sip_headers,
+        )
 
     @patch("poly.cli_commands.chat.json_print")
     def test_json_conv_id_emits_conversations_list(self, mock_json):

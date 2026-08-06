@@ -432,6 +432,7 @@ class PlatformAPIHandler:
         channel: str = "chat.polyai",
         input_lang: ty.Optional[str] = None,
         output_lang: ty.Optional[str] = None,
+        sip_headers: ty.Optional[dict[str, str]] = None,
     ) -> dict:
         """Create a new chat conversation.
 
@@ -444,6 +445,7 @@ class PlatformAPIHandler:
             channel: The channel identifier (e.g. 'chat.polyai', 'webchat.polyai')
             input_lang: Optional language code of the input message, e.g. "en-GB" or "fr-FR"
             output_lang: Optional language code for the agent's response,
+            sip_headers: Optional simulated SIP headers exposed through conv.sip_headers
 
         Returns:
             dict: The API response containing the conversation ID
@@ -459,6 +461,8 @@ class PlatformAPIHandler:
             data["asr_lang_code"] = input_lang
         if output_lang:
             data["tts_lang_code"] = output_lang
+        if sip_headers:
+            data["sip_headers"] = sip_headers
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
     @staticmethod
@@ -542,6 +546,7 @@ class PlatformAPIHandler:
         variant_id: ty.Optional[str] = None,
         input_lang: ty.Optional[str] = None,
         output_lang: ty.Optional[str] = None,
+        sip_headers: ty.Optional[dict[str, str]] = None,
     ) -> dict:
         """Create a new chat conversation against a branch deployment.
 
@@ -555,6 +560,7 @@ class PlatformAPIHandler:
             variant_id: Optional variant ID (e.g. 'Voice')
             input_lang: Optional language code of the input message, e.g. "en-GB" or "fr-FR"
             output_lang: Optional language code for the agent's response, e.g. "en-
+            sip_headers: Optional simulated SIP headers exposed through conv.sip_headers
 
         Returns:
             dict: The API response containing the conversation ID
@@ -571,6 +577,8 @@ class PlatformAPIHandler:
             data["asr_lang_code"] = input_lang
         if output_lang:
             data["tts_lang_code"] = output_lang
+        if sip_headers:
+            data["sip_headers"] = sip_headers
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
     @staticmethod
