@@ -3399,13 +3399,13 @@ class AgentStudioProject:
         if os.path.exists(schema_path):
             with open(schema_path, "r", encoding="utf-8") as f:
                 local_schema = json.load(f)
-            remote_schema = remote_config.get("schema", {})
+            remote_schema = remote_config.get("schema") or {}
             env_diff["schema"] = utils.diff_dicts(local_schema, remote_schema)
 
         if os.path.exists(data_path):
             with open(data_path, "r", encoding="utf-8") as f:
                 local_data = json.load(f)
-            remote_data = remote_config.get("variables", {})
+            remote_data = remote_config.get("variables") or {}
             env_diff["data"] = utils.diff_dicts(local_data, remote_data)
 
         return env_diff
