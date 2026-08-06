@@ -1,6 +1,49 @@
 # CHANGELOG
 
 
+## v0.38.0 (2026-08-06)
+
+### Features
+
+- Add SIP header overrides to chat ([#256](https://github.com/polyai/adk/pull/256),
+  [`bb97864`](https://github.com/polyai/adk/commit/bb978643986582e5426175bb4a4f589d4a96a395))
+
+## Summary
+
+Adds a repeatable `poly chat --sip-header NAME=VALUE` option that simulates SIP headers on chat
+  conversations, so agent behaviour that reads `conv.sip_headers` can be exercised without arranging
+  a real SIP call.
+
+## Motivation
+
+Testing header-dependent agent logic today requires a real SIP call. This gives developers a quick
+  local way to inject agent-visible header values from the chat CLI. Note the option is additive and
+  simulates agent-visible values only; it does not reproduce SIP transport or carrier behaviour, and
+  header injection depends on server-side chat API support rolling out separately.
+
+## Changes
+
+- Add a repeatable `--sip-header NAME=VALUE` option to the modular chat command - Validate header
+  syntax while preserving values that contain `=` - Forward simulated headers through standard and
+  draft conversation creation - Document the option
+
+## Test strategy
+
+- [x] Added/updated unit tests (CLI parsing, session forwarding, API payloads) - [ ] Manual CLI
+  testing (`poly <command>`) - [ ] Tested against a live Agent Studio project - [ ] N/A (docs,
+  config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`pytest -q` result: 994 passed, 30 subtests passed
+
+
 ## v0.37.3 (2026-08-05)
 
 ### Bug Fixes
