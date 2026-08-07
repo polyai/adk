@@ -7,18 +7,38 @@ import json
 import os
 from dataclasses import dataclass, field
 
-import jsonschema
-
 import poly.resources.resource_utils as utils
 from poly.handlers.protobuf.experimental_config_pb2 import ExperimentalConfig_UpdateConfig
-from poly.resources.resource import Resource
+from poly.resources.resource import Resource, register_resource
 
 
+@register_resource("experimental_config")
 @dataclass
 class ExperimentalConfig(Resource):
     """ExperimentalConfig resource"""
 
     config: dict = field(default_factory=dict)
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "ExperimentalConfig"]:
+        """Parse experimental config from a projection dict."""
+        experimental_configs = (
+            projection.get("experimentalConfig", {})
+            .get("experimentalConfigs", {})
+            .get("entities", {})
+        )
+        config_id, config_data = (
+            next(iter(experimental_configs.items()), ("default", {}))
+            if experimental_configs
+            else ("default", {})
+        )
+        return {
+            config_id: cls(
+                resource_id=config_id,
+                name="experimental_config",
+                config=config_data.get("features", {}),
+            )
+        }
 
     @property
     def file_path(self) -> str:
@@ -62,13 +82,16 @@ class ExperimentalConfig(Resource):
         return NotImplementedError("ExperimentalConfig does not support creation.")
 
     def validate(self, **kwargs):
+        import jsonschema
+
         # Validate against schema
-        openapi_schema = utils.load_yaml(
-            open(
-                os.path.join(os.path.dirname(__file__), "experimental_config_schema.yaml"),
-                encoding="utf-8",
-            )
+        schema_path = os.environ.get("ADK_EXPERIMENTAL_CONFIG_SCHEMA_PATH") or os.path.join(
+            os.path.dirname(__file__), "experimental_config_schema.yaml"
         )
+
+        with open(schema_path, encoding="utf-8") as schema_file:
+            openapi_schema = utils.load_yaml(schema_file.read())
+
         additional_features = openapi_schema["components"]["schemas"]["additional_features"]
         resolver = jsonschema.RefResolver.from_schema(openapi_schema)
 

@@ -16,7 +16,7 @@ from poly.handlers.protobuf.sms_pb2 import (
     SMSTemplateReferences,
     UpdateSMSEnvPhoneNumbers,
 )
-from poly.resources.resource import MultiResourceYamlResource, ResourceMapping
+from poly.resources.resource import MultiResourceYamlResource, ResourceMapping, register_resource
 
 
 @dataclass
@@ -33,6 +33,7 @@ class EnvPhoneNumbers:
         }
 
 
+@register_resource("sms_templates")
 @dataclass
 class SMSTemplate(MultiResourceYamlResource):
     """SMS resource for ADK."""
@@ -63,6 +64,24 @@ class SMSTemplate(MultiResourceYamlResource):
                 or env_phone_numbers.get("preRelease", ""),
                 live=env_phone_numbers.get("live", ""),
             )
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "SMSTemplate"]:
+        """Parse SMS templates from a projection dict."""
+        sms_templates_projection = (
+            projection.get("sms", {}).get("templates", {}).get("entities", {})
+        )
+        sms_templates = {}
+        for sms_template_id, sms_template_data in sms_templates_projection.items():
+            if not sms_template_data.get("active", False):
+                continue
+            sms_templates[sms_template_id] = cls(
+                resource_id=sms_template_id,
+                name=sms_template_data["name"],
+                text=sms_template_data.get("text", ""),
+                env_phone_numbers=sms_template_data.get("envPhoneNumbers", {}),
+            )
+        return sms_templates
 
     @classmethod
     def to_pretty_dict(
@@ -98,7 +117,7 @@ class SMSTemplate(MultiResourceYamlResource):
     ) -> "SMSTemplate":
         return cls(
             resource_id=resource_id,
-            name=yaml_data.get("name", ""),
+            name=yaml_data.get("name") or name,
             text=yaml_data.get("text", ""),
             env_phone_numbers=yaml_data.get("env_phone_numbers", {}),
         )

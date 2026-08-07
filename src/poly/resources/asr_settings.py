@@ -15,13 +15,14 @@ from poly.handlers.protobuf.asr_settings_pb2 import (
     LatencyConfig,
 )
 from poly.handlers.protobuf.channels_pb2 import VoiceChannel_UpdateASRSettings
-from poly.resources.resource import ResourceMapping, YamlResource
+from poly.resources.resource import ResourceMapping, YamlResource, register_resource
 
 logger = logging.getLogger(__name__)
 
 VALID_INTERACTION_STYLES = {"balanced", "precise", "swift", "sonic", "turbo"}
 
 
+@register_resource("asr_settings")
 @dataclass
 class AsrSettings(YamlResource):
     """Resource class for managing ASR (speech recognition) settings"""
@@ -41,6 +42,27 @@ class AsrSettings(YamlResource):
         self.name = name
         self.barge_in = barge_in
         self.interaction_style = interaction_style
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "AsrSettings"]:
+        """Parse ASR settings from a projection dict."""
+        asr_settings_data = projection.get("channels", {}).get("voice", {}).get("asrSettings", {})
+        if not asr_settings_data:
+            return {}
+
+        barge_in = asr_settings_data.get("bargeIn", False)
+        interaction_style = asr_settings_data.get("latencyConfig", {}).get(
+            "interactionStyle", "balanced"
+        )
+
+        return {
+            "asr_settings": cls(
+                resource_id="asr_settings",
+                name="asr_settings",
+                barge_in=barge_in,
+                interaction_style=interaction_style,
+            )
+        }
 
     @cached_property
     def file_path(self) -> str:

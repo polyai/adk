@@ -15,7 +15,7 @@ from poly.handlers.protobuf.knowledge_base_pb2 import (
     KnowledgeBase_DeleteTopic,
     KnowledgeBase_UpdateTopic,
 )
-from poly.resources.resource import ResourceMapping, YamlResource
+from poly.resources.resource import ResourceMapping, YamlResource, register_resource
 
 FUNCTION_REGEX = re.compile(r"{{fn:([\w-]+)}}")
 FLOW_FUNCTION_REGEX = re.compile(r"{{ft:([\w-]+)}}")
@@ -24,6 +24,7 @@ FLOW_FUNCTION_REGEX = re.compile(r"{{ft:([\w-]+)}}")
 TOPIC_REFERENCES = ["global_functions", "sms", "handoff", "attributes", "variables", "translations"]
 
 
+@register_resource("topics")
 @dataclass
 class Topic(YamlResource):
     """Dataclass representing an Agent Studio KB Topic"""
@@ -49,6 +50,29 @@ class Topic(YamlResource):
         self.content = content
         self.example_queries = example_queries or []
         self.enabled = enabled
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "Topic"]:
+        """Parse topics from a projection dict."""
+        topics = {}
+        for topic_id, topic in (
+            projection.get("knowledgeBase", {}).get("topics", {}).get("entities", {}).items()
+        ):
+            example_queries = topic.get("exampleQueries", [])
+            queries = [
+                example_queries["query"]
+                for example_queries in example_queries
+                if "query" in example_queries
+            ]
+            topics[topic_id] = cls(
+                resource_id=topic_id,
+                name=topic["name"],
+                actions=topic["actions"],
+                content=topic["content"],
+                example_queries=queries,
+                enabled=topic.get("isActive", True),
+            )
+        return topics
 
     @cached_property
     def file_path(self) -> str:

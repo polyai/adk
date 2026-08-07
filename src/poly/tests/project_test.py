@@ -7,6 +7,8 @@ Copyright PolyAI Limited
 
 import json
 import os
+import shutil
+import tempfile
 import unittest
 from copy import deepcopy
 from unittest.mock import MagicMock, patch
@@ -18,6 +20,7 @@ from poly.resources import (
     ChatGreeting,
     ChatSafetyFilters,
     ChatStylePrompt,
+    Document,
     Entity,
     ExperimentalConfig,
     FlowConfig,
@@ -38,8 +41,8 @@ from poly.resources import (
     Topic,
     TranscriptCorrection,
     Translation,
-    Variant,
     Variable,
+    Variant,
     VariantAttribute,
     VoiceDisclaimerMessage,
     VoiceGreeting,
@@ -195,6 +198,18 @@ class SerializationRoundTripTest(unittest.TestCase):
         restored = FlowConfig(**serialized)
         self.assertEqual(restored.name, "Test Flow")
         self.assertEqual(restored.start_step, "step-1")
+
+    def test_document_round_trip(self):
+        """Document serializes and deserializes via status dict correctly."""
+        doc = Document(resource_id="test.md", name="test", path="test.md", contents="hello world\n")
+        serialized = resource_utils.resource_to_dict(doc)
+        restored = Document(**serialized)
+        self.assertEqual(restored.resource_id, "test.md")
+        self.assertEqual(restored.name, "test")
+        self.assertEqual(restored.path, "TEST.MD")
+        self.assertEqual(restored.contents, "hello world\n")
+        self.assertEqual(restored.file_path, os.path.join("context", "TEST.MD"))
+        self.assertEqual(restored.compute_hash(), doc.compute_hash())
 
     def test_flow_step_round_trip_excludes_sub_resource_internals(self):
         """ASRBiasing/DTMFConfig set 'name' and 'resource_id' internally,
@@ -406,6 +421,15 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
             ],
         )
 
+        # Find Documents
+        self.assertEqual(len(local_resources[Document]), 1)
+        self.assertCountEqual(
+            local_resources[Document],
+            [
+                os.path.join(TEST_DIR, "context", "TEST_DOCUMENT.MD"),
+            ],
+        )
+
     def test_discover_local_resources_empty_project(self):
         project = AgentStudioProject.from_dict(EMPTY_PROJECT_DATA, EMPTY_PROJECT_DIR)
         local_resources = project.discover_local_resources()
@@ -545,6 +569,40 @@ class FindNewKeptDeletedTest(unittest.TestCase):
         deleted_mapping = deleted_mappings[0]
         self.assertEqual(deleted_mapping.resource_type, Function)
 
+    def test_find_new_kept_deleted_new_flow_steps_use_flow_id_prefix(self):
+        """When flow resources are not loaded, new flow steps should use
+        the FlowConfig's generated flow_id as their resource_id prefix,
+        not the flow_name."""
+        project_data = deepcopy(PROJECT_DATA)
+        # Remove all flow resources so they appear as new (not loaded)
+        project_data["resources"].pop("flow_config", None)
+        project_data["resources"].pop("flow_steps", None)
+        project_data["resources"].pop("function_steps", None)
+
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+        local_resources = project.discover_local_resources()
+        new_mappings, kept_mappings, _ = project.find_new_kept_deleted(local_resources)
+
+        new_flow_configs = [m for m in new_mappings if m.resource_type == FlowConfig]
+        new_flow_steps = [m for m in new_mappings if m.resource_type == FlowStep]
+        new_function_steps = [m for m in new_mappings if m.resource_type == FunctionStep]
+
+        self.assertTrue(len(new_flow_configs) > 0)
+        self.assertTrue(len(new_flow_steps) > 0)
+
+        # Build flow_name -> flow_id map from the new FlowConfig mappings
+        flow_id_by_name = {m.flow_name: m.resource_id for m in new_flow_configs}
+
+        # Every new flow step's resource_id should start with its flow's flow_id
+        for step_mapping in new_flow_steps + new_function_steps:
+            expected_flow_id = flow_id_by_name[step_mapping.flow_name]
+            self.assertTrue(
+                step_mapping.resource_id.startswith(expected_flow_id + "_"),
+                f"Step {step_mapping.resource_name} resource_id '{step_mapping.resource_id}' "
+                f"should start with flow_id '{expected_flow_id}_'",
+            )
+            self.assertEqual(step_mapping.flow_id, expected_flow_id)
+
 
 class ProjectStatusTest(unittest.TestCase):
     """Tests for the project_status method"""
@@ -624,6 +682,39 @@ class ProjectStatusTest(unittest.TestCase):
         self.assertEqual(new_files, [])
         self.assertEqual(deleted_files, [])
 
+    def test_project_status_merge_conflict_in_multi_resource_yaml(self):
+        """A conflicted multi-resource YAML file is listed (not raised) by project_status.
+
+        The conflict is detected during discovery (discover_resources ->
+        _get_top_level_data); project_status collects the true file path into
+        files_with_conflicts and skips that file's resources instead of raising or
+        counting them as deleted.
+        """
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        entities_path = os.path.join(TEST_DIR, "config", "entities.yaml")
+        # The multi-resource file is cached by mtime; clear it so the mock is read.
+        Entity._file_cache.clear()
+
+        conflicted_entities = (
+            "entities:\n"
+            "<<<<<<<\n"
+            "  - name: customer_name\n"
+            "    entity_type: name_config\n"
+            "=======\n"
+            "  - name: caller_name\n"
+            "    entity_type: name_config\n"
+            ">>>>>>>\n"
+        )
+
+        with mock_read_from_file({entities_path: conflicted_entities}):
+            files_with_conflicts, modified_files, new_files, deleted_files = (
+                project.project_status()
+            )
+
+        self.assertEqual(files_with_conflicts, [entities_path])
+        # The conflicted file's entities must not be reported as deleted.
+        self.assertFalse(any(entities_path in path for path in deleted_files))
+
     def test_project_status_mixed_changes(self):
         project_data = deepcopy(PROJECT_DATA)
         # Remove a function so it seems there's a new one
@@ -641,7 +732,7 @@ class ProjectStatusTest(unittest.TestCase):
             "function_type": "global",
         }
         # Modify a flow step so it seems there's a modified one
-        project_data["resources"]["flow_steps"]["test_flow_start_step"]["prompt"] = (
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["prompt"] = (
             "Modified prompt"
         )
 
@@ -855,7 +946,9 @@ class GetDiffsTest(unittest.TestCase):
         """Reordering extracted_entities should not produce a diff."""
         project_data = deepcopy(PROJECT_DATA)
         # Reverse the extracted_entities order so it differs from local YAML
-        step = project_data["resources"]["flow_steps"]["test_flow_with_punctuation!_welcome_step"]
+        step = project_data["resources"]["flow_steps"][
+            "FLOW_CONFIG-test_flow_with_punctuation_welcome_step"
+        ]
         step["extracted_entities"] = list(reversed(step["extracted_entities"]))
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         diffs = project.get_diffs()
@@ -865,12 +958,107 @@ class GetDiffsTest(unittest.TestCase):
         )
         self.assertNotIn(step_path, diffs)
 
+    def test_get_diffs_raises_when_single_file_resource_has_conflict(self):
+        """A merge conflict in a function .py file makes get_diffs raise."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        func_path = os.path.join(TEST_DIR, "functions", "test_function.py")
+
+        conflicted_code = (
+            "from _gen import *  # <AUTO GENERATED>\n\n"
+            "def test_function(conv: Conversation):\n"
+            "<<<<<<<\n"
+            '    return "ours"\n'
+            "=======\n"
+            '    return "theirs"\n'
+            ">>>>>>>\n"
+        )
+
+        with mock_read_from_file({func_path: conflicted_code}):
+            with self.assertRaises(resource_utils.MergeConflictError) as ctx:
+                project.get_diffs()
+
+        self.assertIn(func_path, str(ctx.exception))
+
+    def test_get_diffs_raises_when_multi_resource_yaml_has_conflict(self):
+        """A conflict in a multi-resource YAML file makes get_diffs raise.
+
+        For multi-resource YAML files the guard fires during discovery
+        (discover_resources -> _get_top_level_data), before get_diffs reaches its
+        own conflict-collecting loops, so the error is raised with the true on-disk
+        .yaml path rather than a synthetic sub-resource path.
+        """
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        entities_path = os.path.join(TEST_DIR, "config", "entities.yaml")
+        # The multi-resource file is cached by mtime; clear it so the mock is read.
+        Entity._file_cache.clear()
+
+        conflicted_entities = (
+            "entities:\n"
+            "<<<<<<<\n"
+            "  - name: customer_name\n"
+            "    entity_type: name_config\n"
+            "=======\n"
+            "  - name: caller_name\n"
+            "    entity_type: name_config\n"
+            ">>>>>>>\n"
+        )
+
+        with mock_read_from_file({entities_path: conflicted_entities}):
+            with self.assertRaises(resource_utils.MergeConflictError) as ctx:
+                project.get_diffs()
+
+        # The reported path is the true .yaml file, not a synthetic sub-resource path.
+        self.assertIn(entities_path, str(ctx.exception))
+
+    def test_get_diffs_aggregates_conflicts_from_multiple_files(self):
+        """When two single-file resources conflict, the raised error lists both paths."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        func_path = os.path.join(TEST_DIR, "functions", "test_function.py")
+        other_func_path = os.path.join(TEST_DIR, "functions", "validate_email.py")
+
+        conflicted_code = (
+            "from _gen import *  # <AUTO GENERATED>\n\n"
+            "def test_function(conv: Conversation):\n"
+            "<<<<<<<\n"
+            '    return "ours"\n'
+            "=======\n"
+            '    return "theirs"\n'
+            ">>>>>>>\n"
+        )
+        other_conflicted_code = (
+            "from _gen import *  # <AUTO GENERATED>\n\n"
+            "def validate_email(conv: Conversation):\n"
+            "<<<<<<<\n"
+            "    return True\n"
+            "=======\n"
+            "    return False\n"
+            ">>>>>>>\n"
+        )
+
+        with mock_read_from_file(
+            {func_path: conflicted_code, other_func_path: other_conflicted_code}
+        ):
+            with self.assertRaises(resource_utils.MergeConflictError) as ctx:
+                project.get_diffs()
+
+        message = str(ctx.exception)
+        self.assertIn(func_path, message)
+        self.assertIn(other_func_path, message)
+
 
 class CleanResourcesBeforePushTest(unittest.TestCase):
     """Tests for the _clean_resources_before_push method"""
 
     def setUp(self):
+        # Mock the api_handler property: accessing it saves the project config as a
+        # side effect, which would write _gen/.agent_studio_config into the fixture
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
         self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def tearDown(self):
+        patch.stopall()
 
     def test_clean_resources_before_push_groups_steps_and_functions(self):
         # Create a flow config with steps and functions
@@ -1090,7 +1278,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
 
         # Pre-push: dummy step and flow config switch to dummy
         self.assertIn(FlowStep, pre_push_new)
-        dummy_id = "Test Flow_step-1_temp"
+        dummy_id = "flow-123_step-1_temp"
         self.assertIn(dummy_id, pre_push_new[FlowStep])
         dummy = pre_push_new[FlowStep][dummy_id]
         self.assertEqual(dummy.step_id, "step-1_temp")
@@ -1132,7 +1320,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="step-1",
         )
         old_start_step = FlowStep(
-            resource_id="Test Flow_step-1",
+            resource_id="flow-123_step-1",
             step_id="step-1",
             name="Start Step",
             flow_id="flow-123",
@@ -1144,7 +1332,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             extracted_entities=[],
         )
         new_start_step = FlowStep(
-            resource_id="Test Flow_step-2",
+            resource_id="flow-123_step-2",
             step_id="step-2",
             name="Other Step",
             flow_id="flow-123",
@@ -1162,12 +1350,12 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="step-2",
         )
 
-        self.project.resources.setdefault(FlowStep, {})["Test Flow_step-1"] = old_start_step
+        self.project.resources.setdefault(FlowStep, {})["flow-123_step-1"] = old_start_step
         self.project.resources.setdefault(FlowConfig, {})["flow-123"] = flow_config
 
-        new_resources = {FlowStep: {"Test Flow_step-2": new_start_step}}
+        new_resources = {FlowStep: {"flow-123_step-2": new_start_step}}
         updated_resources = {FlowConfig: {"flow-123": updated_flow_config}}
-        deleted_resources = {FlowStep: {"Test Flow_step-1": old_start_step}}
+        deleted_resources = {FlowStep: {"flow-123_step-1": old_start_step}}
 
         push_changes = self.project._clean_resources_before_push(
             {},
@@ -1181,12 +1369,12 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         post_push_deleted = push_changes.post.deleted
 
         # Old step should be moved to post-push deleted (not in main push deleted)
-        self.assertNotIn("Test Flow_step-1", cleaned_deleted.get(FlowStep, {}))
+        self.assertNotIn("flow-123_step-1", cleaned_deleted.get(FlowStep, {}))
         self.assertIn(FlowStep, post_push_deleted)
-        self.assertIn("Test Flow_step-1", post_push_deleted[FlowStep])
+        self.assertIn("flow-123_step-1", post_push_deleted[FlowStep])
 
         # New step in new, flow config in updated
-        self.assertIn("Test Flow_step-2", cleaned_new[FlowStep])
+        self.assertIn("flow-123_step-2", cleaned_new[FlowStep])
         self.assertIn(FlowConfig, cleaned_updated)
         self.assertEqual(cleaned_updated[FlowConfig]["flow-123"].start_step, "step-2")
 
@@ -1207,7 +1395,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         )
         # Old step from branch - different step_id (e.g. from UUID before sync)
         old_start_step = FlowStep(
-            resource_id="Test Flow_step-abc123",
+            resource_id="flow-123_step-abc123",
             step_id="step-abc123",
             name="Start Step",
             flow_id="flow-123",
@@ -1220,7 +1408,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         )
         # New step from main - same name, step_id from file
         new_start_step = FlowStep(
-            resource_id="Test Flow_step-1",
+            resource_id="flow-123_step-1",
             step_id="step-1",
             name="Start Step",
             flow_id="flow-123",
@@ -1238,12 +1426,12 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="step-1",
         )
 
-        self.project.resources.setdefault(FlowStep, {})["Test Flow_step-abc123"] = old_start_step
+        self.project.resources.setdefault(FlowStep, {})["flow-123_step-abc123"] = old_start_step
         self.project.resources.setdefault(FlowConfig, {})["flow-123"] = flow_config
 
-        new_resources = {FlowStep: {"Test Flow_step-1": new_start_step}}
+        new_resources = {FlowStep: {"flow-123_step-1": new_start_step}}
         updated_resources = {FlowConfig: {"flow-123": updated_flow_config}}
-        deleted_resources = {FlowStep: {"Test Flow_step-abc123": old_start_step}}
+        deleted_resources = {FlowStep: {"flow-123_step-abc123": old_start_step}}
 
         push_changes = self.project._clean_resources_before_push(
             {},
@@ -1260,7 +1448,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
 
         # Pre-push: dummy step and flow config switch to dummy
         self.assertIn(FlowStep, pre_push_new)
-        dummy_id = "Test Flow_step-abc123_temp"
+        dummy_id = "flow-123_step-abc123_temp"
         self.assertIn(dummy_id, pre_push_new[FlowStep])
         dummy = pre_push_new[FlowStep][dummy_id]
         self.assertEqual(dummy.step_id, "step-abc123_temp")
@@ -1273,8 +1461,8 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         self.assertIn(dummy_id, post_push_deleted[FlowStep])
 
         # Main push: old in deleted, new in new, flow config in updated
-        self.assertIn("Test Flow_step-abc123", cleaned_deleted[FlowStep])
-        self.assertIn("Test Flow_step-1", cleaned_new[FlowStep])
+        self.assertIn("flow-123_step-abc123", cleaned_deleted[FlowStep])
+        self.assertIn("flow-123_step-1", cleaned_new[FlowStep])
         self.assertIn(FlowConfig, cleaned_updated)
         self.assertEqual(cleaned_updated[FlowConfig]["flow-123"].start_step, "step-1")
 
@@ -1289,7 +1477,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="func_step",
         )
         old_function_step = FunctionStep(
-            resource_id="Test Flow_func_step",
+            resource_id="flow-123_func_step",
             step_id="func_step",
             name="Func Start",
             flow_id="flow-123",
@@ -1299,7 +1487,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             function_id="FUNC-123",
         )
         new_flow_step = FlowStep(
-            resource_id="Test Flow_step-2",
+            resource_id="flow-123_step-2",
             step_id="step-2",
             name="New Start",
             flow_id="flow-123",
@@ -1317,14 +1505,14 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="step-2",
         )
 
-        self.project.resources.setdefault(FunctionStep, {})["Test Flow_func_step"] = (
+        self.project.resources.setdefault(FunctionStep, {})["flow-123_func_step"] = (
             old_function_step
         )
         self.project.resources.setdefault(FlowConfig, {})["flow-123"] = flow_config
 
-        new_resources = {FlowStep: {"Test Flow_step-2": new_flow_step}}
+        new_resources = {FlowStep: {"flow-123_step-2": new_flow_step}}
         updated_resources = {FlowConfig: {"flow-123": updated_flow_config}}
-        deleted_resources = {FunctionStep: {"Test Flow_func_step": old_function_step}}
+        deleted_resources = {FunctionStep: {"flow-123_func_step": old_function_step}}
 
         push_changes = self.project._clean_resources_before_push(
             {},
@@ -1336,9 +1524,9 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
         post_push_deleted = push_changes.post.deleted
 
         # Old FunctionStep should be in post-push deleted
-        self.assertNotIn("Test Flow_func_step", cleaned_deleted.get(FunctionStep, {}))
+        self.assertNotIn("flow-123_func_step", cleaned_deleted.get(FunctionStep, {}))
         self.assertIn(FunctionStep, post_push_deleted)
-        self.assertIn("Test Flow_func_step", post_push_deleted[FunctionStep])
+        self.assertIn("flow-123_func_step", post_push_deleted[FunctionStep])
 
     def test_clean_resources_before_push_function_step_same_name_uses_dummy(
         self,
@@ -1356,7 +1544,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="func_step_old",
         )
         old_function_step = FunctionStep(
-            resource_id="Test Flow_func_step_old",
+            resource_id="flow-123_func_step_old",
             step_id="func_step_old",
             name="Func Start",
             flow_id="flow-123",
@@ -1366,7 +1554,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             function_id="FUNC-123",
         )
         new_function_step = FunctionStep(
-            resource_id="Test Flow_func_step",
+            resource_id="flow-123_func_step",
             step_id="func_step",
             name="Func Start",
             flow_id="flow-123",
@@ -1382,14 +1570,14 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="func_step",
         )
 
-        self.project.resources.setdefault(FunctionStep, {})["Test Flow_func_step_old"] = (
+        self.project.resources.setdefault(FunctionStep, {})["flow-123_func_step_old"] = (
             old_function_step
         )
         self.project.resources.setdefault(FlowConfig, {})["flow-123"] = flow_config
 
-        new_resources = {FunctionStep: {"Test Flow_func_step": new_function_step}}
+        new_resources = {FunctionStep: {"flow-123_func_step": new_function_step}}
         updated_resources = {FlowConfig: {"flow-123": updated_flow_config}}
-        deleted_resources = {FunctionStep: {"Test Flow_func_step_old": old_function_step}}
+        deleted_resources = {FunctionStep: {"flow-123_func_step_old": old_function_step}}
 
         push_changes = self.project._clean_resources_before_push(
             {},
@@ -1405,16 +1593,16 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
 
         # Pre-push: dummy step (uses old step_id for dummy)
         self.assertIn(FlowStep, pre_push_new)
-        self.assertIn("Test Flow_func_step_old_temp", pre_push_new[FlowStep])
+        self.assertIn("flow-123_func_step_old_temp", pre_push_new[FlowStep])
         self.assertIn(FlowConfig, pre_push_updated)
 
         # Post-push: delete dummy
         self.assertIn(FlowStep, post_push_deleted)
-        self.assertIn("Test Flow_func_step_old_temp", post_push_deleted[FlowStep])
+        self.assertIn("flow-123_func_step_old_temp", post_push_deleted[FlowStep])
 
         # Main push: old in deleted, new in new
-        self.assertIn("Test Flow_func_step_old", cleaned_deleted[FunctionStep])
-        self.assertIn("Test Flow_func_step", cleaned_new[FunctionStep])
+        self.assertIn("flow-123_func_step_old", cleaned_deleted[FunctionStep])
+        self.assertIn("flow-123_func_step", cleaned_new[FunctionStep])
 
     def test_clean_resources_before_push_new_flow_function_step_as_start_fixes_with_dummy(
         self,
@@ -1433,7 +1621,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             start_step="entry_func",
         )
         function_start_step = FunctionStep(
-            resource_id="New Flow_entry_func",
+            resource_id="flow-new-func-start_entry_func",
             step_id="entry_func",
             name="Entry",
             flow_id=flow_config_id,
@@ -1445,7 +1633,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
 
         new_resources = {
             FlowConfig: {flow_config_id: flow_config},
-            FunctionStep: {"New Flow_entry_func": function_start_step},
+            FunctionStep: {"flow-new-func-start_entry_func": function_start_step},
         }
         push_changes = self.project._clean_resources_before_push(
             {},
@@ -1475,7 +1663,7 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
 
         # Dummy step is scheduled for post-push deletion
         self.assertIn(FlowStep, post_deleted)
-        self.assertIn("New Flow_entry_func_start_step_temp", post_deleted[FlowStep])
+        self.assertIn("flow-new-func-start_entry_func_start_step_temp", post_deleted[FlowStep])
 
     def test_clean_resources_before_push_orphaned_variable_delete_and_recreate(self):
         """When all functions referencing a variable are deleted, variable is delete+recreated."""
@@ -2019,7 +2207,7 @@ class PushProjectTest(unittest.TestCase):
 
     def test_push_project_modified_sub_resources_dtmf(self):
         project_data = deepcopy(PROJECT_DATA)
-        project_data["resources"]["flow_steps"]["test_flow_start_step"]["dtmf_config"][
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["dtmf_config"][
             "is_enabled"
         ] = True
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
@@ -2035,7 +2223,9 @@ class PushProjectTest(unittest.TestCase):
     def test_push_project_new_sub_resources_condition(self):
         project_data = deepcopy(PROJECT_DATA)
         # Delete condition in project_data to mimic new condition locally
-        project_data["resources"]["flow_steps"]["test_flow_collect_name"]["conditions"] = []
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_collect_name"][
+            "conditions"
+        ] = []
 
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
@@ -2052,7 +2242,9 @@ class PushProjectTest(unittest.TestCase):
     def test_push_project_deleted_sub_resource_condition(self):
         project_data = deepcopy(PROJECT_DATA)
         # Mimic deleting a condition locally by adding to project data
-        project_data["resources"]["flow_steps"]["test_flow_collect_name"]["conditions"].append(
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_collect_name"][
+            "conditions"
+        ].append(
             {
                 "name": "delete_condition",
                 "description": "A condition to be deleted",
@@ -2082,7 +2274,7 @@ class PushProjectTest(unittest.TestCase):
         """Test pushing an updated ASRBiasing sub-resource"""
         project_data = deepcopy(PROJECT_DATA)
         # Modify ASR biasing in project_data
-        project_data["resources"]["flow_steps"]["test_flow_start_step"]["asr_biasing"][
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["asr_biasing"][
             "custom_keywords"
         ] = ["NewKeyword1", "NewKeyword2"]
 
@@ -2113,7 +2305,7 @@ class PushProjectTest(unittest.TestCase):
             "function_type": "global",
         }
         # Modified resource in subresource
-        project_data["resources"]["flow_steps"]["test_flow_start_step"]["asr_biasing"][
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["asr_biasing"][
             "is_enabled"
         ] = False
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
@@ -2315,10 +2507,11 @@ class ValidateProjectTest(unittest.TestCase):
         ):
             errors = project.validate_project()
         self.assertEqual(len(errors), 2)
+        error_texts = "\n".join(errors)
         self.assertIn(
-            "Invalid references: ['global_functions: FUNCTION-missing_function']", errors[0]
+            "Invalid references: ['global_functions: FUNCTION-missing_function']", error_texts
         )
-        self.assertIn("Start step 'missing_step' not found.", errors[1])
+        self.assertIn("Start step 'missing_step' not found.", error_texts)
 
 
 class PullProjectTest(unittest.TestCase):
@@ -3003,6 +3196,39 @@ class PullProjectTest(unittest.TestCase):
         files_with_conflicts, _ = project.pull_project()
         self.assertEqual(files_with_conflicts, [])
 
+    def test_pull_multi_resource_local_normalization_no_false_conflict(self):
+        """Local multi-resource files should be normalised through resource classes
+        before the three-way merge, so formatting differences don't cause conflicts.
+
+        KeyphraseBoosting lowercases the level field in __init__. If the local file
+        has 'level: Boosted' (mixed case), a raw read would differ from the canonical
+        'level: boosted', causing a false merge conflict. Reading through the resource
+        class normalises this.
+        """
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+        incoming_resources = deepcopy(project.resources)
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+
+        # Local file has mixed-case level values (not yet normalised)
+        local_keyphrases_yaml = (
+            "keyphrases:\n"
+            "- keyphrase: PolyAI\n"
+            "  level: Maximum\n"
+            "- keyphrase: reservation\n"
+            "  level: Boosted\n"
+            "- keyphrase: check-in\n"
+            "  level: Default\n"
+        )
+        keyphrases_yaml_path = os.path.join(
+            TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml"
+        )
+
+        with mock_read_from_file({keyphrases_yaml_path: local_keyphrases_yaml}):
+            files_with_conflicts, _ = project.pull_project(force=False)
+
+        self.assertEqual(files_with_conflicts, [])
+
 
 class PullProjectFromEnvTest(unittest.TestCase):
     """Tests for pull_project_from_env when targeting deployment environments.
@@ -3573,6 +3799,542 @@ class FetchProjectTest(unittest.TestCase):
 
         # Since projection_json is None, branch_id is set from api_handler.branch_id
         self.assertEqual(project.branch_id, "staging-id")
+
+
+class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
+    """Tests that _update_pulled_resources and _update_multi_resource_yaml_resources
+    delete local resources when their entire resource type is absent from incoming."""
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.mock_save_config = patch.object(AgentStudioProject, "save_config").start()
+        self.mock_save_imports = patch("poly.utils.save_imports").start()
+        self.mock_export_decorators = patch("poly.utils.export_decorators").start()
+        self.mock_resource_save = patch.object(Resource, "save").start()
+        self.mock_save_to_file = patch.object(Resource, "save_to_file").start()
+        self.mock_os_remove = patch("os.remove").start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_absent_non_multi_resource_type_deleted_on_pull(self):
+        """When incoming_resources omits an entire non-multi resource type (e.g. Topic),
+        all local files for that type should be deleted."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+
+        # Record the topic paths that exist locally before removal
+        topic_paths = [res.get_path(TEST_DIR) for res in incoming_resources[Topic].values()]
+        self.assertGreater(len(topic_paths), 0)
+
+        # Remove Topics entirely from incoming — simulates remote having deleted all topics
+        del incoming_resources[Topic]
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+
+        files_with_conflicts, _ = project.pull_project(force=False)
+
+        self.assertEqual(files_with_conflicts, [])
+        # Verify delete_resource was called (via os.remove) for each topic file
+        removed_paths = [call[0][0] for call in self.mock_os_remove.call_args_list]
+        for path in topic_paths:
+            self.assertIn(
+                path,
+                removed_paths,
+                f"Expected {path} to be deleted when Topic type is absent from incoming",
+            )
+
+    def test_absent_multi_resource_type_deleted_on_pull(self):
+        """When incoming_resources omits an entire MultiResourceYamlResource type
+        (e.g. Entity), delete_resource should be called for each local resource
+        of that type."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+
+        # Record entity paths before removal
+        entity_paths = {res.get_path(TEST_DIR) for res in incoming_resources[Entity].values()}
+        self.assertGreater(len(entity_paths), 0)
+
+        # Remove Entities entirely from incoming — simulates remote having deleted all entities
+        del incoming_resources[Entity]
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+
+        MultiResourceYamlResource._file_cache.clear()
+        with patch.object(Entity, "delete_resource") as mock_delete:
+            files_with_conflicts, _ = project.pull_project(force=False)
+        MultiResourceYamlResource._file_cache.clear()
+
+        self.assertEqual(files_with_conflicts, [])
+        # Verify delete_resource was called for each entity
+        deleted_paths = {call[0][0] for call in mock_delete.call_args_list}
+        self.assertEqual(
+            deleted_paths,
+            entity_paths,
+            "delete_resource should be called for every entity when Entity type is absent",
+        )
+
+    def test_not_loaded_resource_type_not_deleted_on_pull(self):
+        """When a resource type is in _not_loaded_resources, it should NOT be deleted
+        even if absent from incoming_resources. This prevents spurious deletions of
+        types that were never loaded from the local status file."""
+        # Load project without variant_attributes — simulates an older project format
+        project_data = deepcopy(PROJECT_DATA)
+        del project_data["resources"]["variant_attributes"]
+        del project_data["resources"]["variants"]
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        # Verify VariantAttribute is in _not_loaded_resources
+        self.assertIn(VariantAttribute, project._not_loaded_resources)
+
+        # Incoming also doesn't have VariantAttribute — but since it's "not loaded",
+        # we should NOT delete local files for it
+        incoming_resources = deepcopy(project.resources)
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+
+        files_with_conflicts, _ = project.pull_project(force=False)
+
+        self.assertEqual(files_with_conflicts, [])
+        # os.remove should NOT have been called for any variant attribute paths
+        removed_paths = [call[0][0] for call in self.mock_os_remove.call_args_list]
+        variant_attr_paths = [path for path in removed_paths if "variant_attribute" in path]
+        self.assertEqual(
+            variant_attr_paths,
+            [],
+            "Should not delete files for resource types in _not_loaded_resources",
+        )
+
+
+class MigrateFlowStepResourceIdsTest(unittest.TestCase):
+    """Tests for migrate_flow_step_resource_ids status dict migration."""
+
+    def test_rekeys_flow_steps_from_flow_name_to_flow_id(self):
+        """Old-format keys are re-keyed using flow_id."""
+        from poly.migration_utils import migrate_flow_step_resource_ids
+
+        status_dict = {
+            "resources": {
+                "flow_steps": {
+                    "SMS Flow_step-1": {
+                        "resource_id": "SMS Flow_step-1",
+                        "flow_name": "SMS Flow",
+                        "flow_id": "FLOW-abc",
+                    },
+                },
+                "function_steps": {
+                    "SMS Flow_func-1": {
+                        "resource_id": "SMS Flow_func-1",
+                        "flow_name": "SMS Flow",
+                        "flow_id": "FLOW-abc",
+                    },
+                },
+            },
+            "file_structure_info": {
+                "flows/sms_flow/steps/step_1.yaml": {
+                    "resource_id": "SMS Flow_step-1",
+                },
+                "flows/sms_flow/function_steps/func_1.py": {
+                    "resource_id": "SMS Flow_func-1",
+                },
+            },
+        }
+
+        migrate_flow_step_resource_ids(status_dict)
+
+        flow_steps = status_dict["resources"]["flow_steps"]
+        self.assertNotIn("SMS Flow_step-1", flow_steps)
+        self.assertIn("FLOW-abc_step-1", flow_steps)
+        self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
+
+        func_steps = status_dict["resources"]["function_steps"]
+        self.assertNotIn("SMS Flow_func-1", func_steps)
+        self.assertIn("FLOW-abc_func-1", func_steps)
+        self.assertEqual(func_steps["FLOW-abc_func-1"]["resource_id"], "FLOW-abc_func-1")
+
+        fsi = status_dict["file_structure_info"]
+        self.assertEqual(fsi["flows/sms_flow/steps/step_1.yaml"]["resource_id"], "FLOW-abc_step-1")
+        self.assertEqual(
+            fsi["flows/sms_flow/function_steps/func_1.py"]["resource_id"], "FLOW-abc_func-1"
+        )
+
+    def test_already_migrated_entries_are_unchanged(self):
+        """Entries whose key doesn't start with flow_name_ are left as-is."""
+        from poly.migration_utils import migrate_flow_step_resource_ids
+
+        status_dict = {
+            "resources": {
+                "flow_steps": {
+                    "FLOW-abc_step-1": {
+                        "resource_id": "FLOW-abc_step-1",
+                        "flow_name": "SMS Flow",
+                        "flow_id": "FLOW-abc",
+                    },
+                },
+            },
+            "file_structure_info": {},
+        }
+
+        migrate_flow_step_resource_ids(status_dict)
+
+        flow_steps = status_dict["resources"]["flow_steps"]
+        self.assertIn("FLOW-abc_step-1", flow_steps)
+        self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
+
+
+class DiffBranchTest(unittest.TestCase):
+    """Tests for the diff_branch method."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "main"
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def _make_branches(self, entries):
+        """Build a branches dict from a list of (name, branchId, extras) tuples."""
+        branches = {}
+        for name, branch_id, extras in entries:
+            meta = {"branchId": branch_id}
+            meta.update(extras)
+            branches[name] = meta
+        return branches
+
+    def _make_topic(self, resource_id, name, content):
+        """Create a Topic with all required fields."""
+        return Topic(
+            resource_id=resource_id,
+            name=name,
+            actions="",
+            content=content,
+            example_queries=[],
+        )
+
+    def test_on_main_with_no_branch_name_raises_value_error(self):
+        """Calling diff_branch() while on main without specifying a branch raises ValueError."""
+        self.project.branch_id = "main"
+        self.mock_api.get_branches.return_value = self._make_branches([("main", "main", {})])
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.diff_branch()
+        self.assertIn("Cannot diff main branch", str(ctx.exception))
+
+    def test_named_branch_not_found_raises_value_error(self):
+        """Specifying a branch name that doesn't exist raises ValueError."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [("main", "main", {}), ("feature-a", "branch-a-id", {})]
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.diff_branch(branch_name="nonexistent")
+        self.assertIn("does not exist", str(ctx.exception))
+
+    def test_happy_path_returns_diffs(self):
+        """diff_branch returns diffs between fork-point parent and current branch state."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-x",
+                    "branch-x-id",
+                    {"parentBranchId": "main", "parentSequence": "42"},
+                ),
+            ]
+        )
+
+        parent_topic = self._make_topic("TOPIC-1", "Greetings", "Hello original")
+        branch_topic = self._make_topic("TOPIC-1", "Greetings", "Hello updated")
+        parent_resources = {Topic: {"TOPIC-1": parent_topic}}
+        branch_resources = {Topic: {"TOPIC-1": branch_topic}}
+
+        self.mock_api.pull_branch_resources.side_effect = [
+            parent_resources,
+            branch_resources,
+        ]
+
+        diffs = self.project.diff_branch(branch_name="feature-x")
+
+        self.assertIsNotNone(diffs)
+        self.assertEqual(len(diffs), 1)
+        topic_path = os.path.join("topics", "greetings.yaml")
+        self.assertIn(topic_path, diffs)
+        self.assertIn("-content: Hello original", diffs[topic_path])
+        self.assertIn("+content: Hello updated", diffs[topic_path])
+
+        # Verify pull_branch_resources called with correct args
+        calls = self.mock_api.pull_branch_resources.call_args_list
+        self.assertEqual(calls[0].args, ("main", 42))
+        self.assertEqual(calls[1].args, ("branch-x-id",))
+
+    def test_no_changes_returns_none(self):
+        """When parent and branch have identical resources, diff_branch returns None."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-y",
+                    "branch-y-id",
+                    {"parentBranchId": "main", "parentSequence": "10"},
+                ),
+            ]
+        )
+
+        topic = self._make_topic("TOPIC-1", "Hours", "9am-5pm")
+        identical_resources = {Topic: {"TOPIC-1": topic}}
+
+        self.mock_api.pull_branch_resources.side_effect = [
+            identical_resources,
+            deepcopy(identical_resources),
+        ]
+
+        result = self.project.diff_branch(branch_name="feature-y")
+        self.assertIsNone(result)
+
+    def test_null_parent_sequence_falls_back_to_latest(self):
+        """When parentSequence is null, pull_branch_resources is called with at_sequence=None."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-z",
+                    "branch-z-id",
+                    {"parentBranchId": "main", "parentSequence": None},
+                ),
+            ]
+        )
+
+        topic = self._make_topic("TOPIC-1", "Hours", "9am-5pm")
+        self.mock_api.pull_branch_resources.side_effect = [
+            {Topic: {"TOPIC-1": topic}},
+            {Topic: {"TOPIC-1": deepcopy(topic)}},
+        ]
+
+        self.project.diff_branch(branch_name="feature-z")
+
+        # Parent projection should be fetched with at_sequence=None (latest)
+        parent_call = self.mock_api.pull_branch_resources.call_args_list[0]
+        self.assertEqual(parent_call.args[0], "main")
+        self.assertIsNone(parent_call.args[1])
+
+    def test_file_path_filtering(self):
+        """Only diffs matching the provided file_paths are returned."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-f",
+                    "branch-f-id",
+                    {"parentBranchId": "main", "parentSequence": "5"},
+                ),
+            ]
+        )
+
+        topic_a = self._make_topic("TOPIC-A", "Topic A", "old A")
+        topic_b = self._make_topic("TOPIC-B", "Topic B", "old B")
+        parent_resources = {
+            Topic: {"TOPIC-A": topic_a, "TOPIC-B": topic_b},
+        }
+
+        topic_a_new = self._make_topic("TOPIC-A", "Topic A", "new A")
+        topic_b_new = self._make_topic("TOPIC-B", "Topic B", "new B")
+        branch_resources = {
+            Topic: {"TOPIC-A": topic_a_new, "TOPIC-B": topic_b_new},
+        }
+
+        self.mock_api.pull_branch_resources.side_effect = [
+            parent_resources,
+            branch_resources,
+        ]
+
+        topic_a_path = os.path.join("topics", "topic_a.yaml")
+        diffs = self.project.diff_branch(branch_name="feature-f", file_paths=[topic_a_path])
+
+        self.assertIsNotNone(diffs)
+        self.assertIn(topic_a_path, diffs)
+        topic_b_path = os.path.join("topics", "topic_b.yaml")
+        self.assertNotIn(topic_b_path, diffs)
+
+    def test_file_path_filtering_no_matches_returns_none(self):
+        """When file_paths filter excludes all diffs, returns None."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-g",
+                    "branch-g-id",
+                    {"parentBranchId": "main", "parentSequence": "5"},
+                ),
+            ]
+        )
+
+        topic = self._make_topic("TOPIC-1", "Hours", "old")
+        topic_new = self._make_topic("TOPIC-1", "Hours", "new")
+
+        self.mock_api.pull_branch_resources.side_effect = [
+            {Topic: {"TOPIC-1": topic}},
+            {Topic: {"TOPIC-1": topic_new}},
+        ]
+
+        result = self.project.diff_branch(
+            branch_name="feature-g",
+            file_paths=["nonexistent/file.yaml"],
+        )
+        self.assertIsNone(result)
+
+    def test_current_branch_used_when_no_name_specified(self):
+        """When no branch_name given, uses the current branch."""
+        self.project.branch_id = "branch-cur-id"
+        self.mock_api.branch_id = "branch-cur-id"
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "current-branch",
+                    "branch-cur-id",
+                    {"parentBranchId": "main", "parentSequence": "7"},
+                ),
+            ]
+        )
+
+        topic = self._make_topic("TOPIC-1", "FAQ", "same")
+        self.mock_api.pull_branch_resources.side_effect = [
+            {Topic: {"TOPIC-1": topic}},
+            {Topic: {"TOPIC-1": deepcopy(topic)}},
+        ]
+
+        result = self.project.diff_branch()
+        self.assertIsNone(result)
+
+        # Should have used the current branch's metadata
+        branch_call = self.mock_api.pull_branch_resources.call_args_list[1]
+        self.assertEqual(branch_call.args, ("branch-cur-id",))
+
+
+class GetBranchesReturnTypeTest(unittest.TestCase):
+    """Tests for the updated get_branches return type (dict of metadata dicts)."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def test_returns_current_branch_name_and_metadata_dict(self):
+        """get_branches returns (current_name, {name: metadata_dict})."""
+        self.project.branch_id = "branch-abc"
+        self.mock_api.branch_id = "branch-abc"
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+            "my-feature": {"branchId": "branch-abc", "parentBranchId": "main"},
+        }
+
+        current_name, branches = self.project.get_branches()
+
+        self.assertEqual(current_name, "my-feature")
+        self.assertIn("main", branches)
+        self.assertIn("my-feature", branches)
+        self.assertEqual(branches["my-feature"]["branchId"], "branch-abc")
+        self.assertEqual(branches["my-feature"]["parentBranchId"], "main")
+
+    def test_returns_none_when_local_branch_not_found(self):
+        """When the local branch_id doesn't match any remote branch, current_name is None."""
+        self.project.branch_id = "deleted-branch-id"
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+        }
+
+        current_name, branches = self.project.get_branches()
+
+        self.assertIsNone(current_name)
+        self.assertEqual(len(branches), 1)
+
+
+class RtcPullEnvTest(unittest.TestCase):
+    """Tests for AgentStudioProject.rtc_pull_env writing RTC files to disk."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project = AgentStudioProject.from_dict(deepcopy(EMPTY_PROJECT_DATA), self.temp_dir)
+        self.env_dir = os.path.join(self.temp_dir, "real_time_configuration", "draft_and_sandbox")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _read_json(self, file_name: str) -> object:
+        with open(os.path.join(self.env_dir, file_name), "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_pull_env_writes_schema_and_data_returned_by_api(self):
+        """Schema and variables from the API are written to schema.json and data.json."""
+        config = {
+            "schema": {"type": "object", "properties": {"flag": {"type": "boolean"}}},
+            "variables": {"flag": True},
+            "lastUpdated": "2026-01-01T00:00:00Z",
+        }
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            result = self.project.rtc_pull_env("sandbox")
+
+        self.assertEqual(result["environment"], "sandbox")
+        self.assertEqual(self._read_json("schema.json"), config["schema"])
+        self.assertEqual(self._read_json("data.json"), config["variables"])
+
+    def test_pull_env_writes_empty_dicts_when_api_returns_null(self):
+        """A project with no RTC configured writes {} to disk, never literal null.
+
+        The API returns explicit JSON null (not a missing key) for schema/variables when
+        RTC has never been configured, and null is not valid content for these files.
+        """
+        config = {"schema": None, "variables": None, "lastUpdated": "2026-01-01T00:00:00Z"}
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            self.project.rtc_pull_env("sandbox")
+
+        self.assertEqual(self._read_json("schema.json"), {})
+        self.assertEqual(self._read_json("data.json"), {})
+
+    def test_pull_env_metadata_records_empty_dicts_when_api_returns_null(self):
+        """The stored baseline metadata is {} rather than being left unset on null."""
+        config = {"schema": None, "variables": None, "lastUpdated": "2026-01-01T00:00:00Z"}
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            self.project.rtc_pull_env("sandbox")
+
+        self.assertEqual(self.project.rtc_metadata["sandbox"]["base_schema"], {})
+        self.assertEqual(self.project.rtc_metadata["sandbox"]["base_data"], {})
+        self.assertEqual(
+            self.project.rtc_metadata["sandbox"]["last_updated"], "2026-01-01T00:00:00Z"
+        )
+
+    def test_pull_env_null_config_round_trips_through_rtc_load_local(self):
+        """Files written from a null API response can be read back as empty dicts."""
+        config = {"schema": None, "variables": None, "lastUpdated": "2026-01-01T00:00:00Z"}
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            self.project.rtc_pull_env("sandbox")
+
+        loaded = self.project.rtc_load_local("sandbox")
+
+        self.assertEqual(loaded, {"schema": {}, "variables": {}})
+
+    def test_pull_env_schema_only_does_not_write_data_file(self):
+        """schema_only writes schema.json and leaves data.json absent."""
+        config = {"schema": {"type": "object"}, "variables": {"flag": True}, "lastUpdated": "T1"}
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            result = self.project.rtc_pull_env("sandbox", schema_only=True)
+
+        self.assertNotIn("data_file", result)
+        self.assertTrue(os.path.exists(os.path.join(self.env_dir, "schema.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.env_dir, "data.json")))
 
 
 if __name__ == "__main__":

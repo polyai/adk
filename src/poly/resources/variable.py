@@ -18,11 +18,12 @@ from poly.handlers.protobuf.variables_pb2 import (
     Variable_Update,
 )
 from poly.resources.function import Function
-from poly.resources.resource import Resource, ResourceMapping
+from poly.resources.resource import Resource, ResourceMapping, register_resource
 
 logger = logging.getLogger(__name__)
 
 
+@register_resource("variables")
 @dataclass
 class Variable(Resource):
     """A variable resource.
@@ -46,6 +47,18 @@ class Variable(Resource):
         self.resource_id = resource_id
         self.name = name
         self.references = references
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "Variable"]:
+        """Parse variables from a projection dict."""
+        variables = {}
+        variables_data = projection.get("variables", {}).get("variables", {}).get("entities", {})
+        for var_id, var_data in variables_data.items():
+            variables[var_id] = cls(
+                resource_id=var_id,
+                name=var_data.get("name", ""),
+            )
+        return variables
 
     @staticmethod
     def get_resource_prefix(**kwargs) -> str:

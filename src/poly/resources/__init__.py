@@ -17,6 +17,7 @@ from poly.resources.channel_settings import (
     VoiceGreeting,
     VoiceStylePrompt,
 )
+from poly.resources.documents import Document
 from poly.resources.entities import (
     Entity,
     EntityType,
@@ -49,11 +50,15 @@ from poly.resources.languages import AdditionalLanguage, DefaultLanguage
 from poly.resources.phrase_filter import PhraseFilter
 from poly.resources.pronunciation import Pronunciation
 from poly.resources.resource import (
+    RESOURCE_CLASS_TO_NAME,
+    RESOURCE_NAME_TO_CLASS,
     BaseResource,
     MultiResourceYamlResource,
     Resource,
     ResourceMapping,
     SubResource,
+    load_resources_from_projection,
+    register_resource,
 )
 from poly.resources.safety_filters import (
     ChatSafetyFilters,

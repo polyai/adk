@@ -10,8 +10,8 @@ import yaml
 from jsonschema import ValidationError
 
 import poly.resources.resource_utils as resource_utils
-from poly.handlers.sync_client import SyncClientHandler
 from poly.resources.agent_settings import (
+    ALLOWED_ADJECTIVES,
     SettingsPersonality,
     SettingsRole,
     SettingsRules,
@@ -33,6 +33,7 @@ from poly.resources.channel_settings import (
     VoiceGreeting,
     VoiceStylePrompt,
 )
+from poly.resources.documents import Document
 from poly.resources.entities import Entity, EntityType
 from poly.resources.experimental_config import ExperimentalConfig
 from poly.resources.flows import (
@@ -70,6 +71,7 @@ from poly.resources.safety_filters import (
     GeneralSafetyFilters,
     SafetyFilterCategory,
     VoiceSafetyFilters,
+    parse_safety_filter_config,
 )
 from poly.resources.sms import EnvPhoneNumbers, SMSTemplate
 from poly.resources.test_suite import (
@@ -707,30 +709,34 @@ def test_code(conv: Conversation, test_param: int):
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_step-1",
+                resource_id="flow-123_step-1",
                 resource_name="Step One",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/step_one.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_process_payment",
+                resource_id="flow-123_process_payment",
                 resource_name="process_payment",
                 resource_type=FunctionStep,
                 file_path="flows/test_flow/function_steps/process_payment.py",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_dont_know",
+                resource_id="flow-123_dont_know",
                 resource_name="Don't know/ Can't Find",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/dont_know.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
         ]
 
@@ -803,6 +809,7 @@ def test_code(conv: Conversation, test_param: int):
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
                 resource_id="flow-456",
@@ -882,6 +889,69 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
             Function._extract_decorators(code, "my_func", [])
         self.assertIn("booking_ref", str(ctx.exception))
         self.assertIn("unsupported type annotation", str(ctx.exception))
+
+    def test_equality_ignores_variable_references(self):
+        """variable_references must not affect equality.
+
+        read_local_resource always derives it from code, from_projection never sets it, so
+        including it in the generated __eq__ made every disk-read function compare unequal
+        to its projection-read counterpart. sync_ids_with_sandbox compares whole objects,
+        so that rewrote every function in the project on any id sync.
+        """
+
+        def build(variable_references):
+            return Function(
+                resource_id="fn-1",
+                name="my_func",
+                description="desc",
+                code="def my_func(conv: Conversation):\n    pass\n",
+                parameters=[
+                    FunctionParameters(id="param-1", name="p", description="a param", type="string")
+                ],
+                latency_control=FunctionLatencyControl(),
+                function_type=FunctionType.GLOBAL,
+                variable_references=variable_references,
+            )
+
+        from_projection = build(None)
+        from_disk = build({})
+        self.assertEqual(from_disk, from_projection)
+        self.assertEqual(build({"VARIABLE-abc": True}), from_projection)
+
+        # Real changes must still be detected. Sub-resource id drift matters most: a
+        # parameter deleted and recreated renders identically and leaves the parent id
+        # untouched, so only the whole-object comparison catches it.
+        drifted = build({})
+        drifted.parameters[0].id = "param-2"
+        self.assertNotEqual(drifted, from_projection)
+
+        renamed_param = build({})
+        renamed_param.parameters[0].name = "other"
+        self.assertNotEqual(renamed_param, from_projection)
+
+        recoded = build({})
+        recoded.code += "\n# changed\n"
+        self.assertNotEqual(recoded, from_projection)
+
+        redescribed = build({})
+        redescribed.description = "different"
+        self.assertNotEqual(redescribed, from_projection)
+
+        relatency = build({})
+        relatency.latency_control.enabled = True
+        self.assertNotEqual(relatency, from_projection)
+
+    def test_missing_description_reads_as_empty_string(self):
+        """A function with no @func_description must read back as "", not None.
+
+        Agent Studio stores an absent description as "", so returning None made every
+        such function (start/end functions in practice) compare unequal to its
+        projection-read counterpart. "" also stops _generate_raw_output emitting a
+        literal @func_description(None) that cannot be parsed back.
+        """
+        code = "def start_function(conv: Conversation):\n    pass\n"
+        _, _, description, _ = Function._extract_decorators(code, "start_function", [])
+        self.assertEqual(description, "")
 
 
 TEST_TOPIC = Topic(
@@ -1673,9 +1743,8 @@ TEST_PERSONALITY = SettingsPersonality(
 )
 
 PERSONALITY_RAW = """adjectives:
-  Polite: true
   Calm: true
-  Kind: false
+  Polite: true
 custom: ''
 """
 
@@ -1684,6 +1753,35 @@ class SettingsPersonalityTests(unittest.TestCase):
     def test_get_raw(self):
         """Test that raw property returns correct YAML representation."""
         self.assertEqual(TEST_PERSONALITY.raw, PERSONALITY_RAW)
+
+    def test_to_yaml_dict_strips_disabled_adjectives(self):
+        """Test that to_yaml_dict excludes adjectives set to False."""
+        yaml_dict = TEST_PERSONALITY.to_yaml_dict()
+        self.assertEqual(yaml_dict["adjectives"], {"Polite": True, "Calm": True})
+        self.assertNotIn("Kind", yaml_dict["adjectives"])
+
+    def test_to_yaml_dict_sorts_adjectives(self):
+        """Test that to_yaml_dict returns adjectives in sorted order."""
+        unsorted = SettingsPersonality(
+            resource_id="p1",
+            name="personality",
+            adjectives={"Polite": True, "Calm": True, "Energetic": True, "Kind": False},
+            custom="",
+        )
+        yaml_dict = unsorted.to_yaml_dict()
+        self.assertEqual(list(yaml_dict["adjectives"].keys()), ["Calm", "Energetic", "Polite"])
+
+    def test_to_yaml_dict_normalizes_empty_and_all_false(self):
+        """Test that both empty and all-false adjectives produce the same YAML dict."""
+        empty = SettingsPersonality(resource_id="p1", name="personality", adjectives={}, custom="")
+        all_false = SettingsPersonality(
+            resource_id="p2",
+            name="personality",
+            adjectives={"Polite": False, "Calm": False},
+            custom="",
+        )
+        self.assertEqual(empty.to_yaml_dict()["adjectives"], {})
+        self.assertEqual(all_false.to_yaml_dict()["adjectives"], {})
 
     def test_to_pretty(self):
         """Test converting personality to pretty format."""
@@ -1757,8 +1855,8 @@ class SettingsPersonalityTests(unittest.TestCase):
             str(cm.exception),
         )
 
-    def test_build_update_proto_filters_invalid_adjectives(self):
-        """Test that build_update_proto excludes non-allowed adjectives from the payload."""
+    def test_build_update_proto_sends_all_allowed_adjectives(self):
+        """Test that build_update_proto sends all allowed adjectives, defaulting unset to False."""
         personality = SettingsPersonality(
             resource_id="personality_123",
             name="personality",
@@ -1767,8 +1865,12 @@ class SettingsPersonalityTests(unittest.TestCase):
         )
         proto = personality.build_update_proto()
         adjective_values = proto.adjectives.values
-        self.assertEqual(adjective_values, {"Polite": True, "Calm": True})
         self.assertNotIn("InvalidAdjective", adjective_values)
+        self.assertEqual(set(adjective_values.keys()), ALLOWED_ADJECTIVES)
+        self.assertTrue(adjective_values["Polite"])
+        self.assertTrue(adjective_values["Calm"])
+        self.assertFalse(adjective_values["Kind"])
+        self.assertFalse(adjective_values["Funny"])
 
     def test_read_local_resource(self):
         """Test reading a personality from a YAML file."""
@@ -2082,12 +2184,13 @@ class FlowConfigTests(unittest.TestCase):
         """Test converting flow config to pretty format with start_step name mapping."""
         resource_mappings = [
             ResourceMapping(
-                resource_id="Test Flow_step-1",
+                resource_id="flow-123_step-1",
                 resource_name="Start Step",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/start_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             )
         ]
         pretty_content = TEST_FLOW_CONFIG.to_pretty(
@@ -2107,12 +2210,13 @@ class FlowConfigTests(unittest.TestCase):
         """Test roundtrip conversion: to_pretty -> from_pretty."""
         resource_mappings = [
             ResourceMapping(
-                resource_id="Test Flow_step-1",
+                resource_id="flow-123_step-1",
                 resource_name="Start Step",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/start_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             )
         ]
         converted_config = TEST_FLOW_CONFIG.to_pretty(
@@ -2132,15 +2236,16 @@ class FlowConfigTests(unittest.TestCase):
 
         resource_mappings = [
             ResourceMapping(
-                resource_id="Test Flow_step-1",
+                resource_id="flow-123_step-1",
                 resource_name="Start Step",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/start_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_step-2",
+                resource_id="flow-123_step-2",
                 resource_name="Start Step",
                 resource_type=FlowStep,
                 file_path="flows/test_flow_2/steps/start_step.yaml",
@@ -2170,12 +2275,13 @@ class FlowConfigTests(unittest.TestCase):
         """Test validation of flow config."""
         resource_mappings = [
             ResourceMapping(
-                resource_id="Test Flow_step-1",
+                resource_id="flow-123_step-1",
                 resource_name="Start Step",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/start_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             )
         ]
         self.assertIsNone(TEST_FLOW_CONFIG.validate(resource_mappings=resource_mappings))
@@ -2241,14 +2347,16 @@ start_step: Start Step
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_step-1",
+                resource_id="flow-123_step-1",
                 resource_name="Start Step",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/start_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
         ]
 
@@ -2288,12 +2396,13 @@ start_step: step-1
 
         resource_mappings = [
             ResourceMapping(
-                resource_id="Test Flow: Main_step-1",
+                resource_id="flow-colon_step-1",
                 resource_name="Step: Start",
                 resource_type=FlowStep,
                 file_path="flows/test_flow_main/steps/start_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow: Main",
+                flow_id="flow-colon",
             )
         ]
 
@@ -2502,7 +2611,7 @@ class FlowStepTests(unittest.TestCase):
         yaml_dict = yaml.safe_load(FLOW_STEP_RAW_NO_ASR_DTMF)
         step = FlowStep.from_yaml_dict(
             yaml_dict,
-            resource_id="Test Flow_step-1",
+            resource_id="flow-123_step-1",
             file_name="test_step",
             flow_id="flow-123",
             flow_name="Test Flow",
@@ -2518,7 +2627,7 @@ class FlowStepTests(unittest.TestCase):
         )
         step = FlowStep.from_yaml_dict(
             yaml_dict,
-            resource_id="Test Flow_step-1",
+            resource_id="flow-123_step-1",
             file_name="test_step",
             flow_id="flow-123",
             flow_name="Test Flow",
@@ -2531,7 +2640,7 @@ class FlowStepTests(unittest.TestCase):
         yaml_dict = yaml.safe_load("step_type: advanced_step\nname: Test Step\n")
         step = FlowStep.from_yaml_dict(
             yaml_dict,
-            resource_id="Test Flow_step-1",
+            resource_id="flow-123_step-1",
             file_name="test_step",
             flow_id="flow-123",
             flow_name="Test Flow",
@@ -2594,12 +2703,13 @@ conditions:
 
         resource_mappings = [
             ResourceMapping(
-                resource_id="Test Flow: Main_step-2",
+                resource_id="flow-colon_step-2",
                 resource_name="Step: Next",
                 resource_type=FlowStep,
                 file_path="flows/test_flow_main/steps/next_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow: Main",
+                flow_id="flow-colon",
             ),
             ResourceMapping(
                 resource_id="entity-123",
@@ -2642,6 +2752,7 @@ conditions:
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             )
         ]
         self.assertIsNone(TEST_FLOW_STEP.validate(resource_mappings=resource_mappings))
@@ -2729,6 +2840,7 @@ conditions:
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             )
         ]
         for valid_name in ("Test Step", "Step_1", "Step & 2", "Step 1, 2", "a/b", "v1.0", "café"):
@@ -2776,19 +2888,21 @@ conditions:
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_step-2",  # Format: flow_name_step_id
+                resource_id="flow-123_step-2",  # Format: flow_id_step_id
                 resource_name="Step 2",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/step_2.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
         ]
 
         # Test with valid condition
-        # child_step should match the step_id part after removing flow_name prefix from resource_id
+        # child_step should match the step_id part after removing flow_id prefix from resource_id
         valid_condition = Condition(
             resource_id="cond-1",
             name="Valid Condition",
@@ -3274,6 +3388,7 @@ dtmf_config:
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             )
         ]
 
@@ -3323,14 +3438,16 @@ conditions:
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_step-2",
+                resource_id="flow-123_step-2",
                 resource_name="Step 2",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/step_2.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
         ]
 
@@ -3442,30 +3559,34 @@ conditions:
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_advanced-step-1",
+                resource_id="flow-123_advanced-step-1",
                 resource_name="Advanced Step",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/advanced_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_default-step-1",
+                resource_id="flow-123_default-step-1",
                 resource_name="Default Step",
                 resource_type=FlowStep,
                 file_path="flows/test_flow/steps/default_step.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
             ResourceMapping(
-                resource_id="Test Flow_function-step-1",
+                resource_id="flow-123_function-step-1",
                 resource_name="function_step",
                 resource_type=FunctionStep,
                 file_path="flows/test_flow/function_steps/function_step.py",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="flow-123",
             ),
         ]
 
@@ -3724,19 +3845,20 @@ class FunctionStepTests(unittest.TestCase):
                 file_path="flows/test_flow/flow_config.yaml",
                 resource_prefix=None,
                 flow_name="Test Flow",
+                flow_id="test_flow",
             )
         ]
 
         with mock_read_from_file(test_file_pretty_content):
             result = FunctionStep.read_local_resource(
                 file_path="flows/test_flow/function_steps/process_data.py",
-                resource_id="Test Flow_process_data",
+                resource_id="test_flow_process_data",
                 resource_name="process_data",
                 resource_mappings=resource_mappings,
                 known_latency_control={},
             )
 
-            self.assertEqual(result.resource_id, "Test Flow_process_data")
+            self.assertEqual(result.resource_id, "test_flow_process_data")
             self.assertEqual(result.step_id, "process_data")
             self.assertEqual(result.name, "process_data")
             self.assertEqual(result.flow_id, "test_flow")
@@ -6291,7 +6413,7 @@ class SafetyFiltersTests(unittest.TestCase):
             "sexual": {"isActive": False, "precision": "LOOSE"},
             # selfHarm missing
         }
-        result = SyncClientHandler._parse_safety_filter_config(azure)
+        result = parse_safety_filter_config(azure)
         self.assertIn("self_harm", result)
         self.assertFalse(result["self_harm"].enabled)
         self.assertEqual(result["self_harm"].precision, "MEDIUM")
@@ -6304,7 +6426,7 @@ class SafetyFiltersTests(unittest.TestCase):
             "sexual": {"isActive": False, "precision": "LOOSE"},
             "selfHarm": {"isActive": True, "precision": "STRICT"},
         }
-        result = SyncClientHandler._parse_safety_filter_config(azure)
+        result = parse_safety_filter_config(azure)
         self.assertFalse(result["violence"].enabled)
         self.assertEqual(result["violence"].precision, "STRICT")
 
@@ -6422,7 +6544,7 @@ class SafetyFiltersTests(unittest.TestCase):
             with self.subTest(missing=missing):
                 azure = self._make_azure_categories()
                 del azure[missing]
-                result = SyncClientHandler._parse_safety_filter_config(azure)
+                result = parse_safety_filter_config(azure)
                 internal_key = cat_to_internal[missing]
                 self.assertIn(internal_key, result)
                 self.assertFalse(result[internal_key].enabled)
@@ -6430,7 +6552,7 @@ class SafetyFiltersTests(unittest.TestCase):
 
     def test_parse_safety_filter_config_empty_uses_defaults(self):
         """An empty Azure config populates all categories with defaults."""
-        result = SyncClientHandler._parse_safety_filter_config({})
+        result = parse_safety_filter_config({})
         for cat in ("violence", "hate", "sexual", "self_harm"):
             self.assertIn(cat, result)
             self.assertFalse(result[cat].enabled)
@@ -6604,7 +6726,7 @@ class SafetyFiltersTests(unittest.TestCase):
 
     def test_read_safety_filters_from_projection(self):
         """_read_safety_filters_from_projection parses a full projection correctly."""
-        result = SyncClientHandler._read_safety_filters_from_projection(
+        result = GeneralSafetyFilters.from_projection(
             {"contentFilterSettings": self._make_content_filter_projection()}
         )
         sf = result["safety_filters"]
@@ -6624,7 +6746,7 @@ class SafetyFiltersTests(unittest.TestCase):
         """
 
         def from_projection(disabled, is_active):
-            return SyncClientHandler._read_safety_filters_from_projection(
+            return GeneralSafetyFilters.from_projection(
                 {
                     "contentFilterSettings": {
                         "disabled": disabled,
@@ -6645,35 +6767,34 @@ class SafetyFiltersTests(unittest.TestCase):
 
     def test_read_safety_filters_from_projection_empty(self):
         """_read_safety_filters_from_projection returns {} when key absent."""
-        result = SyncClientHandler._read_safety_filters_from_projection({})
+        result = GeneralSafetyFilters.from_projection({})
         self.assertEqual(result, {})
 
     def test_read_voice_safety_filters_from_channel_settings_projection(self):
-        """_read_channel_settings_from_projection parses voice channel safety filters."""
+        """VoiceSafetyFilters.from_projection parses voice channel safety filters."""
         projection = {
             "channels": {
                 "voice": {"config": {"safetyFilters": self._make_content_filter_projection()}}
             }
         }
-        result = SyncClientHandler._read_channel_settings_from_projection(projection)
+        result = VoiceSafetyFilters.from_projection(projection)
 
-        self.assertIn(VoiceSafetyFilters, result)
-        self.assertIn("voice_safety_filters", result[VoiceSafetyFilters])
-        vsf = result[VoiceSafetyFilters]["voice_safety_filters"]
+        self.assertIn("voice_safety_filters", result)
+        vsf = result["voice_safety_filters"]
         self.assertIsInstance(vsf, VoiceSafetyFilters)
         self.assertTrue(vsf.enabled)  # disabled=False in projection → enabled=True
         self.assertTrue(vsf.categories["self_harm"].enabled)
         self.assertEqual(vsf.categories["self_harm"].precision, "STRICT")
 
     def test_read_voice_safety_filters_from_channel_settings_projection_empty(self):
-        """_read_channel_settings_from_projection returns {} when channels are absent."""
-        result = SyncClientHandler._read_channel_settings_from_projection({})
+        """VoiceSafetyFilters.from_projection returns {} when channels are absent."""
+        result = VoiceSafetyFilters.from_projection({})
         self.assertEqual(result, {})
 
     def test_projection_precision_is_converted_to_yaml_level(self):
         """Projection precision values  are converted to YAML level."""
         projection = {"contentFilterSettings": self._make_content_filter_projection()}
-        sf = SyncClientHandler._read_safety_filters_from_projection(projection)["safety_filters"]
+        sf = GeneralSafetyFilters.from_projection(projection)["safety_filters"]
         # Internal precision stays in backend format (UPPERCASE)
         self.assertEqual(sf.categories["violence"].precision, "STRICT")
         self.assertEqual(sf.categories["sexual"].precision, "LOOSE")
@@ -6749,7 +6870,7 @@ class SafetyFiltersTests(unittest.TestCase):
         self.assertEqual(proto.safety_filters.azure_config.violence.precision, "MEDIUM")
 
     def test_read_chat_safety_filters_from_channel_settings_projection(self):
-        """_read_channel_settings_from_projection parses chat channel safety filters."""
+        """ChatSafetyFilters.from_projection parses chat channel safety filters."""
         projection = {
             "channels": {
                 "webChat": {
@@ -6758,18 +6879,17 @@ class SafetyFiltersTests(unittest.TestCase):
                 }
             }
         }
-        result = SyncClientHandler._read_channel_settings_from_projection(projection)
+        result = ChatSafetyFilters.from_projection(projection)
 
-        self.assertIn(ChatSafetyFilters, result)
-        self.assertIn("chat_safety_filters", result[ChatSafetyFilters])
-        csf = result[ChatSafetyFilters]["chat_safety_filters"]
+        self.assertIn("chat_safety_filters", result)
+        csf = result["chat_safety_filters"]
         self.assertIsInstance(csf, ChatSafetyFilters)
         self.assertTrue(csf.enabled)
         self.assertTrue(csf.categories["self_harm"].enabled)
         self.assertEqual(csf.categories["self_harm"].precision, "STRICT")
 
     def test_read_chat_safety_filters_skipped_when_webchat_status_false(self):
-        """_read_channel_settings_from_projection skips chat filters when webChat status is False."""
+        """ChatSafetyFilters.from_projection skips chat filters when webChat status is False."""
         projection = {
             "channels": {
                 "webChat": {
@@ -6778,9 +6898,9 @@ class SafetyFiltersTests(unittest.TestCase):
                 }
             }
         }
-        result = SyncClientHandler._read_channel_settings_from_projection(projection)
+        result = ChatSafetyFilters.from_projection(projection)
 
-        self.assertNotIn(ChatSafetyFilters, result)
+        self.assertEqual(result, {})
 
     def test_chat_safety_filters_file_path(self):
         """ChatSafetyFilters.file_path returns the chat subdirectory path."""
@@ -6795,7 +6915,7 @@ class SafetyFiltersTests(unittest.TestCase):
             name="chat_safety_filters",
             enabled=not data.get("disabled", False),
             filter_type=data.get("type", "azure"),
-            categories=SyncClientHandler._parse_safety_filter_config(data["azureConfig"]),
+            categories=parse_safety_filter_config(data["azureConfig"]),
         )
 
         self.assertTrue(csf.enabled)
@@ -6823,7 +6943,7 @@ class SafetyFiltersTests(unittest.TestCase):
             name="chat_safety_filters",
             enabled=not data.get("disabled", False),
             filter_type=data.get("type", "azure"),
-            categories=SyncClientHandler._parse_safety_filter_config(data["azureConfig"]),
+            categories=parse_safety_filter_config(data["azureConfig"]),
         )
 
         self.assertFalse(csf.enabled)
@@ -8108,6 +8228,612 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
             variant=None,
         )
         resource_utils.check_yaml_field_types(test_case)
+
+
+class DocumentTests(unittest.TestCase):
+    """Tests for the Document resource."""
+
+    def test_file_path(self):
+        doc = Document(resource_id="test.md", name="test", path="test.md", contents="hello")
+        self.assertEqual(doc.file_path, os.path.join("context", "TEST.MD"))
+
+    def test_raw(self):
+        doc = Document(resource_id="test.md", name="test", path="test.md", contents="some content")
+        self.assertEqual(doc.raw, "some content")
+
+    def test_make_pretty_from_pretty_passthrough(self):
+        content = "# Title\nSome markdown content"
+        self.assertEqual(Document.make_pretty(content), content)
+        self.assertEqual(Document.from_pretty(content), content)
+
+    def test_read_local_resource(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context_dir = os.path.join(tmpdir, "context")
+            os.makedirs(context_dir)
+            file_path = os.path.join(context_dir, "doc.md")
+            with open(file_path, "w") as f:
+                f.write("file contents\n")
+
+            doc = Document.read_local_resource(
+                file_path=file_path,
+                resource_id="doc.md",
+                resource_name="doc",
+            )
+            self.assertEqual(doc.resource_id, "doc.md")
+            self.assertEqual(doc.name, "doc")
+            self.assertEqual(doc.path, "DOC.MD")
+            self.assertEqual(doc.contents, "file contents\n")
+
+    def test_save_and_read_round_trip(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            doc = Document(
+                resource_id="round_trip.md",
+                name="round_trip",
+                path="round_trip.md",
+                contents="round trip content\n",
+            )
+            doc.save(tmpdir)
+
+            file_path = os.path.join(tmpdir, "context", "ROUND_TRIP.MD")
+            self.assertTrue(os.path.exists(file_path))
+
+            restored = Document.read_local_resource(
+                file_path=file_path,
+                resource_id="ROUND_TRIP.MD",
+                resource_name="round_trip",
+            )
+            self.assertEqual(restored.contents, doc.contents)
+            self.assertEqual(restored.path, doc.path)
+
+    def test_discover_resources(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            context_dir = os.path.join(tmpdir, "context")
+            os.makedirs(context_dir)
+            with open(os.path.join(context_dir, "doc1.md"), "w") as f:
+                f.write("doc1")
+            with open(os.path.join(context_dir, "doc2.md"), "w") as f:
+                f.write("doc2")
+            with open(os.path.join(context_dir, "not_markdown.txt"), "w") as f:
+                f.write("skip me")
+
+            discovered = Document.discover_resources(tmpdir)
+            self.assertCountEqual(
+                discovered,
+                [
+                    os.path.join(context_dir, "DOC1.MD"),
+                    os.path.join(context_dir, "DOC2.MD"),
+                ],
+            )
+
+    def test_discover_resources_no_context_dir(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            discovered = Document.discover_resources(tmpdir)
+            self.assertEqual(discovered, [])
+
+    def test_path_normalized_to_uppercase(self):
+        """Documents with different-case paths produce the same normalized path."""
+        doc_lower = Document(resource_id="ctx.md", name="ctx", path="context.md", contents="hello")
+        doc_upper = Document(resource_id="ctx.md", name="ctx", path="CONTEXT.MD", contents="hello")
+        doc_mixed = Document(resource_id="ctx.md", name="ctx", path="Context.Md", contents="hello")
+        self.assertEqual(doc_lower.path, "CONTEXT.MD")
+        self.assertEqual(doc_upper.path, "CONTEXT.MD")
+        self.assertEqual(doc_mixed.path, "CONTEXT.MD")
+        self.assertEqual(doc_lower.file_path, doc_upper.file_path)
+        self.assertEqual(doc_lower.file_path, doc_mixed.file_path)
+
+
+class TopicFromProjection(unittest.TestCase):
+    """Tests for Topic.from_projection."""
+
+    def test_parses_topic_fields_and_example_queries(self):
+        """Verify topic name, content, and example queries are parsed correctly."""
+        projection = {
+            "knowledgeBase": {
+                "topics": {
+                    "entities": {
+                        "TOPIC-1": {
+                            "name": "Opening Hours",
+                            "actions": "Answer politely",
+                            "content": "We open at 9am",
+                            "exampleQueries": [
+                                {"query": "when do you open"},
+                                {"noquery": "x"},
+                            ],
+                            "isActive": True,
+                        }
+                    }
+                }
+            }
+        }
+        topics = Topic.from_projection(projection)
+        self.assertEqual(list(topics), ["TOPIC-1"])
+        topic = topics["TOPIC-1"]
+        self.assertIsInstance(topic, Topic)
+        self.assertEqual(topic.name, "Opening Hours")
+        self.assertEqual(topic.content, "We open at 9am")
+        self.assertEqual(topic.example_queries, ["when do you open"])
+
+    def test_empty_projection_yields_no_topics(self):
+        """An empty projection should return an empty dict."""
+        self.assertEqual(Topic.from_projection({}), {})
+
+
+class FunctionFromProjection(unittest.TestCase):
+    """Tests for Function.from_projection."""
+
+    def test_reads_special_flow_and_regular_functions(self):
+        """Verify special, transition, and global functions are all parsed."""
+        projection = {
+            "specialFunctions": {
+                "startFunction": {
+                    "id": "FN-START",
+                    "name": "start",
+                    "description": "greeting",
+                    "code": "pass",
+                },
+                "archivedFunction": {
+                    "id": "FN-OLD",
+                    "name": "old",
+                    "description": "",
+                    "code": "",
+                    "archived": True,
+                },
+            },
+            "flows": {
+                "flows": {
+                    "entities": {
+                        "FLOW-1": {
+                            "name": "Booking",
+                            "transitionFunctions": {
+                                "entities": {
+                                    "FN-T": {
+                                        "name": "transition",
+                                        "description": "moves on",
+                                        "code": "pass",
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            },
+            "functions": {
+                "functions": {
+                    "entities": {
+                        "FN-G": {
+                            "name": "lookup",
+                            "description": "global fn",
+                            "code": "pass",
+                            "parameters": {
+                                "entities": {
+                                    "p1": {
+                                        "id": "p1",
+                                        "name": "arg",
+                                        "type": "string",
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            },
+        }
+        functions = Function.from_projection(projection)
+        self.assertEqual(set(functions), {"FN-START", "FN-T", "FN-G"})
+        self.assertEqual(functions["FN-START"].function_type, FunctionType.START)
+        self.assertEqual(functions["FN-T"].function_type, FunctionType.TRANSITION)
+        self.assertEqual(functions["FN-T"].flow_id, "FLOW-1")
+        self.assertEqual(functions["FN-G"].function_type, FunctionType.GLOBAL)
+        self.assertEqual(functions["FN-G"].parameters[0].name, "arg")
+        self.assertIsInstance(functions["FN-G"], Function)
+
+
+class EntityFromProjection(unittest.TestCase):
+    """Tests for Entity.from_projection."""
+
+    def test_parses_entity_fields(self):
+        """Verify entity name, description, type, and config are parsed."""
+        projection = {
+            "entities": {
+                "entities": {
+                    "entities": {
+                        "ENT-1": {
+                            "name": "colour",
+                            "description": "a colour",
+                            "type": "enum",
+                            "config": {"value": {"values": ["red", "blue"]}},
+                        }
+                    }
+                }
+            }
+        }
+        entities = Entity.from_projection(projection)
+        self.assertEqual(list(entities), ["ENT-1"])
+        self.assertIsInstance(entities["ENT-1"], Entity)
+        self.assertEqual(entities["ENT-1"].name, "colour")
+
+    def test_empty_projection_yields_no_entities(self):
+        """An empty projection should return an empty dict."""
+        self.assertEqual(Entity.from_projection({}), {})
+
+
+class FlowConfigFromProjection(unittest.TestCase):
+    """Tests for FlowConfig.from_projection."""
+
+    def test_parses_flow_config_fields(self):
+        """Verify flow name, description, and start_step are parsed."""
+        projection = {
+            "flows": {
+                "flows": {
+                    "entities": {
+                        "FLOW-1": {
+                            "name": "Booking",
+                            "description": "Handles bookings",
+                            "startStepId": "STEP-A",
+                            "steps": {"entities": {}},
+                        }
+                    }
+                }
+            }
+        }
+        configs = FlowConfig.from_projection(projection)
+        self.assertEqual(list(configs), ["FLOW-1"])
+        self.assertIsInstance(configs["FLOW-1"], FlowConfig)
+        self.assertEqual(configs["FLOW-1"].name, "Booking")
+        self.assertEqual(configs["FLOW-1"].description, "Handles bookings")
+        self.assertEqual(configs["FLOW-1"].start_step, "STEP-A")
+
+    def test_empty_projection_yields_no_flow_configs(self):
+        """An empty projection should return an empty dict."""
+        self.assertEqual(FlowConfig.from_projection({}), {})
+
+
+class FlowStepFromProjection(unittest.TestCase):
+    """Tests for FlowStep.from_projection."""
+
+    def test_parses_non_function_step(self):
+        """Verify a default_step is parsed with the correct key format."""
+        projection = {
+            "flows": {
+                "flows": {
+                    "entities": {
+                        "FLOW-1": {
+                            "name": "Booking",
+                            "steps": {
+                                "entities": {
+                                    "STEP-A": {
+                                        "name": "greet",
+                                        "type": "default_step",
+                                        "prompt": "Hello!",
+                                        "conditions": [],
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        }
+        steps = FlowStep.from_projection(projection)
+        # Key format is {flow_id}_{step_id}
+        expected_key = "FLOW-1_STEP-A"
+        self.assertEqual(list(steps), [expected_key])
+        step = steps[expected_key]
+        self.assertIsInstance(step, FlowStep)
+        self.assertEqual(step.name, "greet")
+        self.assertEqual(step.flow_id, "FLOW-1")
+        self.assertEqual(step.flow_name, "Booking")
+        self.assertEqual(step.prompt, "Hello!")
+
+    def test_skips_function_steps(self):
+        """function_step type entries should be excluded from FlowStep parsing."""
+        projection = {
+            "flows": {
+                "flows": {
+                    "entities": {
+                        "FLOW-1": {
+                            "name": "Booking",
+                            "steps": {
+                                "entities": {
+                                    "STEP-F": {
+                                        "name": "fn_step",
+                                        "type": "function_step",
+                                        "function": {"code": "pass"},
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        }
+        steps = FlowStep.from_projection(projection)
+        self.assertEqual(steps, {})
+
+    def test_empty_projection_yields_no_flow_steps(self):
+        """An empty projection should return an empty dict."""
+        self.assertEqual(FlowStep.from_projection({}), {})
+
+
+class FunctionStepFromProjection(unittest.TestCase):
+    """Tests for FunctionStep.from_projection."""
+
+    def test_parses_function_step(self):
+        """Verify function_step entries are parsed correctly."""
+        projection = {
+            "flows": {
+                "flows": {
+                    "entities": {
+                        "FLOW-1": {
+                            "name": "Booking",
+                            "steps": {
+                                "entities": {
+                                    "STEP-F": {
+                                        "name": "check_availability",
+                                        "type": "function_step",
+                                        "function": {
+                                            "id": "FN-123",
+                                            "code": "return True",
+                                        },
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        }
+        func_steps = FunctionStep.from_projection(projection)
+        expected_key = "FLOW-1_STEP-F"
+        self.assertEqual(list(func_steps), [expected_key])
+        fs = func_steps[expected_key]
+        self.assertIsInstance(fs, FunctionStep)
+        self.assertEqual(fs.name, "check_availability")
+        self.assertEqual(fs.flow_id, "FLOW-1")
+        self.assertEqual(fs.flow_name, "Booking")
+        self.assertEqual(fs.code, "return True")
+        self.assertEqual(fs.function_id, "FN-123")
+
+    def test_skips_non_function_steps(self):
+        """Non-function_step entries should be excluded."""
+        projection = {
+            "flows": {
+                "flows": {
+                    "entities": {
+                        "FLOW-1": {
+                            "name": "Booking",
+                            "steps": {
+                                "entities": {
+                                    "STEP-A": {
+                                        "name": "greet",
+                                        "type": "default_step",
+                                        "prompt": "Hello!",
+                                        "conditions": [],
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        }
+        func_steps = FunctionStep.from_projection(projection)
+        self.assertEqual(func_steps, {})
+
+    def test_empty_projection_yields_no_function_steps(self):
+        """An empty projection should return an empty dict."""
+        self.assertEqual(FunctionStep.from_projection({}), {})
+
+
+class AgentSettingsFromProjection(unittest.TestCase):
+    """Tests for SettingsPersonality, SettingsRole, and SettingsRules from_projection."""
+
+    def test_personality_from_projection(self):
+        """Verify personality adjectives and custom text are parsed."""
+        projection = {
+            "agentSettings": {
+                "personality": {
+                    "adjectives": {"Friendly": True, "Professional": True},
+                    "custom": "Always be cheerful",
+                }
+            }
+        }
+        result = SettingsPersonality.from_projection(projection)
+        self.assertEqual(list(result), ["personality"])
+        personality = result["personality"]
+        self.assertIsInstance(personality, SettingsPersonality)
+        self.assertEqual(personality.adjectives, {"Friendly": True, "Professional": True})
+        self.assertEqual(personality.custom, "Always be cheerful")
+
+    def test_personality_empty_projection(self):
+        """An empty projection should return an empty dict."""
+        self.assertEqual(SettingsPersonality.from_projection({}), {})
+
+    def test_role_from_projection(self):
+        """Verify role value, additional_info, and custom are parsed."""
+        projection = {
+            "agentSettings": {
+                "role": {
+                    "value": "receptionist",
+                    "additionalInfo": "front desk",
+                    "custom": "",
+                }
+            }
+        }
+        result = SettingsRole.from_projection(projection)
+        self.assertEqual(list(result), ["role"])
+        role = result["role"]
+        self.assertIsInstance(role, SettingsRole)
+        self.assertEqual(role.value, "receptionist")
+        self.assertEqual(role.additional_info, "front desk")
+
+    def test_role_empty_projection(self):
+        """An empty projection should return an empty dict."""
+        self.assertEqual(SettingsRole.from_projection({}), {})
+
+    def test_rules_from_projection(self):
+        """Verify rules behaviour is parsed."""
+        projection = {
+            "agentSettings": {
+                "rules": {
+                    "behaviour": "Be polite and helpful",
+                }
+            }
+        }
+        result = SettingsRules.from_projection(projection)
+        self.assertEqual(list(result), ["rules"])
+        rules = result["rules"]
+        self.assertIsInstance(rules, SettingsRules)
+        self.assertEqual(rules.behaviour, "Be polite and helpful")
+
+    def test_rules_empty_projection(self):
+        """An empty projection should return an empty dict."""
+        self.assertEqual(SettingsRules.from_projection({}), {})
+
+
+class ChannelSettingsFromProjection(unittest.TestCase):
+    """Tests for VoiceGreeting, ChatGreeting, VoiceStylePrompt, ChatStylePrompt from_projection."""
+
+    def test_voice_greeting_from_projection(self):
+        """Verify voice greeting welcome_message and language_code are parsed."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "config": {
+                        "greeting": {
+                            "welcomeMessage": "Hello, how can I help?",
+                            "languageCode": "en-US",
+                        }
+                    }
+                }
+            }
+        }
+        result = VoiceGreeting.from_projection(projection)
+        self.assertEqual(list(result), ["voice_greeting"])
+        greeting = result["voice_greeting"]
+        self.assertIsInstance(greeting, VoiceGreeting)
+        self.assertEqual(greeting.welcome_message, "Hello, how can I help?")
+        self.assertEqual(greeting.language_code, "en-US")
+
+    def test_voice_greeting_empty_projection(self):
+        """An empty projection should return an empty dict."""
+        self.assertEqual(VoiceGreeting.from_projection({}), {})
+
+    def test_chat_greeting_from_projection(self):
+        """Verify chat greeting is parsed when webChat status is True."""
+        projection = {
+            "channels": {
+                "webChat": {
+                    "status": True,
+                    "config": {
+                        "greeting": {
+                            "welcomeMessage": "Welcome to chat!",
+                            "languageCode": "en-GB",
+                        }
+                    },
+                }
+            }
+        }
+        result = ChatGreeting.from_projection(projection)
+        self.assertEqual(list(result), ["chat_greeting"])
+        greeting = result["chat_greeting"]
+        self.assertIsInstance(greeting, ChatGreeting)
+        self.assertEqual(greeting.welcome_message, "Welcome to chat!")
+
+    def test_chat_greeting_skipped_when_status_false(self):
+        """Chat greeting should be empty when webChat status is False."""
+        projection = {
+            "channels": {
+                "webChat": {
+                    "status": False,
+                    "config": {
+                        "greeting": {
+                            "welcomeMessage": "Welcome!",
+                        }
+                    },
+                }
+            }
+        }
+        self.assertEqual(ChatGreeting.from_projection(projection), {})
+
+    def test_voice_style_prompt_from_projection(self):
+        """Verify voice style prompt is parsed."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "config": {
+                        "stylePrompt": {
+                            "prompt": "Speak slowly and clearly",
+                        }
+                    }
+                }
+            }
+        }
+        result = VoiceStylePrompt.from_projection(projection)
+        self.assertEqual(list(result), ["voice_style_prompt"])
+        self.assertIsInstance(result["voice_style_prompt"], VoiceStylePrompt)
+        self.assertEqual(result["voice_style_prompt"].prompt, "Speak slowly and clearly")
+
+    def test_voice_style_prompt_empty_projection(self):
+        """An empty projection should return an empty dict."""
+        self.assertEqual(VoiceStylePrompt.from_projection({}), {})
+
+    def test_voice_disclaimer_from_projection(self):
+        """Verify voice disclaimer message is parsed."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "disclaimer": {
+                        "message": "This call may be recorded",
+                        "isEnabled": True,
+                        "languageCode": "en-US",
+                    }
+                }
+            }
+        }
+        result = VoiceDisclaimerMessage.from_projection(projection)
+        self.assertEqual(list(result), ["voice_disclaimer"])
+        disclaimer = result["voice_disclaimer"]
+        self.assertIsInstance(disclaimer, VoiceDisclaimerMessage)
+        self.assertEqual(disclaimer.message, "This call may be recorded")
+        self.assertTrue(disclaimer.enabled)
+
+
+class AsrSettingsFromProjection(unittest.TestCase):
+    """Tests for AsrSettings.from_projection."""
+
+    def test_parses_asr_settings(self):
+        """Verify barge_in and interaction_style are parsed."""
+        projection = {
+            "channels": {
+                "voice": {
+                    "asrSettings": {
+                        "bargeIn": True,
+                        "latencyConfig": {
+                            "interactionStyle": "fast",
+                        },
+                    }
+                }
+            }
+        }
+        result = AsrSettings.from_projection(projection)
+        self.assertEqual(list(result), ["asr_settings"])
+        asr = result["asr_settings"]
+        self.assertIsInstance(asr, AsrSettings)
+        self.assertTrue(asr.barge_in)
+        self.assertEqual(asr.interaction_style, "fast")
+
+    def test_empty_projection_yields_no_asr_settings(self):
+        """An empty projection should return an empty dict."""
+        self.assertEqual(AsrSettings.from_projection({}), {})
 
 
 if __name__ == "__main__":

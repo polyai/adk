@@ -9,6 +9,7 @@ from io import StringIO
 from unittest.mock import MagicMock, patch
 
 from poly.cli import AgentStudioCLI
+from poly.cli_commands.audio_cache import AudioCacheCommand
 from poly.cli_commands.branch import BranchCommand
 from poly.cli_commands.chat import ChatCommand
 from poly.cli_commands.conversations import ConversationsCommand
@@ -744,6 +745,129 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
         self.assertEqual(len(table.rows), 1)
 
 
+class PollTestRunLiveTest(unittest.TestCase):
+    """Tests for poll_test_run_live error resilience (used by TestingCommand.testing_run)."""
+
+    @staticmethod
+    def _completed_run(test_id: str) -> dict:
+        """A fully-completed test run response for a single passing test."""
+        return {
+            "status": "completed",
+            "testHistory": [{"testCaseId": test_id, "status": "passed"}],
+            "passedCount": 1,
+            "failedCount": 0,
+            "errorCount": 0,
+            "testCaseCount": 1,
+        }
+
+    def setUp(self):
+        from collections import namedtuple
+
+        # Minimal stand-in for the TestCase objects poll_test_run_live expects:
+        # it only reads `.resource_id` and `.name`.
+        FakeTest = namedtuple("FakeTest", ["resource_id", "name"])
+        # All tests pass poll_interval=0 so the loop's time.sleep is a no-op
+        # and tests run instantly.
+        self.matched_tests = [FakeTest(resource_id="tc-1", name="My Test")]
+
+    def test_transient_errors_then_success_returns_completed_run(self):
+        """Recovers from a few consecutive transient errors and returns the run."""
+        import requests
+
+        from poly.output.console import poll_test_run_live
+
+        completed = self._completed_run("tc-1")
+        # First 2 polls fail transiently, the 3rd succeeds with a completed run.
+        get_test_run = MagicMock(
+            side_effect=[
+                requests.exceptions.HTTPError("500 Server Error"),
+                requests.exceptions.ConnectionError("connection reset"),
+                completed,
+            ]
+        )
+
+        result = poll_test_run_live(
+            get_test_run,
+            test_run_id="run-123",
+            matched_tests=self.matched_tests,
+            poll_interval=0,
+            max_consecutive_errors=5,
+        )
+
+        self.assertEqual(result, completed)
+        self.assertEqual(get_test_run.call_count, 3)
+
+    def test_error_counter_resets_after_successful_poll(self):
+        """A successful poll resets the counter so later errors are tolerated again."""
+        import requests
+
+        from poly.output.console import poll_test_run_live
+
+        completed = self._completed_run("tc-1")
+        # Pattern: fail, fail, succeed(pending), fail, fail, succeed(done).
+        # With max_consecutive_errors=3 this only completes if the counter
+        # resets after the pending success in the middle.
+        pending = {"status": "running", "testHistory": []}
+        get_test_run = MagicMock(
+            side_effect=[
+                requests.exceptions.HTTPError("boom"),
+                requests.exceptions.HTTPError("boom"),
+                pending,
+                requests.exceptions.HTTPError("boom"),
+                requests.exceptions.HTTPError("boom"),
+                completed,
+            ]
+        )
+
+        result = poll_test_run_live(
+            get_test_run,
+            test_run_id="run-123",
+            matched_tests=self.matched_tests,
+            poll_interval=0,
+            max_consecutive_errors=3,
+        )
+
+        self.assertEqual(result, completed)
+        self.assertEqual(get_test_run.call_count, 6)
+
+    def test_persistent_errors_give_up_and_return_empty_dict(self):
+        """After max_consecutive_errors failures it gives up without raising."""
+        import requests
+
+        from poly.output.console import poll_test_run_live
+
+        get_test_run = MagicMock(side_effect=requests.exceptions.ConnectionError("platform down"))
+
+        result = poll_test_run_live(
+            get_test_run,
+            test_run_id="run-123",
+            matched_tests=self.matched_tests,
+            poll_interval=0,
+            max_consecutive_errors=2,
+        )
+
+        # No successful poll ever happened, so the abandoned run returns {}.
+        self.assertEqual(result, {})
+        self.assertEqual(get_test_run.call_count, 2)
+
+    def test_happy_path_no_errors_returns_completed_run(self):
+        """A clean run with no errors returns the completed response on first poll."""
+        from poly.output.console import poll_test_run_live
+
+        completed = self._completed_run("tc-1")
+        get_test_run = MagicMock(return_value=completed)
+
+        result = poll_test_run_live(
+            get_test_run,
+            test_run_id="run-123",
+            matched_tests=self.matched_tests,
+            poll_interval=0,
+        )
+
+        self.assertEqual(result, completed)
+        self.assertEqual(get_test_run.call_count, 1)
+
+
 class ChatLoopTest(unittest.TestCase):
     """Tests for AgentStudioCLI._run_chat_loop.
 
@@ -889,6 +1013,31 @@ class ChatLoopTest(unittest.TestCase):
         self.assertIn("error", conversation["turns"][0])
 
 
+class ChatArgumentsTest(unittest.TestCase):
+    """Tests for chat-specific CLI argument parsing."""
+
+    @patch("poly.cli_commands.chat.ChatCommand.chat")
+    def test_sip_headers_are_parsed_and_forwarded(self, mock_chat):
+        AgentStudioCLI().main(
+            [
+                "chat",
+                "--sip-header",
+                "X-Customer-ID=12345",
+                "--sip-header",
+                "X-Token=part=two",
+            ]
+        )
+
+        self.assertEqual(
+            mock_chat.call_args.kwargs["sip_headers"],
+            {"X-Customer-ID": "12345", "X-Token": "part=two"},
+        )
+
+    def test_invalid_sip_header_is_rejected(self):
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI().main(["chat", "--sip-header", "X-Customer-ID"])
+
+
 class ChatCommandTest(unittest.TestCase):
     """Tests for ChatCommand.chat.
 
@@ -935,6 +1084,25 @@ class ChatCommandTest(unittest.TestCase):
         )
 
         self.proj.create_chat_session.assert_called_once()
+
+    def test_sip_headers_are_forwarded_when_creating_session(self):
+        sip_headers = {"X-Customer-ID": "12345"}
+
+        ChatCommand.chat(
+            TEST_DIR,
+            environment="sandbox",
+            sip_headers=sip_headers,
+            input_messages=[],
+        )
+
+        self.proj.create_chat_session.assert_called_once_with(
+            "sandbox",
+            "chat.polyai",
+            None,
+            None,
+            None,
+            sip_headers=sip_headers,
+        )
 
     @patch("poly.cli_commands.chat.json_print")
     def test_json_conv_id_emits_conversations_list(self, mock_json):
@@ -2282,7 +2450,9 @@ class CreateProjectTest(unittest.TestCase):
     @patch("poly.cli_commands.project.AgentStudioInterface")
     @patch("questionary.text")
     @patch("questionary.select")
-    def test_user_cancels_project_name_entry(self, mock_select, mock_text, mock_iface_cls, mock_init):
+    def test_user_cancels_project_name_entry(
+        self, mock_select, mock_text, mock_iface_cls, mock_init
+    ):
         """create project returns early when user enters empty project name."""
         mock_iface = mock_iface_cls.return_value
         mock_iface.get_accessible_regions.return_value = ["us-1", "euw-1"]
@@ -2761,3 +2931,201 @@ class ConversationsCommandTest(unittest.TestCase):
         )
         mock_success.assert_called_once()
         self.assertIn("2.0 MB", mock_success.call_args[0][0])
+
+
+class AudioCacheCommandTest(unittest.TestCase):
+    """Tests for the audio-cache CLI commands."""
+
+    SAMPLE_LIST = {
+        "entries": [
+            {
+                "id": "1",
+                "transcript": "Hello there",
+                "cached_at": "2026-05-26T10:00:00+00:00",
+                "hit_count": 3,
+                "duration": 1.2,
+                "regenerated": False,
+                "provider": "eleven_labs",
+                "provider_voice_id": "21m00Tcm4TlvDq8ikWAM",
+                "audio_filename": "1.wav",
+                "imported": False,
+                "language_code": "en-US",
+            }
+        ],
+        "total_count": 1,
+    }
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.audio_cache.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.region = "us-1"
+        self.proj.project_id = "test-project"
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.list_audio_cache")
+    @patch("poly.output.console.print_audio_cache_entries")
+    def test_list_calls_api_with_params(self, mock_print, mock_api):
+        """audio-cache list passes limit/offset/sort to the API."""
+        mock_api.return_value = self.SAMPLE_LIST
+
+        AudioCacheCommand.audio_cache_list(TEST_DIR, limit=20, offset=5, sort="hit_count:desc")
+
+        mock_api.assert_called_once_with(
+            region="us-1", project_id="test-project", limit=20, offset=5, sort="hit_count:desc"
+        )
+        mock_print.assert_called_once()
+
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.list_audio_cache")
+    @patch("poly.cli_commands.audio_cache.json_print")
+    def test_list_json_outputs_raw_response(self, mock_json, mock_api):
+        """audio-cache list --json outputs the full API response."""
+        mock_api.return_value = self.SAMPLE_LIST
+
+        AudioCacheCommand.audio_cache_list(TEST_DIR, output_json=True)
+
+        mock_json.assert_called_once_with(self.SAMPLE_LIST)
+
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.list_audio_cache")
+    @patch("poly.output.console.info")
+    def test_list_empty_shows_info(self, mock_info, mock_api):
+        """audio-cache list with no results shows info message."""
+        mock_api.return_value = {"entries": [], "total_count": 0}
+
+        AudioCacheCommand.audio_cache_list(TEST_DIR)
+
+        mock_info.assert_called_once()
+
+    @patch("builtins.open", create=True)
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.get_audio_cache_file")
+    @patch("poly.output.console.success")
+    def test_get_file_writes_file(self, mock_success, mock_api, mock_open):
+        """audio-cache get-file downloads and writes a WAV file."""
+        mock_open.return_value.__enter__ = MagicMock()
+        mock_open.return_value.__exit__ = MagicMock(return_value=False)
+        mock_api.return_value = b"\x00" * 2_000_000
+
+        AudioCacheCommand.audio_cache_get_file(TEST_DIR, "entry-1", output_path="/tmp/test.wav")
+
+        mock_api.assert_called_once_with(
+            region="us-1", project_id="test-project", entry_id="entry-1"
+        )
+        mock_success.assert_called_once()
+        self.assertIn("2.0 MB", mock_success.call_args[0][0])
+
+    @patch("builtins.open", create=True)
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.update_audio_cache_file")
+    @patch("poly.output.console.success")
+    def test_update_file_reads_and_sends_bytes(self, mock_success, mock_api, mock_open):
+        """audio-cache update-file reads the local file and sends its bytes."""
+        mock_open.return_value.__enter__.return_value.read.return_value = b"RIFF-data"
+        mock_open.return_value.__exit__ = MagicMock(return_value=False)
+
+        AudioCacheCommand.audio_cache_update_file(
+            TEST_DIR, "entry-1", "/tmp/replacement.wav", filename="clip.wav"
+        )
+
+        mock_api.assert_called_once_with(
+            region="us-1",
+            project_id="test-project",
+            entry_id="entry-1",
+            audio_bytes=b"RIFF-data",
+            filename="clip.wav",
+        )
+        mock_success.assert_called_once()
+
+    @patch("builtins.open", create=True)
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.update_audio_cache_details")
+    @patch("poly.output.console.success")
+    def test_update_details_parses_config_and_sends_settings(
+        self, mock_success, mock_api, mock_open
+    ):
+        """audio-cache update-details parses --config JSON into the settings payload."""
+        mock_open.return_value.__enter__.return_value.read.return_value = b"RIFF-data"
+        mock_open.return_value.__exit__ = MagicMock(return_value=False)
+
+        AudioCacheCommand.audio_cache_update_details(
+            TEST_DIR, "entry-1", "/tmp/replacement.wav", "hello", '{"stability": 0.5}'
+        )
+
+        mock_api.assert_called_once_with(
+            region="us-1",
+            project_id="test-project",
+            entry_id="entry-1",
+            audio_bytes=b"RIFF-data",
+            settings={"text": "hello", "config": {"stability": 0.5}},
+            filename="replacement.wav",
+        )
+        mock_success.assert_called_once()
+
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.update_audio_cache_details")
+    @patch("poly.cli_commands.audio_cache.json_print")
+    def test_update_details_invalid_config_json_exits(self, mock_json, mock_api):
+        """An invalid --config JSON string exits with an error instead of calling the API."""
+        with self.assertRaises(SystemExit):
+            AudioCacheCommand.audio_cache_update_details(
+                TEST_DIR, "entry-1", "/tmp/replacement.wav", "hello", "{not json", output_json=True
+            )
+
+        mock_api.assert_not_called()
+        mock_json.assert_called_once()
+        self.assertFalse(mock_json.call_args[0][0]["success"])
+
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.delete_audio_cache_entry")
+    @patch("poly.output.console.success")
+    def test_delete_calls_api(self, mock_success, mock_api):
+        """audio-cache delete calls the API with the entry ID."""
+        mock_api.return_value = {"success": True}
+
+        AudioCacheCommand.audio_cache_delete(TEST_DIR, "entry-1")
+
+        mock_api.assert_called_once_with(
+            region="us-1", project_id="test-project", entry_id="entry-1"
+        )
+        mock_success.assert_called_once()
+
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.bulk_delete_audio_cache")
+    @patch("poly.output.console.success")
+    def test_bulk_delete_splits_comma_separated_ids(self, mock_success, mock_api):
+        """audio-cache bulk-delete parses the --ids flag into a list."""
+        mock_api.return_value = {"deleted": ["1", "2"], "failed": []}
+
+        AudioCacheCommand.audio_cache_bulk_delete(TEST_DIR, "1, 2")
+
+        mock_api.assert_called_once_with(region="us-1", project_id="test-project", ids=["1", "2"])
+        mock_success.assert_called_once()
+
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.bulk_delete_audio_cache")
+    @patch("poly.output.console.error")
+    def test_bulk_delete_reports_failures(self, mock_error, mock_api):
+        """audio-cache bulk-delete reports IDs that failed to delete."""
+        mock_api.return_value = {"deleted": [], "failed": ["9"]}
+
+        AudioCacheCommand.audio_cache_bulk_delete(TEST_DIR, "9")
+
+        mock_error.assert_called_once()
+
+    @patch("builtins.open", create=True)
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.synthesize_audio_cache")
+    @patch("poly.output.console.success")
+    def test_synthesize_writes_preview_file(self, mock_success, mock_api, mock_open):
+        """audio-cache synthesize downloads and writes a preview WAV file."""
+        mock_open.return_value.__enter__ = MagicMock()
+        mock_open.return_value.__exit__ = MagicMock(return_value=False)
+        mock_api.return_value = b"\x00" * 1_000_000
+
+        AudioCacheCommand.audio_cache_synthesize(TEST_DIR, "entry-1", "hello", "{}")
+
+        mock_api.assert_called_once_with(
+            region="us-1",
+            project_id="test-project",
+            entry_id="entry-1",
+            text="hello",
+            config={},
+            language=None,
+        )
+        mock_success.assert_called_once()
+        self.assertIn("entry-1-preview.wav", mock_success.call_args[0][0])

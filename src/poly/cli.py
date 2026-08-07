@@ -12,6 +12,7 @@ from importlib.metadata import version as get_package_version
 
 import argcomplete
 
+from poly.cli_commands.audio_cache import AudioCacheCommand
 from poly.cli_commands.auth import LoginCommand, StartCommand
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.branch import BranchCommand
@@ -20,6 +21,7 @@ from poly.cli_commands.conversations import ConversationsCommand
 from poly.cli_commands.deployments import DeploymentsCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand, StudioCommand
 from poly.cli_commands.review import ReviewCommand
+from poly.cli_commands.rtc import RTCCommand
 from poly.cli_commands.sync import (
     DiffCommand,
     FormatCommand,
@@ -52,7 +54,9 @@ COMMANDS = [
     BranchCommand,
     DeploymentsCommand,
     ConversationsCommand,
+    AudioCacheCommand,
     TestingCommand,
+    RTCCommand,
     ChatCommand,
     DocsCommand,
     CompletionCommand,

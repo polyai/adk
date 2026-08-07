@@ -65,6 +65,8 @@ A typical project structure looks like this:
 │   ├── sms_templates.yaml              # Optional
 │   ├── translations.yaml               # Optional
 │   └── variant_attributes.yaml         # Optional
+├── context/                            # Optional - document context files
+│   └── {document_name}.md
 ├── voice/                              # Voice channel settings
 │   ├── configuration.yaml
 │   ├── safety_filters.yaml             # Optional

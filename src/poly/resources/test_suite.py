@@ -28,7 +28,7 @@ from poly.handlers.protobuf.testing_pb2 import (
     TestCaseAssertion as TestCaseAssertionProto,
 )
 from poly.resources.languages import AdditionalLanguage, DefaultLanguage
-from poly.resources.resource import ResourceMapping, SubResource, YamlResource
+from poly.resources.resource import ResourceMapping, SubResource, YamlResource, register_resource
 from poly.resources.variant_attributes import Variant
 
 INTERNAL_TO_CHANNEL = {
@@ -180,6 +180,7 @@ class TestCaseTags(SubResource):
         raise NotImplementedError("Test Case Tags cannot be deleted")
 
 
+@register_resource("test_cases")
 @dataclass
 class TestCase(YamlResource):
     """Dataclass representing an Agent Studio Test"""
@@ -193,6 +194,53 @@ class TestCase(YamlResource):
     assertions: TestCaseAssertion = None
     tags: TestCaseTags = None
     variant: Optional[str] = None
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "TestCase"]:
+        """Parse test cases from a projection dict."""
+        test_cases = {}
+        for test_case_id, test_case_data in (
+            projection.get("testing", {}).get("testCases", {}).get("entities", {}).items()
+        ):
+            prompt_assertions = []
+            function_assertions = []
+            for assertion in test_case_data.get("assertions", []):
+                assertion_payload = assertion.get("payload", {})
+                if assertion_payload.get("$case") == "prompt":
+                    prompt_assertions.append(assertion_payload.get("value").get("value"))
+                elif assertion_payload.get("$case") == "functionCall":
+                    assertion_value = assertion_payload.get("value", {})
+                    arguments = [
+                        FunctionCallArgumentAssertion(
+                            parameter_name=arg,
+                            expected_value=arg_values.get("expectedValue"),
+                            value_type=arg_values.get("valueType"),
+                        )
+                        for arg, arg_values in assertion_value.get("arguments").items()
+                    ]
+                    function_assertions.append(
+                        FunctionCallAssertion(name=assertion_value.get("name"), arguments=arguments)
+                    )
+            assertions = TestCaseAssertion(
+                resource_id=test_case_id,
+                name="assertions",
+                prompts=prompt_assertions,
+                function_calls=function_assertions,
+            )
+            tags = TestCaseTags(
+                resource_id=test_case_id, name="tags", tags=test_case_data.get("tags", [])
+            )
+            test_cases[test_case_id] = cls(
+                resource_id=test_case_id,
+                name=test_case_data.get("name", ""),
+                scenario=test_case_data.get("scenario", ""),
+                variant=test_case_data.get("variantId", ""),
+                language=test_case_data.get("language", ""),
+                channel=test_case_data.get("channel", ""),
+                assertions=assertions,
+                tags=tags,
+            )
+        return test_cases
 
     def __init__(
         self,
@@ -310,6 +358,9 @@ class TestCase(YamlResource):
         **kwargs,
     ) -> dict:
         """Replace resource names with IDs in a parsed YAML dict."""
+        yaml_dict = super().from_pretty_dict(
+            yaml_dict, resource_mappings=resource_mappings, **kwargs
+        )
         if variant_name := yaml_dict.get("variant"):
             variant_id = next(
                 (

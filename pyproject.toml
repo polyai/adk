@@ -28,10 +28,20 @@ exclude = [
 ]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py314"
 line-length = 100
 exclude = [
     "src/poly/handlers/protobuf/",
+]
+
+[tool.ruff.lint]
+# Ruff defaults (pycodestyle errors + pyflakes) plus import sorting
+select = [
+    "E4",
+    "E7",
+    "E9",
+    "F",
+    "I",
 ]
 
 [tool.ruff.format]
@@ -65,6 +75,7 @@ omit = [
 ]
 
 [tool.pytest.ini_options]
+testpaths = ["src/poly/tests"]
 norecursedirs = [
     "test_projects",
 ]
@@ -149,7 +160,7 @@ tag_format = "v{version}"
 
 [project]
 name = "polyai-adk"
-version = "0.32.0"
+version = "0.38.1"
 description = "Agent Development Kit (ADK) — a CLI for managing Agent Studio projects locally"
 readme = "README.md"
 requires-python = ">=3.14.0"

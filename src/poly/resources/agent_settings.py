@@ -19,6 +19,7 @@ from poly.resources.resource import (
     Resource,
     ResourceMapping,
     YamlResource,
+    register_resource,
 )
 
 ALLOWED_BEHAVIOUR_REFERENCES = [
@@ -40,6 +41,7 @@ ALLOWED_ADJECTIVES = {
 }
 
 
+@register_resource("personality")
 @dataclass
 class SettingsPersonality(YamlResource):
     """Resource class for managing personality settings"""
@@ -54,7 +56,12 @@ class SettingsPersonality(YamlResource):
 
     def to_yaml_dict(self) -> dict:
         """Convert the personality settings to a YAML-serializable dict."""
-        return {"adjectives": self.adjectives, "custom": self.custom}
+        return {
+            "adjectives": {
+                adj: enabled for adj, enabled in sorted(self.adjectives.items()) if enabled
+            },
+            "custom": self.custom,
+        }
 
     @classmethod
     def to_pretty_dict(
@@ -75,6 +82,22 @@ class SettingsPersonality(YamlResource):
             adjectives=yaml_dict.get("adjectives", {}),
             custom=yaml_dict.get("custom", ""),
         )
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "SettingsPersonality"]:
+        """Parse personality settings from a projection dict."""
+        agent_settings = projection.get("agentSettings", {})
+        personality = agent_settings.get("personality", None)
+        if not personality:
+            return {}
+        return {
+            "personality": cls(
+                resource_id="personality",
+                name="personality",
+                adjectives=personality.get("adjectives", {}),
+                custom=personality.get("custom", ""),
+            )
+        }
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         """Validate the personality resource."""
@@ -104,11 +127,7 @@ class SettingsPersonality(YamlResource):
 
         return Personality_UpdatePersonality(
             adjectives={
-                "values": {
-                    adj: enabled
-                    for adj, enabled in self.adjectives.items()
-                    if adj in ALLOWED_ADJECTIVES
-                },
+                "values": {adj: self.adjectives.get(adj, False) for adj in ALLOWED_ADJECTIVES},
             },
             custom=self.custom,
         )
@@ -144,6 +163,7 @@ class SettingsPersonality(YamlResource):
         return [file_path]
 
 
+@register_resource("role")
 @dataclass
 class SettingsRole(YamlResource):
     """Resource class for managing role settings"""
@@ -185,6 +205,23 @@ class SettingsRole(YamlResource):
             additional_info=yaml_dict.get("additional_info", ""),
             custom=yaml_dict.get("custom", ""),
         )
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "SettingsRole"]:
+        """Parse role settings from a projection dict."""
+        agent_settings = projection.get("agentSettings", {})
+        role = agent_settings.get("role", None)
+        if not role:
+            return {}
+        return {
+            "role": cls(
+                resource_id="role",
+                name="role",
+                value=role.get("value", ""),
+                additional_info=role.get("additionalInfo", ""),
+                custom=role.get("custom", ""),
+            )
+        }
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         """Validate the role resource."""
@@ -240,6 +277,7 @@ class SettingsRole(YamlResource):
         return [file_path]
 
 
+@register_resource("rules")
 @dataclass
 class SettingsRules(Resource):
     """Resource class for managing rules settings"""
@@ -278,6 +316,21 @@ class SettingsRules(Resource):
         valid, invalid_references = utils.validate_references(references, resource_mappings)
         if not valid:
             raise ValueError(f"Invalid references: {invalid_references}")
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "SettingsRules"]:
+        """Parse rules settings from a projection dict."""
+        agent_settings = projection.get("agentSettings", {})
+        rules = agent_settings.get("rules", None)
+        if not rules:
+            return {}
+        return {
+            "rules": cls(
+                resource_id="rules",
+                name="rules",
+                behaviour=rules.get("behaviour", ""),
+            )
+        }
 
     @classmethod
     def read_local_resource(
