@@ -1,6 +1,32 @@
 # CHANGELOG
 
 
+## v0.38.2 (2026-08-07)
+
+### Bug Fixes
+
+- Preserve non-ASCII characters when writing RTC JSON files
+  ([#261](https://github.com/polyai/adk/pull/261),
+  [`5b06dd5`](https://github.com/polyai/adk/commit/5b06dd577f64da76710a05e2c06f57721987c405))
+
+## Summary
+
+`poly rtc pull` writes local `schema.json`/`data.json` files via `json.dump(..., indent=2,
+  sort_keys=True)`, which defaults to `ensure_ascii=True`. Every non-ASCII character (e.g. `ô` in
+  "Côte") gets escaped to `ô` even though the file is opened with `encoding="utf-8"`. The same issue
+  affects `rtc edit`'s editor buffer and `rtc diff`'s console output.
+
+Adds `ensure_ascii=False` to the JSON serialization calls in the RTC pull/edit/diff paths so files
+  and terminal output contain the real UTF-8 characters. <img width="531" height="338" alt="image"
+  src="https://github.com/user-attachments/assets/cdaf8b42-5d8d-41e8-aa93-69cbbbd9d3e7" />
+
+## Test Strategy
+
+- [x] Unit test added: `JsonIoTests.test_write_json_file_preserves_unicode` in
+  `src/poly/tests/utils_test.py` - [x] Full test suite passes locally (`uv run pytest`, 995 passed)
+  - [x] `ruff check` / `ruff format --check` clean on changed files
+
+
 ## v0.38.1 (2026-08-06)
 
 ### Bug Fixes
