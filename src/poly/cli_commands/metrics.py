@@ -8,6 +8,7 @@ import os
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 
+import requests
 from ruamel.yaml import YAML, YAMLError
 
 from poly.cli_commands.base import BaseCommand, Parents
@@ -336,15 +337,26 @@ class MetricsCommand(BaseCommand):
         if expected_values:
             data["expected_values"] = expected_values
 
-        result = AgentStudioInterface.create_custom_metric(
-            project.region, project.account_id, project.project_id, data
-        )
-
-        # The server ignores the api flag on create, so follow up with an edit
-        if api:
-            result = AgentStudioInterface.update_custom_metric(
-                project.region, project.account_id, project.project_id, name, {"api": True}
+        try:
+            result = AgentStudioInterface.create_custom_metric(
+                project.region, project.account_id, project.project_id, data
             )
+
+            # The server ignores the api flag on create, so follow up with an edit
+            if api:
+                result = AgentStudioInterface.update_custom_metric(
+                    project.region, project.account_id, project.project_id, name, {"api": True}
+                )
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 409:
+                msg = f"Metric '{name}' already exists."
+            else:
+                msg = f"Failed to create metric: {e.response.text if e.response else e}"
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
 
         if output_json:
             json_print({"success": True, "metric": result})
@@ -382,9 +394,20 @@ class MetricsCommand(BaseCommand):
             json_print({"success": False, "error": msg})
             sys.exit(1)
 
-        result = AgentStudioInterface.update_custom_metric(
-            project.region, project.account_id, project.project_id, name, data
-        )
+        try:
+            result = AgentStudioInterface.update_custom_metric(
+                project.region, project.account_id, project.project_id, name, data
+            )
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                msg = f"Metric '{name}' not found."
+            else:
+                msg = f"Failed to update metric: {e.response.text if e.response else e}"
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
 
         if output_json:
             json_print({"success": True, "metric": result})
