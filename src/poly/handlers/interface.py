@@ -1097,3 +1097,142 @@ class AgentStudioInterface:
             dict: The created test run response.
         """
         return PlatformAPIHandler.trigger_test_run(region, project_id, test_case_ids, branch_id)
+
+    @staticmethod
+    def get_custom_metrics(
+        region: str,
+        account_id: str,
+        project_id: str,
+    ) -> list[dict]:
+        """List all custom metrics for a project.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+
+        Returns:
+            list[dict]: List of custom metric records.
+        """
+        return PlatformAPIHandler.get_custom_metrics(region, account_id, project_id)
+
+    @staticmethod
+    def create_custom_metric(
+        region: str,
+        account_id: str,
+        project_id: str,
+        data: dict,
+    ) -> dict:
+        """Create a new custom metric.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            data: Metric payload — name, type, description, expected_values, api.
+
+        Returns:
+            dict: The created metric record.
+        """
+        return PlatformAPIHandler.create_custom_metric(region, account_id, project_id, data)
+
+    @staticmethod
+    def update_custom_metric(
+        region: str,
+        account_id: str,
+        project_id: str,
+        metric_name: str,
+        data: dict,
+    ) -> dict:
+        """Update an existing custom metric.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            metric_name: Name of the metric to update.
+            data: Fields to update — description, expected_values, active, api.
+
+        Returns:
+            dict: The updated metric record.
+        """
+        return PlatformAPIHandler.update_custom_metric(
+            region, account_id, project_id, metric_name, data
+        )
+
+    @staticmethod
+    def export_custom_metrics(
+        region: str,
+        account_id: str,
+        project_id: str,
+    ) -> dict:
+        """Export all custom metrics as a YAML-parsed dict.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+
+        Returns:
+            dict: Mapping of metric name to metric definition.
+        """
+        return PlatformAPIHandler.export_custom_metrics(region, account_id, project_id)
+
+    @staticmethod
+    def preview_metrics_import(
+        region: str,
+        account_id: str,
+        project_id: str,
+        local_metric_names: set[str],
+    ) -> dict[str, list[str]]:
+        """Fetch remote metrics and compute what an import would do.
+
+        Compares the local metric names against the remote set to determine
+        which metrics would be created, skipped, or exist only on the remote.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            local_metric_names: Set of metric names from the local YAML file.
+
+        Returns:
+            dict with keys ``would_create``, ``would_skip``, and ``remote_only``,
+            each a sorted list of metric names.
+        """
+        remote_metrics = PlatformAPIHandler.get_custom_metrics(region, account_id, project_id)
+        remote_names = {m["name"] for m in remote_metrics if "name" in m}
+
+        would_create = local_metric_names - remote_names
+        would_skip = local_metric_names & remote_names
+        remote_only = remote_names - local_metric_names
+
+        return {
+            "would_create": sorted(would_create),
+            "would_skip": sorted(would_skip),
+            "remote_only": sorted(remote_only),
+        }
+
+    @staticmethod
+    def import_custom_metrics(
+        region: str,
+        account_id: str,
+        project_id: str,
+        yaml_content: str,
+        dry_run: bool = False,
+    ) -> dict:
+        """Bulk-import custom metrics from YAML content.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            yaml_content: Raw YAML string with metric definitions.
+            dry_run: If True, preview changes without applying.
+
+        Returns:
+            dict: Import result with metadata.created and metadata.ignored.
+        """
+        return PlatformAPIHandler.import_custom_metrics(
+            region, account_id, project_id, yaml_content, dry_run
+        )
