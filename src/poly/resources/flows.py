@@ -1277,7 +1277,7 @@ class FlowSettings(SubResource):
             output["asr"] = self.asr.to_yaml_dict()
         if self.vad:
             output["vad"] = self.vad.to_yaml_dict()
-        if self.barge_in and self.barge_in.is_enabled:
+        if self.barge_in:
             output["barge_in"] = self.barge_in.to_yaml_dict()
         if self.llm:
             output["llm"] = self.llm.to_yaml_dict()
@@ -1288,13 +1288,17 @@ class FlowSettings(SubResource):
         """Parse flow step settings from a projection step dict."""
         settings_data = utils.convert_keys_to_snake_case(step.get("settings", {}))
 
-        # Legacy fallback: older projections carried these at the top level of the step.
-        legacy_asr_biasing = step.get("asrBiasing", {})
-        legacy_dtmf = step.get("dtmfConfig", {})
-        if legacy_asr_biasing and "asr_biasing" not in settings_data:
-            settings_data["asr_biasing"] = legacy_asr_biasing
-        if legacy_dtmf and "dtmf" not in settings_data:
-            settings_data["dtmf"] = legacy_dtmf
+        # The step also carries legacy top-level asrBiasing/dtmfConfig. The backend mirrors
+        # those on every settings update but never clears them, so they are only safe to read
+        # for a step that predates the settings block entirely — consulting them per-section
+        # would resurrect a section the user has cleared.
+        if not settings_data:
+            legacy_asr_biasing = step.get("asrBiasing", {})
+            legacy_dtmf = step.get("dtmfConfig", {})
+            if legacy_asr_biasing:
+                settings_data["asr_biasing"] = legacy_asr_biasing
+            if legacy_dtmf:
+                settings_data["dtmf"] = legacy_dtmf
 
         asr_biasing_data = utils.convert_keys_to_snake_case(settings_data.get("asr_biasing") or {})
         dtmf_data = utils.convert_keys_to_snake_case(settings_data.get("dtmf") or {})

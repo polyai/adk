@@ -412,7 +412,12 @@ def fix_conditions_for_deleted_steps(
                 updated_resources.get(Condition, {}).pop(condition_id, None)
 
 
-CLEARABLE_SETTINGS = {"asr", "barge_in", "llm", "vad"}
+CLEARABLE_SETTINGS = {
+    "asr": "asr",
+    "barge_in": "bargeIn",
+    "llm": "llm",
+    "vad": "vad",
+}
 
 
 def clear_unused_settings_from_flow_step(
@@ -433,17 +438,21 @@ def clear_unused_settings_from_flow_step(
         if not original_step.settings and not updated_step.settings:
             continue  # No settings to compare
 
-        cleared_settings = set()
+        cleared_settings = []
         if original_step.settings and updated_step.settings:
             original_keys = set(original_step.settings.to_yaml_dict().keys())
             updated_keys = set(updated_step.settings.to_yaml_dict().keys())
-            cleared_settings = (original_keys - updated_keys) & CLEARABLE_SETTINGS
+            cleared_settings = sorted(
+                CLEARABLE_SETTINGS[key]
+                for key in (original_keys - updated_keys)
+                if key in CLEARABLE_SETTINGS
+            )
 
         if cleared_settings:
             queue_command(
                 create_command_clear_flow_settings(
                     flow_id=updated_step.flow_id,
                     step_id=updated_step.step_id,
-                    cleared_fields=list(cleared_settings),
+                    cleared_fields=cleared_settings,
                 )
             )
