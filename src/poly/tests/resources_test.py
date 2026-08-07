@@ -8341,7 +8341,7 @@ class DocumentFromProjection(unittest.TestCase):
                     "entities": {
                         "DOC-1": {
                             "path": "faq.md",
-                            "contents": "Frequently asked questions",
+                            "content": "Frequently asked questions",
                         }
                     }
                 }
@@ -8354,20 +8354,31 @@ class DocumentFromProjection(unittest.TestCase):
         self.assertEqual(document.name, "faq")
         self.assertEqual(document.contents, "Frequently asked questions")
 
-    def test_skips_document_without_contents(self):
-        """A document missing 'contents' means the user lacks read permission, so it's skipped."""
+    def test_skips_document_without_content(self):
+        """A document missing 'content' means the user lacks read permission, so it's skipped."""
         projection = {
             "documents": {
                 "documents": {
                     "entities": {
                         "DOC-1": {"path": "unreadable.md"},
-                        "DOC-2": {"path": "readable.md", "contents": "visible"},
+                        "DOC-2": {"path": "readable.md", "content": "visible"},
                     }
                 }
             }
         }
         documents = Document.from_projection(projection)
         self.assertEqual(list(documents), ["DOC-2"])
+
+    def test_keeps_document_with_empty_content(self):
+        """An empty 'content' is a readable but empty document, not a permission failure."""
+        projection = {
+            "documents": {
+                "documents": {"entities": {"DOC-1": {"path": "empty.md", "content": ""}}}
+            }
+        }
+        documents = Document.from_projection(projection)
+        self.assertEqual(list(documents), ["DOC-1"])
+        self.assertEqual(documents["DOC-1"].contents, "")
 
     def test_empty_projection_yields_no_documents(self):
         """An empty projection should return an empty dict."""
