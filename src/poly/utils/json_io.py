@@ -11,7 +11,7 @@ from typing import Optional
 def write_json_file(path: str, data: object) -> None:
     """Write data as pretty-printed JSON with trailing newline."""
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, sort_keys=True)
+        json.dump(data, f, indent=2, sort_keys=True, ensure_ascii=False)
         f.write("\n")
 
 
