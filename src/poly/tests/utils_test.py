@@ -4,7 +4,9 @@ Copyright PolyAI Limited
 """
 
 import copy
+import tempfile
 import unittest
+from pathlib import Path
 
 import poly.resources.resource_utils as resource_utils
 from poly import utils
@@ -1082,6 +1084,23 @@ class FlowUtilsTests(unittest.TestCase):
         self.assertIsNone(flow_name_none)
 
     # TODO: Test assigning positions to flow steps
+
+
+class JsonIoTests(unittest.TestCase):
+    """Tests for JSON file read/write helpers."""
+
+    def test_write_json_file_preserves_unicode(self):
+        data = {"site_name": "Côte Barbican"}
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            path = Path(tmp_dir) / "data.json"
+            utils.write_json_file(str(path), data)
+
+            raw = path.read_text(encoding="utf-8")
+            self.assertIn("Côte Barbican", raw)
+            self.assertNotIn("\\u00f4", raw)
+
+            self.assertEqual(utils.read_json_file(str(path)), data)
 
 
 if __name__ == "__main__":
