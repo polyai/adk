@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import io
 import json
 import logging
 import typing as ty
@@ -30,6 +31,16 @@ CHAT_END_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/chat/{conver
 AB_TESTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests"
 AB_TEST_ACTIVE_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/active"
 AB_TEST_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/{ab_test_id}"
+CUSTOM_METRICS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics"
+CUSTOM_METRIC_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics/{metric_name}"
+)
+CUSTOM_METRICS_EXPORT_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics/export"
+)
+CUSTOM_METRICS_IMPORT_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics/import"
+)
 # These use public APIs not /adk endpoints
 PROMOTE_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/promote"
 ROLLBACK_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/rollback"
@@ -1065,3 +1076,108 @@ class PlatformAPIHandler:
             "branchId": branch_id,
         }
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
+
+    @staticmethod
+    def export_custom_metrics(region: str, account_id: str, project_id: str) -> dict:
+        """Export all custom metrics for a project as a YAML-parsed dict.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+
+        Returns:
+            dict: Mapping of metric name to metric definition.
+        """
+        endpoint = CUSTOM_METRICS_EXPORT_URL.format(account_id=account_id, project_id=project_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "GET", response_format="yaml")
+
+    @staticmethod
+    def get_custom_metrics(region: str, account_id: str, project_id: str) -> list[dict]:
+        """List all custom metrics for a project.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+
+        Returns:
+            list[dict]: List of custom metric records.
+        """
+        endpoint = CUSTOM_METRICS_URL.format(account_id=account_id, project_id=project_id)
+        result = PlatformAPIHandler.make_request(region, endpoint, "GET")
+        if isinstance(result, list):
+            return result
+        return result.get("metrics", result.get("data", []))
+
+    @staticmethod
+    def create_custom_metric(region: str, account_id: str, project_id: str, data: dict) -> dict:
+        """Create a new custom metric.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            data: Metric payload — name, type, description, expected_values, api.
+
+        Returns:
+            dict: The created metric record.
+        """
+        endpoint = CUSTOM_METRICS_URL.format(account_id=account_id, project_id=project_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
+
+    @staticmethod
+    def update_custom_metric(
+        region: str,
+        account_id: str,
+        project_id: str,
+        metric_name: str,
+        data: dict,
+    ) -> dict:
+        """Update an existing custom metric.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            metric_name: Name of the metric to update.
+            data: Fields to update — description, expected_values, active, api.
+
+        Returns:
+            dict: The updated metric record.
+        """
+        endpoint = CUSTOM_METRIC_URL.format(
+            account_id=account_id, project_id=project_id, metric_name=metric_name
+        )
+        return PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=data)
+
+    @staticmethod
+    def import_custom_metrics(
+        region: str,
+        account_id: str,
+        project_id: str,
+        yaml_content: str,
+        dry_run: bool = False,
+    ) -> dict:
+        """Bulk-import custom metrics from YAML content.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            yaml_content: Raw YAML string with metric definitions.
+            dry_run: If True, preview changes without applying.
+
+        Returns:
+            dict: Import result with metadata.created and metadata.ignored.
+        """
+        endpoint = CUSTOM_METRICS_IMPORT_URL.format(account_id=account_id, project_id=project_id)
+        params = {"type": "yaml", "dry_run": str(dry_run).lower()}
+        files = {
+            "yaml": (
+                "metrics.yaml",
+                io.BytesIO(yaml_content.encode("utf-8")),
+                "application/x-yaml",
+            )
+        }
+        return PlatformAPIHandler.make_request(region, endpoint, "POST", params=params, files=files)
