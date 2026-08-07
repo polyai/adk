@@ -10,6 +10,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
+from ruamel.yaml import YAML
 
 from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
 from poly.utils import any_credentials_exist, retrieve_api_key
@@ -91,19 +92,28 @@ class PlatformAPIHandler:
         data: ty.Optional[dict] = None,
         params: ty.Optional[dict] = None,
         headers: ty.Optional[dict] = None,
+        files: ty.Optional[dict] = None,
+        response_format: str = "json",
         use_jupiter_api: bool = False,
     ) -> dict:
         """Make a request to the Platform API.
 
         Args:
-            region (str): The region name
-            endpoint (str): The API endpoint
-            method (str): The HTTP method
-            data (dict | None): The request body for POST/PUT requests
-            params (dict | None): Query string parameters
+            region (str): The region name.
+            endpoint (str): The API endpoint.
+            method (str): The HTTP method.
+            data (dict | None): The request body for POST/PUT requests.
+            params (dict | None): Query string parameters.
+            headers (dict | None): Override headers. Built automatically when None.
+            files (dict | None): Multipart file upload fields. When set, ``data``
+                is ignored and ``Content-Type`` is omitted so ``requests`` can set
+                the multipart boundary automatically.
+            response_format (str): How to parse the response. "json" (default)
+                or "yaml".
+            use_jupiter_api (bool): Whether to use the Jupiter API.
 
         Returns:
-            dict: The response JSON
+            dict: The parsed response.
         """
         url = PlatformAPIHandler.get_base_url(region, use_jupiter_api) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
@@ -112,9 +122,10 @@ class PlatformAPIHandler:
             headers = {
                 "X-API-KEY": retrieve_api_key(region),
                 "X-PolyAI-Correlation-Id": correlation_id,
-                "Content-Type": "application/json",
                 "X-Poly-Source": "adk",
             }
+            if not files:
+                headers["Content-Type"] = "application/json"
 
         logger.info(f"Making {method} request to {url}")
 
@@ -125,7 +136,8 @@ class PlatformAPIHandler:
             headers=headers,
             params=params,
             allow_redirects=False,
-            data=json.dumps(data) if data else None,
+            files=files,
+            data=json.dumps(data) if data and not files else None,
         )
 
         logger.debug(
@@ -137,7 +149,8 @@ class PlatformAPIHandler:
             api_response.raise_for_status()
         except requests.HTTPError:
             logger.debug(
-                f"Error in request status_code={api_response.status_code!r} response={api_response.text!r}"
+                f"Error in request status_code={api_response.status_code!r}"
+                f" response={api_response.text!r}"
             )
             raise
 
@@ -145,13 +158,21 @@ class PlatformAPIHandler:
             logger.info(f"Request to {url} successful (no content)")
             return {}
 
+        if response_format == "yaml":
+            content = api_response.text.strip()
+            if not content:
+                return {}
+            ry = YAML()
+            result = ry.load(content)
+            return dict(result) if result else {}
+
         try:
-            api_response = api_response.json()
+            parsed = api_response.json()
         except json.JSONDecodeError as e:
             raise ValueError(f"Failed to parse JSON response: {e}")
 
         logger.info(f"Request to {url} successful")
-        return api_response
+        return parsed
 
     @staticmethod
     def get_accessible_regions(regions: list[str]) -> list[str]:
