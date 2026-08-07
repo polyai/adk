@@ -136,6 +136,46 @@ def print_agents(agents: list[dict[str, Any]]) -> None:
     console.print(table)
 
 
+def print_metrics(metrics: list[dict[str, Any]]) -> None:
+    """Print a table of custom metrics.
+
+    Args:
+        metrics: List of metric dicts from the API.
+    """
+    if not metrics:
+        plain("No metrics found.")
+        return
+
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Name", style="bold yellow", no_wrap=True)
+    table.add_column("Type", no_wrap=True)
+    table.add_column("Active", no_wrap=True)
+    table.add_column("API", no_wrap=True)
+    table.add_column("Description", max_width=50)
+
+    active_count = 0
+    inactive_count = 0
+    for m in metrics:
+        is_active = m.get("active", True)
+        if is_active:
+            active_count += 1
+        else:
+            inactive_count += 1
+
+        desc = m.get("description", "") or ""
+
+        table.add_row(
+            m.get("name", "—"),
+            m.get("type", "—"),
+            "✓" if is_active else "✗",
+            "✓" if m.get("api", False) else "✗",
+            desc,
+        )
+
+    console.print(table)
+    console.print(f"\n{len(metrics)} metrics ({active_count} active, {inactive_count} inactive)")
+
+
 def print_branches(branches: dict[str, str] | list[str], current_branch: str | None) -> None:
     """Print branch list with current branch highlighted."""
     console.print("[label]Branches:[/label]")
