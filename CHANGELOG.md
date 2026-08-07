@@ -1,6 +1,43 @@
 # CHANGELOG
 
 
+## v0.38.4 (2026-08-07)
+
+### Bug Fixes
+
+- Read document projection field as content not contents
+  ([#264](https://github.com/polyai/adk/pull/264),
+  [`0ed2a3e`](https://github.com/polyai/adk/commit/0ed2a3e4f352ac95986ae1afb997c71d4769fe89))
+
+## Summary
+
+Follow-up to #262. The permission check there gates on a `contents` key, but the document projection
+  carries the proto field name `content` (see `Document` in `documents_pb2.pyi`). Every entity
+  therefore fails the check and `Document.from_projection` returns an empty dict, so no documents
+  are pulled at all.
+
+## Changes
+
+- `from_projection` checks for and reads `content` instead of `contents` - Updated the projection
+  fixtures in the tests, which had the same typo and so passed against the broken code - Added a
+  case covering an empty-but-present `content` (readable, empty document — kept, not skipped)
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  conventional commits
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude <noreply@anthropic.com>
+
+
 ## v0.38.3 (2026-08-07)
 
 ### Bug Fixes
