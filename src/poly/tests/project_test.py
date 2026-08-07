@@ -3700,8 +3700,8 @@ class FetchProjectTest(unittest.TestCase):
         """fetch_project(branch_name=...) switches to that branch before pulling."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         self.mock_api_handler.get_branches.return_value = {
-            "main": "branch-1",
-            "dev": "branch-2",
+            "main": {"branchId": "branch-1"},
+            "dev": {"branchId": "branch-2"},
         }
         self.mock_api_handler.pull_resources.return_value = (
             deepcopy(project.resources),
@@ -3718,7 +3718,7 @@ class FetchProjectTest(unittest.TestCase):
     def test_fetch_with_nonexistent_branch_raises_value_error(self):
         """fetch_project raises ValueError when the branch does not exist."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
-        self.mock_api_handler.get_branches.return_value = {"main": "branch-1"}
+        self.mock_api_handler.get_branches.return_value = {"main": {"branchId": "branch-1"}}
 
         with self.assertRaises(ValueError, msg="Branch 'no-such-branch' does not exist."):
             project.fetch_project(branch_name="no-such-branch")
@@ -3787,7 +3787,7 @@ class FetchProjectTest(unittest.TestCase):
     def test_fetch_with_branch_sets_branch_id_before_api_override(self):
         """When both branch_name and no projection_json, branch_id ends up as api value."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
-        self.mock_api_handler.get_branches.return_value = {"staging": "staging-id"}
+        self.mock_api_handler.get_branches.return_value = {"staging": {"branchId": "staging-id"}}
         self.mock_api_handler.pull_resources.return_value = (
             deepcopy(project.resources),
             {},

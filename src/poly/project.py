@@ -473,7 +473,7 @@ class AgentStudioProject:
             branches = self.api_handler.get_branches()
             if branch_name not in branches:
                 raise ValueError(f"Branch '{branch_name}' does not exist.")
-            branch_id = branches[branch_name]
+            branch_id = branches[branch_name]["branchId"]
             self.branch_id = branch_id
             self.api_handler.switch_branch(branch_id)
 
