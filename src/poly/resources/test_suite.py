@@ -358,6 +358,9 @@ class TestCase(YamlResource):
         **kwargs,
     ) -> dict:
         """Replace resource names with IDs in a parsed YAML dict."""
+        yaml_dict = super().from_pretty_dict(
+            yaml_dict, resource_mappings=resource_mappings, **kwargs
+        )
         if variant_name := yaml_dict.get("variant"):
             variant_id = next(
                 (

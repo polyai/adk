@@ -1,6 +1,426 @@
 # CHANGELOG
 
 
+## v0.38.1 (2026-08-06)
+
+### Bug Fixes
+
+- Handle null schema/variables in RTC merge and diff paths
+  ([#257](https://github.com/polyai/adk/pull/257),
+  [`fa76ae6`](https://github.com/polyai/adk/commit/fa76ae66c1cf2f384ad594d8c4f63fc064008e9f))
+
+## Summary
+
+Fix crash when `poly rtc push` triggers a merge against a remote config with null schema or
+  variables.
+
+## Motivation
+
+When a project has no RTC configured, the API returns `{"schema": null, "variables": null}`. The
+  merge and diff code paths used `.get("schema", {})`, which returns `None` when the key exists with
+  a null value (the default `{}` is only used when the key is absent). This caused `merge_rtc_dicts`
+  to crash with `'NoneType' object is not iterable`.
+
+## Changes
+
+- Use `.get("schema") or {}` instead of `.get("schema", {})` in the RTC merge path (`rtc.py`) -
+  Apply the same fix in the RTC diff path (`project.py`) - Matches the pattern already used in
+  `rtc_pull_env` after the earlier null fix
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+<img width="462" height="68" alt="image"
+  src="https://github.com/user-attachments/assets/f0d15c48-6018-416e-a9a9-5f093f182303" />
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
+
+
+## v0.38.0 (2026-08-06)
+
+### Features
+
+- Add SIP header overrides to chat ([#256](https://github.com/polyai/adk/pull/256),
+  [`bb97864`](https://github.com/polyai/adk/commit/bb978643986582e5426175bb4a4f589d4a96a395))
+
+## Summary
+
+Adds a repeatable `poly chat --sip-header NAME=VALUE` option that simulates SIP headers on chat
+  conversations, so agent behaviour that reads `conv.sip_headers` can be exercised without arranging
+  a real SIP call.
+
+## Motivation
+
+Testing header-dependent agent logic today requires a real SIP call. This gives developers a quick
+  local way to inject agent-visible header values from the chat CLI. Note the option is additive and
+  simulates agent-visible values only; it does not reproduce SIP transport or carrier behaviour, and
+  header injection depends on server-side chat API support rolling out separately.
+
+## Changes
+
+- Add a repeatable `--sip-header NAME=VALUE` option to the modular chat command - Validate header
+  syntax while preserving values that contain `=` - Forward simulated headers through standard and
+  draft conversation creation - Document the option
+
+## Test strategy
+
+- [x] Added/updated unit tests (CLI parsing, session forwarding, API payloads) - [ ] Manual CLI
+  testing (`poly <command>`) - [ ] Tested against a live Agent Studio project - [ ] N/A (docs,
+  config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`pytest -q` result: 994 passed, 30 subtests passed
+
+
+## v0.37.3 (2026-08-05)
+
+### Bug Fixes
+
+- Stop id sync rewriting every function in the project
+  ([#255](https://github.com/polyai/adk/pull/255),
+  [`c2ef04d`](https://github.com/polyai/adk/commit/c2ef04da90de4c1fe927633c3d70768b5eb7c968))
+
+## Summary
+
+`sync_ids_with_sandbox` was rewriting every function in the project on every id sync, because two
+  `Function` dataclass fields are populated asymmetrically by `read_local_resource` and
+  `from_projection` and both count toward the generated `__eq__`. This makes disk-read and
+  projection-read functions compare unequal regardless of content.
+
+## Motivation
+
+`sync_ids_with_sandbox` is the **only** code path that decides what changed by comparing whole
+  `Resource` objects (`resource != branch_resource`, `project.py:2850`). `push_project` gates on a
+  rendered-file hash first (`project.py:1163-1171`), and `get_diffs` uses that same hash
+  short-circuit plus a *text* diff of rendered output (`project.py:1547-1570`). So an asymmetric
+  field is invisible everywhere except this one path — which is why this went unnoticed.
+
+The two asymmetric fields were:
+
+| Field | `read_local_resource` | `from_projection` | |---|---|---| | `variable_references` | always
+  derives it from code — a dict, initialised to `{}`, never `None` | never sets it → `None` | |
+  `description` | `_extract_decorators` returned `None` with no `@func_description` |
+  `func["description"]`, which Agent Studio stores as `""` |
+
+This caused a real incident on a customer project. A merge-time id sync — invoked to repair a
+  handful of duplicate-name errors after resources were re-created under fresh ADK ids — emitted
+  **155 commands, 63 of which were these false positives**: 36 global functions + 25 flow transition
+  functions from `variable_references`, and the 2 special functions from `description`. That is
+  every function in the project. Not one `create_function` or `delete_function` was in the batch, so
+  all 63 kept their ids and were rewritten for no reason.
+
+It matters beyond noise because Agent Studio wraps a command batch in a single transaction, so 63
+  pointless commands are 63 extra chances to roll back the id repair that was the point of the sync;
+  and it inflates the Agent Studio merge diff far past the corresponding git PR diff, which is what
+  made the incident hard to spot.
+
+`variable_references` is marked `compare=False` rather than populated from the projection, because
+  it is derived from `code` — which *is* compared — so no real signal is lost. Transition functions
+  never push their references at all (see below), so Agent Studio has nothing stored for them and it
+  would have left 25 of the 63 false positives in place.
+
+## Changes
+
+- `Function.variable_references` is now `field(default_factory=dict, compare=False)` — excluded from
+  the generated `__eq__`. - `Function._extract_decorators` defaults `description` to `""` instead of
+  `None`, matching how Agent Studio stores an absent description. Return annotation tightened from
+  `Optional[str]` to `str`. - Two regression tests in `src/poly/tests/resources_test.py`, both
+  verified to fail without the fix.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+**Round-trip sweep across every resource type.** Build every resource from a real project
+  projection, write it out with its own `save()`, read it back through the same path push and sync
+  use, and diff the compared dataclass fields. Using `save()` rather than a mocked read is what
+  makes multi-resource YAML files work — variant attributes, pronunciations, keyphrases and voice
+  config are 180 of the 506 resources and were being silently skipped otherwise.
+
+| Projection | Resources | Equal | Differ | |---|---|---|---| | feature branch | 506 across 24 types
+  | 506 | **0** | | main | 507 across 24 types | 507 | **0** |
+
+Before the fix, `Function` was 0/63. A static sweep was attempted first and abandoned as inadequate:
+  only 6 of the 34 registered types define both `from_projection` and `read_local_resource` locally
+  with a simple constructor call — the rest inherit the generic `YamlResource.read_local_resource`
+  or build via helpers.
+
+**Both new tests fail without the fix:**
+
+``` FAILED
+  src/poly/tests/resources_test.py::FunctionTests::test_equality_ignores_variable_references FAILED
+  src/poly/tests/resources_test.py::FunctionTests::test_missing_description_reads_as_empty_string 2
+  failed, 391 deselected ```
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes — 989 passed, 30
+  subtests - [x] No breaking changes to the `poly` CLI interface (or migration path documented) -
+  [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+
+## v0.37.2 (2026-08-04)
+
+### Performance Improvements
+
+- Error on merge conflicts instead of dumping every resource
+  ([#240](https://github.com/polyai/adk/pull/240),
+  [`3933d4f`](https://github.com/polyai/adk/commit/3933d4f7496279bae6141d7e98c9784da9c802c0))
+
+## Summary
+
+Makes `poly diff` / `poly status` error clearly on files with unresolved merge conflict markers
+  instead of dumping every resource to scan for them. Removes the last redundant `dump_yaml` from
+  the diff read path.
+
+> Stacked on #239 — this PR targets that branch. Retarget to `main` once #239 merges.
+
+## Motivation
+
+`get_diffs` and `project_status` called `read_from_file` on every kept resource purely to run
+  `contains_merge_conflict`. For multi-resource types that re-serialized the cached sub-dict
+  (`dump_yaml`) — ~892 calls / ~3.4s on a large project — while the check itself is free. It was
+  also the wrong mechanism: a file with conflict markers isn't valid YAML/Python, so it can't be
+  parsed at all. The intended behaviour is to error, not to attempt a diff.
+
+## Changes
+
+- `resources/resource_utils.py`: add `MergeConflictError(ValueError)` and
+  `raise_if_merge_conflicts(files)` (single aggregated, deduped error). - `resources/resource.py`:
+  guard the three parse-read points so a conflicted file raises `MergeConflictError` *before*
+  parsing — `Resource.read_to_raw` (code/doc resources), `YamlResource._read_yaml_dict` (single-file
+  YAML), `MultiResourceYamlResource._get_top_level_data` (multi-resource YAML). Each piggybacks a
+  read already performed (no extra I/O). Deliberately **not** added to the raw
+  `Resource.read_from_file`, which `pull`'s 3-way text merge relies on. - `project.py`:
+  `read_local_resource` re-raises `MergeConflictError` ahead of its generic handler; `get_diffs`
+  collects conflicts across the kept/new loops and raises one aggregated error; `project_status`
+  catches per-resource and still lists conflicted single-file resources.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly diff` / `poly status` on a large
+  project) - [ ] Tested against a live Agent Studio project - [ ] N/A
+
+New tests: `get_diffs` raises for a conflicted single-file resource, for a conflicted multi-resource
+  YAML file, and aggregates multiple conflicted files into one error; `project_status` surfaces a
+  conflicted multi-resource file. Existing pull-with-conflict tests still pass unchanged (pull is
+  untouched).
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (950 passed) - [x] No
+  breaking changes to the `poly` CLI interface - [x] Commit messages follow conventional commits
+
+## Screenshots / Logs
+
+`time poly diff` on a large project (median of 5 warm runs), continuing from #239's baseline:
+
+| | #239 baseline | this PR | |---|---|---| | Wall time | **1.75s** | **0.74s** |
+
+~2.4× faster on top of #239 (and ~5.4× vs. `main`'s 3.97s). Output unchanged (`No changes
+  detected.`).
+
+## Behaviour on conflict
+
+All paths surface a clean, actionable CLI error (no traceback) — e.g. `Merge conflict:
+  config/entities.yaml — resolve the conflict markers before continuing`. The message is derived
+  from the offending path(s) by `MergeConflictError` itself.
+
+- `diff` raises a clear `MergeConflictError` listing every conflicted file (it can't produce a diff
+  of an unparseable file). - `status` lists conflicted files under "Files with merge conflicts" —
+  including multi-resource YAML files (detected at discovery), whose resources are excluded from the
+  new/kept/deleted comparison rather than miscounted as deleted. - `push` raises the same clear
+  error when it reads a conflicted resource, so a half-resolved file is never pushed. - `pull`'s
+  3-way text merge is unchanged (it reads conflicted files as raw text to re-merge); if it needs to
+  *parse* a conflicted local file it raises the same clear error.
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+
+## v0.37.1 (2026-08-04)
+
+### Performance Improvements
+
+- Avoid YAML serialize/reparse roundtrip in multi-resource reads
+  ([#239](https://github.com/polyai/adk/pull/239),
+  [`59be491`](https://github.com/polyai/adk/commit/59be491a16aa3834f174a9b3e1c921a585fbd767))
+
+## Summary
+
+Removes a redundant YAML serialize→reparse roundtrip from the resource read path. Multi-resource
+  reads now use the already-parsed cached dict directly, cutting `poly diff` on a large project from
+  ~4.0s to ~1.8s (2.3×, measured with `time poly diff`).
+
+## Motivation
+
+Profiling `poly diff` on a large agent project showed the time dominated by ruamel.yaml (serialize +
+  parse). The cause: `MultiResourceYamlResource` caches each file already parsed as a dict, but on
+  every resource read it dumped the matching sub-dict back to a YAML string just so the string-based
+  name→ID replacement could run, then immediately reparsed that string into a dict. The dict was
+  squeezed through a string and reconstituted for no benefit (the loader is `typ="safe"`, so no
+  comments/formatting are preserved).
+
+## Changes
+
+- `resource_utils.py`: add `replace_resource_names_with_ids_in_data`, a dict/list-walking equivalent
+  of the existing string replacement; factor the shared lookup/replacer into
+  `_build_reference_replacer` (behaviour of the two string functions is unchanged). - `resource.py`:
+  add a `_read_yaml_dict` read seam. `MultiResourceYamlResource` returns its cached sub-dict via a
+  single `_get_matching` seam that both `read_from_file` (string) and `_read_yaml_dict` (dict)
+  derive from. Move the generic name→ID replacement into the base `from_pretty_dict` (it now walks
+  the dict and returns fresh containers), instead of a whole-string pass in `read_local_resource`. -
+  `flows.py`, `test_suite.py`, `phrase_filter.py`, `variant_attributes.py`: the four
+  `from_pretty_dict` overrides now call `super().from_pretty_dict()` first so they keep the generic
+  replacement. - `languages.py`: `DefaultLanguage` / `AdditionalLanguage` override `_get_matching`
+  (their on-disk form is a bare scalar) instead of `read_from_file`, removing the need for a
+  special-case flag.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly diff` on a large project — output
+  byte-identical, "No changes detected.") - [x] Tested against a live Agent Studio project - [ ] N/A
+  (docs, config, or trivial change)
+
+New unit tests assert the dict-walking replacement matches the old string-path result on nested
+  structures, preserves non-string leaves and keys, does not mutate its input, and honours
+  flow-scoped mappings.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (946 passed) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`time poly diff` on a large project (median of 5 warm runs):
+
+| | Before | After | |---|---|---| | Wall time | **3.97s** | **1.75s** |
+
+~2.3× faster; output unchanged (`No changes detected.`).
+
+_(Earlier drafts of this PR quoted cProfile totals, which inflate ruamel's per-call cost; the above
+  are real `time poly diff` wall-clock numbers.)_
+
+---------
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+
+## v0.37.0 (2026-08-04)
+
+### Continuous Integration
+
+- Add TruffleHog secret scanning on PRs and pushes to main
+  ([#248](https://github.com/polyai/adk/pull/248),
+  [`33ad68f`](https://github.com/polyai/adk/commit/33ad68f11d0d277db550a1c6d95f88c1faec0d2f))
+
+## Summary
+
+Adds automated secret scanning so committed credentials get caught on PRs and on direct pushes to
+  `main`.
+
+## Motivation
+
+Native GitHub secret scanning/push protection are repo-level metadata settings — they don't travel
+  when this repo is forked/copied for integrator engagements, and don't apply to private copies
+  without an org-wide GHAS security configuration. A workflow file lives in repo content instead, so
+  it copies automatically with the repo regardless of where it ends up.
+
+## Changes
+
+- New `.github/workflows/secret-scanning.yml` running [TruffleHog
+  OSS](https://github.com/trufflesecurity/trufflehog) (pinned by commit SHA to `v3.96.0`, not
+  `@main`) on `pull_request` and on `push` to `main`. - Uses `--results=verified,unknown` — flags
+  confirmed-live secrets plus unverifiable-but-suspicious matches, filtering out ones TruffleHog can
+  positively confirm are already dead. - Since a lot of contributors push directly to `main` without
+  going through a PR, a failed scan on a `push` event also opens a GitHub issue, assigns the pusher,
+  and labels it `secret-leak`/`security`, with instructions to rotate the credential immediately
+  (it's already in git history even once removed from `HEAD`).
+
+Out of scope: this detects post-push, it doesn't block the push itself — true prevention needs
+  native GitHub push protection or a required-status-check + branch protection setup, which needs
+  repo admin access to configure separately.
+
+## Test strategy
+
+- [ ] N/A (docs, config, or trivial change)
+
+Workflow syntax has not been exercised against a live PR in this repo yet — first run against this
+  PR itself will be the validation.
+
+## Checklist
+
+- [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/) - [ ]
+  `ruff check .` and `ruff format --check .` pass (no Python changed) - [ ] `pytest` passes (no
+  Python changed) - [ ] No breaking changes to the `poly` CLI interface (or migration path
+  documented) — N/A
+
+### Features
+
+- Add poly audio-cache CLI commands (DEVP-377) ([#246](https://github.com/polyai/adk/pull/246),
+  [`f682c99`](https://github.com/polyai/adk/commit/f682c999c0278cf6dcc4553ff648c1dfc1e28d2f))
+
+## Summary
+
+Adds `poly audio-cache` CLI commands wrapping the Audio Cache public API (poly_core PR #42487) so
+  developers can manage an agent's cached TTS audio without hand-rolled HTTP calls.
+
+## Motivation
+
+[DEVP-377: Create ADK CLI commands for voice cache
+  API](https://linear.app/poly-ai/issue/DEVP-377/create-adk-cli-commands-for-voice-cache-api)
+
+Closes DEVP-377
+
+## Changes
+
+- `poly audio-cache list` — list cached entries with pagination/sorting - `poly audio-cache
+  get-file` — download the cached WAV file - `poly audio-cache update-file` — replace the audio file
+  for an entry - `poly audio-cache update-details` — replace audio + voice tuning settings together
+  - `poly audio-cache delete` / `bulk-delete` — remove one or many entries - `poly audio-cache
+  synthesize` — preview TTS audio without saving to cache - New
+  `PlatformAPIHandler`/`AgentStudioInterface` methods for the above, following the existing
+  `conversations` command pattern (including binary upload/download support, which is new) -
+  `print_audio_cache_entries` table helper in `console.py` - Unit tests for the handler layer
+  (`platform_api_test.py`) and CLI layer (`cli_test.py`) - `cli.md` reference docs for the new
+  command family
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly audio-cache --help` and all
+  subcommand `--help` variants, plus a local file-read/write smoke test) - [ ] Tested against a live
+  Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (974 passed) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow conventional commits
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+
 ## v0.36.3 (2026-07-29)
 
 ### Bug Fixes

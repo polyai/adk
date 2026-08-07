@@ -897,6 +897,69 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         self.assertIn("booking_ref", str(ctx.exception))
         self.assertIn("unsupported type annotation", str(ctx.exception))
 
+    def test_equality_ignores_variable_references(self):
+        """variable_references must not affect equality.
+
+        read_local_resource always derives it from code, from_projection never sets it, so
+        including it in the generated __eq__ made every disk-read function compare unequal
+        to its projection-read counterpart. sync_ids_with_sandbox compares whole objects,
+        so that rewrote every function in the project on any id sync.
+        """
+
+        def build(variable_references):
+            return Function(
+                resource_id="fn-1",
+                name="my_func",
+                description="desc",
+                code="def my_func(conv: Conversation):\n    pass\n",
+                parameters=[
+                    FunctionParameters(id="param-1", name="p", description="a param", type="string")
+                ],
+                latency_control=FunctionLatencyControl(),
+                function_type=FunctionType.GLOBAL,
+                variable_references=variable_references,
+            )
+
+        from_projection = build(None)
+        from_disk = build({})
+        self.assertEqual(from_disk, from_projection)
+        self.assertEqual(build({"VARIABLE-abc": True}), from_projection)
+
+        # Real changes must still be detected. Sub-resource id drift matters most: a
+        # parameter deleted and recreated renders identically and leaves the parent id
+        # untouched, so only the whole-object comparison catches it.
+        drifted = build({})
+        drifted.parameters[0].id = "param-2"
+        self.assertNotEqual(drifted, from_projection)
+
+        renamed_param = build({})
+        renamed_param.parameters[0].name = "other"
+        self.assertNotEqual(renamed_param, from_projection)
+
+        recoded = build({})
+        recoded.code += "\n# changed\n"
+        self.assertNotEqual(recoded, from_projection)
+
+        redescribed = build({})
+        redescribed.description = "different"
+        self.assertNotEqual(redescribed, from_projection)
+
+        relatency = build({})
+        relatency.latency_control.enabled = True
+        self.assertNotEqual(relatency, from_projection)
+
+    def test_missing_description_reads_as_empty_string(self):
+        """A function with no @func_description must read back as "", not None.
+
+        Agent Studio stores an absent description as "", so returning None made every
+        such function (start/end functions in practice) compare unequal to its
+        projection-read counterpart. "" also stops _generate_raw_output emitting a
+        literal @func_description(None) that cannot be parsed back.
+        """
+        code = "def start_function(conv: Conversation):\n    pass\n"
+        _, _, description, _ = Function._extract_decorators(code, "start_function", [])
+        self.assertEqual(description, "")
+
 
 TEST_TOPIC = Topic(
     resource_id="123",

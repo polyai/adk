@@ -551,8 +551,8 @@ class RTCCommand(BaseCommand):
                 "or use --force to overwrite.",
             }
 
-        remote_schema = remote_config.get("schema", {})
-        remote_variables = remote_config.get("variables", {})
+        remote_schema = remote_config.get("schema") or {}
+        remote_variables = remote_config.get("variables") or {}
 
         if not output_json:
             info("Remote has changed since your last pull. Attempting merge...")
