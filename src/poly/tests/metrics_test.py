@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 from poly.cli_commands.metrics import VALID_METRIC_TYPES, MetricsCommand, _parse_bool_flag
+from poly.handlers.interface import AgentStudioInterface
 
 
 class ParseBoolFlagTest(unittest.TestCase):
@@ -808,26 +809,165 @@ class PrintMetricsTest(unittest.TestCase):
         self.assertIn("1 inactive", summary)
 
 
-class PreviewMetricsImportTest(unittest.TestCase):
-    """Tests for PlatformAPIHandler.preview_metrics_import."""
+class CreateCustomMetricInterfaceTest(unittest.TestCase):
+    """Tests for AgentStudioInterface.create_custom_metric business logic."""
 
-    @patch("poly.handlers.platform_api.PlatformAPIHandler.get_custom_metrics")
-    def test_computes_set_diff(self, mock_get):
-        """Correctly partitions local and remote metrics."""
-        from poly.handlers.platform_api import PlatformAPIHandler
+    @patch("poly.handlers.interface.PlatformAPIHandler.update_custom_metric")
+    @patch("poly.handlers.interface.PlatformAPIHandler.create_custom_metric")
+    def test_api_flag_triggers_follow_up_patch(self, mock_create, mock_update):
+        """When api=True, a follow-up PATCH sets the api flag after create."""
+        mock_create.return_value = {"name": "SCORE", "type": "int"}
+        mock_update.return_value = {"name": "SCORE", "type": "int", "api": True}
 
-        mock_get.return_value = [
-            {"name": "EXISTING"},
-            {"name": "REMOTE_ONLY"},
-        ]
-
-        result = PlatformAPIHandler.preview_metrics_import(
-            "us", "acc1", "proj1", {"EXISTING", "NEW_ONE"}
+        result = AgentStudioInterface.create_custom_metric(
+            "us", "acc1", "proj1", {"name": "SCORE", "type": "int", "api": True}
         )
 
-        self.assertEqual(result["would_create"], ["NEW_ONE"])
-        self.assertEqual(result["would_skip"], ["EXISTING"])
-        self.assertEqual(result["remote_only"], ["REMOTE_ONLY"])
+        mock_create.assert_called_once()
+        mock_update.assert_called_once_with("us", "acc1", "proj1", "SCORE", {"api": True})
+        self.assertTrue(result["api"])
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.update_custom_metric")
+    @patch("poly.handlers.interface.PlatformAPIHandler.create_custom_metric")
+    def test_no_api_flag_skips_patch(self, mock_create, mock_update):
+        """When api is not set, no follow-up PATCH is issued."""
+        mock_create.return_value = {"name": "SCORE", "type": "int"}
+
+        AgentStudioInterface.create_custom_metric(
+            "us", "acc1", "proj1", {"name": "SCORE", "type": "int"}
+        )
+
+        mock_create.assert_called_once()
+        mock_update.assert_not_called()
+
+    def test_expected_values_rejected_for_non_string(self):
+        """Raises ValueError when expected_values is set on a non-string metric."""
+        with self.assertRaises(ValueError) as ctx:
+            AgentStudioInterface.create_custom_metric(
+                "us",
+                "acc1",
+                "proj1",
+                {"name": "SCORE", "type": "int", "expected_values": ["a", "b"]},
+            )
+
+        self.assertIn("only valid for string", str(ctx.exception))
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.create_custom_metric")
+    def test_expected_values_allowed_for_string(self, mock_create):
+        """Does not raise when expected_values is set on a string metric."""
+        mock_create.return_value = {"name": "STATUS", "type": "string"}
+
+        AgentStudioInterface.create_custom_metric(
+            "us",
+            "acc1",
+            "proj1",
+            {"name": "STATUS", "type": "string", "expected_values": ["open", "closed"]},
+        )
+
+        mock_create.assert_called_once()
+
+
+class UpdateCustomMetricInterfaceTest(unittest.TestCase):
+    """Tests for AgentStudioInterface.update_custom_metric validation."""
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.update_custom_metric")
+    @patch("poly.handlers.interface.PlatformAPIHandler.get_custom_metrics")
+    def test_expected_values_rejected_for_non_string(self, mock_get, mock_update):
+        """Raises ValueError when expected_values targets a non-string metric."""
+        mock_get.return_value = [{"name": "SCORE", "type": "int"}]
+
+        with self.assertRaises(ValueError) as ctx:
+            AgentStudioInterface.update_custom_metric(
+                "us", "acc1", "proj1", "SCORE", {"expected_values": ["a", "b"]}
+            )
+
+        self.assertIn("only valid for string", str(ctx.exception))
+        mock_update.assert_not_called()
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.update_custom_metric")
+    @patch("poly.handlers.interface.PlatformAPIHandler.get_custom_metrics")
+    def test_expected_values_allowed_for_string(self, mock_get, mock_update):
+        """Does not raise when expected_values targets a string metric."""
+        mock_get.return_value = [{"name": "STATUS", "type": "string"}]
+        mock_update.return_value = {"name": "STATUS"}
+
+        AgentStudioInterface.update_custom_metric(
+            "us", "acc1", "proj1", "STATUS", {"expected_values": ["open"]}
+        )
+
+        mock_update.assert_called_once()
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.update_custom_metric")
+    def test_no_expected_values_skips_type_check(self, mock_update):
+        """When expected_values is not in data, no type lookup is made."""
+        mock_update.return_value = {"name": "SCORE"}
+
+        AgentStudioInterface.update_custom_metric(
+            "us", "acc1", "proj1", "SCORE", {"description": "new desc"}
+        )
+
+        mock_update.assert_called_once()
+
+
+class ImportMetricsFromFileInterfaceTest(unittest.TestCase):
+    """Tests for AgentStudioInterface.import_metrics_from_file."""
+
+    def test_file_not_found_raises(self):
+        """Raises FileNotFoundError for a missing file."""
+        with self.assertRaises(FileNotFoundError):
+            AgentStudioInterface.import_metrics_from_file(
+                "us", "acc1", "proj1", "/nonexistent/metrics.yaml"
+            )
+
+    @patch("builtins.open", unittest.mock.mock_open(read_data="{{invalid"))
+    @patch("os.path.exists", return_value=True)
+    def test_invalid_yaml_raises(self, _):
+        """Raises ValueError for unparseable YAML."""
+        with self.assertRaises(ValueError) as ctx:
+            AgentStudioInterface.import_metrics_from_file("us", "acc1", "proj1", "bad.yaml")
+
+        self.assertIn("Invalid YAML", str(ctx.exception))
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.preview_metrics_import")
+    @patch("builtins.open", unittest.mock.mock_open(read_data="SCORE:\n  type: int\n"))
+    @patch("os.path.exists", return_value=True)
+    def test_dry_run_returns_preview(self, _, mock_preview):
+        """In dry-run mode, returns preview without importing."""
+        mock_preview.return_value = {
+            "would_create": ["SCORE"],
+            "would_skip": [],
+            "remote_only": [],
+        }
+
+        result = AgentStudioInterface.import_metrics_from_file(
+            "us", "acc1", "proj1", "metrics.yaml", dry_run=True
+        )
+
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["would_create"], ["SCORE"])
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.import_custom_metrics")
+    @patch("poly.handlers.interface.PlatformAPIHandler.preview_metrics_import")
+    @patch("builtins.open", unittest.mock.mock_open(read_data="SCORE:\n  type: int\n"))
+    @patch("os.path.exists", return_value=True)
+    def test_import_returns_result_with_remote_only(self, _, mock_preview, mock_import):
+        """Full import merges remote_only from preview into the result."""
+        mock_preview.return_value = {
+            "would_create": ["SCORE"],
+            "would_skip": [],
+            "remote_only": ["OLD_METRIC"],
+        }
+        mock_import.return_value = {
+            "metadata": {"created": ["SCORE"], "ignored": []},
+        }
+
+        result = AgentStudioInterface.import_metrics_from_file(
+            "us", "acc1", "proj1", "metrics.yaml", dry_run=False
+        )
+
+        self.assertEqual(result["remote_only"], ["OLD_METRIC"])
+        self.assertEqual(result["metadata"]["created"], ["SCORE"])
+        mock_import.assert_called_once()
 
 
 class ValidMetricTypesTest(unittest.TestCase):
