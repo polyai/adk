@@ -375,12 +375,11 @@ class MetricsCommand(BaseCommand):
         if expected_values is not None:
             data["expected_values"] = expected_values
 
-        if not data:
+        if not data and not output_json:
+            data = cls._interactive_edit(project, name)
+        elif not data:
             msg = "At least one flag is required (--description, --api, --active, etc.)."
-            if output_json:
-                json_print({"success": False, "error": msg})
-            else:
-                error(msg)
+            json_print({"success": False, "error": msg})
             sys.exit(1)
 
         result = AgentStudioInterface.update_custom_metric(
@@ -394,6 +393,92 @@ class MetricsCommand(BaseCommand):
                 success(f"Deactivated metric {name}")
             else:
                 success(f"Updated metric {name}")
+
+    @classmethod
+    def _interactive_edit(cls, project: object, name: str) -> dict:
+        """Prompt the user to select and edit metric fields interactively.
+
+        Args:
+            project: The loaded AgentStudioProject.
+            name: Name of the metric to edit.
+
+        Returns:
+            A dict of fields to update.
+        """
+        import questionary
+
+        metrics = AgentStudioInterface.get_custom_metrics(
+            project.region,
+            project.account_id,
+            project.project_id,  # type: ignore[attr-defined]
+        )
+
+        metric = next((m for m in metrics if m.get("name") == name), None)
+        if metric is None:
+            error(f"Metric {name!r} not found.")
+            sys.exit(1)
+
+        # Display current values
+        plain(f"\n[bold]Current values for {name}:[/bold]")
+        plain(f"  name:            {metric.get('name', '—')}")
+        plain(f"  type:            {metric.get('type', '—')}")
+        plain(f"  description:     {metric.get('description') or '—'}")
+        plain(f"  api:             {metric.get('api', False)}")
+        plain(f"  active:          {metric.get('active', True)}")
+        ev = metric.get("expected_values") or []
+        plain(f"  expected_values: {' '.join(ev) if ev else '—'}")
+        plain("")
+
+        fields = questionary.checkbox(
+            "Which fields do you want to edit?",
+            choices=["description", "api", "active", "expected_values"],
+        ).ask()
+        if fields is None:
+            sys.exit(1)
+        if not fields:
+            error("No fields selected.")
+            sys.exit(1)
+
+        data: dict = {}
+
+        if "description" in fields:
+            val = questionary.text(
+                "description:",
+                default=metric.get("description") or "",
+            ).ask()
+            if val is None:
+                sys.exit(1)
+            data["description"] = val
+
+        if "api" in fields:
+            val = questionary.confirm(
+                "api:",
+                default=metric.get("api", False),
+            ).ask()
+            if val is None:
+                sys.exit(1)
+            data["api"] = val
+
+        if "active" in fields:
+            val = questionary.confirm(
+                "active:",
+                default=metric.get("active", True),
+            ).ask()
+            if val is None:
+                sys.exit(1)
+            data["active"] = val
+
+        if "expected_values" in fields:
+            current = metric.get("expected_values") or []
+            val = questionary.text(
+                "expected_values (space-separated):",
+                default=" ".join(current),
+            ).ask()
+            if val is None:
+                sys.exit(1)
+            data["expected_values"] = val.split() if val.strip() else []
+
+        return data
 
     @classmethod
     def metrics_import(

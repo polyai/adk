@@ -332,18 +332,20 @@ class MetricsEditTest(unittest.TestCase):
         self.assertTrue(data["api"])
         self.assertTrue(data["active"])
 
-    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.cli_commands.metrics.MetricsCommand._interactive_edit")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.update_custom_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_edit_no_flags_exits(self, mock_load, mock_error):
-        """Exits with error when no update flags are provided."""
+    def test_edit_no_flags_triggers_interactive(self, mock_load, mock_update, mock_interactive):
+        """Enters interactive mode when no flags are provided and not JSON."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
+        mock_interactive.return_value = {"description": "New desc"}
+        mock_update.return_value = {"name": "SCORE", "description": "New desc"}
 
-        with self.assertRaises(SystemExit) as ctx:
-            MetricsCommand.metrics_edit("/fake/path", name="SCORE", output_json=False)
+        MetricsCommand.metrics_edit("/fake/path", name="SCORE", output_json=False)
 
-        self.assertEqual(ctx.exception.code, 1)
-        mock_error.assert_called_once()
+        mock_interactive.assert_called_once_with(project, "SCORE")
+        mock_update.assert_called_once()
 
     @patch("poly.cli_commands.metrics.json_print")
     @patch("poly.cli_commands.metrics.load_project")
@@ -371,6 +373,102 @@ class MetricsEditTest(unittest.TestCase):
         MetricsCommand.metrics_edit("/fake/path", name="SCORE", active=True, output_json=True)
 
         mock_json.assert_called_once_with({"success": True, "metric": result})
+
+
+class InteractiveEditTest(unittest.TestCase):
+    """Tests for MetricsCommand._interactive_edit."""
+
+    SAMPLE_METRICS = [
+        {
+            "name": "SCORE",
+            "type": "int",
+            "description": "CSAT score",
+            "api": False,
+            "active": True,
+            "expected_values": [],
+        },
+    ]
+
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
+    @patch("poly.cli_commands.metrics.error")
+    def test_metric_not_found_exits(self, mock_error, mock_get):
+        """Exits with error when the named metric does not exist."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_get.return_value = self.SAMPLE_METRICS
+
+        with self.assertRaises(SystemExit) as ctx:
+            MetricsCommand._interactive_edit(project, "NONEXISTENT")
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_error.assert_called_once()
+
+    @patch("questionary.checkbox")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
+    def test_checkbox_cancel_exits(self, mock_get, mock_checkbox):
+        """Exits when user cancels field selection."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_get.return_value = self.SAMPLE_METRICS
+        mock_checkbox.return_value.ask.return_value = None
+
+        with self.assertRaises(SystemExit) as ctx:
+            MetricsCommand._interactive_edit(project, "SCORE")
+
+        self.assertEqual(ctx.exception.code, 1)
+
+    @patch("questionary.checkbox")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
+    def test_no_fields_selected_exits(self, mock_get, mock_checkbox):
+        """Exits when user selects no fields."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_get.return_value = self.SAMPLE_METRICS
+        mock_checkbox.return_value.ask.return_value = []
+
+        with self.assertRaises(SystemExit) as ctx:
+            MetricsCommand._interactive_edit(project, "SCORE")
+
+        self.assertEqual(ctx.exception.code, 1)
+
+    @patch("questionary.text")
+    @patch("questionary.checkbox")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
+    def test_edit_description(self, mock_get, mock_checkbox, mock_text):
+        """Returns updated description when user edits it."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_get.return_value = self.SAMPLE_METRICS
+        mock_checkbox.return_value.ask.return_value = ["description"]
+        mock_text.return_value.ask.return_value = "New description"
+
+        result = MetricsCommand._interactive_edit(project, "SCORE")
+
+        self.assertEqual(result, {"description": "New description"})
+
+    @patch("questionary.confirm")
+    @patch("questionary.checkbox")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
+    def test_edit_api_and_active(self, mock_get, mock_checkbox, mock_confirm):
+        """Returns updated api and active flags."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_get.return_value = self.SAMPLE_METRICS
+        mock_checkbox.return_value.ask.return_value = ["api", "active"]
+        mock_confirm.return_value.ask.side_effect = [True, False]
+
+        result = MetricsCommand._interactive_edit(project, "SCORE")
+
+        self.assertEqual(result, {"api": True, "active": False})
+
+    @patch("questionary.text")
+    @patch("questionary.checkbox")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
+    def test_edit_expected_values(self, mock_get, mock_checkbox, mock_text):
+        """Parses space-separated expected values."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_get.return_value = self.SAMPLE_METRICS
+        mock_checkbox.return_value.ask.return_value = ["expected_values"]
+        mock_text.return_value.ask.return_value = "low medium high"
+
+        result = MetricsCommand._interactive_edit(project, "SCORE")
+
+        self.assertEqual(result, {"expected_values": ["low", "medium", "high"]})
 
 
 class MetricsImportTest(unittest.TestCase):
