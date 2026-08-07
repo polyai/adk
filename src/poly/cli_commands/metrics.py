@@ -545,10 +545,14 @@ class MetricsCommand(BaseCommand):
             created = metadata.get("created", [])
             ignored = metadata.get("ignored", [])
 
+            def _item_name(item: dict[str, str] | str) -> str:
+                """Extract name from a metadata item (dict or plain string)."""
+                return item["name"] if isinstance(item, dict) else item
+
             if created:
-                plain(f"Created: {', '.join(created)}")
+                plain(f"Created: {', '.join(_item_name(i) for i in created)}")
             if ignored:
-                plain(f"Skipped (already exist): {', '.join(ignored)}")
+                plain(f"Skipped (already exist): {', '.join(_item_name(i) for i in ignored)}")
 
             created_count = len(created)
             skipped_count = len(ignored)
