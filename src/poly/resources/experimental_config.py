@@ -7,8 +7,6 @@ import json
 import os
 from dataclasses import dataclass, field
 
-import jsonschema
-
 import poly.resources.resource_utils as utils
 from poly.handlers.protobuf.experimental_config_pb2 import ExperimentalConfig_UpdateConfig
 from poly.resources.resource import Resource, register_resource
@@ -84,6 +82,8 @@ class ExperimentalConfig(Resource):
         return NotImplementedError("ExperimentalConfig does not support creation.")
 
     def validate(self, **kwargs):
+        import jsonschema
+
         # Validate against schema
         schema_path = os.environ.get("ADK_EXPERIMENTAL_CONFIG_SCHEMA_PATH") or os.path.join(
             os.path.dirname(__file__), "experimental_config_schema.yaml"

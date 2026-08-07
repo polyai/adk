@@ -499,14 +499,13 @@ class AgentStudioInterface:
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
-    def get_branches(self) -> dict[str, str]:
-        """Get a list of branches.
-
-        Args:
-            branch_name (str): The name of the branch
+    def get_branches(self) -> dict[str, dict[str, Any]]:
+        """Get a list of branches with full metadata.
 
         Returns:
-            dict[str, str]: A dictionary mapping branch names to branch IDs
+            A dictionary mapping branch names to their metadata dicts.
+            Each value contains at least ``branchId``, and may include
+            ``parentBranchId``, ``parentSequence``, ``isDiverged``, etc.
         """
         try:
             return self.sync_client.get_branches()
@@ -577,6 +576,26 @@ class AgentStudioInterface:
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
+    def pull_branch_resources(
+        self, branch_id: str, at_sequence: Optional[int] = None
+    ) -> dict[type, dict[str, Any]]:
+        """Fetch resources for a branch, optionally at a historical sequence.
+
+        Args:
+            branch_id: The branch whose projection to fetch.
+            at_sequence: When provided, fetches the projection at this sequence number.
+
+        Returns:
+            A ResourceMap of the branch's resources.
+        """
+        from poly.resources.resource import load_resources_from_projection
+
+        try:
+            projection = self.sync_client.pull_branch_projection(branch_id, at_sequence)
+            return load_resources_from_projection(projection)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
     @staticmethod
     def create_chat(
         region: str,
@@ -587,6 +606,7 @@ class AgentStudioInterface:
         channel: str = "chat.polyai",
         input_lang: Optional[str] = None,
         output_lang: Optional[str] = None,
+        sip_headers: Optional[dict[str, str]] = None,
     ) -> dict:
         """Create a new chat conversation.
 
@@ -597,6 +617,7 @@ class AgentStudioInterface:
             environment: The environment to chat against (sandbox, pre-release, live)
             variant_id: Optional variant ID (e.g. 'Voice')
             channel: The channel identifier (e.g. 'chat.polyai', 'webchat.polyai')
+            sip_headers: Optional simulated SIP headers exposed through conv.sip_headers
 
         Returns:
             dict: The API response containing the conversation ID and initial greeting
@@ -610,6 +631,7 @@ class AgentStudioInterface:
             channel,
             input_lang=input_lang,
             output_lang=output_lang,
+            sip_headers=sip_headers,
         )
 
     @staticmethod
@@ -676,6 +698,7 @@ class AgentStudioInterface:
         variant_id: Optional[str] = None,
         input_lang: str = None,
         output_lang: str = None,
+        sip_headers: Optional[dict[str, str]] = None,
     ) -> dict:
         """Create a new chat conversation against a branch deployment.
 
@@ -687,6 +710,7 @@ class AgentStudioInterface:
             lambda_deployment_version: Branch lambda version from sourcerer
             channel: The channel identifier (e.g. 'chat.polyai', 'webchat.polyai')
             variant_id: Optional variant ID (e.g. 'Voice')
+            sip_headers: Optional simulated SIP headers exposed through conv.sip_headers
 
         Returns:
             dict: The API response containing the conversation ID and initial greeting
@@ -701,6 +725,7 @@ class AgentStudioInterface:
             variant_id,
             input_lang=input_lang,
             output_lang=output_lang,
+            sip_headers=sip_headers,
         )
 
     @staticmethod
@@ -1009,6 +1034,140 @@ class AgentStudioInterface:
         )
 
     @staticmethod
+    def list_audio_cache(
+        region: str,
+        project_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        sort: Optional[str] = None,
+    ) -> dict:
+        """List cached TTS audio entries for an agent.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            limit: Max entries to return (1-200).
+            offset: Pagination offset.
+            sort: Optional sort expression, e.g. "hit_count:desc".
+
+        Returns:
+            dict: The API response with entries and total_count.
+        """
+        return PlatformAPIHandler.list_audio_cache(region, project_id, limit, offset, sort)
+
+    @staticmethod
+    def get_audio_cache_file(region: str, project_id: str, entry_id: str) -> bytes:
+        """Download the cached audio file for an audio cache entry.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID.
+
+        Returns:
+            bytes: The raw WAV audio data.
+        """
+        return PlatformAPIHandler.get_audio_cache_file(region, project_id, entry_id)
+
+    @staticmethod
+    def update_audio_cache_file(
+        region: str,
+        project_id: str,
+        entry_id: str,
+        audio_bytes: bytes,
+        filename: Optional[str] = None,
+    ) -> None:
+        """Replace the audio file for an existing cache entry.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID.
+            audio_bytes: Raw WAV audio bytes (max 6MB).
+            filename: Optional filename, sent via the X-Filename header.
+        """
+        PlatformAPIHandler.update_audio_cache_file(
+            region, project_id, entry_id, audio_bytes, filename
+        )
+
+    @staticmethod
+    def update_audio_cache_details(
+        region: str,
+        project_id: str,
+        entry_id: str,
+        audio_bytes: bytes,
+        settings: dict,
+        filename: str = "audio.wav",
+    ) -> None:
+        """Replace both the audio file and voice tuning settings for a cache entry.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID.
+            audio_bytes: Raw WAV audio bytes (max 6MB).
+            settings: Dict with "text" and "config" keys (voice tuning settings).
+            filename: Filename to use for the multipart file part.
+        """
+        PlatformAPIHandler.update_audio_cache_details(
+            region, project_id, entry_id, audio_bytes, settings, filename
+        )
+
+    @staticmethod
+    def delete_audio_cache_entry(region: str, project_id: str, entry_id: str) -> dict:
+        """Delete a cached audio entry and its associated audio file.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID.
+
+        Returns:
+            dict: The API response, e.g. {"success": True}.
+        """
+        return PlatformAPIHandler.delete_audio_cache_entry(region, project_id, entry_id)
+
+    @staticmethod
+    def bulk_delete_audio_cache(region: str, project_id: str, ids: list[str]) -> dict:
+        """Delete multiple audio cache entries by ID in a single request.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            ids: List of audio cache entry IDs to delete (max 20).
+
+        Returns:
+            dict: The API response with "deleted" and "failed" ID lists.
+        """
+        return PlatformAPIHandler.bulk_delete_audio_cache(region, project_id, ids)
+
+    @staticmethod
+    def synthesize_audio_cache(
+        region: str,
+        project_id: str,
+        entry_id: str,
+        text: str,
+        config: dict,
+        language: Optional[str] = None,
+    ) -> bytes:
+        """Generate a TTS audio preview using an existing cache entry's voice config.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID whose voice/provider config to use.
+            text: Text to synthesize.
+            config: Provider-specific voice tuning settings.
+            language: Optional BCP-47 language tag, e.g. "en-US".
+
+        Returns:
+            bytes: The raw WAV audio data (preview only, not saved to cache).
+        """
+        return PlatformAPIHandler.synthesize_audio_cache(
+            region, project_id, entry_id, text, config, language
+        )
+
+    @staticmethod
     def list_test_runs(
         region: str,
         project_id: str,
@@ -1236,3 +1395,76 @@ class AgentStudioInterface:
         return PlatformAPIHandler.import_custom_metrics(
             region, account_id, project_id, yaml_content, dry_run
         )
+
+    def list_rtc_configs(
+        region: str,
+        project_id: str,
+    ) -> dict:
+        """List all RTC config pages for a project.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+
+        Returns:
+            dict: The API response with all RTC configs.
+        """
+        return PlatformAPIHandler.list_rtc_configs(region, project_id)
+
+    @staticmethod
+    def get_rtc_config(
+        region: str,
+        project_id: str,
+        client_env: str,
+    ) -> dict:
+        """Get RTC config for a specific environment.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            client_env: The environment (sandbox, pre-release, live).
+
+        Returns:
+            dict: The RTC config with schema, variables, clientEnv, lastUpdated.
+        """
+        return PlatformAPIHandler.get_rtc_config(region, project_id, client_env)
+
+    @staticmethod
+    def put_rtc_schema(
+        region: str,
+        project_id: str,
+        client_env: str,
+        schema: dict,
+    ) -> dict:
+        """Update the RTC schema for an environment.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            client_env: The environment (sandbox, pre-release, live).
+            schema: The JSON Schema Draft 7 object.
+
+        Returns:
+            dict: The updated RTC config.
+        """
+        return PlatformAPIHandler.put_rtc_schema(region, project_id, client_env, schema)
+
+    @staticmethod
+    def patch_rtc_variables(
+        region: str,
+        project_id: str,
+        client_env: str,
+        variables: dict,
+    ) -> dict:
+        """Update the RTC variables (data) for an environment.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            client_env: The environment (sandbox, pre-release, live).
+            variables: The config variables object.
+
+        Returns:
+            dict: The updated RTC config.
+        """
+        return PlatformAPIHandler.patch_rtc_variables(region, project_id, client_env, variables)

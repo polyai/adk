@@ -7,6 +7,8 @@ Copyright PolyAI Limited
 
 import json
 import os
+import shutil
+import tempfile
 import unittest
 from copy import deepcopy
 from unittest.mock import MagicMock, patch
@@ -680,6 +682,39 @@ class ProjectStatusTest(unittest.TestCase):
         self.assertEqual(new_files, [])
         self.assertEqual(deleted_files, [])
 
+    def test_project_status_merge_conflict_in_multi_resource_yaml(self):
+        """A conflicted multi-resource YAML file is listed (not raised) by project_status.
+
+        The conflict is detected during discovery (discover_resources ->
+        _get_top_level_data); project_status collects the true file path into
+        files_with_conflicts and skips that file's resources instead of raising or
+        counting them as deleted.
+        """
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        entities_path = os.path.join(TEST_DIR, "config", "entities.yaml")
+        # The multi-resource file is cached by mtime; clear it so the mock is read.
+        Entity._file_cache.clear()
+
+        conflicted_entities = (
+            "entities:\n"
+            "<<<<<<<\n"
+            "  - name: customer_name\n"
+            "    entity_type: name_config\n"
+            "=======\n"
+            "  - name: caller_name\n"
+            "    entity_type: name_config\n"
+            ">>>>>>>\n"
+        )
+
+        with mock_read_from_file({entities_path: conflicted_entities}):
+            files_with_conflicts, modified_files, new_files, deleted_files = (
+                project.project_status()
+            )
+
+        self.assertEqual(files_with_conflicts, [entities_path])
+        # The conflicted file's entities must not be reported as deleted.
+        self.assertFalse(any(entities_path in path for path in deleted_files))
+
     def test_project_status_mixed_changes(self):
         project_data = deepcopy(PROJECT_DATA)
         # Remove a function so it seems there's a new one
@@ -922,6 +957,93 @@ class GetDiffsTest(unittest.TestCase):
             "flows", "test_flow_with_punctuation!", "steps", "welcome_step.yaml"
         )
         self.assertNotIn(step_path, diffs)
+
+    def test_get_diffs_raises_when_single_file_resource_has_conflict(self):
+        """A merge conflict in a function .py file makes get_diffs raise."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        func_path = os.path.join(TEST_DIR, "functions", "test_function.py")
+
+        conflicted_code = (
+            "from _gen import *  # <AUTO GENERATED>\n\n"
+            "def test_function(conv: Conversation):\n"
+            "<<<<<<<\n"
+            '    return "ours"\n'
+            "=======\n"
+            '    return "theirs"\n'
+            ">>>>>>>\n"
+        )
+
+        with mock_read_from_file({func_path: conflicted_code}):
+            with self.assertRaises(resource_utils.MergeConflictError) as ctx:
+                project.get_diffs()
+
+        self.assertIn(func_path, str(ctx.exception))
+
+    def test_get_diffs_raises_when_multi_resource_yaml_has_conflict(self):
+        """A conflict in a multi-resource YAML file makes get_diffs raise.
+
+        For multi-resource YAML files the guard fires during discovery
+        (discover_resources -> _get_top_level_data), before get_diffs reaches its
+        own conflict-collecting loops, so the error is raised with the true on-disk
+        .yaml path rather than a synthetic sub-resource path.
+        """
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        entities_path = os.path.join(TEST_DIR, "config", "entities.yaml")
+        # The multi-resource file is cached by mtime; clear it so the mock is read.
+        Entity._file_cache.clear()
+
+        conflicted_entities = (
+            "entities:\n"
+            "<<<<<<<\n"
+            "  - name: customer_name\n"
+            "    entity_type: name_config\n"
+            "=======\n"
+            "  - name: caller_name\n"
+            "    entity_type: name_config\n"
+            ">>>>>>>\n"
+        )
+
+        with mock_read_from_file({entities_path: conflicted_entities}):
+            with self.assertRaises(resource_utils.MergeConflictError) as ctx:
+                project.get_diffs()
+
+        # The reported path is the true .yaml file, not a synthetic sub-resource path.
+        self.assertIn(entities_path, str(ctx.exception))
+
+    def test_get_diffs_aggregates_conflicts_from_multiple_files(self):
+        """When two single-file resources conflict, the raised error lists both paths."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        func_path = os.path.join(TEST_DIR, "functions", "test_function.py")
+        other_func_path = os.path.join(TEST_DIR, "functions", "validate_email.py")
+
+        conflicted_code = (
+            "from _gen import *  # <AUTO GENERATED>\n\n"
+            "def test_function(conv: Conversation):\n"
+            "<<<<<<<\n"
+            '    return "ours"\n'
+            "=======\n"
+            '    return "theirs"\n'
+            ">>>>>>>\n"
+        )
+        other_conflicted_code = (
+            "from _gen import *  # <AUTO GENERATED>\n\n"
+            "def validate_email(conv: Conversation):\n"
+            "<<<<<<<\n"
+            "    return True\n"
+            "=======\n"
+            "    return False\n"
+            ">>>>>>>\n"
+        )
+
+        with mock_read_from_file(
+            {func_path: conflicted_code, other_func_path: other_conflicted_code}
+        ):
+            with self.assertRaises(resource_utils.MergeConflictError) as ctx:
+                project.get_diffs()
+
+        message = str(ctx.exception)
+        self.assertIn(func_path, message)
+        self.assertIn(other_func_path, message)
 
 
 class CleanResourcesBeforePushTest(unittest.TestCase):
@@ -2386,7 +2508,9 @@ class ValidateProjectTest(unittest.TestCase):
             errors = project.validate_project()
         self.assertEqual(len(errors), 2)
         error_texts = "\n".join(errors)
-        self.assertIn("Invalid references: ['global_functions: FUNCTION-missing_function']", error_texts)
+        self.assertIn(
+            "Invalid references: ['global_functions: FUNCTION-missing_function']", error_texts
+        )
         self.assertIn("Start step 'missing_step' not found.", error_texts)
 
 
@@ -3706,6 +3830,362 @@ class MigrateFlowStepResourceIdsTest(unittest.TestCase):
         flow_steps = status_dict["resources"]["flow_steps"]
         self.assertIn("FLOW-abc_step-1", flow_steps)
         self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
+
+
+class DiffBranchTest(unittest.TestCase):
+    """Tests for the diff_branch method."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "main"
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def _make_branches(self, entries):
+        """Build a branches dict from a list of (name, branchId, extras) tuples."""
+        branches = {}
+        for name, branch_id, extras in entries:
+            meta = {"branchId": branch_id}
+            meta.update(extras)
+            branches[name] = meta
+        return branches
+
+    def _make_topic(self, resource_id, name, content):
+        """Create a Topic with all required fields."""
+        return Topic(
+            resource_id=resource_id,
+            name=name,
+            actions="",
+            content=content,
+            example_queries=[],
+        )
+
+    def test_on_main_with_no_branch_name_raises_value_error(self):
+        """Calling diff_branch() while on main without specifying a branch raises ValueError."""
+        self.project.branch_id = "main"
+        self.mock_api.get_branches.return_value = self._make_branches([("main", "main", {})])
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.diff_branch()
+        self.assertIn("Cannot diff main branch", str(ctx.exception))
+
+    def test_named_branch_not_found_raises_value_error(self):
+        """Specifying a branch name that doesn't exist raises ValueError."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [("main", "main", {}), ("feature-a", "branch-a-id", {})]
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.diff_branch(branch_name="nonexistent")
+        self.assertIn("does not exist", str(ctx.exception))
+
+    def test_happy_path_returns_diffs(self):
+        """diff_branch returns diffs between fork-point parent and current branch state."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-x",
+                    "branch-x-id",
+                    {"parentBranchId": "main", "parentSequence": "42"},
+                ),
+            ]
+        )
+
+        parent_topic = self._make_topic("TOPIC-1", "Greetings", "Hello original")
+        branch_topic = self._make_topic("TOPIC-1", "Greetings", "Hello updated")
+        parent_resources = {Topic: {"TOPIC-1": parent_topic}}
+        branch_resources = {Topic: {"TOPIC-1": branch_topic}}
+
+        self.mock_api.pull_branch_resources.side_effect = [
+            parent_resources,
+            branch_resources,
+        ]
+
+        diffs = self.project.diff_branch(branch_name="feature-x")
+
+        self.assertIsNotNone(diffs)
+        self.assertEqual(len(diffs), 1)
+        topic_path = os.path.join("topics", "greetings.yaml")
+        self.assertIn(topic_path, diffs)
+        self.assertIn("-content: Hello original", diffs[topic_path])
+        self.assertIn("+content: Hello updated", diffs[topic_path])
+
+        # Verify pull_branch_resources called with correct args
+        calls = self.mock_api.pull_branch_resources.call_args_list
+        self.assertEqual(calls[0].args, ("main", 42))
+        self.assertEqual(calls[1].args, ("branch-x-id",))
+
+    def test_no_changes_returns_none(self):
+        """When parent and branch have identical resources, diff_branch returns None."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-y",
+                    "branch-y-id",
+                    {"parentBranchId": "main", "parentSequence": "10"},
+                ),
+            ]
+        )
+
+        topic = self._make_topic("TOPIC-1", "Hours", "9am-5pm")
+        identical_resources = {Topic: {"TOPIC-1": topic}}
+
+        self.mock_api.pull_branch_resources.side_effect = [
+            identical_resources,
+            deepcopy(identical_resources),
+        ]
+
+        result = self.project.diff_branch(branch_name="feature-y")
+        self.assertIsNone(result)
+
+    def test_null_parent_sequence_falls_back_to_latest(self):
+        """When parentSequence is null, pull_branch_resources is called with at_sequence=None."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-z",
+                    "branch-z-id",
+                    {"parentBranchId": "main", "parentSequence": None},
+                ),
+            ]
+        )
+
+        topic = self._make_topic("TOPIC-1", "Hours", "9am-5pm")
+        self.mock_api.pull_branch_resources.side_effect = [
+            {Topic: {"TOPIC-1": topic}},
+            {Topic: {"TOPIC-1": deepcopy(topic)}},
+        ]
+
+        self.project.diff_branch(branch_name="feature-z")
+
+        # Parent projection should be fetched with at_sequence=None (latest)
+        parent_call = self.mock_api.pull_branch_resources.call_args_list[0]
+        self.assertEqual(parent_call.args[0], "main")
+        self.assertIsNone(parent_call.args[1])
+
+    def test_file_path_filtering(self):
+        """Only diffs matching the provided file_paths are returned."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-f",
+                    "branch-f-id",
+                    {"parentBranchId": "main", "parentSequence": "5"},
+                ),
+            ]
+        )
+
+        topic_a = self._make_topic("TOPIC-A", "Topic A", "old A")
+        topic_b = self._make_topic("TOPIC-B", "Topic B", "old B")
+        parent_resources = {
+            Topic: {"TOPIC-A": topic_a, "TOPIC-B": topic_b},
+        }
+
+        topic_a_new = self._make_topic("TOPIC-A", "Topic A", "new A")
+        topic_b_new = self._make_topic("TOPIC-B", "Topic B", "new B")
+        branch_resources = {
+            Topic: {"TOPIC-A": topic_a_new, "TOPIC-B": topic_b_new},
+        }
+
+        self.mock_api.pull_branch_resources.side_effect = [
+            parent_resources,
+            branch_resources,
+        ]
+
+        topic_a_path = os.path.join("topics", "topic_a.yaml")
+        diffs = self.project.diff_branch(branch_name="feature-f", file_paths=[topic_a_path])
+
+        self.assertIsNotNone(diffs)
+        self.assertIn(topic_a_path, diffs)
+        topic_b_path = os.path.join("topics", "topic_b.yaml")
+        self.assertNotIn(topic_b_path, diffs)
+
+    def test_file_path_filtering_no_matches_returns_none(self):
+        """When file_paths filter excludes all diffs, returns None."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-g",
+                    "branch-g-id",
+                    {"parentBranchId": "main", "parentSequence": "5"},
+                ),
+            ]
+        )
+
+        topic = self._make_topic("TOPIC-1", "Hours", "old")
+        topic_new = self._make_topic("TOPIC-1", "Hours", "new")
+
+        self.mock_api.pull_branch_resources.side_effect = [
+            {Topic: {"TOPIC-1": topic}},
+            {Topic: {"TOPIC-1": topic_new}},
+        ]
+
+        result = self.project.diff_branch(
+            branch_name="feature-g",
+            file_paths=["nonexistent/file.yaml"],
+        )
+        self.assertIsNone(result)
+
+    def test_current_branch_used_when_no_name_specified(self):
+        """When no branch_name given, uses the current branch."""
+        self.project.branch_id = "branch-cur-id"
+        self.mock_api.branch_id = "branch-cur-id"
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "current-branch",
+                    "branch-cur-id",
+                    {"parentBranchId": "main", "parentSequence": "7"},
+                ),
+            ]
+        )
+
+        topic = self._make_topic("TOPIC-1", "FAQ", "same")
+        self.mock_api.pull_branch_resources.side_effect = [
+            {Topic: {"TOPIC-1": topic}},
+            {Topic: {"TOPIC-1": deepcopy(topic)}},
+        ]
+
+        result = self.project.diff_branch()
+        self.assertIsNone(result)
+
+        # Should have used the current branch's metadata
+        branch_call = self.mock_api.pull_branch_resources.call_args_list[1]
+        self.assertEqual(branch_call.args, ("branch-cur-id",))
+
+
+class GetBranchesReturnTypeTest(unittest.TestCase):
+    """Tests for the updated get_branches return type (dict of metadata dicts)."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def test_returns_current_branch_name_and_metadata_dict(self):
+        """get_branches returns (current_name, {name: metadata_dict})."""
+        self.project.branch_id = "branch-abc"
+        self.mock_api.branch_id = "branch-abc"
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+            "my-feature": {"branchId": "branch-abc", "parentBranchId": "main"},
+        }
+
+        current_name, branches = self.project.get_branches()
+
+        self.assertEqual(current_name, "my-feature")
+        self.assertIn("main", branches)
+        self.assertIn("my-feature", branches)
+        self.assertEqual(branches["my-feature"]["branchId"], "branch-abc")
+        self.assertEqual(branches["my-feature"]["parentBranchId"], "main")
+
+    def test_returns_none_when_local_branch_not_found(self):
+        """When the local branch_id doesn't match any remote branch, current_name is None."""
+        self.project.branch_id = "deleted-branch-id"
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+        }
+
+        current_name, branches = self.project.get_branches()
+
+        self.assertIsNone(current_name)
+        self.assertEqual(len(branches), 1)
+
+
+class RtcPullEnvTest(unittest.TestCase):
+    """Tests for AgentStudioProject.rtc_pull_env writing RTC files to disk."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project = AgentStudioProject.from_dict(deepcopy(EMPTY_PROJECT_DATA), self.temp_dir)
+        self.env_dir = os.path.join(self.temp_dir, "real_time_configuration", "draft_and_sandbox")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _read_json(self, file_name: str) -> object:
+        with open(os.path.join(self.env_dir, file_name), "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_pull_env_writes_schema_and_data_returned_by_api(self):
+        """Schema and variables from the API are written to schema.json and data.json."""
+        config = {
+            "schema": {"type": "object", "properties": {"flag": {"type": "boolean"}}},
+            "variables": {"flag": True},
+            "lastUpdated": "2026-01-01T00:00:00Z",
+        }
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            result = self.project.rtc_pull_env("sandbox")
+
+        self.assertEqual(result["environment"], "sandbox")
+        self.assertEqual(self._read_json("schema.json"), config["schema"])
+        self.assertEqual(self._read_json("data.json"), config["variables"])
+
+    def test_pull_env_writes_empty_dicts_when_api_returns_null(self):
+        """A project with no RTC configured writes {} to disk, never literal null.
+
+        The API returns explicit JSON null (not a missing key) for schema/variables when
+        RTC has never been configured, and null is not valid content for these files.
+        """
+        config = {"schema": None, "variables": None, "lastUpdated": "2026-01-01T00:00:00Z"}
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            self.project.rtc_pull_env("sandbox")
+
+        self.assertEqual(self._read_json("schema.json"), {})
+        self.assertEqual(self._read_json("data.json"), {})
+
+    def test_pull_env_metadata_records_empty_dicts_when_api_returns_null(self):
+        """The stored baseline metadata is {} rather than being left unset on null."""
+        config = {"schema": None, "variables": None, "lastUpdated": "2026-01-01T00:00:00Z"}
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            self.project.rtc_pull_env("sandbox")
+
+        self.assertEqual(self.project.rtc_metadata["sandbox"]["base_schema"], {})
+        self.assertEqual(self.project.rtc_metadata["sandbox"]["base_data"], {})
+        self.assertEqual(
+            self.project.rtc_metadata["sandbox"]["last_updated"], "2026-01-01T00:00:00Z"
+        )
+
+    def test_pull_env_null_config_round_trips_through_rtc_load_local(self):
+        """Files written from a null API response can be read back as empty dicts."""
+        config = {"schema": None, "variables": None, "lastUpdated": "2026-01-01T00:00:00Z"}
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            self.project.rtc_pull_env("sandbox")
+
+        loaded = self.project.rtc_load_local("sandbox")
+
+        self.assertEqual(loaded, {"schema": {}, "variables": {}})
+
+    def test_pull_env_schema_only_does_not_write_data_file(self):
+        """schema_only writes schema.json and leaves data.json absent."""
+        config = {"schema": {"type": "object"}, "variables": {"flag": True}, "lastUpdated": "T1"}
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            result = self.project.rtc_pull_env("sandbox", schema_only=True)
+
+        self.assertNotIn("data_file", result)
+        self.assertTrue(os.path.exists(os.path.join(self.env_dir, "schema.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.env_dir, "data.json")))
 
 
 if __name__ == "__main__":

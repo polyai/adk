@@ -118,13 +118,13 @@ class DefaultLanguage(MultiResourceYamlResource):
         _write_languages(type(self), true_file_path, top_level, save_to_cache)
 
     @classmethod
-    def read_from_file(cls, file_path: str) -> str:
+    def _get_matching(cls, file_path: str) -> dict:
+        """Return the default language as a dict, reshaped from its bare scalar on-disk form."""
         true_file_path, _ = _parse_multi_resource_path(file_path)
-        top_level = cls._get_top_level_data(true_file_path)
-        value = top_level.get("default_language")
+        value = cls._get_top_level_data(true_file_path).get("default_language")
         if not value:
             raise FileNotFoundError(f"default_language not found in {true_file_path}")
-        return utils.dump_yaml({"language_code": value})
+        return {"language_code": value}
 
     @classmethod
     def delete_resource(cls, file_path: str, save_to_cache: bool = False) -> None:
@@ -240,14 +240,15 @@ class AdditionalLanguage(MultiResourceYamlResource):
         _write_languages(type(self), true_file_path, top_level, save_to_cache)
 
     @classmethod
-    def read_from_file(cls, file_path: str) -> str:
+    def _get_matching(cls, file_path: str) -> dict:
+        """Return the named additional language as a dict, reshaped from its bare scalar
+        on-disk form."""
         true_file_path, segments = _parse_multi_resource_path(file_path)
         resource_name = segments[-1]
-        top_level = cls._get_top_level_data(true_file_path)
-        additional = top_level.get("additional_languages") or []
+        additional = cls._get_top_level_data(true_file_path).get("additional_languages") or []
         if resource_name not in additional:
             raise FileNotFoundError(f"Language {resource_name} not found in {true_file_path}")
-        return utils.dump_yaml({"language_code": resource_name})
+        return {"language_code": resource_name}
 
     @classmethod
     def delete_resource(cls, file_path: str, save_to_cache: bool = False) -> None:

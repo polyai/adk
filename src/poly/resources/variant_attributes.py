@@ -266,6 +266,9 @@ class VariantAttribute(MultiResourceYamlResource):
         cls, yaml_dict: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> dict:
         """Replace variant names with IDs in a parsed YAML dict."""
+        yaml_dict = super().from_pretty_dict(
+            yaml_dict, resource_mappings=resource_mappings, **kwargs
+        )
         variant_names_to_ids = {
             resource.resource_name: resource.resource_id
             for resource in resource_mappings or []

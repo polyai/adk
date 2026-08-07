@@ -175,6 +175,9 @@ class FlowConfig(YamlResource):
         **kwargs,
     ) -> dict:
         """Replace start_step name with ID in a parsed YAML dict."""
+        yaml_dict = super().from_pretty_dict(
+            yaml_dict, resource_mappings=resource_mappings, resource_name=resource_name, **kwargs
+        )
         start_step_name = yaml_dict.get("start_step")
         if start_step_name:
             for resource in resource_mappings or []:
@@ -382,7 +385,7 @@ class FlowStep(BaseFlowStep, YamlResource):
                 if step.get("type") == "function_step":
                     continue
 
-                local_resource_id = f"{flow_data['name']}_{step_id}"
+                local_resource_id = f"{flow_id}_{step_id}"
                 asr_biasing_data = step.get("asrBiasing", {})
                 dtmf_config_data = step.get("dtmfConfig", {})
                 references = step.get("references", {})
@@ -1493,7 +1496,7 @@ class FunctionStep(Function, BaseFlowStep):
                 if step.get("type") != "function_step":
                     continue
 
-                local_resource_id = f"{flow_data['name']}_{step_id}"
+                local_resource_id = f"{flow_id}_{step_id}"
                 function = step.get("function", {})
                 func_steps[local_resource_id] = cls(
                     resource_id=local_resource_id,

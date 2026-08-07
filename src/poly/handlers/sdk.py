@@ -403,40 +403,58 @@ class SourcererSDK:
                 error_msg = f"Request failed: {e}"
             raise SourcererAPIError(error_msg) from e
 
-    def fetch_projection(self, force_refresh: bool = False) -> dict[str, Any]:
-        """Fetch the projection from the API
+    def fetch_projection(
+        self,
+        force_refresh: bool = False,
+        branch_id: Optional[str] = None,
+        at_sequence: Optional[int] = None,
+    ) -> dict[str, Any]:
+        """Fetch the projection from the API.
 
         Args:
-            force_refresh: If True, bypass cache and fetch fresh data
+            force_refresh: If True, bypass cache and fetch fresh data.
+            branch_id: Fetch for this branch instead of ``self.branch_id``.
+                When provided, caching is skipped entirely.
+            at_sequence: Return the projection at this historical event-sequence
+                number. Implies *force_refresh* and skips caching.
 
         Returns:
-            The projection data as a dictionary
+            The projection data as a dictionary.
 
         Raises:
-            SourcererAPIError: If the API request fails
+            SourcererAPIError: If the API request fails.
         """
-        if self._projection_cache is not None and not force_refresh:
+        use_cache = branch_id is None and at_sequence is None
+        if use_cache and self._projection_cache is not None and not force_refresh:
             return self._projection_cache
 
+        target_branch = branch_id or self.branch_id
+        url = (
+            f"{self.base_url}/accounts/{self.account_id}"
+            f"/projects/{self.project_id}/branches/{target_branch}/projection"
+        )
+        params: dict[str, Any] = {}
+        if at_sequence is not None:
+            params["atSequence"] = at_sequence
+
         try:
-            response = self.session.get(self._get_projection_url())
+            response = self.session.get(url, params=params or None)
             response.raise_for_status()
 
             response_data = response.json()
+            projection = response_data["projection"]
 
-            # Handle the response structure: { lastKnownSequence: string, projection: object }
-            self._projection_cache = response_data["projection"]
+            if use_cache:
+                self._projection_cache = projection
+                if (
+                    "lastKnownSequence" in response_data
+                    and response_data["lastKnownSequence"] is not None
+                ):
+                    self._last_known_sequence = int(response_data["lastKnownSequence"])
+                else:
+                    self._last_known_sequence = None
 
-            # Cache the sequence number separately
-            if (
-                "lastKnownSequence" in response_data
-                and response_data["lastKnownSequence"] is not None
-            ):
-                self._last_known_sequence = int(response_data["lastKnownSequence"])
-            else:
-                self._last_known_sequence = None
-
-            return self._projection_cache
+            return projection
 
         except requests.exceptions.RequestException as e:
             if hasattr(e, "response") and e.response is not None:
@@ -451,11 +469,13 @@ class SourcererSDK:
             raise SourcererAPIError(error_msg) from e
 
     def fetch_deployment_projection(self, deployment_id: str) -> dict[str, Any]:
-        """Fetch projection for a specific deployment from the API
+        """Fetch projection for a specific deployment from the API.
+
         Returns:
-            The deployment projection data as a dictionary
+            The deployment projection data as a dictionary.
+
         Raises:
-            SourcererAPIError: If the API request fails
+            SourcererAPIError: If the API request fails.
         """
         try:
             response = self.session.get(self._get_deployment_projection_url(deployment_id))

@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import copy
 import unittest
 
 import poly.resources.resource_utils as resource_utils
@@ -137,15 +138,17 @@ class MergeUtilsTests(unittest.TestCase):
         updated = "keep\nversion A\nkeep"
         incoming = "keep\nversion B\nkeep"
         result = utils.merge_strings(original, updated, incoming)
-        expected = "\n".join([
-            "keep",
-            "<<<<<<<",
-            "version A",
-            "=======",
-            "version B",
-            ">>>>>>>",
-            "keep",
-        ])
+        expected = "\n".join(
+            [
+                "keep",
+                "<<<<<<<",
+                "version A",
+                "=======",
+                "version B",
+                ">>>>>>>",
+                "keep",
+            ]
+        )
         self.assertEqual(result, expected)
 
     def test_merge_strings_with_trailing_newlines(self):
@@ -289,7 +292,6 @@ def test_code(
             restored_code,
         )
 
-
         with_docstring_code = """import random
 def test_code(
     conv: Conversation,
@@ -371,16 +373,8 @@ def test_code(
 
     def test_restore_function_def_line_comment_with_hash_in_body(self):
         """Test that a # inside the comment text is not double-spaced."""
-        code = (
-            "def test_code(\n"
-            "    conv: Conversation\n"
-            "):  # see issue #123\n"
-            "    pass\n"
-        )
-        expected = (
-            "def test_code(conv: Conversation):  # see issue #123\n"
-            "    pass\n"
-        )
+        code = "def test_code(\n    conv: Conversation\n):  # see issue #123\n    pass\n"
+        expected = "def test_code(conv: Conversation):  # see issue #123\n    pass\n"
         restored = resource_utils.restore_function_def_line(code, "test_code")
         self.assertEqual(restored, expected)
 
@@ -407,10 +401,14 @@ class StringUtilsTests(unittest.TestCase):
         self.assertEqual(cleaned_name, "this_is_a_test_name_with_special_chars")
 
         allow_uppercase = "ThisIsATestName"
-        self.assertEqual(resource_utils.clean_name(allow_uppercase, lowercase=False), "ThisIsATestName")
+        self.assertEqual(
+            resource_utils.clean_name(allow_uppercase, lowercase=False), "ThisIsATestName"
+        )
 
         allow_non_english = "こんにちは"
-        self.assertEqual(resource_utils.clean_name(allow_non_english, lowercase=False), "こんにちは")
+        self.assertEqual(
+            resource_utils.clean_name(allow_non_english, lowercase=False), "こんにちは"
+        )
 
     def test_to_snake_case(self):
         camel_case = "ThisIsATestName"
@@ -547,9 +545,7 @@ class ValidateReferencesTests(unittest.TestCase):
         self.assertTrue(valid)
         self.assertEqual(invalid, [])
 
-        valid, invalid = resource_utils.validate_references(
-            {"attributes": {}, "variables": {}}, []
-        )
+        valid, invalid = resource_utils.validate_references({"attributes": {}, "variables": {}}, [])
         self.assertTrue(valid)
         self.assertEqual(invalid, [])
 
@@ -867,6 +863,174 @@ class ResourceMappingTests(unittest.TestCase):
         )
         expected = "Hello {{vrbl:VAR-customer_name}}, order {{vrbl:VAR-order_id}}."
         self.assertEqual(updated, expected)
+
+
+class ReplaceResourceNamesWithIdsInDataTests(unittest.TestCase):
+    """Tests for replace_resource_names_with_ids_in_data (dict/list walking variant)."""
+
+    # Reuse the same mappings as the string-based reference tests.
+    TEST_RESOURCE_MAPPINGS = ResourceMappingTests.TEST_RESOURCE_MAPPINGS
+
+    def _nested_data(self) -> dict:
+        """A representative nested structure with references at multiple depths.
+
+        References appear inside dict values, list items, and deeply nested
+        dicts, interleaved with non-string values (int, bool, None).
+        """
+        return {
+            "prompt": "Call {{fn:Function 1}} then {{fn:Function 2}}.",
+            "enabled": True,
+            "retries": 3,
+            "fallback": None,
+            "steps": [
+                "First use {{fn:Function 1}}.",
+                42,
+                {
+                    "instruction": "Then {{entity:customer_name}} and {{ho:default}}.",
+                    "nested": {
+                        "deep": "Send {{twilio_sms:test_template}} now.",
+                        "count": 7,
+                    },
+                },
+            ],
+            "closing": "Finally {{attr:customer-name}}.",
+        }
+
+    def test_equivalence_with_string_path_over_serialized_yaml(self):
+        """In-data replacement matches the serialize -> string replace -> reparse path.
+
+        The equivalence holds because references only ever appear inside scalar
+        string values, never in keys or YAML structure.
+        """
+        data = self._nested_data()
+
+        # Baseline: run the existing string-based replacer over the serialized YAML.
+        yaml_string = resource_utils.dump_yaml(data)
+        replaced_yaml = resource_utils.replace_resource_names_with_ids(
+            yaml_string, self.TEST_RESOURCE_MAPPINGS
+        )
+        baseline = resource_utils.load_yaml(replaced_yaml)
+
+        result = resource_utils.replace_resource_names_with_ids_in_data(
+            data, self.TEST_RESOURCE_MAPPINGS
+        )
+
+        self.assertEqual(result, baseline)
+
+    def test_scalar_string_references_are_replaced_at_all_depths(self):
+        """Every string leaf has its references swapped, keys untouched."""
+        data = self._nested_data()
+
+        result = resource_utils.replace_resource_names_with_ids_in_data(
+            data, self.TEST_RESOURCE_MAPPINGS
+        )
+
+        self.assertEqual(result["prompt"], "Call {{fn:function-1}} then {{fn:function-2}}.")
+        self.assertEqual(result["steps"][0], "First use {{fn:function-1}}.")
+        self.assertEqual(
+            result["steps"][2]["instruction"],
+            "Then {{entity:ENTITY-customer_name}} and {{ho:handoff-1}}.",
+        )
+        self.assertEqual(
+            result["steps"][2]["nested"]["deep"],
+            "Send {{twilio_sms:SMS_TEMPLATE-123}} now.",
+        )
+        self.assertEqual(result["closing"], "Finally {{attr:attr-customer-name}}.")
+
+    def test_reference_shaped_keys_are_not_rewritten(self):
+        """Only scalar string values are rewritten; dict keys are left untouched."""
+        data = {"{{fn:Function 1}}": "Refers to {{fn:Function 2}}."}
+
+        result = resource_utils.replace_resource_names_with_ids_in_data(
+            data, self.TEST_RESOURCE_MAPPINGS
+        )
+
+        # Key preserved verbatim, value rewritten.
+        self.assertEqual(result, {"{{fn:Function 1}}": "Refers to {{fn:function-2}}."})
+
+    def test_non_string_leaves_are_preserved(self):
+        """Ints, bools, and None pass through unchanged and keep their types."""
+        data = self._nested_data()
+
+        result = resource_utils.replace_resource_names_with_ids_in_data(
+            data, self.TEST_RESOURCE_MAPPINGS
+        )
+
+        self.assertIs(result["enabled"], True)
+        self.assertEqual(result["retries"], 3)
+        self.assertIsNone(result["fallback"])
+        self.assertEqual(result["steps"][1], 42)
+        self.assertEqual(result["steps"][2]["nested"]["count"], 7)
+
+    def test_input_is_not_mutated(self):
+        """Calling the function leaves the original structure untouched."""
+        data = self._nested_data()
+        original = copy.deepcopy(data)
+
+        resource_utils.replace_resource_names_with_ids_in_data(data, self.TEST_RESOURCE_MAPPINGS)
+
+        self.assertEqual(data, original)
+
+    def test_result_containers_are_independent_of_input(self):
+        """Mutating the returned structure does not affect the input."""
+        data = self._nested_data()
+        original = copy.deepcopy(data)
+
+        result = resource_utils.replace_resource_names_with_ids_in_data(
+            data, self.TEST_RESOURCE_MAPPINGS
+        )
+
+        # Mutate nested dict and list containers in the result.
+        result["steps"].append("new step")
+        result["steps"][2]["nested"]["count"] = 999
+
+        self.assertEqual(data, original)
+
+    def test_empty_containers_round_trip(self):
+        """Empty dicts and lists are returned as fresh empty containers."""
+        self.assertEqual(
+            resource_utils.replace_resource_names_with_ids_in_data({}, self.TEST_RESOURCE_MAPPINGS),
+            {},
+        )
+        self.assertEqual(
+            resource_utils.replace_resource_names_with_ids_in_data([], self.TEST_RESOURCE_MAPPINGS),
+            [],
+        )
+
+    def test_flow_scoped_mappings_only_apply_for_matching_flow(self):
+        """Flow-scoped references are swapped only when flow_folder_name matches."""
+        data = {
+            "prompt": "In the flow, call {{ft:Flow Function}} and {{fn:Function 1}}.",
+        }
+
+        flow_1_result = resource_utils.replace_resource_names_with_ids_in_data(
+            data, self.TEST_RESOURCE_MAPPINGS, flow_folder_name="flow_1"
+        )
+        self.assertEqual(
+            flow_1_result["prompt"],
+            "In the flow, call {{ft:flow-function-1}} and {{fn:function-1}}.",
+        )
+
+        flow_2_result = resource_utils.replace_resource_names_with_ids_in_data(
+            data, self.TEST_RESOURCE_MAPPINGS, flow_folder_name="flow_2"
+        )
+        self.assertEqual(
+            flow_2_result["prompt"],
+            "In the flow, call {{ft:flow-function-2}} and {{fn:function-1}}.",
+        )
+
+    def test_flow_scoped_mappings_not_applied_without_flow(self):
+        """Without a matching flow_folder_name, flow-scoped references are left as-is."""
+        data = {
+            "prompt": "Call {{ft:Flow Function}} and {{fn:Function 1}}.",
+        }
+
+        result = resource_utils.replace_resource_names_with_ids_in_data(
+            data, self.TEST_RESOURCE_MAPPINGS
+        )
+
+        # The flow-scoped {{ft:...}} reference is untouched; the global {{fn:...}} is swapped.
+        self.assertEqual(result["prompt"], "Call {{ft:Flow Function}} and {{fn:function-1}}.")
 
 
 class FlowUtilsTests(unittest.TestCase):
