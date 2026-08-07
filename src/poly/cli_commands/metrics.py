@@ -329,6 +329,14 @@ class MetricsCommand(BaseCommand):
                 sys.exit(1)
             api = api_result
 
+        if expected_values and metric_type != "string":
+            msg = "--expected-values is only valid for string metrics."
+            if output_json:
+                json_print({"success": False, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
+
         data: dict = {"name": name, "type": metric_type}
         if description:
             data["description"] = description
@@ -376,6 +384,19 @@ class MetricsCommand(BaseCommand):
     ) -> None:
         """Update an existing custom metric."""
         project = load_project(base_path, output_json=output_json)
+
+        if expected_values is not None:
+            metrics = AgentStudioInterface.get_custom_metrics(
+                project.region, project.account_id, project.project_id
+            )
+            metric = next((m for m in metrics if m.get("name") == name), None)
+            if metric and metric.get("type") != "string":
+                msg = "--expected-values is only valid for string metrics."
+                if output_json:
+                    json_print({"success": False, "error": msg})
+                else:
+                    error(msg)
+                sys.exit(1)
 
         data: dict = {}
         if description is not None:
@@ -441,6 +462,8 @@ class MetricsCommand(BaseCommand):
             error(f"Metric {name!r} not found.")
             sys.exit(1)
 
+        is_string = metric.get("type") == "string"
+
         # Display current values
         plain(f"\n[bold]Current values for {name}:[/bold]")
         plain(f"  name:            {metric.get('name', '—')}")
@@ -448,13 +471,18 @@ class MetricsCommand(BaseCommand):
         plain(f"  description:     {metric.get('description') or '—'}")
         plain(f"  api:             {metric.get('api', False)}")
         plain(f"  active:          {metric.get('active', True)}")
-        ev = metric.get("expected_values") or []
-        plain(f"  expected_values: {' '.join(ev) if ev else '—'}")
+        if is_string:
+            ev = metric.get("expected_values") or []
+            plain(f"  expected_values: {' '.join(ev) if ev else '—'}")
         plain("")
+
+        choices = ["description", "api", "active"]
+        if is_string:
+            choices.append("expected_values")
 
         fields = questionary.checkbox(
             "Which fields do you want to edit?",
-            choices=["description", "api", "active", "expected_values"],
+            choices=choices,
         ).ask()
         if fields is None:
             sys.exit(1)

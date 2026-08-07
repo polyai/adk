@@ -254,6 +254,48 @@ class MetricsAddTest(unittest.TestCase):
         printed = mock_json.call_args[0][0]
         self.assertIn("--type", printed["error"])
 
+    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.cli_commands.metrics.load_project")
+    def test_add_expected_values_rejected_for_non_string(self, mock_load, mock_error):
+        """Expected values are rejected for non-string metric types."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_load.return_value = project
+
+        with self.assertRaises(SystemExit) as ctx:
+            MetricsCommand.metrics_add(
+                "/fake/path",
+                name="SCORE",
+                metric_type="int",
+                description="desc",
+                api=True,
+                expected_values=["a", "b"],
+                output_json=False,
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_error.assert_called_once()
+        self.assertIn("only valid for string", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.metrics.json_print")
+    @patch("poly.cli_commands.metrics.load_project")
+    def test_add_expected_values_rejected_json(self, mock_load, mock_json):
+        """In JSON mode, expected values are rejected for non-string types."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_load.return_value = project
+
+        with self.assertRaises(SystemExit):
+            MetricsCommand.metrics_add(
+                "/fake/path",
+                name="SCORE",
+                metric_type="int",
+                expected_values=["a", "b"],
+                output_json=True,
+            )
+
+        printed = mock_json.call_args[0][0]
+        self.assertFalse(printed["success"])
+        self.assertIn("only valid for string", printed["error"])
+
     @patch("poly.cli_commands.metrics.json_print")
     @patch("poly.cli_commands.metrics.AgentStudioInterface.create_custom_metric")
     @patch("poly.cli_commands.metrics.load_project")
@@ -360,6 +402,26 @@ class MetricsEditTest(unittest.TestCase):
         printed = mock_json.call_args[0][0]
         self.assertFalse(printed["success"])
 
+    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
+    @patch("poly.cli_commands.metrics.load_project")
+    def test_edit_expected_values_rejected_for_non_string(self, mock_load, mock_get, mock_error):
+        """Expected values flag is rejected when the metric type is not string."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_load.return_value = project
+        mock_get.return_value = [{"name": "SCORE", "type": "int"}]
+
+        with self.assertRaises(SystemExit) as ctx:
+            MetricsCommand.metrics_edit(
+                "/fake/path",
+                name="SCORE",
+                expected_values=["a", "b"],
+                output_json=False,
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("only valid for string", mock_error.call_args[0][0])
+
     @patch("poly.cli_commands.metrics.json_print")
     @patch("poly.cli_commands.metrics.AgentStudioInterface.update_custom_metric")
     @patch("poly.cli_commands.metrics.load_project")
@@ -386,6 +448,14 @@ class InteractiveEditTest(unittest.TestCase):
             "api": False,
             "active": True,
             "expected_values": [],
+        },
+        {
+            "name": "STATUS",
+            "type": "string",
+            "description": "Call status",
+            "api": False,
+            "active": True,
+            "expected_values": ["open", "closed"],
         },
     ]
 
@@ -459,16 +529,30 @@ class InteractiveEditTest(unittest.TestCase):
     @patch("questionary.text")
     @patch("questionary.checkbox")
     @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
-    def test_edit_expected_values(self, mock_get, mock_checkbox, mock_text):
-        """Parses space-separated expected values."""
+    def test_edit_expected_values_string_metric(self, mock_get, mock_checkbox, mock_text):
+        """Parses space-separated expected values for string metrics."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_get.return_value = self.SAMPLE_METRICS
         mock_checkbox.return_value.ask.return_value = ["expected_values"]
         mock_text.return_value.ask.return_value = "low medium high"
 
-        result = MetricsCommand._interactive_edit(project, "SCORE")
+        result = MetricsCommand._interactive_edit(project, "STATUS")
 
         self.assertEqual(result, {"expected_values": ["low", "medium", "high"]})
+
+    @patch("questionary.checkbox")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
+    def test_no_expected_values_for_non_string(self, mock_get, mock_checkbox):
+        """expected_values is not offered as a choice for non-string metrics."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_get.return_value = self.SAMPLE_METRICS
+        mock_checkbox.return_value.ask.return_value = []
+
+        with self.assertRaises(SystemExit):
+            MetricsCommand._interactive_edit(project, "SCORE")
+
+        choices = mock_checkbox.call_args[1]["choices"]
+        self.assertNotIn("expected_values", choices)
 
 
 class MetricsImportTest(unittest.TestCase):
