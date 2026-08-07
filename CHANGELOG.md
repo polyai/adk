@@ -1,6 +1,45 @@
 # CHANGELOG
 
 
+## v0.38.3 (2026-08-07)
+
+### Bug Fixes
+
+- Skip documents without readable contents ([#262](https://github.com/polyai/adk/pull/262),
+  [`4e24a35`](https://github.com/polyai/adk/commit/4e24a35e73d1b148cf122906b187792068ef4a7a))
+
+## Summary
+
+Documents the current user lacks read permission for come back from the platform without a
+  `contents` field. `Document.from_projection` now skips those entries instead of creating a
+  `Document` with empty content.
+
+## Motivation
+
+Previously, a document missing `contents` in the projection was still materialized locally with an
+  empty string, silently masking the fact that the user couldn't actually read it.
+
+## Changes
+
+- `Document.from_projection` skips entities that don't have a `contents` key - Reads the field via
+  `document_data["contents"]` directly (only reached once presence is confirmed)
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  conventional commits
+
+## Screenshots / Logs
+
+N/A
+
+
 ## v0.38.2 (2026-08-07)
 
 ### Bug Fixes
