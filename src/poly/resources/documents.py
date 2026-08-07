@@ -129,12 +129,14 @@ class Document(Resource):
         for document_id, document_data in (
             projection.get("documents", {}).get("documents", {}).get("entities", {}).items()
         ):
+            if "contents" not in document_data:
+                continue
             path = document_data.get("path", "") or ""
             name = path.removesuffix(".md")
             documents[document_id] = Document(
                 resource_id=document_id,
                 name=name,
                 path=path,
-                contents=document_data.get("content", ""),
+                contents=document_data["contents"],
             )
         return documents

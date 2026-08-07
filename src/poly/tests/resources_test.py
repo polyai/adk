@@ -8330,6 +8330,50 @@ class DocumentTests(unittest.TestCase):
         self.assertEqual(doc_lower.file_path, doc_mixed.file_path)
 
 
+class DocumentFromProjection(unittest.TestCase):
+    """Tests for Document.from_projection."""
+
+    def test_parses_document_fields(self):
+        """Verify document name, path, and contents are parsed correctly."""
+        projection = {
+            "documents": {
+                "documents": {
+                    "entities": {
+                        "DOC-1": {
+                            "path": "faq.md",
+                            "contents": "Frequently asked questions",
+                        }
+                    }
+                }
+            }
+        }
+        documents = Document.from_projection(projection)
+        self.assertEqual(list(documents), ["DOC-1"])
+        document = documents["DOC-1"]
+        self.assertIsInstance(document, Document)
+        self.assertEqual(document.name, "faq")
+        self.assertEqual(document.contents, "Frequently asked questions")
+
+    def test_skips_document_without_contents(self):
+        """A document missing 'contents' means the user lacks read permission, so it's skipped."""
+        projection = {
+            "documents": {
+                "documents": {
+                    "entities": {
+                        "DOC-1": {"path": "unreadable.md"},
+                        "DOC-2": {"path": "readable.md", "contents": "visible"},
+                    }
+                }
+            }
+        }
+        documents = Document.from_projection(projection)
+        self.assertEqual(list(documents), ["DOC-2"])
+
+    def test_empty_projection_yields_no_documents(self):
+        """An empty projection should return an empty dict."""
+        self.assertEqual(Document.from_projection({}), {})
+
+
 class TopicFromProjection(unittest.TestCase):
     """Tests for Topic.from_projection."""
 
