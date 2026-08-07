@@ -46,7 +46,7 @@ class MetricsListTest(unittest.TestCase):
         mock_load.return_value = project
         mock_get.return_value = [{"name": "SCORE", "type": "int"}]
 
-        MetricsCommand.metrics_list("/fake/path", output_json=False)
+        MetricsCommand.metrics_list("/tmp/test", output_json=False)
 
         mock_get.assert_called_once_with("us", "acc1", "proj1")
         mock_print.assert_called_once_with([{"name": "SCORE", "type": "int"}])
@@ -61,7 +61,7 @@ class MetricsListTest(unittest.TestCase):
         metrics = [{"name": "SCORE"}]
         mock_get.return_value = metrics
 
-        MetricsCommand.metrics_list("/fake/path", output_json=True)
+        MetricsCommand.metrics_list("/tmp/test", output_json=True)
 
         mock_json.assert_called_once_with(metrics)
 
@@ -79,7 +79,7 @@ class MetricsExportTest(unittest.TestCase):
         data = {"SCORE": {"type": "int"}, "STATUS": {"type": "string"}}
         mock_export.return_value = data
 
-        MetricsCommand.metrics_export("/fake/path", output_json=True)
+        MetricsCommand.metrics_export("/tmp/test", output_json=True)
 
         mock_json.assert_called_once_with(data)
 
@@ -94,7 +94,7 @@ class MetricsExportTest(unittest.TestCase):
         with patch("poly.cli_commands.metrics.YAML") as mock_yaml_cls:
             mock_ry = MagicMock()
             mock_yaml_cls.return_value = mock_ry
-            MetricsCommand.metrics_export("/fake/path", file_path=None, output_json=False)
+            MetricsCommand.metrics_export("/tmp/test", file_path=None, output_json=False)
 
             import sys
 
@@ -115,7 +115,7 @@ class MetricsExportTest(unittest.TestCase):
         ):
             mock_ry = MagicMock()
             mock_yaml_cls.return_value = mock_ry
-            MetricsCommand.metrics_export("/fake/path", file_path="out.yaml", output_json=False)
+            MetricsCommand.metrics_export("/tmp/test", file_path="out.yaml", output_json=False)
 
             mock_file.assert_called_once_with("out.yaml", "w")
             mock_ry.dump.assert_called_once()
@@ -133,7 +133,7 @@ class MetricsExportTest(unittest.TestCase):
         with patch("poly.cli_commands.metrics.YAML") as mock_yaml_cls:
             mock_ry = MagicMock()
             mock_yaml_cls.return_value = mock_ry
-            MetricsCommand.metrics_export("/fake/path", output_json=False)
+            MetricsCommand.metrics_export("/tmp/test", output_json=False)
 
             mock_ry.dump.assert_called_once_with({}, unittest.mock.ANY)
 
@@ -153,7 +153,7 @@ class MetricsAddTest(unittest.TestCase):
         mock_update.return_value = {"name": "SCORE", "type": "int", "api": True}
 
         MetricsCommand.metrics_add(
-            "/fake/path",
+            "/tmp/test",
             name="SCORE",
             metric_type="int",
             description="CSAT Score",
@@ -182,7 +182,7 @@ class MetricsAddTest(unittest.TestCase):
         mock_create.return_value = {"name": "SCORE", "type": "int"}
 
         MetricsCommand.metrics_add(
-            "/fake/path",
+            "/tmp/test",
             name="SCORE",
             metric_type="int",
             api=False,
@@ -202,7 +202,7 @@ class MetricsAddTest(unittest.TestCase):
         mock_create.return_value = {}
 
         MetricsCommand.metrics_add(
-            "/fake/path",
+            "/tmp/test",
             name="STATUS",
             metric_type="string",
             description=None,
@@ -223,7 +223,7 @@ class MetricsAddTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_add(
-                "/fake/path",
+                "/tmp/test",
                 name=None,
                 metric_type="int",
                 output_json=True,
@@ -244,7 +244,7 @@ class MetricsAddTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_add(
-                "/fake/path",
+                "/tmp/test",
                 name="SCORE",
                 metric_type=None,
                 output_json=True,
@@ -263,7 +263,7 @@ class MetricsAddTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_add(
-                "/fake/path",
+                "/tmp/test",
                 name="SCORE",
                 metric_type="int",
                 description="desc",
@@ -285,7 +285,7 @@ class MetricsAddTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit):
             MetricsCommand.metrics_add(
-                "/fake/path",
+                "/tmp/test",
                 name="SCORE",
                 metric_type="int",
                 expected_values=["a", "b"],
@@ -307,7 +307,7 @@ class MetricsAddTest(unittest.TestCase):
         mock_create.return_value = result
 
         MetricsCommand.metrics_add(
-            "/fake/path",
+            "/tmp/test",
             name="SCORE",
             metric_type="int",
             output_json=True,
@@ -327,7 +327,7 @@ class MetricsAddTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_add(
-                "/fake/path",
+                "/tmp/test",
                 name="SCORE",
                 metric_type="int",
                 description="desc",
@@ -350,7 +350,7 @@ class MetricsAddTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit):
             MetricsCommand.metrics_add(
-                "/fake/path", name="SCORE", metric_type="int", output_json=True
+                "/tmp/test", name="SCORE", metric_type="int", output_json=True
             )
 
         printed = mock_json.call_args[0][0]
@@ -371,7 +371,7 @@ class MetricsEditTest(unittest.TestCase):
         mock_update.return_value = {}
 
         MetricsCommand.metrics_edit(
-            "/fake/path", name="SCORE", description="New desc", output_json=False
+            "/tmp/test", name="SCORE", description="New desc", output_json=False
         )
 
         mock_update.assert_called_once_with(
@@ -387,7 +387,7 @@ class MetricsEditTest(unittest.TestCase):
         mock_load.return_value = project
         mock_update.return_value = {}
 
-        MetricsCommand.metrics_edit("/fake/path", name="SCORE", active=False, output_json=False)
+        MetricsCommand.metrics_edit("/tmp/test", name="SCORE", active=False, output_json=False)
 
         mock_update.assert_called_once_with("us", "acc1", "proj1", "SCORE", {"active": False})
         mock_success.assert_called_once()
@@ -403,7 +403,7 @@ class MetricsEditTest(unittest.TestCase):
         mock_update.return_value = {}
 
         MetricsCommand.metrics_edit(
-            "/fake/path",
+            "/tmp/test",
             name="SCORE",
             description="Updated",
             api=True,
@@ -426,7 +426,7 @@ class MetricsEditTest(unittest.TestCase):
         mock_interactive.return_value = {"description": "New desc"}
         mock_update.return_value = {"name": "SCORE", "description": "New desc"}
 
-        MetricsCommand.metrics_edit("/fake/path", name="SCORE", output_json=False)
+        MetricsCommand.metrics_edit("/tmp/test", name="SCORE", output_json=False)
 
         mock_interactive.assert_called_once_with(project, "SCORE")
         mock_update.assert_called_once()
@@ -439,7 +439,7 @@ class MetricsEditTest(unittest.TestCase):
         mock_load.return_value = project
 
         with self.assertRaises(SystemExit):
-            MetricsCommand.metrics_edit("/fake/path", name="SCORE", output_json=True)
+            MetricsCommand.metrics_edit("/tmp/test", name="SCORE", output_json=True)
 
         printed = mock_json.call_args[0][0]
         self.assertFalse(printed["success"])
@@ -456,7 +456,7 @@ class MetricsEditTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_edit(
-                "/fake/path", name="GHOST", description="x", output_json=False
+                "/tmp/test", name="GHOST", description="x", output_json=False
             )
 
         self.assertEqual(ctx.exception.code, 1)
@@ -474,7 +474,7 @@ class MetricsEditTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit):
             MetricsCommand.metrics_edit(
-                "/fake/path", name="GHOST", description="x", output_json=True
+                "/tmp/test", name="GHOST", description="x", output_json=True
             )
 
         printed = mock_json.call_args[0][0]
@@ -492,7 +492,7 @@ class MetricsEditTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_edit(
-                "/fake/path",
+                "/tmp/test",
                 name="SCORE",
                 expected_values=["a", "b"],
                 output_json=False,
@@ -511,7 +511,7 @@ class MetricsEditTest(unittest.TestCase):
         result = {"name": "SCORE", "active": True}
         mock_update.return_value = result
 
-        MetricsCommand.metrics_edit("/fake/path", name="SCORE", active=True, output_json=True)
+        MetricsCommand.metrics_edit("/tmp/test", name="SCORE", active=True, output_json=True)
 
         mock_json.assert_called_once_with({"success": True, "metric": result})
 
@@ -646,7 +646,7 @@ class MetricsImportTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_import(
-                "/fake/path", file_path="/nonexistent/metrics.yaml", output_json=False
+                "/tmp/test", file_path="/nonexistent/metrics.yaml", output_json=False
             )
 
         self.assertEqual(ctx.exception.code, 1)
@@ -662,7 +662,7 @@ class MetricsImportTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit):
             MetricsCommand.metrics_import(
-                "/fake/path", file_path="/nonexistent/metrics.yaml", output_json=True
+                "/tmp/test", file_path="/nonexistent/metrics.yaml", output_json=True
             )
 
         printed = mock_json.call_args[0][0]
@@ -678,7 +678,7 @@ class MetricsImportTest(unittest.TestCase):
         mock_load.return_value = project
 
         with self.assertRaises(SystemExit) as ctx:
-            MetricsCommand.metrics_import("/fake/path", file_path="bad.yaml", output_json=False)
+            MetricsCommand.metrics_import("/tmp/test", file_path="bad.yaml", output_json=False)
 
         self.assertEqual(ctx.exception.code, 1)
 
@@ -697,7 +697,7 @@ class MetricsImportTest(unittest.TestCase):
         }
 
         with patch("poly.cli_commands.metrics.success"), patch("poly.cli_commands.metrics.plain"):
-            MetricsCommand.metrics_import("/fake/path", file_path="metrics.yaml", output_json=False)
+            MetricsCommand.metrics_import("/tmp/test", file_path="metrics.yaml", output_json=False)
 
         mock_import.assert_called_once()
         # Verify dry_run=False was passed
@@ -724,7 +724,7 @@ class MetricsImportTest(unittest.TestCase):
             patch("poly.cli_commands.metrics.success") as mock_success,
             patch("poly.cli_commands.metrics.plain") as mock_plain,
         ):
-            MetricsCommand.metrics_import("/fake/path", file_path="m.yaml", output_json=False)
+            MetricsCommand.metrics_import("/tmp/test", file_path="m.yaml", output_json=False)
 
         plain_calls = [c[0][0] for c in mock_plain.call_args_list]
         self.assertTrue(any("SCORE" in c for c in plain_calls))
