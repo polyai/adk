@@ -315,6 +315,48 @@ class MetricsAddTest(unittest.TestCase):
 
         mock_json.assert_called_once_with({"success": True, "metric": result})
 
+    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.create_custom_metric")
+    @patch("poly.cli_commands.metrics.load_project")
+    def test_add_duplicate_metric_friendly_error(self, mock_load, mock_create, mock_error):
+        """409 from the server shows 'already exists' instead of raw HTTP error."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_load.return_value = project
+        response = MagicMock(status_code=409, text="conflict")
+        mock_create.side_effect = __import__("requests").HTTPError(response=response)
+
+        with self.assertRaises(SystemExit) as ctx:
+            MetricsCommand.metrics_add(
+                "/fake/path",
+                name="SCORE",
+                metric_type="int",
+                description="desc",
+                api=True,
+                output_json=False,
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("already exists", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.metrics.json_print")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.create_custom_metric")
+    @patch("poly.cli_commands.metrics.load_project")
+    def test_add_duplicate_metric_json(self, mock_load, mock_create, mock_json):
+        """409 in JSON mode prints structured error with 'already exists'."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_load.return_value = project
+        response = MagicMock(status_code=409, text="conflict")
+        mock_create.side_effect = __import__("requests").HTTPError(response=response)
+
+        with self.assertRaises(SystemExit):
+            MetricsCommand.metrics_add(
+                "/fake/path", name="SCORE", metric_type="int", output_json=True
+            )
+
+        printed = mock_json.call_args[0][0]
+        self.assertFalse(printed["success"])
+        self.assertIn("already exists", printed["error"])
+
 
 class MetricsEditTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_edit."""
@@ -401,6 +443,43 @@ class MetricsEditTest(unittest.TestCase):
 
         printed = mock_json.call_args[0][0]
         self.assertFalse(printed["success"])
+
+    @patch("poly.cli_commands.metrics.error")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.update_custom_metric")
+    @patch("poly.cli_commands.metrics.load_project")
+    def test_edit_not_found_friendly_error(self, mock_load, mock_update, mock_error):
+        """404 from the server shows 'not found' instead of raw HTTP error."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_load.return_value = project
+        response = MagicMock(status_code=404, text="not found")
+        mock_update.side_effect = __import__("requests").HTTPError(response=response)
+
+        with self.assertRaises(SystemExit) as ctx:
+            MetricsCommand.metrics_edit(
+                "/fake/path", name="GHOST", description="x", output_json=False
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("not found", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.metrics.json_print")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.update_custom_metric")
+    @patch("poly.cli_commands.metrics.load_project")
+    def test_edit_not_found_json(self, mock_load, mock_update, mock_json):
+        """404 in JSON mode prints structured error with 'not found'."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_load.return_value = project
+        response = MagicMock(status_code=404, text="not found")
+        mock_update.side_effect = __import__("requests").HTTPError(response=response)
+
+        with self.assertRaises(SystemExit):
+            MetricsCommand.metrics_edit(
+                "/fake/path", name="GHOST", description="x", output_json=True
+            )
+
+        printed = mock_json.call_args[0][0]
+        self.assertFalse(printed["success"])
+        self.assertIn("not found", printed["error"])
 
     @patch("poly.cli_commands.metrics.error")
     @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
@@ -623,6 +702,35 @@ class MetricsImportTest(unittest.TestCase):
         mock_import.assert_called_once()
         # Verify dry_run=False was passed
         self.assertFalse(mock_import.call_args[1]["dry_run"])
+
+    @patch("builtins.open", unittest.mock.mock_open(read_data="SCORE:\n  type: int\n"))
+    @patch("os.path.exists", return_value=True)
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.import_custom_metrics")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.preview_metrics_import")
+    @patch("poly.cli_commands.metrics.load_project")
+    def test_import_handles_dict_response_items(self, mock_load, mock_preview, mock_import, _):
+        """Import correctly extracts names from dict-format metadata items."""
+        project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        mock_load.return_value = project
+        mock_preview.return_value = {"remote_only": []}
+        mock_import.return_value = {
+            "metadata": {
+                "created": [{"name": "SCORE", "message": "created"}],
+                "ignored": [{"name": "STATUS", "message": "already exists"}],
+            },
+        }
+
+        with (
+            patch("poly.cli_commands.metrics.success") as mock_success,
+            patch("poly.cli_commands.metrics.plain") as mock_plain,
+        ):
+            MetricsCommand.metrics_import("/fake/path", file_path="m.yaml", output_json=False)
+
+        plain_calls = [c[0][0] for c in mock_plain.call_args_list]
+        self.assertTrue(any("SCORE" in c for c in plain_calls))
+        self.assertTrue(any("STATUS" in c for c in plain_calls))
+        mock_success.assert_called_once()
+        self.assertIn("1 metrics", mock_success.call_args[0][0])
 
 
 class PrintDryRunTest(unittest.TestCase):
