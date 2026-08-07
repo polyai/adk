@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import math
 import os
 import re
 import uuid
@@ -774,6 +775,8 @@ class FlowStep(BaseFlowStep, YamlResource):
                 if entity_id not in entity_ids:
                     raise ValueError(f"Requested entity '{entity_id}' not found.")
 
+        self.settings.validate()
+
     def build_update_proto(
         self,
     ) -> Flow_UpdateStep | UpdateNoCodeStep:
@@ -1079,7 +1082,9 @@ class DTMFConfig:
 
     def validate(self):
         """Validate the DTMF configuration."""
-        pass
+        for name in ("inter_digit_timeout", "max_digits"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"DTMF {name} cannot be negative.")
 
     def to_proto(self) -> StepDtmfConfig:
         """Convert to proto representation."""
@@ -1093,12 +1098,18 @@ class DTMFConfig:
         )
 
 
+def _drop_unset(values: dict) -> dict:
+    """Drop keys whose override was never set, so they don't surface as nulls in YAML."""
+    return {key: value for key, value in values.items() if value is not None}
+
+
 @dataclass
 class ASRConfig:
     """ASR Configuration."""
 
-    provider: str
-    model: str
+    # Every field is an optional override, so a step may set only some of them.
+    provider: Optional[str] = None
+    model: Optional[str] = None
 
     def validate(self):
         """Validate the ASR configuration."""
@@ -1106,10 +1117,7 @@ class ASRConfig:
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
-        return {
-            "provider": self.provider,
-            "model": self.model,
-        }
+        return _drop_unset({"provider": self.provider, "model": self.model})
 
     def to_proto(self) -> FlowASRConfig:
         """Convert to proto representation."""
@@ -1118,25 +1126,37 @@ class ASRConfig:
 
 @dataclass
 class VADConfig:
-    provider: str
-    vad_start: float
-    vad_end: float
-    speech_threshold: float
-    silence_threshold: float
+    """VAD Configuration."""
+
+    # Every field is an optional override, so a step may set only some of them.
+    provider: Optional[str] = None
+    vad_start: Optional[float] = None
+    vad_end: Optional[float] = None
+    speech_threshold: Optional[float] = None
+    silence_threshold: Optional[float] = None
 
     def validate(self):
         """Validate the VAD configuration."""
-        pass
+        for name in ("vad_start", "vad_end"):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            if not math.isfinite(value):
+                raise ValueError(f"VAD {name} must be a finite number.")
+            if value < 0:
+                raise ValueError(f"VAD {name} cannot be negative.")
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
-        return {
-            "provider": self.provider,
-            "vad_start": self.vad_start,
-            "vad_end": self.vad_end,
-            "speech_threshold": self.speech_threshold,
-            "silence_threshold": self.silence_threshold,
-        }
+        return _drop_unset(
+            {
+                "provider": self.provider,
+                "vad_start": self.vad_start,
+                "vad_end": self.vad_end,
+                "speech_threshold": self.speech_threshold,
+                "silence_threshold": self.silence_threshold,
+            }
+        )
 
     def to_proto(self) -> FlowVADConfig:
         """Convert to proto representation."""
@@ -1191,10 +1211,34 @@ REASONING_EFFORT_FROM_PROTO_INT = {
 REASONING_EFFORT_TO_PROTO_INT = {v: k for k, v in REASONING_EFFORT_FROM_PROTO_INT.items()}
 
 
+def parse_reasoning_effort(value: "int | str | ReasoningEffort") -> ReasoningEffort:
+    """Parse a reasoning effort from a projection ordinal or a YAML string."""
+    if isinstance(value, ReasoningEffort):
+        return value
+
+    if isinstance(value, int) and not isinstance(value, bool):
+        # Projections send the proto enum's ordinal rather than its string value.
+        if value not in REASONING_EFFORT_FROM_PROTO_INT:
+            raise ValueError(
+                f"Unknown reasoning effort '{value}'. This project may use a newer "
+                "Agent Studio feature - try upgrading polyai-adk."
+            )
+        return REASONING_EFFORT_FROM_PROTO_INT[value]
+
+    try:
+        return ReasoningEffort(value)
+    except ValueError:
+        valid = ", ".join(effort.value for effort in ReasoningEffort)
+        raise ValueError(f"Invalid reasoning_effort '{value}'. Valid values: {valid}.") from None
+
+
 @dataclass
 class LLMConfig:
-    provider_model_id: str
-    reasoning_effort: ReasoningEffort
+    """LLM Configuration."""
+
+    # Both fields are optional overrides, so a step may set only one of them.
+    provider_model_id: Optional[str] = None
+    reasoning_effort: ReasoningEffort = ReasoningEffort.UNSPECIFIED
 
     def validate(self):
         """Validate the LLM configuration."""
@@ -1202,10 +1246,12 @@ class LLMConfig:
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
-        return {
-            "provider_model_id": self.provider_model_id,
-            "reasoning_effort": self.reasoning_effort.value,
-        }
+        return _drop_unset(
+            {
+                "provider_model_id": self.provider_model_id,
+                "reasoning_effort": self.reasoning_effort.value,
+            }
+        )
 
     def to_proto(self) -> FlowLLMConfig:
         """Convert to proto representation."""
@@ -1256,7 +1302,10 @@ class FlowSettings(SubResource):
         if isinstance(barge_in, dict):
             barge_in = BargeInConfig(**barge_in)
         if isinstance(llm, dict):
-            llm["reasoning_effort"] = ReasoningEffort(llm.get("reasoning_effort", "unspecified"))
+            llm = dict(llm)
+            llm["reasoning_effort"] = parse_reasoning_effort(
+                llm.get("reasoning_effort", ReasoningEffort.UNSPECIFIED)
+            )
             llm = LLMConfig(**llm)
 
         self.asr_biasing = asr_biasing
@@ -1307,11 +1356,6 @@ class FlowSettings(SubResource):
         barge_in_data = utils.convert_keys_to_snake_case(settings_data.get("barge_in") or {})
         llm_data = utils.convert_keys_to_snake_case(settings_data.get("llm") or {})
 
-        if isinstance(llm_data.get("reasoning_effort"), int):
-            llm_data["reasoning_effort"] = REASONING_EFFORT_FROM_PROTO_INT[
-                llm_data["reasoning_effort"]
-            ]
-
         return cls(
             step_id=step_id,
             flow_id=flow_id,
@@ -1341,12 +1385,7 @@ class FlowSettings(SubResource):
             asr=ASRConfig(**asr_data) if asr_data else None,
             vad=VADConfig(**vad_data) if vad_data else None,
             barge_in=BargeInConfig(**barge_in_data) if barge_in_data else None,
-            llm=LLMConfig(
-                provider_model_id=llm_data.get("provider_model_id"),
-                reasoning_effort=ReasoningEffort(llm_data.get("reasoning_effort", "unspecified")),
-            )
-            if llm_data
-            else None,
+            llm=llm_data or None,
         )
 
     def validate(self, **kwargs):

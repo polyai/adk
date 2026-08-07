@@ -51,6 +51,7 @@ from poly.resources.flows import (
     ReasoningEffort,
     StepType,
     VADConfig,
+    parse_reasoning_effort,
 )
 from poly.resources.function import (
     Function,
@@ -8671,6 +8672,140 @@ class FlowSettingsSerializationTest(unittest.TestCase):
 
         self.assertEqual(settings.command_type, "flow_settings")
         self.assertEqual(settings.update_command_type, "update_step_settings")
+
+    def test_partially_specified_sections_are_accepted(self):
+        """Every field in the asr/vad/llm sections is an optional override, so a
+        step may set only some of them."""
+        for block, expected in [
+            ({"asr": {"provider": "p"}}, {"asr": {"provider": "p"}}),
+            ({"vad": {"provider": "p"}}, {"vad": {"provider": "p"}}),
+            ({"vad": {"vadStart": 1.5}}, {"vad": {"vad_start": 1.5}}),
+            (
+                {"llm": {"reasoningEffort": 3}},
+                {"llm": {"reasoning_effort": "medium"}},
+            ),
+        ]:
+            with self.subTest(block):
+                settings = FlowSettings.from_projection(
+                    {"settings": block}, step_id=self.STEP_ID, flow_id=self.FLOW_ID
+                )
+                self.assertEqual(settings.to_yaml_dict(), expected)
+
+    def test_unset_overrides_are_not_written_as_nulls(self):
+        settings = self._settings(asr=ASRConfig(provider="p"))
+
+        self.assertEqual(settings.to_yaml_dict(), {"asr": {"provider": "p"}})
+        self.assertFalse(settings.build_update_proto().settings.asr.model)
+
+
+class ReasoningEffortParsingTest(unittest.TestCase):
+    """Tests for parse_reasoning_effort."""
+
+    def test_parses_ordinals_strings_and_enum_members(self):
+        self.assertEqual(parse_reasoning_effort(3), ReasoningEffort.MEDIUM)
+        self.assertEqual(parse_reasoning_effort("medium"), ReasoningEffort.MEDIUM)
+        self.assertEqual(parse_reasoning_effort(ReasoningEffort.MEDIUM), ReasoningEffort.MEDIUM)
+
+    def test_unknown_ordinal_suggests_upgrading(self):
+        """A newer backend enum value must not crash the pull with a raw KeyError."""
+        with self.assertRaises(ValueError) as ctx:
+            parse_reasoning_effort(6)
+
+        self.assertIn("Unknown reasoning effort '6'", str(ctx.exception))
+        self.assertIn("upgrading", str(ctx.exception))
+
+    def test_invalid_string_lists_the_valid_values(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_reasoning_effort("turbo")
+
+        self.assertIn("turbo", str(ctx.exception))
+        self.assertIn("unspecified, minimal, low, medium, high, auto", str(ctx.exception))
+
+
+class FlowSettingsValidationTest(unittest.TestCase):
+    """Tests for the value ranges the backend enforces on settings."""
+
+    def _step(self, **settings_kwargs) -> FlowStep:
+        return FlowStep(
+            resource_id="flow-123_step-1",
+            step_id="step-1",
+            name="Test Step",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.ADVANCED_STEP,
+            prompt="Hello",
+            settings=FlowSettings(step_id="step-1", flow_id="flow-123", **settings_kwargs),
+        )
+
+    def _mappings(self) -> list[ResourceMapping]:
+        return [
+            ResourceMapping(
+                resource_id="flow-123",
+                resource_name="Test Flow",
+                resource_type=FlowConfig,
+                file_path="flows/test_flow/flow_config.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+                flow_id="flow-123",
+            )
+        ]
+
+    def test_negative_dtmf_values_are_rejected(self):
+        for kwargs, expected in [
+            ({"max_digits": -1}, "max_digits"),
+            ({"inter_digit_timeout": -1}, "inter_digit_timeout"),
+        ]:
+            with self.subTest(expected):
+                settings = FlowSettings(
+                    step_id="step-1",
+                    flow_id="flow-123",
+                    dtmf=DTMFConfig("step-1", "flow-123", **kwargs),
+                )
+                with self.assertRaises(ValueError) as ctx:
+                    settings.validate()
+                self.assertIn(expected, str(ctx.exception))
+
+    def test_negative_and_non_finite_vad_values_are_rejected(self):
+        for kwargs, expected in [
+            ({"vad_start": -1.0}, "cannot be negative"),
+            ({"vad_end": -1.0}, "cannot be negative"),
+            ({"vad_start": float("inf")}, "must be a finite number"),
+            ({"vad_end": float("nan")}, "must be a finite number"),
+        ]:
+            with self.subTest(kwargs):
+                settings = FlowSettings(
+                    step_id="step-1", flow_id="flow-123", vad=VADConfig(**kwargs)
+                )
+                with self.assertRaises(ValueError) as ctx:
+                    settings.validate()
+                self.assertIn(expected, str(ctx.exception))
+
+    def test_thresholds_are_unbounded(self):
+        """The backend puts no bounds on these, so neither do we."""
+        settings = FlowSettings(
+            step_id="step-1",
+            flow_id="flow-123",
+            vad=VADConfig(speech_threshold=-5.0, silence_threshold=99.0),
+        )
+
+        self.assertIsNone(settings.validate())
+
+    def test_flow_step_validate_checks_its_settings(self):
+        """Settings are a sub-resource, so nothing else validates them."""
+        step = self._step(dtmf=DTMFConfig("step-1", "flow-123", max_digits=-1))
+
+        with self.assertRaises(ValueError) as ctx:
+            step.validate(resource_mappings=self._mappings())
+
+        self.assertIn("max_digits", str(ctx.exception))
+
+    def test_valid_settings_pass_flow_step_validation(self):
+        step = self._step(
+            dtmf=DTMFConfig("step-1", "flow-123", max_digits=4, inter_digit_timeout=0),
+            vad=VADConfig(vad_start=0.0, vad_end=2.5),
+        )
+
+        self.assertIsNone(step.validate(resource_mappings=self._mappings()))
 
 
 class FunctionStepFromProjection(unittest.TestCase):
