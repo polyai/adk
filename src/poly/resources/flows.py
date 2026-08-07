@@ -423,7 +423,7 @@ class FlowStep(BaseFlowStep, YamlResource):
         }
         flow_settings_dict = self.settings.to_yaml_dict() if self.settings else {}
         if flow_settings_dict:
-            output["settings"] = flow_settings_dict
+            output.update(flow_settings_dict)
 
         if self.step_type == StepType.DEFAULT_STEP:
             output["conditions"] = [condition.to_yaml_dict() for condition in self.conditions]
@@ -511,9 +511,7 @@ class FlowStep(BaseFlowStep, YamlResource):
 
         step_type = StepType(yaml_dict.get("step_type"))
         extracted_entities = yaml_dict.get("extracted_entities", [])
-        settings = FlowSettings.from_yaml_dict(
-            yaml_dict.get("settings", {}), step_id=step_id, flow_id=flow_id
-        )
+        settings = FlowSettings.from_yaml_dict(yaml_dict, step_id=step_id, flow_id=flow_id)
         if step_type == StepType.ADVANCED_STEP:
             # Conditions not applicable
             conditions = []
@@ -1106,6 +1104,13 @@ class ASRConfig:
         """Validate the ASR configuration."""
         pass
 
+    def to_yaml_dict(self) -> dict:
+        """Return a dictionary suitable for YAML serialization."""
+        return {
+            "provider": self.provider,
+            "model": self.model,
+        }
+
     def to_proto(self) -> FlowASRConfig:
         """Convert to proto representation."""
         return FlowASRConfig(provider=self.provider, model=self.model)
@@ -1122,6 +1127,16 @@ class VADConfig:
     def validate(self):
         """Validate the VAD configuration."""
         pass
+
+    def to_yaml_dict(self) -> dict:
+        """Return a dictionary suitable for YAML serialization."""
+        return {
+            "provider": self.provider,
+            "vad_start": self.vad_start,
+            "vad_end": self.vad_end,
+            "speech_threshold": self.speech_threshold,
+            "silence_threshold": self.silence_threshold,
+        }
 
     def to_proto(self) -> FlowVADConfig:
         """Convert to proto representation."""
@@ -1141,6 +1156,10 @@ class BargeInConfig:
     def validate(self):
         """Validate the BargeIn configuration."""
         pass
+
+    def to_yaml_dict(self) -> dict:
+        """Return a dictionary suitable for YAML serialization."""
+        return {"is_enabled": self.is_enabled}
 
     def to_proto(self) -> FlowBargeInConfig:
         """Convert to proto representation."""
@@ -1180,6 +1199,13 @@ class LLMConfig:
     def validate(self):
         """Validate the LLM configuration."""
         pass
+
+    def to_yaml_dict(self) -> dict:
+        """Return a dictionary suitable for YAML serialization."""
+        return {
+            "provider_model_id": self.provider_model_id,
+            "reasoning_effort": self.reasoning_effort.value,
+        }
 
     def to_proto(self) -> FlowLLMConfig:
         """Convert to proto representation."""
@@ -1243,30 +1269,18 @@ class FlowSettings(SubResource):
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
         output = {}
-        if self.asr_biasing:
+        if self.asr_biasing and self.asr_biasing.is_enabled:
             output["asr_biasing"] = self.asr_biasing.to_yaml_dict()
-        if self.dtmf:
-            output["dtmf"] = self.dtmf.to_yaml_dict()
+        if self.dtmf and self.dtmf.is_enabled:
+            output["dtmf_config"] = self.dtmf.to_yaml_dict()
         if self.asr:
-            output["asr"] = {
-                "provider": self.asr.provider,
-                "model": self.asr.model,
-            }
+            output["asr"] = self.asr.to_yaml_dict()
         if self.vad:
-            output["vad"] = {
-                "provider": self.vad.provider,
-                "vad_start": self.vad.vad_start,
-                "vad_end": self.vad.vad_end,
-                "speech_threshold": self.vad.speech_threshold,
-                "silence_threshold": self.vad.silence_threshold,
-            }
-        if self.barge_in:
-            output["barge_in"] = {"is_enabled": self.barge_in.is_enabled}
+            output["vad"] = self.vad.to_yaml_dict()
+        if self.barge_in and self.barge_in.is_enabled:
+            output["barge_in"] = self.barge_in.to_yaml_dict()
         if self.llm:
-            output["llm"] = {
-                "provider_model_id": self.llm.provider_model_id,
-                "reasoning_effort": self.llm.reasoning_effort.value,
-            }
+            output["llm"] = self.llm.to_yaml_dict()
         return output
 
     @classmethod
@@ -1309,7 +1323,7 @@ class FlowSettings(SubResource):
     def from_yaml_dict(cls, yaml_dict: dict, step_id: str, flow_id: str) -> "FlowSettings":
         """Create an instance from YAML data and identity fields."""
         asr_biasing_data: dict = yaml_dict.get("asr_biasing", {})
-        dtmf_data: dict = yaml_dict.get("dtmf", {})
+        dtmf_data: dict = yaml_dict.get("dtmf_config", {})
         asr_data: dict = yaml_dict.get("asr", {})
         vad_data: dict = yaml_dict.get("vad", {})
         barge_in_data: dict = yaml_dict.get("barge_in", {})

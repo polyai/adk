@@ -412,6 +412,9 @@ def fix_conditions_for_deleted_steps(
                 updated_resources.get(Condition, {}).pop(condition_id, None)
 
 
+CLEARABLE_SETTINGS = {"asr", "barge_in", "llm", "vad"}
+
+
 def clear_unused_settings_from_flow_step(
     updated_resources: ResourceMap,
     current_resources: ResourceMap,
@@ -434,7 +437,7 @@ def clear_unused_settings_from_flow_step(
         if original_step.settings and updated_step.settings:
             original_keys = set(original_step.settings.to_yaml_dict().keys())
             updated_keys = set(updated_step.settings.to_yaml_dict().keys())
-            cleared_settings = original_keys - updated_keys
+            cleared_settings = (original_keys - updated_keys) & CLEARABLE_SETTINGS
 
         if cleared_settings:
             queue_command(
