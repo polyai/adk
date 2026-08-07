@@ -142,15 +142,13 @@ class MetricsAddTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_add."""
 
     @patch("poly.cli_commands.metrics.success")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.update_custom_metric")
     @patch("poly.cli_commands.metrics.AgentStudioInterface.create_custom_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_add_with_all_args(self, mock_load, mock_create, mock_update, mock_success):
+    def test_add_with_all_args(self, mock_load, mock_create, mock_success):
         """Non-interactive add passes all fields to create_custom_metric."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        mock_create.return_value = {"name": "SCORE", "type": "int"}
-        mock_update.return_value = {"name": "SCORE", "type": "int", "api": True}
+        mock_create.return_value = {"name": "SCORE", "type": "int", "api": True}
 
         MetricsCommand.metrics_add(
             "/tmp/test",
@@ -168,15 +166,13 @@ class MetricsAddTest(unittest.TestCase):
             "proj1",
             {"name": "SCORE", "type": "int", "description": "CSAT Score", "api": True},
         )
-        mock_update.assert_called_once_with("us", "acc1", "proj1", "SCORE", {"api": True})
         mock_success.assert_called_once()
 
     @patch("poly.cli_commands.metrics.json_print")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.update_custom_metric")
     @patch("poly.cli_commands.metrics.AgentStudioInterface.create_custom_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_add_without_api_skips_update(self, mock_load, mock_create, mock_update, mock_json):
-        """When api=False, no follow-up update call is made."""
+    def test_add_without_api(self, mock_load, mock_create, mock_json):
+        """When api=False, create is called without the api flag."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
         mock_create.return_value = {"name": "SCORE", "type": "int"}
@@ -190,7 +186,8 @@ class MetricsAddTest(unittest.TestCase):
         )
 
         mock_create.assert_called_once()
-        mock_update.assert_not_called()
+        data = mock_create.call_args[0][3]
+        self.assertNotIn("api", data)
 
     @patch("poly.cli_commands.metrics.json_print")
     @patch("poly.cli_commands.metrics.AgentStudioInterface.create_custom_metric")
@@ -255,11 +252,13 @@ class MetricsAddTest(unittest.TestCase):
         self.assertIn("--type", printed["error"])
 
     @patch("poly.cli_commands.metrics.error")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.create_custom_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_add_expected_values_rejected_for_non_string(self, mock_load, mock_error):
+    def test_add_expected_values_rejected_for_non_string(self, mock_load, mock_create, mock_error):
         """Expected values are rejected for non-string metric types."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
+        mock_create.side_effect = ValueError("--expected-values is only valid for string metrics.")
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_add(
@@ -277,11 +276,13 @@ class MetricsAddTest(unittest.TestCase):
         self.assertIn("only valid for string", mock_error.call_args[0][0])
 
     @patch("poly.cli_commands.metrics.json_print")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.create_custom_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_add_expected_values_rejected_json(self, mock_load, mock_json):
+    def test_add_expected_values_rejected_json(self, mock_load, mock_create, mock_json):
         """In JSON mode, expected values are rejected for non-string types."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
+        mock_create.side_effect = ValueError("--expected-values is only valid for string metrics.")
 
         with self.assertRaises(SystemExit):
             MetricsCommand.metrics_add(
@@ -482,13 +483,13 @@ class MetricsEditTest(unittest.TestCase):
         self.assertIn("not found", printed["error"])
 
     @patch("poly.cli_commands.metrics.error")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.update_custom_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_edit_expected_values_rejected_for_non_string(self, mock_load, mock_get, mock_error):
+    def test_edit_expected_values_rejected_for_non_string(self, mock_load, mock_update, mock_error):
         """Expected values flag is rejected when the metric type is not string."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        mock_get.return_value = [{"name": "SCORE", "type": "int"}]
+        mock_update.side_effect = ValueError("--expected-values is only valid for string metrics.")
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_edit(
@@ -638,11 +639,13 @@ class MetricsImportTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_import."""
 
     @patch("poly.cli_commands.metrics.error")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.import_metrics_from_file")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_import_file_not_found(self, mock_load, mock_error):
+    def test_import_file_not_found(self, mock_load, mock_import, mock_error):
         """Exits with error when the import file does not exist."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
+        mock_import.side_effect = FileNotFoundError("File not found: /nonexistent/metrics.yaml")
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_import(
@@ -654,11 +657,13 @@ class MetricsImportTest(unittest.TestCase):
         self.assertIn("File not found", mock_error.call_args[0][0])
 
     @patch("poly.cli_commands.metrics.json_print")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.import_metrics_from_file")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_import_file_not_found_json(self, mock_load, mock_json):
+    def test_import_file_not_found_json(self, mock_load, mock_import, mock_json):
         """In JSON mode, missing file prints error JSON and exits."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
+        mock_import.side_effect = FileNotFoundError("File not found: /nonexistent/metrics.yaml")
 
         with self.assertRaises(SystemExit):
             MetricsCommand.metrics_import(
@@ -668,52 +673,44 @@ class MetricsImportTest(unittest.TestCase):
         printed = mock_json.call_args[0][0]
         self.assertFalse(printed["success"])
 
-    @patch("builtins.open", unittest.mock.mock_open(read_data="{{invalid"))
-    @patch("os.path.exists", return_value=True)
     @patch("poly.cli_commands.metrics.error")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.import_metrics_from_file")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_import_invalid_yaml(self, mock_load, mock_error, mock_exists):
+    def test_import_invalid_yaml(self, mock_load, mock_import, mock_error):
         """Exits with error when YAML parsing fails."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
+        mock_import.side_effect = ValueError("Invalid YAML: ...")
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_import("/tmp/test", file_path="bad.yaml", output_json=False)
 
         self.assertEqual(ctx.exception.code, 1)
 
-    @patch("builtins.open", unittest.mock.mock_open(read_data="SCORE:\n  type: int\n"))
-    @patch("os.path.exists", return_value=True)
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.import_custom_metrics")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.preview_metrics_import")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.import_metrics_from_file")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_import_success(self, mock_load, mock_preview, mock_import, mock_exists):
-        """Successful import calls import_custom_metrics and prints summary."""
+    def test_import_success(self, mock_load, mock_import):
+        """Successful import calls import_metrics_from_file and prints summary."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        mock_preview.return_value = {"remote_only": []}
         mock_import.return_value = {
+            "remote_only": [],
             "metadata": {"created": ["SCORE"], "ignored": []},
         }
 
         with patch("poly.cli_commands.metrics.success"), patch("poly.cli_commands.metrics.plain"):
             MetricsCommand.metrics_import("/tmp/test", file_path="metrics.yaml", output_json=False)
 
-        mock_import.assert_called_once()
-        # Verify dry_run=False was passed
-        self.assertFalse(mock_import.call_args[1]["dry_run"])
+        mock_import.assert_called_once_with("us", "acc1", "proj1", "metrics.yaml", False)
 
-    @patch("builtins.open", unittest.mock.mock_open(read_data="SCORE:\n  type: int\n"))
-    @patch("os.path.exists", return_value=True)
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.import_custom_metrics")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.preview_metrics_import")
+    @patch("poly.cli_commands.metrics.AgentStudioInterface.import_metrics_from_file")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_import_handles_dict_response_items(self, mock_load, mock_preview, mock_import, _):
+    def test_import_handles_dict_response_items(self, mock_load, mock_import):
         """Import correctly extracts names from dict-format metadata items."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        mock_preview.return_value = {"remote_only": []}
         mock_import.return_value = {
+            "remote_only": [],
             "metadata": {
                 "created": [{"name": "SCORE", "message": "created"}],
                 "ignored": [{"name": "STATUS", "message": "already exists"}],
@@ -812,19 +809,19 @@ class PrintMetricsTest(unittest.TestCase):
 
 
 class PreviewMetricsImportTest(unittest.TestCase):
-    """Tests for AgentStudioInterface.preview_metrics_import."""
+    """Tests for PlatformAPIHandler.preview_metrics_import."""
 
-    @patch("poly.handlers.interface.PlatformAPIHandler.get_custom_metrics")
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.get_custom_metrics")
     def test_computes_set_diff(self, mock_get):
         """Correctly partitions local and remote metrics."""
-        from poly.handlers.interface import AgentStudioInterface
+        from poly.handlers.platform_api import PlatformAPIHandler
 
         mock_get.return_value = [
             {"name": "EXISTING"},
             {"name": "REMOTE_ONLY"},
         ]
 
-        result = AgentStudioInterface.preview_metrics_import(
+        result = PlatformAPIHandler.preview_metrics_import(
             "us", "acc1", "proj1", {"EXISTING", "NEW_ONE"}
         )
 

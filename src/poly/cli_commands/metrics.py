@@ -4,12 +4,11 @@ Copyright PolyAI Limited
 """
 
 import logging
-import os
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 
 import requests
-from ruamel.yaml import YAML, YAMLError
+from ruamel.yaml import YAML
 
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
@@ -329,14 +328,6 @@ class MetricsCommand(BaseCommand):
                 sys.exit(1)
             api = api_result
 
-        if expected_values and metric_type != "string":
-            msg = "--expected-values is only valid for string metrics."
-            if output_json:
-                json_print({"success": False, "error": msg})
-            else:
-                error(msg)
-            sys.exit(1)
-
         data: dict = {"name": name, "type": metric_type}
         if description:
             data["description"] = description
@@ -349,12 +340,12 @@ class MetricsCommand(BaseCommand):
             result = AgentStudioInterface.create_custom_metric(
                 project.region, project.account_id, project.project_id, data
             )
-
-            # The server ignores the api flag on create, so follow up with an edit
-            if api:
-                result = AgentStudioInterface.update_custom_metric(
-                    project.region, project.account_id, project.project_id, name, {"api": True}
-                )
+        except ValueError as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(str(e))
+            sys.exit(1)
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 409:
                 msg = f"Metric '{name}' already exists."
@@ -385,19 +376,6 @@ class MetricsCommand(BaseCommand):
         """Update an existing custom metric."""
         project = load_project(base_path, output_json=output_json)
 
-        if expected_values is not None:
-            metrics = AgentStudioInterface.get_custom_metrics(
-                project.region, project.account_id, project.project_id
-            )
-            metric = next((m for m in metrics if m.get("name") == name), None)
-            if metric and metric.get("type") != "string":
-                msg = "--expected-values is only valid for string metrics."
-                if output_json:
-                    json_print({"success": False, "error": msg})
-                else:
-                    error(msg)
-                sys.exit(1)
-
         data: dict = {}
         if description is not None:
             data["description"] = description
@@ -419,6 +397,12 @@ class MetricsCommand(BaseCommand):
             result = AgentStudioInterface.update_custom_metric(
                 project.region, project.account_id, project.project_id, name, data
             )
+        except ValueError as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(str(e))
+            sys.exit(1)
         except requests.HTTPError as e:
             if e.response is not None and e.response.status_code == 404:
                 msg = f"Metric '{name}' not found."
@@ -542,57 +526,29 @@ class MetricsCommand(BaseCommand):
         """Bulk-import metrics from a YAML file."""
         project = load_project(base_path, output_json=output_json)
 
-        if not os.path.exists(file_path):
-            msg = f"File not found: {file_path}"
-            if output_json:
-                json_print({"success": False, "error": msg})
-            else:
-                error(msg)
-            sys.exit(1)
-
-        with open(file_path) as f:
-            yaml_content = f.read()
-
         try:
-            ry = YAML()
-            local_metrics = ry.load(yaml_content) or {}
-        except YAMLError as e:
-            msg = f"Invalid YAML: {e}"
+            result = AgentStudioInterface.import_metrics_from_file(
+                project.region, project.account_id, project.project_id, file_path, dry_run
+            )
+        except (FileNotFoundError, ValueError) as e:
             if output_json:
-                json_print({"success": False, "error": msg})
+                json_print({"success": False, "error": str(e)})
             else:
-                error(msg)
+                error(str(e))
             sys.exit(1)
-
-        local_names = set(local_metrics.keys())
-
-        preview = AgentStudioInterface.preview_metrics_import(
-            project.region, project.account_id, project.project_id, local_names
-        )
 
         if dry_run:
-            cls._print_dry_run(preview, output_json)
+            cls._print_dry_run(result, output_json)
             return
 
-        # Warn about metrics not in the file
-        if preview["remote_only"] and not output_json:
-            warning(
-                f"Metrics on remote but not in file (not deleted):"
-                f" {', '.join(preview['remote_only'])}"
-            )
-
-        import_result = AgentStudioInterface.import_custom_metrics(
-            project.region,
-            project.account_id,
-            project.project_id,
-            yaml_content,
-            dry_run=False,
-        )
+        remote_only = result.get("remote_only", [])
+        if remote_only and not output_json:
+            warning(f"Metrics on remote but not in file (not deleted): {', '.join(remote_only)}")
 
         if output_json:
-            json_print({"success": True, **import_result})
+            json_print({"success": True, **result})
         else:
-            metadata = import_result.get("metadata", {})
+            metadata = result.get("metadata", {})
             created = metadata.get("created", [])
             ignored = metadata.get("ignored", [])
 

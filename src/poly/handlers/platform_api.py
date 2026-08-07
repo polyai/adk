@@ -1448,6 +1448,34 @@ class PlatformAPIHandler:
         }
         return PlatformAPIHandler.make_request(region, endpoint, "POST", params=params, files=files)
 
+    @staticmethod
+    def preview_metrics_import(
+        region: str,
+        account_id: str,
+        project_id: str,
+        local_metric_names: set[str],
+    ) -> dict[str, list[str]]:
+        """Compare local metric names against remote to preview an import.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            local_metric_names: Set of metric names from the local YAML file.
+
+        Returns:
+            dict with keys ``would_create``, ``would_skip``, and ``remote_only``,
+            each a sorted list of metric names.
+        """
+        remote_metrics = PlatformAPIHandler.get_custom_metrics(region, account_id, project_id)
+        remote_names = {m["name"] for m in remote_metrics if "name" in m}
+
+        return {
+            "would_create": sorted(local_metric_names - remote_names),
+            "would_skip": sorted(local_metric_names & remote_names),
+            "remote_only": sorted(remote_names - local_metric_names),
+        }
+
     def list_rtc_configs(
         region: str,
         project_id: str,

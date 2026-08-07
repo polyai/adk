@@ -553,5 +553,22 @@ class ImportCustomMetrics(unittest.TestCase):
         self.assertIn("yaml", call_kwargs.kwargs.get("files", {}))
 
 
+class PreviewMetricsImport(unittest.TestCase):
+    """Tests for PlatformAPIHandler.preview_metrics_import."""
+
+    @patch.object(PlatformAPIHandler, "get_custom_metrics")
+    def test_computes_set_diff(self, mock_get):
+        """Correctly partitions local vs remote metric names."""
+        mock_get.return_value = [{"name": "EXISTING"}, {"name": "REMOTE_ONLY"}]
+
+        result = PlatformAPIHandler.preview_metrics_import(
+            "studio", "acc1", "proj1", {"EXISTING", "NEW_ONE"}
+        )
+
+        self.assertEqual(result["would_create"], ["NEW_ONE"])
+        self.assertEqual(result["would_skip"], ["EXISTING"])
+        self.assertEqual(result["remote_only"], ["REMOTE_ONLY"])
+
+
 if __name__ == "__main__":
     unittest.main()
