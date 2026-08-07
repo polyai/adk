@@ -340,6 +340,12 @@ class MetricsCommand(BaseCommand):
             project.region, project.account_id, project.project_id, data
         )
 
+        # The server ignores the api flag on create, so follow up with an edit
+        if api:
+            result = AgentStudioInterface.update_custom_metric(
+                project.region, project.account_id, project.project_id, name, {"api": True}
+            )
+
         if output_json:
             json_print({"success": True, "metric": result})
         else:
