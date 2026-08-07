@@ -781,6 +781,58 @@ class PrintDryRunTest(unittest.TestCase):
         self.assertEqual(mock_plain.call_count, 1)
 
 
+class PrintMetricsTest(unittest.TestCase):
+    """Tests for print_metrics console output."""
+
+    @patch("poly.output.console.plain")
+    def test_empty_metrics(self, mock_plain):
+        """Prints 'No metrics found.' when list is empty."""
+        from poly.output.console import print_metrics
+
+        print_metrics([])
+
+        mock_plain.assert_called_once_with("No metrics found.")
+
+    @patch("poly.output.console.console")
+    def test_renders_table_with_counts(self, mock_console):
+        """Renders a table and prints active/inactive summary."""
+        from poly.output.console import print_metrics
+
+        metrics = [
+            {"name": "SCORE", "type": "int", "active": True, "api": False},
+            {"name": "OLD", "type": "string", "active": False, "api": True, "description": "old"},
+        ]
+
+        print_metrics(metrics)
+
+        self.assertEqual(mock_console.print.call_count, 2)
+        summary = mock_console.print.call_args_list[1][0][0]
+        self.assertIn("1 active", summary)
+        self.assertIn("1 inactive", summary)
+
+
+class PreviewMetricsImportTest(unittest.TestCase):
+    """Tests for AgentStudioInterface.preview_metrics_import."""
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.get_custom_metrics")
+    def test_computes_set_diff(self, mock_get):
+        """Correctly partitions local and remote metrics."""
+        from poly.handlers.interface import AgentStudioInterface
+
+        mock_get.return_value = [
+            {"name": "EXISTING"},
+            {"name": "REMOTE_ONLY"},
+        ]
+
+        result = AgentStudioInterface.preview_metrics_import(
+            "us", "acc1", "proj1", {"EXISTING", "NEW_ONE"}
+        )
+
+        self.assertEqual(result["would_create"], ["NEW_ONE"])
+        self.assertEqual(result["would_skip"], ["EXISTING"])
+        self.assertEqual(result["remote_only"], ["REMOTE_ONLY"])
+
+
 class ValidMetricTypesTest(unittest.TestCase):
     """Tests for the VALID_METRIC_TYPES constant."""
 
