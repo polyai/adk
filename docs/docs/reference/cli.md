@@ -92,7 +92,7 @@ Run with no arguments and `poly project create` walks you through interactive pr
 3. **Project name** — free-text name for the new project.
 4. **Project ID** — optional slug. Defaults to a slugified version of the name (lowercased, spaces replaced with hyphens, special characters removed). Leave empty to let the platform generate one.
 
-After the project is created in Agent Studio, `poly project create` automatically calls `poly init` to initialize the local project directory.
+After the project is created in Agent Studio, `poly project create` automatically calls `poly init` to initialize the local project directory. In interactive (TTY) mode, it then offers to load an example template into the new project — accept to browse the available templates and pre-populate the project with a working starting point.
 
 Examples:
 
@@ -177,6 +177,50 @@ If the account or project ID is invalid or inaccessible, `poly init` returns a d
 | Permission denied | `Forbidden: you do not have permission to access project '<project_id>' in account '<account_id>'.` |
 
 When using `--json`, the response includes `{ "success": false, "error": "..." }` with the same message.
+
+### `poly template`
+
+Browse and load example project templates from the platform.
+
+#### `poly template list`
+
+List available example project templates.
+
+~~~bash
+poly template list
+poly template list --region us-1
+~~~
+
+| Flag | Description |
+|---|---|
+| `--region` | Region to query for templates. Defaults to the current project's region, or `studio` if no project is detected. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+#### `poly template load`
+
+Load an example template into the current project.
+
+!!! warning "This overwrites local project resources"
+
+    `poly template load` replaces the local project resources with the template contents. The next `poly push` will apply these changes to Agent Studio.
+
+Run without a name to open an interactive searchable picker. Pass a name directly to skip the picker. Use `--force` to suppress the confirmation prompt.
+
+~~~bash
+poly template load
+poly template load "Retail Customer Service Agent - Order & Shipping Support"
+poly template load "Restaurant Reservation Assistant" --force
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `template_name` | Name of the template to load. If omitted, an interactive picker is shown. |
+| `--path` | Path to the project. Defaults to the current working directory. |
+| `--region` | Region to query for templates. Defaults to the current project's region. |
+| `--force`, `-f` | Skip the overwrite confirmation prompt. |
+| `--json` | Print a single JSON object on stdout (machine-readable). Requires `template_name` to be supplied explicitly. |
+
+After loading a template, push the changes to Agent Studio with `poly push`.
 
 ### `poly pull`
 
@@ -852,6 +896,8 @@ poly branch merge 'Merge message' --json
 poly format --json
 poly init --region us-1 --account_id 123 --project_id my_project --json
 poly project create --region us-1 --account_id my-account --name my-project --json
+poly template list --json
+poly template load "Restaurant Reservation Assistant" --json
 poly chat --json -m 'Hello'
 poly chat --json --input-file ./script.txt
 poly deployments show abc123def --json
@@ -883,6 +929,10 @@ When `--json` is used:
 
     When `--json` is used with `poly deployments promote` or `poly deployments rollback`, the confirmation prompt is automatically skipped (equivalent to passing `--force`).
 
+!!! info "`poly template load --json` requires `template_name`"
+
+    When using `poly template load --json`, you must supply the template name as a positional argument. The interactive picker is not available in JSON mode.
+
 ### JSON output shapes
 
 The exact fields vary by command. Common fields include:
@@ -904,6 +954,8 @@ The exact fields vary by command. Common fields include:
 | `poly format --json` | `success`, `check_only`, `format_errors`, `affected`, `ty_ran`, `ty_returncode`, `ty_timed_out` |
 | `poly init --json` | `success`, `root_path` |
 | `poly project create --json` | `success`, `root_path` (via init); on error: `success`, `error` |
+| `poly template list --json` | `success`, `templates` |
+| `poly template load --json` | `success`, `template`; on error: `success`, `error` |
 | `poly chat --json` | `conversations` (array); optional `push` (when `--push` is used) |
 | `poly deployments show --json` | `success`, `deployment`, `active_deployment_hashes`, `included_deployments`, `is_rollback` |
 | `poly deployments promote --json` | `success`, `from_hash`, `to_env`, `message`, `included_deployments`; `dry_run` when `--dry-run` is used |
@@ -1039,17 +1091,18 @@ poly push --from-projection - < proj.json
 A typical CLI workflow looks like this:
 
 1. create a new project with `poly project create` or initialize an existing one with `poly init`
-2. pull with `poly pull` if needed to refresh local state
-3. create or switch to a branch
-4. edit files
-5. inspect changes with `poly status` and `poly diff`
-6. validate with `poly validate`
-7. push with `poly push`
-8. optionally review with `poly review`
-9. test or chat with the agent using `poly chat`
-10. browse and debug conversations with `poly conversations list` and `poly conversations get`
-11. merge the branch with `poly branch merge '<message>'`
-12. promote to pre-release or live with `poly deployments promote`
+2. optionally load a starting-point template with `poly template load`, then push with `poly push`
+3. pull with `poly pull` if needed to refresh local state
+4. create or switch to a branch
+5. edit files
+6. inspect changes with `poly status` and `poly diff`
+7. validate with `poly validate`
+8. push with `poly push`
+9. optionally review with `poly review`
+10. test or chat with the agent using `poly chat`
+11. browse and debug conversations with `poly conversations list` and `poly conversations get`
+12. merge the branch with `poly branch merge '<message>'`
+13. promote to pre-release or live with `poly deployments promote`
 
 !!! info "Run commands from the project folder"
 
