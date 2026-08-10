@@ -52,6 +52,7 @@ from poly.utils import prepush
 
 logger = logging.getLogger(__name__)
 
+
 PROJECT_CONFIG_FILE = "project.yaml"
 STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
 
@@ -441,6 +442,45 @@ class AgentStudioProject:
             self._not_loaded_resources = []
         self.save_config()
 
+    @staticmethod
+    def list_templates(region: str) -> list[dict[str, Any]]:
+        """List available template projects for a region.
+
+        Args:
+            region: The region to query.
+
+        Returns:
+            list[dict[str, Any]]: A list of template project summaries.
+        """
+        return AgentStudioInterface.list_template_projects(region)
+
+    def load_template(self, region: str, template_id: str) -> None:
+        """Load a template into the project.
+
+        Writes template resources to disk without updating the tracked state,
+        so the next ``poly push`` detects the template files as changes.
+        """
+        template_resources = AgentStudioInterface.get_template_resources(template_id, region)
+
+        self._not_loaded_resources = []
+        self.save_config()
+
+        # Delete only ADK-managed resource files, leaving non-ADK files intact.
+        for resource_class in RESOURCE_NAME_TO_CLASS.values():
+            for path in self._sort_paths_for_reverse_deletion(
+                resource_class.discover_resources(self.root_path), resource_class
+            ):
+                resource_class.delete_resource(path)
+
+        # Empty original_resources so all template resources are treated as new
+        # and saved directly, bypassing the three-way merge.
+        empty_resources: ResourceMap = {}
+        self._update_pulled_resources(
+            original_resources=empty_resources,
+            incoming_resources=template_resources,
+            force=True,
+        )
+
     def pull_project(
         self,
         force: bool = False,
@@ -507,18 +547,7 @@ class AgentStudioProject:
 
         # Delete all new resources
         if force:
-            new_resources, _, _ = self.find_new_kept_deleted(self.discover_local_resources())
-            pronunciations = []
-            for resource_mapping in new_resources:
-                # Because pronunciation uses position as a "name", deleting these out of order
-                # Effectively "changes" the name, causing some of the resources to not be deleted
-                if resource_mapping.resource_type == Pronunciation:
-                    pronunciations.append(resource_mapping.file_path)
-                else:
-                    resource_mapping.resource_type.delete_resource(resource_mapping.file_path)
-
-            for file_path in self._sort_paths_for_reverse_deletion(pronunciations, Pronunciation):
-                Pronunciation.delete_resource(file_path)
+            self._delete_new_resources()
 
         utils.export_decorators(DECORATORS, self.root_path)
         utils.save_imports(self.root_path)
@@ -549,6 +578,8 @@ class AgentStudioProject:
 
         self._check_no_duplicate_resource_paths(incoming_resources)
 
+        self._delete_all_local_resources()
+
         files_with_conflicts = self._update_pulled_resources(
             original_resources=self.resources,
             incoming_resources=incoming_resources,
@@ -557,17 +588,36 @@ class AgentStudioProject:
             on_save=None,
         )
 
-        flow_folder = os.path.join(self.root_path, "flows")
-        if os.path.exists(flow_folder):
-            self._delete_empty_folders(flow_folder)
+        utils.export_decorators(DECORATORS, self.root_path)
+        utils.save_imports(self.root_path)
 
-        self.resources = incoming_resources
-        self.file_structure_info = self.compute_file_structure_info(incoming_resources)
+        return files_with_conflicts
 
+    def _delete_all_local_resources(self) -> None:
+        """Delete every local resource file, leaving a clean slate."""
+        discovered = self.discover_local_resources()
+        pronunciations: list[str] = []
+        for resource_class, file_paths in discovered.items():
+            if resource_class is Pronunciation:
+                pronunciations.extend(file_paths)
+            else:
+                for file_path in file_paths:
+                    resource_class.delete_resource(file_path)
+
+        for file_path in self._sort_paths_for_reverse_deletion(pronunciations, Pronunciation):
+            Pronunciation.delete_resource(file_path)
+
+        for entry in os.listdir(self.root_path):
+            entry_path = os.path.join(self.root_path, entry)
+            if os.path.isdir(entry_path) and entry not in {"_gen", ".git"}:
+                self._delete_empty_folders(entry_path)
+
+    def _delete_new_resources(self) -> None:
+        """Delete locally-new resources that don't exist on the remote."""
         new_resources, _, _ = self.find_new_kept_deleted(self.discover_local_resources())
         pronunciations = []
         for resource_mapping in new_resources:
-            # Because pronunciation uses position as a "name", deleting these out of order
+            # Pronunciation uses position as a "name" — deleting out of order
             # effectively "changes" the name, causing some resources not to be deleted.
             if resource_mapping.resource_type == Pronunciation:
                 pronunciations.append(resource_mapping.file_path)
@@ -576,12 +626,6 @@ class AgentStudioProject:
 
         for file_path in self._sort_paths_for_reverse_deletion(pronunciations, Pronunciation):
             Pronunciation.delete_resource(file_path)
-
-        utils.export_decorators(DECORATORS, self.root_path)
-        utils.save_imports(self.root_path)
-        self.save_config()
-
-        return files_with_conflicts
 
     @staticmethod
     def _delete_empty_folders(folder_path: str) -> None:
@@ -847,7 +891,7 @@ class AgentStudioProject:
 
         # If not force, compare with original and local changes
         original_resource_mappings: list[ResourceMapping] = self._make_resource_mappings(
-            self.resources
+            original_resources
         )
 
         # Merging is done on a per file basis.
@@ -857,7 +901,7 @@ class AgentStudioProject:
         total = sum(len(res) for res in incoming_resources.values())
 
         multi_conflicts, current = self._update_multi_resource_yaml_resources(
-            original_resources=self.resources,
+            original_resources=original_resources,
             incoming_resources=incoming_resources,
             original_resource_mappings=original_resource_mappings,
             incoming_resource_mappings=incoming_resource_mappings,

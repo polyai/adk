@@ -233,6 +233,38 @@ class AgentStudioInterface:
         return PlatformAPIHandler.duplicate_project(region, project_id, new_name, new_id)
 
     @staticmethod
+    def list_template_projects(region: str) -> list[dict[str, Any]]:
+        """List available template projects.
+
+        Args:
+            region: The region to query.
+
+        Returns:
+            list[dict[str, Any]]: A list of template project summaries.
+        """
+        return SyncClientHandler(region=region).list_template_projects()
+
+    @staticmethod
+    def get_template_resources(
+        template_id: str, region: str
+    ) -> dict[type[Resource], dict[str, Resource]]:
+        """Fetch a template and return its resources.
+
+        Combines projection fetching and resource conversion in one call.
+
+        Args:
+            template_id: The template project ID.
+            region: The region to query.
+
+        Returns:
+            dict mapping resource types to their resources.
+        """
+        from poly.resources.resource import load_resources_from_projection
+
+        projection = SyncClientHandler(region=region).get_template_project_projection(template_id)
+        return load_resources_from_projection(projection)
+
+    @staticmethod
     def get_deployments(
         region: str, account_id: str, project_id: str, client_env: str = "sandbox"
     ) -> list[dict[str, Any]]:

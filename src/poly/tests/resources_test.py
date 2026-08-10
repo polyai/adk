@@ -3787,6 +3787,7 @@ class EntityTests(unittest.TestCase):
         self.assertIsNone(entity_without_config.validate())
 
 
+
 TEST_FUNCTION_STEP_CODE = """def process_data(conv: Conversation, flow: Flow):
     \"\"\"Process some data.\"\"\"
     return "processed"
