@@ -1,6 +1,174 @@
 # CHANGELOG
 
 
+## v0.39.0 (2026-08-10)
+
+### Continuous Integration
+
+- Make TruffleHog output actionable and drop the Lob false positive
+  ([#263](https://github.com/polyai/adk/pull/263),
+  [`8ff6342`](https://github.com/polyai/adk/commit/8ff6342388e830afb5aec1994ee2e564c0b8c2e0))
+
+## What happened
+
+The secret-scanning gate failed on #259 with exactly one line of output:
+
+``` ##[warning]Found verified Lob result 🐷🔑 ```
+
+No file, no line, no match. The actual trigger was a Python test function name —
+  [`src/poly/tests/metrics_test.py:321`](https://github.com/polyai/adk/blob/main/src/poly/tests/metrics_test.py#L321):
+
+```python def test_add_duplicate_metric_friendly_error(self, mock_load, mock_create, mock_error):
+  ```
+
+That's two separate problems, and this PR fixes both.
+
+## 1. The finding was noise
+
+TruffleHog's Lob detector combines two individually-weak choices:
+
+```go keyPat = regexp.MustCompile(`\b((live|test)_[a-zA-Z0-9_]{35})\b`) // no keyword-proximity gate
+  func (s Scanner) Keywords() []string { return []string{"live_", "test_"} } ```
+
+The `Keywords()` prefilter is the pytest naming convention, so **every chunk in our test suite**
+  reaches an ungated regex that matches any 40-character `test_*` identifier. It also treats HTTP
+  **403 and 422** from `api.lob.com` as "verified" — only 401 counts as invalid — which is how a
+  function name got reported as a *verified* secret.
+
+Measured against this repo with TruffleHog 3.96.0 (`--no-verification`, all result types):
+
+| Scope | Findings | After `--exclude-detectors=lob` | |---|---|---| | Working tree | 51 (all Lob) |
+  0 | | Full `main` history | 85 (all Lob) | 0 |
+
+Lob is **100% of the finding surface**. `main` already contains 36 more identifiers that match the
+  pattern — they only stay quiet because scans are limited to each PR's commit range, so this would
+  have recurred on any PR touching those lines. Roughly 4% of test names in the repo land on exactly
+  40 characters.
+
+ADK does not use Lob (direct-mail API), so there is no coverage to lose.
+
+### Other detectors were checked, not assumed
+
+Of 870 detectors, 133 lack a keyword-proximity gate and 74 have a prefilter keyword present in this
+  repo. Intersecting gives 19 others that are live *and* ungated. All were tested against the source
+  tree — **zero matches and zero near-misses**:
+
+``` uri (user:pass@host) 0 twilio AC<32hex> 0 stripe pi_..._secret_ 0 redis:// creds 0 twilio SK<32>
+  0 zohocrm 1000.hex.hex 0 ftp:// creds 0 launchdarkly 0 sendgrid SG. 0 mongodb:// creds 0
+  salesforce 0 mailchimp <32hex>-usN 0 gemini master-/account- 0 closecrm api_<45> 0 lob (contrast)
+  43 ```
+
+Two worth noting: **Twilio** (`AC`+32hex) is the one to watch given our telephony code — clean
+  today, but a realistic-shaped dummy SID in a fixture will fire it. **Auth0** looks alarming
+  (`\b(ey[a-zA-Z0-9._-]+)\b` with prefilter keywords `token`/`domain`) but `FromData` requires a
+  2000–5000 char match paired with an `*.auth0.com` domain, so it's well gated.
+
+## 2. The output was unactionable regardless
+
+The action always passes `--github-actions`, and that printer emits only the detector name and
+  verification status:
+
+```go fmt.Printf("::warning file=%s,line=%d,endLine=%d::%s", out.Filename, out.StartLine,
+  out.StartLine, message) // message = "Found verified Lob result 🐷🔑" ```
+
+File and line go into annotation *metadata* that never renders in the log, and the match is never
+  printed at all. `extra_args` can't remove `--github-actions`, but `--json` outranks it in
+  TruffleHog's printer selection, so a diagnostic step re-runs the scan on failure:
+
+``` ────────────────────────────────────────── detector: Lob [verified]
+
+file: src/poly/tests/metrics_test.py
+
+line: 321
+
+commit: 0b99540672d0 by Bill <bill@poly-ai.com>
+
+match: test_add_dup… (40 chars) ```
+
+Only a 12-character prefix is printed — enough to triage, not enough to use. The step exits 0; the
+  gate above has already failed the job.
+
+## 3. Also: the scanner version was floating
+
+The action was SHA-pinned, but its `version` input defaulted to `latest` — the failing run logs
+  `VERSION: latest`. The pin covered the wrapper, not the binary doing the scanning. Now pinned to
+  `v3.96.0`.
+
+## Testing
+
+- YAML validated. - `jq` filter tested against a real TruffleHog JSON result record. - Exclusion
+  confirmed to take both the working tree and full `main` history to zero findings. - Diagnostic
+  step mirrors the gate's `--exclude-detectors` so the two can't disagree.
+
+## Note for reviewers
+
+This repo is public, and the description above documents which detector is disabled and that
+  `--results=verified,unknown` filters out unverifiable detectors (`jwt`, `uri`, `sqlserver`). It's
+  all derived from TruffleHog's public source. Happy to trim if anyone would rather that analysis
+  live internally.
+
+### Features
+
+- Add example projects load and list commands ([#204](https://github.com/polyai/adk/pull/204),
+  [`2f7fed1`](https://github.com/polyai/adk/commit/2f7fed19f163f9ac7f803dffc558d9916b78925b))
+
+## Summary
+
+Add `poly template list` and `poly template load` commands that let users browse and load example
+  project templates from the platform.
+
+## Motivation
+
+Closes
+  [DEVP-386](https://linear.app/poly-ai/issue/DEVP-386/add-template-selection-and-load-commands-to-adk-cli)
+
+## Changes
+
+- Add `poly template list` command to browse available example project templates, with optional
+  `--region` flag - Add `poly template load <name>` command to load a template into the current
+  project, with `--force` to skip confirmation and an interactive picker when no name is given
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+``` (polyai-adk) jamesosullivan@JAMES-O-C63L909T4T PROJECT-0Z28NPOM % poly template list --region
+  dev Available templates (5):
+
+Retail Customer Service Agent - Order & Shipping Support Tracks orders, handles returns, and
+  resolves shipping issues on the call Restaurant Reservation Assistant Takes and changes table
+  bookings, answers common questions, and resolves issues on the call Pest Control Field Service
+  Assistant Schedules and manages pest control appointments, handles billing questions, and answers
+  service FAQs Healthcare Clinic Receptionist Books, cancels, and reschedules appointments, answers
+  patient questions, and routes urgent calls to staff Banking Customer Service Virtual Assistant
+  Handles banking queries, processes payments, manages cards, and resolves account issues on the
+  call
+
+(polyai-adk) jamesosullivan@JAMES-O-C63L909T4T PROJECT-0Z28NPOM % poly template load "Retail
+  Customer Service Agent - Order & Shipping Support" --region dev ? Loading 'Retail Customer Service
+  Agent - Order & Shipping Support' will overwrite local project resources. Continue? Yes Loaded
+  template Retail Customer Service Agent - Order & Shipping Support into
+  ws-fd112d8f/PROJECT-0Z28NPOM (polyai-adk) jamesosullivan@JAMES-O-C63L909T4T PROJECT-0Z28NPOM %
+  poly push Pushing local changes for ws-fd112d8f/PROJECT-0Z28NPOM... Pushed
+  ws-fd112d8f/PROJECT-0Z28NPOM to Agent Studio. (polyai-adk) jamesosullivan@JAMES-O-C63L909T4T
+  PROJECT-0Z28NPOM % ```
+
+---------
+
+Co-authored-by: Ruari Phipps <ruari@poly-ai.com>
+
+
 ## v0.38.4 (2026-08-07)
 
 ### Bug Fixes
