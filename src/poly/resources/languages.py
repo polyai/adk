@@ -80,6 +80,10 @@ class DefaultLanguage(MultiResourceYamlResource):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "DefaultLanguage"]:
         """Parse default language from a projection dict."""
+        if "languages" not in projection:
+            logger.debug("No read access to the default language - it will not be pulled.")
+            return {}
+
         language_data = projection.get("languages", {})
         if not language_data:
             return {}
@@ -199,8 +203,10 @@ class AdditionalLanguage(MultiResourceYamlResource):
             return {}
         additional_languages = {}
         languages_projection = language_data.get("additionalLanguages", {}).get("entities", {})
-        if any("code" not in lang for lang in languages_projection.values()):
-            logger.warning("No read access to additional languages - they will not be pulled.")
+        if "languages" not in projection or any(
+            "code" not in lang for lang in languages_projection.values()
+        ):
+            logger.debug("No read access to additional languages - they will not be pulled.")
             return {}
 
         for lang_id, lang in languages_projection.items():

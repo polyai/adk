@@ -59,8 +59,10 @@ class PhraseFilter(MultiResourceYamlResource):
         filters_projection = (
             projection.get("stopKeywords", {}).get("filters", {}).get("entities", {})
         )
-        if any("title" not in f for f in filters_projection.values()):
-            logger.warning("No read access to phrase filtering - it will not be pulled.")
+        if "stopKeywords" not in projection or any(
+            "title" not in f for f in filters_projection.values()
+        ):
+            logger.debug("No read access to phrase filtering - it will not be pulled.")
             return {}
 
         for filter_id, filter_data in filters_projection.items():

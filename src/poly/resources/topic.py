@@ -61,8 +61,10 @@ class Topic(YamlResource):
         topics_projection = (
             projection.get("knowledgeBase", {}).get("topics", {}).get("entities", {})
         )
-        if any("content" not in topic for topic in topics_projection.values()):
-            logger.warning("No read access to the knowledge base - it will not be pulled.")
+        if "knowledgeBase" not in projection or any(
+            "content" not in topic for topic in topics_projection.values()
+        ):
+            logger.debug("No read access to the knowledge base - it will not be pulled.")
             return {}
 
         for topic_id, topic in topics_projection.items():

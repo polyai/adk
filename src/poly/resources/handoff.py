@@ -112,8 +112,10 @@ class Handoff(MultiResourceYamlResource):
         handoffs = {}
         # Read access is checked before "active": an auth-filtered handoff has no
         # "active" field, and must not be mistaken for a deactivated one.
-        if any("active" not in handoff for handoff in handoffs_projection.values()):
-            logger.warning("No read access to handoffs - they will not be pulled.")
+        if "handoff" not in projection or any(
+            "active" not in handoff for handoff in handoffs_projection.values()
+        ):
+            logger.debug("No read access to handoffs - they will not be pulled.")
             return {}
 
         for handoff_id, handoff_data in handoffs_projection.items():

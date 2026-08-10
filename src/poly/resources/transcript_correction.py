@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import ClassVar, Optional
@@ -21,6 +22,8 @@ from poly.handlers.protobuf.transcript_corrections_pb2 import (
     TranscriptCorrectionsUpdateData,
 )
 from poly.resources.resource import MultiResourceYamlResource, ResourceMapping, register_resource
+
+logger = logging.getLogger(__name__)
 
 VALID_REPLACEMENT_TYPES = ("full", "partial", "substring")
 
@@ -92,6 +95,10 @@ class TranscriptCorrection(MultiResourceYamlResource):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "TranscriptCorrection"]:
         """Parse transcript corrections from a projection dict."""
+        if "transcriptCorrections" not in projection:
+            logger.debug("No read access to transcript corrections - it will not be pulled.")
+            return {}
+
         corrections = {}
         for correction_id, correction_data in (
             projection.get("transcriptCorrections", {})

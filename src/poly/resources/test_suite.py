@@ -205,8 +205,10 @@ class TestCase(YamlResource):
         test_cases_projection = (
             projection.get("testing", {}).get("testCases", {}).get("entities", {})
         )
-        if any("scenario" not in tc for tc in test_cases_projection.values()):
-            logger.warning("No read access to test cases - they will not be pulled.")
+        if "testing" not in projection or any(
+            "scenario" not in tc for tc in test_cases_projection.values()
+        ):
+            logger.debug("No read access to test cases - they will not be pulled.")
             return {}
 
         for test_case_id, test_case_data in test_cases_projection.items():

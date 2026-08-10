@@ -112,8 +112,10 @@ class Entity(MultiResourceYamlResource):
         """Parse entities from a projection dict."""
         entities = {}
         entities_projection = projection.get("entities", {}).get("entities", {}).get("entities", {})
-        if any("type" not in entity for entity in entities_projection.values()):
-            logger.warning("No read access to entities - they will not be pulled.")
+        if "entities" not in projection or any(
+            "type" not in entity for entity in entities_projection.values()
+        ):
+            logger.debug("No read access to entities - they will not be pulled.")
             return {}
 
         for entity_id, entity_data in entities_projection.items():

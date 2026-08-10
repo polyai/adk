@@ -66,8 +66,10 @@ class Pronunciation(MultiResourceYamlResource):
         pronunciations_projection = (
             projection.get("pronunciations", {}).get("pronunciations", {}).get("entities", {})
         )
-        if any("regex" not in p for p in pronunciations_projection.values()):
-            logger.warning("No read access to pronunciations - they will not be pulled.")
+        if "pronunciations" not in projection or any(
+            "regex" not in p for p in pronunciations_projection.values()
+        ):
+            logger.debug("No read access to pronunciations - they will not be pulled.")
             return {}
 
         for pronunciation_id, pronunciation_data in pronunciations_projection.items():

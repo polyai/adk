@@ -32,8 +32,10 @@ class ExperimentalConfig(Resource):
         )
         # "features" is optional in the API schema, so it can't distinguish an
         # auth-filtered config from one with no features set. "active" always is.
-        if any("active" not in config for config in experimental_configs.values()):
-            logger.warning("No read access to experimental config - it will not be pulled.")
+        if "experimentalConfig" not in projection or any(
+            "active" not in config for config in experimental_configs.values()
+        ):
+            logger.debug("No read access to experimental config - it will not be pulled.")
             return {}
 
         config_id, config_data = (

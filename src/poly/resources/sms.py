@@ -77,8 +77,10 @@ class SMSTemplate(MultiResourceYamlResource):
         sms_templates = {}
         # Read access is checked before "active": an auth-filtered template has no
         # "active" field, and must not be mistaken for a deactivated one.
-        if any("active" not in template for template in sms_templates_projection.values()):
-            logger.warning("No read access to SMS templates - they will not be pulled.")
+        if "sms" not in projection or any(
+            "active" not in template for template in sms_templates_projection.values()
+        ):
+            logger.debug("No read access to SMS templates - they will not be pulled.")
             return {}
 
         for sms_template_id, sms_template_data in sms_templates_projection.items():

@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import ClassVar, Optional
@@ -18,6 +19,8 @@ from poly.handlers.protobuf.translations_pb2 import (
 from poly.resources.languages import AdditionalLanguage, DefaultLanguage
 from poly.resources.resource import MultiResourceYamlResource, ResourceMapping, register_resource
 
+logger = logging.getLogger(__name__)
+
 
 @register_resource("translations")
 @dataclass
@@ -30,6 +33,10 @@ class Translation(MultiResourceYamlResource):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "Translation"]:
         """Parse translations from a projection dict."""
+        if "translations" not in projection:
+            logger.debug("No read access to translations - it will not be pulled.")
+            return {}
+
         translations_data = (
             projection.get("translations", {}).get("translations", {}).get("entities", {})
         )

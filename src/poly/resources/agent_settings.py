@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -21,6 +22,8 @@ from poly.resources.resource import (
     YamlResource,
     register_resource,
 )
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_BEHAVIOUR_REFERENCES = [
     "global_functions",
@@ -86,6 +89,10 @@ class SettingsPersonality(YamlResource):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "SettingsPersonality"]:
         """Parse personality settings from a projection dict."""
+        if "agentSettings" not in projection:
+            logger.debug("No read access to the agent personality - it will not be pulled.")
+            return {}
+
         agent_settings = projection.get("agentSettings", {})
         personality = agent_settings.get("personality", None)
         if not personality:
@@ -209,6 +216,10 @@ class SettingsRole(YamlResource):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "SettingsRole"]:
         """Parse role settings from a projection dict."""
+        if "agentSettings" not in projection:
+            logger.debug("No read access to the agent role - it will not be pulled.")
+            return {}
+
         agent_settings = projection.get("agentSettings", {})
         role = agent_settings.get("role", None)
         if not role:
@@ -320,6 +331,10 @@ class SettingsRules(Resource):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "SettingsRules"]:
         """Parse rules settings from a projection dict."""
+        if "agentSettings" not in projection:
+            logger.debug("No read access to the agent rules - it will not be pulled.")
+            return {}
+
         agent_settings = projection.get("agentSettings", {})
         rules = agent_settings.get("rules", None)
         if not rules:

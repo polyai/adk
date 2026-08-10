@@ -133,8 +133,10 @@ class Document(Resource):
             projection.get("documents", {}).get("documents", {}).get("entities", {})
         )
         # The projection carries the proto field name, "content".
-        if any("content" not in doc for doc in documents_projection.values()):
-            logger.warning("No read access to context documents - they will not be pulled.")
+        if "documents" not in projection or any(
+            "content" not in doc for doc in documents_projection.values()
+        ):
+            logger.debug("No read access to context documents - they will not be pulled.")
             return {}
 
         for document_id, document_data in documents_projection.items():

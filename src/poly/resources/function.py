@@ -278,8 +278,10 @@ class Function(Resource):
         # transition), so each slice is checked for read access independently -
         # losing one must not hide the others.
         special_functions = projection.get("specialFunctions", {})
-        if any("code" not in func for func in special_functions.values()):
-            logger.warning("No read access to start/end functions - they will not be pulled.")
+        if "specialFunctions" not in projection or any(
+            "code" not in func for func in special_functions.values()
+        ):
+            logger.debug("No read access to start/end functions - they will not be pulled.")
             special_functions = {}
 
         for func_type_key, func in special_functions.items():
@@ -315,12 +317,12 @@ class Function(Resource):
             )
 
         flows = projection.get("flows", {}).get("flows", {}).get("entities", {})
-        if any(
+        if "flows" not in projection or any(
             "code" not in func
             for flow_data in flows.values()
             for func in flow_data.get("transitionFunctions", {}).get("entities", {}).values()
         ):
-            logger.warning("No read access to transition functions - they will not be pulled.")
+            logger.debug("No read access to transition functions - they will not be pulled.")
             flows = {}
 
         for flow_id, flow_data in flows.items():
@@ -353,8 +355,10 @@ class Function(Resource):
                 )
 
         global_functions = projection.get("functions", {}).get("functions", {}).get("entities", {})
-        if any("code" not in func for func in global_functions.values()):
-            logger.warning("No read access to functions - they will not be pulled.")
+        if "functions" not in projection or any(
+            "code" not in func for func in global_functions.values()
+        ):
+            logger.debug("No read access to functions - they will not be pulled.")
             global_functions = {}
 
         for func_id, func in global_functions.items():

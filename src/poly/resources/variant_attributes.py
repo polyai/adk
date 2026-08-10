@@ -68,8 +68,10 @@ class Variant(MultiResourceYamlResource):
         variants_projection = (
             projection.get("variantManagement", {}).get("variants", {}).get("entities", {})
         )
-        if any("name" not in variant for variant in variants_projection.values()):
-            logger.warning("No read access to variants - they will not be pulled.")
+        if "variantManagement" not in projection or any(
+            "name" not in variant for variant in variants_projection.values()
+        ):
+            logger.debug("No read access to variants - they will not be pulled.")
             return {}
 
         for variant_id, variant_data in variants_projection.items():
@@ -228,8 +230,10 @@ class VariantAttribute(MultiResourceYamlResource):
         )
         # "archived" is optional in the API schema, so it can't distinguish an
         # auth-filtered attribute from an unarchived one. "type" always is.
-        if any("type" not in attribute for attribute in attributes_projection.values()):
-            logger.warning("No read access to variant attributes - they will not be pulled.")
+        if "variantManagement" not in projection or any(
+            "type" not in attribute for attribute in attributes_projection.values()
+        ):
+            logger.debug("No read access to variant attributes - they will not be pulled.")
             return {}
 
         for attribute_id, attribute_data in attributes_projection.items():

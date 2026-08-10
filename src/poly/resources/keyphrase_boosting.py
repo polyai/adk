@@ -51,8 +51,10 @@ class KeyphraseBoosting(MultiResourceYamlResource):
         keyphrases_projection = (
             projection.get("keyphraseBoosting", {}).get("keyphraseBoosting", {}).get("entities", {})
         )
-        if any("keyphrase" not in kp for kp in keyphrases_projection.values()):
-            logger.warning("No read access to keyphrase boosting - it will not be pulled.")
+        if "keyphraseBoosting" not in projection or any(
+            "keyphrase" not in kp for kp in keyphrases_projection.values()
+        ):
+            logger.debug("No read access to keyphrase boosting - it will not be pulled.")
             return {}
 
         for kp_id, kp_data in keyphrases_projection.items():

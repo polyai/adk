@@ -111,8 +111,8 @@ class FlowConfig(YamlResource):
         """Parse flow configs from a projection dict."""
         configs = {}
         flows = projection.get("flows", {}).get("flows", {}).get("entities", {})
-        if any("startStepId" not in flow for flow in flows.values()):
-            logger.warning("No read access to flows - they will not be pulled.")
+        if "flows" not in projection or any("startStepId" not in flow for flow in flows.values()):
+            logger.debug("No read access to flows - they will not be pulled.")
             return {}
 
         for flow_id, flow_data in flows.items():
@@ -388,12 +388,12 @@ class FlowStep(BaseFlowStep, YamlResource):
         """Parse flow steps (non-function) from a projection dict."""
         steps = {}
         flows = projection.get("flows", {}).get("flows", {}).get("entities", {})
-        if any(
+        if "flows" not in projection or any(
             "type" not in step
             for flow_data in flows.values()
             for step in flow_data.get("steps", {}).get("entities", {}).values()
         ):
-            logger.warning("No read access to flow steps - they will not be pulled.")
+            logger.debug("No read access to flow steps - they will not be pulled.")
             return {}
 
         for flow_id, flow_data in flows.items():
@@ -1507,12 +1507,12 @@ class FunctionStep(Function, BaseFlowStep):
         """Parse function steps from a projection dict."""
         func_steps = {}
         flows = projection.get("flows", {}).get("flows", {}).get("entities", {})
-        if any(
+        if "flows" not in projection or any(
             "type" not in step
             for flow_data in flows.values()
             for step in flow_data.get("steps", {}).get("entities", {}).values()
         ):
-            logger.warning("No read access to flow steps - they will not be pulled.")
+            logger.debug("No read access to flow steps - they will not be pulled.")
             return {}
 
         for flow_id, flow_data in flows.items():

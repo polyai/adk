@@ -16,6 +16,8 @@ from poly.resources.function import Function
 from poly.resources.resource import PROJECTION_REGISTRY, RESOURCE_CLASS_TO_NAME
 from poly.resources.sms import SMSTemplate
 from poly.resources.topic import Topic
+from poly.resources.variable import Variable
+from poly.utils.prepush import fix_orphaned_variables
 
 # A projection where every slice came back auth-filtered, built from the fields
 # each slice declares in its alwaysPresentJsonPaths allow-list. Slices whose
@@ -182,13 +184,13 @@ class FalsyGuardValuesAreReadable(unittest.TestCase):
     def test_inactive_sms_template_is_a_read_not_a_hide(self):
         """active=False is a deactivated template, not a filtered one.
 
-        Both end up absent, but only the filtered case should warn - so the
+        Both end up absent, but only the filtered case should log - so the
         guard must see the field and fall through to the "active" check.
         """
         projection = {
             "sms": {"templates": {"entities": {"SMS-1": {"name": "old", "active": False}}}}
         }
-        with self.assertNoLogs("poly.resources.sms", level="WARNING"):
+        with self.assertNoLogs("poly.resources.sms", level="DEBUG"):
             self.assertEqual(SMSTemplate.from_projection(projection), {})
 
 
@@ -244,6 +246,41 @@ class FunctionSliceIndependence(unittest.TestCase):
         }
         functions = Function.from_projection(projection)
         self.assertEqual(list(functions), ["TF-1"])
+
+
+class WithheldSlicesAreReported(unittest.TestCase):
+    """A withheld slice arrives as nothing at all, so the absence is the signal."""
+
+    def test_absent_slice_logs_and_yields_nothing(self):
+        with self.assertLogs("poly.resources.topic", level="DEBUG"):
+            self.assertEqual(Topic.from_projection({}), {})
+
+    def test_present_but_empty_slice_is_silent(self):
+        """An authorised slice with no entities is emitted, just empty - not withheld."""
+        projection = {"knowledgeBase": {"topics": {"entities": {}}}}
+        with self.assertNoLogs("poly.resources.topic", level="DEBUG"):
+            self.assertEqual(Topic.from_projection(projection), {})
+
+
+class PrepushDerivationsAreInertWhenHidden(unittest.TestCase):
+    """Why the prepush derivations need no read-access handling of their own.
+
+    They compare the baseline against local files, and a slim pull empties both
+    together - it rewrites the manifest and deletes the files in one go. So a
+    hidden resource is absent from both sides and no derivation can see a delta.
+    fix_orphaned_variables is the one that would corrupt server state if it did:
+    variableUpdate is gated on jupiter_flows, not functions, so the API would
+    accept a reference graph rebuilt from functions the user cannot see.
+    """
+
+    def test_no_variable_commands_when_functions_are_hidden(self):
+        variable = Variable(resource_id="VAR-1", name="order_id")
+        visible = {Variable: {"VAR-1": variable}, Function: {}}
+        new, updated, deleted = {}, {}, {}
+
+        fix_orphaned_variables(visible, new, updated, deleted, visible, lambda _: [])
+
+        self.assertEqual((new, updated, deleted), ({}, {}, {}))
 
 
 if __name__ == "__main__":
