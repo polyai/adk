@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import ClassVar, Optional
@@ -19,6 +20,8 @@ from poly.resources.resource import (
     _parse_multi_resource_path,
     register_resource,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @register_resource("pronunciations")
@@ -60,12 +63,14 @@ class Pronunciation(MultiResourceYamlResource):
         """Parse pronunciations from a projection dict."""
         pronunciations = {}
         index = 0
-        for pronunciation_id, pronunciation_data in (
-            projection.get("pronunciations", {})
-            .get("pronunciations", {})
-            .get("entities", {})
-            .items()
-        ):
+        pronunciations_projection = (
+            projection.get("pronunciations", {}).get("pronunciations", {}).get("entities", {})
+        )
+        if any("regex" not in p for p in pronunciations_projection.values()):
+            logger.warning("No read access to pronunciations - they will not be pulled.")
+            return {}
+
+        for pronunciation_id, pronunciation_data in pronunciations_projection.items():
             pronunciations[pronunciation_id] = cls(
                 resource_id=pronunciation_id,
                 name=pronunciation_data.get("name", ""),

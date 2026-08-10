@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 import re
 from dataclasses import dataclass
@@ -16,6 +17,8 @@ from poly.handlers.protobuf.knowledge_base_pb2 import (
     KnowledgeBase_UpdateTopic,
 )
 from poly.resources.resource import ResourceMapping, YamlResource, register_resource
+
+logger = logging.getLogger(__name__)
 
 FUNCTION_REGEX = re.compile(r"{{fn:([\w-]+)}}")
 FLOW_FUNCTION_REGEX = re.compile(r"{{ft:([\w-]+)}}")
@@ -55,9 +58,14 @@ class Topic(YamlResource):
     def from_projection(cls, projection: dict) -> dict[str, "Topic"]:
         """Parse topics from a projection dict."""
         topics = {}
-        for topic_id, topic in (
-            projection.get("knowledgeBase", {}).get("topics", {}).get("entities", {}).items()
-        ):
+        topics_projection = (
+            projection.get("knowledgeBase", {}).get("topics", {}).get("entities", {})
+        )
+        if any("content" not in topic for topic in topics_projection.values()):
+            logger.warning("No read access to the knowledge base - it will not be pulled.")
+            return {}
+
+        for topic_id, topic in topics_projection.items():
             example_queries = topic.get("exampleQueries", [])
             queries = [
                 example_queries["query"]

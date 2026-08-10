@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import ClassVar, Optional
@@ -17,6 +18,8 @@ from poly.handlers.protobuf.sms_pb2 import (
     UpdateSMSEnvPhoneNumbers,
 )
 from poly.resources.resource import MultiResourceYamlResource, ResourceMapping, register_resource
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -72,6 +75,12 @@ class SMSTemplate(MultiResourceYamlResource):
             projection.get("sms", {}).get("templates", {}).get("entities", {})
         )
         sms_templates = {}
+        # Read access is checked before "active": an auth-filtered template has no
+        # "active" field, and must not be mistaken for a deactivated one.
+        if any("active" not in template for template in sms_templates_projection.values()):
+            logger.warning("No read access to SMS templates - they will not be pulled.")
+            return {}
+
         for sms_template_id, sms_template_data in sms_templates_projection.items():
             if not sms_template_data.get("active", False):
                 continue

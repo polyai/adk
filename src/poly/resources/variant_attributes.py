@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import ClassVar
@@ -19,6 +20,8 @@ from poly.handlers.protobuf.variant_pb2 import (
     VariantValues,
 )
 from poly.resources.resource import MultiResourceYamlResource, ResourceMapping, register_resource
+
+logger = logging.getLogger(__name__)
 
 
 @register_resource("variants")
@@ -62,9 +65,14 @@ class Variant(MultiResourceYamlResource):
     def from_projection(cls, projection: dict) -> dict[str, "Variant"]:
         """Parse variants from a projection dict."""
         variants = {}
-        for variant_id, variant_data in (
-            projection.get("variantManagement", {}).get("variants", {}).get("entities", {}).items()
-        ):
+        variants_projection = (
+            projection.get("variantManagement", {}).get("variants", {}).get("entities", {})
+        )
+        if any("name" not in variant for variant in variants_projection.values()):
+            logger.warning("No read access to variants - they will not be pulled.")
+            return {}
+
+        for variant_id, variant_data in variants_projection.items():
             variants[variant_id] = cls(
                 resource_id=variant_id,
                 name=variant_data["name"],
@@ -215,13 +223,17 @@ class VariantAttribute(MultiResourceYamlResource):
     def from_projection(cls, projection: dict) -> dict[str, "VariantAttribute"]:
         """Parse variant attributes from a projection dict."""
         variant_attributes = {}
-        for attribute_id, attribute_data in (
-            projection.get("variantManagement", {})
-            .get("attributes", {})
-            .get("entities", {})
-            .items()
-        ):
-            if attribute_data["archived"]:
+        attributes_projection = (
+            projection.get("variantManagement", {}).get("attributes", {}).get("entities", {})
+        )
+        # "archived" is optional in the API schema, so it can't distinguish an
+        # auth-filtered attribute from an unarchived one. "type" always is.
+        if any("type" not in attribute for attribute in attributes_projection.values()):
+            logger.warning("No read access to variant attributes - they will not be pulled.")
+            return {}
+
+        for attribute_id, attribute_data in attributes_projection.items():
+            if attribute_data.get("archived"):
                 continue
             variant_attributes[attribute_id] = cls(
                 resource_id=attribute_id, name=attribute_data["name"], mappings={}

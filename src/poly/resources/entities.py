@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass, field
 from enum import Enum
@@ -26,6 +27,8 @@ from poly.handlers.protobuf.entities_pb2 import (
     TimeConfig,
 )
 from poly.resources.resource import MultiResourceYamlResource, ResourceMapping, register_resource
+
+logger = logging.getLogger(__name__)
 
 
 class EntityType(str, Enum):
@@ -108,9 +111,12 @@ class Entity(MultiResourceYamlResource):
     def from_projection(cls, projection: dict) -> dict[str, "Entity"]:
         """Parse entities from a projection dict."""
         entities = {}
-        for entity_id, entity_data in (
-            projection.get("entities", {}).get("entities", {}).get("entities", {}).items()
-        ):
+        entities_projection = projection.get("entities", {}).get("entities", {}).get("entities", {})
+        if any("type" not in entity for entity in entities_projection.values()):
+            logger.warning("No read access to entities - they will not be pulled.")
+            return {}
+
+        for entity_id, entity_data in entities_projection.items():
             entities[entity_id] = cls(
                 resource_id=entity_id,
                 name=entity_data["name"],

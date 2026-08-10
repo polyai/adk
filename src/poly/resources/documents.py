@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from functools import cached_property
@@ -13,6 +14,8 @@ from poly.handlers.protobuf.documents_pb2 import (
     Document_Update,
 )
 from poly.resources.resource import Resource, register_resource
+
+logger = logging.getLogger(__name__)
 
 
 @register_resource("documents")
@@ -126,13 +129,15 @@ class Document(Resource):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "Document"]:
         documents = {}
-        for document_id, document_data in (
-            projection.get("documents", {}).get("documents", {}).get("entities", {}).items()
-        ):
-            # The projection carries the proto field name, "content". An entity without it is
-            # one the current user lacks read permission for, so skip it.
-            if "content" not in document_data:
-                continue
+        documents_projection = (
+            projection.get("documents", {}).get("documents", {}).get("entities", {})
+        )
+        # The projection carries the proto field name, "content".
+        if any("content" not in doc for doc in documents_projection.values()):
+            logger.warning("No read access to context documents - they will not be pulled.")
+            return {}
+
+        for document_id, document_data in documents_projection.items():
             path = document_data.get("path", "") or ""
             name = path.removesuffix(".md")
             documents[document_id] = Document(
