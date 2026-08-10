@@ -103,6 +103,10 @@ Global and transition functions use decorators to describe themselves to the mod
 | `@func_parameter("name", "...")` | Describes a parameter |
 | `@func_latency_control(...)` | Configures delay messaging while the function runs |
 
+`@func_latency_control` accepts `delay_before_responses_start`, `silence_after_each_response`,
+`delay_responses`, and optional `randomize=True` to shuffle delay response order on each
+function invocation (timing slots are preserved).
+
 Function steps do not support `@func_description` or `@func_parameter`.
 
 !!! warning "All parameters must have a type annotation and no default value"
