@@ -76,7 +76,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 | `poly review` | Diff review page: `create` (local vs remote, version hash, or `--before`/`--after`), `list`, `delete` |
 | `poly deployments` | Manage deployments (`list`, with `--env`, `--limit`, `--offset`, `--hash`, `--details`) |
 | `poly chat` | Interactive chat session with the agent (`--environment`, `--channel`, `--sip-header`, `--functions`, `--flows`, `--state`) |
-| `poly docs` | Output resource documentation (`poly docs flows functions topics`, or `--all` for everything) |
+| `poly docs` | Output resource documentation (`poly docs flows functions topics`, or `--all` for everything). `--claude-code` installs this documentation as Claude Code skill and CLAUDE.md memory files instead |
 
 Use `poly -h` and `poly {command} -h` for more detailed information
 
@@ -114,6 +114,8 @@ These placeholders can be used in prompts, rules, topics, and other text fields 
 ## Documentation
 
 Resource-specific documentation is available via `poly docs {resource} [resource ...]` or `poly docs --all`.
+
+To set up Claude Code for a project, run `poly docs --claude-code`. It installs the `poly-adk` skill into `.claude/skills/` and a `poly-adk` section into `CLAUDE.md`, so the agent picks up this documentation on its own. Re-running only rewrites what changed and keeps your own `CLAUDE.md` content; pass `--force` to skip the confirmation prompt.
 
 | Name | Description |
 |------|-------------|

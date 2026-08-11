@@ -51,7 +51,17 @@ Claude Code is particularly useful for:
 
 #### Loading ADK rules into Claude Code
 
-Before starting a session with Claude Code or another external coding tool, generate a documentation file and pass it as context:
+Run this once inside the project:
+
+~~~bash
+poly docs --claude-code
+~~~
+
+It installs the `poly-adk` skill into `.claude/skills/` and a `poly-adk` section into `CLAUDE.md`. Claude Code reads the memory section on every session and loads the skill when you work on agent resources, so you do not need to pass anything as context yourself.
+
+Both are safe to refresh: re-running only rewrites what changed, and it never replaces the parts of `CLAUDE.md` you wrote. Run it again after upgrading the CLI. See [`poly docs --claude-code`](./cli.md#poly-docs-claude-code) for the full behaviour.
+
+For other coding tools, generate a documentation file and pass it as context instead:
 
 ~~~bash
 poly docs --all --output rules.md
