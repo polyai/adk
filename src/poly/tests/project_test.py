@@ -3308,18 +3308,21 @@ class PullProjectFromEnvTest(unittest.TestCase):
     def test_no_changes_produces_no_conflicts(self):
         """Pulling when the deployment matches local resources produces no conflicts."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        original_resources = deepcopy(project.resources)
         incoming_resources = deepcopy(project.resources)
         self.mock_get_remote.return_value = incoming_resources
 
         files_with_conflicts = project.pull_project_from_env(env="live")
 
         self.assertEqual(files_with_conflicts, [])
-        self.assertEqual(project.resources, incoming_resources)
-        self.mock_save_config.assert_called_once()
+        # Resources in memory are NOT updated — env pull only writes files
+        self.assertEqual(project.resources, original_resources)
+        self.mock_save_config.assert_not_called()
 
     def test_remote_modification_applied_to_disk(self):
         """A resource modified in the deployment snapshot is written to disk."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        original_resources = deepcopy(project.resources)
         incoming_resources = deepcopy(project.resources)
         func_id = "FUNCTION-test_function"
         modified_func = deepcopy(incoming_resources[Function][func_id])
@@ -3330,7 +3333,8 @@ class PullProjectFromEnvTest(unittest.TestCase):
         files_with_conflicts = project.pull_project_from_env(env="live")
 
         self.assertEqual(files_with_conflicts, [])
-        self.assertEqual(project.resources[Function][func_id].code, modified_func.code)
+        # In-memory resources unchanged; file was written to disk
+        self.assertEqual(project.resources, original_resources)
         self.assertTrue(self.mock_save_to_file.called or self.mock_resource_save.called)
 
     def test_new_remote_resource_written_locally(self):
@@ -3350,7 +3354,9 @@ class PullProjectFromEnvTest(unittest.TestCase):
         files_with_conflicts = project.pull_project_from_env(env="live")
 
         self.assertEqual(files_with_conflicts, [])
-        self.assertIn("TOPIC-live_only_topic", project.resources.get(Topic, {}))
+        # In-memory resources unchanged; new resource was written to disk only
+        self.assertNotIn("TOPIC-live_only_topic", project.resources.get(Topic, {}))
+        self.assertTrue(self.mock_resource_save.called)
 
     # ------------------------------------------------------------------
     # Force-overwrite semantics (always on for pull_project_from_env)
@@ -3359,6 +3365,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
     def test_local_changes_overwritten_without_conflicts(self):
         """Local modifications are silently overwritten — force is always True."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        original_resources = deepcopy(project.resources)
         incoming_resources = deepcopy(project.resources)
         func_id = "FUNCTION-test_function"
         incoming_resources[Function][
@@ -3366,20 +3373,12 @@ class PullProjectFromEnvTest(unittest.TestCase):
         ].code = 'def test_function(conv: Conversation):\n    return "From live"\n'
         self.mock_get_remote.return_value = incoming_resources
 
-        with mock_read_from_file(
-            {
-                os.path.join(
-                    TEST_DIR, "functions", "test_function.py"
-                ): 'from _gen import *  # <AUTO GENERATED>\n\ndef test_function(conv: Conversation):\n    return "Local diverged"\n'
-            }
-        ):
-            files_with_conflicts = project.pull_project_from_env(env="pre-release")
+        files_with_conflicts = project.pull_project_from_env(env="pre-release")
 
         self.assertEqual(files_with_conflicts, [])
-        self.assertEqual(
-            project.resources[Function][func_id].code,
-            incoming_resources[Function][func_id].code,
-        )
+        # In-memory resources unchanged; file overwritten on disk
+        self.assertEqual(project.resources, original_resources)
+        self.assertTrue(self.mock_resource_save.called)
 
     def test_locally_added_resource_deleted_when_absent_from_deployment(self):
         """A locally-added resource absent from the deployment is deleted."""
@@ -3393,20 +3392,21 @@ class PullProjectFromEnvTest(unittest.TestCase):
 
         self.assertEqual(files_with_conflicts, [])
         self.mock_os_remove.assert_called()
-        self.assertNotIn("TOPIC-Topic 1", project.resources.get(Topic, {}))
+        # In-memory resources unchanged; deletion only affects disk
+        self.assertIn("TOPIC-Topic 1", project.resources.get(Topic, {}))
 
     # ------------------------------------------------------------------
     # Side-effects: config + imports saved
     # ------------------------------------------------------------------
 
-    def test_save_config_and_imports_called_on_success(self):
-        """save_config and save_imports are always called after a successful pull."""
+    def test_save_config_not_called_and_imports_saved_on_success(self):
+        """save_config must NOT be called (env changes are local); save_imports is called."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         self.mock_get_remote.return_value = deepcopy(project.resources)
 
         project.pull_project_from_env(env="live")
 
-        self.mock_save_config.assert_called_once()
+        self.mock_save_config.assert_not_called()
         self.mock_save_imports.assert_called_once()
 
     def test_save_config_not_called_when_no_deployment(self):
@@ -3658,6 +3658,155 @@ class ResolveTestsTest(unittest.TestCase):
         """A file path that matches nothing raises ValueError."""
         with self.assertRaises(ValueError, msg="No tests found"):
             self.project.resolve_tests(files=["no_such_test.yaml"])
+
+
+class FetchProjectTest(unittest.TestCase):
+    """Tests for the fetch_project method."""
+
+    def setUp(self):
+        """Set up common mocks — only api_handler and save_config, no file I/O mocks."""
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.mock_save_config = patch.object(AgentStudioProject, "save_config").start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_fetch_without_branch_updates_resources_and_returns_them(self):
+        """fetch_project() without a branch fetches remote state and returns projection."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        expected_resources = deepcopy(project.resources)
+        expected_projection = {"some": "projection"}
+        self.mock_api_handler.pull_resources.return_value = (
+            expected_resources,
+            expected_projection,
+        )
+        self.mock_api_handler.branch_id = "remote-branch-id"
+
+        projection = project.fetch_project()
+
+        self.assertEqual(projection, expected_projection)
+        self.assertEqual(project.resources, expected_resources)
+        self.assertEqual(project._not_loaded_resources, [])
+        self.mock_api_handler.pull_resources.assert_called_once_with(projection_json=None)
+
+    def test_fetch_without_branch_updates_branch_id_from_api(self):
+        """When no projection_json, branch_id should be updated from api_handler."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {},
+        )
+        self.mock_api_handler.branch_id = "api-branch-42"
+
+        project.fetch_project()
+
+        self.assertEqual(project.branch_id, "api-branch-42")
+
+    def test_fetch_with_valid_branch_switches_branch_then_fetches(self):
+        """fetch_project(branch_name=...) switches to that branch before pulling."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.get_branches.return_value = {
+            "main": {"branchId": "branch-1"},
+            "dev": {"branchId": "branch-2"},
+        }
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {},
+        )
+        self.mock_api_handler.branch_id = "branch-2"
+
+        project.fetch_project(branch_name="dev")
+
+        self.mock_api_handler.get_branches.assert_called_once()
+        self.mock_api_handler.switch_branch.assert_called_once_with("branch-2")
+        self.assertEqual(project.branch_id, "branch-2")
+
+    def test_fetch_with_nonexistent_branch_raises_value_error(self):
+        """fetch_project raises ValueError when the branch does not exist."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.get_branches.return_value = {"main": {"branchId": "branch-1"}}
+
+        with self.assertRaises(ValueError, msg="Branch 'no-such-branch' does not exist."):
+            project.fetch_project(branch_name="no-such-branch")
+
+        self.mock_api_handler.pull_resources.assert_not_called()
+
+    def test_fetch_with_projection_json_does_not_update_branch_id_from_api(self):
+        """When projection_json is provided, branch_id should NOT be overwritten from API."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        original_branch_id = project.branch_id
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {"cached": True},
+        )
+        self.mock_api_handler.branch_id = "should-not-be-used"
+
+        project.fetch_project(projection_json={"cached": "projection"})
+
+        self.assertEqual(project.branch_id, original_branch_id)
+        self.mock_api_handler.pull_resources.assert_called_once_with(
+            projection_json={"cached": "projection"}
+        )
+
+    def test_fetch_calls_save_config(self):
+        """fetch_project always calls save_config to persist the status file."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {},
+        )
+        self.mock_api_handler.branch_id = "b"
+
+        project.fetch_project()
+
+        self.mock_save_config.assert_called_once()
+
+    def test_fetch_does_not_write_resource_files(self):
+        """fetch_project must not call Resource.save() — it only updates in-memory state."""
+        mock_resource_save = patch.object(Resource, "save").start()
+        mock_save_to_file = patch.object(Resource, "save_to_file").start()
+
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {},
+        )
+        self.mock_api_handler.branch_id = "b"
+
+        project.fetch_project()
+
+        mock_resource_save.assert_not_called()
+        mock_save_to_file.assert_not_called()
+
+    def test_fetch_updates_file_structure_info(self):
+        """fetch_project should recompute file_structure_info from the new resources."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        new_resources = deepcopy(project.resources)
+        self.mock_api_handler.pull_resources.return_value = (new_resources, {})
+        self.mock_api_handler.branch_id = "b"
+
+        project.fetch_project()
+
+        expected_info = project.compute_file_structure_info(new_resources)
+        self.assertEqual(project.file_structure_info, expected_info)
+
+    def test_fetch_with_branch_sets_branch_id_before_api_override(self):
+        """When both branch_name and no projection_json, branch_id ends up as api value."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.get_branches.return_value = {"staging": {"branchId": "staging-id"}}
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {},
+        )
+        # After pull, the api_handler.branch_id may differ from the branch dict value
+        self.mock_api_handler.branch_id = "staging-id"
+
+        project.fetch_project(branch_name="staging")
+
+        # Since projection_json is None, branch_id is set from api_handler.branch_id
+        self.assertEqual(project.branch_id, "staging-id")
 
 
 class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
