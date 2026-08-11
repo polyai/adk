@@ -3700,9 +3700,35 @@ class AgentStudioProject:
     @cached_property
     def using_simplified_deployments(self) -> bool:
         """Check if the project is using simplified deployments."""
-        return self.api_handler.feature_flag_enabled(
+        flag_enabled = self.api_handler.feature_flag_enabled(
             key="deployment-simplification",
             region=self.region,
             project_id=self.project_id,
             default=False,
+        )
+        if not flag_enabled:
+            return False
+
+        # A project is converged if the main == live
+        # Once a project is converged, all deployments will go to live
+        # To check, look at most recent deployment in sandbox and live. If it is the same as live, then the project is converged
+        live_deployments = self.api_handler.get_deployments(
+            self.region, self.account_id, self.project_id, client_env="live"
+        )
+        sandbox_deployments = self.api_handler.get_deployments(
+            self.region, self.account_id, self.project_id, client_env="sandbox"
+        )
+
+        live_head = next((d for d in live_deployments if not d.get("deleted", False)), None)
+        sandbox_head = next((d for d in sandbox_deployments if not d.get("deleted", False)), None)
+
+        def _parse_created_at(deployment: dict) -> datetime:
+            return datetime.strptime(deployment["created_at"], "%a, %d %b %Y %H:%M:%S %Z")
+
+        if live_head is None and sandbox_head is None:
+            # No deployments in either environment, consider converged
+            return True
+
+        return live_head is not None and (
+            sandbox_head is None or _parse_created_at(live_head) >= _parse_created_at(sandbox_head)
         )

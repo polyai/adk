@@ -4555,6 +4555,62 @@ class UsingSimplifiedDeploymentsTest(unittest.TestCase):
         self.assertEqual(first, second)
         self.mock_api.feature_flag_enabled.assert_called_once()
 
+    def test_does_not_query_deployments_when_flag_is_disabled(self):
+        """Deployments are only fetched once the feature flag is confirmed enabled."""
+        project = self._build_project(flag_value=False)
+
+        self.assertFalse(project.using_simplified_deployments)
+        project.api_handler.get_deployments.assert_not_called()
+
+    def _deployment(self, created_at: str, deleted: bool = False) -> dict:
+        """Build a minimal deployment dict for convergence checks."""
+        return {"created_at": created_at, "deleted": deleted}
+
+    def _set_deployments(self, api: MagicMock, live: list, sandbox: list) -> None:
+        """Stub get_deployments to return a different list per client_env."""
+        api.get_deployments.side_effect = (
+            lambda *args, **kwargs: live if kwargs["client_env"] == "live" else sandbox
+        )
+
+    def test_converges_when_no_deployments_exist_in_either_environment(self):
+        """With no deployments anywhere, there's nothing for live to lag behind."""
+        self._set_deployments(self.mock_api, live=[], sandbox=[])
+
+        self.assertTrue(self.project.using_simplified_deployments)
+
+    def test_convergence_depends_on_relative_head_timestamps(self):
+        """Live is converged once its head is at least as new as sandbox's."""
+        earlier, later = "Mon, 01 Jan 2026 10:00:00 GMT", "Mon, 01 Jan 2026 12:00:00 GMT"
+        cases = {
+            "live newer": ((later, earlier), True),
+            "equal": ((later, later), True),
+            "live older": ((earlier, later), False),
+            "only live has deployments": ((earlier, None), True),
+            "only sandbox has deployments": ((None, earlier), False),
+        }
+        for name, ((live_time, sandbox_time), expected) in cases.items():
+            with self.subTest(name):
+                live = [self._deployment(live_time)] if live_time else []
+                sandbox = [self._deployment(sandbox_time)] if sandbox_time else []
+                self._set_deployments(self.mock_api, live=live, sandbox=sandbox)
+                self.project.__dict__.pop("using_simplified_deployments", None)
+
+                self.assertEqual(self.project.using_simplified_deployments, expected)
+
+    def test_skips_deleted_deployments_to_find_the_head(self):
+        """A deleted deployment at the top of the list is not treated as the head."""
+        self._set_deployments(
+            self.mock_api,
+            live=[
+                self._deployment("Mon, 01 Jan 2026 14:00:00 GMT", deleted=True),
+                self._deployment("Mon, 01 Jan 2026 10:00:00 GMT"),
+            ],
+            sandbox=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT")],
+        )
+
+        # The live head (10:00, ignoring the deleted 14:00 entry) is older than sandbox's (12:00).
+        self.assertFalse(self.project.using_simplified_deployments)
+
 
 class DeploymentModePropertyTest(unittest.TestCase):
     """Tests for the AgentStudioProject.deployment_mode property."""
