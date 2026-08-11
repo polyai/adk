@@ -1,6 +1,62 @@
 # CHANGELOG
 
 
+## v0.40.0 (2026-08-11)
+
+### Features
+
+- Add `poly fetch` command ([#213](https://github.com/polyai/adk/pull/213),
+  [`89841d7`](https://github.com/polyai/adk/commit/89841d7fe0d5f59c282bbb35890fabcdc7f5d116))
+
+## Summary
+
+Adds a new `poly fetch` CLI command that downloads the latest remote project state and updates the
+  status file, without writing resource files to disk or merging with local changes. Supports
+  `--branch` to switch to an existing branch before fetching.
+
+## Motivation
+
+There's currently no CLI command to load the latest remote state without modifying local files.
+  Operations like CI/CD pipelines need to switch to a branch and fetch its state before running
+  `push`, `validate`, or `merge` — but today this is only possible via the Python API. `poly fetch`
+  fills this gap, making these workflows possible with bash-only CLI calls.
+
+Closes DEVP-247
+
+## Changes
+
+- Added `fetch_project()` method to `AgentStudioProject` — fetches remote state, updates in-memory
+  resources and status file, optionally switches branch - Registered `poly fetch` CLI subcommand
+  with `--path`, `--branch`/`-b`, `--json`, `--from-projection` (hidden), `--output-json-projection`
+  (hidden) - Added 9 unit tests covering: basic fetch, branch switching, non-existent branch error,
+  projection passthrough, save_config called, no resource files written
+
+### Example CI usage
+
+```bash # Switch to branch + fetch remote state + push local changes poly fetch -b my-branch --path
+  /path/to/project poly push -f --path /path/to/project
+
+# Fetch + validate poly fetch -b my-branch --path /path/to/project poly validate --path
+  /path/to/project ```
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.39.0 (2026-08-10)
 
 ### Continuous Integration
