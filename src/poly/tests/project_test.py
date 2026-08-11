@@ -3652,6 +3652,155 @@ class ResolveTestsTest(unittest.TestCase):
             self.project.resolve_tests(files=["no_such_test.yaml"])
 
 
+class FetchProjectTest(unittest.TestCase):
+    """Tests for the fetch_project method."""
+
+    def setUp(self):
+        """Set up common mocks — only api_handler and save_config, no file I/O mocks."""
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.mock_save_config = patch.object(AgentStudioProject, "save_config").start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_fetch_without_branch_updates_resources_and_returns_them(self):
+        """fetch_project() without a branch fetches remote state and returns projection."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        expected_resources = deepcopy(project.resources)
+        expected_projection = {"some": "projection"}
+        self.mock_api_handler.pull_resources.return_value = (
+            expected_resources,
+            expected_projection,
+        )
+        self.mock_api_handler.branch_id = "remote-branch-id"
+
+        projection = project.fetch_project()
+
+        self.assertEqual(projection, expected_projection)
+        self.assertEqual(project.resources, expected_resources)
+        self.assertEqual(project._not_loaded_resources, [])
+        self.mock_api_handler.pull_resources.assert_called_once_with(projection_json=None)
+
+    def test_fetch_without_branch_updates_branch_id_from_api(self):
+        """When no projection_json, branch_id should be updated from api_handler."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {},
+        )
+        self.mock_api_handler.branch_id = "api-branch-42"
+
+        project.fetch_project()
+
+        self.assertEqual(project.branch_id, "api-branch-42")
+
+    def test_fetch_with_valid_branch_switches_branch_then_fetches(self):
+        """fetch_project(branch_name=...) switches to that branch before pulling."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.get_branches.return_value = {
+            "main": {"branchId": "branch-1"},
+            "dev": {"branchId": "branch-2"},
+        }
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {},
+        )
+        self.mock_api_handler.branch_id = "branch-2"
+
+        project.fetch_project(branch_name="dev")
+
+        self.mock_api_handler.get_branches.assert_called_once()
+        self.mock_api_handler.switch_branch.assert_called_once_with("branch-2")
+        self.assertEqual(project.branch_id, "branch-2")
+
+    def test_fetch_with_nonexistent_branch_raises_value_error(self):
+        """fetch_project raises ValueError when the branch does not exist."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.get_branches.return_value = {"main": {"branchId": "branch-1"}}
+
+        with self.assertRaises(ValueError, msg="Branch 'no-such-branch' does not exist."):
+            project.fetch_project(branch_name="no-such-branch")
+
+        self.mock_api_handler.pull_resources.assert_not_called()
+
+    def test_fetch_with_projection_json_does_not_update_branch_id_from_api(self):
+        """When projection_json is provided, branch_id should NOT be overwritten from API."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        original_branch_id = project.branch_id
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {"cached": True},
+        )
+        self.mock_api_handler.branch_id = "should-not-be-used"
+
+        project.fetch_project(projection_json={"cached": "projection"})
+
+        self.assertEqual(project.branch_id, original_branch_id)
+        self.mock_api_handler.pull_resources.assert_called_once_with(
+            projection_json={"cached": "projection"}
+        )
+
+    def test_fetch_calls_save_config(self):
+        """fetch_project always calls save_config to persist the status file."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {},
+        )
+        self.mock_api_handler.branch_id = "b"
+
+        project.fetch_project()
+
+        self.mock_save_config.assert_called_once()
+
+    def test_fetch_does_not_write_resource_files(self):
+        """fetch_project must not call Resource.save() — it only updates in-memory state."""
+        mock_resource_save = patch.object(Resource, "save").start()
+        mock_save_to_file = patch.object(Resource, "save_to_file").start()
+
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {},
+        )
+        self.mock_api_handler.branch_id = "b"
+
+        project.fetch_project()
+
+        mock_resource_save.assert_not_called()
+        mock_save_to_file.assert_not_called()
+
+    def test_fetch_updates_file_structure_info(self):
+        """fetch_project should recompute file_structure_info from the new resources."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        new_resources = deepcopy(project.resources)
+        self.mock_api_handler.pull_resources.return_value = (new_resources, {})
+        self.mock_api_handler.branch_id = "b"
+
+        project.fetch_project()
+
+        expected_info = project.compute_file_structure_info(new_resources)
+        self.assertEqual(project.file_structure_info, expected_info)
+
+    def test_fetch_with_branch_sets_branch_id_before_api_override(self):
+        """When both branch_name and no projection_json, branch_id ends up as api value."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.get_branches.return_value = {"staging": {"branchId": "staging-id"}}
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {},
+        )
+        # After pull, the api_handler.branch_id may differ from the branch dict value
+        self.mock_api_handler.branch_id = "staging-id"
+
+        project.fetch_project(branch_name="staging")
+
+        # Since projection_json is None, branch_id is set from api_handler.branch_id
+        self.assertEqual(project.branch_id, "staging-id")
+
+
 class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
     """Tests that _update_pulled_resources and _update_multi_resource_yaml_resources
     delete local resources when their entire resource type is absent from incoming."""
