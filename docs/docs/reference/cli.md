@@ -194,6 +194,40 @@ If the branch you are currently on no longer exists in Agent Studio, `poly pull`
 
 When using JSON output (`--json`), the response includes `new_branch_name` and `new_branch_id` fields if a branch switch occurred.
 
+### `poly fetch`
+
+Fetch the latest remote project state from Agent Studio without modifying local resource files.
+
+Like `git fetch`, `poly fetch` updates the tracked remote state (and the local status file) but does not change your working files. Use it when you need to switch to a branch and load its remote state before running `push`, `validate`, or other commands — without touching the files on disk.
+
+Examples:
+
+~~~bash
+poly fetch
+poly fetch --branch my-feature
+poly fetch -b my-feature --path /path/to/project
+~~~
+
+| Flag | Description |
+|---|---|
+| `--branch`, `-b` | Switch to this branch before fetching. Raises an error if the branch does not exist. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+!!! tip "CI/CD usage"
+
+    `poly fetch` is particularly useful in CI/CD pipelines where you need to switch branches and load remote state without modifying working-tree files:
+
+    ~~~bash
+    # Switch to branch + fetch remote state + push local changes
+    poly fetch -b my-branch --path /path/to/project
+    poly push -f --path /path/to/project
+
+    # Fetch + validate
+    poly fetch -b my-branch --path /path/to/project
+    poly validate --path /path/to/project
+    ~~~
+
 ### `poly push`
 
 Push local changes to Agent Studio.
@@ -839,6 +873,8 @@ All core subcommands accept a `--json` flag that switches stdout to a single JSO
 poly status --json
 poly push --json
 poly pull --json
+poly fetch --json
+poly fetch --branch my-feature --json
 poly validate --json
 poly diff --json
 poly revert --json
@@ -892,6 +928,7 @@ The exact fields vary by command. Common fields include:
 | `poly status --json` | `files_with_conflicts`, `modified_files`, `new_files`, `deleted_files` |
 | `poly push --json` | `success`, `message`, `dry_run` |
 | `poly pull --json` | `success`, `files_with_conflicts` |
+| `poly fetch --json` | `success`; with `--branch`: also `branch_name`, `branch_id` |
 | `poly validate --json` | `valid`, `errors` |
 | `poly diff --json` | `diffs` |
 | `poly revert --json` | `success`, `files_reverted` |
@@ -939,6 +976,24 @@ Error responses always include `{ "success": false, "error": "...", "traceback":
 !!! info "`poly project create` with `--json` requires explicit flags"
 
     When using `poly project create --json`, you must supply `--region`, `--account_id`, and `--name` explicitly. Interactive prompts are not supported in JSON mode.
+
+#### `poly fetch --json` output shape
+
+When `--json` is used with `poly fetch`, the command emits a single JSON object on success:
+
+~~~json
+{ "success": true }
+~~~
+
+When `--branch` is also supplied, the response includes the branch that was switched to:
+
+~~~json
+{
+  "success": true,
+  "branch_name": "my-feature",
+  "branch_id": "branch-abc123"
+}
+~~~
 
 #### `poly chat --json` output shape
 
@@ -1016,17 +1071,18 @@ poly push --json --dry-run --output-json-commands
 
 The output will include a `commands` key with each command serialized from its protobuf representation.
 
-### Driving pull/push from a captured projection
+### Driving pull/push/fetch from a captured projection
 
-The `--from-projection` flag on `pull`, `push`, `init`, and `branch switch` lets you supply a projection JSON directly (as a string or via stdin with `-`) instead of fetching it from the API. This is useful for offline workflows and integration testing.
+The `--from-projection` flag on `pull`, `push`, `fetch`, `init`, and `branch switch` lets you supply a projection JSON directly (as a string or via stdin with `-`) instead of fetching it from the API. This is useful for offline workflows and integration testing.
 
 ~~~bash
 poly pull --from-projection - < projection.json
 poly push --from-projection '{"topics": [...], ...}'
+poly fetch --from-projection - < projection.json
 cat projection.json | poly pull --from-projection -
 ~~~
 
-The `--output-json-projection` flag on `pull`, `init`, and `branch switch` includes the projection in the JSON output when `--json` is also set. This lets you capture a projection from one command and feed it into another.
+The `--output-json-projection` flag on `pull`, `fetch`, `init`, and `branch switch` includes the projection in the JSON output when `--json` is also set. This lets you capture a projection from one command and feed it into another.
 
 ~~~bash
 poly pull --json --output-json-projection | jq .projection > proj.json
