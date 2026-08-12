@@ -805,9 +805,7 @@ def print_deployment_show(
     console.print(f"Message: {deployment_message}")
     console.print()
 
-    if not included_deployments:
-        console.print("[muted]No intermediate deployments.[/muted]")
-    else:
+    if included_deployments:
         count = len(included_deployments)
         label = "Reverted deployments" if is_rollback else "Included deployments"
         console.print(f"[label]{label} ({count}):[/label]")

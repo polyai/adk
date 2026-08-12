@@ -1955,6 +1955,7 @@ class DeploymentsShowTest(unittest.TestCase):
         self.mock_load_patcher = patch("poly.cli_commands.deployments.load_project")
         self.mock_load = self.mock_load_patcher.start()
         self.proj = MagicMock()
+        self.proj.using_simplified_deployments = False
         self.mock_load.return_value = self.proj
 
         # Sandbox versions: [v0(newest), v1, v2, v3, v4(oldest)]
@@ -2205,6 +2206,7 @@ class DeploymentsPromoteTest(unittest.TestCase):
         self.mock_load_patcher = patch("poly.cli_commands.deployments.load_project")
         self.mock_load = self.mock_load_patcher.start()
         self.proj = MagicMock()
+        self.proj.using_simplified_deployments = False
         self.proj.get_deployments.return_value = (list(self.VERSIONS), dict(self.ACTIVE_HASHES))
         self.proj.promote_deployment.return_value = True
         self.mock_load.return_value = self.proj
@@ -2455,6 +2457,7 @@ class DeploymentsRollbackTest(unittest.TestCase):
         self.mock_load_patcher = patch("poly.cli_commands.deployments.load_project")
         self.mock_load = self.mock_load_patcher.start()
         self.proj = MagicMock()
+        self.proj.using_simplified_deployments = False
         self.proj.get_deployments.return_value = (list(self.VERSIONS), dict(self.ACTIVE_HASHES))
         self.proj.rollback_deployment.return_value = True
         self.mock_load.return_value = self.proj
@@ -4155,3 +4158,172 @@ class AudioCacheCommandTest(unittest.TestCase):
         )
         mock_success.assert_called_once()
         self.assertIn("entry-1-preview.wav", mock_success.call_args[0][0])
+
+
+class DeploymentsSimplifiedModeTest(unittest.TestCase):
+    """Deployment-mode awareness across the deployments command family.
+
+    Under simplified deployments main deploys straight to live and sandbox is frozen
+    at its pre-migration state, so these commands must target live rather than reading
+    or writing the stale sandbox history. Legacy-mode behaviour is covered by the
+    DeploymentsShowTest/PromoteTest/RollbackTest classes above.
+    """
+
+    VERSIONS = [
+        {
+            "id": "dep-1",
+            "version_hash": "abc123456xyz",
+            "deployment_metadata": {"deployment_message": "initial release"},
+        },
+        {
+            "id": "dep-2",
+            "version_hash": "def789012xyz",
+            "deployment_metadata": {"deployment_message": "hotfix"},
+        },
+    ]
+    ACTIVE_HASHES = {"sandbox": "abc123456xyz", "live": "abc123456xyz"}
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.deployments.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.get_deployments.return_value = (list(self.VERSIONS), dict(self.ACTIVE_HASHES))
+        self.proj.rollback_deployment.return_value = True
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _client_envs_queried(self):
+        """Every client_env passed to get_deployments, positional or keyword."""
+        return [
+            call.kwargs.get("client_env", call.args[0] if call.args else None)
+            for call in self.proj.get_deployments.call_args_list
+        ]
+
+    # ── list ─────────────────────────────────────────────────────────
+
+    @patch("poly.output.console.print_deployments")
+    def test_list_defaults_to_live_when_simplified(self, _mock_print):
+        """With no --env, a converged project lists live rather than frozen sandbox."""
+        self.proj.using_simplified_deployments = True
+
+        DeploymentsCommand.deployments_list(TEST_DIR)
+
+        self.assertEqual(self._client_envs_queried(), ["live"])
+
+    @patch("poly.output.console.print_deployments")
+    def test_list_defaults_to_sandbox_when_not_simplified(self, _mock_print):
+        """An unmigrated project keeps the legacy sandbox default."""
+        self.proj.using_simplified_deployments = False
+
+        DeploymentsCommand.deployments_list(TEST_DIR)
+
+        self.assertEqual(self._client_envs_queried(), ["sandbox"])
+
+    @patch("poly.output.console.print_deployments")
+    def test_list_explicit_env_wins_when_simplified(self, _mock_print):
+        """--env sandbox still reads the frozen pre-migration history."""
+        self.proj.using_simplified_deployments = True
+
+        DeploymentsCommand.deployments_list(TEST_DIR, environment="sandbox")
+
+        self.assertEqual(self._client_envs_queried(), ["sandbox"])
+
+    # ── show ─────────────────────────────────────────────────────────
+
+    @patch("poly.output.console.print_deployment_show")
+    def test_show_defaults_to_live_when_simplified(self, _mock_print):
+        """show defaults to live, then reads sandbox for the included-deployment history."""
+        self.proj.using_simplified_deployments = True
+
+        DeploymentsCommand.deployments_show(TEST_DIR, version_hash="abc123456")
+
+        self.assertEqual(self._client_envs_queried(), ["live", "sandbox"])
+
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_show_reports_no_included_deployments_for_a_post_migration_deploy(self, mock_json):
+        """A live-only hash is absent from frozen sandbox, so nothing is bundled into it."""
+        self.proj.using_simplified_deployments = True
+        live_only = [
+            {
+                "id": "dep-live",
+                "version_hash": "live99999xyz",
+                "deployment_metadata": {"deployment_message": "merge to main"},
+            }
+        ]
+        # live holds the merge; sandbox is frozen and never saw this hash
+        self.proj.get_deployments.side_effect = [
+            (live_only, {"live": "live99999xyz"}),
+            (list(self.VERSIONS), dict(self.ACTIVE_HASHES)),
+        ]
+
+        DeploymentsCommand.deployments_show(TEST_DIR, version_hash="live99999", output_json=True)
+
+        payload = mock_json.call_args[0][0]
+        self.assertEqual(payload["included_deployments"], [])
+        self.assertFalse(payload["is_rollback"])
+
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_show_still_resolves_included_for_a_pre_migration_deploy(self, mock_json):
+        """A pre-migration promotion kept its sandbox hash, so its bundle still resolves."""
+        self.proj.using_simplified_deployments = True
+        promoted = [{**self.VERSIONS[0]}]
+        self.proj.get_deployments.side_effect = [
+            (promoted, {"live": "abc123456xyz"}),
+            (list(self.VERSIONS), dict(self.ACTIVE_HASHES)),
+        ]
+
+        DeploymentsCommand.deployments_show(TEST_DIR, version_hash="abc123456", output_json=True)
+
+        payload = mock_json.call_args[0][0]
+        self.assertEqual(
+            [d["version_hash"] for d in payload["included_deployments"]],
+            ["abc123456xyz", "def789012xyz"],
+        )
+
+    # ── promote ──────────────────────────────────────────────────────
+
+    @patch("poly.output.console.error")
+    def test_promote_blocked_when_simplified(self, mock_error):
+        """Promote is refused before any API call — the platform does not reject it."""
+        self.proj.using_simplified_deployments = True
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.deployments_promote(
+                TEST_DIR, from_deployment="abc123456", to_env="live", force=True
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.proj.promote_deployment.assert_not_called()
+        self.proj.get_deployments.assert_not_called()
+        self.assertIn("simplified deployments", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_promote_blocked_when_simplified_json(self, mock_json):
+        """The refusal is machine-readable in --json mode."""
+        self.proj.using_simplified_deployments = True
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.deployments_promote(
+                TEST_DIR, from_deployment="abc123456", to_env="live", output_json=True
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.proj.promote_deployment.assert_not_called()
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("simplified deployments", payload["error"])
+
+    # ── rollback ─────────────────────────────────────────────────────
+
+    @patch("poly.output.console.success")
+    def test_rollback_targets_live_when_simplified(self, mock_success):
+        """Rollback reads live candidates — the only target the platform accepts."""
+        self.proj.using_simplified_deployments = True
+
+        DeploymentsCommand.deployments_rollback(TEST_DIR, deployment="abc123456", force=True)
+
+        self.assertEqual(self._client_envs_queried(), ["live"])
+        self.proj.rollback_deployment.assert_called_once_with("dep-1", message="initial release")
+        self.assertIn("Live", mock_success.call_args[0][0])
