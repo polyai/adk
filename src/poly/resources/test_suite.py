@@ -429,7 +429,12 @@ class TestCase(YamlResource):
             self.tags = TestCaseTags(**tags)
         self.variant = variant
         self.language = language
-        self.caller_number = caller_number
+        # Trimmed on the way in, matching the platform entity: a stray trailing
+        # space is invisible in a YAML file but changes the agent-memory
+        # identifier the number resolves to.
+        self.caller_number = (
+            caller_number.strip() if isinstance(caller_number, str) else caller_number
+        )
         # Both are always constructed, even when empty. Clearing a value has to
         # produce a command, and get_new_updated_deleted_subresources works by
         # comparing subresources — an absent one cannot differ from anything.
@@ -641,6 +646,17 @@ class TestCase(YamlResource):
                 None,
             ):
                 raise ValueError(f"Variant {self.variant} not found")
+
+        # An unquoted number is the easy mistake here, and a silent one: YAML
+        # reads `+447700900000` as the int 447700900000, dropping the leading
+        # `+`. Coercing it back to text would send a different number, so this
+        # rejects rather than guesses.
+        if self.caller_number is not None and not isinstance(self.caller_number, str):
+            raise ValueError(
+                f"caller_number must be text, got {type(self.caller_number).__name__} "
+                f"({self.caller_number}) — quote it so YAML keeps it as written, "
+                "including any leading '+' or zeros"
+            )
 
         # Integration attributes carry JSON types through to the agent
         _validate_attribute_value(self.integration_attributes.attributes, "integration_attributes")

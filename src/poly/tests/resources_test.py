@@ -7605,6 +7605,28 @@ class TestCaseMockContextTests(unittest.TestCase):
             test_case.integration_attributes.attributes, {"tier": "gold", "retry_count": 2}
         )
 
+    def test_caller_number_is_trimmed(self):
+        """A trailing space is invisible in YAML but changes the identifier the
+        number resolves to in agent memory."""
+        test_case = self._test_case(caller_number="  +447700900000  ")
+
+        self.assertEqual(test_case.caller_number, "+447700900000")
+        self.assertEqual(test_case.build_update_proto().caller_number, "+447700900000")
+
+    def test_validate_rejects_an_unquoted_caller_number(self):
+        """YAML reads `+447700900000` as the int 447700900000, dropping the `+`.
+
+        Coercing it back to text would send a different number, so this has to
+        fail loudly rather than guess.
+        """
+        test_case = self._test_case(caller_number=447700900000)
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+
+        self.assertIn("caller_number must be text", str(ctx.exception))
+        self.assertIn("quote it", str(ctx.exception))
+
     def test_sip_header_bools_use_wire_casing(self):
         """YAML types `x-flag: true` as a bool; str() would send Python's "True"."""
         headers = TestCaseSipHeaders(
