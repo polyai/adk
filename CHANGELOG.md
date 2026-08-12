@@ -1,6 +1,506 @@
 # CHANGELOG
 
 
+## v0.40.0 (2026-08-11)
+
+### Features
+
+- Add `poly fetch` command ([#213](https://github.com/polyai/adk/pull/213),
+  [`89841d7`](https://github.com/polyai/adk/commit/89841d7fe0d5f59c282bbb35890fabcdc7f5d116))
+
+## Summary
+
+Adds a new `poly fetch` CLI command that downloads the latest remote project state and updates the
+  status file, without writing resource files to disk or merging with local changes. Supports
+  `--branch` to switch to an existing branch before fetching.
+
+## Motivation
+
+There's currently no CLI command to load the latest remote state without modifying local files.
+  Operations like CI/CD pipelines need to switch to a branch and fetch its state before running
+  `push`, `validate`, or `merge` — but today this is only possible via the Python API. `poly fetch`
+  fills this gap, making these workflows possible with bash-only CLI calls.
+
+Closes DEVP-247
+
+## Changes
+
+- Added `fetch_project()` method to `AgentStudioProject` — fetches remote state, updates in-memory
+  resources and status file, optionally switches branch - Registered `poly fetch` CLI subcommand
+  with `--path`, `--branch`/`-b`, `--json`, `--from-projection` (hidden), `--output-json-projection`
+  (hidden) - Added 9 unit tests covering: basic fetch, branch switching, non-existent branch error,
+  projection passthrough, save_config called, no resource files written
+
+### Example CI usage
+
+```bash # Switch to branch + fetch remote state + push local changes poly fetch -b my-branch --path
+  /path/to/project poly push -f --path /path/to/project
+
+# Fetch + validate poly fetch -b my-branch --path /path/to/project poly validate --path
+  /path/to/project ```
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
+## v0.39.0 (2026-08-10)
+
+### Continuous Integration
+
+- Make TruffleHog output actionable and drop the Lob false positive
+  ([#263](https://github.com/polyai/adk/pull/263),
+  [`8ff6342`](https://github.com/polyai/adk/commit/8ff6342388e830afb5aec1994ee2e564c0b8c2e0))
+
+## What happened
+
+The secret-scanning gate failed on #259 with exactly one line of output:
+
+``` ##[warning]Found verified Lob result 🐷🔑 ```
+
+No file, no line, no match. The actual trigger was a Python test function name —
+  [`src/poly/tests/metrics_test.py:321`](https://github.com/polyai/adk/blob/main/src/poly/tests/metrics_test.py#L321):
+
+```python def test_add_duplicate_metric_friendly_error(self, mock_load, mock_create, mock_error):
+  ```
+
+That's two separate problems, and this PR fixes both.
+
+## 1. The finding was noise
+
+TruffleHog's Lob detector combines two individually-weak choices:
+
+```go keyPat = regexp.MustCompile(`\b((live|test)_[a-zA-Z0-9_]{35})\b`) // no keyword-proximity gate
+  func (s Scanner) Keywords() []string { return []string{"live_", "test_"} } ```
+
+The `Keywords()` prefilter is the pytest naming convention, so **every chunk in our test suite**
+  reaches an ungated regex that matches any 40-character `test_*` identifier. It also treats HTTP
+  **403 and 422** from `api.lob.com` as "verified" — only 401 counts as invalid — which is how a
+  function name got reported as a *verified* secret.
+
+Measured against this repo with TruffleHog 3.96.0 (`--no-verification`, all result types):
+
+| Scope | Findings | After `--exclude-detectors=lob` | |---|---|---| | Working tree | 51 (all Lob) |
+  0 | | Full `main` history | 85 (all Lob) | 0 |
+
+Lob is **100% of the finding surface**. `main` already contains 36 more identifiers that match the
+  pattern — they only stay quiet because scans are limited to each PR's commit range, so this would
+  have recurred on any PR touching those lines. Roughly 4% of test names in the repo land on exactly
+  40 characters.
+
+ADK does not use Lob (direct-mail API), so there is no coverage to lose.
+
+### Other detectors were checked, not assumed
+
+Of 870 detectors, 133 lack a keyword-proximity gate and 74 have a prefilter keyword present in this
+  repo. Intersecting gives 19 others that are live *and* ungated. All were tested against the source
+  tree — **zero matches and zero near-misses**:
+
+``` uri (user:pass@host) 0 twilio AC<32hex> 0 stripe pi_..._secret_ 0 redis:// creds 0 twilio SK<32>
+  0 zohocrm 1000.hex.hex 0 ftp:// creds 0 launchdarkly 0 sendgrid SG. 0 mongodb:// creds 0
+  salesforce 0 mailchimp <32hex>-usN 0 gemini master-/account- 0 closecrm api_<45> 0 lob (contrast)
+  43 ```
+
+Two worth noting: **Twilio** (`AC`+32hex) is the one to watch given our telephony code — clean
+  today, but a realistic-shaped dummy SID in a fixture will fire it. **Auth0** looks alarming
+  (`\b(ey[a-zA-Z0-9._-]+)\b` with prefilter keywords `token`/`domain`) but `FromData` requires a
+  2000–5000 char match paired with an `*.auth0.com` domain, so it's well gated.
+
+## 2. The output was unactionable regardless
+
+The action always passes `--github-actions`, and that printer emits only the detector name and
+  verification status:
+
+```go fmt.Printf("::warning file=%s,line=%d,endLine=%d::%s", out.Filename, out.StartLine,
+  out.StartLine, message) // message = "Found verified Lob result 🐷🔑" ```
+
+File and line go into annotation *metadata* that never renders in the log, and the match is never
+  printed at all. `extra_args` can't remove `--github-actions`, but `--json` outranks it in
+  TruffleHog's printer selection, so a diagnostic step re-runs the scan on failure:
+
+``` ────────────────────────────────────────── detector: Lob [verified]
+
+file: src/poly/tests/metrics_test.py
+
+line: 321
+
+commit: 0b99540672d0 by Bill <bill@poly-ai.com>
+
+match: test_add_dup… (40 chars) ```
+
+Only a 12-character prefix is printed — enough to triage, not enough to use. The step exits 0; the
+  gate above has already failed the job.
+
+## 3. Also: the scanner version was floating
+
+The action was SHA-pinned, but its `version` input defaulted to `latest` — the failing run logs
+  `VERSION: latest`. The pin covered the wrapper, not the binary doing the scanning. Now pinned to
+  `v3.96.0`.
+
+## Testing
+
+- YAML validated. - `jq` filter tested against a real TruffleHog JSON result record. - Exclusion
+  confirmed to take both the working tree and full `main` history to zero findings. - Diagnostic
+  step mirrors the gate's `--exclude-detectors` so the two can't disagree.
+
+## Note for reviewers
+
+This repo is public, and the description above documents which detector is disabled and that
+  `--results=verified,unknown` filters out unverifiable detectors (`jwt`, `uri`, `sqlserver`). It's
+  all derived from TruffleHog's public source. Happy to trim if anyone would rather that analysis
+  live internally.
+
+### Features
+
+- Add example projects load and list commands ([#204](https://github.com/polyai/adk/pull/204),
+  [`2f7fed1`](https://github.com/polyai/adk/commit/2f7fed19f163f9ac7f803dffc558d9916b78925b))
+
+## Summary
+
+Add `poly template list` and `poly template load` commands that let users browse and load example
+  project templates from the platform.
+
+## Motivation
+
+Closes
+  [DEVP-386](https://linear.app/poly-ai/issue/DEVP-386/add-template-selection-and-load-commands-to-adk-cli)
+
+## Changes
+
+- Add `poly template list` command to browse available example project templates, with optional
+  `--region` flag - Add `poly template load <name>` command to load a template into the current
+  project, with `--force` to skip confirmation and an interactive picker when no name is given
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+``` (polyai-adk) jamesosullivan@JAMES-O-C63L909T4T PROJECT-0Z28NPOM % poly template list --region
+  dev Available templates (5):
+
+Retail Customer Service Agent - Order & Shipping Support Tracks orders, handles returns, and
+  resolves shipping issues on the call Restaurant Reservation Assistant Takes and changes table
+  bookings, answers common questions, and resolves issues on the call Pest Control Field Service
+  Assistant Schedules and manages pest control appointments, handles billing questions, and answers
+  service FAQs Healthcare Clinic Receptionist Books, cancels, and reschedules appointments, answers
+  patient questions, and routes urgent calls to staff Banking Customer Service Virtual Assistant
+  Handles banking queries, processes payments, manages cards, and resolves account issues on the
+  call
+
+(polyai-adk) jamesosullivan@JAMES-O-C63L909T4T PROJECT-0Z28NPOM % poly template load "Retail
+  Customer Service Agent - Order & Shipping Support" --region dev ? Loading 'Retail Customer Service
+  Agent - Order & Shipping Support' will overwrite local project resources. Continue? Yes Loaded
+  template Retail Customer Service Agent - Order & Shipping Support into
+  ws-fd112d8f/PROJECT-0Z28NPOM (polyai-adk) jamesosullivan@JAMES-O-C63L909T4T PROJECT-0Z28NPOM %
+  poly push Pushing local changes for ws-fd112d8f/PROJECT-0Z28NPOM... Pushed
+  ws-fd112d8f/PROJECT-0Z28NPOM to Agent Studio. (polyai-adk) jamesosullivan@JAMES-O-C63L909T4T
+  PROJECT-0Z28NPOM % ```
+
+---------
+
+Co-authored-by: Ruari Phipps <ruari@poly-ai.com>
+
+
+## v0.38.4 (2026-08-07)
+
+### Bug Fixes
+
+- Read document projection field as content not contents
+  ([#264](https://github.com/polyai/adk/pull/264),
+  [`0ed2a3e`](https://github.com/polyai/adk/commit/0ed2a3e4f352ac95986ae1afb997c71d4769fe89))
+
+## Summary
+
+Follow-up to #262. The permission check there gates on a `contents` key, but the document projection
+  carries the proto field name `content` (see `Document` in `documents_pb2.pyi`). Every entity
+  therefore fails the check and `Document.from_projection` returns an empty dict, so no documents
+  are pulled at all.
+
+## Changes
+
+- `from_projection` checks for and reads `content` instead of `contents` - Updated the projection
+  fixtures in the tests, which had the same typo and so passed against the broken code - Added a
+  case covering an empty-but-present `content` (readable, empty document — kept, not skipped)
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  conventional commits
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude <noreply@anthropic.com>
+
+
+## v0.38.3 (2026-08-07)
+
+### Bug Fixes
+
+- Skip documents without readable contents ([#262](https://github.com/polyai/adk/pull/262),
+  [`4e24a35`](https://github.com/polyai/adk/commit/4e24a35e73d1b148cf122906b187792068ef4a7a))
+
+## Summary
+
+Documents the current user lacks read permission for come back from the platform without a
+  `contents` field. `Document.from_projection` now skips those entries instead of creating a
+  `Document` with empty content.
+
+## Motivation
+
+Previously, a document missing `contents` in the projection was still materialized locally with an
+  empty string, silently masking the fact that the user couldn't actually read it.
+
+## Changes
+
+- `Document.from_projection` skips entities that don't have a `contents` key - Reads the field via
+  `document_data["contents"]` directly (only reached once presence is confirmed)
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  conventional commits
+
+## Screenshots / Logs
+
+N/A
+
+
+## v0.38.2 (2026-08-07)
+
+### Bug Fixes
+
+- Preserve non-ASCII characters when writing RTC JSON files
+  ([#261](https://github.com/polyai/adk/pull/261),
+  [`5b06dd5`](https://github.com/polyai/adk/commit/5b06dd577f64da76710a05e2c06f57721987c405))
+
+## Summary
+
+`poly rtc pull` writes local `schema.json`/`data.json` files via `json.dump(..., indent=2,
+  sort_keys=True)`, which defaults to `ensure_ascii=True`. Every non-ASCII character (e.g. `ô` in
+  "Côte") gets escaped to `ô` even though the file is opened with `encoding="utf-8"`. The same issue
+  affects `rtc edit`'s editor buffer and `rtc diff`'s console output.
+
+Adds `ensure_ascii=False` to the JSON serialization calls in the RTC pull/edit/diff paths so files
+  and terminal output contain the real UTF-8 characters. <img width="531" height="338" alt="image"
+  src="https://github.com/user-attachments/assets/cdaf8b42-5d8d-41e8-aa93-69cbbbd9d3e7" />
+
+## Test Strategy
+
+- [x] Unit test added: `JsonIoTests.test_write_json_file_preserves_unicode` in
+  `src/poly/tests/utils_test.py` - [x] Full test suite passes locally (`uv run pytest`, 995 passed)
+  - [x] `ruff check` / `ruff format --check` clean on changed files
+
+
+## v0.38.1 (2026-08-06)
+
+### Bug Fixes
+
+- Handle null schema/variables in RTC merge and diff paths
+  ([#257](https://github.com/polyai/adk/pull/257),
+  [`fa76ae6`](https://github.com/polyai/adk/commit/fa76ae66c1cf2f384ad594d8c4f63fc064008e9f))
+
+## Summary
+
+Fix crash when `poly rtc push` triggers a merge against a remote config with null schema or
+  variables.
+
+## Motivation
+
+When a project has no RTC configured, the API returns `{"schema": null, "variables": null}`. The
+  merge and diff code paths used `.get("schema", {})`, which returns `None` when the key exists with
+  a null value (the default `{}` is only used when the key is absent). This caused `merge_rtc_dicts`
+  to crash with `'NoneType' object is not iterable`.
+
+## Changes
+
+- Use `.get("schema") or {}` instead of `.get("schema", {})` in the RTC merge path (`rtc.py`) -
+  Apply the same fix in the RTC diff path (`project.py`) - Matches the pattern already used in
+  `rtc_pull_env` after the earlier null fix
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+<img width="462" height="68" alt="image"
+  src="https://github.com/user-attachments/assets/f0d15c48-6018-416e-a9a9-5f093f182303" />
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Opus 4.6 <noreply@anthropic.com>
+
+
+## v0.38.0 (2026-08-06)
+
+### Features
+
+- Add SIP header overrides to chat ([#256](https://github.com/polyai/adk/pull/256),
+  [`bb97864`](https://github.com/polyai/adk/commit/bb978643986582e5426175bb4a4f589d4a96a395))
+
+## Summary
+
+Adds a repeatable `poly chat --sip-header NAME=VALUE` option that simulates SIP headers on chat
+  conversations, so agent behaviour that reads `conv.sip_headers` can be exercised without arranging
+  a real SIP call.
+
+## Motivation
+
+Testing header-dependent agent logic today requires a real SIP call. This gives developers a quick
+  local way to inject agent-visible header values from the chat CLI. Note the option is additive and
+  simulates agent-visible values only; it does not reproduce SIP transport or carrier behaviour, and
+  header injection depends on server-side chat API support rolling out separately.
+
+## Changes
+
+- Add a repeatable `--sip-header NAME=VALUE` option to the modular chat command - Validate header
+  syntax while preserving values that contain `=` - Forward simulated headers through standard and
+  draft conversation creation - Document the option
+
+## Test strategy
+
+- [x] Added/updated unit tests (CLI parsing, session forwarding, API payloads) - [ ] Manual CLI
+  testing (`poly <command>`) - [ ] Tested against a live Agent Studio project - [ ] N/A (docs,
+  config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`pytest -q` result: 994 passed, 30 subtests passed
+
+
+## v0.37.3 (2026-08-05)
+
+### Bug Fixes
+
+- Stop id sync rewriting every function in the project
+  ([#255](https://github.com/polyai/adk/pull/255),
+  [`c2ef04d`](https://github.com/polyai/adk/commit/c2ef04da90de4c1fe927633c3d70768b5eb7c968))
+
+## Summary
+
+`sync_ids_with_sandbox` was rewriting every function in the project on every id sync, because two
+  `Function` dataclass fields are populated asymmetrically by `read_local_resource` and
+  `from_projection` and both count toward the generated `__eq__`. This makes disk-read and
+  projection-read functions compare unequal regardless of content.
+
+## Motivation
+
+`sync_ids_with_sandbox` is the **only** code path that decides what changed by comparing whole
+  `Resource` objects (`resource != branch_resource`, `project.py:2850`). `push_project` gates on a
+  rendered-file hash first (`project.py:1163-1171`), and `get_diffs` uses that same hash
+  short-circuit plus a *text* diff of rendered output (`project.py:1547-1570`). So an asymmetric
+  field is invisible everywhere except this one path — which is why this went unnoticed.
+
+The two asymmetric fields were:
+
+| Field | `read_local_resource` | `from_projection` | |---|---|---| | `variable_references` | always
+  derives it from code — a dict, initialised to `{}`, never `None` | never sets it → `None` | |
+  `description` | `_extract_decorators` returned `None` with no `@func_description` |
+  `func["description"]`, which Agent Studio stores as `""` |
+
+This caused a real incident on a customer project. A merge-time id sync — invoked to repair a
+  handful of duplicate-name errors after resources were re-created under fresh ADK ids — emitted
+  **155 commands, 63 of which were these false positives**: 36 global functions + 25 flow transition
+  functions from `variable_references`, and the 2 special functions from `description`. That is
+  every function in the project. Not one `create_function` or `delete_function` was in the batch, so
+  all 63 kept their ids and were rewritten for no reason.
+
+It matters beyond noise because Agent Studio wraps a command batch in a single transaction, so 63
+  pointless commands are 63 extra chances to roll back the id repair that was the point of the sync;
+  and it inflates the Agent Studio merge diff far past the corresponding git PR diff, which is what
+  made the incident hard to spot.
+
+`variable_references` is marked `compare=False` rather than populated from the projection, because
+  it is derived from `code` — which *is* compared — so no real signal is lost. Transition functions
+  never push their references at all (see below), so Agent Studio has nothing stored for them and it
+  would have left 25 of the 63 false positives in place.
+
+## Changes
+
+- `Function.variable_references` is now `field(default_factory=dict, compare=False)` — excluded from
+  the generated `__eq__`. - `Function._extract_decorators` defaults `description` to `""` instead of
+  `None`, matching how Agent Studio stores an absent description. Return annotation tightened from
+  `Optional[str]` to `str`. - Two regression tests in `src/poly/tests/resources_test.py`, both
+  verified to fail without the fix.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+**Round-trip sweep across every resource type.** Build every resource from a real project
+  projection, write it out with its own `save()`, read it back through the same path push and sync
+  use, and diff the compared dataclass fields. Using `save()` rather than a mocked read is what
+  makes multi-resource YAML files work — variant attributes, pronunciations, keyphrases and voice
+  config are 180 of the 506 resources and were being silently skipped otherwise.
+
+| Projection | Resources | Equal | Differ | |---|---|---|---| | feature branch | 506 across 24 types
+  | 506 | **0** | | main | 507 across 24 types | 507 | **0** |
+
+Before the fix, `Function` was 0/63. A static sweep was attempted first and abandoned as inadequate:
+  only 6 of the 34 registered types define both `from_projection` and `read_local_resource` locally
+  with a simple constructor call — the rest inherit the generic `YamlResource.read_local_resource`
+  or build via helpers.
+
+**Both new tests fail without the fix:**
+
+``` FAILED
+  src/poly/tests/resources_test.py::FunctionTests::test_equality_ignores_variable_references FAILED
+  src/poly/tests/resources_test.py::FunctionTests::test_missing_description_reads_as_empty_string 2
+  failed, 391 deselected ```
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes — 989 passed, 30
+  subtests - [x] No breaking changes to the `poly` CLI interface (or migration path documented) -
+  [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.37.2 (2026-08-04)
 
 ### Performance Improvements

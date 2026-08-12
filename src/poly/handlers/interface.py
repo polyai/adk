@@ -248,6 +248,38 @@ class AgentStudioInterface:
         return PlatformAPIHandler.duplicate_project(region, project_id, new_name, new_id)
 
     @staticmethod
+    def list_template_projects(region: str) -> list[dict[str, Any]]:
+        """List available template projects.
+
+        Args:
+            region: The region to query.
+
+        Returns:
+            list[dict[str, Any]]: A list of template project summaries.
+        """
+        return SyncClientHandler(region=region).list_template_projects()
+
+    @staticmethod
+    def get_template_resources(
+        template_id: str, region: str
+    ) -> dict[type[Resource], dict[str, Resource]]:
+        """Fetch a template and return its resources.
+
+        Combines projection fetching and resource conversion in one call.
+
+        Args:
+            template_id: The template project ID.
+            region: The region to query.
+
+        Returns:
+            dict mapping resource types to their resources.
+        """
+        from poly.resources.resource import load_resources_from_projection
+
+        projection = SyncClientHandler(region=region).get_template_project_projection(template_id)
+        return load_resources_from_projection(projection)
+
+    @staticmethod
     def get_deployments(
         region: str, account_id: str, project_id: str, client_env: str = "sandbox"
     ) -> list[dict[str, Any]]:
@@ -645,6 +677,7 @@ class AgentStudioInterface:
         channel: str = "chat.polyai",
         input_lang: Optional[str] = None,
         output_lang: Optional[str] = None,
+        sip_headers: Optional[dict[str, str]] = None,
     ) -> dict:
         """Create a new chat conversation.
 
@@ -655,6 +688,7 @@ class AgentStudioInterface:
             environment: The environment to chat against (sandbox, pre-release, live)
             variant_id: Optional variant ID (e.g. 'Voice')
             channel: The channel identifier (e.g. 'chat.polyai', 'webchat.polyai')
+            sip_headers: Optional simulated SIP headers exposed through conv.sip_headers
 
         Returns:
             dict: The API response containing the conversation ID and initial greeting
@@ -668,6 +702,7 @@ class AgentStudioInterface:
             channel,
             input_lang=input_lang,
             output_lang=output_lang,
+            sip_headers=sip_headers,
         )
 
     @staticmethod
@@ -734,6 +769,7 @@ class AgentStudioInterface:
         variant_id: Optional[str] = None,
         input_lang: str = None,
         output_lang: str = None,
+        sip_headers: Optional[dict[str, str]] = None,
     ) -> dict:
         """Create a new chat conversation against a branch deployment.
 
@@ -745,6 +781,7 @@ class AgentStudioInterface:
             lambda_deployment_version: Branch lambda version from sourcerer
             channel: The channel identifier (e.g. 'chat.polyai', 'webchat.polyai')
             variant_id: Optional variant ID (e.g. 'Voice')
+            sip_headers: Optional simulated SIP headers exposed through conv.sip_headers
 
         Returns:
             dict: The API response containing the conversation ID and initial greeting
@@ -759,6 +796,7 @@ class AgentStudioInterface:
             variant_id,
             input_lang=input_lang,
             output_lang=output_lang,
+            sip_headers=sip_headers,
         )
 
     @staticmethod

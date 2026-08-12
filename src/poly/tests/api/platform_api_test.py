@@ -53,6 +53,42 @@ class GetBaseUrl(unittest.TestCase):
             PlatformAPIHandler.get_base_url("mars-1", use_jupiter_api=True)
 
 
+class CreateChat(unittest.TestCase):
+    """Tests for chat creation request payloads."""
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_standard_chat_includes_sip_headers(self, mock_make_request):
+        sip_headers = {"X-Customer-ID": "12345"}
+
+        PlatformAPIHandler.create_chat(
+            "uk-1",
+            "ACCOUNT-123",
+            "PROJECT-123",
+            sip_headers=sip_headers,
+        )
+
+        self.assertEqual(
+            mock_make_request.call_args.kwargs["data"]["sip_headers"], sip_headers
+        )
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_draft_chat_includes_sip_headers(self, mock_make_request):
+        sip_headers = {"X-Customer-ID": "12345"}
+
+        PlatformAPIHandler.create_draft_chat(
+            "uk-1",
+            "ACCOUNT-123",
+            "PROJECT-123",
+            "artifact-version",
+            "lambda-version",
+            sip_headers=sip_headers,
+        )
+
+        self.assertEqual(
+            mock_make_request.call_args.kwargs["data"]["sip_headers"], sip_headers
+        )
+
+
 class MakeRequest(unittest.TestCase):
     """Tests for PlatformAPIHandler.make_request HTTP behaviour."""
 
