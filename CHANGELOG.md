@@ -1,6 +1,164 @@
 # CHANGELOG
 
 
+## v0.41.0 (2026-08-12)
+
+### Chores
+
+- **protobuf**: Regenerate for mock call context ([#266](https://github.com/polyai/adk/pull/266),
+  [`8fff71b`](https://github.com/polyai/adk/commit/8fff71b2eb6f5a2e4d1b4aa849396c2a8760be49))
+
+The vendored protos under `src/poly/handlers/protobuf/` had drifted well behind the platform protos
+  they are generated from. Regenerated wholesale rather than leaving a partial sync.
+
+Companion to poly_core#44868, which does the same for its copy of these protos.
+
+## What arrives
+
+**`testing_pb2`**
+
+* `TestCase` gains `caller_number = 20`, `sip_headers = 21` (`map<string, string>`),
+  `integration_attributes = 22` (`google.protobuf.Struct`) * `Create_TestCase` / `Update_TestCase`
+  gain `caller_number = 11` * New `SetTestCaseSipHeaders` and `SetTestCaseIntegrationAttributes`
+  messages, with entries `452` and `455` in `commands_pb2` * `api_mocks = 19`, which had been
+  missing since it shipped
+
+**Also caught up by the same run**, none of it this project's work: `agent_settings`, `artifact`,
+  `channels`, `functions`, `knowledge_base`, `snapshot`, `variant`. `webchat_csat_pb2` is new — it
+  exists in poly_core's copy of these protos but had never been generated here.
+
+## Provenance
+
+Generated output only, no hand edits.
+
+There is **no proto generation script in this repo** — `scripts/` holds only `sync_runtime_stubs.py`
+  — so this reproduces what platform_ui's `apps/agent-stream/generate_protos.sh` does for poly_core:
+  protoc 25.5, the same include paths against a poly_core checkout on master (`6d2f8d717a`), then
+  the relative-to-absolute import rewrite pointed at `poly.handlers.protobuf` instead of the
+  sourcerer_sdk package.
+
+That the process is undocumented and unautomated is the reason for this drift, and is worth fixing
+  separately.
+
+## Verification
+
+Constructed the new messages against the generated code:
+
+``` TestCase: '+447700900000' {'x-dnis': '123'} {'retry_count': 2.0, 'tier': 'gold'}
+
+command fields: ['set_test_case_sip_headers', 'set_test_case_integration_attributes'] ```
+
+Full suite: **1008 passed**.
+
+Note for the follow-up: `retry_count` went in as `2` and came back as `2.0`, because
+  `google.protobuf.Struct` stores every number as a double. Invisible in the browser, where all
+  numbers are doubles anyway, but it will need handling when these values are written to YAML.
+
+## Not in this PR
+
+This changes nothing user-visible on its own — `simulated_at` has been in these protos for a while
+  and is still absent from the resource layer. Wiring the new fields into `test_suite.py` is
+  [DEVP-580](https://linear.app/poly-ai/issue/DEVP-580).
+
+Closes [DEVP-579](https://linear.app/poly-ai/issue/DEVP-579).
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+
+### Features
+
+- **test-suite**: Support mock call context on test cases
+  ([#267](https://github.com/polyai/adk/pull/267),
+  [`9a439de`](https://github.com/polyai/adk/commit/9a439defffec0c15cddad42a570fff0a4be8bb06))
+
+## Summary
+
+Adds caller number, SIP headers and integration attributes to the test case resource so `poly pull`
+  and `poly push` round-trip them, with docs in `src/poly/docs/tests.md`. Until now the ADK silently
+  dropped all three.
+
+**Stacked on #266** — its base should be retargeted to `main` once that merges.
+
+## Motivation
+
+Agent Studio can set mock call context on a test case; the ADK could not see or send it. Pulling a
+  project omitted the fields from the YAML and pushing left them untouched on the server.
+
+Closes [DEVP-580](https://linear.app/poly-ai/issue/DEVP-580)
+
+## Changes
+
+- `caller_number` on the `TestCase` resource — a scalar on `Create_TestCase` / `Update_TestCase`.
+  Always sent, empty string included, since proto3 has no null and clearing it otherwise would not
+  stick - `TestCaseSipHeaders` and `TestCaseIntegrationAttributes` subresources, each with its own
+  `set_` command, on the existing `TestCaseTags` pattern - Both subresources are always constructed,
+  even when empty — `get_new_updated_deleted_subresources` compares subresources, so an absent one
+  cannot differ from the populated one it replaces and clearing a value would never push -
+  `from_projection` reads the camelCase projection keys (`callerNumber`, `sipHeaders`,
+  `integrationAttributes`) - Type handling so the YAML path matches the platform (see below) -
+  `src/poly/docs/tests.md` — a "Mock call context" section with a worked example, per-field notes
+  and the quoting rules
+
+## Test strategy
+
+- [x] Added/updated unit tests — 21 new - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested
+  against a live Agent Studio project - [ ] N/A
+
+**1029 passed**, ruff clean. Coverage of `test_suite.py` +3.4%.
+
+Four behaviours are mutation-tested — each fails when the code it covers is reverted:
+
+| Test | Reverting | |---|---| | `test_struct_doubles_are_written_back_as_ints` | the float
+  normalisation | | `test_clearing_subresources_still_pushes` | guarding the comparison on
+  non-emptiness | | `test_sip_header_bools_use_wire_casing` | `_header_value` back to `str()` | |
+  `test_validate_rejects_dates_with_an_actionable_message` | the date branch |
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface — additive fields only - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+YAML types unquoted scalars, so it can produce values the Studio UI's text inputs never can. I
+  probed every type against the generated protos rather than assuming; `string`, `number`, `float`,
+  `bool`, `null`, `list` and nested `map` all round-trip correctly. Four cases did not:
+
+| YAML | Was | Now | |---|---|---| | `x-flag: true` (SIP header) | `"True"` — Python's casing |
+  `"true"` | | `x-none:` (SIP header) | `"None"` | `""` | | `expiry: 2026-08-12` (attribute) |
+  `ValueError: Unexpected type` | rejected in `validate()` with the path and the quoted form | |
+  `caller_number: +447700900000` | `TypeError: bad argument type` | rejected — see below |
+
+A `Struct` also stores every number as a double, so an attribute pushed as `2` returns as `2.0` and
+  would write `2.0` back to YAML, giving a spurious diff on every pull after a push. Integral floats
+  are folded back to `int`; genuine decimals are untouched.
+
+The caller number one is the subtle one. YAML reads `+447700900000` as the int `447700900000` —
+  **dropping the `+`** — and that is indistinguishable from someone writing no `+` at all:
+
+``` caller_number: +447700900000 -> 447700900000 str() -> '447700900000'
+
+caller_number: 447700900000 -> 447700900000 str() -> '447700900000' ```
+
+So `str()` would silently send a different number. It is rejected with a message saying to quote it.
+  Caller number is also now trimmed on push, matching the platform entity, where a trailing space
+  changes the agent-memory identifier.
+
+## Still missing after this
+
+`severity`, `simulated_at` and `api_mocks` remain unsupported by the resource layer, despite the
+  latter two now being in the protos. Those are the same six fields
+  [BLD-811](https://linear.app/poly-ai/issue/BLD-811) reports missing from the environment
+  comparison renderer — every consumer of the TestCase model except the main form has fallen behind
+  by the same set. Worth a follow-up.
+
+---------
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+
+
 ## v0.40.0 (2026-08-11)
 
 ### Features

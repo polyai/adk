@@ -20,6 +20,9 @@ Each test case has these fields:
 - **tags** (list, optional): Labels for grouping and filtering tests.
 - **variant** (string, optional): Variant name to run the test against.
 - **language** (string): Language code for the test run, e.g. `en-GB`.
+- **caller_number** (string, optional): The number the simulated call arrives from.
+- **sip_headers** (map, optional): SIP headers a carrier would send with an inbound call.
+- **integration_attributes** (map, optional): Attributes a channel or connector passes in.
 - **prompt_assertions** (list, optional): Expected behaviours in the agent's response.
 - **function_call_assertions** (list, optional): Expected function calls and argument values.
 
@@ -42,6 +45,68 @@ function_call_assertions:
     expected_value: hello
     value_type: string
 ```
+
+## Mock call context
+
+A real conversation arrives carrying more than the user's words: the number it came from, the SIP headers a carrier attached, the attributes a channel passed in. Three optional fields simulate that, so a flow that branches on any of it can be tested without placing a real call.
+
+```yaml
+name: VIP caller routing
+scenario: Ask to speak to someone about my order.
+channel: voice
+language: en-GB
+caller_number: "+447700900000"
+sip_headers:
+  x-dnis: "441234567890"
+  x-call-id: abc-123
+integration_attributes:
+  tier: gold
+  retry_count: 2
+  vip: true
+  account:
+    region: uk
+```
+
+### caller_number
+
+The number the call arrives from, always text. The agent reads it as `conv.caller_number`.
+
+Leave it out to simulate a withheld or anonymous number — a real production case worth testing, so no format validation is applied beyond trimming surrounding whitespace.
+
+**Quote it.** YAML reads an unquoted number as an integer *and drops a leading `+`*, so `+447700900000` and `447700900000` become the same value:
+
+```yaml
+caller_number: +447700900000     # becomes 447700900000 — the + is lost
+caller_number: "+447700900000"   # correct
+```
+
+`push` rejects an unquoted number rather than converting it, because the two cases are indistinguishable once YAML has parsed them and silently sending a different number would make the test lie.
+
+### sip_headers
+
+Headers a carrier would send with an inbound call. The agent reads them as `conv.sip_headers`.
+
+Header names are case-sensitive — match exactly what your telephony integration sends. Values are always text on the wire, so a YAML `true` is sent as `"true"` and a number as its digits. Quote anything you want preserved exactly.
+
+Headers can be set on a `webchat` test, but a real webchat conversation never receives them, so the test covers a state production cannot reach.
+
+### integration_attributes
+
+Attributes a channel or connector passes in. The agent reads them as `conv.integration_attributes`.
+
+Unlike SIP headers, these **keep their type** through to the agent, so a flow branching on `retry_count > 2` sees a number rather than the text `"2"`. Text, numbers, `true`/`false`, `null`, lists and nested maps are all supported.
+
+Types come from YAML, which means quoting matters:
+
+| YAML | Reaches the agent as |
+|------|----------------------|
+| `retry_count: 2` | number |
+| `retry_count: "2"` | text |
+| `vip: true` | boolean |
+| `vip: "true"` | text |
+| `expiry: "2026-08-12"` | text |
+
+Dates must be quoted. An unquoted `expiry: 2026-08-12` is a YAML date, which the agent cannot receive, and `push` rejects it rather than guessing what you meant.
 
 ## Prompt assertions
 
@@ -83,10 +148,12 @@ On `push`, each test case is validated:
 - **language** is required and must match a configured project language (default or additional).
 - **variant**, if specified, must match an existing variant in the project.
 - **function_call_assertions**: each function name must match a global function in the project, and each argument's `value_type` must be one of `string`, `integer`, `number`, or `boolean`.
+- **integration_attributes**: values must be text, numbers, `true`/`false`, `null`, lists or nested maps. An unquoted date is rejected with the quoted form to use instead, and keys must be text.
 
 ## Best practices
 
 - Use tags like `smoke` or `regression` to group related tests.
 - Write scenarios as realistic user utterances.
+- Set mock call context only where the flow reads it. A test that carries headers no node inspects is noise.
 - Combine prompt assertions (what the agent says) with function call assertions (what the agent does) for end-to-end coverage.
 - Keep one test focused on one behaviour or flow path.
