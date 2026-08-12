@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import datetime
 import os
 import unittest
 
@@ -7603,6 +7604,95 @@ class TestCaseMockContextTests(unittest.TestCase):
         self.assertEqual(
             test_case.integration_attributes.attributes, {"tier": "gold", "retry_count": 2}
         )
+
+    def test_sip_header_bools_use_wire_casing(self):
+        """YAML types `x-flag: true` as a bool; str() would send Python's "True"."""
+        headers = TestCaseSipHeaders(
+            resource_id=self.RESOURCE_ID,
+            name="sip_headers",
+            headers={"x-flag": True, "x-off": False, "x-count": 2, "x-none": None},
+        )
+
+        sent = dict(headers.build_update_proto().sip_headers)
+
+        self.assertEqual(sent["x-flag"], "true")
+        self.assertEqual(sent["x-off"], "false")
+        self.assertEqual(sent["x-count"], "2")
+        self.assertEqual(sent["x-none"], "")
+
+    def test_sip_header_dates_are_sent_as_iso_text(self):
+        headers = TestCaseSipHeaders(
+            resource_id=self.RESOURCE_ID,
+            name="sip_headers",
+            headers={"x-date": datetime.date(2026, 8, 12)},
+        )
+
+        self.assertEqual(dict(headers.build_update_proto().sip_headers)["x-date"], "2026-08-12")
+
+    def test_validate_rejects_dates_with_an_actionable_message(self):
+        """An unquoted YAML date would otherwise reach Struct.update and raise
+        `ValueError: Unexpected type`, naming neither the key nor the file."""
+        test_case = self._test_case(
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID,
+                name="integration_attributes",
+                attributes={"expiry": datetime.date(2026, 8, 12)},
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+
+        message = str(ctx.exception)
+        self.assertIn("integration_attributes.expiry", message)
+        self.assertIn("2026-08-12", message)
+
+    def test_validate_rejects_non_text_keys(self):
+        test_case = self._test_case(
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID,
+                name="integration_attributes",
+                attributes={2: "x"},
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+
+        self.assertIn("must be text", str(ctx.exception))
+
+    def test_validate_reports_the_path_of_a_nested_bad_value(self):
+        test_case = self._test_case(
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID,
+                name="integration_attributes",
+                attributes={"booking": {"slots": [{"at": datetime.date(2026, 8, 12)}]}},
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+
+        self.assertIn("integration_attributes.booking.slots[0].at", str(ctx.exception))
+
+    def test_validate_accepts_every_supported_json_type(self):
+        test_case = self._test_case(
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID,
+                name="integration_attributes",
+                attributes={
+                    "s": "gold",
+                    "n": 2,
+                    "f": 1.5,
+                    "b": True,
+                    "nil": None,
+                    "list": [1, "two", False],
+                    "nested": {"a": {"b": 1}},
+                },
+            )
+        )
+
+        test_case.validate()
 
     def test_from_projection_without_mock_context(self):
         projection = {

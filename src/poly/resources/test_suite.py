@@ -5,6 +5,7 @@ Copyright PolyAI Limited
 
 import os
 from dataclasses import dataclass, field
+from datetime import date, datetime
 from typing import Any, Optional
 
 from google.protobuf.struct_pb2 import Struct
@@ -184,6 +185,22 @@ class TestCaseTags(SubResource):
         raise NotImplementedError("Test Case Tags cannot be deleted")
 
 
+def _header_value(value: Any) -> str:
+    """Render a YAML value as the text a carrier would actually send.
+
+    SIP headers are `map<string, string>`, but YAML types unquoted scalars, so
+    `x-flag: true` arrives as a Python bool. Plain `str()` would send `"True"`
+    — Python's capitalisation, which no carrier and no other client produces.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return ""
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return str(value)
+
+
 @dataclass
 class TestCaseSipHeaders(SubResource):
     """Dataclass representing the mock SIP headers on a test case"""
@@ -205,7 +222,7 @@ class TestCaseSipHeaders(SubResource):
             id=self.resource_id,
             # map<string, string> on the wire: a header value is always text,
             # unlike an integration attribute.
-            sip_headers={str(key): str(value) for key, value in self.headers.items()},
+            sip_headers={str(key): _header_value(value) for key, value in self.headers.items()},
         )
 
     def build_create_proto(self) -> None:
@@ -232,6 +249,40 @@ def _normalise_attribute(value: Any) -> Any:
     if isinstance(value, list):
         return [_normalise_attribute(item) for item in value]
     return value
+
+
+def _validate_attribute_value(value: Any, path: str) -> None:
+    """Reject values a google.protobuf.Struct cannot carry.
+
+    YAML types unquoted scalars, so `expiry: 2026-08-12` becomes a
+    `datetime.date` and `Struct.update` fails with a bare
+    `ValueError: Unexpected type` naming neither the key nor the file. The
+    wire format is JSON, exactly as in the UI, where the type picker offers
+    string, number, boolean and JSON and nothing else.
+    """
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError(
+                    f"Integration attribute key {path}.{key!r} must be text — "
+                    f"quote it to stop YAML reading it as {type(key).__name__}"
+                )
+            _validate_attribute_value(item, f"{path}.{key}")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_attribute_value(item, f"{path}[{index}]")
+        return
+    if isinstance(value, (date, datetime)):
+        raise ValueError(
+            f"Integration attribute '{path}' is a {type(value).__name__}, which the agent "
+            f"cannot receive — quote it to send it as text: '{value.isoformat()}'"
+        )
+    if value is not None and not isinstance(value, (str, int, float, bool)):
+        raise ValueError(
+            f"Integration attribute '{path}' is a {type(value).__name__}; "
+            "only text, numbers, true/false, lists and nested maps are supported"
+        )
 
 
 @dataclass
@@ -590,6 +641,9 @@ class TestCase(YamlResource):
                 None,
             ):
                 raise ValueError(f"Variant {self.variant} not found")
+
+        # Integration attributes carry JSON types through to the agent
+        _validate_attribute_value(self.integration_attributes.attributes, "integration_attributes")
 
         # Function name is valid
         known_global_functions = {
