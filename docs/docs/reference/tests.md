@@ -63,6 +63,9 @@ The directory is optional. Create it only when you have test cases to define.
 | `language` | Yes | BCP 47 language tag (e.g. `en-GB`). Must be a configured language in the project. |
 | `variant` | No | Name of a variant from `config/variant_attributes.yaml`. Defaults to the project default variant. |
 | `tags` | No | List of strings used to group, filter, or schedule tests. Usable with `poly test run --tag`. |
+| `caller_number` | No | The number the simulated call arrives from. Must be quoted. |
+| `sip_headers` | No | SIP headers a carrier would send with an inbound call. |
+| `integration_attributes` | No | Attributes a channel or connector passes in. |
 | `prompt_assertions` | No | List of natural-language statements that must hold about the agent's behavior. Each is evaluated by an LLM judge. |
 | `function_call_assertions` | No | List of expected function calls and their argument values. |
 
@@ -142,6 +145,68 @@ prompt_assertions:
   - The agent greets the user
 ~~~
 
+## Mock call context
+
+A real conversation arrives carrying more than the user's words: the number it came from, the SIP headers a carrier attached, the attributes a channel passed in. Three optional fields simulate that, so a flow that branches on any of it can be tested without placing a real call.
+
+~~~yaml
+name: VIP caller routing
+scenario: Ask to speak to someone about my order.
+channel: voice
+language: en-GB
+caller_number: "+447700900000"
+sip_headers:
+  x-dnis: "441234567890"
+  x-call-id: abc-123
+integration_attributes:
+  tier: gold
+  retry_count: 2
+  vip: true
+  account:
+    region: uk
+~~~
+
+### caller_number
+
+The number the call arrives from, always text. The agent reads it as `conv.caller_number`.
+
+Leave it out to simulate a withheld or anonymous number — a real production case worth testing, so no format validation is applied beyond trimming surrounding whitespace.
+
+**Quote it.** YAML reads an unquoted number as an integer *and drops a leading `+`*, so `+447700900000` and `447700900000` become the same value:
+
+~~~yaml
+caller_number: +447700900000     # becomes 447700900000 — the + is lost
+caller_number: "+447700900000"   # correct
+~~~
+
+`push` rejects an unquoted number rather than converting it, because the two cases are indistinguishable once YAML has parsed them and silently sending a different number would make the test lie.
+
+### sip_headers
+
+Headers a carrier would send with an inbound call. The agent reads them as `conv.sip_headers`.
+
+Header names are case-sensitive — match exactly what your telephony integration sends. Values are always text on the wire, so a YAML `true` is sent as `"true"` and a number as its digits. Quote anything you want preserved exactly.
+
+Headers can be set on a `webchat` test, but a real webchat conversation never receives them, so the test covers a state production cannot reach.
+
+### integration_attributes
+
+Attributes a channel or connector passes in. The agent reads them as `conv.integration_attributes`.
+
+Unlike SIP headers, these **keep their type** through to the agent, so a flow branching on `retry_count > 2` sees a number rather than the text `"2"`. Text, numbers, `true`/`false`, `null`, lists and nested maps are all supported.
+
+Types come from YAML, which means quoting matters:
+
+| YAML | Reaches the agent as |
+|------|----------------------|
+| `retry_count: 2` | number |
+| `retry_count: "2"` | text |
+| `vip: true` | boolean |
+| `vip: "true"` | text |
+| `expiry: "2026-08-12"` | text |
+
+Dates must be quoted. An unquoted `expiry: 2026-08-12` is a YAML date, which the agent cannot receive, and `push` rejects it rather than guessing what you meant.
+
 ## Validation
 
 `poly validate` checks each test case:
@@ -152,6 +217,8 @@ prompt_assertions:
 - `variant`, if set, must reference a variant declared in `config/variant_attributes.yaml`
 - each `function_call_assertions[*].name` must match a global function under `functions/`
 - each argument's `value_type` must be one of `string`, `integer`, `number`, `boolean`
+- `caller_number`, if set, must be a quoted string — an unquoted number is rejected with an actionable message
+- `integration_attributes`: values must be text, numbers, `true`/`false`, `null`, lists or nested maps. An unquoted date is rejected with the quoted form to use instead, and keys must be text.
 - the filename must match the normalized `name`
 
 Validation runs automatically as part of `poly push`.
@@ -165,7 +232,7 @@ Test cases follow the standard ADK lifecycle:
 3. push with `poly push` to sync to Agent Studio
 4. trigger and monitor the suite with `poly test run`
 
-`poly push` creates, updates, or deletes test cases on Agent Studio to match local state, including `prompt_assertions` and `tags`. Use `poly test run` to trigger execution and `poly test show` / `poly test list` to inspect results — all without leaving the terminal.
+`poly push` creates, updates, or deletes test cases on Agent Studio to match local state, including `prompt_assertions`, `tags`, `caller_number`, `sip_headers`, and `integration_attributes`. Use `poly test run` to trigger execution and `poly test show` / `poly test list` to inspect results — all without leaving the terminal.
 
 !!! tip "Tests are branch-scoped"
 
@@ -292,6 +359,7 @@ Good coverage of a project usually includes:
 - use `tags` consistently (`smoke`, `regression`, `<flow_name>`) so suites can be filtered with `--tag`
 - cover error paths, not only success cases
 - add a webchat and a voice variant of any critical path that runs on both channels
+- set mock call context only where the flow reads it — a test that carries headers no node inspects is noise
 - validate as part of the normal edit loop, not just before merge
 - combine the suite with `poly chat` and interactive review in Agent Studio when behavior depends on the full conversation flow
 
