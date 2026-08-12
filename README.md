@@ -213,6 +213,75 @@ poly chat --sip-header X-Customer-ID=12345 --sip-header X-Language=en-GB
 functions through `conv.sip_headers`. It does not create a SIP call or reproduce
 carrier-level SIP behaviour.
 
+### `poly sip-trunks`
+
+Manage account-level SIP trunks and route dialled extensions to agents. The account and
+region are inferred from project metadata unless `--account-id` and `--region` are supplied.
+
+Place the declarative configuration in the account directory, alongside project folders:
+
+```text
+pod-point-uk/
+├── sip-trunks.yaml
+└── charging-support/
+    └── project.yaml
+```
+
+```yaml
+- id: tr-ev3vx4iqcbhaeilk2jw9qp8n
+  name: Primary carrier
+  sip_cidr: [203.0.113.0/24]
+  rtp_cidr: [198.51.100.0/24]
+  encrypted: true
+  hostname: tr-ev3vx4iqcbhaeilk2jw9qp8n.sbc.sip.uk.poly.ai
+  inbound_auth:
+    type: digest
+    username: carrier-user
+    realm: sbc.sip.uk.poly.ai
+  extensions:
+    - extension: "1000"
+      agent_id: charging-support
+      client_env: live
+```
+
+```bash
+poly sip-trunks manage
+poly sip-trunks manage --yes                    # apply without confirmation
+poly sip-trunks manage --rotate-auth <trunk_id>
+poly sip-trunks manage --file ../sip-trunks.yaml
+poly sip-trunks list                         # display a summary table
+poly sip-trunks list --output                # write account-level sip-trunks.yaml
+poly sip-trunks list --output export.yaml
+poly sip-trunks get <trunk_id>
+poly sip-trunks delete <trunk_id>
+```
+
+`manage` creates or updates entries in the YAML and prints every managed trunk's generated
+hostname when it changes. Before writing, it validates the complete file, displays a diff,
+and asks for confirmation. Use `--yes` for trusted automation; `--json` also requires
+`--yes` when changes exist. When everything already matches, it prints `Nothing changed.`
+After reconciling a trunk, it writes useful API-generated metadata—`id`, `hostname`, and the
+digest `realm`—into the YAML while preserving formatting and comments. These fields are
+informational and ignored when constructing API writes. Creation and update timestamps are
+intentionally omitted. Entries omitted from the file are not deleted; use `delete`
+explicitly for trunks. When an `extensions` list is present, it is authoritative: removing
+an entry schedules that extension for deletion in the confirmation diff. Omitting the
+entire `extensions` key leaves the trunk's extensions unmanaged. The older `sip_trunks:`
+wrapper remains readable for migration.
+
+`list` displays a table by default. With `--output`, it exports trunk IDs, hostnames,
+CIDRs, authentication state, and extensions in the same schema consumed by `manage`.
+Existing files are protected unless `--force` is used.
+API responses never contain SIP passwords or tokens, so exported files do not contain
+secrets. `inbound_auth.type` is `digest`, `token`, or `none`. `manage` securely prompts
+when a secret is required to create a trunk or change its authentication. Normal updates
+never resend existing credentials; use `--rotate-auth <trunk_id>` to rotate them explicitly.
+Use `--json` for machine-readable output.
+
+The account region is not stored in `sip-trunks.yaml`. ADK reads it from the current
+project or from project directories immediately below the account directory. If no project
+metadata is available, pass `--region`; inconsistent project regions are rejected.
+
 ### `poly docs`
 
 Output ADK documentation

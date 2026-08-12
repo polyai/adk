@@ -15,6 +15,20 @@ from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
 from poly.utils import any_credentials_exist, retrieve_api_key
 
 logger = logging.getLogger(__name__)
+
+
+def _redact_sensitive_data(value: ty.Any) -> ty.Any:
+    """Return a logging-safe copy of nested API request data."""
+    if isinstance(value, dict):
+        return {
+            key: "***" if key.lower() in {"password", "token"} else _redact_sensitive_data(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_sensitive_data(item) for item in value]
+    return value
+
+
 ACCOUNTS_URL = "/adk/v1/accounts"
 PROJECTS_URL = "/adk/v1/accounts/{account_id}/projects"
 DEPLOYMENTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/deployments"
@@ -139,7 +153,7 @@ class PlatformAPIHandler:
         )
 
         logger.debug(
-            f"Request/response url={url!r} body={data!r}"
+            f"Request/response url={url!r} body={_redact_sensitive_data(data)!r}"
             f" status_code={api_response.status_code!r} response={api_response.text!r}"
         )
 
