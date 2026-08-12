@@ -20,7 +20,10 @@
         "entity_type": "phone_number",
         "config": {
           "enabled": true,
-          "country_codes": ["US", "UK"]
+          "country_codes": [
+            "US",
+            "UK"
+          ]
         }
       },
       "ENTITY-date": {
@@ -50,7 +53,11 @@
         "description": "Confirmation status options",
         "entity_type": "enum",
         "config": {
-          "options": ["confirmed", "pending", "cancelled"]
+          "options": [
+            "confirmed",
+            "pending",
+            "cancelled"
+          ]
         }
       },
       "ENTITY-email": {
@@ -502,7 +509,9 @@
           {
             "name": "has_name",
             "description": "User provided name",
-            "required_entities": ["ENTITY-customer_name"],
+            "required_entities": [
+              "ENTITY-customer_name"
+            ],
             "condition_type": "step_condition",
             "child_step": "confirm_details",
             "step_id": "collect_name",
@@ -526,7 +535,9 @@
             "ingress": "top"
           }
         ],
-        "extracted_entities": ["ENTITY-customer_name"],
+        "extracted_entities": [
+          "ENTITY-customer_name"
+        ],
         "position": {
           "x": 600.0,
           "y": 500.0
@@ -589,7 +600,9 @@
           {
             "name": "has_phone",
             "description": "User provided phone",
-            "required_entities": ["ENTITY-phone_number"],
+            "required_entities": [
+              "ENTITY-phone_number"
+            ],
             "condition_type": "step_condition",
             "child_step": "final_step",
             "step_id": "collect_phone",
@@ -613,7 +626,9 @@
             "ingress": "top"
           }
         ],
-        "extracted_entities": ["ENTITY-phone_number"],
+        "extracted_entities": [
+          "ENTITY-phone_number"
+        ],
         "position": {
           "x": 1200.0,
           "y": 500.0
@@ -676,7 +691,9 @@
           {
             "name": "book_appointment",
             "description": "User wants to book appointment",
-            "required_entities": ["ENTITY-date"],
+            "required_entities": [
+              "ENTITY-date"
+            ],
             "condition_type": "step_condition",
             "child_step": "collect_party_size",
             "step_id": "welcome_step",
@@ -689,7 +706,9 @@
           {
             "name": "check_status",
             "description": "User wants to check status",
-            "required_entities": ["ENTITY-confirmation_status"],
+            "required_entities": [
+              "ENTITY-confirmation_status"
+            ],
             "condition_type": "step_condition",
             "child_step": "status_result",
             "step_id": "welcome_step",
@@ -713,7 +732,10 @@
             "ingress": "top"
           }
         ],
-        "extracted_entities": ["ENTITY-date", "ENTITY-confirmation_status"],
+        "extracted_entities": [
+          "ENTITY-date",
+          "ENTITY-confirmation_status"
+        ],
         "position": {
           "x": 0.0,
           "y": 0.0
@@ -733,7 +755,9 @@
           {
             "name": "has_party_size",
             "description": "User provided party size",
-            "required_entities": ["ENTITY-party_size"],
+            "required_entities": [
+              "ENTITY-party_size"
+            ],
             "condition_type": "step_condition",
             "child_step": "collect_email",
             "step_id": "collect_party_size",
@@ -757,7 +781,9 @@
             "ingress": "top"
           }
         ],
-        "extracted_entities": ["ENTITY-party_size"],
+        "extracted_entities": [
+          "ENTITY-party_size"
+        ],
         "position": {
           "x": 600.0,
           "y": 500.0
@@ -922,8 +948,14 @@
           "phone_number": "+1234567890"
         },
         "sip_headers": [
-          {"key": "X-PolyAI-Session", "value": "session_id_123"},
-          {"key": "X-Custom-Header", "value": "custom_value"}
+          {
+            "key": "X-PolyAI-Session",
+            "value": "session_id_123"
+          },
+          {
+            "key": "X-Custom-Header",
+            "value": "custom_value"
+          }
         ]
       },
       "handoff-2": {
@@ -954,7 +986,10 @@
         "resource_id": "STOP_KEYWORD-block_profanity",
         "name": "Block Profanity",
         "description": "Blocks profane words from being spoken",
-        "regular_expressions": ["\\bbadword\\b", "\\boffensive\\b"],
+        "regular_expressions": [
+          "\\bbadword\\b",
+          "\\boffensive\\b"
+        ],
         "say_phrase": false,
         "function": "FUNCTION-validate_email"
       },
@@ -962,7 +997,9 @@
         "resource_id": "STOP_KEYWORD-block_competitor_names",
         "name": "Block Competitor Names",
         "description": "Prevents mentioning competitor names",
-        "regular_expressions": ["\\bcompetitor\\b"],
+        "regular_expressions": [
+          "\\bcompetitor\\b"
+        ],
         "say_phrase": true
       }
     },
@@ -1061,9 +1098,18 @@
         "name": "customer_api",
         "description": "test",
         "environments": {
-          "sandbox": {"base_url": "https://dev-customer.com", "auth_type": "basic"},
-          "pre_release": {"base_url": "https://dev-customer.com", "auth_type": "basic"},
-          "live": {"base_url": "https://customer.com", "auth_type": "apiKey"}
+          "sandbox": {
+            "base_url": "https://dev-customer.com",
+            "auth_type": "basic"
+          },
+          "pre_release": {
+            "base_url": "https://dev-customer.com",
+            "auth_type": "basic"
+          },
+          "live": {
+            "base_url": "https://customer.com",
+            "auth_type": "apiKey"
+          }
         },
         "operations": [
           {
@@ -1090,10 +1136,22 @@
         "enabled": true,
         "filter_type": "azure",
         "categories": {
-          "violence": {"enabled": true, "precision": "MEDIUM"},
-          "hate": {"enabled": true, "precision": "MEDIUM"},
-          "sexual": {"enabled": true, "precision": "MEDIUM"},
-          "self_harm": {"enabled": true, "precision": "MEDIUM"}
+          "violence": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "hate": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "sexual": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "self_harm": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          }
         }
       }
     },
@@ -1104,10 +1162,22 @@
         "enabled": true,
         "filter_type": "azure",
         "categories": {
-          "violence": {"enabled": true, "precision": "MEDIUM"},
-          "hate": {"enabled": true, "precision": "MEDIUM"},
-          "sexual": {"enabled": true, "precision": "MEDIUM"},
-          "self_harm": {"enabled": true, "precision": "MEDIUM"}
+          "violence": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "hate": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "sexual": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "self_harm": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          }
         }
       }
     },
@@ -1118,10 +1188,22 @@
         "enabled": true,
         "filter_type": "azure",
         "categories": {
-          "violence": {"enabled": true, "precision": "MEDIUM"},
-          "hate": {"enabled": true, "precision": "MEDIUM"},
-          "sexual": {"enabled": true, "precision": "MEDIUM"},
-          "self_harm": {"enabled": true, "precision": "MEDIUM"}
+          "violence": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "hate": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "sexual": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "self_harm": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          }
         }
       }
     },
@@ -1190,12 +1272,18 @@
       "TN-greeting": {
         "resource_id": "TN-greeting",
         "name": "greeting",
-        "translations": {"en-GB": "Hello, how can I help you?", "fr-FR": "Bonjour, comment puis-je vous aider?"}
+        "translations": {
+          "en-GB": "Hello, how can I help you?",
+          "fr-FR": "Bonjour, comment puis-je vous aider?"
+        }
       },
       "TN-farewell": {
         "resource_id": "TN-farewell",
         "name": "farewell",
-        "translations": {"en-GB": "Goodbye", "fr-FR": "Au revoir"}
+        "translations": {
+          "en-GB": "Goodbye",
+          "fr-FR": "Au revoir"
+        }
       }
     },
     "default_language": {
@@ -1224,4 +1312,3 @@
     "migrated_legacy_topic_files"
   ]
 }
-
