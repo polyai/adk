@@ -7,7 +7,7 @@ from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Map
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class AgentSettings(_message.Message):
-    __slots__ = ("greeting", "personality", "role", "disclaimer_message", "rules", "language_behaviors")
+    __slots__ = ("greeting", "personality", "role", "disclaimer_message", "rules", "language_behaviors", "persona")
     class LanguageBehaviorsEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -21,13 +21,15 @@ class AgentSettings(_message.Message):
     DISCLAIMER_MESSAGE_FIELD_NUMBER: _ClassVar[int]
     RULES_FIELD_NUMBER: _ClassVar[int]
     LANGUAGE_BEHAVIORS_FIELD_NUMBER: _ClassVar[int]
+    PERSONA_FIELD_NUMBER: _ClassVar[int]
     greeting: _containers.RepeatedCompositeFieldContainer[Greeting]
     personality: Personality
     role: Role
     disclaimer_message: _containers.RepeatedCompositeFieldContainer[DisclaimerMessage]
     rules: Rules
     language_behaviors: _containers.MessageMap[str, LanguageBehavior]
-    def __init__(self, greeting: _Optional[_Iterable[_Union[Greeting, _Mapping]]] = ..., personality: _Optional[_Union[Personality, _Mapping]] = ..., role: _Optional[_Union[Role, _Mapping]] = ..., disclaimer_message: _Optional[_Iterable[_Union[DisclaimerMessage, _Mapping]]] = ..., rules: _Optional[_Union[Rules, _Mapping]] = ..., language_behaviors: _Optional[_Mapping[str, LanguageBehavior]] = ...) -> None: ...
+    persona: Persona
+    def __init__(self, greeting: _Optional[_Iterable[_Union[Greeting, _Mapping]]] = ..., personality: _Optional[_Union[Personality, _Mapping]] = ..., role: _Optional[_Union[Role, _Mapping]] = ..., disclaimer_message: _Optional[_Iterable[_Union[DisclaimerMessage, _Mapping]]] = ..., rules: _Optional[_Union[Rules, _Mapping]] = ..., language_behaviors: _Optional[_Mapping[str, LanguageBehavior]] = ..., persona: _Optional[_Union[Persona, _Mapping]] = ...) -> None: ...
 
 class Greeting(_message.Message):
     __slots__ = ("welcome_message", "created_at", "created_by", "updated_at", "updated_by", "references", "language_code")
@@ -139,6 +141,88 @@ class PersonalityReferences(_message.Message):
     VARIABLES_FIELD_NUMBER: _ClassVar[int]
     variables: _containers.ScalarMap[str, bool]
     def __init__(self, variables: _Optional[_Mapping[str, bool]] = ...) -> None: ...
+
+class PersonaReferences(_message.Message):
+    __slots__ = ("sms", "handoff", "attributes", "globalFunctions", "variables", "translations")
+    class SmsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    class HandoffEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    class AttributesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    class GlobalFunctionsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    class VariablesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    class TranslationsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    SMS_FIELD_NUMBER: _ClassVar[int]
+    HANDOFF_FIELD_NUMBER: _ClassVar[int]
+    ATTRIBUTES_FIELD_NUMBER: _ClassVar[int]
+    GLOBALFUNCTIONS_FIELD_NUMBER: _ClassVar[int]
+    VARIABLES_FIELD_NUMBER: _ClassVar[int]
+    TRANSLATIONS_FIELD_NUMBER: _ClassVar[int]
+    sms: _containers.ScalarMap[str, bool]
+    handoff: _containers.ScalarMap[str, bool]
+    attributes: _containers.ScalarMap[str, bool]
+    globalFunctions: _containers.ScalarMap[str, bool]
+    variables: _containers.ScalarMap[str, bool]
+    translations: _containers.ScalarMap[str, bool]
+    def __init__(self, sms: _Optional[_Mapping[str, bool]] = ..., handoff: _Optional[_Mapping[str, bool]] = ..., attributes: _Optional[_Mapping[str, bool]] = ..., globalFunctions: _Optional[_Mapping[str, bool]] = ..., variables: _Optional[_Mapping[str, bool]] = ..., translations: _Optional[_Mapping[str, bool]] = ...) -> None: ...
+
+class Persona(_message.Message):
+    __slots__ = ("content", "references", "created_at", "created_by", "updated_at", "updated_by")
+    CONTENT_FIELD_NUMBER: _ClassVar[int]
+    REFERENCES_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    CREATED_BY_FIELD_NUMBER: _ClassVar[int]
+    UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
+    UPDATED_BY_FIELD_NUMBER: _ClassVar[int]
+    content: str
+    references: PersonaReferences
+    created_at: str
+    created_by: str
+    updated_at: _timestamp_pb2.Timestamp
+    updated_by: str
+    def __init__(self, content: _Optional[str] = ..., references: _Optional[_Union[PersonaReferences, _Mapping]] = ..., created_at: _Optional[str] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ...) -> None: ...
+
+class Persona_UpdatePersona(_message.Message):
+    __slots__ = ("content", "references")
+    CONTENT_FIELD_NUMBER: _ClassVar[int]
+    REFERENCES_FIELD_NUMBER: _ClassVar[int]
+    content: str
+    references: PersonaReferences
+    def __init__(self, content: _Optional[str] = ..., references: _Optional[_Union[PersonaReferences, _Mapping]] = ...) -> None: ...
 
 class Role(_message.Message):
     __slots__ = ("value", "additional_info", "custom", "created_at", "created_by", "updated_at", "updated_by", "references")
@@ -313,28 +397,78 @@ class RulesReferences(_message.Message):
     def __init__(self, sms: _Optional[_Mapping[str, bool]] = ..., handoff: _Optional[_Mapping[str, bool]] = ..., attributes: _Optional[_Mapping[str, bool]] = ..., globalFunctions: _Optional[_Mapping[str, bool]] = ..., variables: _Optional[_Mapping[str, bool]] = ..., translations: _Optional[_Mapping[str, bool]] = ...) -> None: ...
 
 class Rules(_message.Message):
-    __slots__ = ("behaviour", "references", "created_at", "created_by", "updated_at", "updated_by")
+    __slots__ = ("behaviour", "references", "created_at", "created_by", "updated_at", "updated_by", "additional_instructions", "sections")
     BEHAVIOUR_FIELD_NUMBER: _ClassVar[int]
     REFERENCES_FIELD_NUMBER: _ClassVar[int]
     CREATED_AT_FIELD_NUMBER: _ClassVar[int]
     CREATED_BY_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
     UPDATED_BY_FIELD_NUMBER: _ClassVar[int]
+    ADDITIONAL_INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
+    SECTIONS_FIELD_NUMBER: _ClassVar[int]
     behaviour: str
     references: RulesReferences
     created_at: str
     created_by: str
     updated_at: _timestamp_pb2.Timestamp
     updated_by: str
-    def __init__(self, behaviour: _Optional[str] = ..., references: _Optional[_Union[RulesReferences, _Mapping]] = ..., created_at: _Optional[str] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ...) -> None: ...
+    additional_instructions: str
+    sections: _containers.RepeatedCompositeFieldContainer[BehaviourSection]
+    def __init__(self, behaviour: _Optional[str] = ..., references: _Optional[_Union[RulesReferences, _Mapping]] = ..., created_at: _Optional[str] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., additional_instructions: _Optional[str] = ..., sections: _Optional[_Iterable[_Union[BehaviourSection, _Mapping]]] = ...) -> None: ...
 
 class Rules_UpdateRules(_message.Message):
-    __slots__ = ("behaviour", "references")
+    __slots__ = ("behaviour", "references", "additional_instructions")
     BEHAVIOUR_FIELD_NUMBER: _ClassVar[int]
     REFERENCES_FIELD_NUMBER: _ClassVar[int]
+    ADDITIONAL_INSTRUCTIONS_FIELD_NUMBER: _ClassVar[int]
     behaviour: str
     references: RulesReferences
-    def __init__(self, behaviour: _Optional[str] = ..., references: _Optional[_Union[RulesReferences, _Mapping]] = ...) -> None: ...
+    additional_instructions: str
+    def __init__(self, behaviour: _Optional[str] = ..., references: _Optional[_Union[RulesReferences, _Mapping]] = ..., additional_instructions: _Optional[str] = ...) -> None: ...
+
+class Rules_CreateSection(_message.Message):
+    __slots__ = ("id", "title", "content", "references")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    CONTENT_FIELD_NUMBER: _ClassVar[int]
+    REFERENCES_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    title: str
+    content: str
+    references: BehaviourSectionReferences
+    def __init__(self, id: _Optional[str] = ..., title: _Optional[str] = ..., content: _Optional[str] = ..., references: _Optional[_Union[BehaviourSectionReferences, _Mapping]] = ...) -> None: ...
+
+class Rules_UpdateSection(_message.Message):
+    __slots__ = ("id", "title", "content", "references")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    CONTENT_FIELD_NUMBER: _ClassVar[int]
+    REFERENCES_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    title: str
+    content: str
+    references: BehaviourSectionReferences
+    def __init__(self, id: _Optional[str] = ..., title: _Optional[str] = ..., content: _Optional[str] = ..., references: _Optional[_Union[BehaviourSectionReferences, _Mapping]] = ...) -> None: ...
+
+class Rules_DeleteSection(_message.Message):
+    __slots__ = ("id",)
+    ID_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    def __init__(self, id: _Optional[str] = ...) -> None: ...
+
+class SectionPositionUpdate(_message.Message):
+    __slots__ = ("id", "position")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    POSITION_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    position: int
+    def __init__(self, id: _Optional[str] = ..., position: _Optional[int] = ...) -> None: ...
+
+class Rules_ReorderSections(_message.Message):
+    __slots__ = ("newPositions",)
+    NEWPOSITIONS_FIELD_NUMBER: _ClassVar[int]
+    newPositions: _containers.RepeatedCompositeFieldContainer[SectionPositionUpdate]
+    def __init__(self, newPositions: _Optional[_Iterable[_Union[SectionPositionUpdate, _Mapping]]] = ...) -> None: ...
 
 class LanguageBehaviorReferences(_message.Message):
     __slots__ = ("sms", "handoff", "attributes", "globalFunctions", "variables")
@@ -412,3 +546,83 @@ class LanguageBehavior_UpdateLanguageBehavior(_message.Message):
     behavior_prompt: str
     references: LanguageBehaviorReferences
     def __init__(self, language_code: _Optional[str] = ..., behavior_prompt: _Optional[str] = ..., references: _Optional[_Union[LanguageBehaviorReferences, _Mapping]] = ...) -> None: ...
+
+class BehaviourSectionReferences(_message.Message):
+    __slots__ = ("sms", "handoff", "attributes", "globalFunctions", "variables", "translations")
+    class SmsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    class HandoffEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    class AttributesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    class GlobalFunctionsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    class VariablesEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    class TranslationsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: bool
+        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    SMS_FIELD_NUMBER: _ClassVar[int]
+    HANDOFF_FIELD_NUMBER: _ClassVar[int]
+    ATTRIBUTES_FIELD_NUMBER: _ClassVar[int]
+    GLOBALFUNCTIONS_FIELD_NUMBER: _ClassVar[int]
+    VARIABLES_FIELD_NUMBER: _ClassVar[int]
+    TRANSLATIONS_FIELD_NUMBER: _ClassVar[int]
+    sms: _containers.ScalarMap[str, bool]
+    handoff: _containers.ScalarMap[str, bool]
+    attributes: _containers.ScalarMap[str, bool]
+    globalFunctions: _containers.ScalarMap[str, bool]
+    variables: _containers.ScalarMap[str, bool]
+    translations: _containers.ScalarMap[str, bool]
+    def __init__(self, sms: _Optional[_Mapping[str, bool]] = ..., handoff: _Optional[_Mapping[str, bool]] = ..., attributes: _Optional[_Mapping[str, bool]] = ..., globalFunctions: _Optional[_Mapping[str, bool]] = ..., variables: _Optional[_Mapping[str, bool]] = ..., translations: _Optional[_Mapping[str, bool]] = ...) -> None: ...
+
+class BehaviourSection(_message.Message):
+    __slots__ = ("id", "title", "content", "references", "created_at", "created_by", "updated_at", "updated_by", "position")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    CONTENT_FIELD_NUMBER: _ClassVar[int]
+    REFERENCES_FIELD_NUMBER: _ClassVar[int]
+    CREATED_AT_FIELD_NUMBER: _ClassVar[int]
+    CREATED_BY_FIELD_NUMBER: _ClassVar[int]
+    UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
+    UPDATED_BY_FIELD_NUMBER: _ClassVar[int]
+    POSITION_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    title: str
+    content: str
+    references: BehaviourSectionReferences
+    created_at: str
+    created_by: str
+    updated_at: _timestamp_pb2.Timestamp
+    updated_by: str
+    position: int
+    def __init__(self, id: _Optional[str] = ..., title: _Optional[str] = ..., content: _Optional[str] = ..., references: _Optional[_Union[BehaviourSectionReferences, _Mapping]] = ..., created_at: _Optional[str] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., position: _Optional[int] = ...) -> None: ...
