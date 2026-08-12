@@ -244,24 +244,28 @@ class Variant_ImportVariantForCsv(_message.Message):
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., is_default: bool = ...) -> None: ...
 
 class Variant_ImportAttributeForCsv(_message.Message):
-    __slots__ = ("id", "name", "references")
+    __slots__ = ("id", "name", "references", "type")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     REFERENCES_FIELD_NUMBER: _ClassVar[int]
+    TYPE_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     references: AttributeReferences
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., references: _Optional[_Union[AttributeReferences, _Mapping]] = ...) -> None: ...
+    type: AttributeType
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., references: _Optional[_Union[AttributeReferences, _Mapping]] = ..., type: _Optional[_Union[AttributeType, _Mapping]] = ...) -> None: ...
 
 class Variant_ImportVariantAttributeValuesForCsv(_message.Message):
-    __slots__ = ("variant_id", "attribute_id", "value")
+    __slots__ = ("variant_id", "attribute_id", "value", "typed_value")
     VARIANT_ID_FIELD_NUMBER: _ClassVar[int]
     ATTRIBUTE_ID_FIELD_NUMBER: _ClassVar[int]
     VALUE_FIELD_NUMBER: _ClassVar[int]
+    TYPED_VALUE_FIELD_NUMBER: _ClassVar[int]
     variant_id: str
     attribute_id: str
     value: str
-    def __init__(self, variant_id: _Optional[str] = ..., attribute_id: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    typed_value: _struct_pb2.Value
+    def __init__(self, variant_id: _Optional[str] = ..., attribute_id: _Optional[str] = ..., value: _Optional[str] = ..., typed_value: _Optional[_Union[_struct_pb2.Value, _Mapping]] = ...) -> None: ...
 
 class Variant_ImportVariants(_message.Message):
     __slots__ = ("variants", "attributes", "variant_attribute_values", "deleted_variant_ids", "deleted_attribute_ids")

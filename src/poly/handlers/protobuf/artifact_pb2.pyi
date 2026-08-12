@@ -1210,12 +1210,14 @@ class WebChatChannel(_message.Message):
     def __init__(self, enabled: bool = ..., config: _Optional[_Union[ChannelConfig, _Mapping]] = ...) -> None: ...
 
 class MessagingChannel(_message.Message):
-    __slots__ = ("session", "twilio")
+    __slots__ = ("session", "twilio", "csat")
     SESSION_FIELD_NUMBER: _ClassVar[int]
     TWILIO_FIELD_NUMBER: _ClassVar[int]
+    CSAT_FIELD_NUMBER: _ClassVar[int]
     session: MessagingSessionConfig
     twilio: MessagingTwilioConfig
-    def __init__(self, session: _Optional[_Union[MessagingSessionConfig, _Mapping]] = ..., twilio: _Optional[_Union[MessagingTwilioConfig, _Mapping]] = ...) -> None: ...
+    csat: MessagingCSATConfig
+    def __init__(self, session: _Optional[_Union[MessagingSessionConfig, _Mapping]] = ..., twilio: _Optional[_Union[MessagingTwilioConfig, _Mapping]] = ..., csat: _Optional[_Union[MessagingCSATConfig, _Mapping]] = ...) -> None: ...
 
 class MessagingTwilioConfig(_message.Message):
     __slots__ = ("content_templates",)
@@ -1291,15 +1293,97 @@ class MessagingCloseNotification(_message.Message):
     enabled: bool
     def __init__(self, enabled: bool = ...) -> None: ...
 
+class MessagingCSATConfig(_message.Message):
+    __slots__ = ("enabled", "survey_after_handoff", "title", "questions")
+    class TitleEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    SURVEY_AFTER_HANDOFF_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    QUESTIONS_FIELD_NUMBER: _ClassVar[int]
+    enabled: bool
+    survey_after_handoff: bool
+    title: _containers.ScalarMap[str, str]
+    questions: _containers.RepeatedCompositeFieldContainer[MessagingCSATQuestion]
+    def __init__(self, enabled: bool = ..., survey_after_handoff: bool = ..., title: _Optional[_Mapping[str, str]] = ..., questions: _Optional[_Iterable[_Union[MessagingCSATQuestion, _Mapping]]] = ...) -> None: ...
+
+class MessagingCSATQuestion(_message.Message):
+    __slots__ = ("id", "text")
+    class TextEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    text: _containers.ScalarMap[str, str]
+    def __init__(self, id: _Optional[str] = ..., text: _Optional[_Mapping[str, str]] = ...) -> None: ...
+
+class SmsBehaviorConfig(_message.Message):
+    __slots__ = ("tones", "emoji_use", "sign_off", "opener", "date_format", "time_format")
+    TONES_FIELD_NUMBER: _ClassVar[int]
+    EMOJI_USE_FIELD_NUMBER: _ClassVar[int]
+    SIGN_OFF_FIELD_NUMBER: _ClassVar[int]
+    OPENER_FIELD_NUMBER: _ClassVar[int]
+    DATE_FORMAT_FIELD_NUMBER: _ClassVar[int]
+    TIME_FORMAT_FIELD_NUMBER: _ClassVar[int]
+    tones: _containers.RepeatedScalarFieldContainer[str]
+    emoji_use: str
+    sign_off: str
+    opener: str
+    date_format: str
+    time_format: str
+    def __init__(self, tones: _Optional[_Iterable[str]] = ..., emoji_use: _Optional[str] = ..., sign_off: _Optional[str] = ..., opener: _Optional[str] = ..., date_format: _Optional[str] = ..., time_format: _Optional[str] = ...) -> None: ...
+
+class SmsComplianceKeyword(_message.Message):
+    __slots__ = ("keyword", "action", "auto_reply")
+    KEYWORD_FIELD_NUMBER: _ClassVar[int]
+    ACTION_FIELD_NUMBER: _ClassVar[int]
+    AUTO_REPLY_FIELD_NUMBER: _ClassVar[int]
+    keyword: str
+    action: str
+    auto_reply: str
+    def __init__(self, keyword: _Optional[str] = ..., action: _Optional[str] = ..., auto_reply: _Optional[str] = ...) -> None: ...
+
+class SmsChannel(_message.Message):
+    __slots__ = ("enabled", "config", "sender_phone_number", "channel_behavior_mode", "behavior_config", "ending_message", "error_fallback_message", "compliance_keywords")
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    CONFIG_FIELD_NUMBER: _ClassVar[int]
+    SENDER_PHONE_NUMBER_FIELD_NUMBER: _ClassVar[int]
+    CHANNEL_BEHAVIOR_MODE_FIELD_NUMBER: _ClassVar[int]
+    BEHAVIOR_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    ENDING_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FALLBACK_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    COMPLIANCE_KEYWORDS_FIELD_NUMBER: _ClassVar[int]
+    enabled: bool
+    config: ChannelConfig
+    sender_phone_number: str
+    channel_behavior_mode: str
+    behavior_config: SmsBehaviorConfig
+    ending_message: str
+    error_fallback_message: str
+    compliance_keywords: _containers.RepeatedCompositeFieldContainer[SmsComplianceKeyword]
+    def __init__(self, enabled: bool = ..., config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., sender_phone_number: _Optional[str] = ..., channel_behavior_mode: _Optional[str] = ..., behavior_config: _Optional[_Union[SmsBehaviorConfig, _Mapping]] = ..., ending_message: _Optional[str] = ..., error_fallback_message: _Optional[str] = ..., compliance_keywords: _Optional[_Iterable[_Union[SmsComplianceKeyword, _Mapping]]] = ...) -> None: ...
+
 class Channels(_message.Message):
-    __slots__ = ("voice", "web_chat", "messaging")
+    __slots__ = ("voice", "web_chat", "messaging", "sms")
     VOICE_FIELD_NUMBER: _ClassVar[int]
     WEB_CHAT_FIELD_NUMBER: _ClassVar[int]
     MESSAGING_FIELD_NUMBER: _ClassVar[int]
+    SMS_FIELD_NUMBER: _ClassVar[int]
     voice: VoiceChannel
     web_chat: WebChatChannel
     messaging: MessagingChannel
-    def __init__(self, voice: _Optional[_Union[VoiceChannel, _Mapping]] = ..., web_chat: _Optional[_Union[WebChatChannel, _Mapping]] = ..., messaging: _Optional[_Union[MessagingChannel, _Mapping]] = ...) -> None: ...
+    sms: SmsChannel
+    def __init__(self, voice: _Optional[_Union[VoiceChannel, _Mapping]] = ..., web_chat: _Optional[_Union[WebChatChannel, _Mapping]] = ..., messaging: _Optional[_Union[MessagingChannel, _Mapping]] = ..., sms: _Optional[_Union[SmsChannel, _Mapping]] = ...) -> None: ...
 
 class AudioEnhancement(_message.Message):
     __slots__ = ("ai_coustics",)
