@@ -28,6 +28,14 @@ class ReasoningEffort(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
     REASONING_EFFORT_MEDIUM: _ClassVar[ReasoningEffort]
     REASONING_EFFORT_HIGH: _ClassVar[ReasoningEffort]
     REASONING_EFFORT_AUTO: _ClassVar[ReasoningEffort]
+
+class VariantAttributeKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    VARIANT_ATTRIBUTE_KIND_STRING: _ClassVar[VariantAttributeKind]
+    VARIANT_ATTRIBUTE_KIND_NUMBER: _ClassVar[VariantAttributeKind]
+    VARIANT_ATTRIBUTE_KIND_BOOLEAN: _ClassVar[VariantAttributeKind]
+    VARIANT_ATTRIBUTE_KIND_ENUM: _ClassVar[VariantAttributeKind]
+    VARIANT_ATTRIBUTE_KIND_OBJECT: _ClassVar[VariantAttributeKind]
 GUARDRAIL_NAME_UNSPECIFIED: GuardrailName
 GUARDRAIL_NAME_JAILBREAK_DEFENCE: GuardrailName
 GUARDRAIL_NAME_HALLUCINATION_CONTROL: GuardrailName
@@ -40,6 +48,11 @@ REASONING_EFFORT_LOW: ReasoningEffort
 REASONING_EFFORT_MEDIUM: ReasoningEffort
 REASONING_EFFORT_HIGH: ReasoningEffort
 REASONING_EFFORT_AUTO: ReasoningEffort
+VARIANT_ATTRIBUTE_KIND_STRING: VariantAttributeKind
+VARIANT_ATTRIBUTE_KIND_NUMBER: VariantAttributeKind
+VARIANT_ATTRIBUTE_KIND_BOOLEAN: VariantAttributeKind
+VARIANT_ATTRIBUTE_KIND_ENUM: VariantAttributeKind
+VARIANT_ATTRIBUTE_KIND_OBJECT: VariantAttributeKind
 
 class CoreArtifact(_message.Message):
     __slots__ = ("name", "last_updated", "functions_deployment", "conversation_limits", "voice", "asr", "model", "assistant_config", "knowledge_base", "functions", "start_function", "handoffs", "voice_tuning_settings", "sms_templates", "flows", "intro_message", "stop_keywords", "variants", "variant_attributes", "end_function", "deployed_voices", "entities", "api_integrations", "variables", "disclaimers", "agent_voices", "multilingual_agent_settings", "multilingual_translations", "channels", "integrations")
@@ -495,6 +508,14 @@ class Handoff(_message.Message):
     bye: _agent_pb2.ByeHandoff
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., description: _Optional[str] = ..., extension: _Optional[str] = ..., invite: _Optional[_Union[_agent_pb2.InviteHandoff, _Mapping]] = ..., refer: _Optional[_Union[_agent_pb2.ReferHandoff, _Mapping]] = ..., bye: _Optional[_Union[_agent_pb2.ByeHandoff, _Mapping]] = ...) -> None: ...
 
+class DeployedHandoffs(_message.Message):
+    __slots__ = ("default_handoff", "handoffs")
+    DEFAULT_HANDOFF_FIELD_NUMBER: _ClassVar[int]
+    HANDOFFS_FIELD_NUMBER: _ClassVar[int]
+    default_handoff: Handoff
+    handoffs: _containers.RepeatedCompositeFieldContainer[Handoff]
+    def __init__(self, default_handoff: _Optional[_Union[Handoff, _Mapping]] = ..., handoffs: _Optional[_Iterable[_Union[Handoff, _Mapping]]] = ...) -> None: ...
+
 class VoiceTuningSettings(_message.Message):
     __slots__ = ("genai_project_id", "voice_config_id", "settings", "created_by", "created_at", "updated_by", "updated_at")
     GENAI_PROJECT_ID_FIELD_NUMBER: _ClassVar[int]
@@ -630,12 +651,14 @@ class ExitFlowCondition(_message.Message):
     def __init__(self, details: _Optional[_Union[NoCodeStepConditionDetails, _Mapping]] = ...) -> None: ...
 
 class FunctionStepConditionDetails(_message.Message):
-    __slots__ = ("label", "description")
+    __slots__ = ("label", "description", "required_entities")
     LABEL_FIELD_NUMBER: _ClassVar[int]
     DESCRIPTION_FIELD_NUMBER: _ClassVar[int]
+    REQUIRED_ENTITIES_FIELD_NUMBER: _ClassVar[int]
     label: str
     description: str
-    def __init__(self, label: _Optional[str] = ..., description: _Optional[str] = ...) -> None: ...
+    required_entities: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, label: _Optional[str] = ..., description: _Optional[str] = ..., required_entities: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class FlowStepCondition(_message.Message):
     __slots__ = ("details", "child_step_name")
@@ -947,8 +970,22 @@ class Variant(_message.Message):
     is_default: bool
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., created_by: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., is_default: bool = ...) -> None: ...
 
+class VariantAttributeEnumConfig(_message.Message):
+    __slots__ = ("values",)
+    VALUES_FIELD_NUMBER: _ClassVar[int]
+    values: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, values: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class VariantAttributeType(_message.Message):
+    __slots__ = ("kind", "enum_config")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    ENUM_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    kind: VariantAttributeKind
+    enum_config: VariantAttributeEnumConfig
+    def __init__(self, kind: _Optional[_Union[VariantAttributeKind, str]] = ..., enum_config: _Optional[_Union[VariantAttributeEnumConfig, _Mapping]] = ...) -> None: ...
+
 class VariantAttribute(_message.Message):
-    __slots__ = ("id", "name", "attribute_type", "created_by", "created_at", "updated_by", "updated_at", "values")
+    __slots__ = ("id", "name", "attribute_type", "created_by", "created_at", "updated_by", "updated_at", "values", "type")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     ATTRIBUTE_TYPE_FIELD_NUMBER: _ClassVar[int]
@@ -957,6 +994,7 @@ class VariantAttribute(_message.Message):
     UPDATED_BY_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
     VALUES_FIELD_NUMBER: _ClassVar[int]
+    TYPE_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     attribute_type: str
@@ -965,7 +1003,8 @@ class VariantAttribute(_message.Message):
     updated_by: str
     updated_at: _timestamp_pb2.Timestamp
     values: _struct_pb2.Struct
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., attribute_type: _Optional[str] = ..., created_by: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., values: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
+    type: VariantAttributeType
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., attribute_type: _Optional[str] = ..., created_by: _Optional[str] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., values: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ..., type: _Optional[_Union[VariantAttributeType, _Mapping]] = ...) -> None: ...
 
 class AsrCorrection(_message.Message):
     __slots__ = ("id", "name", "description", "regular_expressions")
@@ -1170,13 +1209,181 @@ class WebChatChannel(_message.Message):
     config: ChannelConfig
     def __init__(self, enabled: bool = ..., config: _Optional[_Union[ChannelConfig, _Mapping]] = ...) -> None: ...
 
+class MessagingChannel(_message.Message):
+    __slots__ = ("session", "twilio", "csat")
+    SESSION_FIELD_NUMBER: _ClassVar[int]
+    TWILIO_FIELD_NUMBER: _ClassVar[int]
+    CSAT_FIELD_NUMBER: _ClassVar[int]
+    session: MessagingSessionConfig
+    twilio: MessagingTwilioConfig
+    csat: MessagingCSATConfig
+    def __init__(self, session: _Optional[_Union[MessagingSessionConfig, _Mapping]] = ..., twilio: _Optional[_Union[MessagingTwilioConfig, _Mapping]] = ..., csat: _Optional[_Union[MessagingCSATConfig, _Mapping]] = ...) -> None: ...
+
+class MessagingTwilioConfig(_message.Message):
+    __slots__ = ("content_templates",)
+    CONTENT_TEMPLATES_FIELD_NUMBER: _ClassVar[int]
+    content_templates: MessagingContentTemplates
+    def __init__(self, content_templates: _Optional[_Union[MessagingContentTemplates, _Mapping]] = ...) -> None: ...
+
+class MessagingContentTemplates(_message.Message):
+    __slots__ = ("media_base", "url_base", "default_language", "language")
+    class LanguageEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: MessagingContentTemplateSids
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[_Union[MessagingContentTemplateSids, _Mapping]] = ...) -> None: ...
+    MEDIA_BASE_FIELD_NUMBER: _ClassVar[int]
+    URL_BASE_FIELD_NUMBER: _ClassVar[int]
+    DEFAULT_LANGUAGE_FIELD_NUMBER: _ClassVar[int]
+    LANGUAGE_FIELD_NUMBER: _ClassVar[int]
+    media_base: str
+    url_base: str
+    default_language: str
+    language: _containers.MessageMap[str, MessagingContentTemplateSids]
+    def __init__(self, media_base: _Optional[str] = ..., url_base: _Optional[str] = ..., default_language: _Optional[str] = ..., language: _Optional[_Mapping[str, MessagingContentTemplateSids]] = ...) -> None: ...
+
+class MessagingContentTemplateSids(_message.Message):
+    __slots__ = ("by_card_count",)
+    class ByCardCountEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    BY_CARD_COUNT_FIELD_NUMBER: _ClassVar[int]
+    by_card_count: _containers.ScalarMap[str, str]
+    def __init__(self, by_card_count: _Optional[_Mapping[str, str]] = ...) -> None: ...
+
+class MessagingSessionConfig(_message.Message):
+    __slots__ = ("ttl_seconds", "inactivity_warning", "close_notification")
+    TTL_SECONDS_FIELD_NUMBER: _ClassVar[int]
+    INACTIVITY_WARNING_FIELD_NUMBER: _ClassVar[int]
+    CLOSE_NOTIFICATION_FIELD_NUMBER: _ClassVar[int]
+    ttl_seconds: MessagingSessionTtls
+    inactivity_warning: MessagingInactivityWarning
+    close_notification: MessagingCloseNotification
+    def __init__(self, ttl_seconds: _Optional[_Union[MessagingSessionTtls, _Mapping]] = ..., inactivity_warning: _Optional[_Union[MessagingInactivityWarning, _Mapping]] = ..., close_notification: _Optional[_Union[MessagingCloseNotification, _Mapping]] = ...) -> None: ...
+
+class MessagingSessionTtls(_message.Message):
+    __slots__ = ("websocket", "sms", "rcs", "email")
+    WEBSOCKET_FIELD_NUMBER: _ClassVar[int]
+    SMS_FIELD_NUMBER: _ClassVar[int]
+    RCS_FIELD_NUMBER: _ClassVar[int]
+    EMAIL_FIELD_NUMBER: _ClassVar[int]
+    websocket: int
+    sms: int
+    rcs: int
+    email: int
+    def __init__(self, websocket: _Optional[int] = ..., sms: _Optional[int] = ..., rcs: _Optional[int] = ..., email: _Optional[int] = ...) -> None: ...
+
+class MessagingInactivityWarning(_message.Message):
+    __slots__ = ("enabled", "delay_seconds")
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    DELAY_SECONDS_FIELD_NUMBER: _ClassVar[int]
+    enabled: bool
+    delay_seconds: int
+    def __init__(self, enabled: bool = ..., delay_seconds: _Optional[int] = ...) -> None: ...
+
+class MessagingCloseNotification(_message.Message):
+    __slots__ = ("enabled",)
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    enabled: bool
+    def __init__(self, enabled: bool = ...) -> None: ...
+
+class MessagingCSATConfig(_message.Message):
+    __slots__ = ("enabled", "survey_after_handoff", "title", "questions")
+    class TitleEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    SURVEY_AFTER_HANDOFF_FIELD_NUMBER: _ClassVar[int]
+    TITLE_FIELD_NUMBER: _ClassVar[int]
+    QUESTIONS_FIELD_NUMBER: _ClassVar[int]
+    enabled: bool
+    survey_after_handoff: bool
+    title: _containers.ScalarMap[str, str]
+    questions: _containers.RepeatedCompositeFieldContainer[MessagingCSATQuestion]
+    def __init__(self, enabled: bool = ..., survey_after_handoff: bool = ..., title: _Optional[_Mapping[str, str]] = ..., questions: _Optional[_Iterable[_Union[MessagingCSATQuestion, _Mapping]]] = ...) -> None: ...
+
+class MessagingCSATQuestion(_message.Message):
+    __slots__ = ("id", "text")
+    class TextEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    ID_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    text: _containers.ScalarMap[str, str]
+    def __init__(self, id: _Optional[str] = ..., text: _Optional[_Mapping[str, str]] = ...) -> None: ...
+
+class SmsBehaviorConfig(_message.Message):
+    __slots__ = ("tones", "emoji_use", "sign_off", "opener", "date_format", "time_format")
+    TONES_FIELD_NUMBER: _ClassVar[int]
+    EMOJI_USE_FIELD_NUMBER: _ClassVar[int]
+    SIGN_OFF_FIELD_NUMBER: _ClassVar[int]
+    OPENER_FIELD_NUMBER: _ClassVar[int]
+    DATE_FORMAT_FIELD_NUMBER: _ClassVar[int]
+    TIME_FORMAT_FIELD_NUMBER: _ClassVar[int]
+    tones: _containers.RepeatedScalarFieldContainer[str]
+    emoji_use: str
+    sign_off: str
+    opener: str
+    date_format: str
+    time_format: str
+    def __init__(self, tones: _Optional[_Iterable[str]] = ..., emoji_use: _Optional[str] = ..., sign_off: _Optional[str] = ..., opener: _Optional[str] = ..., date_format: _Optional[str] = ..., time_format: _Optional[str] = ...) -> None: ...
+
+class SmsComplianceKeyword(_message.Message):
+    __slots__ = ("keyword", "action", "auto_reply")
+    KEYWORD_FIELD_NUMBER: _ClassVar[int]
+    ACTION_FIELD_NUMBER: _ClassVar[int]
+    AUTO_REPLY_FIELD_NUMBER: _ClassVar[int]
+    keyword: str
+    action: str
+    auto_reply: str
+    def __init__(self, keyword: _Optional[str] = ..., action: _Optional[str] = ..., auto_reply: _Optional[str] = ...) -> None: ...
+
+class SmsChannel(_message.Message):
+    __slots__ = ("enabled", "config", "sender_phone_number", "channel_behavior_mode", "behavior_config", "ending_message", "error_fallback_message", "compliance_keywords")
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    CONFIG_FIELD_NUMBER: _ClassVar[int]
+    SENDER_PHONE_NUMBER_FIELD_NUMBER: _ClassVar[int]
+    CHANNEL_BEHAVIOR_MODE_FIELD_NUMBER: _ClassVar[int]
+    BEHAVIOR_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    ENDING_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    ERROR_FALLBACK_MESSAGE_FIELD_NUMBER: _ClassVar[int]
+    COMPLIANCE_KEYWORDS_FIELD_NUMBER: _ClassVar[int]
+    enabled: bool
+    config: ChannelConfig
+    sender_phone_number: str
+    channel_behavior_mode: str
+    behavior_config: SmsBehaviorConfig
+    ending_message: str
+    error_fallback_message: str
+    compliance_keywords: _containers.RepeatedCompositeFieldContainer[SmsComplianceKeyword]
+    def __init__(self, enabled: bool = ..., config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., sender_phone_number: _Optional[str] = ..., channel_behavior_mode: _Optional[str] = ..., behavior_config: _Optional[_Union[SmsBehaviorConfig, _Mapping]] = ..., ending_message: _Optional[str] = ..., error_fallback_message: _Optional[str] = ..., compliance_keywords: _Optional[_Iterable[_Union[SmsComplianceKeyword, _Mapping]]] = ...) -> None: ...
+
 class Channels(_message.Message):
-    __slots__ = ("voice", "web_chat")
+    __slots__ = ("voice", "web_chat", "messaging", "sms")
     VOICE_FIELD_NUMBER: _ClassVar[int]
     WEB_CHAT_FIELD_NUMBER: _ClassVar[int]
+    MESSAGING_FIELD_NUMBER: _ClassVar[int]
+    SMS_FIELD_NUMBER: _ClassVar[int]
     voice: VoiceChannel
     web_chat: WebChatChannel
-    def __init__(self, voice: _Optional[_Union[VoiceChannel, _Mapping]] = ..., web_chat: _Optional[_Union[WebChatChannel, _Mapping]] = ...) -> None: ...
+    messaging: MessagingChannel
+    sms: SmsChannel
+    def __init__(self, voice: _Optional[_Union[VoiceChannel, _Mapping]] = ..., web_chat: _Optional[_Union[WebChatChannel, _Mapping]] = ..., messaging: _Optional[_Union[MessagingChannel, _Mapping]] = ..., sms: _Optional[_Union[SmsChannel, _Mapping]] = ...) -> None: ...
 
 class AudioEnhancement(_message.Message):
     __slots__ = ("ai_coustics",)
