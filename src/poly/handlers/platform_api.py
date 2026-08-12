@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import io
 import json
 import logging
 import typing as ty
@@ -10,6 +11,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
+from ruamel.yaml import YAML
 
 from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
 from poly.utils import any_credentials_exist, retrieve_api_key
@@ -29,6 +31,16 @@ CHAT_END_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/chat/{conver
 AB_TESTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests"
 AB_TEST_ACTIVE_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/active"
 AB_TEST_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/ab-tests/{ab_test_id}"
+CUSTOM_METRICS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics"
+CUSTOM_METRIC_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics/{metric_name}"
+)
+CUSTOM_METRICS_EXPORT_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics/export"
+)
+CUSTOM_METRICS_IMPORT_URL = (
+    "/adk/v1/accounts/{account_id}/projects/{project_id}/custom-metrics/import"
+)
 # These use public APIs not /adk endpoints
 PROMOTE_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/promote"
 ROLLBACK_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/rollback"
@@ -101,19 +113,28 @@ class PlatformAPIHandler:
         data: ty.Optional[dict] = None,
         params: ty.Optional[dict] = None,
         headers: ty.Optional[dict] = None,
+        files: ty.Optional[dict] = None,
+        response_format: str = "json",
         use_jupiter_api: bool = False,
     ) -> dict:
         """Make a request to the Platform API.
 
         Args:
-            region (str): The region name
-            endpoint (str): The API endpoint
-            method (str): The HTTP method
-            data (dict | None): The request body for POST/PUT requests
-            params (dict | None): Query string parameters
+            region (str): The region name.
+            endpoint (str): The API endpoint.
+            method (str): The HTTP method.
+            data (dict | None): The request body for POST/PUT requests.
+            params (dict | None): Query string parameters.
+            headers (dict | None): Override headers. Built automatically when None.
+            files (dict | None): Multipart file upload fields. When set, ``data``
+                is ignored and ``Content-Type`` is omitted so ``requests`` can set
+                the multipart boundary automatically.
+            response_format (str): How to parse the response. "json" (default)
+                or "yaml".
+            use_jupiter_api (bool): Whether to use the Jupiter API.
 
         Returns:
-            dict: The response JSON
+            dict: The parsed response.
         """
         url = PlatformAPIHandler.get_base_url(region, use_jupiter_api) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
@@ -122,9 +143,10 @@ class PlatformAPIHandler:
             headers = {
                 "X-API-KEY": retrieve_api_key(region),
                 "X-PolyAI-Correlation-Id": correlation_id,
-                "Content-Type": "application/json",
                 "X-Poly-Source": "adk",
             }
+            if not files:
+                headers["Content-Type"] = "application/json"
 
         logger.info(f"Making {method} request to {url}")
 
@@ -135,7 +157,8 @@ class PlatformAPIHandler:
             headers=headers,
             params=params,
             allow_redirects=False,
-            data=json.dumps(data) if data else None,
+            files=files,
+            data=json.dumps(data) if data and not files else None,
         )
 
         logger.debug(
@@ -147,7 +170,8 @@ class PlatformAPIHandler:
             api_response.raise_for_status()
         except requests.HTTPError:
             logger.debug(
-                f"Error in request status_code={api_response.status_code!r} response={api_response.text!r}"
+                f"Error in request status_code={api_response.status_code!r}"
+                f" response={api_response.text!r}"
             )
             raise
 
@@ -155,13 +179,21 @@ class PlatformAPIHandler:
             logger.info(f"Request to {url} successful (no content)")
             return {}
 
+        if response_format == "yaml":
+            content = api_response.text.strip()
+            if not content:
+                return {}
+            ry = YAML()
+            result = ry.load(content)
+            return dict(result) if result else {}
+
         try:
-            api_response = api_response.json()
+            parsed = api_response.json()
         except json.JSONDecodeError as e:
             raise ValueError(f"Failed to parse JSON response: {e}")
 
         logger.info(f"Request to {url} successful")
-        return api_response
+        return parsed
 
     @staticmethod
     def get_accessible_regions(regions: list[str]) -> list[str]:
@@ -1312,6 +1344,138 @@ class PlatformAPIHandler:
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
     @staticmethod
+    def export_custom_metrics(region: str, account_id: str, project_id: str) -> dict:
+        """Export all custom metrics for a project as a YAML-parsed dict.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+
+        Returns:
+            dict: Mapping of metric name to metric definition.
+        """
+        endpoint = CUSTOM_METRICS_EXPORT_URL.format(account_id=account_id, project_id=project_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "GET", response_format="yaml")
+
+    @staticmethod
+    def get_custom_metrics(region: str, account_id: str, project_id: str) -> list[dict]:
+        """List all custom metrics for a project.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+
+        Returns:
+            list[dict]: List of custom metric records.
+        """
+        endpoint = CUSTOM_METRICS_URL.format(account_id=account_id, project_id=project_id)
+        result = PlatformAPIHandler.make_request(region, endpoint, "GET")
+        if isinstance(result, list):
+            return result
+        return result.get("metrics", result.get("data", []))
+
+    @staticmethod
+    def create_custom_metric(region: str, account_id: str, project_id: str, data: dict) -> dict:
+        """Create a new custom metric.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            data: Metric payload — name, type, description, expected_values, api.
+
+        Returns:
+            dict: The created metric record.
+        """
+        endpoint = CUSTOM_METRICS_URL.format(account_id=account_id, project_id=project_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
+
+    @staticmethod
+    def update_custom_metric(
+        region: str,
+        account_id: str,
+        project_id: str,
+        metric_name: str,
+        data: dict,
+    ) -> dict:
+        """Update an existing custom metric.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            metric_name: Name of the metric to update.
+            data: Fields to update — description, expected_values, active, api.
+
+        Returns:
+            dict: The updated metric record.
+        """
+        endpoint = CUSTOM_METRIC_URL.format(
+            account_id=account_id, project_id=project_id, metric_name=metric_name
+        )
+        return PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=data)
+
+    @staticmethod
+    def import_custom_metrics(
+        region: str,
+        account_id: str,
+        project_id: str,
+        yaml_content: str,
+        dry_run: bool = False,
+    ) -> dict:
+        """Bulk-import custom metrics from YAML content.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            yaml_content: Raw YAML string with metric definitions.
+            dry_run: If True, preview changes without applying.
+
+        Returns:
+            dict: Import result with metadata.created and metadata.ignored.
+        """
+        endpoint = CUSTOM_METRICS_IMPORT_URL.format(account_id=account_id, project_id=project_id)
+        params = {"type": "yaml", "dry_run": str(dry_run).lower()}
+        files = {
+            "yaml": (
+                "metrics.yaml",
+                io.BytesIO(yaml_content.encode("utf-8")),
+                "application/x-yaml",
+            )
+        }
+        return PlatformAPIHandler.make_request(region, endpoint, "POST", params=params, files=files)
+
+    @staticmethod
+    def preview_metrics_import(
+        region: str,
+        account_id: str,
+        project_id: str,
+        local_metric_names: set[str],
+    ) -> dict[str, list[str]]:
+        """Compare local metric names against remote to preview an import.
+
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            local_metric_names: Set of metric names from the local YAML file.
+
+        Returns:
+            dict with keys ``would_create``, ``would_skip``, and ``remote_only``,
+            each a sorted list of metric names.
+        """
+        remote_metrics = PlatformAPIHandler.get_custom_metrics(region, account_id, project_id)
+        remote_names = {m["name"] for m in remote_metrics if "name" in m}
+
+        return {
+            "would_create": sorted(local_metric_names - remote_names),
+            "would_skip": sorted(local_metric_names & remote_names),
+            "remote_only": sorted(remote_names - local_metric_names),
+        }
+
     def list_rtc_configs(
         region: str,
         project_id: str,

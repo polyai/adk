@@ -459,5 +459,116 @@ class SynthesizeAudioCache(unittest.TestCase):
             PlatformAPIHandler.synthesize_audio_cache("studio", "agent-1", "entry-1", "hi", {})
 
 
+class GetCustomMetrics(unittest.TestCase):
+    """Tests for PlatformAPIHandler.get_custom_metrics."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_returns_list_directly(self, mock_request, _mock_key):
+        """When the API returns a bare list, it is returned as-is."""
+        metrics = [{"name": "SCORE", "type": "int"}]
+        mock_request.return_value = make_mock_response(200, json_body=metrics)
+
+        result = PlatformAPIHandler.get_custom_metrics("studio", "acc1", "proj1")
+
+        self.assertEqual(result, metrics)
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_extracts_from_metrics_key(self, mock_request, _mock_key):
+        """When the API wraps the list in a 'metrics' key, it is unwrapped."""
+        metrics = [{"name": "SCORE", "type": "int"}]
+        mock_request.return_value = make_mock_response(200, json_body={"metrics": metrics})
+
+        result = PlatformAPIHandler.get_custom_metrics("studio", "acc1", "proj1")
+
+        self.assertEqual(result, metrics)
+
+
+class CreateCustomMetric(unittest.TestCase):
+    """Tests for PlatformAPIHandler.create_custom_metric."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_posts_data_to_correct_endpoint(self, mock_request, _mock_key):
+        """create_custom_metric sends a POST with the metric payload."""
+        mock_request.return_value = make_mock_response(200, json_body={"name": "SCORE"})
+
+        data = {"name": "SCORE", "type": "int"}
+        PlatformAPIHandler.create_custom_metric("studio", "acc1", "proj1", data)
+
+        call_kwargs = mock_request.call_args
+        self.assertEqual(call_kwargs.kwargs["method"], "POST")
+        self.assertIn("/custom-metrics", call_kwargs.kwargs["url"])
+
+
+class UpdateCustomMetric(unittest.TestCase):
+    """Tests for PlatformAPIHandler.update_custom_metric."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_patches_correct_metric(self, mock_request, _mock_key):
+        """update_custom_metric sends a PATCH to the metric-specific URL."""
+        mock_request.return_value = make_mock_response(200, json_body={"name": "SCORE"})
+
+        PlatformAPIHandler.update_custom_metric("studio", "acc1", "proj1", "SCORE", {"api": True})
+
+        call_kwargs = mock_request.call_args
+        self.assertEqual(call_kwargs.kwargs["method"], "PATCH")
+        self.assertIn("/custom-metrics/SCORE", call_kwargs.kwargs["url"])
+
+
+class ExportCustomMetrics(unittest.TestCase):
+    """Tests for PlatformAPIHandler.export_custom_metrics."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_requests_yaml_format(self, mock_request, _mock_key):
+        """export_custom_metrics hits the export endpoint with a GET."""
+        yaml_body = b"SCORE:\n  type: int\n"
+        mock_request.return_value = make_mock_response(200, content=yaml_body)
+
+        PlatformAPIHandler.export_custom_metrics("studio", "acc1", "proj1")
+
+        call_kwargs = mock_request.call_args
+        self.assertEqual(call_kwargs.kwargs["method"], "GET")
+        self.assertIn("/export", call_kwargs.kwargs["url"])
+
+
+class ImportCustomMetrics(unittest.TestCase):
+    """Tests for PlatformAPIHandler.import_custom_metrics."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_sends_multipart_upload(self, mock_request, _mock_key):
+        """import_custom_metrics POSTs a multipart file upload."""
+        mock_request.return_value = make_mock_response(
+            200, json_body={"metadata": {"created": [], "ignored": []}}
+        )
+
+        PlatformAPIHandler.import_custom_metrics("studio", "acc1", "proj1", "SCORE:\n  type: int\n")
+
+        call_kwargs = mock_request.call_args
+        self.assertIn("/import", call_kwargs.kwargs["url"])
+        self.assertIn("yaml", call_kwargs.kwargs.get("files", {}))
+
+
+class PreviewMetricsImport(unittest.TestCase):
+    """Tests for PlatformAPIHandler.preview_metrics_import."""
+
+    @patch.object(PlatformAPIHandler, "get_custom_metrics")
+    def test_computes_set_diff(self, mock_get):
+        """Correctly partitions local vs remote metric names."""
+        mock_get.return_value = [{"name": "EXISTING"}, {"name": "REMOTE_ONLY"}]
+
+        result = PlatformAPIHandler.preview_metrics_import(
+            "studio", "acc1", "proj1", {"EXISTING", "NEW_ONE"}
+        )
+
+        self.assertEqual(result["would_create"], ["NEW_ONE"])
+        self.assertEqual(result["would_skip"], ["EXISTING"])
+        self.assertEqual(result["remote_only"], ["REMOTE_ONLY"])
+
+
 if __name__ == "__main__":
     unittest.main()
