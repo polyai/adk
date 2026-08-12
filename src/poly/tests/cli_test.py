@@ -4,6 +4,8 @@ Copyright PolyAI Limited
 """
 
 import os
+import re
+import tempfile
 import unittest
 from io import StringIO
 from unittest.mock import MagicMock, patch
@@ -17,8 +19,9 @@ from poly.cli_commands.deployments import DeploymentsCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand
 from poly.cli_commands.shared import compute_diff
 from poly.cli_commands.sync import FormatCommand, RevertCommand
-from poly.cli_commands.utils import CompletionCommand
+from poly.cli_commands.utils import CompletionCommand, DocsCommand
 from poly.tests.project_test import TEST_DIR
+from poly.utils import agent_setup
 
 
 def _run_result(returncode: int, stdout: str = "", stderr: str = ""):
@@ -3129,3 +3132,382 @@ class AudioCacheCommandTest(unittest.TestCase):
         )
         mock_success.assert_called_once()
         self.assertIn("entry-1-preview.wav", mock_success.call_args[0][0])
+
+
+class ClaudeCodeSetupTest(unittest.TestCase):
+    """Tests for `poly docs --claude-code` and the agent setup planner."""
+
+    CLI_COMMANDS = {
+        "test_fresh_install_writes_skill_and_memory": "poly docs --claude-code --path <project>",
+        "test_rerun_is_a_noop": "poly docs --claude-code --path <project>",
+        "test_existing_memory_is_appended_to": "poly docs --claude-code --path <project>",
+        "test_existing_block_is_replaced_in_place": "poly docs --claude-code --path <project> -f",
+        "test_edited_skill_file_needs_confirmation": "poly docs --claude-code --path <project>",
+        "test_stale_skill_files_are_removed": "poly docs --claude-code --path <project> -f",
+        "test_unterminated_block_raises": "poly docs --claude-code --path <project>",
+    }
+
+    def setUp(self):
+        cmd = self.CLI_COMMANDS.get(self._testMethodName, "")
+        print("\n" + "─" * 60 + f"\n  {self._testMethodName}\n  $ {cmd}\n" + "─" * 60)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project_dir = self._tmp.name
+        self.skill_dir = os.path.join(self.project_dir, ".claude", "skills", "poly-adk")
+        self.memory_path = os.path.join(self.project_dir, "CLAUDE.md")
+
+    def tearDown(self):
+        self._tmp.cleanup()
+        print("─" * 60 + "\n")
+
+    def _install(self, force: bool = True) -> None:
+        DocsCommand.setup_claude_code(self.project_dir, force=force)
+
+    def _read_memory(self) -> str:
+        with open(self.memory_path, encoding="utf-8") as f:
+            return f.read()
+
+    def test_fresh_install_writes_skill_and_memory(self):
+        """A fresh install writes SKILL.md, every reference file, and CLAUDE.md."""
+        self._install()
+
+        self.assertTrue(os.path.exists(os.path.join(self.skill_dir, "SKILL.md")))
+        references = os.listdir(os.path.join(self.skill_dir, "references"))
+        self.assertIn("flows.md", references)
+        self.assertGreater(len(references), 10)
+        self.assertIn(agent_setup.MEMORY_BEGIN, self._read_memory())
+
+    def test_rerun_is_a_noop(self):
+        """Re-running against an up-to-date project plans no changes."""
+        self._install()
+
+        plan = agent_setup.plan_claude_code_setup(self.project_dir)
+
+        self.assertTrue(plan.is_noop)
+        self.assertEqual([], plan.pending)
+        self.assertFalse(plan.needs_confirmation)
+
+    def test_existing_memory_is_appended_to(self):
+        """An existing CLAUDE.md keeps its content and gains the poly-adk block."""
+        with open(self.memory_path, "w", encoding="utf-8") as f:
+            f.write("# My project\n\nSome existing notes.\n")
+
+        plan = agent_setup.plan_claude_code_setup(self.project_dir)
+        memory_write = next(w for w in plan.writes if w.path == self.memory_path)
+        self.assertEqual(agent_setup.APPEND, memory_write.action)
+        # Appending is additive, so it must not trigger a confirmation prompt.
+        self.assertFalse(plan.needs_confirmation)
+
+        self._install()
+        memory = self._read_memory()
+        self.assertIn("Some existing notes.", memory)
+        self.assertIn(agent_setup.MEMORY_BEGIN, memory)
+
+    def test_existing_block_is_replaced_in_place(self):
+        """Refreshing rewrites the poly-adk block and leaves surrounding text alone."""
+        self._install()
+        with open(self.memory_path, encoding="utf-8") as f:
+            installed = f.read()
+        with open(self.memory_path, "w", encoding="utf-8") as f:
+            f.write("# Header\n\n" + installed.replace("poly pull", "STALE") + "\n## Footer\n")
+
+        self._install()
+
+        memory = self._read_memory()
+        self.assertIn("# Header", memory)
+        self.assertIn("## Footer", memory)
+        self.assertNotIn("STALE", memory)
+        self.assertIn("poly pull", memory)
+        self.assertEqual(1, memory.count(agent_setup.MEMORY_BEGIN))
+
+    def test_edited_skill_file_needs_confirmation(self):
+        """A locally edited skill file is planned as a destructive overwrite."""
+        self._install()
+        skill_path = os.path.join(self.skill_dir, "SKILL.md")
+        with open(skill_path, "a", encoding="utf-8") as f:
+            f.write("\nlocal edit\n")
+
+        plan = agent_setup.plan_claude_code_setup(self.project_dir)
+
+        self.assertTrue(plan.needs_confirmation)
+        self.assertEqual([skill_path], [w.path for w in plan.destructive])
+
+    def test_stale_skill_files_are_removed(self):
+        """Files in the skill directory that the CLI no longer ships are deleted."""
+        self._install()
+        stale = os.path.join(self.skill_dir, "references", "removed_resource.md")
+        with open(stale, "w", encoding="utf-8") as f:
+            f.write("dropped in a later release")
+
+        plan = agent_setup.plan_claude_code_setup(self.project_dir)
+        self.assertEqual([stale], plan.removals)
+
+        self._install()
+        self.assertFalse(os.path.exists(stale))
+
+    def test_unterminated_block_raises(self):
+        """A CLAUDE.md with an opening marker but no closing marker is rejected."""
+        with open(self.memory_path, "w", encoding="utf-8") as f:
+            f.write(f"{agent_setup.MEMORY_BEGIN}\nhalf a block\n")
+
+        with self.assertRaises(ValueError):
+            agent_setup.plan_claude_code_setup(self.project_dir)
+
+
+class DocsCommandDispatchTest(unittest.TestCase):
+    """Tests for `poly docs` argument handling and dispatch."""
+
+    CLI_COMMANDS = {
+        "test_claude_code_flag_dispatches_to_setup": "poly docs --claude-code",
+        "test_plain_docs_still_prints": "poly docs flows",
+        "test_path_and_force_are_forwarded": "poly docs --claude-code --path <dir> -f",
+        "test_claude_code_rejects_all": "poly docs --all --claude-code",
+        "test_claude_code_rejects_output": "poly docs --claude-code --output out.md",
+        "test_claude_code_rejects_topic_names": "poly docs flows --claude-code",
+    }
+
+    def setUp(self):
+        cmd = self.CLI_COMMANDS.get(self._testMethodName, "")
+        print("\n" + "─" * 60 + f"\n  {self._testMethodName}\n  $ {cmd}\n" + "─" * 60)
+
+    def tearDown(self):
+        print("─" * 60 + "\n")
+
+    @patch("poly.cli_commands.utils.DocsCommand.setup_claude_code")
+    def test_claude_code_flag_dispatches_to_setup(self, mock_setup):
+        """--claude-code routes to the setup handler, not the doc printer."""
+        AgentStudioCLI().main(["docs", "--claude-code"])
+
+        mock_setup.assert_called_once()
+
+    @patch("poly.cli_commands.utils.DocsCommand.setup_claude_code")
+    @patch("poly.cli_commands.utils.DocsCommand.docs")
+    def test_plain_docs_still_prints(self, mock_docs, mock_setup):
+        """Without --claude-code the command prints documentation as before."""
+        AgentStudioCLI().main(["docs", "flows"])
+
+        mock_setup.assert_not_called()
+        mock_docs.assert_called_once_with(
+            documents=["flows"], all_documents=False, output=None
+        )
+
+    @patch("poly.cli_commands.utils.DocsCommand.setup_claude_code")
+    def test_path_and_force_are_forwarded(self, mock_setup):
+        """--path and --force reach the setup handler."""
+        AgentStudioCLI().main(["docs", "--claude-code", "--path", "/tmp/x", "--force"])
+
+        mock_setup.assert_called_once_with(path="/tmp/x", force=True)
+
+    @patch("poly.cli_commands.utils.DocsCommand.setup_claude_code")
+    def test_claude_code_rejects_all(self, mock_setup):
+        """--claude-code with --all exits rather than silently ignoring --all."""
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI().main(["docs", "--all", "--claude-code"])
+
+        mock_setup.assert_not_called()
+
+    @patch("poly.cli_commands.utils.DocsCommand.setup_claude_code")
+    def test_claude_code_rejects_output(self, mock_setup):
+        """--claude-code with --output exits; nothing would have been written there."""
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI().main(["docs", "--claude-code", "--output", "out.md"])
+
+        mock_setup.assert_not_called()
+
+    @patch("poly.cli_commands.utils.DocsCommand.setup_claude_code")
+    def test_claude_code_rejects_topic_names(self, mock_setup):
+        """--claude-code with topic names exits."""
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI().main(["docs", "flows", "--claude-code"])
+
+        mock_setup.assert_not_called()
+
+
+class ClaudeCodeSetupPromptTest(unittest.TestCase):
+    """Tests for the confirmation behaviour of `poly docs --claude-code`."""
+
+    CLI_COMMANDS = {
+        "test_noop_reports_up_to_date": "poly docs --claude-code",
+        "test_non_tty_overwrite_exits": "poly docs --claude-code",
+        "test_declining_the_prompt_writes_nothing": "poly docs --claude-code",
+        "test_accepting_the_prompt_writes": "poly docs --claude-code",
+        "test_force_skips_the_prompt": "poly docs --claude-code --force",
+    }
+
+    def setUp(self):
+        cmd = self.CLI_COMMANDS.get(self._testMethodName, "")
+        print("\n" + "─" * 60 + f"\n  {self._testMethodName}\n  $ {cmd}\n" + "─" * 60)
+        self._tmp = tempfile.TemporaryDirectory()
+        self.project_dir = self._tmp.name
+        self.skill_path = os.path.join(
+            self.project_dir, ".claude", "skills", "poly-adk", "SKILL.md"
+        )
+
+    def tearDown(self):
+        self._tmp.cleanup()
+        print("─" * 60 + "\n")
+
+    def _install_then_edit(self) -> str:
+        """Install the assets, then locally edit SKILL.md so a re-run must confirm."""
+        DocsCommand.setup_claude_code(self.project_dir, force=True)
+        with open(self.skill_path, "a", encoding="utf-8") as f:
+            f.write("\nlocal edit\n")
+        with open(self.skill_path, encoding="utf-8") as f:
+            return f.read()
+
+    def _read_skill(self) -> str:
+        with open(self.skill_path, encoding="utf-8") as f:
+            return f.read()
+
+    @patch("poly.output.console.success")
+    def test_noop_reports_up_to_date(self, mock_success):
+        """A second run against an unchanged project reports success and writes nothing."""
+        DocsCommand.setup_claude_code(self.project_dir, force=True)
+        before = self._read_skill()
+        mock_success.reset_mock()
+
+        DocsCommand.setup_claude_code(self.project_dir)
+
+        self.assertIn("already up to date", mock_success.call_args[0][0])
+        self.assertEqual(before, self._read_skill())
+
+    @patch("sys.stdin.isatty", return_value=False)
+    def test_non_tty_overwrite_exits(self, _mock_isatty):
+        """Without a terminal to prompt in, a destructive run exits instead of clobbering."""
+        edited = self._install_then_edit()
+
+        with self.assertRaises(SystemExit) as ctx:
+            DocsCommand.setup_claude_code(self.project_dir)
+
+        self.assertEqual(1, ctx.exception.code)
+        self.assertEqual(edited, self._read_skill())
+
+    @patch("questionary.confirm")
+    @patch("sys.stdin.isatty", return_value=True)
+    def test_declining_the_prompt_writes_nothing(self, _mock_isatty, mock_confirm):
+        """Answering no to the prompt leaves every file untouched."""
+        edited = self._install_then_edit()
+        mock_confirm.return_value.ask.return_value = False
+
+        DocsCommand.setup_claude_code(self.project_dir)
+
+        mock_confirm.assert_called_once()
+        self.assertEqual(edited, self._read_skill())
+
+    @patch("questionary.confirm")
+    @patch("sys.stdin.isatty", return_value=True)
+    def test_accepting_the_prompt_writes(self, _mock_isatty, mock_confirm):
+        """Answering yes restores the edited file to what the CLI ships."""
+        edited = self._install_then_edit()
+        mock_confirm.return_value.ask.return_value = True
+
+        DocsCommand.setup_claude_code(self.project_dir)
+
+        self.assertNotEqual(edited, self._read_skill())
+        self.assertNotIn("local edit", self._read_skill())
+
+    @patch("questionary.confirm")
+    @patch("sys.stdin.isatty", return_value=True)
+    def test_force_skips_the_prompt(self, _mock_isatty, mock_confirm):
+        """--force overwrites without asking, which is what CI and setup scripts need."""
+        self._install_then_edit()
+
+        DocsCommand.setup_claude_code(self.project_dir, force=True)
+
+        mock_confirm.assert_not_called()
+        self.assertNotIn("local edit", self._read_skill())
+
+
+class PackagedSkillTest(unittest.TestCase):
+    """Tests that the shipped poly-adk skill stays internally consistent."""
+
+    def setUp(self):
+        print("\n" + "─" * 60 + f"\n  {self._testMethodName}\n" + "─" * 60)
+
+    def tearDown(self):
+        print("─" * 60 + "\n")
+
+    @staticmethod
+    def _skill_markdown() -> str:
+        skill_path = os.path.join(agent_setup.SKILLS_PACKAGE_DIR, "poly-adk", "SKILL.md")
+        with open(skill_path, encoding="utf-8") as f:
+            return f.read()
+
+    def test_skill_has_frontmatter(self):
+        """SKILL.md needs name and description frontmatter for Claude Code to load it."""
+        content = self._skill_markdown()
+
+        self.assertTrue(content.startswith("---\n"))
+        frontmatter = content.split("---", 2)[1]
+        self.assertIn("name: poly-adk", frontmatter)
+        self.assertIn("description:", frontmatter)
+
+    def test_referenced_files_all_exist(self):
+        """Every references/*.md path named in SKILL.md is actually shipped."""
+        referenced = set(re.findall(r"references/([\w-]+\.md)", self._skill_markdown()))
+        shipped = {
+            os.path.basename(relative)
+            for _, relative in agent_setup.discover_skill_files()
+            if relative.startswith("references")
+        }
+
+        self.assertTrue(referenced, "SKILL.md should reference its reference files")
+        self.assertEqual(set(), referenced - shipped, "SKILL.md references missing files")
+        self.assertEqual(set(), shipped - referenced, "shipped files missing from SKILL.md")
+
+    def test_no_reference_files_are_empty(self):
+        """An empty reference file would silently give the agent nothing to read."""
+        for source, relative in agent_setup.discover_skill_files():
+            with self.subTest(relative):
+                with open(source, encoding="utf-8") as f:
+                    self.assertGreater(len(f.read().strip()), 100)
+
+    def test_skill_tree_stays_within_the_packaged_globs(self):
+        """No skill file may nest deeper than references/, or it won't be packaged.
+
+        pyproject.toml globs `poly-adk/*.md` and `poly-adk/references/*.md`, neither of
+        which recurses. A file added below those would be missing from the wheel.
+        """
+        for _, relative in agent_setup.discover_skill_files():
+            parts = relative.split(os.sep)
+            with self.subTest(relative):
+                self.assertLessEqual(len(parts), 2)
+                if len(parts) == 2:
+                    self.assertEqual("references", parts[0])
+
+
+class RenderMemoryTest(unittest.TestCase):
+    """Tests for merging the poly-adk block into an existing CLAUDE.md."""
+
+    BLOCK = f"{agent_setup.MEMORY_BEGIN}\nbody\n{agent_setup.MEMORY_END}\n"
+
+    def setUp(self):
+        print("\n" + "─" * 60 + f"\n  {self._testMethodName}\n" + "─" * 60)
+
+    def tearDown(self):
+        print("─" * 60 + "\n")
+
+    def test_missing_file_becomes_the_block(self):
+        """No CLAUDE.md yet means the file is just the block."""
+        self.assertEqual(self.BLOCK, agent_setup.render_memory(None, self.BLOCK))
+
+    def test_whitespace_only_file_is_replaced(self):
+        """A blank CLAUDE.md is treated as absent rather than appended to."""
+        self.assertEqual(self.BLOCK, agent_setup.render_memory("\n  \n", self.BLOCK))
+
+    def test_file_without_trailing_newline_is_separated(self):
+        """Appending inserts a blank line even when the existing file lacks a newline."""
+        result = agent_setup.render_memory("# Notes", self.BLOCK)
+
+        self.assertEqual(f"# Notes\n\n{self.BLOCK}", result)
+
+    def test_existing_block_is_replaced_not_duplicated(self):
+        """Re-rendering swaps the block body and leaves one copy of the markers."""
+        existing = f"# Top\n\n{agent_setup.MEMORY_BEGIN}\nold\n{agent_setup.MEMORY_END}\n\n# End\n"
+
+        result = agent_setup.render_memory(existing, self.BLOCK)
+
+        self.assertEqual(1, result.count(agent_setup.MEMORY_BEGIN))
+        self.assertIn("# Top", result)
+        self.assertIn("# End", result)
+        self.assertIn("body", result)
+        self.assertNotIn("old", result)

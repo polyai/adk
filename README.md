@@ -223,6 +223,14 @@ poly docs {documentation (e.g topics)}
 poly docs --output doc_file.md
 ```
 
+Set up Claude Code for the project, installing the `poly-adk` skill into
+`.claude/skills/` and a `poly-adk` section into `CLAUDE.md`:
+```bash
+poly docs --claude-code
+poly docs --claude-code --force   # skip the confirmation prompt
+```
+Re-running only rewrites what changed, and your own `CLAUDE.md` content is kept.
+
 ## Bugs & Feature Requests
 
 Please report bugs or request features via the [GitHub Issues](https://github.com/PolyAI/adk/issues) page.

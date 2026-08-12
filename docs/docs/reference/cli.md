@@ -742,6 +742,39 @@ Available resource names include:
 | `voice_settings` | Voice greeting, disclaimer, style prompt |
 | `variables` | State variables referenced in code |
 
+#### `poly docs --claude-code`
+
+Set up Claude Code for the project instead of printing documentation. This installs the same reference material as files the agent picks up on its own, so you no longer need to generate `rules.md` and paste it into a prompt.
+
+Examples:
+
+~~~bash
+poly docs --claude-code
+poly docs --claude-code --force
+poly docs --claude-code --path ./account/project
+~~~
+
+It writes two things into the project:
+
+| Path | Purpose |
+|---|---|
+| `.claude/skills/poly-adk/` | The `poly-adk` skill: `SKILL.md` plus a `references/` file per resource type. Claude Code loads it on demand when you work on agent resources. |
+| `CLAUDE.md` | A `poly-adk` section covering the project layout, CLI workflow, and the rules that apply across every resource. Read on every session. |
+
+Behaviour on re-run:
+
+- Files that already match what the CLI ships are left alone, so re-running is a no-op.
+- An existing `CLAUDE.md` is never replaced. The `poly-adk` section is delimited by `<!-- BEGIN poly-adk -->` and `<!-- END poly-adk -->` markers, and only the text between those markers is rewritten. Anything you add around it survives.
+- Locally edited skill files, and skill files the CLI no longer ships, are listed and confirmed before being overwritten or deleted. Pass `--force` to skip the prompt, which is what you want in CI or a setup script.
+
+Re-run the command after upgrading the CLI to pick up documentation changes.
+
+| Option | Description |
+|---|---|
+| `--claude-code` | Install the skill and memory files rather than printing docs. |
+| `-f`, `--force` | Overwrite and remove existing files without confirmation. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+
 ### `poly deployments`
 
 Manage deployments for the project.

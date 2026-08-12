@@ -8,6 +8,12 @@ public names re-exported here for convenience and backwards compatibility.
 Copyright PolyAI Limited
 """
 
+from poly.utils.agent_setup import (
+    ClaudeCodePlan,
+    apply_claude_code_setup,
+    plan_claude_code_setup,
+    render_memory,
+)
 from poly.utils.commands import create_command_webchat_channel_update_status
 from poly.utils.credentials import (
     CREDENTIALS_FILE_PATH,
@@ -32,7 +38,9 @@ from poly.utils.variable_references import (
 __all__ = [
     "CREDENTIALS_FILE_PATH",
     "FUNCTION_TYPE_TO_VAR_REF_FIELD",
+    "ClaudeCodePlan",
     "any_credentials_exist",
+    "apply_claude_code_setup",
     "compute_variable_references",
     "diff_dicts",
     "create_command_webchat_channel_update_status",
@@ -43,7 +51,9 @@ __all__ = [
     "func_parameter",
     "merge_rtc_dicts",
     "merge_strings",
+    "plan_claude_code_setup",
     "read_json_file",
+    "render_memory",
     "retrieve_api_key",
     "save_api_key_credential_file",
     "save_imports",

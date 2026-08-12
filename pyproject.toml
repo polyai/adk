@@ -26,6 +26,11 @@ exclude = [
 "poly.docs" = [
     "*.md",
 ]
+"poly.skills" = [
+    "*.md",
+    "poly-adk/*.md",
+    "poly-adk/references/*.md",
+]
 
 [tool.ruff]
 target-version = "py314"
