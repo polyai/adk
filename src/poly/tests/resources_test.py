@@ -79,6 +79,8 @@ from poly.resources.test_suite import (
     FunctionCallAssertion,
     TestCase,
     TestCaseAssertion,
+    TestCaseIntegrationAttributes,
+    TestCaseSipHeaders,
     TestCaseTags,
 )
 from poly.resources.topic import (
@@ -7411,6 +7413,219 @@ class TestCaseTests(unittest.TestCase):
                 os.path.join(base_path, "test_suite", "webchat_smoke_test.yaml"),
             ],
         )
+
+
+class TestCaseMockContextTests(unittest.TestCase):
+    """Caller number, SIP headers and integration attributes on a test case."""
+
+    RESOURCE_ID = "TEST-mock_context"
+
+    def _test_case(self, **overrides) -> TestCase:
+        defaults = {
+            "resource_id": self.RESOURCE_ID,
+            "name": "Mock context test",
+            "scenario": "Caller asks about their account.",
+            "channel": "chat.polyai",
+            "language": "en-GB",
+            "assertions": TestCaseAssertion(
+                resource_id=self.RESOURCE_ID, name="assertions", prompts=[], function_calls=[]
+            ),
+            "tags": TestCaseTags(resource_id=self.RESOURCE_ID, name="tags", tags=[]),
+        }
+        defaults.update(overrides)
+        return TestCase(**defaults)
+
+    def test_yaml_roundtrip_preserves_values_and_types(self):
+        test_case = self._test_case(
+            caller_number="+447700900000",
+            sip_headers=TestCaseSipHeaders(
+                resource_id=self.RESOURCE_ID, name="sip_headers", headers={"x-dnis": "441234"}
+            ),
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID,
+                name="integration_attributes",
+                attributes={"tier": "gold", "retry_count": 2, "vip": True},
+            ),
+        )
+
+        yaml_dict = test_case.to_yaml_dict()
+        self.assertEqual(yaml_dict["caller_number"], "+447700900000")
+        self.assertEqual(yaml_dict["sip_headers"], {"x-dnis": "441234"})
+        self.assertEqual(
+            yaml_dict["integration_attributes"], {"tier": "gold", "retry_count": 2, "vip": True}
+        )
+
+        restored = TestCase.from_yaml_dict(
+            yaml_dict, resource_id=self.RESOURCE_ID, name="Mock context test"
+        )
+        self.assertEqual(restored.caller_number, "+447700900000")
+        self.assertEqual(restored.sip_headers.headers, {"x-dnis": "441234"})
+        self.assertEqual(
+            restored.integration_attributes.attributes,
+            {"tier": "gold", "retry_count": 2, "vip": True},
+        )
+        # A number must not come back as a string, or a flow branching on
+        # `retry_count > 2` breaks.
+        self.assertIsInstance(restored.integration_attributes.attributes["retry_count"], int)
+        self.assertIsInstance(restored.integration_attributes.attributes["vip"], bool)
+
+    def test_omits_empty_values_from_yaml(self):
+        yaml_dict = self._test_case().to_yaml_dict()
+
+        self.assertNotIn("caller_number", yaml_dict)
+        self.assertNotIn("sip_headers", yaml_dict)
+        self.assertNotIn("integration_attributes", yaml_dict)
+
+    def test_caller_number_on_create_and_update_protos(self):
+        test_case = self._test_case(caller_number="+447700900000")
+
+        self.assertEqual(test_case.build_create_proto().caller_number, "+447700900000")
+        self.assertEqual(test_case.build_update_proto().caller_number, "+447700900000")
+
+    def test_caller_number_absent_sends_empty_string(self):
+        # Proto3 has no null; the field must still be sent so clearing it sticks.
+        self.assertEqual(self._test_case().build_update_proto().caller_number, "")
+
+    def test_subresource_command_types(self):
+        test_case = self._test_case()
+
+        self.assertEqual(test_case.sip_headers.update_command_type, "set_test_case_sip_headers")
+        self.assertEqual(
+            test_case.integration_attributes.update_command_type,
+            "set_test_case_integration_attributes",
+        )
+
+    def test_sip_headers_proto(self):
+        headers = TestCaseSipHeaders(
+            resource_id=self.RESOURCE_ID, name="sip_headers", headers={"x-dnis": "441234"}
+        )
+
+        proto = headers.build_update_proto()
+
+        self.assertEqual(proto.id, self.RESOURCE_ID)
+        self.assertEqual(dict(proto.sip_headers), {"x-dnis": "441234"})
+
+    def test_integration_attributes_proto_keeps_json_types(self):
+        attributes = TestCaseIntegrationAttributes(
+            resource_id=self.RESOURCE_ID,
+            name="integration_attributes",
+            attributes={"tier": "gold", "retry_count": 2, "vip": True, "meta": {"a": 1}},
+        )
+
+        proto = attributes.build_update_proto()
+        struct = dict(proto.integration_attributes)
+
+        self.assertEqual(struct["tier"], "gold")
+        self.assertEqual(struct["retry_count"], 2)
+        self.assertIs(struct["vip"], True)
+        self.assertEqual(dict(struct["meta"]), {"a": 1})
+
+    def test_struct_doubles_are_written_back_as_ints(self):
+        """Struct stores every number as a double, so 2 returns as 2.0.
+
+        Left alone that produces a spurious `2 -> 2.0` diff on every pull
+        following a push.
+        """
+        attributes = TestCaseIntegrationAttributes(
+            resource_id=self.RESOURCE_ID,
+            name="integration_attributes",
+            attributes={"retry_count": 2.0, "ratio": 1.5, "nested": {"count": 3.0}},
+        )
+
+        rendered = attributes.to_yaml_dict()
+
+        self.assertEqual(rendered["retry_count"], 2)
+        self.assertIsInstance(rendered["retry_count"], int)
+        self.assertEqual(rendered["ratio"], 1.5)
+        self.assertEqual(rendered["nested"]["count"], 3)
+
+    def test_subresources_pushed_when_changed(self):
+        old = self._test_case()
+        new = self._test_case(
+            sip_headers=TestCaseSipHeaders(
+                resource_id=self.RESOURCE_ID, name="sip_headers", headers={"x-dnis": "441234"}
+            ),
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID, name="integration_attributes", attributes={"a": 1}
+            ),
+        )
+
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertIn(new.sip_headers, updated)
+        self.assertIn(new.integration_attributes, updated)
+
+    def test_clearing_subresources_still_pushes(self):
+        # The command has to be sent, or the cleared values survive on the server.
+        old = self._test_case(
+            sip_headers=TestCaseSipHeaders(
+                resource_id=self.RESOURCE_ID, name="sip_headers", headers={"x-dnis": "441234"}
+            ),
+        )
+        new = self._test_case()
+
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertIn(new.sip_headers, updated)
+
+    def test_unchanged_subresources_are_not_pushed(self):
+        old = self._test_case()
+        new = self._test_case()
+
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertNotIn(new.sip_headers, updated)
+        self.assertNotIn(new.integration_attributes, updated)
+
+    def test_from_projection_reads_camel_case_keys(self):
+        projection = {
+            "testing": {
+                "testCases": {
+                    "entities": {
+                        self.RESOURCE_ID: {
+                            "name": "Mock context test",
+                            "scenario": "Caller asks about their account.",
+                            "channel": "chat.polyai",
+                            "language": "en-GB",
+                            "callerNumber": "+447700900000",
+                            "sipHeaders": {"x-dnis": "441234"},
+                            "integrationAttributes": {"tier": "gold", "retry_count": 2},
+                        }
+                    }
+                }
+            }
+        }
+
+        test_case = TestCase.from_projection(projection)[self.RESOURCE_ID]
+
+        self.assertEqual(test_case.caller_number, "+447700900000")
+        self.assertEqual(test_case.sip_headers.headers, {"x-dnis": "441234"})
+        self.assertEqual(
+            test_case.integration_attributes.attributes, {"tier": "gold", "retry_count": 2}
+        )
+
+    def test_from_projection_without_mock_context(self):
+        projection = {
+            "testing": {
+                "testCases": {
+                    "entities": {
+                        self.RESOURCE_ID: {
+                            "name": "Mock context test",
+                            "scenario": "Caller asks about their account.",
+                            "channel": "chat.polyai",
+                            "language": "en-GB",
+                        }
+                    }
+                }
+            }
+        }
+
+        test_case = TestCase.from_projection(projection)[self.RESOURCE_ID]
+
+        self.assertEqual(test_case.caller_number, "")
+        self.assertEqual(test_case.sip_headers.headers, {})
+        self.assertEqual(test_case.integration_attributes.attributes, {})
+        self.assertNotIn("sip_headers", test_case.to_yaml_dict())
 
 
 class ParseMultiResourcePathTests(unittest.TestCase):
