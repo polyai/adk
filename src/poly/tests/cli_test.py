@@ -238,7 +238,7 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         call_kwargs = self.proj.pull_project_from_env.call_args[1]
         self.assertEqual(call_kwargs["env"], "live")
         self.assertIs(call_kwargs["format"], False)
-        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
         self.proj.push_project.assert_called_once_with(
             force=True,
             skip_validation=True,
@@ -256,7 +256,7 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         call_kwargs = self.proj.pull_project_from_env.call_args[1]
         self.assertEqual(call_kwargs["env"], "pre-release")
         self.assertIs(call_kwargs["format"], False)
-        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
         self.proj.push_project.assert_called_once_with(
             force=True,
             skip_validation=True,
@@ -279,7 +279,7 @@ class BranchCreateFromEnvTest(unittest.TestCase):
             BranchCommand.branch_create(TEST_DIR, "my-branch", env="live", force=False)
 
         self.assertIn("No resources returned from environment 'live'", str(ctx.exception))
-        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
         self.proj.pull_project_from_env.assert_called_once()
         pull_kwargs = self.proj.pull_project_from_env.call_args[1]
         self.assertEqual(pull_kwargs["env"], "live")
@@ -291,7 +291,7 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         BranchCommand.branch_create(TEST_DIR, "my-branch", env="sandbox", force=False)
 
         self.proj.pull_project_from_env.assert_not_called()
-        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
         self.proj.push_project.assert_not_called()
 
     @patch("poly.output.console.error")
@@ -342,7 +342,7 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         BranchCommand.branch_create(TEST_DIR, "my-branch", env=None, force=False)
 
         # No source branch is passed: the CLI relies on the project's own branch state.
-        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
         message = mock_success.call_args[0][0]
         self.assertIn("my-branch", message)
         self.assertIn("feature-a", message)
@@ -353,7 +353,7 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         self.proj.branch_id = "branch-a-id"
         self.proj.get_current_branch.return_value = "feature-a"
 
-        def create_and_switch(_branch_name):
+        def create_and_switch(_branch_name, source_branch_name=None):
             self.proj.branch_id = "new-branch-id"
             return "new-branch-id"
 
@@ -377,7 +377,7 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         BranchCommand.branch_create(TEST_DIR, "my-branch", env=None, force=False)
 
         self.proj.pull_project_from_env.assert_not_called()
-        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
         self.proj.push_project.assert_not_called()
 
     def test_branch_create_env_does_not_push_when_create_branch_fails(self):
@@ -389,9 +389,82 @@ class BranchCreateFromEnvTest(unittest.TestCase):
             BranchCommand.branch_create(TEST_DIR, "my-branch", env="live", force=False)
 
         self.assertEqual(ctx.exception.code, 1)
-        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
         self.proj.pull_project_from_env.assert_not_called()
         self.proj.push_project.assert_not_called()
+
+
+class BranchCreateFromSourceBranchTest(unittest.TestCase):
+    """Tests for ``poly branch create --from <branch>``."""
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        # The user is on feature-a, but creates from feature-b via --from.
+        self.proj.branch_id = "branch-feature-a"
+        self.proj.get_current_branch.return_value = "feature-a"
+        self.proj.get_diffs.return_value = {}
+        self.proj.create_branch.return_value = "new-branch-id"
+        self.proj.get_branches.return_value = (
+            "feature-a",
+            {
+                "main": {"branchId": "main"},
+                "feature-a": {"branchId": "branch-feature-a", "parentBranchId": "main"},
+                "feature-b": {"branchId": "branch-feature-b", "parentBranchId": "main"},
+            },
+        )
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.output.console.success")
+    def test_from_flag_is_parsed_and_forwarded_as_the_source_branch(self, _mock_success):
+        """'branch create <name> --from <branch>' reaches create_branch as source_branch_name."""
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        args = cli._create_parser().parse_args(
+            ["branch", "create", "my-branch", "--from", "feature-b"]
+        )
+
+        BranchCommand.run(args)
+
+        self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name="feature-b")
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_output_reports_the_source_branch_as_the_base(self, mock_json):
+        """JSON base_branch_name/base_branch_id describe the --from branch, not the current one."""
+        BranchCommand.branch_create(
+            TEST_DIR, "my-branch", output_json=True, source_branch="feature-b"
+        )
+
+        self.assertEqual(
+            mock_json.call_args[0][0],
+            {
+                "success": True,
+                "base_branch_id": "branch-feature-b",
+                "base_branch_name": "feature-b",
+                "new_branch_id": "new-branch-id",
+                "branch_name": "my-branch",
+            },
+        )
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_unknown_source_branch_is_reported_as_a_json_error(self, mock_json):
+        """An unknown --from branch is rejected by the project and reported as an error."""
+        self.proj.create_branch.side_effect = ValueError("Branch 'ghost' does not exist.")
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_create(
+                TEST_DIR, "my-branch", output_json=True, source_branch="ghost"
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(
+            mock_json.call_args[0][0],
+            {"success": False, "error": "Branch 'ghost' does not exist."},
+        )
 
 
 class BranchDeleteTest(unittest.TestCase):

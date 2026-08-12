@@ -2274,43 +2274,61 @@ class AgentStudioProject:
         )
         return current_branch, branches
 
-    def create_branch(self, branch_name: str = None) -> str:
+    def create_branch(
+        self, branch_name: str = None, source_branch_name: Optional[str] = None
+    ) -> str:
         """Create a new branch in the project.
 
         Args:
             branch_name (str): The name of the new branch
+            source_branch_name (str): Name of the branch to create the new branch from.
+                Defaults to the current branch.
 
         Returns:
             str: The ID of the newly created branch
 
         Raises:
-            ValueError: If the branch cannot be created due to deployment mode restrictions
+            ValueError: If the branch cannot be created due to deployment mode restrictions,
+                or source_branch_name does not exist.
         """
-        if self.deployment_mode == DeploymentMode.SIMPLE:
+        branches = None
+        if source_branch_name is not None or self.deployment_mode in (
+            DeploymentMode.SIMPLE,
+            DeploymentMode.RELEASES_BRANCHES,
+        ):
             branches = self.api_handler.get_branches()
+
+        if source_branch_name is not None:
+            if source_branch_name not in branches:
+                raise ValueError(f"Branch '{source_branch_name}' does not exist.")
+            source_branch_id = branches[source_branch_name]["branchId"]
+        else:
+            source_branch_id = self.branch_id
+
+        if self.deployment_mode == DeploymentMode.SIMPLE:
             if len(branches) >= 2:
                 raise ValueError(
                     "Cannot create branch. Only one branch is allowed in simple deployment mode. Please delete/merge existing branches before creating a new one."
                 )
         if self.deployment_mode == DeploymentMode.RELEASES:
-            if self.branch_id != "main":
+            if source_branch_id != "main":
                 raise ValueError(
                     "Cannot create branch. Branches can only be created from the main branch in releases deployment mode."
                 )
         if self.deployment_mode == DeploymentMode.RELEASES_BRANCHES:
-            branches = self.api_handler.get_branches()
-            current_branch_meta = next(
-                (meta for meta in branches.values() if meta["branchId"] == self.branch_id),
+            source_branch_meta = next(
+                (meta for meta in branches.values() if meta["branchId"] == source_branch_id),
                 None,
             )
-            if current_branch_meta is None or (
-                not self.branch_id == "main" and current_branch_meta.get("parentBranchId") != "main"
+            if source_branch_meta is None or (
+                not source_branch_id == "main"
+                and source_branch_meta.get("parentBranchId") != "main"
             ):
                 raise ValueError(
                     "Cannot create branch. Branches with depth above 2 are not allowed in releases-branches deployment mode."
                 )
 
-        branch_id = self.api_handler.create_branch(branch_name, self.branch_id)
+        branch_id = self.api_handler.create_branch(branch_name, source_branch_id)
         self.branch_id = branch_id
         self.save_config()
         return branch_id
@@ -3694,7 +3712,13 @@ class AgentStudioProject:
         """Get the deployment mode for the project."""
         if self._deployment_mode is None:
             cfg = self.get_project_info().get("config") or {}
-            self._deployment_mode = DeploymentMode(cfg.get("deployment_mode", "releases"))
+            deployment_mode = DeploymentMode(cfg.get("deployment_mode", "releases"))
+            if (
+                deployment_mode == DeploymentMode.RELEASES_BRANCHES
+                and not self.using_simplified_deployments
+            ):
+                deployment_mode = DeploymentMode.RELEASES
+            self._deployment_mode = deployment_mode
         return self._deployment_mode
 
     @cached_property

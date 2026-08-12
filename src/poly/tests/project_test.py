@@ -4804,6 +4804,81 @@ class CreateBranchDeploymentModeTest(unittest.TestCase):
         self.assertEqual(self.project.branch_id, "new-branch-id")
         self.mock_save_config.assert_called()
 
+    # -- source_branch_name: create from a branch other than the current one --
+
+    def test_named_source_branch_overrides_the_current_branch(self):
+        """Passing source_branch_name resolves that branch's id and validates against it,
+        not against whatever branch the user currently has checked out."""
+        self._set_deployment_mode("releases_branches")
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {"branchId": "branch-feature-a", "parentBranchId": "main"},
+            "feature-b": {"branchId": "branch-feature-b", "parentBranchId": "main"},
+        }
+
+        new_branch_id = self.project.create_branch("my-feature", source_branch_name="feature-b")
+
+        self.assertEqual(new_branch_id, "new-branch-id")
+        self.mock_api.create_branch.assert_called_once_with("my-feature", "branch-feature-b")
+        self.assertEqual(self.project.branch_id, "new-branch-id")
+
+    def test_unknown_source_branch_is_rejected_without_creating(self):
+        """Naming a branch that does not exist remotely fails before anything is created."""
+        self._set_deployment_mode("releases_branches")
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {"main": {"branchId": "main"}}
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.create_branch("my-feature", source_branch_name="no-such-branch")
+
+        self.assertEqual(str(ctx.exception), "Branch 'no-such-branch' does not exist.")
+        self.mock_api.create_branch.assert_not_called()
+        self.assertEqual(self.project.branch_id, "branch-feature-a")
+
+    def test_deployment_mode_guards_validate_the_named_source_not_the_current_branch(self):
+        """The same per-mode guards apply, but keyed off source_branch_name when given."""
+        branches = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {"branchId": "branch-feature-a", "parentBranchId": "main"},
+            "feature-b": {"branchId": "branch-feature-b", "parentBranchId": "main"},
+            "feature-b-child": {
+                "branchId": "branch-feature-b-child",
+                "parentBranchId": "branch-feature-b",
+            },
+        }
+        cases = {
+            "releases allows main by name from elsewhere": ("releases", "main", None),
+            "releases rejects a named non-main source": (
+                "releases",
+                "feature-b",
+                "releases deployment mode",
+            ),
+            "releases_branches rejects a named grandchild of main": (
+                "releases_branches",
+                "feature-b-child",
+                "depth",
+            ),
+        }
+        for description, (mode, source_branch_name, expected_error) in cases.items():
+            with self.subTest(description):
+                self.project._deployment_mode = None  # deployment_mode caches on first access
+                self._set_deployment_mode(mode)
+                self._set_current_branch("branch-feature-a")
+                self.mock_api.get_branches.return_value = branches
+                self.mock_api.create_branch.reset_mock()
+
+                if expected_error:
+                    with self.assertRaises(ValueError) as ctx:
+                        self.project.create_branch(
+                            "my-feature", source_branch_name=source_branch_name
+                        )
+                    self.assertIn(expected_error, str(ctx.exception))
+                    self.mock_api.create_branch.assert_not_called()
+                else:
+                    self.project.create_branch("my-feature", source_branch_name=source_branch_name)
+                    self.mock_api.create_branch.assert_called_once_with("my-feature", "main")
+
 
 class MergeBranchTest(unittest.TestCase):
     """Tests for AgentStudioProject.merge_branch."""

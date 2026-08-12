@@ -142,6 +142,7 @@ class BranchCommand(BaseCommand):
                 "  poly branch list\n"
                 "  poly branch list --archived\n"
                 "  poly branch create new-branch\n"
+                "  poly branch create new-branch --from other-branch\n"
                 "  poly branch switch existing-branch\n"
                 "  poly branch rename new-name\n"
                 "  poly branch merge 'Merge branch'\n"
@@ -188,6 +189,14 @@ class BranchCommand(BaseCommand):
             dest="environment",
             help="Initiate the new branch from this environment instead of sandbox (main).",
         )
+        branch_create_parser.add_argument(
+            "--from",
+            type=str,
+            default=None,
+            dest="source_branch",
+            metavar="BRANCH",
+            help="Create the new branch from this branch instead of the current branch.",
+        ).completer = cls._branch_name_completer
         branch_create_parser.add_argument(
             "--force",
             "-f",
@@ -453,6 +462,7 @@ class BranchCommand(BaseCommand):
                 args.json,
                 getattr(args, "environment", None),
                 getattr(args, "force", False),
+                getattr(args, "source_branch", None),
             )
 
         elif args.branch_subcommand == "switch":
@@ -561,6 +571,7 @@ class BranchCommand(BaseCommand):
         output_json: bool = False,
         env: str = None,
         force: bool = False,
+        source_branch: str = None,
     ) -> None:
         """Create a new branch in the Agent Studio project."""
         from poly.output.console import error, success, warning
@@ -587,10 +598,15 @@ class BranchCommand(BaseCommand):
                 warning("No branch name provided. Exiting.")
                 return
 
-        base_branch_id = project.branch_id
-        base_branch_name = project.get_current_branch()
+        if source_branch:
+            base_branch_name = source_branch
+            _, branches = project.get_branches()
+            base_branch_id = branches.get(source_branch, {}).get("branchId")
+        else:
+            base_branch_id = project.branch_id
+            base_branch_name = project.get_current_branch()
         try:
-            new_branch_id = project.create_branch(branch_name)
+            new_branch_id = project.create_branch(branch_name, source_branch_name=source_branch)
         except ValueError as e:
             if output_json:
                 json_print({"success": False, "error": str(e)})

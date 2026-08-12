@@ -147,6 +147,7 @@ poly branch list                       # active branches
 poly branch list --archived            # soft-deleted branches
 poly branch current
 poly branch create my-feature
+poly branch create my-hotfix --from my-feature  # branch from another branch instead of the current one
 poly branch switch my-feature
 poly branch switch my-feature --force  # discard uncommitted changes
 poly branch rename my-feature-v2       # rename the current branch
