@@ -1,6 +1,80 @@
 # CHANGELOG
 
 
+## v0.43.0 (2026-08-13)
+
+### Features
+
+- Per flow settings ([#260](https://github.com/polyai/adk/pull/260),
+  [`a9e0029`](https://github.com/polyai/adk/commit/a9e0029333814020f3bdeef388f29b3f244bd2f3))
+
+## Summary
+
+Consolidates per-step flow config (ASR biasing, DTMF, and the new ASR, VAD, barge-in and LLM
+  sections) into a single `FlowSettings` sub-resource, pushed as one `update_step_settings` command
+  instead of separate per-section commands. Adds the matching read path, clear path, and a
+  status-dict migration.
+
+## Motivation
+
+The platform moved per-step overrides into a nested `FlowStepSettings` block behind a single update
+  command, and introduced four new sections (ASR, VAD, barge-in, LLM) the ADK had no way to
+  represent. Previously ASR biasing and DTMF were separate sub-resources with their own
+  `flow_step_asr_config` / `flow_step_dtmf_config` commands, and the newer sections were
+  unsupported.
+
+## Changes
+
+- **New `FlowSettings` sub-resource** grouping all six sections, replacing the separate
+  `ASRBiasing`/`DTMFConfig` sub-resources. It is update-only (`update_step_settings`), matching the
+  existing `AsrSettings` pattern — `CreateAdvancedStep` has no `settings` field, so settings on a
+  new step ride along as an update after the step create. - **New config types** `ASRConfig`,
+  `VADConfig`, `BargeInConfig` and `LLMConfig` (with a `ReasoningEffort` enum), each with
+  `to_yaml_dict` / `to_proto`. - **Settings stay top-level in step YAML** (`asr_biasing:`,
+  `dtmf_config:`, `llm:` …) so existing step files need no rewriting. - **Projection reading**
+  handles the camelCase projection shape and maps `reasoningEffort` from its proto ordinal to the
+  enum. The step's legacy top-level `asrBiasing`/`dtmfConfig` are only read when there is no
+  `settings` block at all: the backend mirrors those on every settings update but never clears them,
+  so consulting them per-section would resurrect a section the user had cleared. - **Clearing a
+  section** emits `clear_step_settings`. `update_step_settings` merges per section, so a section
+  dropped from local YAML would otherwise be read as "not updated" rather than "cleared". Only
+  `asr`, `vad`, `bargeIn` and `llm` are sent — the backend's enum rejects anything else, and
+  `asr_biasing`/`dtmf` are excluded by design because they deep-merge into the legacy top-level
+  mirrors. Section names are translated to the backend's casing (`barge_in` → `bargeIn`); an unknown
+  value fails validation for the whole command batch. - **Disabled sections** are omitted from step
+  YAML for `asr_biasing` and `dtmf_config`, so disabled reads as absent. `barge_in` is kept even
+  when disabled, since it is clearable and an explicit disable has to stay distinguishable from
+  having no override. - **Status-dict migration** (`migrated_flow_step_settings`) folds legacy
+  top-level keys into `settings`. Without it, a status file written by an older version loads with
+  empty settings and reports every advanced step as modified — which also blocks `branch switch`,
+  `merge` and `sync ids`, all of which refuse to run with uncommitted changes. - Regenerated the
+  test project fixture into the new format and updated the affected tests.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New coverage:
+
+- `ClearUnusedSettingsFromFlowStepTest` — backend casing (`barge_in` → `bargeIn`), pass-through
+  sections, all four clearable sections at once, `asr_biasing`/`dtmf` producing no command,
+  unclearable sections not suppressing clearable ones, and the no-op cases (unchanged settings,
+  added sections, step missing from remote state). - `FlowSettingsFromProjectionTest` — camelCase
+  parsing across all six sections, every `reasoningEffort` ordinal, legacy top-level ignored when a
+  settings block exists but read when it does not, and absent settings yielding empty settings
+  rather than `None`. - `FlowSettingsSerializationTest` — full six-section YAML round-trip,
+  `dtmf_config` as the YAML key, disabled-section handling, and `build_update_proto` setting only
+  the sections present. - `MigrateFlowStepSettingsTest` — folding, loading the migrated shape into a
+  `FlowStep`, newer settings taking precedence, and steps without legacy keys being left alone.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.42.2 (2026-08-13)
 
 ### Bug Fixes
