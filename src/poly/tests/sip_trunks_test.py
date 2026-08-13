@@ -13,6 +13,19 @@ from unittest.mock import MagicMock, patch
 from poly.cli import AgentStudioCLI
 from poly.cli_commands.sip_trunks import SIPTrunksCommand
 from poly.handlers.sip_trunking_api import SIPTrunkingAPIHandler
+from poly.sip_trunks.config import (
+    default_export_path,
+    find_manage_file,
+    infer_account_context,
+    load_manage_config,
+    persist_trunk_response,
+)
+from poly.sip_trunks.reconciler import (
+    PlanChange,
+    export_config,
+    managed_trunk_data,
+    trunk_patch,
+)
 
 
 class SIPTrunkingAPIHandlerTest(unittest.TestCase):
@@ -81,10 +94,29 @@ class SIPTrunksCommandTest(unittest.TestCase):
         self.assertEqual(args.output, "export.yaml")
         self.assertTrue(args.force)
 
-    def test_parser_registers_explicit_auth_rotation(self):
+    def test_parser_normalizes_all_supported_region_spellings(self):
+        spellings = {
+            "us": "us-1",
+            "US-1": "us-1",
+            "eu": "euw-1",
+            "EUW-1": "euw-1",
+            "uk": "uk-1",
+            "UK-1": "uk-1",
+        }
+        for supplied, expected in spellings.items():
+            with self.subTest(region=supplied):
+                args = self._parser().parse_args(["sip-trunks", "list", "--region", supplied])
+                self.assertEqual(args.region, expected)
+
+    def test_parser_accepts_legacy_account_id_spelling(self):
         args = self._parser().parse_args(
-            ["sip-trunks", "manage", "--rotate-auth", "tr-123"]
+            ["sip-trunks", "list", "--account_id", "acct-123", "--region", "uk"]
         )
+
+        self.assertEqual(args.account_id, "acct-123")
+
+    def test_parser_registers_explicit_auth_rotation(self):
+        args = self._parser().parse_args(["sip-trunks", "manage", "--rotate-auth", "tr-123"])
 
         self.assertEqual(args.rotate_auth, "tr-123")
 
@@ -93,15 +125,16 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         self.assertTrue(args.yes)
 
-    @patch.object(SIPTrunksCommand, "manage")
+    @patch.object(SIPTrunksCommand, "_apply_manage_plan")
     @patch.object(SIPTrunksCommand, "_print_manage_diff")
-    @patch.object(SIPTrunksCommand, "_preview_manage")
+    @patch.object(SIPTrunksCommand, "_build_manage_plan")
     @patch("questionary.confirm")
     def test_manage_displays_diff_and_aborts_when_not_confirmed(
-        self, confirm, preview_manage, print_diff, manage
+        self, confirm, build_plan, print_diff, apply_plan
     ):
         changes = [{"action": "update", "resource": "trunk tr-123", "diff": "name"}]
-        preview_manage.return_value = changes
+        plan = MagicMock(changes=(PlanChange(**changes[0]),))
+        build_plan.return_value = plan
         confirm.return_value.ask.return_value = False
         args = self._parser().parse_args(["sip-trunks", "manage"])
 
@@ -111,31 +144,32 @@ class SIPTrunksCommandTest(unittest.TestCase):
         confirm.assert_called_once_with(
             "Apply these SIP trunk changes?", default=False, auto_enter=False
         )
-        manage.assert_not_called()
+        apply_plan.assert_not_called()
 
     @patch.object(SIPTrunksCommand, "_print_manage_result")
-    @patch.object(SIPTrunksCommand, "manage")
+    @patch.object(SIPTrunksCommand, "_apply_manage_plan")
     @patch.object(SIPTrunksCommand, "_print_manage_diff")
-    @patch.object(SIPTrunksCommand, "_preview_manage")
+    @patch.object(SIPTrunksCommand, "_build_manage_plan")
     @patch("questionary.confirm")
     def test_manage_applies_changes_after_confirmation(
-        self, confirm, preview_manage, print_diff, manage, print_result
+        self, confirm, build_plan, print_diff, apply_plan, print_result
     ):
         changes = [{"action": "create", "resource": "trunk Example", "diff": "+ trunk"}]
         result = {"success": True, "trunks": []}
-        preview_manage.return_value = changes
+        plan = MagicMock(changes=(PlanChange(**changes[0]),))
+        build_plan.return_value = plan
         confirm.return_value.ask.return_value = True
-        manage.return_value = result
+        apply_plan.return_value = result
         args = self._parser().parse_args(["sip-trunks", "manage"])
 
         SIPTrunksCommand.run(args)
 
         print_diff.assert_called_once_with(changes)
-        manage.assert_called_once_with(args)
+        apply_plan.assert_called_once_with(plan)
         print_result.assert_called_once_with(result, output_json=False)
 
     @patch.object(SIPTrunksCommand, "_print_list_table")
-    @patch.object(SIPTrunksCommand, "export_config")
+    @patch("poly.cli_commands.sip_trunks.export_config")
     def test_list_displays_table_by_default(self, export_config, print_list_table):
         export = {"account_id": "acct-123", "sip_trunks": []}
         export_config.return_value = export
@@ -206,7 +240,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             {"success": True, "trunk_id": "tr-123"}, output_json=True
         )
 
-    @patch("poly.cli_commands.sip_trunks.read_project_config")
+    @patch("poly.sip_trunks.config.read_project_config")
     def test_context_defaults_to_current_project(self, read_project_config):
         read_project_config.return_value = MagicMock(
             account_id="acct-123", region="euw-1", root_path="/account/project"
@@ -228,9 +262,9 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            result = SIPTrunksCommand._infer_account_context(str(account_dir))
+            context = infer_account_context(str(account_dir))
 
-        self.assertEqual(result, ("uk-1", "acct-123"))
+        self.assertEqual((context.region, context.account_id), ("uk-1", "acct-123"))
 
     def test_conflicting_account_project_regions_are_rejected(self):
         with TemporaryDirectory() as temp_dir:
@@ -244,7 +278,66 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 )
 
             with self.assertRaisesRegex(ValueError, "disagree on region"):
-                SIPTrunksCommand._infer_account_context(str(account_dir))
+                infer_account_context(str(account_dir))
+
+    def test_equivalent_account_project_region_aliases_do_not_conflict(self):
+        with TemporaryDirectory() as temp_dir:
+            account_dir = Path(temp_dir) / "acct-123"
+            for project_id, region in (("one", "uk"), ("two", "UK-1")):
+                project_dir = account_dir / project_id
+                project_dir.mkdir(parents=True)
+                (project_dir / "project.yaml").write_text(
+                    f"project_id: {project_id}\naccount_id: acct-123\nregion: {region}\n",
+                    encoding="utf-8",
+                )
+
+            context = infer_account_context(str(account_dir))
+
+        self.assertEqual((context.region, context.account_id), ("uk-1", "acct-123"))
+
+    @patch("poly.sip_trunks.config.read_project_config")
+    def test_explicit_file_from_another_account_does_not_use_current_project(
+        self, read_project_config
+    ):
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            current_project_dir = root / "account-b" / "project-b"
+            current_project_dir.mkdir(parents=True)
+            account_a = root / "account-a"
+            project_a = account_a / "project-a"
+            project_a.mkdir(parents=True)
+            (project_a / "project.yaml").write_text(
+                "project_id: project-a\naccount_id: account-a\nregion: uk-1\n",
+                encoding="utf-8",
+            )
+            config_path = account_a / "sip-trunks.yaml"
+            config_path.write_text("[]\n", encoding="utf-8")
+            read_project_config.return_value = MagicMock(
+                account_id="account-b",
+                region="us-1",
+                root_path=str(current_project_dir),
+            )
+
+            loaded = load_manage_config(str(current_project_dir), file_path=str(config_path))
+
+        self.assertEqual(loaded.account_id, "account-a")
+        self.assertEqual(loaded.region, "uk-1")
+
+    @patch("poly.sip_trunks.config.read_project_config")
+    def test_default_export_for_another_account_uses_its_sibling_directory(
+        self, read_project_config
+    ):
+        read_project_config.return_value = MagicMock(
+            account_id="account-b",
+            root_path=os.path.join("root", "account-b", "project-b"),
+        )
+
+        result = default_export_path(os.path.join("root", "account-b", "project-b"), "account-a")
+
+        self.assertEqual(
+            result,
+            os.path.join("root", "account-a", "sip-trunks.yaml"),
+        )
 
     @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_extensions")
     @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_trunks")
@@ -284,7 +377,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             ]
         }
 
-        result = SIPTrunksCommand.export_config("uk-1", "pod-point-uk")
+        result = export_config("uk-1", "pod-point-uk")
 
         self.assertNotIn("region", result)
         config = result["sip_trunks"][0]
@@ -359,11 +452,16 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 json=False,
             )
 
-            _, region, account_id, trunks = SIPTrunksCommand._load_manage_config(manage_args)
+            loaded = load_manage_config(
+                manage_args.path,
+                file_path=manage_args.file_path,
+                account_id=manage_args.account_id,
+                region=manage_args.region,
+            )
 
-        self.assertEqual(region, "uk-1")
-        self.assertEqual(account_id, "pod-point-uk")
-        self.assertEqual(trunks[0]["id"], "tr-123")
+        self.assertEqual(loaded.region, "uk-1")
+        self.assertEqual(loaded.account_id, "pod-point-uk")
+        self.assertEqual(loaded.trunks[0]["id"], "tr-123")
         self.assertTrue(exported_text.startswith("- id: tr-123\n"))
         self.assertNotIn("sip_trunks:", exported_text)
         self.assertNotIn("account_id:", exported_text)
@@ -381,11 +479,28 @@ class SIPTrunksCommandTest(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(ValueError, "Do not set 'region'"):
-                SIPTrunksCommand._load_manage_config(args)
+                load_manage_config(
+                    args.path,
+                    file_path=args.file_path,
+                    account_id=args.account_id,
+                    region=args.region,
+                )
+
+    def test_legacy_trunk_mapping_rejects_non_mapping_values(self):
+        with TemporaryDirectory() as temp_dir:
+            config_file = Path(temp_dir) / "sip-trunks.yaml"
+            config_file.write_text("sip_trunks:\n  Primary carrier: invalid\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "Every SIP trunk value must be a mapping"):
+                load_manage_config(
+                    temp_dir,
+                    account_id="acct-123",
+                    region="uk",
+                )
 
     def test_environment_secret_reference_is_rejected(self):
         with self.assertRaisesRegex(ValueError, "password_env.*prompted"):
-            SIPTrunksCommand._managed_trunk_data(
+            managed_trunk_data(
                 "tr-123",
                 {
                     "inbound_auth": {
@@ -398,7 +513,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             )
 
     @patch("poly.cli_commands.sip_trunks.getpass")
-    @patch("poly.cli_commands.sip_trunks.read_project_config", return_value=None)
+    @patch("poly.sip_trunks.config.read_project_config", return_value=None)
     @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_trunks")
     def test_preview_validates_extensions_before_prompting_or_writing(
         self, list_trunks, _read_project, prompt
@@ -429,11 +544,11 @@ class SIPTrunksCommandTest(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(ValueError, "missing required field.*agent_id"):
-                SIPTrunksCommand._preview_manage(args)
+                SIPTrunksCommand._build_manage_plan(args)
 
         prompt.assert_not_called()
 
-    @patch("poly.cli_commands.sip_trunks.read_project_config", return_value=None)
+    @patch("poly.sip_trunks.config.read_project_config", return_value=None)
     @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_extensions")
     @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_trunks")
     def test_preview_shows_extension_removed_from_present_list(
@@ -487,7 +602,9 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 rotate_auth=None,
             )
 
-            changes = SIPTrunksCommand._preview_manage(args)
+            changes = [
+                change.as_dict() for change in SIPTrunksCommand._build_manage_plan(args).changes
+            ]
 
         self.assertIn(
             {
@@ -500,7 +617,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
     @patch("poly.cli_commands.sip_trunks.getpass", return_value="secret")
     def test_new_digest_auth_prompts_for_password(self, prompt):
-        desired, _ = SIPTrunksCommand._managed_trunk_data(
+        desired, _ = managed_trunk_data(
             "Primary carrier",
             {
                 "name": "Primary carrier",
@@ -524,7 +641,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
     @patch("poly.cli_commands.sip_trunks.getpass")
     def test_existing_digest_auth_does_not_prompt_or_resend_password(self, prompt):
-        desired, _ = SIPTrunksCommand._managed_trunk_data(
+        desired, _ = managed_trunk_data(
             "tr-123",
             {"inbound_auth": {"type": "digest", "username": "alice"}},
             create=False,
@@ -534,9 +651,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
             "inbound": {"sip_auth": {"enabled": True, "username": "alice"}},
         }
 
-        supplied = SIPTrunksCommand._prompt_auth_secret(
-            "tr-123", current, desired, rotate=False
-        )
+        supplied = SIPTrunksCommand._prompt_auth_secret("tr-123", current, desired, rotate=False)
 
         self.assertFalse(supplied)
         self.assertNotIn("password", desired["inbound"]["sip_auth"])
@@ -544,7 +659,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
     @patch("poly.cli_commands.sip_trunks.getpass", return_value="rotated")
     def test_explicit_rotation_prompts_for_existing_digest_auth(self, prompt):
-        desired, _ = SIPTrunksCommand._managed_trunk_data(
+        desired, _ = managed_trunk_data(
             "tr-123",
             {"inbound_auth": {"type": "digest", "username": "alice"}},
             create=False,
@@ -554,19 +669,15 @@ class SIPTrunksCommandTest(unittest.TestCase):
             "inbound": {"sip_auth": {"enabled": True, "username": "alice"}},
         }
 
-        supplied = SIPTrunksCommand._prompt_auth_secret(
-            "tr-123", current, desired, rotate=True
-        )
+        supplied = SIPTrunksCommand._prompt_auth_secret("tr-123", current, desired, rotate=True)
 
         self.assertTrue(supplied)
         self.assertEqual(desired["inbound"]["sip_auth"]["password"], "rotated")
         prompt.assert_called_once()
 
     def test_auth_type_none_disables_current_auth(self):
-        desired, _ = SIPTrunksCommand._managed_trunk_data(
-            "tr-123", {"inbound_auth": {"type": "none"}}, create=False
-        )
-        patch_data = SIPTrunksCommand._trunk_patch(
+        desired, _ = managed_trunk_data("tr-123", {"inbound_auth": {"type": "none"}}, create=False)
+        patch_data = trunk_patch(
             {
                 "name": "tr-123",
                 "inbound": {
@@ -579,90 +690,6 @@ class SIPTrunksCommandTest(unittest.TestCase):
         )
 
         self.assertEqual(patch_data, {"inbound": {"sip_token_auth": {"disable": True}}})
-
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.update_extension")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.create_extension")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.delete_extension")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_extensions")
-    def test_unchanged_extensions_report_total_without_changes(
-        self, list_extensions, delete_extension, create_extension, update_extension
-    ):
-        list_extensions.return_value = {
-            "extensions": [
-                {
-                    "extension": "1000",
-                    "agent": {
-                        "agent_id": "charging-support",
-                        "client_env": "live",
-                    },
-                }
-            ]
-        }
-
-        result = SIPTrunksCommand._manage_extensions(
-            "uk-1",
-            "pod-point-uk",
-            "tr-123",
-            [
-                {
-                    "extension": "1000",
-                    "agent_id": "charging-support",
-                    "client_env": "live",
-                }
-            ],
-        )
-
-        self.assertEqual(result, (1, 0, 0, 0))
-        create_extension.assert_not_called()
-        update_extension.assert_not_called()
-        delete_extension.assert_not_called()
-
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.update_extension")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.create_extension")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.delete_extension")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_extensions")
-    def test_manage_extensions_deletes_entries_omitted_from_present_list(
-        self, list_extensions, delete_extension, create_extension, update_extension
-    ):
-        list_extensions.return_value = {
-            "extensions": [
-                {
-                    "extension": "1000",
-                    "agent": {"agent_id": "agent-one", "client_env": "live"},
-                },
-                {
-                    "extension": "2000",
-                    "agent": {"agent_id": "agent-two", "client_env": "live"},
-                },
-            ]
-        }
-
-        result = SIPTrunksCommand._manage_extensions(
-            "uk-1",
-            "pod-point-uk",
-            "tr-123",
-            [{"extension": "1000", "agent_id": "agent-one", "client_env": "live"}],
-        )
-
-        self.assertEqual(result, (1, 0, 0, 1))
-        delete_extension.assert_called_once_with(
-            "uk-1", "pod-point-uk", "tr-123", "2000"
-        )
-        create_extension.assert_not_called()
-        update_extension.assert_not_called()
-
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.delete_extension")
-    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_extensions")
-    def test_omitted_extensions_key_leaves_extensions_unmanaged(
-        self, list_extensions, delete_extension
-    ):
-        result = SIPTrunksCommand._manage_extensions(
-            "uk-1", "pod-point-uk", "tr-123", None
-        )
-
-        self.assertEqual(result, (0, 0, 0, 0))
-        list_extensions.assert_not_called()
-        delete_extension.assert_not_called()
 
     @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_extensions")
     @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_trunks")
@@ -683,7 +710,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         }
         list_extensions.return_value = {"extensions": []}
 
-        result = SIPTrunksCommand.export_config("uk-1", "acct-123")
+        result = export_config("uk-1", "acct-123")
 
         self.assertEqual(result["sip_trunks"][0]["extensions"], [])
 
@@ -720,11 +747,11 @@ class SIPTrunksCommandTest(unittest.TestCase):
             config_file = account_dir / "sip-trunks.yaml"
             config_file.write_text("sip_trunks: []\n", encoding="utf-8")
 
-            result = SIPTrunksCommand._find_manage_file(str(project_dir), None)
+            result = find_manage_file(str(project_dir), None)
 
             self.assertEqual(result, str(config_file))
 
-    @patch("poly.cli_commands.sip_trunks.read_project_config", return_value=None)
+    @patch("poly.sip_trunks.config.read_project_config", return_value=None)
     @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_extensions")
     @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.create_trunk")
     @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_trunks")
@@ -761,7 +788,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 json=False,
             )
 
-            result = SIPTrunksCommand.manage(args)
+            result = SIPTrunksCommand._apply_manage_plan(SIPTrunksCommand._build_manage_plan(args))
             saved_config = config_file.read_text(encoding="utf-8")
 
         create_trunk.assert_called_once_with(
@@ -796,7 +823,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            SIPTrunksCommand._persist_trunk_response(
+            persist_trunk_response(
                 str(config_file),
                 0,
                 "Primary carrier",
@@ -823,7 +850,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         self.assertNotIn("updated_at", saved)
 
     @patch("poly.cli_commands.sip_trunks.getpass", return_value="rotated-secret")
-    @patch("poly.cli_commands.sip_trunks.read_project_config", return_value=None)
+    @patch("poly.sip_trunks.config.read_project_config", return_value=None)
     @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_extensions")
     @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.update_trunk")
     @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_trunks")
@@ -870,22 +897,18 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 rotate_auth="tr-123",
             )
 
-            result = SIPTrunksCommand.manage(args)
+            result = SIPTrunksCommand._apply_manage_plan(SIPTrunksCommand._build_manage_plan(args))
 
         prompt.assert_called_once_with("SIP password for tr-123: ")
         update_trunk.assert_called_once_with(
             "uk-1",
             "pod-point-uk",
             "tr-123",
-            {
-                "inbound": {
-                    "sip_auth": {"username": "alice", "password": "rotated-secret"}
-                }
-            },
+            {"inbound": {"sip_auth": {"username": "alice", "password": "rotated-secret"}}},
         )
         self.assertEqual(result["trunks"][0]["status"], "updated")
 
-    @patch("poly.cli_commands.sip_trunks.read_project_config", return_value=None)
+    @patch("poly.sip_trunks.config.read_project_config", return_value=None)
     @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.delete_trunk")
     @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.update_trunk")
     @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.list_trunks")
@@ -943,7 +966,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 json=False,
             )
 
-            result = SIPTrunksCommand.manage(args)
+            result = SIPTrunksCommand._apply_manage_plan(SIPTrunksCommand._build_manage_plan(args))
 
         update_trunk.assert_called_once_with(
             "uk-1", "pod-point-uk", "tr-managed", {"encrypted": False}
