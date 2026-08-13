@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import os
 import unittest
 from argparse import Namespace
 from pathlib import Path
@@ -215,7 +216,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
         result = SIPTrunksCommand._resolve_context(args)
 
         self.assertEqual(result, ("euw-1", "acct-123"))
-        read_project_config.assert_called_once_with("/project")
+        read_project_config.assert_called_once_with(os.path.abspath(args.path))
 
     def test_context_is_inferred_from_account_child_projects(self):
         with TemporaryDirectory() as temp_dir:
