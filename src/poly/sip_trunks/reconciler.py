@@ -511,7 +511,8 @@ def build_manage_plan(
         current = by_id.get(configured_id) if configured_id else None
         if configured_id and current is None:
             raise ValueError(
-                f"SIP trunk '{local_name}' references unknown remote ID '{configured_id}'."
+                f"SIP trunk '{local_name}' references unknown remote ID '{configured_id}'. "
+                "If the trunk was deleted, remove its entry from sip-trunks.yaml."
             )
         if current is None:
             matches = by_name.get(str(desired["name"]), [])
