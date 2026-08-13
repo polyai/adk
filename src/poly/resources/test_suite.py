@@ -47,22 +47,18 @@ ALLOWED_TYPES = ["string", "integer", "number", "boolean"]
 SIMULATED_AT_HINT = "an ISO 8601 datetime, e.g. 2026-01-15T09:30:00Z"
 
 
-def parse_simulated_at(value: str | datetime | dict | None) -> Optional[datetime]:
+def parse_simulated_at(value: str | datetime | None) -> Optional[datetime]:
     """Parse a test clock value into a UTC datetime, or None when unset.
 
-    Accepts an ISO 8601 string (the platform projection format), a datetime
-    (ruamel parses unquoted YAML timestamps into one), or a protobuf Timestamp
-    JSON object. Naive datetimes are assumed to be UTC.
+    Accepts an ISO 8601 string (the platform projection format) or a datetime
+    (ruamel parses unquoted YAML timestamps into one). Naive datetimes are
+    assumed to be UTC.
     """
     if value is None or value == "":
         return None
 
     if isinstance(value, datetime):
         parsed = value
-    elif isinstance(value, dict):
-        seconds = int(value.get("seconds", 0))
-        nanos = int(value.get("nanos", 0))
-        parsed = datetime.fromtimestamp(seconds + nanos / 1e9, tz=timezone.utc)
     else:
         try:
             parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
@@ -247,7 +243,7 @@ class TestCase(YamlResource):
         assertions: TestCaseAssertion | dict,
         tags: TestCaseTags | dict,
         variant: Optional[str] = None,
-        simulated_at: str | datetime | dict | None = None,
+        simulated_at: str | datetime | None = None,
     ):
         self.resource_id = resource_id
         self.name = name
@@ -486,7 +482,13 @@ class TestCase(YamlResource):
         return "test_case"
 
     def _build_simulated_at_proto(self) -> Optional[Timestamp]:
-        """Build the protobuf Timestamp for the test clock, or None when unset."""
+        """Build the protobuf Timestamp for the test clock, or None when unset.
+
+        Note: the platform reads an unset optional field as "no update" rather than
+        "clear", so removing simulated_at from a local file does not currently remove
+        the test clock upstream. Clearing needs a platform-side signal, as was added
+        for variant_id.
+        """
         parsed = parse_simulated_at(self.simulated_at)
         if parsed is None:
             return None

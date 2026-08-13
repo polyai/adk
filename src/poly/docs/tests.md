@@ -20,7 +20,7 @@ Each test case has these fields:
 - **tags** (list, optional): Labels for grouping and filtering tests.
 - **variant** (string, optional): Variant name to run the test against.
 - **language** (string): Language code for the test run, e.g. `en-GB`.
-- **simulated_at** (string, optional): Test clock — the point in time the conversation is simulated at, as an ISO 8601 datetime (e.g. `2026-01-15T09:30:00Z`). Values are normalised to UTC.
+- **simulated_at** (string, optional): Test clock — the point in time the conversation is simulated at, as an ISO 8601 datetime (e.g. `2026-01-15T09:30:00Z`). Values are normalised to UTC. Note that removing the field and pushing does not clear an existing test clock on the platform — an omitted value is read as "leave unchanged".
 - **prompt_assertions** (list, optional): Expected behaviours in the agent's response.
 - **function_call_assertions** (list, optional): Expected function calls and argument values.
 
