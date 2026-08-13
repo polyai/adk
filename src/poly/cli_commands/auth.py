@@ -10,8 +10,7 @@ from argparse import ArgumentParser, Namespace, _SubParsersAction
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.handlers.auth0_handler import REGION_TO_AUTH_DETAILS
-from poly.handlers.interface import AgentStudioInterface
-from poly.regions import REGIONS
+from poly.handlers.interface import REGIONS, AgentStudioInterface
 from poly.utils import (
     CREDENTIALS_FILE_PATH,
     save_api_key_credential_file,
