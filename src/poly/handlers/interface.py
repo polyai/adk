@@ -14,7 +14,6 @@ from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.protobuf.handoff_pb2 import Handoff_SetDefault
 from poly.handlers.sdk import SourcererAPIError
 from poly.handlers.sync_client import SyncClientHandler
-from poly.regions import REGIONS
 from poly.resources import (
     ApiIntegration,
     BaseResource,
@@ -31,6 +30,15 @@ from poly.resources import (
     Variant,
     VariantAttribute,
 )
+
+REGIONS = [
+    "us-1",
+    "euw-1",
+    "uk-1",
+    "studio",
+    "staging",
+    "dev",
+]
 
 
 class AgentStudioInterface:
