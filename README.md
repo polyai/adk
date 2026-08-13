@@ -253,7 +253,8 @@ poly sip-trunks list                         # display a summary table
 poly sip-trunks list --output                # write account-level sip-trunks.yaml
 poly sip-trunks list --output export.yaml
 poly sip-trunks get <trunk_id>
-poly sip-trunks delete <trunk_id>
+poly sip-trunks delete <trunk_id>             # confirm before deleting
+poly sip-trunks delete <trunk_id> --yes       # delete without prompting
 ```
 
 `manage` creates or updates entries in the YAML and prints every managed trunk's generated
@@ -277,7 +278,9 @@ API responses never contain SIP passwords or tokens, so exported files do not co
 secrets. `inbound_auth.type` is `digest`, `token`, or `none`. `manage` securely prompts
 when a secret is required to create a trunk or change its authentication. Normal updates
 never resend existing credentials; use `--rotate-auth <trunk_id>` to rotate them explicitly.
-Use `--json` for machine-readable output.
+`delete` asks for confirmation by default and prints a concise success message. Use `--yes`
+to skip confirmation; deletion with `--json` requires `--yes`. Use `--json` for
+machine-readable output.
 
 The account region is not stored in `sip-trunks.yaml`. ADK reads it from the current
 project or from project directories immediately below the account directory. If no project

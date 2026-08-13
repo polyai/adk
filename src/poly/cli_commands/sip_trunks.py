@@ -121,6 +121,12 @@ class SIPTrunksCommand(BaseCommand):
         )
         cls._add_context_arguments(delete_parser)
         delete_parser.add_argument("trunk_id", help="SIP trunk ID.")
+        delete_parser.add_argument(
+            "-y",
+            "--yes",
+            action="store_true",
+            help="Delete without prompting for confirmation.",
+        )
 
     @staticmethod
     def _resolve_context(args: Namespace) -> tuple[str, str]:
@@ -396,6 +402,9 @@ class SIPTrunksCommand(BaseCommand):
             cls._print_manage_result(result, output_json=args.json)
             return
 
+        if action == "delete" and args.json and not args.yes:
+            raise ValueError("sip-trunks delete --json requires --yes.")
+
         region, account_id = cls._resolve_context(args)
         if action == "list":
             result = export_config(region, account_id)
@@ -430,7 +439,25 @@ class SIPTrunksCommand(BaseCommand):
                 cls._print_get_table(result, extensions)
                 return
         else:
+            if not args.yes:
+                import questionary
+
+                confirmed = questionary.confirm(
+                    f"Delete SIP trunk {args.trunk_id}?",
+                    default=False,
+                    auto_enter=False,
+                ).ask()
+                if not confirmed:
+                    from poly.output.console import info
+
+                    info("Aborted. SIP trunk was not deleted.")
+                    return
             SIPTrunkingAPIHandler.delete_trunk(region, account_id, args.trunk_id)
             result = {"success": True, "trunk_id": args.trunk_id}
+            if not args.json:
+                from poly.output.console import success
+
+                success(f"Deleted SIP trunk {args.trunk_id}.")
+                return
 
         cls._print_result(result, output_json=args.json)

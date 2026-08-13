@@ -943,7 +943,12 @@ poly sip-trunks manage --rotate-auth <trunk_id>
 ~~~bash
 poly sip-trunks get <trunk_id>
 poly sip-trunks delete <trunk_id>
+poly sip-trunks delete <trunk_id> --yes
 ~~~
+
+`delete` asks for confirmation and prints a human-readable success message by default.
+Use `--yes` to skip confirmation. Machine-readable deletion with `--json` requires
+`--yes`.
 
 All leaf commands support `--json`, `--path`, `--account-id`, and `--region`.
 

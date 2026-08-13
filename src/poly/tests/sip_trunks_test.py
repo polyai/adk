@@ -132,6 +132,11 @@ class SIPTrunksCommandTest(unittest.TestCase):
 
         self.assertTrue(args.yes)
 
+    def test_parser_registers_yes_for_non_interactive_delete(self):
+        args = self._parser().parse_args(["sip-trunks", "delete", "tr-123", "--yes"])
+
+        self.assertTrue(args.yes)
+
     @patch.object(SIPTrunksCommand, "_apply_manage_plan")
     @patch.object(SIPTrunksCommand, "_print_manage_diff")
     @patch.object(SIPTrunksCommand, "_build_manage_plan")
@@ -236,6 +241,7 @@ class SIPTrunksCommandTest(unittest.TestCase):
                 "acct-123",
                 "--region",
                 "us",
+                "--yes",
                 "--json",
             ]
         )
@@ -246,6 +252,71 @@ class SIPTrunksCommandTest(unittest.TestCase):
         print_result.assert_called_once_with(
             {"success": True, "trunk_id": "tr-123"}, output_json=True
         )
+
+    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.delete_trunk")
+    @patch("questionary.confirm")
+    def test_delete_aborts_when_not_confirmed(self, confirm, delete_trunk):
+        confirm.return_value.ask.return_value = False
+        args = self._parser().parse_args(
+            [
+                "sip-trunks",
+                "delete",
+                "tr-123",
+                "--account-id",
+                "acct-123",
+                "--region",
+                "uk",
+            ]
+        )
+
+        SIPTrunksCommand.run(args)
+
+        confirm.assert_called_once_with("Delete SIP trunk tr-123?", default=False, auto_enter=False)
+        delete_trunk.assert_not_called()
+
+    @patch("poly.output.console.success")
+    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.delete_trunk")
+    @patch("questionary.confirm")
+    def test_delete_confirms_and_prints_human_success(self, confirm, delete_trunk, success):
+        confirm.return_value.ask.return_value = True
+        args = self._parser().parse_args(
+            [
+                "sip-trunks",
+                "delete",
+                "tr-123",
+                "--account-id",
+                "acct-123",
+                "--region",
+                "uk",
+            ]
+        )
+
+        SIPTrunksCommand.run(args)
+
+        delete_trunk.assert_called_once_with("uk-1", "acct-123", "tr-123")
+        success.assert_called_once_with("Deleted SIP trunk tr-123.")
+
+    @patch("poly.cli_commands.sip_trunks.SIPTrunkingAPIHandler.delete_trunk")
+    @patch("questionary.confirm")
+    def test_delete_json_requires_yes(self, confirm, delete_trunk):
+        args = self._parser().parse_args(
+            [
+                "sip-trunks",
+                "delete",
+                "tr-123",
+                "--account-id",
+                "acct-123",
+                "--region",
+                "uk",
+                "--json",
+            ]
+        )
+
+        with self.assertRaisesRegex(ValueError, "delete --json requires --yes"):
+            SIPTrunksCommand.run(args)
+
+        confirm.assert_not_called()
+        delete_trunk.assert_not_called()
 
     @patch("poly.sip_trunks.config.read_project_config")
     def test_context_defaults_to_current_project(self, read_project_config):
