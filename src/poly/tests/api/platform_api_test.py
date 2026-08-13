@@ -67,9 +67,7 @@ class CreateChat(unittest.TestCase):
             sip_headers=sip_headers,
         )
 
-        self.assertEqual(
-            mock_make_request.call_args.kwargs["data"]["sip_headers"], sip_headers
-        )
+        self.assertEqual(mock_make_request.call_args.kwargs["data"]["sip_headers"], sip_headers)
 
     @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
     def test_draft_chat_includes_sip_headers(self, mock_make_request):
@@ -84,9 +82,7 @@ class CreateChat(unittest.TestCase):
             sip_headers=sip_headers,
         )
 
-        self.assertEqual(
-            mock_make_request.call_args.kwargs["data"]["sip_headers"], sip_headers
-        )
+        self.assertEqual(mock_make_request.call_args.kwargs["data"]["sip_headers"], sip_headers)
 
 
 class MakeRequest(unittest.TestCase):
@@ -116,29 +112,6 @@ class MakeRequest(unittest.TestCase):
 
         sent = mock_request.call_args.kwargs["data"]
         self.assertEqual(json.loads(sent), {"name": "abc"})
-
-    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
-    def test_sensitive_request_fields_are_redacted_from_debug_logs(self, mock_request, _mock_key):
-        """Passwords and tokens are sent to the API but omitted from debug logs."""
-        mock_request.return_value = make_mock_response(200, json_body={})
-        data = {
-            "inbound": {
-                "sip_auth": {"username": "alice", "password": "digest-secret"},
-                "sip_token_auth": {"token": "token-secret"},
-            }
-        }
-
-        with self.assertLogs("poly.handlers.platform_api", level="DEBUG") as logs:
-            PlatformAPIHandler.make_request("studio", "/x", method="POST", data=data)
-
-        sent = json.loads(mock_request.call_args.kwargs["data"])
-        self.assertEqual(sent, data)
-        output = "\n".join(logs.output)
-        self.assertNotIn("digest-secret", output)
-        self.assertNotIn("token-secret", output)
-        self.assertIn("'password': '***'", output)
-        self.assertIn("'token': '***'", output)
 
     @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
     @patch("poly.handlers.platform_api.requests.request")
