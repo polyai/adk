@@ -1,6 +1,39 @@
 # CHANGELOG
 
 
+## v0.42.1 (2026-08-13)
+
+### Bug Fixes
+
+- Fake diff on test_suite ([#272](https://github.com/polyai/adk/pull/272),
+  [`998f1d2`](https://github.com/polyai/adk/commit/998f1d2b0d0d7913e73b9a80427e710eac76fb88))
+
+## Summary Integration attributes and sip headers were giving a fake diff due to how the origin is
+  being loaded back from disk
+
+## Motivation When loading a project, the previous known remote version was being loaded wrong,
+  creating a spurious diff
+
+## Changes - Load the object directly, not putting into the attribute or sip_headers part
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs Before: ``` -sip_headers: - resource_id: TEST_CASES-974954e0 - name:
+  sip_headers - headers: {} -integration_attributes: - resource_id: TEST_CASES-974954e0 - name:
+  integration_attributes - attributes: {} ``` After: ``` No changes detected. ```
+
+
 ## v0.42.0 (2026-08-13)
 
 ### Features
