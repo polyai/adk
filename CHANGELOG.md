@@ -1,6 +1,114 @@
 # CHANGELOG
 
 
+## v0.42.0 (2026-08-13)
+
+### Features
+
+- Branch sync, history, rename, tag/untag, and archive/restore
+  ([#247](https://github.com/polyai/adk/pull/247),
+  [`948bcac`](https://github.com/polyai/adk/commit/948bcacd98846383c62f31806fc88f8a6c8ba2e5))
+
+## Summary
+
+Adds six `poly branch` subcommands — `sync`, `history`, `rename`, `restore`, `tag`, `untag` — plus
+  `branch list --archived`, and teaches `branch create`/`merge`/`current`/`list` about branch
+  lineage and the project's deployment mode. Commands the platform only exposes under simplified
+  deployments are gated behind the `deployment_simplification` feature flag. Also makes `poly
+  deployments list`/`show`/`promote`/`rollback` aware of that same deployment mode.
+
+## Motivation
+
+The platform's simplified deployment model introduces branch lineage (branches can be created from
+  other branches), staging tags, and soft-archive/restore with a 30-day window. The ADK CLI had no
+  support for any of it, and `poly branch merge` assumed every branch's parent was `main`. Once a
+  project moves to simplified deployments, its old `sandbox` deployment history is also frozen in
+  place — merges to main go straight to `live` — so the existing `deployments` commands needed to
+  stop defaulting to `sandbox`.
+
+## Changes
+
+**New commands**
+
+- `poly branch sync` — merge the parent branch's changes into the current branch, reusing the
+  existing merge-conflict UX (`-i`/`--interactive`, `--resolutions`) - `poly branch history
+  [--branch-name] [--limit]` — merge history for a branch, 10 entries by default - `poly branch
+  rename [new_name]` — rename the current branch - `poly branch restore [branch]` — restore a
+  soft-deleted branch from the archive - `poly branch tag` / `poly branch untag` — tag the current
+  branch to deploy it to staging, or remove the tag - `poly branch list --archived` — list
+  soft-deleted branches instead of active ones
+
+**Changed behaviour**
+
+- `branch create` now respects the project's deployment mode: one active branch in `simple`,
+  main-only in `releases`, and branching off a direct child of main (max depth 2) in
+  `releases_branches`. This replaces the previous unconditional "branches can only be created from
+  main" guard. A new `--from <branch>` flag lets the source branch be named explicitly instead of
+  always defaulting to whatever branch is currently checked out; the deployment-mode guards validate
+  against the named source, not the current branch. - `branch merge` merges into the branch's actual
+  parent instead of always `main`, switches to that parent afterwards, and shows a confirmation plus
+  "now live" messaging when merging into main under simplified deployments. Merges into a branch
+  other than `main` no longer require a merge message. - `branch current` also prints the parent
+  branch, suppressed when the parent is `main` to avoid noise in the common case. `--json` always
+  includes `parent_branch`. - `branch list` and the `switch`/`delete` interactive pickers render
+  lineage as an indented tree in `releases_branches` mode, and show staging tags. - `branch`
+  subcommands are regrouped into lifecycle and inspection groups in `--help`, and stale help
+  text/epilogs are corrected. - `deployments list`/`show` default to the `live` environment instead
+  of `sandbox` for projects using simplified deployments (`--env` still overrides). `show` no longer
+  prints a "No intermediate deployments" placeholder when the included list is empty, since
+  post-migration deployments legitimately have none. - `deployments promote` is refused outright for
+  projects using simplified deployments — merging to main deploys straight to live, so there is no
+  sandbox → pre-release → live ladder left to promote along, and the platform does not reject the
+  call itself. - `deployments rollback` targets `live` rather than `sandbox` for projects using
+  simplified deployments, since that's the only environment the platform accepts a rollback target
+  for.
+
+**Feature-flag gating**
+
+- New `PosthogHandler` and `AgentStudioInterface.feature_flag_enabled`, backing
+  `AgentStudioProject.using_simplified_deployments`. - `using_simplified_deployments` now also
+  checks convergence: even with the feature flag on, it only reports `True` once the project's
+  `live` deployment head is at least as recent as its `sandbox` head (i.e. `live` has caught up and
+  sandbox is no longer receiving new deployments). This avoids treating a project as simplified
+  mid-migration, while it still has newer sandbox deployments that haven't reached live. - New
+  `require_deployment_simplification` helper gates `sync`, `tag`, and `untag` — the three endpoints
+  the platform 404s when the flag is off. Previously these surfaced a bare `API error: 404 Client
+  Error`; they now exit 1 with an explanatory message in both human and `--json` modes. - New
+  `DeploymentMode` enum and `AgentStudioProject.deployment_mode`, read from the project's
+  `config.deployment_mode` and defaulting to `releases`.
+
+**Supporting API surface**
+
+`sync_branch`, `get_branch_history`, `rename_branch`, `list_archived_branches`, `restore_branch`,
+  `tag_branch`, `untag_branch`, `get_project`, and `create_branch(..., source_branch_id)` across the
+  SDK, sync client, and interface. New console renderers for branch trees, archived branches, and
+  merge history.
+
+**Other**
+
+- Adds `posthog==7.35.4`. - README `poly branch` section and `poly branch --help` examples updated
+  to cover the new commands, including `--from`.
+
+## Follow-ups (tracked separately, not silently dropped)
+
+- The `sandbox` environment does not exist under simplified deployments, but it is still the
+  hardcoded default for `diff`, `chat`, and the `rtc` commands, so those return empty results rather
+  than an explanation. Fixing that also means introducing a shared environment constant — the
+  three-environment literal is currently duplicated at 15+ sites — and renaming
+  `sandbox`/`pre-release` to the branches/staging vocabulary the product now uses.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1208 passed, 61
+  subtests) - [x] No breaking changes to the `poly` CLI interface (or migration path documented) -
+  [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.41.0 (2026-08-12)
 
 ### Chores
