@@ -5298,5 +5298,232 @@ class RtcPullEnvTest(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.env_dir, "data.json")))
 
 
+class SyncIdsWithSandboxTest(unittest.TestCase):
+    """Tests for sync_ids_with_sandbox adopting sandbox resource ids."""
+
+    LOCAL_FLOW_ID = "FLOW_CONFIG-test_flow"
+    SANDBOX_FLOW_ID = "FLOW-sandbox-assigned-id"
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.project.branch_id = "branch-1"
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "branch-1"
+        self.mock_api.send_queued_commands.return_value = True
+        self.project._api_handler = self.mock_api
+        patch.object(AgentStudioProject, "save_config").start()
+        self.addCleanup(patch.stopall)
+
+    def _sandbox_resources_with_reassigned_flow_id(self, without_start_step: bool = False):
+        """Sandbox resources identical to local, except test_flow has a different flow id.
+
+        Mirrors a flow that was created on main after the branch was cut: the files are the
+        same, but the platform assigned the flow a new id, so the sandbox steps carry a
+        `{sandbox_flow_id}_{step_id}` composite resource id.
+
+        Args:
+            without_start_step: omit the start step from the sandbox, so it looks like a
+                step added on this branch with no sandbox counterpart.
+        """
+        sandbox = deepcopy(self.project.resources)
+        for resource_type, resources_by_id in sandbox.items():
+            rekeyed = {}
+            for resource in resources_by_id.values():
+                if isinstance(resource, FlowConfig) and resource.resource_id == self.LOCAL_FLOW_ID:
+                    resource.resource_id = self.SANDBOX_FLOW_ID
+                elif getattr(resource, "flow_id", None) == self.LOCAL_FLOW_ID:
+                    if without_start_step and resource.resource_id.endswith("_start_step"):
+                        continue
+                    resource.flow_id = self.SANDBOX_FLOW_ID
+                    resource.resource_id = resource.resource_id.replace(
+                        self.LOCAL_FLOW_ID, self.SANDBOX_FLOW_ID, 1
+                    )
+                rekeyed[resource.resource_id] = resource
+            sandbox[resource_type] = rekeyed
+        return sandbox
+
+    def test_start_step_is_bare_step_id_when_sandbox_reassigned_the_flow_id(self):
+        """The synced flow config's start_step keeps only the step id, with no flow id prefix.
+
+        start_step is stored as a name locally and resolved back to an id by stripping the
+        flow id prefix off the step's composite resource id. If the mapping's flow_id is the
+        stale local one while the step id has already moved to the sandbox flow id, nothing
+        is stripped and the platform rejects the flow with "Start step ID does not exist".
+        """
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id()
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+        ):
+            self.assertTrue(self.project.sync_ids_with_sandbox())
+
+        synced_flow = self.project.resources[FlowConfig][self.SANDBOX_FLOW_ID]
+        self.assertEqual(synced_flow.start_step, "start_step")
+
+    def test_start_step_is_bare_step_id_when_the_start_step_is_new_on_the_branch(self):
+        """A start step with no sandbox counterpart is still re-pointed at the synced flow id.
+
+        A step added on the branch keeps its `{local_flow_id}_{step_id}` id, so if only
+        flow_id is translated the prefix and flow_id disagree and the flow id stays welded
+        onto start_step exactly as it did in the unfixed case.
+        """
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id(
+            without_start_step=True
+        )
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+        ):
+            self.assertTrue(self.project.sync_ids_with_sandbox())
+
+        synced_flow = self.project.resources[FlowConfig][self.SANDBOX_FLOW_ID]
+        self.assertEqual(synced_flow.start_step, "start_step")
+
+    def test_branch_only_step_is_rekeyed_onto_the_sandbox_flow_id(self):
+        """A step added on the branch adopts the sandbox flow id in its composite id."""
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id(
+            without_start_step=True
+        )
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+        ):
+            self.project.sync_ids_with_sandbox()
+
+        steps = self.project.resources[FlowStep]
+        self.assertIn(f"{self.SANDBOX_FLOW_ID}_start_step", steps)
+        self.assertNotIn(f"{self.LOCAL_FLOW_ID}_start_step", steps)
+        # No step is left straddling the two flow ids.
+        self.assertEqual(
+            [
+                step.resource_id
+                for step in steps.values()
+                if step.flow_id == self.SANDBOX_FLOW_ID
+                and not step.resource_id.startswith(f"{self.SANDBOX_FLOW_ID}_")
+            ],
+            [],
+        )
+
+    def test_two_flows_reassigned_at_once_do_not_contaminate_each_other(self):
+        """Each flow's steps are re-keyed onto their own flow's synced id.
+
+        `FLOW_CONFIG-test_flow` is a string prefix of `FLOW_CONFIG-test_flow_with_punctuation`,
+        so a rewrite that matched flow ids by substring rather than per-resource could strip
+        the wrong prefix and move one flow's steps under the other.
+        """
+        other_local_id = "FLOW_CONFIG-test_flow_with_punctuation"
+        other_sandbox_id = "FLOW-sandbox-other-id"
+        renames = {self.LOCAL_FLOW_ID: self.SANDBOX_FLOW_ID, other_local_id: other_sandbox_id}
+
+        sandbox = deepcopy(self.project.resources)
+        for resource_type, resources_by_id in sandbox.items():
+            rekeyed = {}
+            for resource in resources_by_id.values():
+                if isinstance(resource, FlowConfig) and resource.resource_id in renames:
+                    resource.resource_id = renames[resource.resource_id]
+                elif getattr(resource, "flow_id", None) in renames:
+                    old_flow_id = resource.flow_id
+                    resource.flow_id = renames[old_flow_id]
+                    if resource.resource_id.startswith(f"{old_flow_id}_"):
+                        resource.resource_id = (
+                            f"{resource.flow_id}_"
+                            f"{resource.resource_id.removeprefix(f'{old_flow_id}_')}"
+                        )
+                rekeyed[resource.resource_id] = resource
+            sandbox[resource_type] = rekeyed
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox
+        ):
+            self.assertTrue(self.project.sync_ids_with_sandbox())
+
+        self.assertEqual(
+            self.project.resources[FlowConfig][self.SANDBOX_FLOW_ID].start_step, "start_step"
+        )
+        self.assertEqual(
+            self.project.resources[FlowConfig][other_sandbox_id].start_step, "welcome_step"
+        )
+        # Every step sits under its own flow's synced id, with a matching composite prefix.
+        for step in self.project.resources[FlowStep].values():
+            if step.flow_id in renames.values():
+                self.assertTrue(
+                    step.resource_id.startswith(f"{step.flow_id}_"),
+                    f"{step.resource_id} does not sit under its flow {step.flow_id}",
+                )
+
+    def test_flow_scoped_function_ids_are_not_rewritten(self):
+        """Flow-scoped functions keep their ids: only composite step ids embed the flow id.
+
+        A Function belonging to a flow carries a flow_id but its resource_id
+        (`FUNCTION-process_data`) does not embed it. Prepending the synced flow id to such
+        an id would corrupt it, so the rewrite must apply only to composite ids.
+        """
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id()
+        flow_scoped_function_ids = {
+            function.resource_id
+            for function in self.project.resources[Function].values()
+            if getattr(function, "flow_id", None) == self.LOCAL_FLOW_ID
+        }
+        self.assertTrue(flow_scoped_function_ids, "fixture must have flow-scoped functions")
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+        ):
+            self.project.sync_ids_with_sandbox()
+
+        synced_function_ids = set(self.project.resources[Function])
+        self.assertTrue(flow_scoped_function_ids <= synced_function_ids)
+        self.assertEqual(
+            [rid for rid in synced_function_ids if rid.startswith(f"{self.SANDBOX_FLOW_ID}_")],
+            [],
+        )
+
+    def test_flow_and_steps_adopt_sandbox_ids(self):
+        """Both the flow config and its steps are re-keyed onto the sandbox flow id."""
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id()
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+        ):
+            self.project.sync_ids_with_sandbox()
+
+        self.assertIn(self.SANDBOX_FLOW_ID, self.project.resources[FlowConfig])
+        self.assertNotIn(self.LOCAL_FLOW_ID, self.project.resources[FlowConfig])
+
+        start_step = self.project.resources[FlowStep][f"{self.SANDBOX_FLOW_ID}_start_step"]
+        self.assertEqual(start_step.flow_id, self.SANDBOX_FLOW_ID)
+
+    def test_ids_unchanged_when_sandbox_ids_already_match(self):
+        """A sandbox whose ids already match the branch leaves local resource ids alone."""
+        with patch.object(
+            AgentStudioProject,
+            "get_remote_resources_by_name",
+            return_value=deepcopy(self.project.resources),
+        ):
+            self.assertTrue(self.project.sync_ids_with_sandbox())
+
+        self.assertIn(self.LOCAL_FLOW_ID, self.project.resources[FlowConfig])
+        self.assertEqual(
+            self.project.resources[FlowConfig][self.LOCAL_FLOW_ID].start_step, "start_step"
+        )
+
+    def test_raises_on_main_branch(self):
+        """Syncing ids while on main is not allowed."""
+        self.project.branch_id = "main"
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.sync_ids_with_sandbox()
+        self.assertIn("Cannot sync ids while on main branch", str(ctx.exception))
+
+    def test_raises_when_there_are_uncommitted_changes(self):
+        """Uncommitted local changes must be committed before ids can be synced."""
+        with patch.object(
+            AgentStudioProject, "get_diffs", return_value={"topics/topic_1.yaml": "a diff"}
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                self.project.sync_ids_with_sandbox()
+        self.assertIn("uncommitted changes", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
