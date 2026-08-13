@@ -268,29 +268,119 @@ Examples:
 
 ~~~bash
 poly branch list
+poly branch list --archived
 poly branch current
 poly branch create my-feature
+poly branch create my-feature --from other-branch
 poly branch create my-hotfix --env live
 poly branch create my-hotfix --env live --force
 poly branch switch my-feature
 poly branch switch my-feature --force
+poly branch rename new-name
 poly branch merge 'Merge feature branch'
 poly branch merge 'Merge feature branch' --interactive
+poly branch merge 'Merge feature branch' --force
+poly branch sync
+poly branch sync --interactive
+poly branch history
+poly branch history --branch-name my-feature --limit 5
 poly branch delete
 poly branch delete my-feature
+poly branch restore <branch-id>
+poly branch tag
+poly branch untag
 ~~~
+
+#### `poly branch create`
+
+Creates a new branch. By default the branch is sourced from the currently checked-out branch.
+
+| Flag | Description |
+|---|---|
+| `--from <branch>` | Create the new branch from this branch instead of the currently checked-out branch. |
+| `--env`, `--environment` | Source the new branch from a deployed environment snapshot instead of the current branch. Choices: `sandbox`, `pre-release`, `live`. |
+| `--force`, `-f` | Force branch creation even if there are uncommitted local changes. |
+
+The allowed source branch depends on the project's deployment mode:
+
+- **`simple`** — only one active branch allowed at a time.
+- **`releases`** — branches can only be created from `main`.
+- **`releases_branches`** — branches can be created from `main` or from a direct child of `main` (max depth 2).
+
+When `--env live` or `--env pre-release` is specified:
+
+- the version of the deployed environment is pulled into your local workspace
+- a branch is created from that snapshot
+- the version is immediately pushed to the new branch, leaving a clean slate for hotfix changes
+- if there are local changes, the command will fail unless `--force` is also passed
+
+!!! warning "Use `--env live` with caution"
+
+    Branching from a live deployment snapshot will overwrite your local project with the live state. Merging this branch back to main may roll back changes that were introduced after the snapshot was taken.
 
 #### `poly branch merge`
 
-Merge the current branch into `main` via the CLI. A merge message is required.
+Merge the current branch into its parent branch via the CLI. A merge message is required when merging into `main`.
 
 ~~~bash
 poly branch merge 'Merge message'
 poly branch merge 'Merge message' --interactive
 poly branch merge 'Merge message' --resolutions resolutions.json
+poly branch merge 'Merge message' --force
 ~~~
 
+- Merges into the branch's configured **parent** (not always `main`).
+- When merging into `main` under simplified deployments, the command warns that changes will go live and prompts for confirmation. Use `--force` to skip the prompt.
+- Merges into a branch other than `main` do not require a merge message.
+- After a successful merge the CLI switches your local checkout to the parent branch.
+
 For the full merge workflow — conflict tables, `--interactive` flow, the `--resolutions` JSON format, post-merge behavior, and troubleshooting — see the dedicated [Branch merging reference](./branch_merge.md).
+
+#### `poly branch sync`
+
+Merge the parent branch's latest changes into the current branch. This is the reverse direction of `poly branch merge` — it brings upstream changes down rather than pushing branch changes up.
+
+~~~bash
+poly branch sync
+poly branch sync --interactive
+poly branch sync --resolutions resolutions.json
+~~~
+
+Supports the same `--interactive` / `-i` and `--resolutions` conflict-resolution flow as `poly branch merge`.
+
+!!! info "Simplified deployments only"
+
+    `poly branch sync` requires the project to be using simplified deployments. On other projects the command exits with an explanatory error.
+
+| Flag | Description |
+|---|---|
+| `--interactive`, `-i` | Resolve conflicts interactively. Cannot be combined with `--json`. |
+| `--resolutions <source>` | Pre-defined resolutions as a JSON file path, inline JSON string, or `-` for stdin. |
+
+#### `poly branch history`
+
+Show the merge history for a branch. Defaults to the current branch and the 10 most recent entries.
+
+~~~bash
+poly branch history
+poly branch history --branch-name my-feature
+poly branch history --limit 20
+~~~
+
+| Flag | Description |
+|---|---|
+| `--branch-name`, `-b` | Branch to show history for. Defaults to the current branch. |
+| `--limit` | Number of history entries to show. Defaults to `10`. |
+
+#### `poly branch rename`
+
+Rename the current branch.
+
+~~~bash
+poly branch rename new-name
+~~~
+
+If `new_name` is omitted, the command prompts for one interactively. The `main` branch cannot be renamed.
 
 #### `poly branch delete`
 
@@ -310,30 +400,63 @@ poly branch delete my-feature
 
     On some projects, the delete command hits the same platform endpoint as branch chat and returns a 404 after the confirmation. If this happens, delete the branch through the Agent Studio UI instead.
 
-#### `poly branch create`
+#### `poly branch restore`
 
-Creates a new branch. By default the branch is sourced from the project's `main` branch (the sandbox environment).
+Restore a soft-deleted (archived) branch. Branches are soft-deleted for 30 days before permanent removal.
 
-| Flag | Description |
-|---|---|
-| `--env`, `--environment` | Source the new branch from a deployed environment snapshot instead of `main`. Choices: `sandbox`, `pre-release`, `live`. |
-| `--force`, `-f` | Force branch creation even if there are uncommitted local changes on main. |
+~~~bash
+poly branch restore <branch-id>
+~~~
 
-When `--env live` or `--env pre-release` is specified:
+If `branch-id` is omitted, the command shows an interactive picker of archived branches. Because archived branch names are not unique, the picker displays the branch ID and parent alongside the name. Use `poly branch list --archived` to find the branch ID first.
 
-- the version of the deployed environment is pulled into your local workspace
-- a branch is created from that snapshot
-- the version is immediately pushed to the new branch, leaving a clean slate for hotfix changes
-- the command can only be run from `main`
-- if there are local changes, the command will fail unless `--force` is also passed
+!!! info "Branch IDs are required for restore"
 
-!!! warning "Use `--env live` with caution"
+    Archived branch names are not guaranteed to be unique. Always use the branch ID (shown in `poly branch list --archived`) rather than the name when restoring.
 
-    Branching from a live deployment snapshot will overwrite your local project with the live state. Merging this branch back to main may roll back changes that were introduced after the snapshot was taken.
+#### `poly branch list --archived`
 
-!!! info "Only one active branch is allowed at a time"
+List soft-deleted (archived) branches instead of active ones.
 
-    Agent Studio supports one non-main branch per project. Attempting to create a second branch while one already exists returns an error. Merge or delete the existing branch in Agent Studio before creating a new one.
+~~~bash
+poly branch list --archived
+poly branch list --archived --json
+~~~
+
+#### `poly branch tag`
+
+Tag the current branch to deploy it to the staging environment. Not supported on `main`.
+
+~~~bash
+poly branch tag
+~~~
+
+!!! info "Simplified deployments only"
+
+    `poly branch tag` requires the project to be using simplified deployments.
+
+#### `poly branch untag`
+
+Remove the staging tag from the current branch. Not supported on `main`.
+
+~~~bash
+poly branch untag
+~~~
+
+!!! info "Simplified deployments only"
+
+    `poly branch untag` requires the project to be using simplified deployments.
+
+#### `poly branch current`
+
+Show the current branch. Also prints the parent branch when it is not `main`.
+
+~~~bash
+poly branch current
+poly branch current --json
+~~~
+
+In JSON mode, `parent_branch` is always included in the output (as `null` when there is no parent other than `main`).
 
 ### `poly format`
 
@@ -760,13 +883,9 @@ poly deployments show abc123def
 poly deployments show abc123def --env live
 ~~~
 
-#### `poly deployments list`
-
-List deployments for the project.
-
 | Flag | Description |
 |---|---|
-| `--env` | Environment to list deployments for. Choices: `sandbox`, `pre-release`, `live`. Defaults to `sandbox`. |
+| `--env` | Environment to list deployments for. Choices: `sandbox`, `pre-release`, `live`. Defaults to `live` for projects using simplified deployments, otherwise `sandbox`. |
 | `--details` | Show additional deployment details. |
 | `--verbose` | Show full error tracebacks for debugging. |
 
@@ -774,9 +893,26 @@ List deployments for the project.
 
     The default tabular view may wrap long URLs across multiple rows, making it unreadable in narrow terminals. `--details` produces a vertical layout that is easier to read.
 
+#### `poly deployments show`
+
+Show detailed metadata and included deployments for a single deployment version.
+
+~~~bash
+poly deployments show abc123def
+poly deployments show abc123def --env live
+~~~
+
+| Flag | Description |
+|---|---|
+| `--env` | Environment to query. Choices: `sandbox`, `pre-release`, `live`. Defaults to `live` for projects using simplified deployments, otherwise `sandbox`. |
+
 #### `poly deployments promote`
 
 Promote a deployment to the next environment (`pre-release` or `live`), removing the need to use the Agent Studio UI.
+
+!!! warning "Not available for simplified deployments"
+
+    `poly deployments promote` is not available for projects using simplified deployments. Under simplified deployments, merging to `main` deploys directly to `live` — there is no sandbox → pre-release → live ladder to promote along.
 
 Examples:
 
@@ -808,7 +944,7 @@ Without `--force`, the command prompts for confirmation before proceeding and op
 
 #### `poly deployments rollback`
 
-Roll back sandbox to a previous deployment version.
+Roll back main to a previous deployment version. Targets the `live` environment for projects using simplified deployments, and `sandbox` otherwise.
 
 Examples:
 
@@ -843,12 +979,20 @@ poly validate --json
 poly diff --json
 poly revert --json
 poly branch list --json
+poly branch list --archived --json
 poly branch create my-feature --json
+poly branch create my-feature --from other-branch --json
 poly branch switch my-feature --json
 poly branch current --json
+poly branch rename new-name --json
 poly branch delete --json
 poly branch delete my-feature --json
 poly branch merge 'Merge message' --json
+poly branch sync --json
+poly branch history --json
+poly branch restore <branch-id> --json
+poly branch tag --json
+poly branch untag --json
 poly format --json
 poly init --region us-1 --account_id 123 --project_id my_project --json
 poly project create --region us-1 --account_id my-account --name my-project --json
@@ -877,7 +1021,7 @@ When `--json` is used:
 
 !!! info "`--interactive` and `--json` cannot be used together"
 
-    `poly branch merge --interactive` requires a terminal for its conflict-resolution prompts and is incompatible with `--json`.
+    `poly branch merge --interactive` and `poly branch sync --interactive` require a terminal for their conflict-resolution prompts and are incompatible with `--json`.
 
 !!! info "`--json` implies `--force` for deployments commands"
 
@@ -896,11 +1040,18 @@ The exact fields vary by command. Common fields include:
 | `poly diff --json` | `diffs` |
 | `poly revert --json` | `success`, `files_reverted` |
 | `poly branch list --json` | `current_branch`, `branches` |
-| `poly branch create --json` | `success`, `new_branch_id`, `branch_name` |
+| `poly branch list --archived --json` | `archived_branches` |
+| `poly branch create --json` | `success`, `new_branch_id`, `branch_name`, `base_branch_id`, `base_branch_name` |
 | `poly branch switch --json` | `success`, `switched_to`, `dry_run` |
-| `poly branch current --json` | `current_branch` |
+| `poly branch current --json` | `current_branch`, `parent_branch` |
+| `poly branch rename --json` | `success`, `old_branch_name`, `new_branch_name` |
 | `poly branch delete --json` | `success`, `deleted` |
 | `poly branch merge --json` | `success`; on conflict: `conflicts`, `errors` |
+| `poly branch sync --json` | `success`; on conflict: `conflicts`, `errors` |
+| `poly branch history --json` | `branch_name`, `branch_id`, `history` |
+| `poly branch restore --json` | `success`, `branch_id` |
+| `poly branch tag --json` | `success` |
+| `poly branch untag --json` | `success` |
 | `poly format --json` | `success`, `check_only`, `format_errors`, `affected`, `ty_ran`, `ty_returncode`, `ty_timed_out` |
 | `poly init --json` | `success`, `root_path` |
 | `poly project create --json` | `success`, `root_path` (via init); on error: `success`, `error` |
@@ -921,13 +1072,19 @@ The exact fields vary by command. Common fields include:
 
 For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
 
+For `poly branch current --json`, the response always includes `parent_branch` (as `null` when the branch's parent is `main` or there is no parent).
+
+For `poly branch create --json`, the response includes `base_branch_id` and `base_branch_name` indicating which branch the new branch was created from.
+
 For `poly branch merge --json`, a successful merge returns `{ "success": true }`. When conflicts or errors are present, the response includes `"conflicts"` and `"errors"` arrays containing the raw conflict and error objects from the platform.
+
+For `poly branch sync --json`, a successful sync returns `{ "success": true }`. When conflicts or errors are present, the response includes `"conflicts"` and `"errors"` arrays.
 
 For `poly deployments show --json`, the response includes:
 
 - `deployment` — the full deployment record for the requested version hash.
 - `active_deployment_hashes` — a map of environment names to the currently active version hash in each environment.
-- `included_deployments` — the list of sandbox deployments included since the predecessor version in the queried environment.
+- `included_deployments` — the list of sandbox deployments included since the predecessor version in the queried environment. Empty for deployments made under simplified deployments.
 - `is_rollback` — `true` if the deployment is a rollback to an older version.
 
 Error responses always include `{ "success": false, "error": "...", "traceback": "..." }`.
