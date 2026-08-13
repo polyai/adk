@@ -11,10 +11,9 @@ from contextlib import nullcontext
 
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project, parse_from_projection_json
-from poly.handlers.interface import AgentStudioInterface
+from poly.handlers.interface import REGIONS, AgentStudioInterface
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
-from poly.regions import REGIONS
 
 
 class ProjectCommand(BaseCommand):

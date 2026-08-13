@@ -10,8 +10,7 @@ from argparse import ArgumentParser, Namespace, _SubParsersAction
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.project import ProjectCommand
 from poly.handlers.auth0_handler import Auth0Handler
-from poly.handlers.interface import AgentStudioInterface
-from poly.regions import REGIONS
+from poly.handlers.interface import REGIONS, AgentStudioInterface
 from poly.utils import (
     CREDENTIALS_FILE_PATH,
     any_credentials_exist,
