@@ -1144,7 +1144,7 @@ class AgentStudioProject:
         )
 
         # Queue new/updated/deleted resources
-        commands = []
+        commands = self.api_handler.get_queued_commands()
         if pre_changes.new or pre_changes.deleted or pre_changes.updated:
             commands.extend(
                 self.api_handler.queue_resources(
@@ -1525,6 +1525,12 @@ class AgentStudioProject:
             updated_resources,
             deleted_resources,
             current_resources=self.resources,
+        )
+
+        prepush.clear_unused_settings_from_flow_step(
+            updated_resources,
+            current_resources=self.resources,
+            queue_command=lambda command: self.api_handler.queue_command(command),
         )
 
         return PushPhaseChangeSet(

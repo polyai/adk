@@ -39,13 +39,20 @@ from poly.resources.entities import Entity, EntityType
 from poly.resources.experimental_config import ExperimentalConfig
 from poly.resources.flows import (
     ASRBiasing,
+    ASRConfig,
+    BargeInConfig,
     Condition,
     ConditionType,
     DTMFConfig,
     FlowConfig,
+    FlowSettings,
     FlowStep,
     FunctionStep,
+    LLMConfig,
+    ReasoningEffort,
     StepType,
+    VADConfig,
+    parse_reasoning_effort,
 )
 from poly.resources.function import (
     Function,
@@ -2438,16 +2445,20 @@ TEST_FLOW_STEP = FlowStep(
     flow_id="flow-123",
     flow_name="Test Flow",
     step_type=StepType.ADVANCED_STEP,
-    asr_biasing=ASRBiasing(
+    settings=FlowSettings(
         flow_id="flow-123",
         step_id="step-1",
-        custom_keywords=["Hello", "Help", "Support"],
-        is_enabled=True,
-    ),
-    dtmf_config=DTMFConfig(
-        flow_id="flow-123",
-        step_id="step-1",
-        is_enabled=False,
+        asr_biasing=ASRBiasing(
+            custom_keywords=["Hello", "Help", "Support"],
+            is_enabled=True,
+        ),
+        # Enabled so it survives to_yaml_dict, which omits disabled sections.
+        dtmf=DTMFConfig(
+            flow_id="flow-123",
+            step_id="step-1",
+            is_enabled=True,
+            max_digits=4,
+        ),
     ),
     conditions=[],
     prompt="Hello, how can I help you?",
@@ -2473,9 +2484,9 @@ asr_biasing:
   - Help
   - Support
 dtmf_config:
-  is_enabled: false
+  is_enabled: true
   inter_digit_timeout: 0
-  max_digits: 0
+  max_digits: 4
   end_key: '#'
   collect_while_agent_speaking: false
   is_pii: false
@@ -2620,8 +2631,8 @@ class FlowStepTests(unittest.TestCase):
             flow_name="Test Flow",
             resource_mappings=[],
         )
-        self.assertEqual(step.asr_biasing, ASRBiasing(flow_id="flow-123", step_id="step-1"))
-        self.assertEqual(step.dtmf_config, DTMFConfig(flow_id="flow-123", step_id="step-1"))
+        self.assertIsNone(step.settings.asr_biasing)
+        self.assertIsNone(step.settings.dtmf)
 
     def test_prompt_whitespace_is_stripped(self):
         """Prompts with leading/trailing whitespace are stripped on read."""
@@ -2768,8 +2779,6 @@ conditions:
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.ADVANCED_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[],
             prompt=None,
             position={"x": 0.0, "y": 0.0},
@@ -2786,8 +2795,6 @@ conditions:
             flow_id="missing-flow",
             flow_name="Test Flow",
             step_type=StepType.ADVANCED_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[],
             prompt="Test prompt",
             position={"x": 0.0, "y": 0.0},
@@ -2804,8 +2811,6 @@ conditions:
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.DEFAULT_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[],
             prompt="Use {{fn:func-123}}",
             position={"x": 0.0, "y": 0.0},
@@ -2822,8 +2827,6 @@ conditions:
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.DEFAULT_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[],
             prompt="Hello, how can I help you?",
             position={"x": 0.0, "y": 0.0},
@@ -2854,8 +2857,6 @@ conditions:
                 flow_id="flow-123",
                 flow_name="Test Flow",
                 step_type=StepType.ADVANCED_STEP,
-                asr_biasing=None,
-                dtmf_config=None,
                 conditions=[],
                 prompt="Prompt",
                 position={"x": 0.0, "y": 0.0},
@@ -2870,8 +2871,6 @@ conditions:
                 flow_id="flow-123",
                 flow_name="Test Flow",
                 step_type=StepType.ADVANCED_STEP,
-                asr_biasing=None,
-                dtmf_config=None,
                 conditions=[],
                 prompt="Prompt",
                 position={"x": 0.0, "y": 0.0},
@@ -3036,17 +3035,19 @@ conditions:
     def test_get_new_updated_deleted_subresources(self):
         """Test get_new_updated_deleted_subresources for flow step.
 
-        Advanced steps only check ASR/DTMF (updates only).
+        Advanced steps only check settings (updates only).
         Default steps only check conditions (new/updated/deleted).
         """
-        # ===== ADVANCED STEP TESTS (ASR/DTMF only, updates only) =====
+        # ===== ADVANCED STEP TESTS (settings only, updates only) =====
 
-        # Test Advanced step with no old resource
+        # Test Advanced step with no old resource: settings differ from the empty
+        # baseline, so they are pushed as a single update alongside the step create.
         new, updated, deleted = TEST_FLOW_STEP.get_new_updated_deleted_subresources(
             old_resource=None
         )
         self.assertEqual(len(new), 0)
-        self.assertEqual(len(updated), 0)  # No old_resource, so no updates
+        self.assertEqual(len(updated), 1)
+        self.assertEqual(updated[0].command_type, "flow_settings")
         self.assertEqual(len(deleted), 0)
 
         # Test Advanced step with same resource (no changes)
@@ -3054,7 +3055,26 @@ conditions:
             old_resource=TEST_FLOW_STEP
         )
         self.assertEqual(len(new), 0)
-        self.assertEqual(len(updated), 0)  # ASR/DTMF unchanged
+        self.assertEqual(len(updated), 0)  # Settings unchanged
+        self.assertEqual(len(deleted), 0)
+
+        # Test Advanced step with no settings at all: nothing to push
+        step_no_settings = FlowStep(
+            resource_id="flow-123_step-1",
+            step_id="step-1",
+            name="Test Step",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.ADVANCED_STEP,
+            conditions=[],
+            prompt="Test prompt",
+            position={"x": 0.0, "y": 0.0},
+        )
+        new, updated, deleted = step_no_settings.get_new_updated_deleted_subresources(
+            old_resource=None
+        )
+        self.assertEqual(len(new), 0)
+        self.assertEqual(len(updated), 0)
         self.assertEqual(len(deleted), 0)
 
         # Test Advanced step: ASR biasing changed (update)
@@ -3071,34 +3091,7 @@ conditions:
             address=False,
             custom_keywords=["keyword1"],
             is_enabled=True,
-            step_id="step-1",
-            flow_id="flow-123",
         )
-
-        step_with_asr = FlowStep(
-            resource_id="flow-123_step-1",
-            step_id="step-1",
-            name="Test Step",
-            flow_id="flow-123",
-            flow_name="Test Flow",
-            step_type=StepType.ADVANCED_STEP,
-            asr_biasing=new_asr,
-            dtmf_config=None,
-            conditions=[],
-            prompt="Test prompt",
-            position={"x": 0.0, "y": 0.0},
-        )
-
-        new, updated, deleted = step_with_asr.get_new_updated_deleted_subresources(
-            old_resource=TEST_FLOW_STEP
-        )
-        self.assertEqual(len(new), 0)  # Advanced steps don't have "new" ASR/DTMF
-        self.assertEqual(len(updated), 1)  # ASR changed
-        self.assertEqual(updated[0].resource_id, "flow-123.step-1")
-        self.assertEqual(updated[0].command_type, "flow_step_asr_config")
-        self.assertEqual(len(deleted), 0)  # Advanced steps don't have "deleted" ASR/DTMF
-
-        # Test Advanced step: DTMF config changed (update)
         new_dtmf = DTMFConfig(
             is_enabled=True,
             inter_digit_timeout=5,
@@ -3110,53 +3103,39 @@ conditions:
             flow_id="flow-123",
         )
 
-        step_with_dtmf = FlowStep(
-            resource_id="flow-123_step-1",
-            step_id="step-1",
-            name="Test Step",
-            flow_id="flow-123",
-            flow_name="Test Flow",
-            step_type=StepType.ADVANCED_STEP,
-            asr_biasing=None,
-            dtmf_config=new_dtmf,
-            conditions=[],
-            prompt="Test prompt",
-            position={"x": 0.0, "y": 0.0},
-        )
+        def advanced_step_with(**settings_kwargs) -> FlowStep:
+            return FlowStep(
+                resource_id="flow-123_step-1",
+                step_id="step-1",
+                name="Test Step",
+                flow_id="flow-123",
+                flow_name="Test Flow",
+                step_type=StepType.ADVANCED_STEP,
+                settings=FlowSettings(step_id="step-1", flow_id="flow-123", **settings_kwargs),
+                conditions=[],
+                prompt="Test prompt",
+                position={"x": 0.0, "y": 0.0},
+            )
 
-        new, updated, deleted = step_with_dtmf.get_new_updated_deleted_subresources(
-            old_resource=TEST_FLOW_STEP
-        )
-        self.assertEqual(len(new), 0)  # Advanced steps don't have "new" DTMF
-        self.assertEqual(len(updated), 1)  # DTMF changed
-        self.assertEqual(updated[0].resource_id, "flow-123.step-1")
-        self.assertEqual(updated[0].command_type, "flow_step_dtmf_config")
-        self.assertEqual(updated[0].max_digits, 4)
-        self.assertEqual(len(deleted), 0)  # Advanced steps don't have "deleted" DTMF
+        # Every settings change collapses into a single flow_settings update, because
+        # the platform takes the whole block in one update_step_settings command.
+        for description, step in [
+            ("ASR biasing changed", advanced_step_with(asr_biasing=new_asr)),
+            ("DTMF changed", advanced_step_with(dtmf=new_dtmf)),
+            ("both changed", advanced_step_with(asr_biasing=new_asr, dtmf=new_dtmf)),
+        ]:
+            with self.subTest(description):
+                new, updated, deleted = step.get_new_updated_deleted_subresources(
+                    old_resource=TEST_FLOW_STEP
+                )
+                self.assertEqual(len(new), 0)
+                self.assertEqual(len(updated), 1)
+                self.assertEqual(updated[0].command_type, "flow_settings")
+                self.assertEqual(updated[0].update_command_type, "update_step_settings")
+                self.assertEqual(updated[0].resource_id, "flow-123_step-1_settings")
+                self.assertEqual(len(deleted), 0)
 
-        # Test Advanced step: Both ASR and DTMF updated
-        step_with_both = FlowStep(
-            resource_id="flow-123_step-1",
-            step_id="step-1",
-            name="Test Step",
-            flow_id="flow-123",
-            flow_name="Test Flow",
-            step_type=StepType.ADVANCED_STEP,
-            asr_biasing=new_asr,
-            dtmf_config=new_dtmf,
-            conditions=[],
-            prompt="Test prompt",
-            position={"x": 0.0, "y": 0.0},
-        )
-
-        new, updated, deleted = step_with_both.get_new_updated_deleted_subresources(
-            old_resource=TEST_FLOW_STEP
-        )
-        self.assertEqual(len(new), 0)
-        self.assertEqual(len(updated), 2)  # Both ASR and DTMF updated
-        updated_types = {u.command_type for u in updated}
-        self.assertIn("flow_step_asr_config", updated_types)
-        self.assertIn("flow_step_dtmf_config", updated_types)
+        self.assertEqual(advanced_step_with(dtmf=new_dtmf).settings.dtmf.max_digits, 4)
         self.assertEqual(len(deleted), 0)
 
         # ===== DEFAULT STEP TESTS (Conditions only, new/updated/deleted) =====
@@ -3169,8 +3148,6 @@ conditions:
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.DEFAULT_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[],
             prompt="Test prompt",
             position={"x": 0.0, "y": 0.0},
@@ -3203,8 +3180,6 @@ conditions:
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.DEFAULT_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[new_condition],
             prompt="Test prompt",
             position={"x": 0.0, "y": 0.0},
@@ -3239,8 +3214,6 @@ conditions:
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.DEFAULT_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[updated_condition],
             prompt="Test prompt",
             position={"x": 0.0, "y": 0.0},
@@ -3307,8 +3280,6 @@ conditions:
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.DEFAULT_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[condition_1, condition_2, condition_3],
             prompt="Test prompt",
             position={"x": 0.0, "y": 0.0},
@@ -3345,8 +3316,6 @@ conditions:
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.DEFAULT_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[updated_condition_1, condition_2, condition_4],
             prompt="Test prompt",
             position={"x": 0.0, "y": 0.0},
@@ -3410,15 +3379,15 @@ dtmf_config:
             self.assertEqual(result.step_type, StepType.ADVANCED_STEP)
             self.assertEqual(result.prompt, "Hello, how can I help you?")
             # Verify ASR biasing
-            self.assertIsNotNone(result.asr_biasing)
-            self.assertEqual(result.asr_biasing.is_enabled, True)
-            self.assertEqual(result.asr_biasing.alphanumeric, True)
-            self.assertEqual(result.asr_biasing.custom_keywords, ["keyword1", "keyword2"])
+            self.assertIsNotNone(result.settings.asr_biasing)
+            self.assertEqual(result.settings.asr_biasing.is_enabled, True)
+            self.assertEqual(result.settings.asr_biasing.alphanumeric, True)
+            self.assertEqual(result.settings.asr_biasing.custom_keywords, ["keyword1", "keyword2"])
             # Verify DTMF config
-            self.assertIsNotNone(result.dtmf_config)
-            self.assertEqual(result.dtmf_config.is_enabled, True)
-            self.assertEqual(result.dtmf_config.max_digits, 4)
-            self.assertEqual(result.dtmf_config.end_key, "#")
+            self.assertIsNotNone(result.settings.dtmf)
+            self.assertEqual(result.settings.dtmf.is_enabled, True)
+            self.assertEqual(result.settings.dtmf.max_digits, 4)
+            self.assertEqual(result.settings.dtmf.end_key, "#")
 
     def test_read_local_resource_default_step(self):
         """Test reading a flow step with conditions."""
@@ -3670,8 +3639,6 @@ prompt: This is a default step
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.DEFAULT_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[],
             extracted_entities=["zebra", "apple", "mango"],
             prompt="Extract some entities.",
@@ -8944,6 +8911,347 @@ class FlowStepFromProjection(unittest.TestCase):
     def test_empty_projection_yields_no_flow_steps(self):
         """An empty projection should return an empty dict."""
         self.assertEqual(FlowStep.from_projection({}), {})
+
+
+class FlowSettingsFromProjectionTest(unittest.TestCase):
+    """Tests for FlowSettings.from_projection.
+
+    Projections are camelCase and the nested settings block is authoritative.
+    """
+
+    STEP_ID = "STEP-A"
+    FLOW_ID = "FLOW-1"
+
+    def _parse(self, step: dict) -> FlowSettings:
+        return FlowSettings.from_projection(step, step_id=self.STEP_ID, flow_id=self.FLOW_ID)
+
+    def test_parses_camel_case_sections(self):
+        settings = self._parse(
+            {
+                "settings": {
+                    "asrBiasing": {
+                        "isEnabled": True,
+                        "nameSpelling": True,
+                        "partySize": True,
+                        "customKeywords": ["acme"],
+                    },
+                    "dtmf": {"isEnabled": True, "maxDigits": 4, "endKey": "#"},
+                    "bargeIn": {"isEnabled": True},
+                }
+            }
+        )
+
+        self.assertTrue(settings.asr_biasing.is_enabled)
+        self.assertTrue(settings.asr_biasing.name_spelling)
+        self.assertTrue(settings.asr_biasing.party_size)
+        self.assertEqual(settings.asr_biasing.custom_keywords, ["acme"])
+        self.assertEqual(settings.dtmf.max_digits, 4)
+        self.assertTrue(settings.barge_in.is_enabled)
+
+    def test_parses_asr_vad_and_llm_sections(self):
+        settings = self._parse(
+            {
+                "settings": {
+                    "asr": {"provider": "prov", "model": "mod"},
+                    "vad": {
+                        "provider": "prov",
+                        "vadStart": 1.5,
+                        "vadEnd": 2.5,
+                        "speechThreshold": 0.3,
+                        "silenceThreshold": 0.7,
+                    },
+                    "llm": {"providerModelId": "polywhirl-3-5", "reasoningEffort": 3},
+                }
+            }
+        )
+
+        self.assertEqual(settings.asr.model, "mod")
+        self.assertEqual(settings.vad.vad_start, 1.5)
+        self.assertEqual(settings.vad.silence_threshold, 0.7)
+        self.assertEqual(settings.llm.provider_model_id, "polywhirl-3-5")
+
+    def test_reasoning_effort_int_maps_to_enum(self):
+        """The projection sends the proto enum's ordinal, not its string value."""
+        for ordinal, expected in [
+            (0, ReasoningEffort.UNSPECIFIED),
+            (1, ReasoningEffort.MINIMAL),
+            (2, ReasoningEffort.LOW),
+            (3, ReasoningEffort.MEDIUM),
+            (4, ReasoningEffort.HIGH),
+            (5, ReasoningEffort.AUTO),
+        ]:
+            with self.subTest(ordinal):
+                settings = self._parse(
+                    {"settings": {"llm": {"providerModelId": "m", "reasoningEffort": ordinal}}}
+                )
+                self.assertEqual(settings.llm.reasoning_effort, expected)
+
+    def test_legacy_top_level_config_is_ignored(self):
+        """The backend keeps emitting asrBiasing/dtmfConfig even once settings are cleared.
+
+        Reading them back would resurrect config the user removed, so a cleared
+        section must stay cleared.
+        """
+        settings = self._parse(
+            {
+                "asrBiasing": {"isEnabled": True, "alphanumeric": True},
+                "dtmfConfig": {"isEnabled": True, "maxDigits": 9},
+                "settings": {"llm": {"providerModelId": "m", "reasoningEffort": 1}},
+            }
+        )
+
+        self.assertIsNone(settings.asr_biasing)
+        self.assertIsNone(settings.dtmf)
+        self.assertEqual(settings.llm.provider_model_id, "m")
+
+    def test_legacy_top_level_config_is_read_when_there_is_no_settings_block(self):
+        """A step untouched since before per-step settings shipped has config only
+        at the top level, and must still be migrated."""
+        settings = self._parse(
+            {
+                "asrBiasing": {"isEnabled": True, "alphanumeric": True},
+                "dtmfConfig": {"isEnabled": True, "maxDigits": 9},
+            }
+        )
+
+        self.assertTrue(settings.asr_biasing.is_enabled)
+        self.assertTrue(settings.asr_biasing.alphanumeric)
+        self.assertEqual(settings.dtmf.max_digits, 9)
+
+    def test_missing_settings_yields_empty_settings_not_none(self):
+        """FlowStep.settings is never None, so diffing never has to special-case it."""
+        settings = self._parse({})
+
+        self.assertIsInstance(settings, FlowSettings)
+        self.assertEqual(settings.to_yaml_dict(), {})
+        self.assertEqual(settings.step_id, self.STEP_ID)
+        self.assertEqual(settings.flow_id, self.FLOW_ID)
+
+
+class FlowSettingsSerializationTest(unittest.TestCase):
+    """Tests for FlowSettings YAML round-tripping and proto building."""
+
+    STEP_ID = "step-1"
+    FLOW_ID = "FLOW-abc"
+
+    def _settings(self, **kwargs) -> FlowSettings:
+        return FlowSettings(step_id=self.STEP_ID, flow_id=self.FLOW_ID, **kwargs)
+
+    def test_round_trips_every_section(self):
+        settings = self._settings(
+            asr_biasing=ASRBiasing(is_enabled=True, custom_keywords=["acme"], numeric=True),
+            dtmf=DTMFConfig(self.STEP_ID, self.FLOW_ID, is_enabled=True, max_digits=4),
+            asr=ASRConfig(provider="prov", model="mod"),
+            vad=VADConfig(
+                provider="prov",
+                vad_start=1.5,
+                vad_end=2.5,
+                speech_threshold=0.3,
+                silence_threshold=0.7,
+            ),
+            barge_in=BargeInConfig(is_enabled=True),
+            llm=LLMConfig(provider_model_id="mod-1", reasoning_effort=ReasoningEffort.HIGH),
+        )
+
+        restored = FlowSettings.from_yaml_dict(
+            settings.to_yaml_dict(), step_id=self.STEP_ID, flow_id=self.FLOW_ID
+        )
+
+        self.assertEqual(restored.to_yaml_dict(), settings.to_yaml_dict())
+        self.assertEqual(restored.asr_biasing.custom_keywords, ["acme"])
+        self.assertEqual(restored.dtmf.max_digits, 4)
+        self.assertEqual(restored.asr.model, "mod")
+        self.assertEqual(restored.vad.vad_end, 2.5)
+        self.assertTrue(restored.barge_in.is_enabled)
+        self.assertEqual(restored.llm.reasoning_effort, ReasoningEffort.HIGH)
+
+    def test_dtmf_uses_legacy_yaml_key(self):
+        """The YAML key stays dtmf_config so existing step files keep working."""
+        settings = self._settings(
+            dtmf=DTMFConfig(self.STEP_ID, self.FLOW_ID, is_enabled=True, max_digits=2)
+        )
+
+        yaml_dict = settings.to_yaml_dict()
+        self.assertIn("dtmf_config", yaml_dict)
+        self.assertNotIn("dtmf", yaml_dict)
+        self.assertEqual(
+            FlowSettings.from_yaml_dict(
+                yaml_dict, step_id=self.STEP_ID, flow_id=self.FLOW_ID
+            ).dtmf.max_digits,
+            2,
+        )
+
+    def test_disabled_asr_biasing_and_dtmf_are_omitted(self):
+        """Disabled is represented as absent for the sections that deep-merge."""
+        settings = self._settings(
+            asr_biasing=ASRBiasing(is_enabled=False, custom_keywords=["acme"]),
+            dtmf=DTMFConfig(self.STEP_ID, self.FLOW_ID, is_enabled=False),
+        )
+
+        self.assertEqual(settings.to_yaml_dict(), {})
+
+    def test_disabled_barge_in_is_kept(self):
+        """barge_in is clearable, so an explicit disable must be distinguishable
+        from no override at all."""
+        settings = self._settings(barge_in=BargeInConfig(is_enabled=False))
+
+        self.assertEqual(settings.to_yaml_dict(), {"barge_in": {"is_enabled": False}})
+
+    def test_build_update_proto_only_sets_present_sections(self):
+        settings = self._settings(
+            barge_in=BargeInConfig(is_enabled=True),
+            llm=LLMConfig(provider_model_id="mod-1", reasoning_effort=ReasoningEffort.LOW),
+        )
+
+        proto = settings.build_update_proto()
+
+        self.assertEqual(proto.flow_id, self.FLOW_ID)
+        self.assertEqual(proto.step_id, self.STEP_ID)
+        self.assertTrue(proto.settings.HasField("barge_in"))
+        self.assertTrue(proto.settings.HasField("llm"))
+        self.assertEqual(proto.settings.llm.provider_model_id, "mod-1")
+        for absent in ("asr_biasing", "dtmf", "asr", "vad"):
+            self.assertFalse(proto.settings.HasField(absent), absent)
+
+    def test_command_type_is_the_combined_settings_command(self):
+        settings = self._settings(barge_in=BargeInConfig(is_enabled=True))
+
+        self.assertEqual(settings.command_type, "flow_settings")
+        self.assertEqual(settings.update_command_type, "update_step_settings")
+
+    def test_partially_specified_sections_are_accepted(self):
+        """Every field in the asr/vad/llm sections is an optional override, so a
+        step may set only some of them."""
+        for block, expected in [
+            ({"asr": {"provider": "p"}}, {"asr": {"provider": "p"}}),
+            ({"vad": {"provider": "p"}}, {"vad": {"provider": "p"}}),
+            ({"vad": {"vadStart": 1.5}}, {"vad": {"vad_start": 1.5}}),
+            (
+                {"llm": {"reasoningEffort": 3}},
+                {"llm": {"reasoning_effort": "medium"}},
+            ),
+        ]:
+            with self.subTest(block):
+                settings = FlowSettings.from_projection(
+                    {"settings": block}, step_id=self.STEP_ID, flow_id=self.FLOW_ID
+                )
+                self.assertEqual(settings.to_yaml_dict(), expected)
+
+    def test_unset_overrides_are_not_written_as_nulls(self):
+        settings = self._settings(asr=ASRConfig(provider="p"))
+
+        self.assertEqual(settings.to_yaml_dict(), {"asr": {"provider": "p"}})
+        self.assertFalse(settings.build_update_proto().settings.asr.model)
+
+
+class ReasoningEffortParsingTest(unittest.TestCase):
+    """Tests for parse_reasoning_effort."""
+
+    def test_parses_ordinals_strings_and_enum_members(self):
+        self.assertEqual(parse_reasoning_effort(3), ReasoningEffort.MEDIUM)
+        self.assertEqual(parse_reasoning_effort("medium"), ReasoningEffort.MEDIUM)
+        self.assertEqual(parse_reasoning_effort(ReasoningEffort.MEDIUM), ReasoningEffort.MEDIUM)
+
+    def test_unknown_ordinal_suggests_upgrading(self):
+        """A newer backend enum value must not crash the pull with a raw KeyError."""
+        with self.assertRaises(ValueError) as ctx:
+            parse_reasoning_effort(6)
+
+        self.assertIn("Unknown reasoning effort '6'", str(ctx.exception))
+        self.assertIn("upgrading", str(ctx.exception))
+
+    def test_invalid_string_lists_the_valid_values(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_reasoning_effort("turbo")
+
+        self.assertIn("turbo", str(ctx.exception))
+        self.assertIn("unspecified, minimal, low, medium, high, auto", str(ctx.exception))
+
+
+class FlowSettingsValidationTest(unittest.TestCase):
+    """Tests for the value ranges the backend enforces on settings."""
+
+    def _step(self, **settings_kwargs) -> FlowStep:
+        return FlowStep(
+            resource_id="flow-123_step-1",
+            step_id="step-1",
+            name="Test Step",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.ADVANCED_STEP,
+            prompt="Hello",
+            settings=FlowSettings(step_id="step-1", flow_id="flow-123", **settings_kwargs),
+        )
+
+    def _mappings(self) -> list[ResourceMapping]:
+        return [
+            ResourceMapping(
+                resource_id="flow-123",
+                resource_name="Test Flow",
+                resource_type=FlowConfig,
+                file_path="flows/test_flow/flow_config.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+                flow_id="flow-123",
+            )
+        ]
+
+    def test_negative_dtmf_values_are_rejected(self):
+        for kwargs, expected in [
+            ({"max_digits": -1}, "max_digits"),
+            ({"inter_digit_timeout": -1}, "inter_digit_timeout"),
+        ]:
+            with self.subTest(expected):
+                settings = FlowSettings(
+                    step_id="step-1",
+                    flow_id="flow-123",
+                    dtmf=DTMFConfig("step-1", "flow-123", **kwargs),
+                )
+                with self.assertRaises(ValueError) as ctx:
+                    settings.validate()
+                self.assertIn(expected, str(ctx.exception))
+
+    def test_negative_and_non_finite_vad_values_are_rejected(self):
+        for kwargs, expected in [
+            ({"vad_start": -1.0}, "cannot be negative"),
+            ({"vad_end": -1.0}, "cannot be negative"),
+            ({"vad_start": float("inf")}, "must be a finite number"),
+            ({"vad_end": float("nan")}, "must be a finite number"),
+        ]:
+            with self.subTest(kwargs):
+                settings = FlowSettings(
+                    step_id="step-1", flow_id="flow-123", vad=VADConfig(**kwargs)
+                )
+                with self.assertRaises(ValueError) as ctx:
+                    settings.validate()
+                self.assertIn(expected, str(ctx.exception))
+
+    def test_thresholds_are_unbounded(self):
+        """The backend puts no bounds on these, so neither do we."""
+        settings = FlowSettings(
+            step_id="step-1",
+            flow_id="flow-123",
+            vad=VADConfig(speech_threshold=-5.0, silence_threshold=99.0),
+        )
+
+        self.assertIsNone(settings.validate())
+
+    def test_flow_step_validate_checks_its_settings(self):
+        """Settings are a sub-resource, so nothing else validates them."""
+        step = self._step(dtmf=DTMFConfig("step-1", "flow-123", max_digits=-1))
+
+        with self.assertRaises(ValueError) as ctx:
+            step.validate(resource_mappings=self._mappings())
+
+        self.assertIn("max_digits", str(ctx.exception))
+
+    def test_valid_settings_pass_flow_step_validation(self):
+        step = self._step(
+            dtmf=DTMFConfig("step-1", "flow-123", max_digits=4, inter_digit_timeout=0),
+            vad=VADConfig(vad_start=0.0, vad_end=2.5),
+        )
+
+        self.assertIsNone(step.validate(resource_mappings=self._mappings()))
 
 
 class FunctionStepFromProjection(unittest.TestCase):

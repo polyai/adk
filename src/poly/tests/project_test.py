@@ -52,6 +52,7 @@ from poly.resources.flows import (
     ASRBiasing,
     Condition,
     DTMFConfig,
+    FlowSettings,
     StepType,
 )
 from poly.resources.function import FunctionType
@@ -212,9 +213,9 @@ class SerializationRoundTripTest(unittest.TestCase):
         self.assertEqual(restored.compute_hash(), doc.compute_hash())
 
     def test_flow_step_round_trip_excludes_sub_resource_internals(self):
-        """ASRBiasing/DTMFConfig set 'name' and 'resource_id' internally,
-        but these are not __init__ params. They must be excluded from
-        serialization so nested deserialization works.
+        """FlowSettings sets 'name' and 'resource_id' internally, but these are
+        not __init__ params. They must be excluded from serialization so nested
+        deserialization works.
         """
         step = FlowStep(
             resource_id="flow_step-1",
@@ -224,23 +225,28 @@ class SerializationRoundTripTest(unittest.TestCase):
             flow_name="Test Flow",
             step_type="advanced_step",
             prompt="Hello",
-            asr_biasing=ASRBiasing(step_id="step-1", flow_id="flow-123"),
-            dtmf_config=DTMFConfig(step_id="step-1", flow_id="flow-123"),
+            settings=FlowSettings(
+                step_id="step-1",
+                flow_id="flow-123",
+                asr_biasing=ASRBiasing(is_enabled=True),
+                dtmf=DTMFConfig(step_id="step-1", flow_id="flow-123"),
+            ),
         )
         serialized = resource_utils.resource_to_dict(step)
-        asr_dict = serialized["asr_biasing"]
-        dtmf_dict = serialized["dtmf_config"]
+        settings_dict = serialized["settings"]
 
         # Internal fields must not leak into serialized output
-        self.assertNotIn("name", asr_dict)
-        self.assertNotIn("resource_id", asr_dict)
-        self.assertNotIn("name", dtmf_dict)
-        self.assertNotIn("resource_id", dtmf_dict)
+        self.assertNotIn("name", settings_dict)
+        self.assertNotIn("resource_id", settings_dict)
+        for section in ("asr_biasing", "dtmf"):
+            self.assertNotIn("name", settings_dict[section])
+            self.assertNotIn("resource_id", settings_dict[section])
 
         # Deserialize back — must not raise TypeError
         restored = FlowStep(**serialized)
         self.assertEqual(restored.name, "Test Step")
-        self.assertEqual(restored.asr_biasing.step_id, "step-1")
+        self.assertEqual(restored.settings.step_id, "step-1")
+        self.assertTrue(restored.settings.asr_biasing.is_enabled)
 
 
 class DiscoverLocalResourcesTest(unittest.TestCase):
@@ -2207,9 +2213,9 @@ class PushProjectTest(unittest.TestCase):
 
     def test_push_project_modified_sub_resources_dtmf(self):
         project_data = deepcopy(PROJECT_DATA)
-        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["dtmf_config"][
-            "is_enabled"
-        ] = True
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["settings"][
+            "dtmf"
+        ]["is_enabled"] = True
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
         success, message, commands = project.push_project(force=True)
@@ -2218,7 +2224,8 @@ class PushProjectTest(unittest.TestCase):
         self.mock_api_handler.queue_resources.assert_called_once()
         call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
-        self.assertIn(DTMFConfig, updated_resources)
+        # DTMF is pushed as part of the step's combined settings sub-resource.
+        self.assertIn(FlowSettings, updated_resources)
 
     def test_push_project_new_sub_resources_condition(self):
         project_data = deepcopy(PROJECT_DATA)
@@ -2274,9 +2281,9 @@ class PushProjectTest(unittest.TestCase):
         """Test pushing an updated ASRBiasing sub-resource"""
         project_data = deepcopy(PROJECT_DATA)
         # Modify ASR biasing in project_data
-        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["asr_biasing"][
-            "custom_keywords"
-        ] = ["NewKeyword1", "NewKeyword2"]
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["settings"][
+            "asr_biasing"
+        ]["custom_keywords"] = ["NewKeyword1", "NewKeyword2"]
 
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
@@ -2286,7 +2293,8 @@ class PushProjectTest(unittest.TestCase):
         self.mock_api_handler.queue_resources.assert_called_once()
         call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
-        self.assertIn(ASRBiasing, updated_resources)
+        # ASR biasing is pushed as part of the step's combined settings sub-resource.
+        self.assertIn(FlowSettings, updated_resources)
 
     def test_push_project_mixed_changes(self):
         project_data = deepcopy(PROJECT_DATA)
@@ -2305,9 +2313,9 @@ class PushProjectTest(unittest.TestCase):
             "function_type": "global",
         }
         # Modified resource in subresource
-        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["asr_biasing"][
-            "is_enabled"
-        ] = False
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["settings"][
+            "asr_biasing"
+        ]["is_enabled"] = False
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
         success, message, commands = project.push_project(force=True)
@@ -2319,7 +2327,7 @@ class PushProjectTest(unittest.TestCase):
         updated_resources = call_args.kwargs["updated_resources"]
         deleted_resources = call_args.kwargs["deleted_resources"]
         self.assertIn(Topic, new_resources)
-        self.assertIn(ASRBiasing, updated_resources)
+        self.assertIn(FlowSettings, updated_resources)
         self.assertIn(FlowStep, updated_resources)
         self.assertIn(Function, deleted_resources)
 
@@ -3980,6 +3988,107 @@ class MigrateFlowStepResourceIdsTest(unittest.TestCase):
         self.assertIn("FLOW-abc_step-1", flow_steps)
         self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
 
+
+class MigrateFlowStepSettingsTest(unittest.TestCase):
+    """Tests for migrate_flow_step_settings status dict migration."""
+
+    @staticmethod
+    def _legacy_status_dict() -> dict:
+        return {
+            "resources": {
+                "flow_steps": {
+                    "FLOW-abc_step-1": {
+                        "resource_id": "FLOW-abc_step-1",
+                        "step_id": "step-1",
+                        "flow_id": "FLOW-abc",
+                        "asr_biasing": {
+                            "is_enabled": True,
+                            "custom_keywords": ["hello"],
+                            # Internals set by the config class, not __init__ args
+                            "step_id": "step-1",
+                            "flow_id": "FLOW-abc",
+                            "resource_id": "FLOW-abc.step-1",
+                            "name": "asr",
+                        },
+                        "dtmf_config": {
+                            "is_enabled": True,
+                            "max_digits": 4,
+                            "step_id": "step-1",
+                            "flow_id": "FLOW-abc",
+                            "resource_id": "FLOW-abc.step-1",
+                            "name": "dtmf",
+                        },
+                    },
+                },
+            },
+        }
+
+    def test_folds_legacy_keys_into_settings(self):
+        """Legacy top-level asr_biasing/dtmf_config move under settings."""
+        from poly.migration_utils import migrate_flow_step_settings
+
+        status_dict = self._legacy_status_dict()
+        migrate_flow_step_settings(status_dict)
+
+        settings = status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"]["settings"]
+        # dtmf_config is renamed to dtmf to match FlowSettings
+        self.assertEqual(
+            settings,
+            {
+                "asr_biasing": {"is_enabled": True, "custom_keywords": ["hello"]},
+                "dtmf": {"is_enabled": True, "max_digits": 4},
+            },
+        )
+
+    def test_migrated_dict_loads_into_flow_settings(self):
+        """The migrated shape is accepted by FlowStep, which is the point of the migration."""
+        from poly.migration_utils import migrate_flow_step_settings
+
+        status_dict = self._legacy_status_dict()
+        migrate_flow_step_settings(status_dict)
+        resource_dict = status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"]
+
+        step = FlowStep(
+            resource_id=resource_dict["resource_id"],
+            name="Step 1",
+            step_id=resource_dict["step_id"],
+            flow_id=resource_dict["flow_id"],
+            flow_name="Test Flow",
+            step_type="advanced_step",
+            prompt="Hello",
+            settings=resource_dict["settings"],
+        )
+        self.assertTrue(step.settings.asr_biasing.is_enabled)
+        self.assertEqual(step.settings.asr_biasing.custom_keywords, ["hello"])
+        self.assertEqual(step.settings.dtmf.max_digits, 4)
+
+    def test_existing_settings_take_precedence(self):
+        """A newer status dict already carrying settings is not overwritten."""
+        from poly.migration_utils import migrate_flow_step_settings
+
+        status_dict = self._legacy_status_dict()
+        status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"]["settings"] = {
+            "asr_biasing": {"is_enabled": False},
+        }
+
+        migrate_flow_step_settings(status_dict)
+
+        settings = status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"]["settings"]
+        self.assertFalse(settings["asr_biasing"]["is_enabled"])
+        # The section missing from the newer format is still back-filled
+        self.assertEqual(settings["dtmf"], {"is_enabled": True, "max_digits": 4})
+
+    def test_steps_without_legacy_keys_are_untouched(self):
+        """Steps with no legacy config gain no settings key."""
+        from poly.migration_utils import migrate_flow_step_settings
+
+        status_dict = {
+            "resources": {"flow_steps": {"FLOW-abc_step-1": {"resource_id": "FLOW-abc_step-1"}}}
+        }
+
+        migrate_flow_step_settings(status_dict)
+
+        self.assertNotIn("settings", status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"])
 
 class SyncBranchProject(unittest.TestCase):
     """Tests for AgentStudioProject.sync_branch."""
