@@ -18,6 +18,7 @@ from poly.sip_trunks.config import (
     find_manage_file,
     infer_account_context,
     load_manage_config,
+    normalize_sip_trunk_region,
     persist_trunk_response,
 )
 from poly.sip_trunks.reconciler import (
@@ -107,6 +108,12 @@ class SIPTrunksCommandTest(unittest.TestCase):
             with self.subTest(region=supplied):
                 args = self._parser().parse_args(["sip-trunks", "list", "--region", supplied])
                 self.assertEqual(args.region, expected)
+
+    def test_sip_region_normalization_rejects_non_sip_regions(self):
+        for region in ("studio", "staging", "dev", "unknown"):
+            with self.subTest(region=region):
+                with self.assertRaisesRegex(ValueError, "Unsupported SIP Trunking region"):
+                    normalize_sip_trunk_region(region)
 
     def test_parser_accepts_legacy_account_id_spelling(self):
         args = self._parser().parse_args(

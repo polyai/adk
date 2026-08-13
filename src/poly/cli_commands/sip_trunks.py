@@ -10,7 +10,6 @@ from typing import Any
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.handlers.sip_trunking_api import SIPTrunkingAPIHandler
 from poly.output.json_output import json_print
-from poly.regions import ENTERPRISE_REGIONS, normalize_region
 from poly.sip_trunks import config as sip_trunk_config
 from poly.sip_trunks.reconciler import (
     ManagePlan,
@@ -35,8 +34,8 @@ class SIPTrunksCommand(BaseCommand):
         )
         parser.add_argument(
             "--region",
-            type=normalize_region,
-            choices=ENTERPRISE_REGIONS,
+            type=sip_trunk_config.normalize_sip_trunk_region,
+            choices=sip_trunk_config.SIP_TRUNK_REGIONS,
             help="Account region (eu, uk, or us). Defaults to the current project's region.",
         )
 
