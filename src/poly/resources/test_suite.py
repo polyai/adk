@@ -440,17 +440,17 @@ class TestCase(YamlResource):
         # comparing subresources — an absent one cannot differ from anything.
         if isinstance(sip_headers, TestCaseSipHeaders):
             self.sip_headers = sip_headers
+        elif sip_headers:
+            self.sip_headers = TestCaseSipHeaders(**sip_headers)
         else:
-            self.sip_headers = TestCaseSipHeaders(
-                resource_id=resource_id, name="sip_headers", headers=sip_headers or {}
-            )
+            self.sip_headers = TestCaseSipHeaders(resource_id=resource_id, name="sip_headers")
         if isinstance(integration_attributes, TestCaseIntegrationAttributes):
             self.integration_attributes = integration_attributes
+        elif integration_attributes:
+            self.integration_attributes = TestCaseIntegrationAttributes(**integration_attributes)
         else:
             self.integration_attributes = TestCaseIntegrationAttributes(
-                resource_id=resource_id,
-                name="integration_attributes",
-                attributes=integration_attributes or {},
+                resource_id=resource_id, name="integration_attributes"
             )
 
     @property
