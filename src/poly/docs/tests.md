@@ -20,6 +20,7 @@ Each test case has these fields:
 - **tags** (list, optional): Labels for grouping and filtering tests.
 - **variant** (string, optional): Variant name to run the test against.
 - **language** (string): Language code for the test run, e.g. `en-GB`.
+- **simulated_at** (string, optional): Test clock — the point in time the conversation is simulated at, as an ISO 8601 datetime (e.g. `2026-01-15T09:30:00Z`). Values are normalised to UTC.
 - **prompt_assertions** (list, optional): Expected behaviours in the agent's response.
 - **function_call_assertions** (list, optional): Expected function calls and argument values.
 
@@ -30,6 +31,7 @@ name: Greeting flow test
 scenario: Ask for help with booking.
 channel: voice
 language: en-GB
+simulated_at: 2026-01-15T09:30:00Z
 tags:
 - booking
 - smoke
@@ -81,6 +83,7 @@ On `push`, each test case is validated:
 - **channel** must be `voice` or `webchat`.
 - **scenario** is required (cannot be empty).
 - **language** is required and must match a configured project language (default or additional).
+- **simulated_at**, if specified, must be a valid ISO 8601 datetime.
 - **variant**, if specified, must match an existing variant in the project.
 - **function_call_assertions**: each function name must match a global function in the project, and each argument's `value_type` must be one of `string`, `integer`, `number`, or `boolean`.
 

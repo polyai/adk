@@ -5,7 +5,10 @@ Copyright PolyAI Limited
 
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Optional
+
+from google.protobuf.timestamp_pb2 import Timestamp
 
 import poly.resources.resource_utils as utils
 
@@ -40,6 +43,44 @@ CHANNEL_TO_INTERNAL = {v: k for k, v in INTERNAL_TO_CHANNEL.items()}
 
 
 ALLOWED_TYPES = ["string", "integer", "number", "boolean"]
+
+SIMULATED_AT_HINT = "an ISO 8601 datetime, e.g. 2026-01-15T09:30:00Z"
+
+
+def parse_simulated_at(value: str | datetime | dict | None) -> Optional[datetime]:
+    """Parse a test clock value into a UTC datetime, or None when unset.
+
+    Accepts an ISO 8601 string (the platform projection format), a datetime
+    (ruamel parses unquoted YAML timestamps into one), or a protobuf Timestamp
+    JSON object. Naive datetimes are assumed to be UTC.
+    """
+    if value is None or value == "":
+        return None
+
+    if isinstance(value, datetime):
+        parsed = value
+    elif isinstance(value, dict):
+        seconds = int(value.get("seconds", 0))
+        nanos = int(value.get("nanos", 0))
+        parsed = datetime.fromtimestamp(seconds + nanos / 1e9, tz=timezone.utc)
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid simulated_at value '{value}'. Expected {SIMULATED_AT_HINT}"
+            ) from exc
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def format_simulated_at(value: Optional[datetime]) -> Optional[str]:
+    """Render a test clock datetime as a canonical UTC ISO 8601 string."""
+    if value is None:
+        return None
+    return value.isoformat().replace("+00:00", "Z")
 
 
 @dataclass
@@ -193,6 +234,7 @@ class TestCase(YamlResource):
     assertions: TestCaseAssertion = None
     tags: TestCaseTags = None
     variant: Optional[str] = None
+    simulated_at: Optional[str] = None
 
     def __init__(
         self,
@@ -205,6 +247,7 @@ class TestCase(YamlResource):
         assertions: TestCaseAssertion | dict,
         tags: TestCaseTags | dict,
         variant: Optional[str] = None,
+        simulated_at: str | datetime | dict | None = None,
     ):
         self.resource_id = resource_id
         self.name = name
@@ -220,6 +263,7 @@ class TestCase(YamlResource):
             self.tags = TestCaseTags(**tags)
         self.variant = variant
         self.language = language
+        self.simulated_at = format_simulated_at(parse_simulated_at(simulated_at))
 
     @property
     def file_path(self) -> str:
@@ -235,6 +279,8 @@ class TestCase(YamlResource):
         output["language"] = self.language
         if self.variant:
             output["variant"] = self.variant
+        if self.simulated_at:
+            output["simulated_at"] = self.simulated_at
 
         if tags_list := self.tags.tags:
             output["tags"] = tags_list
@@ -283,6 +329,7 @@ class TestCase(YamlResource):
             assertions=test_case_assertion,
             tags=test_case_tags,
             variant=yaml_dict.get("variant"),
+            simulated_at=yaml_dict.get("simulated_at"),
         )
 
     @classmethod
@@ -438,6 +485,15 @@ class TestCase(YamlResource):
     def command_type(self) -> str:
         return "test_case"
 
+    def _build_simulated_at_proto(self) -> Optional[Timestamp]:
+        """Build the protobuf Timestamp for the test clock, or None when unset."""
+        parsed = parse_simulated_at(self.simulated_at)
+        if parsed is None:
+            return None
+        timestamp = Timestamp()
+        timestamp.FromDatetime(parsed)
+        return timestamp
+
     def build_create_proto(self) -> Create_TestCase:
         return Create_TestCase(
             id=self.resource_id,
@@ -446,6 +502,7 @@ class TestCase(YamlResource):
             variant_id=self.variant,
             language=self.language,
             channel=self.channel,
+            simulated_at=self._build_simulated_at_proto(),
         )
 
     def build_update_proto(self) -> Update_TestCase:
@@ -456,6 +513,7 @@ class TestCase(YamlResource):
             variant_id=self.variant or "",
             language=self.language,
             channel=self.channel,
+            simulated_at=self._build_simulated_at_proto(),
         )
 
     def build_delete_proto(self) -> Delete_TestCase:

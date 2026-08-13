@@ -955,6 +955,7 @@ class SyncClientHandler:
                 channel=test_case_data.get("channel", ""),
                 assertions=assertions,
                 tags=tags,
+                simulated_at=test_case_data.get("simulatedAt"),
             )
         return test_cases
 
