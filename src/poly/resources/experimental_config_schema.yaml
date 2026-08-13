@@ -31,6 +31,7 @@ components:
         - deepgram
         - raven
         - soniox
+        - assemblyai
 
     asr_common_config_properties:
       type: object
@@ -47,6 +48,7 @@ components:
             - deepgram: Deepgram cloud speech recognition
             - raven: PolyAI Raven Omni speech recognition
             - soniox: Soniox cloud speech recognition
+            - assemblyai: AssemblyAI v3 Streaming speech recognition
         model:
           type: string
           minLength: 1
@@ -61,6 +63,7 @@ components:
             - deepgram: "nova-3", "nova-2"
             - raven: "raven-omni"
             - soniox: "stt-rt-v5"
+            - assemblyai: "universal-3-5-pro", "u3-rt-pro-beta-1"
         language:
           type: string
           minLength: 2
