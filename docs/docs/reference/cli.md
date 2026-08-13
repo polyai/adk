@@ -409,6 +409,8 @@ Examples:
 poly chat
 poly chat --environment live
 poly chat --channel webchat
+poly chat --sip-header X-Customer-ID=12345
+poly chat --sip-header X-Customer-ID=12345 --sip-header X-Language=en-GB
 poly chat --metadata
 poly chat --lang fr-FR
 poly chat --input-lang en-US --output-lang fr-FR
@@ -467,6 +469,26 @@ Use language flags to specify the expected input and output language when chatti
 
 `--input-lang` and `--output-lang` take precedence over `--lang` when both are supplied.
 
+#### Simulating SIP headers
+
+Use `--sip-header NAME=VALUE` to simulate a SIP header when starting a conversation.
+
+Single header:
+
+~~~bash
+poly chat --sip-header X-Customer-ID=12345
+~~~
+
+Multiple headers are supported by repeating the flag:
+
+~~~bash
+poly chat --sip-header X-Customer-ID=12345 --sip-header X-Language=en-GB
+~~~
+
+The values are exposed to project functions through `conv.sip_headers`. This is for
+testing agent behaviour only; it does not create a SIP call or reproduce carrier-level
+SIP behaviour. SIP headers cannot be changed when resuming an existing conversation.
+
 #### `poly chat` flags summary
 
 | Flag | Description |
@@ -478,6 +500,7 @@ Use language flags to specify the expected input and output language when chatti
 | `--json` | Emit a single JSON object when the session ends (see below). |
 | `--environment` | Target environment. Choices: `branch`, `sandbox`, `pre-release`, `live`. Defaults to `branch`. `branch` chats against the last **pushed** state of your current branch (not local uncommitted changes); on main it falls back to `sandbox`. Use `--push` to push local changes before chatting. |
 | `--channel` | Channel to use (e.g. `webchat`, `voice`). |
+| `--sip-header NAME=VALUE` | Simulate a SIP header at conversation start (repeatable). |
 | `--lang` | Set both input and output language. |
 | `--input-lang` | Set input language only. |
 | `--output-lang` | Set output language only. |

@@ -19,7 +19,7 @@ from poly.utils import merge_rtc_dicts
 
 def _to_sorted_json(data: dict) -> str:
     """Serialize a dict to deterministically ordered JSON for merging."""
-    return json.dumps(data, indent=2, sort_keys=True) + "\n"
+    return json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 
 def _merge_rtc_file(
@@ -553,8 +553,8 @@ class RTCCommand(BaseCommand):
                 "or use --force to overwrite.",
             }
 
-        remote_schema = remote_config.get("schema", {})
-        remote_variables = remote_config.get("variables", {})
+        remote_schema = remote_config.get("schema") or {}
+        remote_variables = remote_config.get("variables") or {}
 
         if not output_json:
             info("Remote has changed since your last pull. Attempting merge...")
@@ -626,7 +626,7 @@ class RTCCommand(BaseCommand):
             content = variables
             filename = "data.json"
 
-        content_str = json.dumps(content, indent=2, sort_keys=True) + "\n"
+        content_str = json.dumps(content, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
         try:
             edited_str = edit_in_editor(content_str, extension=".json", filename=filename)
@@ -798,8 +798,11 @@ def _print_change(change: dict) -> None:
     change_type = change["type"]
 
     if change_type == "added_locally":
-        info(f"    + {path}: {json.dumps(change['local'])}")
+        info(f"    + {path}: {json.dumps(change['local'], ensure_ascii=False)}")
     elif change_type == "only_remote":
-        info(f"    - {path}: {json.dumps(change['remote'])} (only on remote)")
+        info(f"    - {path}: {json.dumps(change['remote'], ensure_ascii=False)} (only on remote)")
     elif change_type == "changed":
-        info(f"    ~ {path}: {json.dumps(change['remote'])} → {json.dumps(change['local'])}")
+        info(
+            f"    ~ {path}: {json.dumps(change['remote'], ensure_ascii=False)} → "
+            f"{json.dumps(change['local'], ensure_ascii=False)}"
+        )

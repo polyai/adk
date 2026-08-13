@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import datetime
 import os
 import unittest
 
@@ -79,6 +80,8 @@ from poly.resources.test_suite import (
     FunctionCallAssertion,
     TestCase,
     TestCaseAssertion,
+    TestCaseIntegrationAttributes,
+    TestCaseSipHeaders,
     TestCaseTags,
 )
 from poly.resources.topic import (
@@ -889,6 +892,69 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
             Function._extract_decorators(code, "my_func", [])
         self.assertIn("booking_ref", str(ctx.exception))
         self.assertIn("unsupported type annotation", str(ctx.exception))
+
+    def test_equality_ignores_variable_references(self):
+        """variable_references must not affect equality.
+
+        read_local_resource always derives it from code, from_projection never sets it, so
+        including it in the generated __eq__ made every disk-read function compare unequal
+        to its projection-read counterpart. sync_ids_with_sandbox compares whole objects,
+        so that rewrote every function in the project on any id sync.
+        """
+
+        def build(variable_references):
+            return Function(
+                resource_id="fn-1",
+                name="my_func",
+                description="desc",
+                code="def my_func(conv: Conversation):\n    pass\n",
+                parameters=[
+                    FunctionParameters(id="param-1", name="p", description="a param", type="string")
+                ],
+                latency_control=FunctionLatencyControl(),
+                function_type=FunctionType.GLOBAL,
+                variable_references=variable_references,
+            )
+
+        from_projection = build(None)
+        from_disk = build({})
+        self.assertEqual(from_disk, from_projection)
+        self.assertEqual(build({"VARIABLE-abc": True}), from_projection)
+
+        # Real changes must still be detected. Sub-resource id drift matters most: a
+        # parameter deleted and recreated renders identically and leaves the parent id
+        # untouched, so only the whole-object comparison catches it.
+        drifted = build({})
+        drifted.parameters[0].id = "param-2"
+        self.assertNotEqual(drifted, from_projection)
+
+        renamed_param = build({})
+        renamed_param.parameters[0].name = "other"
+        self.assertNotEqual(renamed_param, from_projection)
+
+        recoded = build({})
+        recoded.code += "\n# changed\n"
+        self.assertNotEqual(recoded, from_projection)
+
+        redescribed = build({})
+        redescribed.description = "different"
+        self.assertNotEqual(redescribed, from_projection)
+
+        relatency = build({})
+        relatency.latency_control.enabled = True
+        self.assertNotEqual(relatency, from_projection)
+
+    def test_missing_description_reads_as_empty_string(self):
+        """A function with no @func_description must read back as "", not None.
+
+        Agent Studio stores an absent description as "", so returning None made every
+        such function (start/end functions in practice) compare unequal to its
+        projection-read counterpart. "" also stops _generate_raw_output emitting a
+        literal @func_description(None) that cannot be parsed back.
+        """
+        code = "def start_function(conv: Conversation):\n    pass\n"
+        _, _, description, _ = Function._extract_decorators(code, "start_function", [])
+        self.assertEqual(description, "")
 
 
 TEST_TOPIC = Topic(
@@ -3722,6 +3788,7 @@ class EntityTests(unittest.TestCase):
             config={},  # FREE_TEXT has no required config fields
         )
         self.assertIsNone(entity_without_config.validate())
+
 
 
 TEST_FUNCTION_STEP_CODE = """def process_data(conv: Conversation, flow: Flow):
@@ -7349,6 +7416,330 @@ class TestCaseTests(unittest.TestCase):
         )
 
 
+class TestCaseMockContextTests(unittest.TestCase):
+    """Caller number, SIP headers and integration attributes on a test case."""
+
+    RESOURCE_ID = "TEST-mock_context"
+
+    def _test_case(self, **overrides) -> TestCase:
+        defaults = {
+            "resource_id": self.RESOURCE_ID,
+            "name": "Mock context test",
+            "scenario": "Caller asks about their account.",
+            "channel": "chat.polyai",
+            "language": "en-GB",
+            "assertions": TestCaseAssertion(
+                resource_id=self.RESOURCE_ID, name="assertions", prompts=[], function_calls=[]
+            ),
+            "tags": TestCaseTags(resource_id=self.RESOURCE_ID, name="tags", tags=[]),
+        }
+        defaults.update(overrides)
+        return TestCase(**defaults)
+
+    def test_yaml_roundtrip_preserves_values_and_types(self):
+        test_case = self._test_case(
+            caller_number="+447700900000",
+            sip_headers=TestCaseSipHeaders(
+                resource_id=self.RESOURCE_ID, name="sip_headers", headers={"x-dnis": "441234"}
+            ),
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID,
+                name="integration_attributes",
+                attributes={"tier": "gold", "retry_count": 2, "vip": True},
+            ),
+        )
+
+        yaml_dict = test_case.to_yaml_dict()
+        self.assertEqual(yaml_dict["caller_number"], "+447700900000")
+        self.assertEqual(yaml_dict["sip_headers"], {"x-dnis": "441234"})
+        self.assertEqual(
+            yaml_dict["integration_attributes"], {"tier": "gold", "retry_count": 2, "vip": True}
+        )
+
+        restored = TestCase.from_yaml_dict(
+            yaml_dict, resource_id=self.RESOURCE_ID, name="Mock context test"
+        )
+        self.assertEqual(restored.caller_number, "+447700900000")
+        self.assertEqual(restored.sip_headers.headers, {"x-dnis": "441234"})
+        self.assertEqual(
+            restored.integration_attributes.attributes,
+            {"tier": "gold", "retry_count": 2, "vip": True},
+        )
+        # A number must not come back as a string, or a flow branching on
+        # `retry_count > 2` breaks.
+        self.assertIsInstance(restored.integration_attributes.attributes["retry_count"], int)
+        self.assertIsInstance(restored.integration_attributes.attributes["vip"], bool)
+
+    def test_omits_empty_values_from_yaml(self):
+        yaml_dict = self._test_case().to_yaml_dict()
+
+        self.assertNotIn("caller_number", yaml_dict)
+        self.assertNotIn("sip_headers", yaml_dict)
+        self.assertNotIn("integration_attributes", yaml_dict)
+
+    def test_caller_number_on_create_and_update_protos(self):
+        test_case = self._test_case(caller_number="+447700900000")
+
+        self.assertEqual(test_case.build_create_proto().caller_number, "+447700900000")
+        self.assertEqual(test_case.build_update_proto().caller_number, "+447700900000")
+
+    def test_caller_number_absent_sends_empty_string(self):
+        # Proto3 has no null; the field must still be sent so clearing it sticks.
+        self.assertEqual(self._test_case().build_update_proto().caller_number, "")
+
+    def test_subresource_command_types(self):
+        test_case = self._test_case()
+
+        self.assertEqual(test_case.sip_headers.update_command_type, "set_test_case_sip_headers")
+        self.assertEqual(
+            test_case.integration_attributes.update_command_type,
+            "set_test_case_integration_attributes",
+        )
+
+    def test_sip_headers_proto(self):
+        headers = TestCaseSipHeaders(
+            resource_id=self.RESOURCE_ID, name="sip_headers", headers={"x-dnis": "441234"}
+        )
+
+        proto = headers.build_update_proto()
+
+        self.assertEqual(proto.id, self.RESOURCE_ID)
+        self.assertEqual(dict(proto.sip_headers), {"x-dnis": "441234"})
+
+    def test_integration_attributes_proto_keeps_json_types(self):
+        attributes = TestCaseIntegrationAttributes(
+            resource_id=self.RESOURCE_ID,
+            name="integration_attributes",
+            attributes={"tier": "gold", "retry_count": 2, "vip": True, "meta": {"a": 1}},
+        )
+
+        proto = attributes.build_update_proto()
+        struct = dict(proto.integration_attributes)
+
+        self.assertEqual(struct["tier"], "gold")
+        self.assertEqual(struct["retry_count"], 2)
+        self.assertIs(struct["vip"], True)
+        self.assertEqual(dict(struct["meta"]), {"a": 1})
+
+    def test_struct_doubles_are_written_back_as_ints(self):
+        """Struct stores every number as a double, so 2 returns as 2.0.
+
+        Left alone that produces a spurious `2 -> 2.0` diff on every pull
+        following a push.
+        """
+        attributes = TestCaseIntegrationAttributes(
+            resource_id=self.RESOURCE_ID,
+            name="integration_attributes",
+            attributes={"retry_count": 2.0, "ratio": 1.5, "nested": {"count": 3.0}},
+        )
+
+        rendered = attributes.to_yaml_dict()
+
+        self.assertEqual(rendered["retry_count"], 2)
+        self.assertIsInstance(rendered["retry_count"], int)
+        self.assertEqual(rendered["ratio"], 1.5)
+        self.assertEqual(rendered["nested"]["count"], 3)
+
+    def test_subresources_pushed_when_changed(self):
+        old = self._test_case()
+        new = self._test_case(
+            sip_headers=TestCaseSipHeaders(
+                resource_id=self.RESOURCE_ID, name="sip_headers", headers={"x-dnis": "441234"}
+            ),
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID, name="integration_attributes", attributes={"a": 1}
+            ),
+        )
+
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertIn(new.sip_headers, updated)
+        self.assertIn(new.integration_attributes, updated)
+
+    def test_clearing_subresources_still_pushes(self):
+        # The command has to be sent, or the cleared values survive on the server.
+        old = self._test_case(
+            sip_headers=TestCaseSipHeaders(
+                resource_id=self.RESOURCE_ID, name="sip_headers", headers={"x-dnis": "441234"}
+            ),
+        )
+        new = self._test_case()
+
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertIn(new.sip_headers, updated)
+
+    def test_unchanged_subresources_are_not_pushed(self):
+        old = self._test_case()
+        new = self._test_case()
+
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertNotIn(new.sip_headers, updated)
+        self.assertNotIn(new.integration_attributes, updated)
+
+    def test_from_projection_reads_camel_case_keys(self):
+        projection = {
+            "testing": {
+                "testCases": {
+                    "entities": {
+                        self.RESOURCE_ID: {
+                            "name": "Mock context test",
+                            "scenario": "Caller asks about their account.",
+                            "channel": "chat.polyai",
+                            "language": "en-GB",
+                            "callerNumber": "+447700900000",
+                            "sipHeaders": {"x-dnis": "441234"},
+                            "integrationAttributes": {"tier": "gold", "retry_count": 2},
+                        }
+                    }
+                }
+            }
+        }
+
+        test_case = TestCase.from_projection(projection)[self.RESOURCE_ID]
+
+        self.assertEqual(test_case.caller_number, "+447700900000")
+        self.assertEqual(test_case.sip_headers.headers, {"x-dnis": "441234"})
+        self.assertEqual(
+            test_case.integration_attributes.attributes, {"tier": "gold", "retry_count": 2}
+        )
+
+    def test_caller_number_is_trimmed(self):
+        """A trailing space is invisible in YAML but changes the identifier the
+        number resolves to in agent memory."""
+        test_case = self._test_case(caller_number="  +447700900000  ")
+
+        self.assertEqual(test_case.caller_number, "+447700900000")
+        self.assertEqual(test_case.build_update_proto().caller_number, "+447700900000")
+
+    def test_validate_rejects_an_unquoted_caller_number(self):
+        """YAML reads `+447700900000` as the int 447700900000, dropping the `+`.
+
+        Coercing it back to text would send a different number, so this has to
+        fail loudly rather than guess.
+        """
+        test_case = self._test_case(caller_number=447700900000)
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+
+        self.assertIn("caller_number must be text", str(ctx.exception))
+        self.assertIn("quote it", str(ctx.exception))
+
+    def test_sip_header_bools_use_wire_casing(self):
+        """YAML types `x-flag: true` as a bool; str() would send Python's "True"."""
+        headers = TestCaseSipHeaders(
+            resource_id=self.RESOURCE_ID,
+            name="sip_headers",
+            headers={"x-flag": True, "x-off": False, "x-count": 2, "x-none": None},
+        )
+
+        sent = dict(headers.build_update_proto().sip_headers)
+
+        self.assertEqual(sent["x-flag"], "true")
+        self.assertEqual(sent["x-off"], "false")
+        self.assertEqual(sent["x-count"], "2")
+        self.assertEqual(sent["x-none"], "")
+
+    def test_sip_header_dates_are_sent_as_iso_text(self):
+        headers = TestCaseSipHeaders(
+            resource_id=self.RESOURCE_ID,
+            name="sip_headers",
+            headers={"x-date": datetime.date(2026, 8, 12)},
+        )
+
+        self.assertEqual(dict(headers.build_update_proto().sip_headers)["x-date"], "2026-08-12")
+
+    def test_validate_rejects_dates_with_an_actionable_message(self):
+        """An unquoted YAML date would otherwise reach Struct.update and raise
+        `ValueError: Unexpected type`, naming neither the key nor the file."""
+        test_case = self._test_case(
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID,
+                name="integration_attributes",
+                attributes={"expiry": datetime.date(2026, 8, 12)},
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+
+        message = str(ctx.exception)
+        self.assertIn("integration_attributes.expiry", message)
+        self.assertIn("2026-08-12", message)
+
+    def test_validate_rejects_non_text_keys(self):
+        test_case = self._test_case(
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID,
+                name="integration_attributes",
+                attributes={2: "x"},
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+
+        self.assertIn("must be text", str(ctx.exception))
+
+    def test_validate_reports_the_path_of_a_nested_bad_value(self):
+        test_case = self._test_case(
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID,
+                name="integration_attributes",
+                attributes={"booking": {"slots": [{"at": datetime.date(2026, 8, 12)}]}},
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+
+        self.assertIn("integration_attributes.booking.slots[0].at", str(ctx.exception))
+
+    def test_validate_accepts_every_supported_json_type(self):
+        test_case = self._test_case(
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID,
+                name="integration_attributes",
+                attributes={
+                    "s": "gold",
+                    "n": 2,
+                    "f": 1.5,
+                    "b": True,
+                    "nil": None,
+                    "list": [1, "two", False],
+                    "nested": {"a": {"b": 1}},
+                },
+            )
+        )
+
+        test_case.validate()
+
+    def test_from_projection_without_mock_context(self):
+        projection = {
+            "testing": {
+                "testCases": {
+                    "entities": {
+                        self.RESOURCE_ID: {
+                            "name": "Mock context test",
+                            "scenario": "Caller asks about their account.",
+                            "channel": "chat.polyai",
+                            "language": "en-GB",
+                        }
+                    }
+                }
+            }
+        }
+
+        test_case = TestCase.from_projection(projection)[self.RESOURCE_ID]
+
+        self.assertEqual(test_case.caller_number, "")
+        self.assertEqual(test_case.sip_headers.headers, {})
+        self.assertEqual(test_case.integration_attributes.attributes, {})
+        self.assertNotIn("sip_headers", test_case.to_yaml_dict())
+
+
 class ParseMultiResourcePathTests(unittest.TestCase):
     """Tests for _parse_multi_resource_path including Windows drive-letter handling."""
 
@@ -8257,20 +8648,69 @@ class DocumentTests(unittest.TestCase):
 
     def test_path_normalized_to_uppercase(self):
         """Documents with different-case paths produce the same normalized path."""
-        doc_lower = Document(
-            resource_id="ctx.md", name="ctx", path="context.md", contents="hello"
-        )
-        doc_upper = Document(
-            resource_id="ctx.md", name="ctx", path="CONTEXT.MD", contents="hello"
-        )
-        doc_mixed = Document(
-            resource_id="ctx.md", name="ctx", path="Context.Md", contents="hello"
-        )
+        doc_lower = Document(resource_id="ctx.md", name="ctx", path="context.md", contents="hello")
+        doc_upper = Document(resource_id="ctx.md", name="ctx", path="CONTEXT.MD", contents="hello")
+        doc_mixed = Document(resource_id="ctx.md", name="ctx", path="Context.Md", contents="hello")
         self.assertEqual(doc_lower.path, "CONTEXT.MD")
         self.assertEqual(doc_upper.path, "CONTEXT.MD")
         self.assertEqual(doc_mixed.path, "CONTEXT.MD")
         self.assertEqual(doc_lower.file_path, doc_upper.file_path)
         self.assertEqual(doc_lower.file_path, doc_mixed.file_path)
+
+
+class DocumentFromProjection(unittest.TestCase):
+    """Tests for Document.from_projection."""
+
+    def test_parses_document_fields(self):
+        """Verify document name, path, and contents are parsed correctly."""
+        projection = {
+            "documents": {
+                "documents": {
+                    "entities": {
+                        "DOC-1": {
+                            "path": "faq.md",
+                            "content": "Frequently asked questions",
+                        }
+                    }
+                }
+            }
+        }
+        documents = Document.from_projection(projection)
+        self.assertEqual(list(documents), ["DOC-1"])
+        document = documents["DOC-1"]
+        self.assertIsInstance(document, Document)
+        self.assertEqual(document.name, "faq")
+        self.assertEqual(document.contents, "Frequently asked questions")
+
+    def test_skips_document_without_content(self):
+        """A document missing 'content' means the user lacks read permission, so it's skipped."""
+        projection = {
+            "documents": {
+                "documents": {
+                    "entities": {
+                        "DOC-1": {"path": "unreadable.md"},
+                        "DOC-2": {"path": "readable.md", "content": "visible"},
+                    }
+                }
+            }
+        }
+        documents = Document.from_projection(projection)
+        self.assertEqual(list(documents), ["DOC-2"])
+
+    def test_keeps_document_with_empty_content(self):
+        """An empty 'content' is a readable but empty document, not a permission failure."""
+        projection = {
+            "documents": {
+                "documents": {"entities": {"DOC-1": {"path": "empty.md", "content": ""}}}
+            }
+        }
+        documents = Document.from_projection(projection)
+        self.assertEqual(list(documents), ["DOC-1"])
+        self.assertEqual(documents["DOC-1"].contents, "")
+
+    def test_empty_projection_yields_no_documents(self):
+        """An empty projection should return an empty dict."""
+        self.assertEqual(Document.from_projection({}), {})
 
 
 class TopicFromProjection(unittest.TestCase):

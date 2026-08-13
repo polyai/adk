@@ -222,7 +222,7 @@ class Function(Resource):
     flow_id: Optional[str] = None
     flow_name: Optional[str] = None
     function_type: Optional[FunctionType] = None
-    variable_references: Optional[dict] = None
+    variable_references: Optional[dict] = field(default_factory=dict, compare=False)
 
     def __init__(
         self,
@@ -698,7 +698,7 @@ class Function(Resource):
         function_name: str,
         known_parameters: list[FunctionParameters],
         known_latency_control: Optional[FunctionLatencyControl] = None,
-    ) -> tuple[str, list[FunctionParameters], Optional[str], FunctionLatencyControl]:
+    ) -> tuple[str, list[FunctionParameters], str, FunctionLatencyControl]:
         """Extract decorators from the function code.
 
         Args:
@@ -708,7 +708,7 @@ class Function(Resource):
             tuple: The cleaned code, list of parameters, and description.
         """
         parameters: list[FunctionParameters] = []
-        description: str = None
+        description: str = ""
         latency_control = FunctionLatencyControl()
         target = Function._get_target_function(code, function_name)
         if target:

@@ -394,6 +394,15 @@ class ProjectCommand(BaseCommand):
             output_json=output_json,
         )
 
+        if not output_json and sys.stdin.isatty():
+            try:
+                from poly.cli_commands.template import TemplateCommand
+
+                project_path = os.path.join(base_path, account_id, project_id)
+                TemplateCommand.offer_template_on_create(project_path, region)
+            except Exception:
+                pass
+
     @classmethod
     def list_projects(
         cls,
