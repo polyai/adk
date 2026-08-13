@@ -278,6 +278,22 @@ class SIPTrunkReconcilerTest(unittest.TestCase):
 
         list_trunks.assert_not_called()
 
+    @patch.object(SIPTrunkingAPIHandler, "list_trunks", return_value={"sip_trunks": []})
+    def test_unknown_remote_trunk_id_explains_how_to_update_config(self, _list_trunks):
+        with self.assertRaises(ValueError) as context:
+            build_manage_plan(
+                "/account/sip-trunks.yaml",
+                "uk-1",
+                "acct-123",
+                [{"id": "tr-deleted", "name": "Deleted trunk"}],
+            )
+
+        self.assertEqual(
+            str(context.exception),
+            "SIP trunk 'tr-deleted' references unknown remote ID 'tr-deleted'. "
+            "If the trunk was deleted, remove its entry from sip-trunks.yaml.",
+        )
+
     @patch.object(SIPTrunkingAPIHandler, "list_trunks")
     def test_remote_trunk_cannot_be_targeted_by_id_and_old_name(self, list_trunks):
         list_trunks.return_value = {
