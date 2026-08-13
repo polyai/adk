@@ -1,6 +1,94 @@
 # CHANGELOG
 
 
+## v0.42.2 (2026-08-13)
+
+### Bug Fixes
+
+- **sync**: Resolve flow step ids against the synced flow id
+  ([#270](https://github.com/polyai/adk/pull/270),
+  [`fe795ad`](https://github.com/polyai/adk/commit/fe795ada6aa077fa8824a764633e8ba982233402))
+
+## Summary
+
+`sync_ids_with_sandbox` could send a flow's `startStepId` with the flow id still welded onto the
+  front of the step id, which the platform rejects with a validation error saying the start step id
+  does not exist. This resolves flow step ids against the flow id the step was actually synced to.
+
+## Motivation
+
+Flow steps are identified locally by a composite `{flow_id}_{step_id}` resource id, and `FlowConfig`
+  recovers a bare step id by stripping the `{flow_id}_` prefix off it.
+
+`sync_ids_with_sandbox` built each flow-scoped resource's `ResourceMapping` using the resource's own
+  stale, pre-sync `flow_id`. When the sandbox had assigned the flow a different id, the mapping's
+  `flow_id` and the step's composite resource id disagreed, so `removeprefix` found no match.
+  Because `removeprefix` fails open — returning the string unchanged rather than raising — nothing
+  was stripped and no error surfaced locally. `start_step` kept the full composite value and the
+  push failed server-side, aborting the whole command batch.
+
+This was hit on a real sync against a live project.
+
+## Changes
+
+- Build a `flow_id_translation` lookup from each local `FlowConfig` id to the id it syncs to, and
+  resolve flow-scoped resources' `flow_id` through it instead of trusting the stale local value. -
+  Re-point the composite resource id of a flow step that has **no** sandbox counterpart (i.e. added
+  on the branch) onto the synced flow id, so the embedded prefix and `flow_id` always agree. Without
+  this the same corruption survives for branch-only steps. - Restrict that rewrite to `BaseFlowStep`
+  subclasses with a genuinely matching prefix. Flow-scoped functions also carry a `flow_id` but keep
+  standalone ids, so prepending a flow id to those would corrupt ids that were previously fine. -
+  Add a `SyncIdsWithSandboxTest` suite covering the sync-id paths, which had no direct tests before.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+9 new tests. Both halves of the fix were mutation-tested — each was reverted in turn to confirm the
+  relevant tests actually fail without it, rather than passing incidentally:
+
+- start step resolves to a bare step id when the sandbox reassigned the flow id - same, when the
+  start step is new on the branch and has no sandbox counterpart - a branch-only step is re-keyed
+  onto the sandbox flow id, leaving no step straddling two flow ids - flow-scoped function ids are
+  **not** rewritten - two flows reassigned at once do not contaminate each other (one fixture flow
+  id is a string prefix of the other, so a substring-based rewrite would move steps under the wrong
+  flow) - ids unchanged when sandbox ids already match, plus the two guard clauses
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Before, for a flow whose sandbox id differs from the local one:
+
+``` startStepId: "FLOW_CONFIG-abc12345_FLOW_STEPS-6789" # rejected by the platform ```
+
+After:
+
+``` startStepId: "FLOW_STEPS-6789" ```
+
+### Follow-up
+
+Stacked child: #271, which corrects the `test_project` fixture.
+
+An earlier draft of this section claimed a no-op `sync_ids_with_sandbox` emits spurious writes
+  because disk-read resources compare unequal to their projection-read counterparts. That claim was
+  wrong and did not make it into this description. The churn came from the fixture storing values a
+  real status file cannot contain, not from an asymmetry in the resource classes:
+  `FlowStep.from_projection` always materializes `asr_biasing`/`dtmf_config`, and #255 already fixed
+  the `Function` case. #271 has the detail.
+
+What does remain, addressed in neither PR: `sync_ids_with_sandbox` is still the only path deciding
+  what changed by comparing whole `Resource` objects, while `push`/`get_diffs` compare the
+  rendered-file hash. That asymmetry is what allowed #255's bug to exist in the first place.
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+
 ## v0.42.1 (2026-08-13)
 
 ### Bug Fixes
