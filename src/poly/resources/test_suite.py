@@ -441,17 +441,11 @@ class TestCase(YamlResource):
         if isinstance(sip_headers, TestCaseSipHeaders):
             self.sip_headers = sip_headers
         else:
-            self.sip_headers = TestCaseSipHeaders(
-                resource_id=resource_id, name="sip_headers", headers=sip_headers or {}
-            )
+            self.sip_headers = TestCaseSipHeaders(**sip_headers)
         if isinstance(integration_attributes, TestCaseIntegrationAttributes):
             self.integration_attributes = integration_attributes
         else:
-            self.integration_attributes = TestCaseIntegrationAttributes(
-                resource_id=resource_id,
-                name="integration_attributes",
-                attributes=integration_attributes or {},
-            )
+            self.integration_attributes = TestCaseIntegrationAttributes(**integration_attributes)
 
     @property
     def file_path(self) -> str:
