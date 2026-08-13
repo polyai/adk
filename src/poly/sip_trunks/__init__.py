@@ -5,6 +5,8 @@ Copyright PolyAI Limited
 
 from poly.sip_trunks.config import (
     ACCOUNT_DEFAULT_OUTPUT,
+    SIP_TRUNK_REGION_ALIASES,
+    SIP_TRUNK_REGIONS,
     AccountContext,
     LoadedManageConfig,
     default_export_path,
@@ -12,6 +14,7 @@ from poly.sip_trunks.config import (
     find_manage_file,
     infer_account_context,
     load_manage_config,
+    normalize_sip_trunk_region,
     persist_trunk_response,
     resolve_account_context,
     write_export,
@@ -20,6 +23,8 @@ from poly.sip_trunks.config import (
 
 __all__ = [
     "ACCOUNT_DEFAULT_OUTPUT",
+    "SIP_TRUNK_REGIONS",
+    "SIP_TRUNK_REGION_ALIASES",
     "AccountContext",
     "LoadedManageConfig",
     "default_export_path",
@@ -27,6 +32,7 @@ __all__ = [
     "find_manage_file",
     "infer_account_context",
     "load_manage_config",
+    "normalize_sip_trunk_region",
     "persist_trunk_response",
     "resolve_account_context",
     "write_export",
