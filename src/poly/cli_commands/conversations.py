@@ -3,7 +3,7 @@
 Copyright PolyAI Limited
 """
 
-from argparse import Namespace, _SubParsersAction, ArgumentParser, RawTextHelpFormatter
+from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from typing import Optional
 
 from poly.cli_commands.base import BaseCommand, Parents

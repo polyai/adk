@@ -83,11 +83,7 @@ prompt_assertions:
   - The agent explains the contact centre is closed
 ~~~
 
-Values are parsed as ISO 8601 and normalized to UTC when written back by `poly pull`, so `2026-01-15T22:30:00+00:00` and `2026-01-15T23:30:00+01:00` both round-trip as `2026-01-15T22:30:00Z`. An offset-less value such as `2026-01-15T22:30:00` is treated as UTC. Omit the field to run against the real clock.
-
-!!! warning "Removing `simulated_at` does not yet clear it upstream"
-
-    Agent Studio reads an omitted `simulated_at` on update as "leave unchanged", not "clear". Deleting the field from a local file and pushing therefore leaves the existing test clock in place on the platform. Until the platform accepts an explicit clear signal, remove a test clock from the Agent Studio UI.
+Values are parsed as ISO 8601 and normalized to UTC when written back by `poly pull`, so `2026-01-15T22:30:00+00:00` and `2026-01-15T23:30:00+01:00` both round-trip as `2026-01-15T22:30:00Z`. An offset-less value such as `2026-01-15T22:30:00` is treated as UTC. Omit the field to run against the real clock; removing it from a file that had one clears the test clock on the next push.
 
 ## Prompt assertions
 

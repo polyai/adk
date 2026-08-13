@@ -10,13 +10,113 @@ import subprocess
 import sys
 from argparse import SUPPRESS, ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from contextlib import nullcontext
+from typing import Any, Optional
 
 from poly.cli_commands.base import BaseCommand, Parents
-from poly.cli_commands.shared import compute_diff, load_project, parse_from_projection_json
-from poly.handlers.interface import AgentStudioInterface
+from poly.cli_commands.shared import (
+    compute_diff,
+    load_project,
+    parse_from_projection_json,
+    print_project_file_changes,
+)
 from poly.output.json_output import commands_to_dicts, json_print
 
 logger = logging.getLogger(__name__)
+
+
+class FetchCommand(BaseCommand):
+    """Fetch the latest project configuration from Agent Studio without applying it."""
+
+    command = "fetch"
+
+    @classmethod
+    def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
+        """Register the ``fetch`` subcommand."""
+        fetch_parser = subparsers.add_parser(
+            "fetch",
+            parents=[parents.verbose, parents.json, parents.debug],
+            help="Fetch the latest project state from Agent Studio without modifying local files.",
+            description="Fetch the latest project state from Agent Studio without modifying local resource files.\n\nLike 'git fetch', this updates the tracked remote state but does not change your working files.\nUse --branch to switch to a different branch before fetching.\n\nExamples:\n  poly fetch\n  poly fetch --branch my-feature",
+            formatter_class=RawTextHelpFormatter,
+        )
+        fetch_parser.add_argument(
+            "--path",
+            type=str,
+            default=os.getcwd(),
+            help="Base path to the project. Defaults to current working directory.",
+        )
+        fetch_parser.add_argument(
+            "--branch",
+            "-b",
+            type=str,
+            default=None,
+            help="Switch to this branch before fetching. Errors if the branch does not exist.",
+        )
+        fetch_parser.add_argument(
+            "--from-projection",
+            type=str,
+            metavar="JSON|-",
+            help=SUPPRESS,
+            default=None,
+        )
+        fetch_parser.add_argument(
+            "--output-json-projection",
+            action="store_true",
+            help=SUPPRESS,
+            default=False,
+        )
+
+    @classmethod
+    def run(cls, args: Namespace) -> None:
+        """Execute the fetch command."""
+        cls.fetch(
+            args.path,
+            args.branch,
+            args.from_projection,
+            output_json=args.json,
+            output_json_projection=args.output_json_projection,
+        )
+
+    @classmethod
+    def fetch(
+        cls,
+        base_path: str,
+        branch_name: Optional[str] = None,
+        from_projection: Optional[str] = None,
+        output_json: bool = False,
+        output_json_projection: bool = False,
+    ) -> None:
+        """Fetch the latest project state from Agent Studio without modifying local files."""
+
+        from poly.output.console import info, success
+
+        project = load_project(base_path, output_json=output_json)
+        if not output_json:
+            info(f"Fetching project [bold]{project.account_id}/{project.project_id}[/bold]...")
+
+        projection_json = parse_from_projection_json(
+            from_projection,
+            json_errors=output_json or output_json_projection,
+        )
+
+        projection = project.fetch_project(
+            branch_name=branch_name,
+            projection_json=projection_json,
+        )
+
+        if output_json or output_json_projection:
+            json_output: dict[str, Any] = {"success": True}
+            if branch_name:
+                json_output["branch_name"] = branch_name
+                json_output["branch_id"] = project.branch_id
+            if output_json_projection:
+                json_output["projection"] = projection
+            json_print(json_output)
+            return
+
+        if branch_name:
+            info(f"Switched to branch '{branch_name}'.")
+        success(f"Fetched {project.account_id}/{project.project_id}")
 
 
 class PullCommand(BaseCommand):
@@ -65,6 +165,12 @@ class PullCommand(BaseCommand):
             help=SUPPRESS,
             default=False,
         )
+        pull_parser.add_argument(
+            "--include-rtc",
+            action="store_true",
+            default=False,
+            help="Also pull Real-Time Configuration for all environments.",
+        )
 
     @classmethod
     def run(cls, args: Namespace) -> None:
@@ -76,6 +182,7 @@ class PullCommand(BaseCommand):
             args.from_projection,
             output_json=args.json,
             output_json_projection=args.output_json_projection,
+            include_rtc=getattr(args, "include_rtc", False),
         )
 
     @classmethod
@@ -87,9 +194,10 @@ class PullCommand(BaseCommand):
         from_projection: str = None,
         output_json: bool = False,
         output_json_projection: bool = False,
+        include_rtc: bool = False,
     ) -> None:
         """Pull the latest project configuration from the Agent Studio."""
-        from poly.output.console import console, info, print_file_list, success, warning
+        from poly.output.console import console, error, info, print_file_list, success, warning
 
         project = load_project(base_path, output_json=output_json)
         if not output_json:
@@ -130,8 +238,15 @@ class PullCommand(BaseCommand):
                 json_output["new_branch_id"] = project.branch_id
             if output_json_projection:
                 json_output["projection"] = projection
+            if include_rtc and not files_with_conflicts:
+                from poly.cli_commands.rtc import RTCCommand
+
+                rtc_result = RTCCommand.rtc_pull(base_path, env="all", output_json=True)
+                json_output["rtc"] = rtc_result
+                if not rtc_result["success"]:
+                    json_output["success"] = False
             json_print(json_output)
-            if files_with_conflicts:
+            if files_with_conflicts or not json_output["success"]:
                 sys.exit(1)
             return
 
@@ -143,6 +258,18 @@ class PullCommand(BaseCommand):
             print_file_list("Merge conflicts detected", files_with_conflicts, "filename.conflict")
 
         success(f"Pulled {project.account_id}/{project.project_id}")
+
+        if include_rtc and not files_with_conflicts:
+            from poly.cli_commands.rtc import RTCCommand
+
+            rtc_result = RTCCommand.rtc_pull(base_path, env="all")
+            if rtc_result["success"]:
+                for f in rtc_result["files_written"]:
+                    success(f"Pulled RTC {f['environment']} — {f['schema_file']}")
+                    success(f"Pulled RTC {f['environment']} — {f['data_file']}")
+            else:
+                error(f"RTC pull failed: {rtc_result['error']}")
+                sys.exit(1)
 
 
 class PushCommand(BaseCommand):
@@ -201,10 +328,28 @@ class PushCommand(BaseCommand):
             help=SUPPRESS,
             default=False,
         )
+        push_parser.add_argument(
+            "--include-rtc",
+            action="store_true",
+            default=False,
+            help="Also push Real-Time Configuration. Defaults to sandbox; use --rtc-env to override.",
+        )
+        push_parser.add_argument(
+            "--rtc-env",
+            type=str,
+            default=None,
+            choices=["sandbox", "pre-release", "live"],
+            help="RTC environment to push to. Requires --include-rtc. Defaults to sandbox.",
+        )
 
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Execute the push command."""
+        if args.rtc_env is not None and not args.include_rtc:
+            from poly.output.console import warning
+
+            warning("--rtc-env has no effect without --include-rtc.")
+
         cls.push(
             args.path,
             args.force,
@@ -214,6 +359,8 @@ class PushCommand(BaseCommand):
             args.from_projection,
             output_json=args.json,
             output_commands=args.output_json_commands,
+            include_rtc=args.include_rtc,
+            rtc_env=args.rtc_env or "sandbox",
         )
 
     @classmethod
@@ -227,6 +374,8 @@ class PushCommand(BaseCommand):
         from_projection: str = None,
         output_json: bool = False,
         output_commands: bool = False,
+        include_rtc: bool = False,
+        rtc_env: str = "sandbox",
     ) -> None:
         """Push the project configuration to the Agent Studio."""
         from poly.output.console import error, info, plain, success, warning
@@ -264,8 +413,24 @@ class PushCommand(BaseCommand):
                 json_output["new_branch_id"] = project.branch_id
             if output_commands:
                 json_output["commands"] = commands_to_dicts(commands)
+            if include_rtc and push_ok and not dry_run:
+                from poly.cli_commands.rtc import RTCCommand
+
+                rtc_result = RTCCommand.rtc_push(
+                    base_path,
+                    env=rtc_env,
+                    force=force,
+                    output_json=(output_json or output_commands),
+                )
+                if rtc_result is None:
+                    json_output["rtc"] = {"success": False, "error": "RTC push cancelled."}
+                    json_output["success"] = False
+                else:
+                    json_output["rtc"] = rtc_result
+                    if not rtc_result.get("success"):
+                        json_output["success"] = False
             json_print(json_output)
-            if not push_ok:
+            if not json_output["success"]:
                 sys.exit(1)
             return
 
@@ -276,6 +441,19 @@ class PushCommand(BaseCommand):
         else:
             error(f"Failed to push {project.account_id}/{project.project_id} to Agent Studio.")
             plain(output)
+
+        if include_rtc and push_ok and not dry_run:
+            from poly.cli_commands.rtc import RTCCommand
+
+            rtc_result = RTCCommand.rtc_push(base_path, env=rtc_env, force=force)
+            if rtc_result is None:
+                error("RTC push cancelled.")
+                sys.exit(1)
+            elif rtc_result["success"]:
+                success(f"Pushed RTC to {rtc_env}")
+            else:
+                error(f"RTC push failed: {rtc_result['error']}")
+                sys.exit(1)
 
 
 class StatusCommand(BaseCommand):
@@ -310,53 +488,8 @@ class StatusCommand(BaseCommand):
     @classmethod
     def status(cls, base_path: str, output_json: bool = False) -> None:
         """Check the changed files of the project."""
-        from poly.output.console import plain, print_file_list, print_status
-
         project = load_project(base_path, output_json=output_json)
-
-        if not project.account_name:
-            try:
-                api_handler = AgentStudioInterface()
-                accounts = api_handler.get_accounts(project.region)
-                project.account_name = accounts.get(project.account_id)
-                if project.account_name:
-                    project.save_config()
-            except Exception:
-                logger.debug("Failed to fetch account name for status display", exc_info=True)
-
-        files_with_conflicts, modified_files, new_files, deleted_files = project.project_status()
-
-        if output_json:
-            json_output = {
-                "account_name": project.account_name,
-                "project_name": project.project_name,
-                "files_with_conflicts": files_with_conflicts,
-                "modified_files": modified_files,
-                "new_files": new_files,
-                "deleted_files": deleted_files,
-            }
-            json_print(json_output)
-            return
-
-        branch_info = project.get_current_branch()
-
-        print_status(
-            region=project.region,
-            account_id=project.account_id,
-            project_id=project.project_id,
-            last_updated=project.last_updated.isoformat(),
-            branch=branch_info,
-            account_name=project.account_name,
-            project_name=project.project_name,
-        )
-
-        print_file_list("Files with merge conflicts", files_with_conflicts, "filename.conflict")
-        print_file_list("New files", new_files, "filename.new")
-        print_file_list("Deleted files", deleted_files, "filename.deleted")
-        print_file_list("Modified files", modified_files, "filename.modified")
-
-        if not modified_files and not new_files and not deleted_files and not files_with_conflicts:
-            plain("\n[muted]No changes detected.[/muted]")
+        print_project_file_changes(project, output_json=output_json)
 
 
 class RevertCommand(BaseCommand):

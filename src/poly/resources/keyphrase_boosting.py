@@ -13,11 +13,12 @@ from poly.handlers.protobuf.keyphrase_boosting_pb2 import (
     KeyphraseBoosting_DeleteKeyphrase,
     KeyphraseBoosting_UpdateKeyphrase,
 )
-from poly.resources.resource import MultiResourceYamlResource
+from poly.resources.resource import MultiResourceYamlResource, register_resource
 
 VALID_LEVELS = ("default", "boosted", "maximum")
 
 
+@register_resource("keyphrase_boosting")
 @dataclass
 class KeyphraseBoosting(MultiResourceYamlResource):
     """Dataclass representing an ASR Keyphrase Boosting entry"""
@@ -39,6 +40,24 @@ class KeyphraseBoosting(MultiResourceYamlResource):
         self.name = name
         self.keyphrase = keyphrase
         self.level = level.lower()
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "KeyphraseBoosting"]:
+        """Parse keyphrase boosting entries from a projection dict."""
+        keyphrases = {}
+        for kp_id, kp_data in (
+            projection.get("keyphraseBoosting", {})
+            .get("keyphraseBoosting", {})
+            .get("entities", {})
+            .items()
+        ):
+            keyphrases[kp_id] = cls(
+                resource_id=kp_id,
+                name=kp_data.get("keyphrase", ""),
+                keyphrase=kp_data.get("keyphrase", ""),
+                level=kp_data.get("level", "default"),
+            )
+        return keyphrases
 
     @property
     def file_path(self) -> str:

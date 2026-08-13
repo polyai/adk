@@ -5,10 +5,10 @@ Copyright PolyAI Limited
 
 import os
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import date, datetime, timezone
+from typing import Any, Optional
 
-from google.protobuf.timestamp_pb2 import Timestamp
+from google.protobuf.struct_pb2 import Struct
 
 import poly.resources.resource_utils as utils
 
@@ -18,6 +18,8 @@ from poly.handlers.protobuf.testing_pb2 import (
     Delete_TestCase,
     PromptAssertion,
     SetTestCaseAssertions,
+    SetTestCaseIntegrationAttributes,
+    SetTestCaseSipHeaders,
     SetTestCaseTags,
     Update_TestCase,
 )
@@ -31,7 +33,7 @@ from poly.handlers.protobuf.testing_pb2 import (
     TestCaseAssertion as TestCaseAssertionProto,
 )
 from poly.resources.languages import AdditionalLanguage, DefaultLanguage
-from poly.resources.resource import ResourceMapping, SubResource, YamlResource
+from poly.resources.resource import ResourceMapping, SubResource, YamlResource, register_resource
 from poly.resources.variant_attributes import Variant
 
 INTERNAL_TO_CHANNEL = {
@@ -217,6 +219,144 @@ class TestCaseTags(SubResource):
         raise NotImplementedError("Test Case Tags cannot be deleted")
 
 
+def _header_value(value: Any) -> str:
+    """Render a YAML value as the text a carrier would actually send.
+
+    SIP headers are `map<string, string>`, but YAML types unquoted scalars, so
+    `x-flag: true` arrives as a Python bool. Plain `str()` would send `"True"`
+    — Python's capitalisation, which no carrier and no other client produces.
+    """
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return ""
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    return str(value)
+
+
+@dataclass
+class TestCaseSipHeaders(SubResource):
+    """Dataclass representing the mock SIP headers on a test case"""
+
+    __test__ = False
+
+    headers: dict[str, str] = field(default_factory=dict)
+
+    @property
+    def command_type(self) -> str:
+        return "test_case_sip_headers"
+
+    @property
+    def update_command_type(self) -> str:
+        return "set_test_case_sip_headers"
+
+    def build_update_proto(self) -> SetTestCaseSipHeaders:
+        return SetTestCaseSipHeaders(
+            id=self.resource_id,
+            # map<string, string> on the wire: a header value is always text,
+            # unlike an integration attribute.
+            sip_headers={str(key): _header_value(value) for key, value in self.headers.items()},
+        )
+
+    def build_create_proto(self) -> None:
+        raise NotImplementedError("Test Case SIP Headers cannot be created")
+
+    def build_delete_proto(self) -> None:
+        raise NotImplementedError("Test Case SIP Headers cannot be deleted")
+
+
+def _normalise_attribute(value: Any) -> Any:
+    """Render a value read back from a Struct the way it was written.
+
+    `google.protobuf.Struct` holds every number as a double, so an attribute
+    pushed as `2` returns as `2.0` and would be written back to YAML that way,
+    producing a spurious diff on every pull after a push. Integral floats are
+    folded back to int; genuine decimals are untouched.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    if isinstance(value, dict):
+        return {key: _normalise_attribute(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_normalise_attribute(item) for item in value]
+    return value
+
+
+def _validate_attribute_value(value: Any, path: str) -> None:
+    """Reject values a google.protobuf.Struct cannot carry.
+
+    YAML types unquoted scalars, so `expiry: 2026-08-12` becomes a
+    `datetime.date` and `Struct.update` fails with a bare
+    `ValueError: Unexpected type` naming neither the key nor the file. The
+    wire format is JSON, exactly as in the UI, where the type picker offers
+    string, number, boolean and JSON and nothing else.
+    """
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError(
+                    f"Integration attribute key {path}.{key!r} must be text — "
+                    f"quote it to stop YAML reading it as {type(key).__name__}"
+                )
+            _validate_attribute_value(item, f"{path}.{key}")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_attribute_value(item, f"{path}[{index}]")
+        return
+    if isinstance(value, (date, datetime)):
+        raise ValueError(
+            f"Integration attribute '{path}' is a {type(value).__name__}, which the agent "
+            f"cannot receive — quote it to send it as text: '{value.isoformat()}'"
+        )
+    if value is not None and not isinstance(value, (str, int, float, bool)):
+        raise ValueError(
+            f"Integration attribute '{path}' is a {type(value).__name__}; "
+            "only text, numbers, true/false, lists and nested maps are supported"
+        )
+
+
+@dataclass
+class TestCaseIntegrationAttributes(SubResource):
+    """Dataclass representing the mock integration attributes on a test case"""
+
+    __test__ = False
+
+    attributes: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def command_type(self) -> str:
+        return "test_case_integration_attributes"
+
+    @property
+    def update_command_type(self) -> str:
+        return "set_test_case_integration_attributes"
+
+    def to_yaml_dict(self) -> dict:
+        return _normalise_attribute(self.attributes)
+
+    def build_update_proto(self) -> SetTestCaseIntegrationAttributes:
+        # google.protobuf.Struct, not a string map: values keep their JSON type
+        # through to conv.integration_attributes, so a flow branching on
+        # `retry_count > 2` sees a number rather than "2".
+        attributes = Struct()
+        attributes.update(self.attributes)
+        return SetTestCaseIntegrationAttributes(
+            id=self.resource_id,
+            integration_attributes=attributes,
+        )
+
+    def build_create_proto(self) -> None:
+        raise NotImplementedError("Test Case Integration Attributes cannot be created")
+
+    def build_delete_proto(self) -> None:
+        raise NotImplementedError("Test Case Integration Attributes cannot be deleted")
+
+
+@register_resource("test_cases")
 @dataclass
 class TestCase(YamlResource):
     """Dataclass representing an Agent Studio Test"""
@@ -230,7 +370,71 @@ class TestCase(YamlResource):
     assertions: TestCaseAssertion = None
     tags: TestCaseTags = None
     variant: Optional[str] = None
+    caller_number: Optional[str] = None
     simulated_at: Optional[str] = None
+    sip_headers: "TestCaseSipHeaders" = None
+    integration_attributes: "TestCaseIntegrationAttributes" = None
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "TestCase"]:
+        """Parse test cases from a projection dict."""
+        test_cases = {}
+        for test_case_id, test_case_data in (
+            projection.get("testing", {}).get("testCases", {}).get("entities", {}).items()
+        ):
+            prompt_assertions = []
+            function_assertions = []
+            for assertion in test_case_data.get("assertions", []):
+                assertion_payload = assertion.get("payload", {})
+                if assertion_payload.get("$case") == "prompt":
+                    prompt_assertions.append(assertion_payload.get("value").get("value"))
+                elif assertion_payload.get("$case") == "functionCall":
+                    assertion_value = assertion_payload.get("value", {})
+                    arguments = [
+                        FunctionCallArgumentAssertion(
+                            parameter_name=arg,
+                            expected_value=arg_values.get("expectedValue"),
+                            value_type=arg_values.get("valueType"),
+                        )
+                        for arg, arg_values in assertion_value.get("arguments").items()
+                    ]
+                    function_assertions.append(
+                        FunctionCallAssertion(name=assertion_value.get("name"), arguments=arguments)
+                    )
+            assertions = TestCaseAssertion(
+                resource_id=test_case_id,
+                name="assertions",
+                prompts=prompt_assertions,
+                function_calls=function_assertions,
+            )
+            tags = TestCaseTags(
+                resource_id=test_case_id, name="tags", tags=test_case_data.get("tags", [])
+            )
+            sip_headers = TestCaseSipHeaders(
+                resource_id=test_case_id,
+                name="sip_headers",
+                headers=test_case_data.get("sipHeaders") or {},
+            )
+            integration_attributes = TestCaseIntegrationAttributes(
+                resource_id=test_case_id,
+                name="integration_attributes",
+                attributes=test_case_data.get("integrationAttributes") or {},
+            )
+            test_cases[test_case_id] = cls(
+                resource_id=test_case_id,
+                name=test_case_data.get("name", ""),
+                scenario=test_case_data.get("scenario", ""),
+                variant=test_case_data.get("variantId", ""),
+                language=test_case_data.get("language", ""),
+                channel=test_case_data.get("channel", ""),
+                assertions=assertions,
+                tags=tags,
+                caller_number=test_case_data.get("callerNumber", ""),
+                simulated_at=test_case_data.get("simulatedAt"),
+                sip_headers=sip_headers,
+                integration_attributes=integration_attributes,
+            )
+        return test_cases
 
     def __init__(
         self,
@@ -243,7 +447,10 @@ class TestCase(YamlResource):
         assertions: TestCaseAssertion | dict,
         tags: TestCaseTags | dict,
         variant: Optional[str] = None,
+        caller_number: Optional[str] = None,
         simulated_at: str | datetime | None = None,
+        sip_headers: "TestCaseSipHeaders | dict | None" = None,
+        integration_attributes: "TestCaseIntegrationAttributes | dict | None" = None,
     ):
         self.resource_id = resource_id
         self.name = name
@@ -259,7 +466,30 @@ class TestCase(YamlResource):
             self.tags = TestCaseTags(**tags)
         self.variant = variant
         self.language = language
+        # Trimmed on the way in, matching the platform entity: a stray trailing
+        # space is invisible in a YAML file but changes the agent-memory
+        # identifier the number resolves to.
+        self.caller_number = (
+            caller_number.strip() if isinstance(caller_number, str) else caller_number
+        )
         self.simulated_at = format_simulated_at(parse_simulated_at(simulated_at))
+        # Both are always constructed, even when empty. Clearing a value has to
+        # produce a command, and get_new_updated_deleted_subresources works by
+        # comparing subresources — an absent one cannot differ from anything.
+        if isinstance(sip_headers, TestCaseSipHeaders):
+            self.sip_headers = sip_headers
+        elif sip_headers:
+            self.sip_headers = TestCaseSipHeaders(**sip_headers)
+        else:
+            self.sip_headers = TestCaseSipHeaders(resource_id=resource_id, name="sip_headers")
+        if isinstance(integration_attributes, TestCaseIntegrationAttributes):
+            self.integration_attributes = integration_attributes
+        elif integration_attributes:
+            self.integration_attributes = TestCaseIntegrationAttributes(**integration_attributes)
+        else:
+            self.integration_attributes = TestCaseIntegrationAttributes(
+                resource_id=resource_id, name="integration_attributes"
+            )
 
     @property
     def file_path(self) -> str:
@@ -275,11 +505,21 @@ class TestCase(YamlResource):
         output["language"] = self.language
         if self.variant:
             output["variant"] = self.variant
+
+        if self.caller_number:
+            output["caller_number"] = self.caller_number
+
         if self.simulated_at:
             output["simulated_at"] = self.simulated_at
 
         if tags_list := self.tags.tags:
             output["tags"] = tags_list
+
+        if headers := self.sip_headers.headers:
+            output["sip_headers"] = headers
+
+        if attributes := self.integration_attributes.to_yaml_dict():
+            output["integration_attributes"] = attributes
 
         if assert_dict := self.assertions.to_yaml_dict():
             output.update(assert_dict)
@@ -315,6 +555,17 @@ class TestCase(YamlResource):
         tags = yaml_dict.get("tags", [])
         test_case_tags = TestCaseTags(resource_id=resource_id, name="tags", tags=tags)
 
+        test_case_sip_headers = TestCaseSipHeaders(
+            resource_id=resource_id,
+            name="sip_headers",
+            headers=yaml_dict.get("sip_headers") or {},
+        )
+        test_case_integration_attributes = TestCaseIntegrationAttributes(
+            resource_id=resource_id,
+            name="integration_attributes",
+            attributes=yaml_dict.get("integration_attributes") or {},
+        )
+
         channel = yaml_dict.get("channel")
         return cls(
             resource_id=resource_id,
@@ -325,7 +576,10 @@ class TestCase(YamlResource):
             assertions=test_case_assertion,
             tags=test_case_tags,
             variant=yaml_dict.get("variant"),
+            caller_number=yaml_dict.get("caller_number"),
             simulated_at=yaml_dict.get("simulated_at"),
+            sip_headers=test_case_sip_headers,
+            integration_attributes=test_case_integration_attributes,
         )
 
     @classmethod
@@ -353,6 +607,9 @@ class TestCase(YamlResource):
         **kwargs,
     ) -> dict:
         """Replace resource names with IDs in a parsed YAML dict."""
+        yaml_dict = super().from_pretty_dict(
+            yaml_dict, resource_mappings=resource_mappings, **kwargs
+        )
         if variant_name := yaml_dict.get("variant"):
             variant_id = next(
                 (
@@ -432,6 +689,20 @@ class TestCase(YamlResource):
             ):
                 raise ValueError(f"Variant {self.variant} not found")
 
+        # An unquoted number is the easy mistake here, and a silent one: YAML
+        # reads `+447700900000` as the int 447700900000, dropping the leading
+        # `+`. Coercing it back to text would send a different number, so this
+        # rejects rather than guesses.
+        if self.caller_number is not None and not isinstance(self.caller_number, str):
+            raise ValueError(
+                f"caller_number must be text, got {type(self.caller_number).__name__} "
+                f"({self.caller_number}) — quote it so YAML keeps it as written, "
+                "including any leading '+' or zeros"
+            )
+
+        # Integration attributes carry JSON types through to the agent
+        _validate_attribute_value(self.integration_attributes.attributes, "integration_attributes")
+
         # Function name is valid
         known_global_functions = {
             resource.resource_name
@@ -469,32 +740,26 @@ class TestCase(YamlResource):
         if not old_resource:
             updated.append(self.assertions)
             updated.append(self.tags)
+            if self.sip_headers.headers:
+                updated.append(self.sip_headers)
+            if self.integration_attributes.attributes:
+                updated.append(self.integration_attributes)
         else:
             if old_resource.assertions != self.assertions:
                 updated.append(self.assertions)
             if old_resource.tags != self.tags:
                 updated.append(self.tags)
+            # Compared even when now empty, so clearing them pushes a command.
+            if old_resource.sip_headers != self.sip_headers:
+                updated.append(self.sip_headers)
+            if old_resource.integration_attributes != self.integration_attributes:
+                updated.append(self.integration_attributes)
 
         return [], updated, []
 
     @property
     def command_type(self) -> str:
         return "test_case"
-
-    def _build_simulated_at_proto(self) -> Optional[Timestamp]:
-        """Build the protobuf Timestamp for the test clock, or None when unset.
-
-        Note: the platform reads an unset optional field as "no update" rather than
-        "clear", so removing simulated_at from a local file does not currently remove
-        the test clock upstream. Clearing needs a platform-side signal, as was added
-        for variant_id.
-        """
-        parsed = parse_simulated_at(self.simulated_at)
-        if parsed is None:
-            return None
-        timestamp = Timestamp()
-        timestamp.FromDatetime(parsed)
-        return timestamp
 
     def build_create_proto(self) -> Create_TestCase:
         return Create_TestCase(
@@ -504,7 +769,10 @@ class TestCase(YamlResource):
             variant_id=self.variant,
             language=self.language,
             channel=self.channel,
-            simulated_at=self._build_simulated_at_proto(),
+            caller_number=self.caller_number or "",
+            # Empty string is the explicit "clear" signal, as for caller_number and
+            # variant_id — an omitted optional field reads as "no update" platform-side.
+            simulated_at=self.simulated_at or "",
         )
 
     def build_update_proto(self) -> Update_TestCase:
@@ -515,7 +783,10 @@ class TestCase(YamlResource):
             variant_id=self.variant or "",
             language=self.language,
             channel=self.channel,
-            simulated_at=self._build_simulated_at_proto(),
+            caller_number=self.caller_number or "",
+            # Empty string is the explicit "clear" signal, as for caller_number and
+            # variant_id — an omitted optional field reads as "no update" platform-side.
+            simulated_at=self.simulated_at or "",
         )
 
     def build_delete_proto(self) -> Delete_TestCase:

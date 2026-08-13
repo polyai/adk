@@ -15,6 +15,7 @@ from typing import Any, Optional
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project, parse_from_projection_json, read_project_config
 from poly.output.json_output import json_print
+from poly.project import DeploymentMode
 from poly.resources.resource_utils import contains_merge_conflict
 from poly.utils import merge_strings
 
@@ -67,6 +68,42 @@ def _auto_merge_resolution(path: list[str], merged_value: str) -> dict[str, Any]
     return {"path": path, "value": merged_value, "strategy": "theirs"}
 
 
+def _build_branch_name_lookup(project: Any, archived: list[dict[str, Any]]) -> dict[str, str]:
+    """Map branch ids to branch names, for displaying archived branches' parents.
+
+    Archived entries reference their parent by id only, which means nothing to a
+    user. A parent is normally archived alongside its children, so the archive
+    resolves most ids on its own; the active branches are fetched only when an id
+    is still unresolved (a child archived while its parent stayed live).
+    """
+    names = {
+        branch["branchId"]: branch.get("name") or branch["branchId"]
+        for branch in archived
+        if branch.get("branchId")
+    }
+
+    unresolved = {
+        branch.get("parentBranchId")
+        for branch in archived
+        if branch.get("parentBranchId") and branch.get("parentBranchId") != "main"
+    } - names.keys()
+    if not unresolved:
+        return names
+
+    try:
+        _, active = project.get_branches()
+    except ValueError:
+        # The parent column is cosmetic — degrade to showing raw ids rather than
+        # failing the whole listing.
+        return names
+
+    for name, meta in active.items():
+        branch_id = meta.get("branchId")
+        if branch_id and branch_id not in names:
+            names[branch_id] = name
+    return names
+
+
 class BranchCommand(BaseCommand):
     """Manage branches in the Agent Studio project."""
 
@@ -103,23 +140,38 @@ class BranchCommand(BaseCommand):
                 "Manage branches in the Agent Studio project.\n\n"
                 "Examples:\n"
                 "  poly branch list\n"
+                "  poly branch list --archived\n"
                 "  poly branch create new-branch\n"
+                "  poly branch create new-branch --from other-branch\n"
                 "  poly branch switch existing-branch\n"
-                "  poly branch merge 'Merge branch'"
+                "  poly branch rename new-name\n"
+                "  poly branch merge 'Merge branch'\n"
+                "  poly branch sync\n"
+                "  poly branch history\n"
                 "  poly branch current\n"
                 "  poly branch delete\n"
+                "  poly branch restore archived-branch\n"
+                "  poly branch tag\n"
+                "  poly branch untag\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
         branch_subparsers = branches_parser.add_subparsers(dest="branch_subcommand", required=True)
 
+        # -- list --
         branch_list_parser = branch_subparsers.add_parser(
             "list",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
             help="List all branches in the project.",
         )
+        branch_list_parser.add_argument(
+            "--archived",
+            action="store_true",
+            help="Show soft-deleted (archived) branches instead of active ones.",
+        )
         branch_list_parser.set_defaults(branch_subcommand="list")
 
+        # -- create --
         branch_create_parser = branch_subparsers.add_parser(
             "create",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -138,6 +190,14 @@ class BranchCommand(BaseCommand):
             help="Initiate the new branch from this environment instead of sandbox (main).",
         )
         branch_create_parser.add_argument(
+            "--from",
+            type=str,
+            default=None,
+            dest="source_branch",
+            metavar="BRANCH",
+            help="Create the new branch from this branch instead of the current branch.",
+        ).completer = cls._branch_name_completer
+        branch_create_parser.add_argument(
             "--force",
             "-f",
             action="store_true",
@@ -145,6 +205,7 @@ class BranchCommand(BaseCommand):
         )
         branch_create_parser.set_defaults(branch_subcommand="create")
 
+        # -- switch --
         branch_switch_parser = branch_subparsers.add_parser(
             "switch",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -179,6 +240,7 @@ class BranchCommand(BaseCommand):
         )
         branch_switch_parser.set_defaults(branch_subcommand="switch")
 
+        # -- current --
         branch_current_parser = branch_subparsers.add_parser(
             "current",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -186,6 +248,22 @@ class BranchCommand(BaseCommand):
         )
         branch_current_parser.set_defaults(branch_subcommand="current")
 
+        # -- rename --
+        branch_rename_parser = branch_subparsers.add_parser(
+            "rename",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Rename the current branch.",
+        )
+        branch_rename_parser.add_argument(
+            "new_branch_name",
+            type=str,
+            nargs="?",
+            default=None,
+            help="New name for the current branch.",
+        )
+        branch_rename_parser.set_defaults(branch_subcommand="rename")
+
+        # -- delete --
         branch_delete_parser = branch_subparsers.add_parser(
             "delete",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
@@ -199,16 +277,36 @@ class BranchCommand(BaseCommand):
         ).completer = cls._branch_name_completer
         branch_delete_parser.set_defaults(branch_subcommand="delete")
 
+        # -- restore --
+        branch_restore_parser = branch_subparsers.add_parser(
+            "restore",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Restore a soft-deleted branch from the archive.",
+        )
+        branch_restore_parser.add_argument(
+            "branch_id",
+            type=str,
+            metavar="BRANCH",
+            nargs="?",
+            default=None,
+            help=(
+                "Branch id of the archived branch to restore. Archived names are not "
+                "unique, so ids are required — find them with 'poly branch list --archived'."
+            ),
+        )
+        branch_restore_parser.set_defaults(branch_subcommand="restore")
+
+        # -- merge --
         branch_merge_parser = branch_subparsers.add_parser(
             "merge",
             parents=[parents.path, parents.verbose, parents.json, parents.debug],
-            help="Merge branch into main",
+            help="Merge branch into its parent branch",
         )
         branch_merge_parser.add_argument(
             "message",
             nargs="?",
             default=None,
-            help="Message for the merge.",
+            help="Message for the merge. Required when merging into main.",
         )
         branch_merge_parser.add_argument(
             "--interactive",
@@ -228,13 +326,134 @@ class BranchCommand(BaseCommand):
                 '- value: Optional custom value (use "theirs" strategy)'
             ),
         )
+        branch_merge_parser.add_argument(
+            "--force",
+            "-f",
+            action="store_true",
+            help="Skip the confirmation prompt when merging into main deploys to a live environment.",
+        )
         branch_merge_parser.set_defaults(branch_subcommand="merge")
+
+        # -- sync --
+        branch_sync_parser = branch_subparsers.add_parser(
+            "sync",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Sync branch with parent",
+        )
+        branch_sync_parser.add_argument(
+            "--interactive",
+            "-i",
+            action="store_true",
+            help="Enable interactive mode for resolving any merge conflicts. Set $EDITOR or $VISUAL to your preferred editor for editing merge conflict values if needed.",
+        )
+        branch_sync_parser.add_argument(
+            "--resolutions",
+            type=str,
+            default=None,
+            help=(
+                "Conflict resolutions as a JSON file path, inline JSON string, or '-' for stdin. "
+                "JSON should be an array of objects, each representing a conflict resolution:\n"
+                '- path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])\n'
+                '- strategy: Resolution strategy - "ours", "theirs", or "base"\n'
+                '- value: Optional custom value (use "theirs" strategy)'
+            ),
+        )
+        branch_sync_parser.set_defaults(branch_subcommand="sync")
+
+        # -- tag --
+        branch_tag_parser = branch_subparsers.add_parser(
+            "tag",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Tag the current branch and deploy to staging environment. Tagging 'main' branch is not supported.",
+        )
+        branch_tag_parser.set_defaults(branch_subcommand="tag")
+
+        # -- untag --
+        branch_untag_parser = branch_subparsers.add_parser(
+            "untag",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Remove a tag from the current branch. Untagging 'main' branch is not supported.",
+        )
+        branch_untag_parser.set_defaults(branch_subcommand="untag")
+
+        # -- diff --
+        branch_diff_parser = branch_subparsers.add_parser(
+            "diff",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Show changes made on a branch since it was created.",
+        )
+        branch_diff_parser.add_argument(
+            "branch_name",
+            nargs="?",
+            default=None,
+            help="Branch to diff. Defaults to the current branch.",
+        ).completer = cls._branch_name_completer
+        branch_diff_parser.add_argument(
+            "--files",
+            nargs="*",
+            help="Only show changes for these files.",
+        )
+        branch_diff_parser.set_defaults(branch_subcommand="diff")
+
+        # -- review --
+        branch_review_parser = branch_subparsers.add_parser(
+            "review",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Create a GitHub Gist of branch changes since it was created.",
+        )
+        branch_review_parser.add_argument(
+            "branch_name",
+            nargs="?",
+            default=None,
+            help="Branch to review. Defaults to the current branch.",
+        ).completer = cls._branch_name_completer
+        branch_review_parser.add_argument(
+            "--files",
+            nargs="*",
+            help="Only include changes for these files.",
+        )
+        branch_review_parser.set_defaults(branch_subcommand="review")
+
+        # -- status --
+        branch_status_parser = branch_subparsers.add_parser(
+            "status",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Show branch status including local changes and fork-point info.",
+        )
+        branch_status_parser.add_argument(
+            "branch_name",
+            nargs="?",
+            default=None,
+            help="Branch to check status for. Defaults to the current branch.",
+        ).completer = cls._branch_name_completer
+        branch_status_parser.set_defaults(branch_subcommand="status")
+
+        # -- history --
+        branch_history_parser = branch_subparsers.add_parser(
+            "history",
+            parents=[parents.path, parents.verbose, parents.json, parents.debug],
+            help="Show the history of a branch.",
+        )
+        branch_history_parser.add_argument(
+            "--branch-name",
+            "-b",
+            type=str,
+            default=None,
+            help="Name of the branch to show history for. Defaults to the current branch.",
+        )
+        branch_history_parser.add_argument(
+            "--limit",
+            type=int,
+            default=10,
+            help="Number of history entries to show. Defaults to 10.",
+        )
+        branch_history_parser.set_defaults(branch_subcommand="history")
 
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Dispatch to the matching branch sub-handler."""
         if args.branch_subcommand == "list":
-            cls.branch_list(args.path, args.json)
+            cls.branch_list(args.path, args.json, getattr(args, "archived", False))
 
         elif args.branch_subcommand == "create":
             cls.branch_create(
@@ -243,6 +462,7 @@ class BranchCommand(BaseCommand):
                 args.json,
                 getattr(args, "environment", None),
                 getattr(args, "force", False),
+                getattr(args, "source_branch", None),
             )
 
         elif args.branch_subcommand == "switch":
@@ -263,14 +483,60 @@ class BranchCommand(BaseCommand):
             cls.branch_delete(args.path, args.branch_name, args.json)
 
         elif args.branch_subcommand == "merge":
-            cls.branch_merge(args.path, args.message, args.json, args.interactive, args.resolutions)
+            cls.branch_merge(
+                args.path, args.message, args.json, args.interactive, args.resolutions, args.force
+            )
+
+        elif args.branch_subcommand == "sync":
+            cls.branch_sync(args.path, args.json, args.interactive, args.resolutions)
+
+        elif args.branch_subcommand == "history":
+            cls.branch_history(args.path, args.branch_name, args.json, args.limit)
+
+        elif args.branch_subcommand == "rename":
+            cls.branch_rename(args.path, args.new_branch_name, args.json)
+
+        elif args.branch_subcommand == "restore":
+            cls.branch_restore(args.path, args.branch_id, args.json)
+
+        elif args.branch_subcommand == "tag":
+            cls.branch_tag(args.path, args.json)
+
+        elif args.branch_subcommand == "untag":
+            cls.branch_untag(args.path, args.json)
+
+        elif args.branch_subcommand == "diff":
+            cls.branch_diff(args.path, args.branch_name, getattr(args, "files", None), args.json)
+
+        elif args.branch_subcommand == "review":
+            cls.branch_review(args.path, args.branch_name, getattr(args, "files", None), args.json)
+
+        elif args.branch_subcommand == "status":
+            cls.branch_status(args.path, args.branch_name, args.json)
 
     @classmethod
-    def branch_list(cls, base_path: str, output_json: bool = False) -> None:
+    def branch_list(cls, base_path: str, output_json: bool = False, archived: bool = False) -> None:
         """List branches in the Agent Studio project."""
-        from poly.output.console import plain, print_branches, warning
+        from poly.output.console import (
+            plain,
+            print_archived_branches,
+            print_branches,
+            print_releases_branches,
+            warning,
+        )
 
         project = load_project(base_path, output_json=output_json)
+
+        if archived:
+            branches = project.list_archived_branches()
+            if output_json:
+                json_print({"archived_branches": branches})
+                return
+            if not branches:
+                plain("[muted]No archived branches found.[/muted]")
+                return
+            print_archived_branches(branches, _build_branch_name_lookup(project, branches))
+            return
 
         current_branch, branches = project.get_branches()
 
@@ -286,7 +552,10 @@ class BranchCommand(BaseCommand):
             plain("[muted]No branches found.[/muted]")
             return
 
-        print_branches(branches, current_branch)
+        if project.deployment_mode == DeploymentMode.RELEASES_BRANCHES:
+            print_releases_branches(branches, current_branch)
+        else:
+            print_branches(branches, current_branch)
 
         if current_branch is None:
             warning(
@@ -302,36 +571,18 @@ class BranchCommand(BaseCommand):
         output_json: bool = False,
         env: str = None,
         force: bool = False,
+        source_branch: str = None,
     ) -> None:
         """Create a new branch in the Agent Studio project."""
         from poly.output.console import error, success, warning
 
         project = load_project(base_path, output_json=output_json)
 
-        if project.branch_id != "main":
-            if output_json:
-                json_print(
-                    {
-                        "success": False,
-                        "error": "Branches can only be created from the main branch (sandbox).",
-                    }
-                )
-            else:
-                error(
-                    "Branches can only be created from the [bold]main[/bold] branch (sandbox). "
-                    "Please switch and try again."
-                )
-            sys.exit(1)
-
         if env in ["pre-release", "live"]:
             # Checks for any local changes on main before creating env branch.
             if diffs := project.get_diffs():
                 if not force:
-                    raise ValueError(
-                        f"Uncommitted changes on main branch, diffs: {list(diffs.keys())}"
-                    )
-            project.pull_project_from_env(env=env, format=False)
-            success(f"Pulled {project.account_id}/{project.project_id}")
+                    raise ValueError(f"Uncommitted changes on main, diffs: {list(diffs.keys())}")
 
         if not branch_name:
             if output_json:
@@ -347,11 +598,27 @@ class BranchCommand(BaseCommand):
                 warning("No branch name provided. Exiting.")
                 return
 
-        new_branch_id = project.create_branch(branch_name)
+        if source_branch:
+            base_branch_name = source_branch
+            _, branches = project.get_branches()
+            base_branch_id = branches.get(source_branch, {}).get("branchId")
+        else:
+            base_branch_id = project.branch_id
+            base_branch_name = project.get_current_branch()
+        try:
+            new_branch_id = project.create_branch(branch_name, source_branch_name=source_branch)
+        except ValueError as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(str(e))
+            sys.exit(1)
         if output_json:
             json_print(
                 {
                     "success": bool(new_branch_id),
+                    "base_branch_id": base_branch_id,
+                    "base_branch_name": base_branch_name,
                     "new_branch_id": new_branch_id,
                     "branch_name": branch_name,
                 }
@@ -361,13 +628,17 @@ class BranchCommand(BaseCommand):
             return
 
         if new_branch_id:
-            success(f"Branch '{branch_name}' created (ID: {new_branch_id})")
+            success(
+                f"Created new branch '{branch_name}' (ID: {new_branch_id}) from '{base_branch_name}'"
+            )
         else:
             error("Failed to create the branch.")
             sys.exit(1)
 
         # Pushes existing state of env to provide clean slate for hotfixes.
         if env in ["pre-release", "live"]:
+            project.pull_project_from_env(env=env, format=False)
+            success(f"Pulled {project.account_id}/{project.project_id}")
             project.push_project(
                 force=True,
                 skip_validation=True,
@@ -389,7 +660,7 @@ class BranchCommand(BaseCommand):
         """Switch to a different branch in the Agent Studio project."""
         import questionary
 
-        from poly.output.console import console, error, plain, success, warning
+        from poly.output.console import console, error, flatten_branch_tree, plain, success, warning
 
         project = load_project(base_path, output_json=output_json)
 
@@ -408,24 +679,27 @@ class BranchCommand(BaseCommand):
                 plain("[muted]No branches found.[/muted]")
                 return
 
-            # Create menu options from branch names
-            menu_options = []
-            for name in branches.keys():
-                if name == current_branch:
-                    menu_options.append(f"{name} (current)")
-                else:
-                    menu_options.append(name)
+            if project.deployment_mode == DeploymentMode.RELEASES_BRANCHES:
+                # Show branch-from-branch lineage via indentation/connectors.
+                choices = [
+                    questionary.Choice(title=title, value=value)
+                    for title, value in flatten_branch_tree(branches, current_branch)
+                ]
+            else:
+                choices = [
+                    questionary.Choice(
+                        title=f"{name} (current)" if name == current_branch else name,
+                        value=name,
+                    )
+                    for name in branches.keys()
+                ]
 
-            branch_menu = questionary.select(
-                "Select Branch", choices=menu_options, use_search_filter=True, use_jk_keys=False
+            branch_name = questionary.select(
+                "Select Branch", choices=choices, use_search_filter=True, use_jk_keys=False
             ).ask()
-            if not branch_menu:
+            if not branch_name:
                 warning("No branch selected. Exiting.")
                 return
-
-            # Get the selected branch name (remove "(current)" suffix if present)
-            selected_option = branch_menu
-            branch_name = selected_option.replace(" (current)", "")
 
         projection_json = parse_from_projection_json(
             from_projection,
@@ -471,26 +745,44 @@ class BranchCommand(BaseCommand):
 
     @classmethod
     def get_current_branch(cls, base_path: str, output_json: bool = False) -> None:
-        """Get the current branch of the Agent Studio project."""
+        """Get the current branch of the Agent Studio project, and its parent if it has one."""
         from poly.output.console import plain, warning
 
         project = load_project(base_path, output_json=output_json)
 
-        current_branch = project.get_current_branch()
-        if output_json:
-            json_output = {
-                "current_branch": current_branch,
-            }
-            json_print(json_output)
-            return
+        current_branch, branches = project.get_branches()
 
         if current_branch is None:
-            warning(
-                "Current local branch does not exist in Agent Studio. "
-                "It may have been deleted or merged."
-            )
+            if output_json:
+                json_print({"current_branch": None, "parent_branch": None})
+            else:
+                warning(
+                    "Current local branch does not exist in Agent Studio. "
+                    "It may have been deleted or merged."
+                )
             return
+
+        parent_branch_id = branches.get(current_branch, {}).get("parentBranchId")
+        parent_branch = (
+            next(
+                (
+                    name
+                    for name, meta in branches.items()
+                    if meta.get("branchId") == parent_branch_id
+                ),
+                parent_branch_id,
+            )
+            if parent_branch_id
+            else None
+        )
+
+        if output_json:
+            json_print({"current_branch": current_branch, "parent_branch": parent_branch})
+            return
+
         plain(f"Current branch: [bold]{current_branch}[/bold]")
+        if parent_branch and parent_branch != "main":
+            plain(f"Parent branch: [bold]{parent_branch}[/bold]")
 
     @classmethod
     def branch_delete(
@@ -505,13 +797,13 @@ class BranchCommand(BaseCommand):
         """
         import questionary
 
-        from poly.output.console import error, info, plain, success, warning
+        from poly.output.console import error, flatten_branch_tree, info, plain, success, warning
 
         project = load_project(base_path, output_json=output_json)
         current_branch, branches = project.get_branches()
 
         # Filter out 'main' — it cannot be deleted
-        deletable = {name: bid for name, bid in branches.items() if name != "main"}
+        deletable = {name: meta for name, meta in branches.items() if name != "main"}
 
         if branch_name:
             if branch_name not in deletable:
@@ -530,12 +822,12 @@ class BranchCommand(BaseCommand):
                     return
             try:
                 deleted = project.delete_branch(branch_name)
-            except (ValueError, Exception) as e:
+            except ValueError as e:
                 if output_json:
                     json_print({"success": False, "message": str(e)})
                 else:
                     error(str(e))
-                return
+                sys.exit(1)
             if output_json:
                 result = {"success": deleted}
                 if deleted and branch_name == current_branch:
@@ -554,17 +846,31 @@ class BranchCommand(BaseCommand):
             plain("[muted]No deletable branches found.[/muted]")
             return
 
-        choices = []
-        for name in deletable:
-            label = f"{name} (current)" if name == current_branch else name
-            choices.append(label)
+        if project.deployment_mode == DeploymentMode.RELEASES_BRANCHES:
+            # Show 'main' as disabled tree context so lineage is visible, but not selectable.
+            choices = [
+                questionary.Choice(
+                    title=title,
+                    value=value,
+                    disabled="cannot delete main" if value == "main" else None,
+                )
+                for title, value in flatten_branch_tree(branches, current_branch)
+            ]
+        else:
+            choices = [
+                questionary.Choice(
+                    title=f"{name} (current)" if name == current_branch else name,
+                    value=name,
+                )
+                for name in deletable
+            ]
 
         selected = questionary.checkbox("Select branches to delete", choices=choices).ask()
         if not selected:
             warning("No branches selected. Exiting.")
             return
 
-        branch_names = [label.replace(" (current)", "") for label in selected]
+        branch_names = selected
         confirm_msg = f"Delete {len(branch_names)} branch(es): {', '.join(branch_names)}?"
         confirmed = questionary.confirm(confirm_msg, default=False).ask()
         if not confirmed:
@@ -573,8 +879,7 @@ class BranchCommand(BaseCommand):
 
         deleted_count = 0
         current_branch_deleted = False
-        for label in selected:
-            name = label.replace(" (current)", "")
+        for name in selected:
             try:
                 deleted = project.delete_branch(name)
                 if deleted:
@@ -588,7 +893,7 @@ class BranchCommand(BaseCommand):
                 else:
                     if not output_json:
                         error(f"Failed to delete branch '{name}'.")
-            except (ValueError, Exception) as e:
+            except ValueError as e:
                 if not output_json:
                     error(str(e))
 
@@ -761,8 +1066,11 @@ class BranchCommand(BaseCommand):
         output_json: bool = False,
         interactive: bool = False,
         resolutions_file: str = None,
+        force: bool = False,
     ):
         """Merge the current branch into main, with optional conflict resolutions."""
+        import questionary
+
         from poly.output.console import (
             console,
             error,
@@ -772,13 +1080,6 @@ class BranchCommand(BaseCommand):
             success,
             warning,
         )
-
-        if message is None or (isinstance(message, str) and not message.strip()):
-            if output_json:
-                json_print({"success": False, "error": "Merge message is required."})
-            else:
-                error("Merge message is required.")
-            sys.exit(1)
 
         if interactive and output_json:
             json_print(
@@ -810,8 +1111,52 @@ class BranchCommand(BaseCommand):
 
         project = load_project(base_path, output_json=output_json)
 
-        branch_name = project.get_current_branch()
-        ctx = console.status("[info]Merging branch...[/info]") if not output_json else nullcontext()
+        current_branch_name, branches = project.get_branches()
+        current_branch_meta = branches.get(current_branch_name, {})
+        parent_branch_id = current_branch_meta.get("parentBranchId") or None
+        parent_branch_name = next(
+            (name for name, meta in branches.items() if meta.get("branchId") == parent_branch_id),
+            "main",
+        )
+
+        if parent_branch_name == "main" and (
+            message is None or (isinstance(message, str) and not message.strip())
+        ):
+            if output_json:
+                json_print(
+                    {"success": False, "error": "Merge message is required when merging into main."}
+                )
+            else:
+                error("Merge message is required when merging into main.")
+            sys.exit(1)
+
+        is_live_deploy = parent_branch_name == "main" and project.using_simplified_deployments
+
+        def _report_merge_success() -> None:
+            if is_live_deploy:
+                success(
+                    f"Branch '{current_branch_name}' merged into main — your changes are now live."
+                )
+            else:
+                success(f"Branch '{current_branch_name}' merged successfully.")
+            info(f"Switched to '{parent_branch_name}' branch after merge.")
+
+        if is_live_deploy:
+            if not output_json and not force:
+                warning("Merging into 'main' will deploy changes into live environment")
+                if not questionary.confirm(
+                    "Confirm Deployment?", default=False, auto_enter=False
+                ).ask():
+                    warning("Aborted.")
+                    sys.exit(0)
+
+        ctx = (
+            console.status(
+                f"[info]Merging branch '{current_branch_name}' into '{parent_branch_name}'...[/info]"
+            )
+            if not output_json
+            else nullcontext()
+        )
         with ctx:
             merge_success, conflicts, errors = project.merge_branch(
                 message=message, conflict_resolutions=file_resolutions
@@ -828,12 +1173,11 @@ class BranchCommand(BaseCommand):
             return
 
         if merge_success:
-            success(f"Branch '{branch_name}' merged successfully.")
-            info('Switched to "main" branch after merge.')
+            _report_merge_success()
             return
 
         # Failed branch merge
-        error(f"Failed to merge branch '{branch_name}'.")
+        error(f"Failed to merge branch '{current_branch_name}'.")
         if errors:
             plain("\n[red]Errors:[/red]")
             for err in errors:
@@ -864,7 +1208,9 @@ class BranchCommand(BaseCommand):
             os.sep.join(r["path"]): r for r in (file_resolutions or []) if "path" in r
         }
         while True:
-            resolutions = cls._merge_interactively(enriched, existing_resolutions, branch_name)
+            resolutions = cls._merge_interactively(
+                enriched, existing_resolutions, current_branch_name
+            )
             if not resolutions:
                 warning("No resolutions provided. Exiting.")
                 sys.exit(1)
@@ -878,18 +1224,17 @@ class BranchCommand(BaseCommand):
                     message=message, conflict_resolutions=resolutions
                 )
             if merge_success:
-                success(f"Branch '{branch_name}' merged successfully.")
-                info('Switched to "main" branch after merge.')
+                _report_merge_success()
                 break
             if errors:
-                error(f"Failed to merge branch '{branch_name}' after conflict resolution.")
+                error(f"Failed to merge branch '{current_branch_name}' after conflict resolution.")
                 plain("\n[red]Errors:[/red]")
                 for err in errors:
                     error(f"- {err['path']}: {err['message']}")
                 sys.exit(1)
             if not conflicts:
                 error(
-                    f"Failed to merge branch '{branch_name}' after conflict resolution "
+                    f"Failed to merge branch '{current_branch_name}' after conflict resolution "
                     "(no conflicts or errors returned)."
                 )
                 sys.exit(1)
@@ -906,3 +1251,570 @@ class BranchCommand(BaseCommand):
                     show_type=True,
                     panel_title="Remaining merge conflicts",
                 )
+
+    @classmethod
+    def branch_diff(
+        cls,
+        base_path: str,
+        branch_name: str = None,
+        files: list[str] = None,
+        output_json: bool = False,
+    ) -> None:
+        """Show changes made on a branch since it was created."""
+        from poly.output.console import console, error, plain, print_diff
+
+        project = load_project(base_path, output_json=output_json)
+
+        try:
+            diffs = project.diff_branch(branch_name=branch_name, file_paths=files)
+        except ValueError as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(str(e))
+            sys.exit(1)
+
+        if not diffs:
+            if output_json:
+                json_print({"success": True, "diffs": {}})
+            else:
+                plain("[muted]No changes detected on this branch.[/muted]")
+            return
+
+        if output_json:
+            json_print({"success": True, "diffs": diffs})
+            return
+
+        for file_path, diff_text in diffs.items():
+            console.rule(f"[bold]{file_path}[/bold]")
+            print_diff(diff_text)
+
+    @classmethod
+    def branch_review(
+        cls,
+        base_path: str,
+        branch_name: str = None,
+        files: list[str] = None,
+        output_json: bool = False,
+    ) -> None:
+        """Create a GitHub Gist of branch changes since it was created."""
+        import requests as req
+
+        from poly.handlers.github_api_handler import GitHubAPIHandler
+        from poly.output.console import error, plain, success
+
+        project = load_project(base_path, output_json=output_json)
+
+        try:
+            diffs = project.diff_branch(branch_name=branch_name, file_paths=files)
+        except ValueError as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(str(e))
+            sys.exit(1)
+
+        if not diffs:
+            if output_json:
+                json_print({"success": False, "message": "No changes to review."})
+            else:
+                plain("[muted]No changes detected on this branch.[/muted]")
+            return
+
+        project_name = "/".join(os.path.abspath(base_path).split(os.sep)[-2:])
+        display_name = branch_name or project.get_current_branch() or project.branch_id
+        description = f"Poly ADK: {project_name}: branch '{display_name}' review"
+
+        body = {}
+        for file_path, diff in diffs.items():
+            if not diff:
+                continue
+            safe_name = file_path.replace(os.sep, "_")
+            body[f"{safe_name}.diff"] = {"content": diff}
+
+        try:
+            url = GitHubAPIHandler.create_gist(
+                files=body,
+                description=description,
+                public=False,
+            )
+            if output_json:
+                json_print({"success": True, "link": url})
+            else:
+                success(f"Review gist created: {url}")
+        except req.HTTPError as e:
+            if output_json:
+                json_print({"success": False, "message": f"GitHub API error: {e}"})
+            else:
+                error(f"GitHub API error: {e}")
+        except OSError as e:
+            if output_json:
+                json_print({"success": False, "message": str(e)})
+            else:
+                error(str(e))
+
+    @classmethod
+    def branch_status(
+        cls,
+        base_path: str,
+        branch_name: str = None,
+        output_json: bool = False,
+    ) -> None:
+        """Show what changed on a branch relative to its fork point."""
+        from poly.cli_commands.shared import resolve_account_name
+        from poly.output.console import error, plain, print_file_list, print_status
+
+        project = load_project(base_path, output_json=output_json)
+        resolve_account_name(project)
+
+        current_branch_name, branches = project.get_branches()
+        target_name = branch_name or current_branch_name
+        branch_meta = branches.get(target_name, {}) if target_name else {}
+
+        parent_branch_id = branch_meta.get("parentBranchId")
+        parent_name = next(
+            (name for name, meta in branches.items() if meta.get("branchId") == parent_branch_id),
+            parent_branch_id,
+        )
+        created_by = branch_meta.get("createdBy")
+        is_diverged = branch_meta.get("isDiverged")
+
+        try:
+            new_files, modified_files, deleted_files = project.branch_status(
+                branch_name=branch_name
+            )
+        except ValueError as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(str(e))
+            sys.exit(1)
+
+        if output_json:
+            json_print(
+                {
+                    "branch": target_name,
+                    "parent_branch": parent_name,
+                    "created_by": created_by,
+                    "is_diverged": is_diverged,
+                    "new_files": new_files,
+                    "modified_files": modified_files,
+                    "deleted_files": deleted_files,
+                }
+            )
+            return
+
+        print_status(
+            region=project.region,
+            account_id=project.account_id,
+            project_id=project.project_id,
+            last_updated=project.last_updated.isoformat(),
+            branch=target_name,
+            account_name=project.account_name,
+            project_name=project.project_name,
+            parent_branch=parent_name,
+            created_by=created_by,
+            is_diverged=is_diverged,
+            title="Branch Status",
+        )
+
+        print_file_list("New files", new_files, "filename.new")
+        print_file_list("Deleted files", deleted_files, "filename.deleted")
+        print_file_list("Modified files", modified_files, "filename.modified")
+
+        if not new_files and not modified_files and not deleted_files:
+            plain("\n[muted]No changes on this branch.[/muted]")
+
+    @classmethod
+    def branch_sync(
+        cls,
+        base_path: str,
+        output_json: bool = False,
+        interactive: bool = False,
+        resolutions_file: str = None,
+    ):
+        """Sync the current branch with it's parent, with optional conflict resolutions."""
+        from poly.cli_commands.shared import require_deployment_simplification
+        from poly.output.console import (
+            console,
+            error,
+            output_merge_conflict_table,
+            plain,
+            success,
+            warning,
+        )
+
+        if interactive and output_json:
+            json_print(
+                {
+                    "success": False,
+                    "error": "--interactive and --json cannot be used together.",
+                }
+            )
+            sys.exit(1)
+
+        file_resolutions: list[dict[str, Any]] | None = None
+        if resolutions_file:
+            try:
+                if resolutions_file == "-":
+                    file_resolutions = json.load(sys.stdin)
+                elif resolutions_file.lstrip().startswith("["):
+                    file_resolutions = json.loads(resolutions_file)
+                else:
+                    with open(resolutions_file, encoding="utf-8") as f:
+                        file_resolutions = json.load(f)
+                if not isinstance(file_resolutions, list):
+                    raise ValueError("Resolutions must be a JSON array.")
+            except (OSError, json.JSONDecodeError, ValueError) as exc:
+                if output_json:
+                    json_print({"success": False, "error": f"Failed to parse resolutions: {exc}"})
+                else:
+                    error(f"Failed to parse resolutions: {exc}")
+                sys.exit(1)
+
+        project = load_project(base_path, output_json=output_json)
+
+        require_deployment_simplification(project, output_json=output_json)
+
+        branch_name = project.get_current_branch()
+        ctx = console.status("[info]Syncing branch...[/info]") if not output_json else nullcontext()
+        with ctx:
+            merge_success, conflicts, errors = project.sync_branch(
+                conflict_resolutions=file_resolutions
+            )
+
+        if output_json:
+            output = {"success": merge_success}
+            if conflicts or errors:
+                output["conflicts"] = conflicts
+                output["errors"] = errors
+            json_print(output)
+            if not merge_success:
+                sys.exit(1)
+            return
+
+        if merge_success:
+            success(f"Branch '{branch_name}' synced successfully.")
+            return
+
+        # Failed branch sync
+        error(f"Failed to sync branch '{branch_name}'.")
+        if errors:
+            plain("\n[red]Errors:[/red]")
+            for err in errors:
+                error(f"- {err['path']}: {err['message']}")
+
+        enriched = enrich_branch_merge_conflicts(conflicts) if conflicts else []
+        display_conflict = [
+            c for c in enriched if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
+        ]
+        if display_conflict:
+            output_merge_conflict_table(
+                display_conflict, show_type=True, resolutions=file_resolutions
+            )
+
+        if errors:
+            sys.exit(1)
+
+        if not interactive:
+            plain(
+                "Merge conflicts detected. To resolve:\n"
+                "- Use 'poly branch sync -i' to resolve conflicts interactively\n"
+                "- Use 'poly branch sync --resolutions <file.json>' to provide pre-defined resolutions\n"
+                "- Merge manually on Agent Studio"
+            )
+            sys.exit(1)
+
+        existing_resolutions = {
+            os.sep.join(r["path"]): r for r in (file_resolutions or []) if "path" in r
+        }
+        while True:
+            resolutions = cls._merge_interactively(enriched, existing_resolutions, branch_name)
+            if not resolutions:
+                warning("No resolutions provided. Exiting.")
+                sys.exit(1)
+            ctx2 = (
+                console.status("[info]Sync branch...[/info]") if not output_json else nullcontext()
+            )
+            with ctx2:
+                merge_success, conflicts, errors = project.sync_branch(
+                    conflict_resolutions=resolutions
+                )
+            if merge_success:
+                success(f"Branch '{branch_name}' synced successfully.")
+                break
+            if errors:
+                error(f"Failed to sync branch '{branch_name}' after conflict resolution.")
+                plain("\n[red]Errors:[/red]")
+                for err in errors:
+                    error(f"- {err['path']}: {err['message']}")
+                sys.exit(1)
+            if not conflicts:
+                error(
+                    f"Failed to sync branch '{branch_name}' after conflict resolution "
+                    "(no conflicts or errors returned)."
+                )
+                sys.exit(1)
+            warning("Sync still blocked; resolve the remaining conflicts below.")
+            enriched = enrich_branch_merge_conflicts(conflicts)
+            display_conflict = [
+                c
+                for c in enriched
+                if c.get("path") and c["path"][-1] not in {"updatedAt", "createdAt"}
+            ]
+            if display_conflict:
+                output_merge_conflict_table(
+                    display_conflict,
+                    show_type=True,
+                    panel_title="Remaining merge conflicts",
+                )
+
+    @classmethod
+    def branch_history(
+        cls,
+        base_path: str,
+        branch_name: Optional[str] = None,
+        output_json: bool = False,
+        limit: int = 10,
+    ) -> None:
+        """Show the history of a branch in the Agent Studio project."""
+        from poly.output.console import plain, print_branch_history, warning
+
+        project = load_project(base_path, output_json=output_json)
+
+        current_branch, branches = project.get_branches()
+        if not branch_name:
+            branch_name = current_branch
+
+        if not branch_name:
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "error": "No current branch found. Please specify a branch name.",
+                    }
+                )
+            else:
+                warning("No current branch found. Please specify a branch name.")
+            return
+
+        branch_id = branches.get(branch_name, {}).get("branchId")
+        if not branch_id:
+            if output_json:
+                json_print({"success": False, "error": f"Branch '{branch_name}' does not exist."})
+            else:
+                warning(f"Branch '{branch_name}' does not exist.")
+            return
+
+        history = project.get_branch_history(branch_id)
+        history = history[:limit]
+
+        if output_json:
+            json_print({"branch_name": branch_name, "branch_id": branch_id, "history": history})
+            return
+
+        if not history:
+            plain(f"[muted]No history found for branch '{branch_name}'.[/muted]")
+            return
+
+        plain(f"History for branch '{branch_name}':")
+        print_branch_history(history)
+
+    @classmethod
+    def branch_rename(
+        cls, base_path: str, new_branch_name: Optional[str] = None, output_json: bool = False
+    ) -> None:
+        """Rename the current branch in the Agent Studio project."""
+        from poly.output.console import error, success, warning
+
+        project = load_project(base_path, output_json=output_json)
+
+        current_branch = project.get_current_branch()
+        if not current_branch:
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "error": "Current branch doesn't exist. Create a new branch before renaming.",
+                    }
+                )
+            else:
+                warning("Current branch doesn't exist. Create a new branch before renaming.")
+            return
+
+        if current_branch == "main":
+            if output_json:
+                json_print({"success": False, "error": "Cannot rename the main branch."})
+            else:
+                error("Cannot rename the main branch.")
+            return
+
+        if not new_branch_name:
+            if output_json:
+                json_print({"success": False, "error": "No new branch name provided."})
+            else:
+                new_branch_name = input("Enter the new name for the current branch: ").strip()
+                if not new_branch_name:
+                    warning("No new branch name provided. Exiting.")
+                    return
+
+        try:
+            renamed = project.rename_branch(new_branch_name)
+        except ValueError as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(str(e))
+            sys.exit(1)
+
+        if output_json:
+            json_print(
+                {
+                    "success": renamed,
+                    "old_branch_name": current_branch,
+                    "new_branch_name": new_branch_name,
+                }
+            )
+        else:
+            if renamed:
+                success(f"Renamed branch '{current_branch}' to '{new_branch_name}'.")
+            else:
+                error(f"Failed to rename branch '{current_branch}' to '{new_branch_name}'.")
+
+    @classmethod
+    def branch_restore(
+        cls,
+        base_path: str,
+        branch_id: Optional[str] = None,
+        output_json: bool = False,
+    ) -> None:
+        """Restore a soft-deleted branch from the archive, by branch id or name."""
+        import questionary
+
+        from poly.output.console import (
+            error,
+            plain,
+            resolve_parent_branch_label,
+            success,
+            warning,
+        )
+
+        project = load_project(base_path, output_json=output_json)
+
+        if not branch_id:
+            if output_json:
+                json_print(
+                    {
+                        "success": False,
+                        "error": "branch restore with --json requires a branch id argument.",
+                    }
+                )
+                sys.exit(1)
+
+            archived = project.list_archived_branches()
+            if not archived:
+                plain("[muted]No archived branches to restore.[/muted]")
+                return
+
+            name_by_branch_id = _build_branch_name_lookup(project, archived)
+            archived_branch_ids = {b["branchId"] for b in archived if b.get("branchId")}
+            choices = []
+            branch_by_label: dict[str, dict[str, Any]] = {}
+            for b in archived:
+                name = b.get("name", "—")
+                archived_branch_id = b.get("branchId", "")
+                parent = resolve_parent_branch_label(b, name_by_branch_id, archived_branch_ids)
+                # Names repeat across the archive, so the id and parent are what
+                # actually let the user tell two same-named entries apart.
+                label = f"{name} ({archived_branch_id}) — parent: {parent}"
+                choices.append(label)
+                branch_by_label[label] = b
+
+            selected = questionary.select(
+                "Select branch to restore",
+                choices=choices,
+                use_search_filter=True,
+                use_jk_keys=False,
+            ).ask()
+            if not selected:
+                warning("No branch selected. Exiting.")
+                return
+
+            selected_branch = branch_by_label[selected]
+            try:
+                restored = project.restore_branch(selected_branch["branchId"])
+            except ValueError as e:
+                error(str(e))
+                sys.exit(1)
+            if restored:
+                success(f"Branch '{selected_branch.get('name', '—')}' restored.")
+            else:
+                error("Failed to restore selected branch.")
+            return
+
+        try:
+            restored = project.restore_branch(branch_id)
+        except ValueError as e:
+            if output_json:
+                json_print({"success": False, "error": str(e)})
+            else:
+                error(str(e))
+            sys.exit(1)
+
+        if output_json:
+            json_print({"success": restored, "branch_id": branch_id})
+        else:
+            if restored:
+                success(f"Branch '{branch_id}' restored.")
+            else:
+                error(f"Failed to restore branch '{branch_id}'.")
+
+    @classmethod
+    def branch_tag(
+        cls,
+        base_path: str,
+        output_json: bool = False,
+    ) -> None:
+        """Tag the current branch with a new tag."""
+        from poly.cli_commands.shared import require_deployment_simplification
+        from poly.output.console import error, success
+
+        project = load_project(base_path, output_json=output_json)
+        require_deployment_simplification(project, output_json=output_json)
+
+        tagged = project.tag_branch()
+
+        if output_json:
+            json_print({"success": tagged})
+        else:
+            if tagged:
+                success(
+                    f"Current branch '{project.get_current_branch()}' tagged and deployed to staging."
+                )
+            else:
+                error("Failed to tag the current branch.")
+
+    @classmethod
+    def branch_untag(
+        cls,
+        base_path: str,
+        output_json: bool = False,
+    ) -> None:
+        """Remove a tag from the current branch."""
+        from poly.cli_commands.shared import require_deployment_simplification
+        from poly.output.console import error, success
+
+        project = load_project(base_path, output_json=output_json)
+        require_deployment_simplification(project, output_json=output_json)
+
+        untagged = project.untag_branch()
+
+        if output_json:
+            json_print({"success": untagged})
+        else:
+            if untagged:
+                success(
+                    f"Staging tag removed from current branch '{project.get_current_branch()}'."
+                )
+            else:
+                error("Failed to remove tag from the current branch.")

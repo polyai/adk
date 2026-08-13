@@ -398,6 +398,8 @@ Examples:
 poly chat
 poly chat --environment live
 poly chat --channel webchat
+poly chat --sip-header X-Customer-ID=12345
+poly chat --sip-header X-Customer-ID=12345 --sip-header X-Language=en-GB
 poly chat --metadata
 poly chat --lang fr-FR
 poly chat --input-lang en-US --output-lang fr-FR
@@ -456,6 +458,26 @@ Use language flags to specify the expected input and output language when chatti
 
 `--input-lang` and `--output-lang` take precedence over `--lang` when both are supplied.
 
+#### Simulating SIP headers
+
+Use `--sip-header NAME=VALUE` to simulate a SIP header when starting a conversation.
+
+Single header:
+
+~~~bash
+poly chat --sip-header X-Customer-ID=12345
+~~~
+
+Multiple headers are supported by repeating the flag:
+
+~~~bash
+poly chat --sip-header X-Customer-ID=12345 --sip-header X-Language=en-GB
+~~~
+
+The values are exposed to project functions through `conv.sip_headers`. This is for
+testing agent behaviour only; it does not create a SIP call or reproduce carrier-level
+SIP behaviour. SIP headers cannot be changed when resuming an existing conversation.
+
 #### `poly chat` flags summary
 
 | Flag | Description |
@@ -467,6 +489,7 @@ Use language flags to specify the expected input and output language when chatti
 | `--json` | Emit a single JSON object when the session ends (see below). |
 | `--environment` | Target environment. Choices: `branch`, `sandbox`, `pre-release`, `live`. Defaults to `branch`. `branch` chats against the last **pushed** state of your current branch (not local uncommitted changes); on main it falls back to `sandbox`. Use `--push` to push local changes before chatting. |
 | `--channel` | Channel to use (e.g. `webchat`, `voice`). |
+| `--sip-header NAME=VALUE` | Simulate a SIP header at conversation start (repeatable). |
 | `--lang` | Set both input and output language. |
 | `--input-lang` | Set input language only. |
 | `--output-lang` | Set output language only. |
@@ -543,6 +566,139 @@ poly conversations get-audio <conversation_id> --json
 | `--direction` | Audio track to download. Choices: `combined`, `user`, `agent`. Defaults to `combined`. |
 | `--redacted` | Download the redacted version of the audio. |
 | `-o`, `--output` | Output file path. Defaults to `<conversation_id>.wav`. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a JSON summary on stdout instead of the success message (audio is still written to disk). |
+
+### `poly audio-cache`
+
+Manage an agent's cached TTS audio entries using the public Audio Cache API.
+
+`poly audio-cache` requires a subcommand: `list`, `get-file`, `update-file`, `update-details`, `delete`, `bulk-delete`, or `synthesize`.
+
+Examples:
+
+~~~bash
+poly audio-cache list
+poly audio-cache get-file <entry_id> -o cached.wav
+poly audio-cache update-file <entry_id> --file replacement.wav
+poly audio-cache synthesize <entry_id> --text "Hello there" -o preview.wav
+poly audio-cache delete <entry_id>
+poly audio-cache bulk-delete --ids id1,id2,id3
+~~~
+
+#### `poly audio-cache list`
+
+List cached TTS audio entries with metadata (transcript, provider, voice, duration, hit count).
+
+~~~bash
+poly audio-cache list
+poly audio-cache list --limit 20 --offset 10
+poly audio-cache list --sort hit_count:desc
+~~~
+
+| Flag | Description |
+|---|---|
+| `--limit` | Max number of entries to return (1-200). Defaults to `50`. |
+| `--offset` | Number of entries to skip. Defaults to `0`. |
+| `--sort` | Sort expression, e.g. `hit_count:desc` or `duration:asc`. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+#### `poly audio-cache get-file`
+
+Download the cached WAV audio file for a cache entry.
+
+~~~bash
+poly audio-cache get-file <entry_id>
+poly audio-cache get-file <entry_id> -o cached.wav
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `entry_id` | The audio cache entry ID. Required. |
+| `-o`, `--output` | Output file path. Defaults to `<entry_id>.wav`. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a JSON summary on stdout instead of the success message (audio is still written to disk). |
+
+#### `poly audio-cache update-file`
+
+Replace the audio file for an existing cache entry. Maximum file size is 6MB.
+
+~~~bash
+poly audio-cache update-file <entry_id> --file replacement.wav
+poly audio-cache update-file <entry_id> --file replacement.wav --filename clip.wav
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `entry_id` | The audio cache entry ID. Required. |
+| `--file` | Path to the local replacement WAV file. Required. |
+| `--filename` | Filename to record for the uploaded audio. Defaults to the local file's basename. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+#### `poly audio-cache update-details`
+
+Replace both the audio file and voice tuning settings for a cache entry in one call. Maximum file size is 6MB.
+
+~~~bash
+poly audio-cache update-details <entry_id> --file replacement.wav --text "Hi there"
+poly audio-cache update-details <entry_id> --file replacement.wav --text "Hi" --config '{"stability": 0.5}'
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `entry_id` | The audio cache entry ID. Required. |
+| `--file` | Path to the local replacement WAV file. Required. |
+| `--text` | Transcript text associated with the audio. Required. |
+| `--config` | JSON object of provider-specific voice tuning settings (e.g. `stability`, `speed`, `model_id`). Defaults to `{}`. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+#### `poly audio-cache delete`
+
+Permanently delete a cached audio entry and its audio file.
+
+~~~bash
+poly audio-cache delete <entry_id>
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `entry_id` | The audio cache entry ID. Required. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+#### `poly audio-cache bulk-delete`
+
+Delete multiple audio cache entries in a single request. Best-effort — reports which IDs succeeded and which failed, so partial failures can be retried. Maximum 20 IDs per request.
+
+~~~bash
+poly audio-cache bulk-delete --ids id1,id2,id3
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `--ids` | Comma-separated list of audio cache entry IDs to delete (max 20). Required. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+#### `poly audio-cache synthesize`
+
+Generate a TTS audio preview using an existing cache entry's voice and provider configuration, without saving it to the cache.
+
+~~~bash
+poly audio-cache synthesize <entry_id> --text "Hello there"
+poly audio-cache synthesize <entry_id> --text "Hi" --language en-US -o out.wav
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `entry_id` | The audio cache entry ID whose voice/provider config to preview with. Required. |
+| `--text` | Text to synthesize. Required. |
+| `--config` | JSON object of provider-specific voice tuning settings. Defaults to `{}`. |
+| `--language` | BCP-47 language tag, e.g. `en-US`. |
+| `-o`, `--output` | Output file path. Defaults to `<entry_id>-preview.wav`. |
 | `--path` | Base path to the project. Defaults to the current working directory. |
 | `--json` | Print a JSON summary on stdout instead of the success message (audio is still written to disk). |
 
@@ -705,6 +861,12 @@ poly deployments rollback --to <id> --force --json
 poly conversations list --json
 poly conversations get <conversation_id> --json
 poly conversations get-audio <conversation_id> --json
+poly audio-cache list --json
+poly audio-cache get-file <entry_id> --json
+poly audio-cache update-file <entry_id> --file replacement.wav --json
+poly audio-cache delete <entry_id> --json
+poly audio-cache bulk-delete --ids id1,id2 --json
+poly audio-cache synthesize <entry_id> --text "Hello" --json
 ~~~
 
 When `--json` is used:
@@ -749,6 +911,13 @@ The exact fields vary by command. Common fields include:
 | `poly conversations list --json` | `conversations`, `count`, `limit`, `offset` |
 | `poly conversations get --json` | full conversation detail object |
 | `poly conversations get-audio --json` | `success`, `conversation_id`, `direction`, `redacted`, `output_path`, `size_bytes` |
+| `poly audio-cache list --json` | `entries`, `total_count` |
+| `poly audio-cache get-file --json` | `success`, `entry_id`, `output_path`, `size_bytes` |
+| `poly audio-cache update-file --json` | `success`, `entry_id`, `size_bytes` |
+| `poly audio-cache update-details --json` | `success`, `entry_id`, `size_bytes` |
+| `poly audio-cache delete --json` | `success` |
+| `poly audio-cache bulk-delete --json` | `deleted`, `failed` |
+| `poly audio-cache synthesize --json` | `success`, `entry_id`, `output_path`, `size_bytes` |
 
 For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
 
