@@ -223,24 +223,24 @@ Place the declarative configuration in the account directory, alongside project 
 ```text
 pod-point-uk/
 ├── sip-trunks.yaml
-└── charging-support/
+└── pod-ukp/
     └── project.yaml
 ```
 
+For a new trunk, start with the fields you control. The trunk ID and hostname do not exist
+until the API creates the trunk:
+
 ```yaml
-- id: tr-ev3vx4iqcbhaeilk2jw9qp8n
-  name: Primary carrier
+- name: Primary carrier
   sip_cidr: [203.0.113.0/24]
   rtp_cidr: [198.51.100.0/24]
   encrypted: true
-  hostname: tr-ev3vx4iqcbhaeilk2jw9qp8n.sbc.sip.uk.poly.ai
   inbound_auth:
     type: digest
     username: carrier-user
-    realm: sbc.sip.uk.poly.ai
   extensions:
     - extension: "1000"
-      agent_id: charging-support
+      agent_id: pod-ukp
       client_env: live
 ```
 
@@ -260,14 +260,15 @@ poly sip-trunks delete <trunk_id>
 hostname when it changes. Before writing, it validates the complete file, displays a diff,
 and asks for confirmation. Use `--yes` for trusted automation; `--json` also requires
 `--yes` when changes exist. When everything already matches, it prints `Nothing changed.`
-After reconciling a trunk, it writes useful API-generated metadata—`id`, `hostname`, and the
-digest `realm`—into the YAML while preserving formatting and comments. These fields are
-informational and ignored when constructing API writes. Creation and update timestamps are
-intentionally omitted. Entries omitted from the file are not deleted; use `delete`
-explicitly for trunks. When an `extensions` list is present, it is authoritative: removing
-an entry schedules that extension for deletion in the confirmation diff. Omitting the
-entire `extensions` key leaves the trunk's extensions unmanaged. The older `sip_trunks:`
-wrapper remains readable for migration.
+After a new trunk is created successfully, `manage` adds its generated `id` (the trunk ID)
+and `hostname` to the same YAML entry. It also saves the digest `realm` returned by the API.
+These fields are informational and ignored when constructing API writes. Formatting and
+comments are preserved, while creation and update timestamps are intentionally omitted.
+Entries omitted from the file are not deleted; use `delete` explicitly for trunks. When an
+`extensions` list is present, it is authoritative: removing an entry schedules that
+extension for deletion in the confirmation diff. Omitting the entire `extensions` key
+leaves the trunk's extensions unmanaged. The older `sip_trunks:` wrapper remains readable
+for migration.
 
 `list` displays a table by default. With `--output`, it exports trunk IDs, hostnames,
 CIDRs, authentication state, and extensions in the same schema consumed by `manage`.
