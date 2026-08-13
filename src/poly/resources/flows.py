@@ -1338,19 +1338,22 @@ class FlowSettings(SubResource):
     @classmethod
     def from_projection(cls, step: dict, step_id: str, flow_id: str) -> "FlowSettings":
         """Parse flow step settings from a projection step dict."""
-        settings_data = utils.convert_keys_to_snake_case(step.get("settings", {}))
-
-        # The step also carries legacy top-level asrBiasing/dtmfConfig. The backend mirrors
-        # those on every settings update but never clears them, so they are only safe to read
-        # for a step that predates the settings block entirely — consulting them per-section
-        # would resurrect a section the user has cleared.
-        if not settings_data:
+        settings_data = step.get("settings")
+        if settings_data is None:
+            # No settings block means this step predates it entirely, so fall back to the
+            # legacy top-level fields. The backend mirrors these onto every settings update
+            # but never clears them, so once a settings block exists it must not be
+            # overridden by legacy fields — an empty settings block means the user cleared
+            # everything.
+            settings_data = {}
             legacy_asr_biasing = step.get("asrBiasing", {})
             legacy_dtmf = step.get("dtmfConfig", {})
             if legacy_asr_biasing:
                 settings_data["asr_biasing"] = legacy_asr_biasing
             if legacy_dtmf:
                 settings_data["dtmf"] = legacy_dtmf
+        else:
+            settings_data = utils.convert_keys_to_snake_case(settings_data)
 
         asr_biasing_data = utils.convert_keys_to_snake_case(settings_data.get("asr_biasing") or {})
         dtmf_data = utils.convert_keys_to_snake_case(settings_data.get("dtmf") or {})
