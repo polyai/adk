@@ -7371,6 +7371,96 @@ class TestCaseTests(unittest.TestCase):
         self.assertEqual(updated_after_edit, [])
         self.assertEqual(deleted_after_edit, [])
 
+    def _test_case_with_simulated_at(self, simulated_at) -> TestCase:
+        resource_id = "TEST-clock"
+        return TestCase(
+            resource_id=resource_id,
+            name="Clock test",
+            scenario="Ask about opening hours.",
+            channel="chat.polyai",
+            language="en-GB",
+            assertions=TestCaseAssertion(
+                resource_id=resource_id, name="assertions", prompts=[], function_calls=[]
+            ),
+            tags=TestCaseTags(resource_id=resource_id, name="tags", tags=[]),
+            simulated_at=simulated_at,
+        )
+
+    def test_simulated_at_is_normalized_to_utc(self):
+        cases = {
+            "2026-01-15T09:30:00Z": "2026-01-15T09:30:00Z",
+            "2026-01-15T09:30:00+00:00": "2026-01-15T09:30:00Z",
+            # Offsets are converted to UTC, naive values are assumed to be UTC.
+            "2026-01-15T11:30:00+02:00": "2026-01-15T09:30:00Z",
+            "2026-01-15T09:30:00": "2026-01-15T09:30:00Z",
+            # ruamel parses an unquoted YAML timestamp into a datetime.
+            datetime.datetime(2026, 1, 15, 9, 30): "2026-01-15T09:30:00Z",
+            datetime.datetime(
+                2026, 1, 15, 9, 30, tzinfo=datetime.timezone.utc
+            ): "2026-01-15T09:30:00Z",
+        }
+        for value, expected in cases.items():
+            with self.subTest(value=value):
+                self.assertEqual(self._test_case_with_simulated_at(value).simulated_at, expected)
+
+    def test_simulated_at_yaml_roundtrip(self):
+        test_case = self._test_case_with_simulated_at("2026-01-15T09:30:00Z")
+        yaml_dict = test_case.to_yaml_dict()
+        self.assertEqual(yaml_dict["simulated_at"], "2026-01-15T09:30:00Z")
+
+        restored = TestCase.from_yaml_dict(yaml_dict, resource_id="TEST-clock", name="Clock test")
+        self.assertEqual(restored.simulated_at, test_case.simulated_at)
+
+    def test_simulated_at_omitted_when_unset(self):
+        test_case = self._test_case_with_simulated_at(None)
+        self.assertIsNone(test_case.simulated_at)
+        self.assertNotIn("simulated_at", test_case.to_yaml_dict())
+
+    def test_unset_simulated_at_sends_empty_string_to_clear(self):
+        # An omitted optional field reads as "no update" platform-side, so clearing a
+        # test clock has to send an explicit empty value — as caller_number does.
+        test_case = self._test_case_with_simulated_at(None)
+        for proto in (test_case.build_create_proto(), test_case.build_update_proto()):
+            self.assertTrue(proto.HasField("simulated_at"))
+            self.assertEqual(proto.simulated_at, "")
+
+    def test_simulated_at_invalid_value_raises(self):
+        with self.assertRaises(ValueError) as cm:
+            self._test_case_with_simulated_at("not-a-date")
+        self.assertIn("Invalid simulated_at value", str(cm.exception))
+
+    def test_simulated_at_in_protos(self):
+        test_case = self._test_case_with_simulated_at("2026-01-15T09:30:00Z")
+        for proto in (test_case.build_create_proto(), test_case.build_update_proto()):
+            self.assertTrue(proto.HasField("simulated_at"))
+            self.assertEqual(proto.simulated_at, "2026-01-15T09:30:00Z")
+
+    def test_read_simulated_at_from_projection(self):
+        projection = {
+            "testing": {
+                "testCases": {
+                    "entities": {
+                        "TEST-clock": {
+                            "name": "Clock test",
+                            "scenario": "Ask about opening hours.",
+                            "channel": "chat.polyai",
+                            "language": "en-GB",
+                            "simulatedAt": "2026-01-15T09:30:00Z",
+                        },
+                        "TEST-no-clock": {
+                            "name": "No clock test",
+                            "scenario": "Say hello.",
+                            "channel": "webchat.polyai",
+                            "language": "en-GB",
+                        },
+                    }
+                }
+            }
+        }
+        test_cases = TestCase.from_projection(projection)
+        self.assertEqual(test_cases["TEST-clock"].simulated_at, "2026-01-15T09:30:00Z")
+        self.assertIsNone(test_cases["TEST-no-clock"].simulated_at)
+
     def test_discover_resources(self):
         base_path = os.path.join(os.path.dirname(__file__), "test_projects", "test_project")
         discovered = TestCase.discover_resources(base_path)

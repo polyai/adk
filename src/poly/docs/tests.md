@@ -20,6 +20,7 @@ Each test case has these fields:
 - **tags** (list, optional): Labels for grouping and filtering tests.
 - **variant** (string, optional): Variant name to run the test against.
 - **language** (string): Language code for the test run, e.g. `en-GB`.
+- **simulated_at** (string, optional): Test clock — the point in time the conversation is simulated at, as an ISO 8601 datetime (e.g. `2026-01-15T09:30:00Z`). Values are normalised to UTC. Omit it to run against the real clock.
 - **caller_number** (string, optional): The number the simulated call arrives from.
 - **sip_headers** (map, optional): SIP headers a carrier would send with an inbound call.
 - **integration_attributes** (map, optional): Attributes a channel or connector passes in.
@@ -45,6 +46,22 @@ function_call_assertions:
     expected_value: hello
     value_type: string
 ```
+
+## Test clock
+
+`simulated_at` pins the agent's notion of "now" for the simulated conversation, so time-dependent behaviour — out-of-hours routing, "tomorrow" date resolution, a seasonal greeting — can be tested deterministically instead of depending on when the suite happens to run.
+
+```yaml
+name: Out of hours test
+scenario: Ask to speak to an agent.
+channel: voice
+language: en-GB
+simulated_at: 2026-01-15T22:30:00Z
+prompt_assertions:
+- The agent explains the contact centre is closed
+```
+
+Values are parsed as ISO 8601 and normalised to UTC, so `2026-01-15T22:30:00+00:00` and `2026-01-15T23:30:00+01:00` both round-trip as `2026-01-15T22:30:00Z`. A value without an offset is treated as UTC. Removing the field and pushing clears the test clock on the platform.
 
 ## Mock call context
 

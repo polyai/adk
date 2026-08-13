@@ -62,11 +62,28 @@ The directory is optional. Create it only when you have test cases to define.
 | `channel` | Yes | `voice` or `webchat`. |
 | `language` | Yes | BCP 47 language tag (e.g. `en-GB`). Must be a configured language in the project. |
 | `variant` | No | Name of a variant from `config/variant_attributes.yaml`. Defaults to the project default variant. |
+| `simulated_at` | No | Test clock — the point in time the conversation is simulated at, as an ISO 8601 datetime (e.g. `2026-01-15T09:30:00Z`). Defaults to the time the run is triggered. |
 | `tags` | No | List of strings used to group, filter, or schedule tests. Usable with `poly test run --tag`. |
 | `prompt_assertions` | No | List of natural-language statements that must hold about the agent's behavior. Each is evaluated by an LLM judge. |
 | `function_call_assertions` | No | List of expected function calls and their argument values. |
 
 At least one of `prompt_assertions` or `function_call_assertions` should be set — a test with no assertions runs but cannot pass or fail.
+
+## Test clock
+
+`simulated_at` pins the agent's notion of "now" for the duration of the simulated conversation. Use it to make time-dependent behavior deterministic — out-of-hours routing, "tomorrow" date resolution, or a seasonal greeting — instead of depending on when the suite happens to run.
+
+~~~yaml
+name: Out of hours test
+scenario: Ask to speak to an agent.
+channel: voice
+language: en-GB
+simulated_at: 2026-01-15T22:30:00Z
+prompt_assertions:
+  - The agent explains the contact centre is closed
+~~~
+
+Values are parsed as ISO 8601 and normalized to UTC when written back by `poly pull`, so `2026-01-15T22:30:00+00:00` and `2026-01-15T23:30:00+01:00` both round-trip as `2026-01-15T22:30:00Z`. An offset-less value such as `2026-01-15T22:30:00` is treated as UTC. Omit the field to run against the real clock; removing it from a file that had one clears the test clock on the next push.
 
 ## Prompt assertions
 
@@ -150,6 +167,7 @@ prompt_assertions:
 - `scenario` is required and non-empty
 - `language` is required and must be one of the project's configured languages (`default_language` or `additional_languages`)
 - `variant`, if set, must reference a variant declared in `config/variant_attributes.yaml`
+- `simulated_at`, if set, must be a valid ISO 8601 datetime
 - each `function_call_assertions[*].name` must match a global function under `functions/`
 - each argument's `value_type` must be one of `string`, `integer`, `number`, `boolean`
 - the filename must match the normalized `name`
