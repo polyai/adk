@@ -15,7 +15,6 @@ from poly.constants import DEFAULT_VOICE_ID_FALLBACK, DEFAULT_VOICE_IDS
 from poly.utils import any_credentials_exist, retrieve_api_key
 
 logger = logging.getLogger(__name__)
-
 ACCOUNTS_URL = "/adk/v1/accounts"
 PROJECTS_URL = "/adk/v1/accounts/{account_id}/projects"
 DEPLOYMENTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/deployments"
