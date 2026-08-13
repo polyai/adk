@@ -19,7 +19,6 @@ from poly.handlers.utils import camel_to_snake_keys
 from poly.utils import raise_if_no_credentials, retrieve_api_key
 
 logger = logging.getLogger(__name__)
-
 ACCOUNTS_URL = "/adk/v1/accounts"
 PROJECTS_URL = "/adk/v1/accounts/{account_id}/projects"
 PROJECT_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}"
