@@ -14,9 +14,14 @@ from typing import Any
 from ruamel.yaml import YAML
 
 from poly.cli_commands.shared import read_project_config
-from poly.regions import ENTERPRISE_REGIONS, normalize_region
 
 ACCOUNT_DEFAULT_OUTPUT = "__account_default__"
+SIP_TRUNK_REGIONS = ("us-1", "euw-1", "uk-1")
+SIP_TRUNK_REGION_ALIASES = {
+    "us": "us-1",
+    "eu": "euw-1",
+    "uk": "uk-1",
+}
 
 
 @dataclass(frozen=True)
@@ -38,12 +43,11 @@ class LoadedManageConfig:
     source_digest: str
 
 
-def _normalize_sip_region(region: str) -> str:
-    try:
-        normalized = normalize_region(region)
-    except ValueError:
-        raise ValueError(f"Unsupported SIP Trunking region: {region}") from None
-    if normalized not in ENTERPRISE_REGIONS:
+def normalize_sip_trunk_region(region: str) -> str:
+    """Normalize a region supported by the SIP Trunking API."""
+    candidate = region.strip().lower()
+    normalized = SIP_TRUNK_REGION_ALIASES.get(candidate, candidate)
+    if normalized not in SIP_TRUNK_REGIONS:
         raise ValueError(f"Unsupported SIP Trunking region: {region}")
     return normalized
 
@@ -135,7 +139,7 @@ def infer_account_context(
 
     if region is None:
         matching_regions = {
-            _normalize_sip_region(item[1]) for item in discovered if item[0] == account_id
+            normalize_sip_trunk_region(item[1]) for item in discovered if item[0] == account_id
         }
         if len(matching_regions) > 1:
             regions = ", ".join(sorted(matching_regions))
@@ -151,7 +155,7 @@ def infer_account_context(
                 "its projects or pass --region."
             )
 
-    normalized_region = _normalize_sip_region(region)
+    normalized_region = normalize_sip_trunk_region(region)
     return AccountContext(region=normalized_region, account_id=account_id)
 
 
