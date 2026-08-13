@@ -162,7 +162,11 @@ class SIPTrunksCommand(BaseCommand):
         discovered: list[tuple[str, str, str]] = []
         if current_project:
             discovered.append(
-                (str(current_project.account_id), str(current_project.region), current_project.root_path)
+                (
+                    str(current_project.account_id),
+                    str(current_project.region),
+                    current_project.root_path,
+                )
             )
 
         if os.path.isdir(account_dir):
@@ -340,7 +344,8 @@ class SIPTrunksCommand(BaseCommand):
         region, account_id = cls._infer_account_context(
             os.path.dirname(config_path),
             current_project=project,
-            account_id=args.account_id or (config.get("account_id") if isinstance(config, dict) else None),
+            account_id=args.account_id
+            or (config.get("account_id") if isinstance(config, dict) else None),
             region=args.region,
         )
 
@@ -402,9 +407,7 @@ class SIPTrunksCommand(BaseCommand):
                 cls._reject_yaml_secret(inbound_auth, "password")
                 username = inbound_auth.get("username")
                 if not username:
-                    raise ValueError(
-                        f"SIP trunk '{local_name}' digest auth requires a username."
-                    )
+                    raise ValueError(f"SIP trunk '{local_name}' digest auth requires a username.")
                 auth_data = {"username": username}
                 data["inbound"] = {"sip_auth": auth_data}
             elif auth_type == "token":
@@ -434,9 +437,7 @@ class SIPTrunksCommand(BaseCommand):
                 cls._reject_yaml_secret(digest, "password")
                 username = digest.get("username")
                 if not username:
-                    raise ValueError(
-                        f"SIP trunk '{local_name}' digest auth requires a username."
-                    )
+                    raise ValueError(f"SIP trunk '{local_name}' digest auth requires a username.")
                 auth_data = {"username": username}
                 data["inbound"] = {"sip_auth": auth_data}
             elif token_auth is not None:
@@ -668,8 +669,7 @@ class SIPTrunksCommand(BaseCommand):
         rotate_auth = getattr(args, "rotate_auth", None)
         if rotate_auth and not any(trunk.get("id") == rotate_auth for trunk in desired_trunks):
             raise ValueError(
-                f"Cannot rotate SIP trunk '{rotate_auth}': its ID is not declared in "
-                f"{config_path}."
+                f"Cannot rotate SIP trunk '{rotate_auth}': its ID is not declared in {config_path}."
             )
 
         response = SIPTrunkingAPIHandler.list_trunks(region, account_id)
@@ -738,10 +738,9 @@ class SIPTrunksCommand(BaseCommand):
                         new_value = "token"
                     desired_auth = (desired.get("inbound") or {}).get("sip_auth") or {}
                     current_auth = (current.get("inbound") or {}).get("sip_auth") or {}
-                    if (
-                        old_value == new_value == "digest"
-                        and current_auth.get("username") != desired_auth.get("username")
-                    ):
+                    if old_value == new_value == "digest" and current_auth.get(
+                        "username"
+                    ) != desired_auth.get("username"):
                         detail = (
                             f"digest username: {current_auth.get('username')!r} -> "
                             f"{desired_auth.get('username')!r} (credential required)"
@@ -807,9 +806,7 @@ class SIPTrunksCommand(BaseCommand):
             existing_extensions = extension_response.get("extensions", [])
             if not isinstance(existing_extensions, list):
                 raise ValueError("Expected the SIP Trunking API to return an extensions list.")
-            by_extension = {
-                str(item.get("extension")): item for item in existing_extensions
-            }
+            by_extension = {str(item.get("extension")): item for item in existing_extensions}
             desired_numbers = {extension["extension"] for extension in normalized_extensions}
             for extension in normalized_extensions:
                 number = extension["extension"]
@@ -876,8 +873,7 @@ class SIPTrunksCommand(BaseCommand):
         rotate_auth = getattr(args, "rotate_auth", None)
         if rotate_auth and not any(trunk.get("id") == rotate_auth for trunk in desired_trunks):
             raise ValueError(
-                f"Cannot rotate SIP trunk '{rotate_auth}': its ID is not declared in "
-                f"{config_path}."
+                f"Cannot rotate SIP trunk '{rotate_auth}': its ID is not declared in {config_path}."
             )
         response = SIPTrunkingAPIHandler.list_trunks(region, account_id)
         existing_items = response.get("sip_trunks", [])
@@ -946,9 +942,7 @@ class SIPTrunksCommand(BaseCommand):
                 else:
                     status = "unchanged"
 
-            metadata_updated = cls._persist_trunk_response(
-                config_path, index, local_name, current
-            )
+            metadata_updated = cls._persist_trunk_response(config_path, index, local_name, current)
 
             (
                 extensions_total,
