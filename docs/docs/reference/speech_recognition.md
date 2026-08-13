@@ -73,6 +73,8 @@ barge_in: false
 interaction_style: balanced
 ~~~
 
+These apply to the whole voice channel. Individual flow steps can override barge-in, ASR provider, VAD, and LLM settings for a single turn — see [step settings](flows.md#step-settings).
+
 ### Interaction styles
 
 | Style | Behavior |
@@ -190,6 +192,13 @@ corrections:
 ## Related pages
 
 <div class="grid cards" markdown>
+
+-   **Flows**
+
+    ---
+
+    Configure per-step ASR, VAD, barge-in, and LLM overrides with step settings.
+    [Open flows](./flows.md#step-settings)
 
 -   **Voice settings**
 

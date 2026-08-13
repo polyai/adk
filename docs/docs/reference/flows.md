@@ -32,7 +32,7 @@ Flows are best used when the agent needs to move through a structured process su
 
     ---
 
-    Steps with more control over ASR, DTMF, and callable transition functions.
+    Steps with more control over callable transition functions, plus optional per-turn overrides.
 
 -   **Function steps**
 
@@ -133,6 +133,7 @@ ASR biasing is automatically configured based on the entities requested in the s
 | `conditions` | Conditions that control transitions |
 | `extracted_entities` | Entities to collect in the step |
 | `prompt` | Prompt shown to the model |
+| (step settings) | Any of the [step settings](#step-settings) below |
 
 ### Prompt behavior
 
@@ -173,11 +174,7 @@ Use the correct step identifier depending on target type:
 
 Advanced steps also live in `steps/*.yaml`.
 
-These steps support additional controls such as:
-
-- custom ASR tuning
-- DTMF collection rules
-- transition function calls from the prompt
+These steps support additional controls such as calling transition functions from the prompt, and optional per-turn overrides for ASR, VAD, barge-in, and LLM settings.
 
 ### Fields
 
@@ -185,37 +182,105 @@ These steps support additional controls such as:
 |---|---|
 | `step_type` | Must be `advanced_step` |
 | `name` | Human-readable step name |
-| `asr_biasing` | ASR tuning for the turn |
-| `dtmf_config` | DTMF collection settings |
 | `prompt` | Prompt shown to the model |
+| (step settings) | Any of the [step settings](#step-settings) below |
 
-### ASR biasing
+## Step settings
 
-Advanced steps can tune ASR toward specific kinds of user input.
+Steps can override project-level voice and LLM defaults for a single turn. Every section is optional — omit a section to inherit the project default. All settings apply to both default and advanced steps.
 
-Supported ASR biasing fields include:
+~~~yaml
+step_type: advanced_step
+name: Collect Card Number
+asr_biasing:
+  is_enabled: true
+  numeric: true
+  custom_keywords:
+  - Acme
+dtmf_config:
+  is_enabled: true
+  max_digits: 4
+  end_key: '#'
+asr:
+  provider: deepgram
+  model: nova-3
+vad:
+  vad_start: 0.2
+  vad_end: 0.8
+barge_in:
+  is_enabled: false
+llm:
+  provider_model_id: polywhirl-3-5
+  reasoning_effort: medium
+prompt: Please read out your card number.
+~~~
 
-- `alphanumeric`
-- `name_spelling`
-- `numeric`
-- `party_size`
-- `precise_date`
-- `relative_date`
-- `single_number`
-- `time`
-- `yes_no`
-- `address`
-- `custom_keywords`
+### `asr_biasing`
 
-### DTMF configuration
+ASR tuning for the turn.
 
-Advanced steps can also define DTMF behavior, including:
+| Field | Description |
+|---|---|
+| `is_enabled` | (bool) Whether ASR biasing is enabled |
+| `alphanumeric`, `name_spelling`, `numeric`, `party_size`, `precise_date`, `relative_date`, `single_number`, `time`, `yes_no`, `address` | (bool) Whether to tune ASR for that type of input |
+| `custom_keywords` | (list[str]) Words to bias towards |
 
-- `inter_digit_timeout`
-- `max_digits`
-- `end_key`
-- `collect_while_agent_speaking`
-- `is_pii`
+### `dtmf_config`
+
+Keypad input settings.
+
+| Field | Description |
+|---|---|
+| `is_enabled` | (bool) Whether DTMF collection is enabled |
+| `inter_digit_timeout` | (int) How long to wait in seconds between button presses. Cannot be negative |
+| `max_digits` | (int) Max number of digits to collect. Cannot be negative |
+| `end_key` | (str) When this key is pressed, end collection |
+| `collect_while_agent_speaking` | (bool) Allow collection during the agent's speech |
+| `is_pii` | (bool) Does user input count as PII |
+
+### `asr`
+
+Speech recognition provider override.
+
+| Field | Description |
+|---|---|
+| `provider` | (str) ASR provider name |
+| `model` | (str) ASR model name |
+
+### `vad`
+
+Voice activity detection override.
+
+| Field | Description |
+|---|---|
+| `provider` | (str) VAD provider name |
+| `vad_start` | (float) Seconds. Must be zero or greater |
+| `vad_end` | (float) Seconds. Must be zero or greater |
+| `speech_threshold` | (float) |
+| `silence_threshold` | (float) |
+
+### `barge_in`
+
+Whether the caller can interrupt the agent.
+
+| Field | Description |
+|---|---|
+| `is_enabled` | (bool) Whether barge-in is enabled |
+
+### `llm`
+
+Model override for the turn.
+
+| Field | Description |
+|---|---|
+| `provider_model_id` | (str) Model identifier |
+| `reasoning_effort` | (str) One of `unspecified`, `minimal`, `low`, `medium`, `high`, `auto` |
+
+### Removing settings
+
+`asr`, `vad`, `barge_in` and `llm` are removed by deleting the section from the file; the step then inherits the project default again.
+
+`asr_biasing` and `dtmf_config` behave differently — the platform merges them rather than replacing them, so they cannot be removed. Turn them off with `is_enabled: false` instead. A disabled `asr_biasing` or `dtmf_config` is written back out as an absent section, so after a `poly pull` a disabled section will not appear in the file.
 
 ## Step prompt design
 
@@ -234,7 +299,7 @@ Python should be used for:
 
 !!! warning "Do not put deterministic branching logic into prompts"
 
-    Do not encode logic like “If $x == 0 do A, else do B” in prompts. Put that logic in Python and transition to the correct step explicitly.
+    Do not encode logic like "If $x == 0 do A, else do B" in prompts. Put that logic in Python and transition to the correct step explicitly.
 
 ### Prompt tips
 
