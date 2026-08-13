@@ -1,6 +1,68 @@
 # CHANGELOG
 
 
+## v0.44.0 (2026-08-13)
+
+### Features
+
+- Support test clock (simulated_at) on test cases ([#273](https://github.com/polyai/adk/pull/273),
+  [`2ffd8bd`](https://github.com/polyai/adk/commit/2ffd8bd17c8b7b807a3934722d303647fd9c20b2))
+
+## Summary
+
+Adds support for the test clock (`simulated_at`) on test cases. The field already exists on the
+  `TestCase` protobuf messages but was dropped at every ADK layer, so a simulated time set in Agent
+  Studio was invisible locally and never sent on push.
+
+## Motivation
+
+`simulated_at` pins the agent's notion of "now" for a simulated conversation, which is how
+  time-dependent behaviour (out-of-hours routing, relative date resolution, seasonal greetings) is
+  made deterministic. Today it can only be set in the Agent Studio UI: `poly pull` silently drops
+  it, and there is no way to express it in `test_suite/*.yaml`.
+
+## Changes
+
+- Add optional `simulated_at` to the `TestCase` resource, stored as a canonical UTC ISO 8601 string
+  - Read `simulatedAt` from the platform projection in `_read_test_cases_from_projection` (pull) -
+  Emit/parse `simulated_at` in `to_yaml_dict` / `from_yaml_dict` - Send `simulated_at` as a protobuf
+  `Timestamp` on `Create_TestCase` and `Update_TestCase` (push) - Accept ISO 8601 strings,
+  `datetime` objects (ruamel parses unquoted YAML timestamps into one), and protobuf Timestamp JSON;
+  normalise everything to UTC and raise a clear `ValueError` on an unparseable value - Document the
+  field in `src/poly/docs/tests.md` and `docs/docs/reference/tests.md`
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New tests in `TestCaseTests` cover UTC normalisation across input forms, YAML round-trip, omission
+  when unset, invalid-value errors, create/update proto contents, and reading `simulatedAt` from a
+  projection.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (788 passed) - [x] No
+  breaking changes to the `poly` CLI interface — `simulated_at` is optional and omitted from YAML
+  when unset - [x] Commit messages follow [conventional
+  commits](https://www.conventionalcommits.org/)
+
+## Note for reviewers
+
+One behaviour worth a second opinion: `simulated_at` is a proto3 `optional` field, so unlike
+  `variant_id` (which is cleared by sending `""`) there is no empty value to send. When a user
+  removes `simulated_at` from a YAML file, `build_update_proto` leaves the field unset rather than
+  explicitly clearing it — whether the platform treats "unset" as "no change" or "clear" decides if
+  removing the field locally actually removes the test clock upstream. Happy to follow up if the
+  platform needs an explicit clear signal.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+
+
 ## v0.43.0 (2026-08-13)
 
 ### Features
