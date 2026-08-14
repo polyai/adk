@@ -1,6 +1,371 @@
 # CHANGELOG
 
 
+## v0.44.0 (2026-08-13)
+
+### Features
+
+- Support test clock (simulated_at) on test cases ([#273](https://github.com/polyai/adk/pull/273),
+  [`2ffd8bd`](https://github.com/polyai/adk/commit/2ffd8bd17c8b7b807a3934722d303647fd9c20b2))
+
+## Summary
+
+Adds support for the test clock (`simulated_at`) on test cases. The field already exists on the
+  `TestCase` protobuf messages but was dropped at every ADK layer, so a simulated time set in Agent
+  Studio was invisible locally and never sent on push.
+
+## Motivation
+
+`simulated_at` pins the agent's notion of "now" for a simulated conversation, which is how
+  time-dependent behaviour (out-of-hours routing, relative date resolution, seasonal greetings) is
+  made deterministic. Today it can only be set in the Agent Studio UI: `poly pull` silently drops
+  it, and there is no way to express it in `test_suite/*.yaml`.
+
+## Changes
+
+- Add optional `simulated_at` to the `TestCase` resource, stored as a canonical UTC ISO 8601 string
+  - Read `simulatedAt` from the platform projection in `_read_test_cases_from_projection` (pull) -
+  Emit/parse `simulated_at` in `to_yaml_dict` / `from_yaml_dict` - Send `simulated_at` as a protobuf
+  `Timestamp` on `Create_TestCase` and `Update_TestCase` (push) - Accept ISO 8601 strings,
+  `datetime` objects (ruamel parses unquoted YAML timestamps into one), and protobuf Timestamp JSON;
+  normalise everything to UTC and raise a clear `ValueError` on an unparseable value - Document the
+  field in `src/poly/docs/tests.md` and `docs/docs/reference/tests.md`
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New tests in `TestCaseTests` cover UTC normalisation across input forms, YAML round-trip, omission
+  when unset, invalid-value errors, create/update proto contents, and reading `simulatedAt` from a
+  projection.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (788 passed) - [x] No
+  breaking changes to the `poly` CLI interface — `simulated_at` is optional and omitted from YAML
+  when unset - [x] Commit messages follow [conventional
+  commits](https://www.conventionalcommits.org/)
+
+## Note for reviewers
+
+One behaviour worth a second opinion: `simulated_at` is a proto3 `optional` field, so unlike
+  `variant_id` (which is cleared by sending `""`) there is no empty value to send. When a user
+  removes `simulated_at` from a YAML file, `build_update_proto` leaves the field unset rather than
+  explicitly clearing it — whether the platform treats "unset" as "no change" or "clear" decides if
+  removing the field locally actually removes the test clock upstream. Happy to follow up if the
+  platform needs an explicit clear signal.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+
+
+## v0.43.0 (2026-08-13)
+
+### Features
+
+- Per flow settings ([#260](https://github.com/polyai/adk/pull/260),
+  [`a9e0029`](https://github.com/polyai/adk/commit/a9e0029333814020f3bdeef388f29b3f244bd2f3))
+
+## Summary
+
+Consolidates per-step flow config (ASR biasing, DTMF, and the new ASR, VAD, barge-in and LLM
+  sections) into a single `FlowSettings` sub-resource, pushed as one `update_step_settings` command
+  instead of separate per-section commands. Adds the matching read path, clear path, and a
+  status-dict migration.
+
+## Motivation
+
+The platform moved per-step overrides into a nested `FlowStepSettings` block behind a single update
+  command, and introduced four new sections (ASR, VAD, barge-in, LLM) the ADK had no way to
+  represent. Previously ASR biasing and DTMF were separate sub-resources with their own
+  `flow_step_asr_config` / `flow_step_dtmf_config` commands, and the newer sections were
+  unsupported.
+
+## Changes
+
+- **New `FlowSettings` sub-resource** grouping all six sections, replacing the separate
+  `ASRBiasing`/`DTMFConfig` sub-resources. It is update-only (`update_step_settings`), matching the
+  existing `AsrSettings` pattern — `CreateAdvancedStep` has no `settings` field, so settings on a
+  new step ride along as an update after the step create. - **New config types** `ASRConfig`,
+  `VADConfig`, `BargeInConfig` and `LLMConfig` (with a `ReasoningEffort` enum), each with
+  `to_yaml_dict` / `to_proto`. - **Settings stay top-level in step YAML** (`asr_biasing:`,
+  `dtmf_config:`, `llm:` …) so existing step files need no rewriting. - **Projection reading**
+  handles the camelCase projection shape and maps `reasoningEffort` from its proto ordinal to the
+  enum. The step's legacy top-level `asrBiasing`/`dtmfConfig` are only read when there is no
+  `settings` block at all: the backend mirrors those on every settings update but never clears them,
+  so consulting them per-section would resurrect a section the user had cleared. - **Clearing a
+  section** emits `clear_step_settings`. `update_step_settings` merges per section, so a section
+  dropped from local YAML would otherwise be read as "not updated" rather than "cleared". Only
+  `asr`, `vad`, `bargeIn` and `llm` are sent — the backend's enum rejects anything else, and
+  `asr_biasing`/`dtmf` are excluded by design because they deep-merge into the legacy top-level
+  mirrors. Section names are translated to the backend's casing (`barge_in` → `bargeIn`); an unknown
+  value fails validation for the whole command batch. - **Disabled sections** are omitted from step
+  YAML for `asr_biasing` and `dtmf_config`, so disabled reads as absent. `barge_in` is kept even
+  when disabled, since it is clearable and an explicit disable has to stay distinguishable from
+  having no override. - **Status-dict migration** (`migrated_flow_step_settings`) folds legacy
+  top-level keys into `settings`. Without it, a status file written by an older version loads with
+  empty settings and reports every advanced step as modified — which also blocks `branch switch`,
+  `merge` and `sync ids`, all of which refuse to run with uncommitted changes. - Regenerated the
+  test project fixture into the new format and updated the affected tests.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+New coverage:
+
+- `ClearUnusedSettingsFromFlowStepTest` — backend casing (`barge_in` → `bargeIn`), pass-through
+  sections, all four clearable sections at once, `asr_biasing`/`dtmf` producing no command,
+  unclearable sections not suppressing clearable ones, and the no-op cases (unchanged settings,
+  added sections, step missing from remote state). - `FlowSettingsFromProjectionTest` — camelCase
+  parsing across all six sections, every `reasoningEffort` ordinal, legacy top-level ignored when a
+  settings block exists but read when it does not, and absent settings yielding empty settings
+  rather than `None`. - `FlowSettingsSerializationTest` — full six-section YAML round-trip,
+  `dtmf_config` as the YAML key, disabled-section handling, and `build_update_proto` setting only
+  the sections present. - `MigrateFlowStepSettingsTest` — folding, loading the migrated shape into a
+  `FlowStep`, newer settings taking precedence, and steps without legacy keys being left alone.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
+## v0.42.2 (2026-08-13)
+
+### Bug Fixes
+
+- **sync**: Resolve flow step ids against the synced flow id
+  ([#270](https://github.com/polyai/adk/pull/270),
+  [`fe795ad`](https://github.com/polyai/adk/commit/fe795ada6aa077fa8824a764633e8ba982233402))
+
+## Summary
+
+`sync_ids_with_sandbox` could send a flow's `startStepId` with the flow id still welded onto the
+  front of the step id, which the platform rejects with a validation error saying the start step id
+  does not exist. This resolves flow step ids against the flow id the step was actually synced to.
+
+## Motivation
+
+Flow steps are identified locally by a composite `{flow_id}_{step_id}` resource id, and `FlowConfig`
+  recovers a bare step id by stripping the `{flow_id}_` prefix off it.
+
+`sync_ids_with_sandbox` built each flow-scoped resource's `ResourceMapping` using the resource's own
+  stale, pre-sync `flow_id`. When the sandbox had assigned the flow a different id, the mapping's
+  `flow_id` and the step's composite resource id disagreed, so `removeprefix` found no match.
+  Because `removeprefix` fails open — returning the string unchanged rather than raising — nothing
+  was stripped and no error surfaced locally. `start_step` kept the full composite value and the
+  push failed server-side, aborting the whole command batch.
+
+This was hit on a real sync against a live project.
+
+## Changes
+
+- Build a `flow_id_translation` lookup from each local `FlowConfig` id to the id it syncs to, and
+  resolve flow-scoped resources' `flow_id` through it instead of trusting the stale local value. -
+  Re-point the composite resource id of a flow step that has **no** sandbox counterpart (i.e. added
+  on the branch) onto the synced flow id, so the embedded prefix and `flow_id` always agree. Without
+  this the same corruption survives for branch-only steps. - Restrict that rewrite to `BaseFlowStep`
+  subclasses with a genuinely matching prefix. Flow-scoped functions also carry a `flow_id` but keep
+  standalone ids, so prepending a flow id to those would corrupt ids that were previously fine. -
+  Add a `SyncIdsWithSandboxTest` suite covering the sync-id paths, which had no direct tests before.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+9 new tests. Both halves of the fix were mutation-tested — each was reverted in turn to confirm the
+  relevant tests actually fail without it, rather than passing incidentally:
+
+- start step resolves to a bare step id when the sandbox reassigned the flow id - same, when the
+  start step is new on the branch and has no sandbox counterpart - a branch-only step is re-keyed
+  onto the sandbox flow id, leaving no step straddling two flow ids - flow-scoped function ids are
+  **not** rewritten - two flows reassigned at once do not contaminate each other (one fixture flow
+  id is a string prefix of the other, so a substring-based rewrite would move steps under the wrong
+  flow) - ids unchanged when sandbox ids already match, plus the two guard clauses
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Before, for a flow whose sandbox id differs from the local one:
+
+``` startStepId: "FLOW_CONFIG-abc12345_FLOW_STEPS-6789" # rejected by the platform ```
+
+After:
+
+``` startStepId: "FLOW_STEPS-6789" ```
+
+### Follow-up
+
+Stacked child: #271, which corrects the `test_project` fixture.
+
+An earlier draft of this section claimed a no-op `sync_ids_with_sandbox` emits spurious writes
+  because disk-read resources compare unequal to their projection-read counterparts. That claim was
+  wrong and did not make it into this description. The churn came from the fixture storing values a
+  real status file cannot contain, not from an asymmetry in the resource classes:
+  `FlowStep.from_projection` always materializes `asr_biasing`/`dtmf_config`, and #255 already fixed
+  the `Function` case. #271 has the detail.
+
+What does remain, addressed in neither PR: `sync_ids_with_sandbox` is still the only path deciding
+  what changed by comparing whole `Resource` objects, while `push`/`get_diffs` compare the
+  rendered-file hash. That asymmetry is what allowed #255's bug to exist in the first place.
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+
+## v0.42.1 (2026-08-13)
+
+### Bug Fixes
+
+- Fake diff on test_suite ([#272](https://github.com/polyai/adk/pull/272),
+  [`998f1d2`](https://github.com/polyai/adk/commit/998f1d2b0d0d7913e73b9a80427e710eac76fb88))
+
+## Summary Integration attributes and sip headers were giving a fake diff due to how the origin is
+  being loaded back from disk
+
+## Motivation When loading a project, the previous known remote version was being loaded wrong,
+  creating a spurious diff
+
+## Changes - Load the object directly, not putting into the attribute or sip_headers part
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs Before: ``` -sip_headers: - resource_id: TEST_CASES-974954e0 - name:
+  sip_headers - headers: {} -integration_attributes: - resource_id: TEST_CASES-974954e0 - name:
+  integration_attributes - attributes: {} ``` After: ``` No changes detected. ```
+
+
+## v0.42.0 (2026-08-13)
+
+### Features
+
+- Branch sync, history, rename, tag/untag, and archive/restore
+  ([#247](https://github.com/polyai/adk/pull/247),
+  [`948bcac`](https://github.com/polyai/adk/commit/948bcacd98846383c62f31806fc88f8a6c8ba2e5))
+
+## Summary
+
+Adds six `poly branch` subcommands — `sync`, `history`, `rename`, `restore`, `tag`, `untag` — plus
+  `branch list --archived`, and teaches `branch create`/`merge`/`current`/`list` about branch
+  lineage and the project's deployment mode. Commands the platform only exposes under simplified
+  deployments are gated behind the `deployment_simplification` feature flag. Also makes `poly
+  deployments list`/`show`/`promote`/`rollback` aware of that same deployment mode.
+
+## Motivation
+
+The platform's simplified deployment model introduces branch lineage (branches can be created from
+  other branches), staging tags, and soft-archive/restore with a 30-day window. The ADK CLI had no
+  support for any of it, and `poly branch merge` assumed every branch's parent was `main`. Once a
+  project moves to simplified deployments, its old `sandbox` deployment history is also frozen in
+  place — merges to main go straight to `live` — so the existing `deployments` commands needed to
+  stop defaulting to `sandbox`.
+
+## Changes
+
+**New commands**
+
+- `poly branch sync` — merge the parent branch's changes into the current branch, reusing the
+  existing merge-conflict UX (`-i`/`--interactive`, `--resolutions`) - `poly branch history
+  [--branch-name] [--limit]` — merge history for a branch, 10 entries by default - `poly branch
+  rename [new_name]` — rename the current branch - `poly branch restore [branch]` — restore a
+  soft-deleted branch from the archive - `poly branch tag` / `poly branch untag` — tag the current
+  branch to deploy it to staging, or remove the tag - `poly branch list --archived` — list
+  soft-deleted branches instead of active ones
+
+**Changed behaviour**
+
+- `branch create` now respects the project's deployment mode: one active branch in `simple`,
+  main-only in `releases`, and branching off a direct child of main (max depth 2) in
+  `releases_branches`. This replaces the previous unconditional "branches can only be created from
+  main" guard. A new `--from <branch>` flag lets the source branch be named explicitly instead of
+  always defaulting to whatever branch is currently checked out; the deployment-mode guards validate
+  against the named source, not the current branch. - `branch merge` merges into the branch's actual
+  parent instead of always `main`, switches to that parent afterwards, and shows a confirmation plus
+  "now live" messaging when merging into main under simplified deployments. Merges into a branch
+  other than `main` no longer require a merge message. - `branch current` also prints the parent
+  branch, suppressed when the parent is `main` to avoid noise in the common case. `--json` always
+  includes `parent_branch`. - `branch list` and the `switch`/`delete` interactive pickers render
+  lineage as an indented tree in `releases_branches` mode, and show staging tags. - `branch`
+  subcommands are regrouped into lifecycle and inspection groups in `--help`, and stale help
+  text/epilogs are corrected. - `deployments list`/`show` default to the `live` environment instead
+  of `sandbox` for projects using simplified deployments (`--env` still overrides). `show` no longer
+  prints a "No intermediate deployments" placeholder when the included list is empty, since
+  post-migration deployments legitimately have none. - `deployments promote` is refused outright for
+  projects using simplified deployments — merging to main deploys straight to live, so there is no
+  sandbox → pre-release → live ladder left to promote along, and the platform does not reject the
+  call itself. - `deployments rollback` targets `live` rather than `sandbox` for projects using
+  simplified deployments, since that's the only environment the platform accepts a rollback target
+  for.
+
+**Feature-flag gating**
+
+- New `PosthogHandler` and `AgentStudioInterface.feature_flag_enabled`, backing
+  `AgentStudioProject.using_simplified_deployments`. - `using_simplified_deployments` now also
+  checks convergence: even with the feature flag on, it only reports `True` once the project's
+  `live` deployment head is at least as recent as its `sandbox` head (i.e. `live` has caught up and
+  sandbox is no longer receiving new deployments). This avoids treating a project as simplified
+  mid-migration, while it still has newer sandbox deployments that haven't reached live. - New
+  `require_deployment_simplification` helper gates `sync`, `tag`, and `untag` — the three endpoints
+  the platform 404s when the flag is off. Previously these surfaced a bare `API error: 404 Client
+  Error`; they now exit 1 with an explanatory message in both human and `--json` modes. - New
+  `DeploymentMode` enum and `AgentStudioProject.deployment_mode`, read from the project's
+  `config.deployment_mode` and defaulting to `releases`.
+
+**Supporting API surface**
+
+`sync_branch`, `get_branch_history`, `rename_branch`, `list_archived_branches`, `restore_branch`,
+  `tag_branch`, `untag_branch`, `get_project`, and `create_branch(..., source_branch_id)` across the
+  SDK, sync client, and interface. New console renderers for branch trees, archived branches, and
+  merge history.
+
+**Other**
+
+- Adds `posthog==7.35.4`. - README `poly branch` section and `poly branch --help` examples updated
+  to cover the new commands, including `--from`.
+
+## Follow-ups (tracked separately, not silently dropped)
+
+- The `sandbox` environment does not exist under simplified deployments, but it is still the
+  hardcoded default for `diff`, `chat`, and the `rtc` commands, so those return empty results rather
+  than an explanation. Fixing that also means introducing a shared environment constant — the
+  three-environment literal is currently duplicated at 15+ sites — and renaming
+  `sandbox`/`pre-release` to the branches/staging vocabulary the product now uses.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1208 passed, 61
+  subtests) - [x] No breaking changes to the `poly` CLI interface (or migration path documented) -
+  [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.41.0 (2026-08-12)
 
 ### Chores

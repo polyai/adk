@@ -5,7 +5,7 @@ Copyright PolyAI Limited
 
 import os
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Any, Optional
 
 from google.protobuf.struct_pb2 import Struct
@@ -45,6 +45,40 @@ CHANNEL_TO_INTERNAL = {v: k for k, v in INTERNAL_TO_CHANNEL.items()}
 
 
 ALLOWED_TYPES = ["string", "integer", "number", "boolean"]
+
+SIMULATED_AT_HINT = "an ISO 8601 datetime, e.g. 2026-01-15T09:30:00Z"
+
+
+def parse_simulated_at(value: str | datetime | None) -> Optional[datetime]:
+    """Parse a test clock value into a UTC datetime, or None when unset.
+
+    Accepts an ISO 8601 string (the platform projection format) or a datetime
+    (ruamel parses unquoted YAML timestamps into one). Naive datetimes are
+    assumed to be UTC.
+    """
+    if value is None or value == "":
+        return None
+
+    if isinstance(value, datetime):
+        parsed = value
+    else:
+        try:
+            parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        except ValueError as exc:
+            raise ValueError(
+                f"Invalid simulated_at value '{value}'. Expected {SIMULATED_AT_HINT}"
+            ) from exc
+
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def format_simulated_at(value: Optional[datetime]) -> Optional[str]:
+    """Render a test clock datetime as a canonical UTC ISO 8601 string."""
+    if value is None:
+        return None
+    return value.isoformat().replace("+00:00", "Z")
 
 
 @dataclass
@@ -337,6 +371,7 @@ class TestCase(YamlResource):
     tags: TestCaseTags = None
     variant: Optional[str] = None
     caller_number: Optional[str] = None
+    simulated_at: Optional[str] = None
     sip_headers: "TestCaseSipHeaders" = None
     integration_attributes: "TestCaseIntegrationAttributes" = None
 
@@ -395,6 +430,7 @@ class TestCase(YamlResource):
                 assertions=assertions,
                 tags=tags,
                 caller_number=test_case_data.get("callerNumber", ""),
+                simulated_at=test_case_data.get("simulatedAt"),
                 sip_headers=sip_headers,
                 integration_attributes=integration_attributes,
             )
@@ -412,6 +448,7 @@ class TestCase(YamlResource):
         tags: TestCaseTags | dict,
         variant: Optional[str] = None,
         caller_number: Optional[str] = None,
+        simulated_at: str | datetime | None = None,
         sip_headers: "TestCaseSipHeaders | dict | None" = None,
         integration_attributes: "TestCaseIntegrationAttributes | dict | None" = None,
     ):
@@ -435,22 +472,23 @@ class TestCase(YamlResource):
         self.caller_number = (
             caller_number.strip() if isinstance(caller_number, str) else caller_number
         )
+        self.simulated_at = format_simulated_at(parse_simulated_at(simulated_at))
         # Both are always constructed, even when empty. Clearing a value has to
         # produce a command, and get_new_updated_deleted_subresources works by
         # comparing subresources — an absent one cannot differ from anything.
         if isinstance(sip_headers, TestCaseSipHeaders):
             self.sip_headers = sip_headers
+        elif sip_headers:
+            self.sip_headers = TestCaseSipHeaders(**sip_headers)
         else:
-            self.sip_headers = TestCaseSipHeaders(
-                resource_id=resource_id, name="sip_headers", headers=sip_headers or {}
-            )
+            self.sip_headers = TestCaseSipHeaders(resource_id=resource_id, name="sip_headers")
         if isinstance(integration_attributes, TestCaseIntegrationAttributes):
             self.integration_attributes = integration_attributes
+        elif integration_attributes:
+            self.integration_attributes = TestCaseIntegrationAttributes(**integration_attributes)
         else:
             self.integration_attributes = TestCaseIntegrationAttributes(
-                resource_id=resource_id,
-                name="integration_attributes",
-                attributes=integration_attributes or {},
+                resource_id=resource_id, name="integration_attributes"
             )
 
     @property
@@ -470,6 +508,9 @@ class TestCase(YamlResource):
 
         if self.caller_number:
             output["caller_number"] = self.caller_number
+
+        if self.simulated_at:
+            output["simulated_at"] = self.simulated_at
 
         if tags_list := self.tags.tags:
             output["tags"] = tags_list
@@ -536,6 +577,7 @@ class TestCase(YamlResource):
             tags=test_case_tags,
             variant=yaml_dict.get("variant"),
             caller_number=yaml_dict.get("caller_number"),
+            simulated_at=yaml_dict.get("simulated_at"),
             sip_headers=test_case_sip_headers,
             integration_attributes=test_case_integration_attributes,
         )
@@ -728,6 +770,9 @@ class TestCase(YamlResource):
             language=self.language,
             channel=self.channel,
             caller_number=self.caller_number or "",
+            # Empty string is the explicit "clear" signal, as for caller_number and
+            # variant_id — an omitted optional field reads as "no update" platform-side.
+            simulated_at=self.simulated_at or "",
         )
 
     def build_update_proto(self) -> Update_TestCase:
@@ -739,6 +784,9 @@ class TestCase(YamlResource):
             language=self.language,
             channel=self.channel,
             caller_number=self.caller_number or "",
+            # Empty string is the explicit "clear" signal, as for caller_number and
+            # variant_id — an omitted optional field reads as "no update" platform-side.
+            simulated_at=self.simulated_at or "",
         )
 
     def build_delete_proto(self) -> Delete_TestCase:

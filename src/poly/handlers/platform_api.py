@@ -17,6 +17,7 @@ from poly.utils import any_credentials_exist, retrieve_api_key
 logger = logging.getLogger(__name__)
 ACCOUNTS_URL = "/adk/v1/accounts"
 PROJECTS_URL = "/adk/v1/accounts/{account_id}/projects"
+PROJECT_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}"
 DEPLOYMENTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/deployments"
 ACTIVE_DEPLOYMENTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/deployments/active"
 CHAT_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/chat"
@@ -224,6 +225,21 @@ class PlatformAPIHandler:
                 accounts[account.get("id")] = account.get("name")
 
         return accounts
+
+    @staticmethod
+    def get_project(region: str, account_id: str, project_id: str) -> dict:
+        """Get a specific project for a given account.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+            project_id (str): The project ID
+
+        Returns:
+            dict: The project details
+        """
+        endpoint = PROJECT_URL.format(account_id=account_id, project_id=project_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")
 
     @staticmethod
     def get_projects(region: str, account_id: str) -> dict[str, str]:
