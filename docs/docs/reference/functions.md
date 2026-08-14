@@ -12,6 +12,8 @@ They can be called by the model, used as flow steps, or run automatically at cal
 
 Functions are how the ADK handles behavior that should not be left to prompt interpretation alone.
 
+To manage functions programmatically over the REST API instead of via local files, see [`poly functions`](cli.md#poly-functions).
+
 ## Where functions live
 
 ~~~text

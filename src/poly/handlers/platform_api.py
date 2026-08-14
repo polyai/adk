@@ -53,6 +53,38 @@ RTC_CONFIGS_URL = "/v1/agents/{project_id}/real-time-configs"
 RTC_CONFIG_URL = "/v1/agents/{project_id}/real-time-configs/{client_env}"
 RTC_SCHEMA_URL = "/v1/agents/{project_id}/real-time-configs/{client_env}/schema"
 RTC_VARIABLES_URL = "/v1/agents/{project_id}/real-time-configs/{client_env}/variables"
+FUNCTIONS_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions"
+FUNCTION_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}"
+FUNCTION_EXECUTE_URL = (
+    "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/execute"
+)
+FUNCTION_DUPLICATE_URL = (
+    "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/duplicate"
+)
+FUNCTION_REFERENCES_URL = (
+    "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/references"
+)
+FUNCTION_TYPE_DEFINITIONS_URL = (
+    "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/type_definitions"
+)
+FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
+FUNCTIONS_DEPLOY_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/deploy"
+FUNCTIONS_DEPLOYMENTS_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/deployments"
+START_FUNCTION_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/start"
+END_FUNCTION_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/end"
+
+
+class FunctionConflictError(ValueError):
+    """Raised when a Functions API call returns a 409 conflict.
+
+    A ValueError subclass so it's caught by generic error handling, but it
+    carries the orphaned_references payload so callers can decide whether to
+    retry with force=True or surface the conflicting flow steps to the user.
+    """
+
+    def __init__(self, message: str, orphaned_references: list[dict[str, ty.Any]]):
+        super().__init__(message)
+        self.orphaned_references = orphaned_references
 
 
 class PlatformAPIHandler:
@@ -1406,3 +1438,381 @@ class PlatformAPIHandler:
         endpoint = RTC_VARIABLES_URL.format(project_id=project_id, client_env=client_env)
         data = {"variables": variables}
         return PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=data)
+
+    @staticmethod
+    def _request_translating_conflicts(*args: ty.Any, **kwargs: ty.Any) -> dict:
+        """Call make_request, translating a 409 into a FunctionConflictError.
+
+        A 409 causes ``raise_for_status()`` to raise requests.HTTPError before
+        make_request returns, so the conflict body has to be pulled off the
+        exception's response, not the (never-returned) success payload.
+
+        Raises:
+            FunctionConflictError: If the response status was 409.
+        """
+        try:
+            return PlatformAPIHandler.make_request(*args, **kwargs)
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 409:
+                try:
+                    body = e.response.json()
+                except ValueError:
+                    body = {}
+                raise FunctionConflictError(
+                    body.get("message", "Conflict"), body.get("orphaned_references", [])
+                ) from e
+            raise
+
+    @staticmethod
+    def list_functions(
+        region: str,
+        project_id: str,
+        branch_id: str,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict:
+        """List functions on a branch.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            limit: Max number of functions to return (1-50).
+            offset: Number of functions to skip.
+
+        Returns:
+            dict: {"functions": [...]}.
+        """
+        endpoint = FUNCTIONS_URL.format(project_id=project_id, branch_id=branch_id)
+        params = {"limit": limit, "offset": offset}
+        return PlatformAPIHandler.make_request(region, endpoint, "GET", params=params)
+
+    @staticmethod
+    def get_function(region: str, project_id: str, branch_id: str, function_id: str) -> dict:
+        """Get a single function by ID.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID.
+
+        Returns:
+            dict: The function.
+        """
+        endpoint = FUNCTION_URL.format(
+            project_id=project_id, branch_id=branch_id, function_id=function_id
+        )
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")
+
+    @staticmethod
+    def create_function(
+        region: str,
+        project_id: str,
+        branch_id: str,
+        name: str,
+        description: str,
+        code: str,
+        parameters: ty.Optional[list[dict]] = None,
+        delay_control: ty.Optional[dict] = None,
+    ) -> dict:
+        """Create a new function on a branch.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            name: The function name.
+            description: The function description.
+            code: The function's Python source.
+            parameters: The function's parameter specs.
+            delay_control: Optional delay/filler message settings.
+
+        Returns:
+            dict: The created function.
+
+        Raises:
+            FunctionConflictError: On a 409 name collision (name collisions are
+                rejected outright and are not force-overridable).
+        """
+        endpoint = FUNCTIONS_URL.format(project_id=project_id, branch_id=branch_id)
+        data: dict[str, ty.Any] = {
+            "name": name,
+            "description": description,
+            "code": code,
+            "parameters": parameters or [],
+        }
+        if delay_control:
+            data["delay_control"] = delay_control
+        return PlatformAPIHandler._request_translating_conflicts(
+            region, endpoint, "POST", data=data
+        )
+
+    @staticmethod
+    def update_function(
+        region: str,
+        project_id: str,
+        branch_id: str,
+        function_id: str,
+        updates: dict,
+        force: bool = False,
+    ) -> dict:
+        """Patch a function.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID.
+            updates: The fields to change (name, description, code, parameters).
+            force: Override an orphaned-reference conflict.
+
+        Returns:
+            dict: The updated function.
+
+        Raises:
+            FunctionConflictError: On a 409 conflict, unless force=True.
+        """
+        endpoint = FUNCTION_URL.format(
+            project_id=project_id, branch_id=branch_id, function_id=function_id
+        )
+        data = dict(updates)
+        if force:
+            data["force"] = True
+        return PlatformAPIHandler._request_translating_conflicts(
+            region, endpoint, "PATCH", data=data
+        )
+
+    @staticmethod
+    def delete_function(
+        region: str,
+        project_id: str,
+        branch_id: str,
+        function_id: str,
+        force: bool = False,
+    ) -> dict:
+        """Delete a function.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID.
+            force: Override an orphaned-reference conflict.
+
+        Returns:
+            dict: Empty on a 204 No Content response.
+
+        Raises:
+            FunctionConflictError: On a 409 conflict, unless force=True.
+        """
+        endpoint = FUNCTION_URL.format(
+            project_id=project_id, branch_id=branch_id, function_id=function_id
+        )
+        data = {"force": True} if force else None
+        return PlatformAPIHandler._request_translating_conflicts(
+            region, endpoint, "DELETE", data=data
+        )
+
+    @staticmethod
+    def execute_function(
+        region: str,
+        project_id: str,
+        branch_id: str,
+        function_id: str,
+        args: dict,
+    ) -> dict:
+        """Execute a function with the given arguments.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID.
+            args: The arguments to pass to the function.
+
+        Returns:
+            dict: {"body": ..., "logs": [...], "runtime": ...}.
+        """
+        endpoint = FUNCTION_EXECUTE_URL.format(
+            project_id=project_id, branch_id=branch_id, function_id=function_id
+        )
+        return PlatformAPIHandler.make_request(region, endpoint, "POST", data={"args": args})
+
+    @staticmethod
+    def duplicate_function(
+        region: str,
+        project_id: str,
+        branch_id: str,
+        function_id: str,
+        name: ty.Optional[str] = None,
+    ) -> dict:
+        """Duplicate a function, optionally with a new name.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID to duplicate.
+            name: Optional name for the copy. Defaults to a server-generated name.
+
+        Returns:
+            dict: The newly created function.
+
+        Raises:
+            FunctionConflictError: On a 409 explicit-name collision.
+        """
+        endpoint = FUNCTION_DUPLICATE_URL.format(
+            project_id=project_id, branch_id=branch_id, function_id=function_id
+        )
+        data = {"name": name} if name is not None else None
+        return PlatformAPIHandler._request_translating_conflicts(
+            region, endpoint, "POST", data=data
+        )
+
+    @staticmethod
+    def deploy_functions(region: str, project_id: str, branch_id: str) -> dict:
+        """Deploy all draft functions on a branch.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            dict: {"deployment_version": ..., "function_ids": [...], "deployed_at": ...}.
+        """
+        endpoint = FUNCTIONS_DEPLOY_URL.format(project_id=project_id, branch_id=branch_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "POST")
+
+    @staticmethod
+    def validate_functions(region: str, project_id: str, branch_id: str) -> dict:
+        """Validate all functions on a branch for orphaned refs and syntax errors.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            dict: {"valid": bool, "issues": [...]}.
+        """
+        endpoint = FUNCTIONS_VALIDATE_URL.format(project_id=project_id, branch_id=branch_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "POST")
+
+    @staticmethod
+    def get_function_references(
+        region: str, project_id: str, branch_id: str, function_id: str
+    ) -> dict:
+        """Get the flow steps that reference a function.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID.
+
+        Returns:
+            dict: {"references": [...]}.
+        """
+        endpoint = FUNCTION_REFERENCES_URL.format(
+            project_id=project_id, branch_id=branch_id, function_id=function_id
+        )
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")
+
+    @staticmethod
+    def get_function_type_definitions(
+        region: str, project_id: str, branch_id: str, function_id: str
+    ) -> dict:
+        """Get Python type stubs for a function, for IDE autocomplete.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID.
+
+        Returns:
+            dict: {"code": ...}.
+        """
+        endpoint = FUNCTION_TYPE_DEFINITIONS_URL.format(
+            project_id=project_id, branch_id=branch_id, function_id=function_id
+        )
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")
+
+    @staticmethod
+    def get_start_function(region: str, project_id: str, branch_id: str) -> dict:
+        """Get the branch's start_function.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            dict: {"code": ..., "errors": [...], "version": ...}.
+        """
+        endpoint = START_FUNCTION_URL.format(project_id=project_id, branch_id=branch_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")
+
+    @staticmethod
+    def update_start_function(region: str, project_id: str, branch_id: str, code: str) -> dict:
+        """Update the branch's start_function code.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            code: The new start_function source.
+
+        Returns:
+            dict: The updated start_function.
+        """
+        endpoint = START_FUNCTION_URL.format(project_id=project_id, branch_id=branch_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "PUT", data={"code": code})
+
+    @staticmethod
+    def get_end_function(region: str, project_id: str, branch_id: str) -> dict:
+        """Get the branch's end_function.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            dict: {"code": ..., "errors": [...], "version": ...}.
+        """
+        endpoint = END_FUNCTION_URL.format(project_id=project_id, branch_id=branch_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")
+
+    @staticmethod
+    def update_end_function(region: str, project_id: str, branch_id: str, code: str) -> dict:
+        """Update the branch's end_function code.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            code: The new end_function source.
+
+        Returns:
+            dict: The updated end_function.
+        """
+        endpoint = END_FUNCTION_URL.format(project_id=project_id, branch_id=branch_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "PUT", data={"code": code})
+
+    @staticmethod
+    def list_function_deployments(region: str, project_id: str, branch_id: str) -> dict:
+        """List function deployment history across environments.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            dict: {"deployments": [...]}.
+        """
+        endpoint = FUNCTIONS_DEPLOYMENTS_URL.format(project_id=project_id, branch_id=branch_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")

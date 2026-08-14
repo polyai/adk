@@ -16,6 +16,15 @@ To see all available commands and options:
 poly --help
 ~~~
 
+Commands are listed under section headers so related ones stay together:
+
+| Section | Commands |
+|---|---|
+| Getting started | `init`, `start`, `login`, `studio`, `project` |
+| Project sync | `pull`, `push`, `status`, `revert`, `format`, `validate`, `diff`, `review`, `branch`, `test`, `rtc`, `chat` |
+| Builder API | `deployments`, `conversations`, `audio-cache`, `functions` |
+| Other | `docs`, `completion` |
+
 Each command also supports its own help output. For example:
 
 ~~~bash
@@ -262,7 +271,9 @@ poly revert file1.yaml file2.yaml
 
 ### `poly branch`
 
-Manage project branches.
+Manage project branches. `poly branch --help` splits its subcommands into
+**Branch lifecycle** (`list`, `create`, `switch`, `current`, `delete`, `merge`)
+and **Inspect** (`diff`, `review`, `status`).
 
 Examples:
 
@@ -702,6 +713,248 @@ poly audio-cache synthesize <entry_id> --text "Hi" --language en-US -o out.wav
 | `--path` | Base path to the project. Defaults to the current working directory. |
 | `--json` | Print a JSON summary on stdout instead of the success message (audio is still written to disk). |
 
+### `poly functions`
+
+Manage Functions using the public Functions REST API, scoped to the project's current branch.
+
+!!! note
+
+    This is a different mechanism from the local `functions/*.py` files synced by `poly pull` / `poly push` (see [Functions](functions.md)). `poly functions` talks to the Functions REST API directly and does not read or write local function files.
+
+Every subcommand also accepts `--region`, `--project_id` and `--branch_id` directly, so `poly functions` can run headlessly (CI, scripts) without a local project checkout:
+
+~~~bash
+poly functions list --region us-1 --project_id abc123 --branch_id main
+~~~
+
+All three must be given together — if any one is set, all three are required. With none set, the current local project's region/project/branch are used, as before.
+
+`poly functions --help` splits its subcommands into four sections:
+
+| Section | Subcommands |
+|---|---|
+| Manage | `list`, `get`, `create`, `update`, `delete`, `duplicate` |
+| Run and inspect | `execute`, `references`, `type-definitions` |
+| Deploy | `validate`, `deploy`, `deployments` |
+| Lifecycle hooks | `start`, `end` |
+
+Examples:
+
+~~~bash
+poly functions list
+poly functions get <function_id>
+poly functions create --name my_func --description "desc" --code-file func.py
+poly functions execute <function_id> --args '{"x": 1}'
+poly functions deploy
+~~~
+
+#### `poly functions list`
+
+List the Functions defined on the current branch.
+
+~~~bash
+poly functions list
+poly functions list --limit 50 --offset 50
+~~~
+
+| Flag | Description |
+|---|---|
+| `--limit` | Max number of functions to return (1-50). Defaults to `20`. |
+| `--offset` | Number of functions to skip. Defaults to `0`. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+#### `poly functions get`
+
+Show a function's metadata, parameters and code.
+
+~~~bash
+poly functions get <function_id>
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `function_id` | The function ID. Required. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+#### `poly functions create`
+
+Create a new Function on the current branch from a local code file.
+
+~~~bash
+poly functions create --name my_func --description "desc" --code-file func.py
+poly functions create --name my_func --description "desc" --code-file func.py \
+    --parameters '[{"name": "x", "type": "str", "description": "an x"}]'
+~~~
+
+| Flag | Description |
+|---|---|
+| `--name` | The function name. Required. |
+| `--description` | The function description. Required. |
+| `--code-file` | Local path to the function's Python source. Required. |
+| `--parameters` | JSON list of parameter specs. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+A name collision returns a conflict and is not overridable — pick a different name.
+
+#### `poly functions update`
+
+Update a Function's name, description, code or parameters. At least one field must be supplied.
+
+~~~bash
+poly functions update <function_id> --code-file func.py
+poly functions update <function_id> --description "new desc"
+poly functions update <function_id> --name renamed --force
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `function_id` | The function ID. Required. |
+| `--name` | New function name. |
+| `--description` | New function description. |
+| `--code-file` | Local path to the replacement Python source. |
+| `--parameters` | JSON list of parameter specs. |
+| `-f`, `--force` | Override an orphaned-reference conflict, leaving flow steps pointing at nothing. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+If flow steps reference the function in a way the change would break, the command reports the conflicting steps and exits non-zero. Re-run with `--force` to apply it anyway. With `--json`, the conflicting steps are returned under `orphaned_references`.
+
+#### `poly functions delete`
+
+Delete a Function from the current branch.
+
+~~~bash
+poly functions delete <function_id>
+poly functions delete <function_id> --force
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `function_id` | The function ID. Required. |
+| `-f`, `--force` | Override an orphaned-reference conflict, leaving flow steps pointing at nothing. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+#### `poly functions execute`
+
+Execute a Function and print its return value, logs and runtime.
+
+~~~bash
+poly functions execute <function_id>
+poly functions execute <function_id> --args '{"x": 1}'
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `function_id` | The function ID. Required. |
+| `--args` | JSON object of arguments to pass to the function. Defaults to `{}`. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+#### `poly functions duplicate`
+
+Copy a Function on the current branch.
+
+~~~bash
+poly functions duplicate <function_id>
+poly functions duplicate <function_id> --name my_func_copy
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `function_id` | The function ID to copy. Required. |
+| `--name` | Name for the copy. Defaults to a server-generated name. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+#### `poly functions deploy`
+
+Deploy every draft Function on the current branch.
+
+~~~bash
+poly functions deploy
+~~~
+
+| Flag | Description |
+|---|---|
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+#### `poly functions validate`
+
+Check every Function on the current branch for syntax errors and orphaned flow-step references.
+
+~~~bash
+poly functions validate
+~~~
+
+| Flag | Description |
+|---|---|
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+#### `poly functions references`
+
+List the flow steps that call a Function. Useful before a rename or delete.
+
+~~~bash
+poly functions references <function_id>
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `function_id` | The function ID. Required. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+#### `poly functions type-definitions`
+
+Print the `Conversation`/`Flow` type stubs available to a Function, for IDE autocomplete.
+
+~~~bash
+poly functions type-definitions <function_id>
+poly functions type-definitions <function_id> > stubs.py
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `function_id` | The function ID. Required. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+#### `poly functions deployments`
+
+Show the deployment history for the project's Functions across environments.
+
+~~~bash
+poly functions deployments
+~~~
+
+| Flag | Description |
+|---|---|
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
+#### `poly functions start` / `poly functions end`
+
+Read or replace the branch's `start_function` and `end_function`. Each takes a `get` or `update` subcommand.
+
+~~~bash
+poly functions start get
+poly functions start update --code-file start.py
+poly functions end get
+poly functions end update --code-file end.py
+~~~
+
+| Argument / Flag | Description |
+|---|---|
+| `--code-file` | Local path to the replacement source. Required for `update`. |
+| `--path` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout (machine-readable). |
+
 ### `poly docs`
 
 Output resource documentation.
@@ -867,6 +1120,12 @@ poly audio-cache update-file <entry_id> --file replacement.wav --json
 poly audio-cache delete <entry_id> --json
 poly audio-cache bulk-delete --ids id1,id2 --json
 poly audio-cache synthesize <entry_id> --text "Hello" --json
+poly functions list --json
+poly functions get <function_id> --json
+poly functions create --name my_func --description "desc" --code-file func.py --json
+poly functions execute <function_id> --args '{"x": 1}' --json
+poly functions validate --json
+poly functions deploy --json
 ~~~
 
 When `--json` is used:

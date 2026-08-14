@@ -1402,6 +1402,321 @@ class AgentStudioInterface:
         """
         return PlatformAPIHandler.patch_rtc_variables(region, project_id, client_env, variables)
 
+    # -- Functions API ------------------------------------------------------
+    # Public REST API for managing/executing user-defined Functions. Distinct
+    # from the local-file/decorator Functions synced via push/pull.
+
+    @staticmethod
+    def list_functions(
+        region: str,
+        project_id: str,
+        branch_id: str,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> dict:
+        """List functions on a branch.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            limit: Max number of functions to return (1-50).
+            offset: Number of functions to skip.
+
+        Returns:
+            dict: {"functions": [...]}.
+        """
+        return PlatformAPIHandler.list_functions(region, project_id, branch_id, limit, offset)
+
+    @staticmethod
+    def get_function(region: str, project_id: str, branch_id: str, function_id: str) -> dict:
+        """Get a single function by ID.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID.
+
+        Returns:
+            dict: The function.
+        """
+        return PlatformAPIHandler.get_function(region, project_id, branch_id, function_id)
+
+    @staticmethod
+    def create_function(
+        region: str,
+        project_id: str,
+        branch_id: str,
+        name: str,
+        description: str,
+        code: str,
+        parameters: Optional[list[dict]] = None,
+        delay_control: Optional[dict] = None,
+    ) -> dict:
+        """Create a new function on a branch.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            name: The function name.
+            description: The function description.
+            code: The function's Python source.
+            parameters: The function's parameter specs.
+            delay_control: Optional delay/filler message settings.
+
+        Returns:
+            dict: The created function.
+
+        Raises:
+            FunctionConflictError: On a 409 name collision (a ValueError subclass).
+        """
+        return PlatformAPIHandler.create_function(
+            region, project_id, branch_id, name, description, code, parameters, delay_control
+        )
+
+    @staticmethod
+    def update_function(
+        region: str,
+        project_id: str,
+        branch_id: str,
+        function_id: str,
+        updates: dict,
+        force: bool = False,
+    ) -> dict:
+        """Patch a function.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID.
+            updates: The fields to change (name, description, code, parameters).
+            force: Override an orphaned-reference conflict.
+
+        Returns:
+            dict: The updated function.
+
+        Raises:
+            FunctionConflictError: On a 409 conflict, unless force=True.
+        """
+        return PlatformAPIHandler.update_function(
+            region, project_id, branch_id, function_id, updates, force
+        )
+
+    @staticmethod
+    def delete_function(
+        region: str,
+        project_id: str,
+        branch_id: str,
+        function_id: str,
+        force: bool = False,
+    ) -> dict:
+        """Delete a function.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID.
+            force: Override an orphaned-reference conflict.
+
+        Returns:
+            dict: Empty on a 204 No Content response.
+
+        Raises:
+            FunctionConflictError: On a 409 conflict, unless force=True.
+        """
+        return PlatformAPIHandler.delete_function(region, project_id, branch_id, function_id, force)
+
+    @staticmethod
+    def execute_function(
+        region: str,
+        project_id: str,
+        branch_id: str,
+        function_id: str,
+        args: dict,
+    ) -> dict:
+        """Execute a function with the given arguments.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID.
+            args: The arguments to pass to the function.
+
+        Returns:
+            dict: {"body": ..., "logs": [...], "runtime": ...}.
+        """
+        return PlatformAPIHandler.execute_function(region, project_id, branch_id, function_id, args)
+
+    @staticmethod
+    def duplicate_function(
+        region: str,
+        project_id: str,
+        branch_id: str,
+        function_id: str,
+        name: Optional[str] = None,
+    ) -> dict:
+        """Duplicate a function, optionally with a new name.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID to duplicate.
+            name: Optional name for the copy.
+
+        Returns:
+            dict: The newly created function.
+
+        Raises:
+            FunctionConflictError: On a 409 explicit-name collision.
+        """
+        return PlatformAPIHandler.duplicate_function(
+            region, project_id, branch_id, function_id, name
+        )
+
+    @staticmethod
+    def deploy_functions(region: str, project_id: str, branch_id: str) -> dict:
+        """Deploy all draft functions on a branch.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            dict: {"deployment_version": ..., "function_ids": [...], "deployed_at": ...}.
+        """
+        return PlatformAPIHandler.deploy_functions(region, project_id, branch_id)
+
+    @staticmethod
+    def validate_functions(region: str, project_id: str, branch_id: str) -> dict:
+        """Validate all functions on a branch.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            dict: {"valid": bool, "issues": [...]}.
+        """
+        return PlatformAPIHandler.validate_functions(region, project_id, branch_id)
+
+    @staticmethod
+    def get_function_references(
+        region: str, project_id: str, branch_id: str, function_id: str
+    ) -> dict:
+        """Get the flow steps that reference a function.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID.
+
+        Returns:
+            dict: {"references": [...]}.
+        """
+        return PlatformAPIHandler.get_function_references(
+            region, project_id, branch_id, function_id
+        )
+
+    @staticmethod
+    def get_function_type_definitions(
+        region: str, project_id: str, branch_id: str, function_id: str
+    ) -> dict:
+        """Get Python type stubs for a function, for IDE autocomplete.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID.
+
+        Returns:
+            dict: {"code": ...}.
+        """
+        return PlatformAPIHandler.get_function_type_definitions(
+            region, project_id, branch_id, function_id
+        )
+
+    @staticmethod
+    def get_start_function(region: str, project_id: str, branch_id: str) -> dict:
+        """Get the branch's start_function.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            dict: {"code": ..., "errors": [...], "version": ...}.
+        """
+        return PlatformAPIHandler.get_start_function(region, project_id, branch_id)
+
+    @staticmethod
+    def update_start_function(region: str, project_id: str, branch_id: str, code: str) -> dict:
+        """Update the branch's start_function code.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            code: The new start_function source.
+
+        Returns:
+            dict: The updated start_function.
+        """
+        return PlatformAPIHandler.update_start_function(region, project_id, branch_id, code)
+
+    @staticmethod
+    def get_end_function(region: str, project_id: str, branch_id: str) -> dict:
+        """Get the branch's end_function.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            dict: {"code": ..., "errors": [...], "version": ...}.
+        """
+        return PlatformAPIHandler.get_end_function(region, project_id, branch_id)
+
+    @staticmethod
+    def update_end_function(region: str, project_id: str, branch_id: str, code: str) -> dict:
+        """Update the branch's end_function code.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            code: The new end_function source.
+
+        Returns:
+            dict: The updated end_function.
+        """
+        return PlatformAPIHandler.update_end_function(region, project_id, branch_id, code)
+
+    @staticmethod
+    def list_function_deployments(region: str, project_id: str, branch_id: str) -> dict:
+        """List function deployment history across environments.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            dict: {"deployments": [...]}.
+        """
+        return PlatformAPIHandler.list_function_deployments(region, project_id, branch_id)
+
     def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
         """Get the history of a specific branch.
 
