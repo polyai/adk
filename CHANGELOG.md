@@ -1,6 +1,58 @@
 # CHANGELOG
 
 
+## v0.44.1 (2026-08-14)
+
+### Bug Fixes
+
+- Include X-PolyAI-Email header on audio cache and test run requests
+  ([#275](https://github.com/polyai/adk/pull/275),
+  [`9a0f98e`](https://github.com/polyai/adk/commit/9a0f98e5e896460246e9601327e525a3bf5d2b33))
+
+## Summary
+
+Several `PlatformAPIHandler` methods built their request headers without forwarding
+  `ADK_COMMAND_USER_OVERRIDE`, so those calls skipped the user-email attribution that every other
+  request in the file already sends.
+
+## Motivation
+
+The generic `make_request` path (and other handler methods) forward `ADK_COMMAND_USER_OVERRIDE` as
+  an `X-PolyAI-Email` header so the platform can attribute requests to the acting user. The
+  audio-cache preview/synthesize and test-run listing methods built their headers independently and
+  had missed this, so those specific endpoints silently skipped attribution whenever the override
+  was set.
+
+## Changes
+
+- Add the `X-PolyAI-Email` header (from `ADK_COMMAND_USER_OVERRIDE`) to the header-building blocks
+  in `get_conversation_audio`, `get_audio_cache_file`, `update_audio_cache_file`,
+  `update_audio_cache_details`, and `synthesize_audio_cache` in `src/poly/handlers/platform_api.py`
+  - Add test coverage in `src/poly/tests/api/platform_api_test.py` asserting the header is sent (or
+  correctly absent) across all six header-building methods
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+
 ## v0.44.0 (2026-08-13)
 
 ### Features
