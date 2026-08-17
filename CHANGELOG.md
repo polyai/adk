@@ -1,6 +1,158 @@
 # CHANGELOG
 
 
+## v0.44.2 (2026-08-17)
+
+### Bug Fixes
+
+- Open poly studio on the current branch ([#241](https://github.com/polyai/adk/pull/241),
+  [`fda047c`](https://github.com/polyai/adk/commit/fda047c8ba25834ffb7d4e2e971fb15bde961e53))
+
+## Summary
+
+`poly studio` now opens the Agent Studio web UI on the branch the local project is checked out to,
+  instead of always landing on the default branch.
+
+## Motivation
+
+The command built the Studio URL from `studio_base_url` only
+  (`https://{domain}/{account}/{project}`), with no branch context, so the browser always opened the
+  default branch view — inconsistent with `poly pull`/`push`/`status`, which operate against the
+  current branch.
+
+## Changes
+
+- `StudioCommand.open_agent_studio` now builds
+  `f"{project.studio_base_url}/home?branchId={project.branch_id}"`, using the already-loaded
+  `branch_id` (a feature branch id, or `main`). - `studio_base_url` is left as the bare base — it is
+  also consumed by `get_conversation_url`, so the query param is composed in the command rather than
+  the property. - Added `StudioCommandTest` covering feature-branch and default-branch URL
+  construction.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Before: `https://studio.uk.poly.ai/<account>/<project>`
+
+After: `https://studio.uk.poly.ai/<account>/<project>/home?branchId=BRANCH-XXXXXX`
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+
+### Chores
+
+- **tests**: Make the test_project fixture match a real status file
+  ([#271](https://github.com/polyai/adk/pull/271),
+  [`3bb26e4`](https://github.com/polyai/adk/commit/3bb26e49e74dc4bd53ac310836b0121cc6818e8e))
+
+## Summary
+
+The `test_project` fixture stored values a real status file cannot contain, which made a no-op
+  `sync_ids_with_sandbox` look like 10 changed resources. This regenerates the drifted entries from
+  a disk read and adds tests so the fixture cannot drift again.
+
+## Motivation
+
+A real status file is written by `save_config` → `to_dict` from live resources, so every stored
+  resource matches what reading that same file off disk produces. The fixture had drifted from that
+  in four ways:
+
+| Stored | Should be | Where | |---|---|---| | `asr_biasing: null`, `dtmf_config: null` |
+  materialized objects | 4 flow steps | | `child_step: null` | `""` | 3 conditions | |
+  `condition_type: step_condition` | `no_code_step_condition` | 1 condition | | `description: null`
+  | `""` | 2 functions | | key `attr-<name>` | key `<name>` | 4 variant attributes |
+
+Neither path produces those values. `FlowStep.from_projection`
+  ([flows.py:401-428](../blob/main/src/poly/resources/flows.py#L401-L428)) always constructs
+  `ASRBiasing` and `DTMFConfig`, and #255 already made `description` default to `""`. The fixture
+  simply never caught up.
+
+This matters because `sync_ids_with_sandbox` is the only code path that decides what changed by
+  comparing whole `Resource` objects — the point #255 makes. `push_project` and `get_diffs` gate on
+  the rendered-file hash instead. So stored values that disagree with disk are invisible everywhere
+  except that one path, where they surface as spurious writes:
+
+``` no-op sync, before: 4 VariantAttribute created + 4 deleted, 2 Function + 4 FlowStep + 4
+  Condition updated no-op sync, after: nothing staged, no commands sent ```
+
+Agent Studio wraps a command batch in a single transaction, so every pointless command is another
+  chance to roll back the id repair that was the point of the sync.
+
+It also meant the sync tests could not assert the thing most worth asserting — that a no-op sync
+  sends nothing — because it wasn't true.
+
+## Changes
+
+- Regenerate the 6 drifted resource entries from a disk read, and re-key the 4 variant attributes
+  onto their own `resource_id`s. - `TestProjectFixtureIntegrityTest` pins both properties: every
+  resource is stored under a key equal to its `resource_id`, and every stored resource equals a disk
+  read across compared fields. This is what would have caught the drift. -
+  `test_no_op_sync_sends_no_commands` asserts an identical sandbox stages nothing. -
+  `test_content_change_is_still_detected` is its counterweight, so the no-op assertion cannot pass
+  by making sync blind to real changes.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+1042 passed. The three new guard tests were verified against the pre-fix fixture and all three fail
+  on it, reporting 13 drifted values:
+
+``` FAILED SyncIdsWithSandboxTest::test_no_op_sync_sends_no_commands FAILED
+  TestProjectFixtureIntegrityTest::test_stored_ids_match_their_resource_ids FAILED
+  TestProjectFixtureIntegrityTest::test_stored_resources_match_a_disk_read ```
+
+`test_content_change_is_still_detected` passes both before and after, as it should.
+
+`test_stored_resources_match_a_disk_read` asserts its own comparison count against the mapping
+  count. An earlier version of this audit keyed relative paths against absolute ones, matched zero
+  resources, and reported a clean bill of health — the count assertion makes that failure mode loud
+  instead of silent.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes — 1042 passed, 30
+  subtests - [x] No breaking changes to the `poly` CLI interface (or migration path documented) -
+  [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Two commits, so the noise is separable:
+
+1. `chore(tests): normalize test_project fixture JSON formatting` — whitespace only, parsed content
+  byte-for-byte identical. Skip it in review. 2. `fix(tests): make the test_project fixture match a
+  real status file` — the actual corrections and tests.
+
+Regenerated entries are full serializations, so they also fill in fields that were already
+  semantically equal (for example `latency_control: {}` becoming its materialized default). No
+  compared field changes value beyond the table above.
+
+### Not addressed
+
+No production code changes here. Worth considering separately: `sync_ids_with_sandbox` remains the
+  only path using whole-object comparison, so a future field asymmetry can still cause spurious
+  rewrites even with the fixture correct. Aligning it with the `compute_hash()`/`to_yaml_dict()`
+  comparison the rest of the codebase uses would remove that class of bug structurally, but it needs
+  an equivalence sweep first — a comparison that misses a real update is worse than one that stages
+  a redundant write.
+
+---------
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+
 ## v0.44.1 (2026-08-14)
 
 ### Bug Fixes
