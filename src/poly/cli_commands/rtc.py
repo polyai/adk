@@ -8,9 +8,6 @@ import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from typing import Optional
 
-import questionary
-import requests
-
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
 from poly.output.console import edit_in_editor, error, info, success, warning
@@ -22,7 +19,7 @@ from poly.utils import merge_rtc_dicts
 
 def _to_sorted_json(data: dict) -> str:
     """Serialize a dict to deterministically ordered JSON for merging."""
-    return json.dumps(data, indent=2, sort_keys=True) + "\n"
+    return json.dumps(data, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
 
 def _merge_rtc_file(
@@ -77,6 +74,8 @@ def _resolve_rtc_conflict_interactively(
     Returns:
         Resolved dict, or None if the user cancelled.
     """
+    import questionary
+
     while True:
         choices = [
             questionary.Choice("Use local version (yours)", value="local"),
@@ -387,6 +386,8 @@ class RTCCommand(BaseCommand):
         Returns:
             dict: Result with success status and files_written list.
         """
+        import requests
+
         project = load_project(base_path, output_json=output_json)
 
         if env == "all":
@@ -424,6 +425,9 @@ class RTCCommand(BaseCommand):
         Returns:
             dict with success status, or None if the user cancelled interactively.
         """
+        import questionary
+        import requests
+
         project = load_project(base_path, output_json=output_json)
 
         # Load local files
@@ -547,8 +551,8 @@ class RTCCommand(BaseCommand):
                 "or use --force to overwrite.",
             }
 
-        remote_schema = remote_config.get("schema", {})
-        remote_variables = remote_config.get("variables", {})
+        remote_schema = remote_config.get("schema") or {}
+        remote_variables = remote_config.get("variables") or {}
 
         if not output_json:
             info("Remote has changed since your last pull. Attempting merge...")
@@ -599,6 +603,9 @@ class RTCCommand(BaseCommand):
         Returns:
             dict with success status, or None if cancelled/no changes.
         """
+        import questionary
+        import requests
+
         project = load_project(base_path)
 
         try:
@@ -607,8 +614,8 @@ class RTCCommand(BaseCommand):
             return {"success": False, "error": f"Failed to fetch RTC config: {e}"}
 
         baseline_last_updated = config.get("lastUpdated")
-        schema = config.get("schema", {})
-        variables = config.get("variables", {})
+        schema = config.get("schema") or {}
+        variables = config.get("variables") or {}
 
         if edit_schema:
             content = schema
@@ -617,7 +624,7 @@ class RTCCommand(BaseCommand):
             content = variables
             filename = "data.json"
 
-        content_str = json.dumps(content, indent=2, sort_keys=True) + "\n"
+        content_str = json.dumps(content, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
 
         try:
             edited_str = edit_in_editor(content_str, extension=".json", filename=filename)
@@ -688,6 +695,8 @@ class RTCCommand(BaseCommand):
         Returns:
             dict with success status and per-environment diffs.
         """
+        import requests
+
         project = load_project(base_path, output_json=output_json)
 
         if env == "all":
@@ -787,8 +796,11 @@ def _print_change(change: dict) -> None:
     change_type = change["type"]
 
     if change_type == "added_locally":
-        info(f"    + {path}: {json.dumps(change['local'])}")
+        info(f"    + {path}: {json.dumps(change['local'], ensure_ascii=False)}")
     elif change_type == "only_remote":
-        info(f"    - {path}: {json.dumps(change['remote'])} (only on remote)")
+        info(f"    - {path}: {json.dumps(change['remote'], ensure_ascii=False)} (only on remote)")
     elif change_type == "changed":
-        info(f"    ~ {path}: {json.dumps(change['remote'])} → {json.dumps(change['local'])}")
+        info(
+            f"    ~ {path}: {json.dumps(change['remote'], ensure_ascii=False)} → "
+            f"{json.dumps(change['local'], ensure_ascii=False)}"
+        )

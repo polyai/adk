@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 """
 
 import json
+import logging
 import os
 import sys
 from collections.abc import Callable
@@ -22,6 +23,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
+from rich.tree import Tree
 
 # Global verbose flag — set by CLI before commands run
 _verbose = False
@@ -43,6 +45,8 @@ _theme = Theme(
 
 console = Console(theme=_theme, stderr=False)
 err_console = Console(theme=_theme, stderr=True)
+
+logger = logging.getLogger(__name__)
 
 
 def set_verbose(verbose: bool) -> None:
@@ -147,6 +151,80 @@ def print_agents(agents: list[dict[str, Any]]) -> None:
     console.print(table)
 
 
+def _convert_flat_branches_to_tree(branches: dict[str, Any]) -> list[dict[str, Any]]:
+    """Group a flat branches dict into a forest of nodes linked by parentBranchId.
+
+    Two passes are required: branches can be listed in any order — including a
+    child appearing before its own parent — so every node must exist before any
+    parent lookup runs.
+    """
+    nodes = {
+        meta.get("branchId"): {"name": name, "meta": meta, "children": []}
+        for name, meta in branches.items()
+    }
+
+    roots = []
+    for node in nodes.values():
+        parent = nodes.get(node["meta"].get("parentBranchId"))
+        (parent["children"] if parent is not None else roots).append(node)
+    return roots
+
+
+def print_releases_branches(branches: dict[str, Any], current_branch: str | None) -> None:
+    """Print branches as a tree reflecting parent/child (branch-from-branch) relationships."""
+
+    def label(node: dict[str, Any]) -> str:
+        name = node["name"]
+        text = f"[success]{name}[/success]" if name == current_branch else name
+        if tag := node["meta"].get("tag"):
+            text += f" [info]({tag})[/info]"
+        if name == current_branch:
+            text += " [muted](current)[/muted]"
+        return text
+
+    def add(parent_tree: Tree, node: dict[str, Any]) -> None:
+        branch_tree = parent_tree.add(label(node))
+        for child in sorted(node["children"], key=lambda n: n["name"]):
+            add(branch_tree, child)
+
+    console.print("[label]Branches:[/label]")
+    tree = Tree("", hide_root=True, guide_style="dim")
+    for root in sorted(_convert_flat_branches_to_tree(branches), key=lambda n: n["name"]):
+        add(tree, root)
+    console.print(tree)
+
+
+def flatten_branch_tree(
+    branches: dict[str, Any], current_branch: str | None
+) -> list[tuple[str, str]]:
+    """Flatten the parent/child branch tree into (display_title, branch_name) pairs.
+
+    For use in flat pickers (e.g. questionary) that have no native tree rendering —
+    hierarchy is conveyed via indentation and connector characters in the title,
+    while the value stays the plain branch name.
+    """
+
+    def label(name: str) -> str:
+        return f"{name} (current)" if name == current_branch else name
+
+    def walk(nodes: list[dict[str, Any]], indent: str) -> list[tuple[str, str]]:
+        lines = []
+        nodes = sorted(nodes, key=lambda n: n["name"])
+        for i, node in enumerate(nodes):
+            is_last = i == len(nodes) - 1
+            connector = "└─ " if is_last else "├─ "
+            lines.append((indent + connector + label(node["name"]), node["name"]))
+            extension = "   " if is_last else "│  "
+            lines.extend(walk(node["children"], indent + extension))
+        return lines
+
+    lines = []
+    for root in sorted(_convert_flat_branches_to_tree(branches), key=lambda n: n["name"]):
+        lines.append((label(root["name"]), root["name"]))
+        lines.extend(walk(root["children"], ""))
+    return lines
+
+
 def print_branches(branches: dict[str, Any] | list[str], current_branch: str | None) -> None:
     """Print branch list with current branch highlighted."""
     console.print("[label]Branches:[/label]")
@@ -156,6 +234,93 @@ def print_branches(branches: dict[str, Any] | list[str], current_branch: str | N
             console.print(f"  [success]* {name}[/success] [muted](current)[/muted]")
         else:
             console.print(f"    {name}")
+
+
+def resolve_parent_branch_label(
+    branch: dict[str, Any],
+    name_by_branch_id: dict[str, str] | None = None,
+    archived_branch_ids: set[str] | None = None,
+) -> str:
+    """Describe an archived branch's parent for display.
+
+    Archived branches carry only a ``parentBranchId``, which is meaningless to a
+    user. Resolve it to a name where possible: ``main`` stands for itself, other
+    ids are looked up in ``name_by_branch_id`` (built from the archive itself and,
+    where needed, the active branches). An id with no known name falls back to the
+    id so the row is never silently blank.
+
+    A parent that is itself archived is marked ``(archived)`` — restoring a child
+    does not bring its parent back, so that distinction is load-bearing.
+
+    Returns plain text, not markup: this also labels the interactive restore
+    picker, which renders literally.
+    """
+    parent_branch_id = branch.get("parentBranchId")
+    if not parent_branch_id:
+        return "—"
+    if parent_branch_id == "main":
+        return "main"
+
+    label = (name_by_branch_id or {}).get(parent_branch_id, parent_branch_id)
+    if parent_branch_id in (archived_branch_ids or set()):
+        return f"{label} (archived)"
+    return label
+
+
+def print_archived_branches(
+    branches: list[dict[str, Any]], name_by_branch_id: dict[str, str] | None = None
+) -> None:
+    """Print a table of archived (soft-deleted) branches.
+
+    Args:
+        branches: Archived branch entries as returned by the platform.
+        name_by_branch_id: Branch id to name, used to render each row's parent.
+    """
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Branch", no_wrap=True)
+    table.add_column("ID", style="muted", no_wrap=True)
+    table.add_column("Parent", no_wrap=True)
+    table.add_column("Archived", no_wrap=True)
+    table.add_column("Expires", no_wrap=True)
+
+    # Derived here rather than passed in so it cannot drift from the rows shown.
+    archived_branch_ids = {b["branchId"] for b in branches if b.get("branchId")}
+
+    for branch in branches:
+        archived_at = _format_iso_timestamp(branch.get("archivedAt", ""))
+        days_left = branch.get("daysLeft")
+        expires = f"{days_left} days left" if days_left is not None else "—"
+        table.add_row(
+            branch.get("name", "—"),
+            branch.get("branchId", "—"),
+            resolve_parent_branch_label(branch, name_by_branch_id, archived_branch_ids),
+            archived_at,
+            expires,
+        )
+
+    console.print(table)
+
+
+def print_branch_history(commits: list[dict[str, Any]]) -> None:
+    """Print a table of branch history commits."""
+    if not commits:
+        console.print("[muted]No commits found for this branch.[/muted]")
+        return
+
+    table = Table(box=None, show_header=False, header_style="bold", padding=(0, 1))
+    table.add_column("Merged At", no_wrap=True)
+    table.add_column("Branch", no_wrap=True)
+    table.add_column("Merged By", no_wrap=True)
+
+    for commit in commits:
+        merged_at = _format_iso_timestamp(commit.get("mergedAt", ""))
+        table.add_row(
+            merged_at,
+            commit.get("branchName", "—"),
+            commit.get("mergedBy", "—"),
+        )
+
+    console.print(table)
 
 
 def print_validation_errors(errors: list[str]) -> None:
@@ -640,9 +805,7 @@ def print_deployment_show(
     console.print(f"Message: {deployment_message}")
     console.print()
 
-    if not included_deployments:
-        console.print("[muted]No intermediate deployments.[/muted]")
-    else:
+    if included_deployments:
         count = len(included_deployments)
         label = "Reverted deployments" if is_rollback else "Included deployments"
         console.print(f"[label]{label} ({count}):[/label]")
@@ -851,6 +1014,40 @@ def print_conversations(
     console.print(table)
 
 
+def print_audio_cache_entries(entries: list[dict[str, Any]]) -> None:
+    """Print a table of audio cache entry summaries.
+
+    Args:
+        entries: List of audio cache entry dicts (as returned by the
+            audio cache list API).
+    """
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("ID", style="bold yellow", no_wrap=True)
+    table.add_column("Transcript", overflow="fold")
+    table.add_column("Provider", no_wrap=True)
+    table.add_column("Voice", no_wrap=True)
+    table.add_column("Duration", no_wrap=True, justify="right")
+    table.add_column("Hits", no_wrap=True, justify="right")
+    table.add_column("Cached At", no_wrap=True)
+
+    for e in entries:
+        cached_at = e.get("cached_at") or "—"
+        if cached_at != "—":
+            cached_at = _format_iso_timestamp(cached_at)
+        duration = f"{e.get('duration', 0):.1f}s"
+        table.add_row(
+            str(e.get("id", "—")),
+            e.get("transcript", "—"),
+            e.get("provider", "—"),
+            e.get("provider_voice_id", "—"),
+            duration,
+            str(e.get("hit_count", 0)),
+            cached_at,
+        )
+
+    console.print(table)
+
+
 def print_conversation_detail(conversation: dict[str, Any], studio_url: str | None = None) -> None:
     """Print detailed conversation information including turns.
 
@@ -987,6 +1184,12 @@ def handle_exception(exc: Exception) -> None:
             if isinstance(exc, exc_type):
                 prefix = msg
                 break
+
+        # MergeConflictError subclasses ValueError, so override the generic prefix.
+        from poly.resources.resource_utils import MergeConflictError
+
+        if isinstance(exc, MergeConflictError):
+            prefix = "Merge conflict"
 
         # requests.HTTPError
         try:
@@ -1306,19 +1509,29 @@ def poll_test_run_live(
     test_run_id: str,
     matched_tests: list,
     poll_interval: int = 5,
+    max_consecutive_errors: int = 5,
 ) -> dict:
     """Poll a test run with a live-updating display.
+
+    Transient errors from `get_test_run` (e.g. a 500 while the run is still
+    in progress on the platform) are tolerated up to `max_consecutive_errors`
+    in a row before giving up, since the run itself keeps going server-side
+    even if a status poll fails.
 
     Args:
         get_test_run: Callable that takes a test run ID and returns the run dict.
         test_run_id: The test run ID to poll.
         matched_tests: List of TestCase objects (must have resource_id and name).
         poll_interval: Seconds between polls.
+        max_consecutive_errors: Consecutive failed polls tolerated before giving up.
 
     Returns:
-        dict: The final test run response.
+        dict: The final test run response, or {} if polling was abandoned
+        without ever receiving a successful response.
     """
     import time
+
+    import requests
 
     total = len(matched_tests)
     test_names = {t.resource_id: t.name for t in matched_tests}
@@ -1329,6 +1542,8 @@ def poll_test_run_live(
     completed_ordered: list[dict] = []
 
     merged = pending_results
+    result: dict = {}
+    consecutive_errors = 0
     initial = (
         _build_compact_display([], total, test_names)
         if compact
@@ -1337,7 +1552,26 @@ def poll_test_run_live(
     with Live(initial, console=console, refresh_per_second=10) as live:
         while True:
             time.sleep(poll_interval)
-            result = get_test_run(test_run_id)
+
+            try:
+                result = get_test_run(test_run_id)
+            except requests.exceptions.RequestException as exc:
+                consecutive_errors += 1
+                logger.warning(
+                    f"Poll {consecutive_errors}/{max_consecutive_errors} for test run "
+                    f"{test_run_id} failed: {exc}"
+                )
+                if consecutive_errors >= max_consecutive_errors:
+                    warning(
+                        f"Lost contact with the platform while polling test run "
+                        f"{test_run_id} ({consecutive_errors} consecutive failures). "
+                        f"The run may still be in progress — check its status with "
+                        f"[bold]poly test show {test_run_id}[/bold]."
+                    )
+                    return result
+                continue
+
+            consecutive_errors = 0
             test_results = result.get("testHistory", [])
 
             actual_by_id = {r.get("testCaseId"): r for r in test_results}

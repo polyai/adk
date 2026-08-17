@@ -143,12 +143,30 @@ poly revert file1.yaml file2.yaml  # revert specific files
 Manage branches (default branch is `main`):
 
 ```bash
-poly branch list
+poly branch list                       # active branches
+poly branch list --archived            # soft-deleted branches
 poly branch current
 poly branch create my-feature
+poly branch create my-hotfix --from my-feature  # branch from another branch instead of the current one
 poly branch switch my-feature
 poly branch switch my-feature --force  # discard uncommitted changes
+poly branch rename my-feature-v2       # rename the current branch
+poly branch merge 'Merge my-feature'   # merge into the parent branch
+poly branch sync                       # pull the parent branch's changes in
+poly branch history                    # merge history for the current branch
+poly branch delete                     # soft-delete, restorable for 30 days
+poly branch restore my-feature-id      # restore a soft-deleted branch
 ```
+
+Projects using simplified deployments can also stage a branch:
+
+```bash
+poly branch tag                        # tag the current branch, deploying it to staging
+poly branch untag                      # remove the tag
+```
+
+`poly branch sync`, `tag`, and `untag` are only available on projects with simplified deployments
+enabled; they exit with an error otherwise.
 
 ### `poly format`
 
@@ -202,7 +220,16 @@ poly chat
 poly chat --environment live
 poly chat --channel webchat
 poly chat --metadata   # show functions, flows, and state each turn
+
+# Simulate one SIP header
+poly chat --sip-header X-Customer-ID=12345
+# Simulate multiple SIP headers
+poly chat --sip-header X-Customer-ID=12345 --sip-header X-Language=en-GB
 ```
+
+`--sip-header NAME=VALUE` is repeatable and simulates headers exposed to project
+functions through `conv.sip_headers`. It does not create a SIP call or reproduce
+carrier-level SIP behaviour.
 
 ### `poly docs`
 

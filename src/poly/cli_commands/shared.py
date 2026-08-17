@@ -243,3 +243,27 @@ def print_project_file_changes(
 
     if not modified_files and not new_files and not deleted_files and not files_with_conflicts:
         plain("\n[muted]No changes detected.[/muted]")
+
+
+def require_deployment_simplification(
+    project: AgentStudioProject, output_json: bool = False
+) -> None:
+    """Check if the project is using deployment simplification and exit if not.
+
+    Args:
+        project: The loaded project.
+        output_json: If True, output JSON and exit on failure.
+    """
+    from poly.output.console import error
+
+    if not project.using_simplified_deployments:
+        if output_json:
+            json_print(
+                {
+                    "success": False,
+                    "error": "Command is only available for projects using simplified deployments.",
+                }
+            )
+        else:
+            error("Command is only available for projects using simplified deployments.")
+        sys.exit(1)

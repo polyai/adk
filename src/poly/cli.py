@@ -12,6 +12,7 @@ from importlib.metadata import version as get_package_version
 
 import argcomplete
 
+from poly.cli_commands.audio_cache import AudioCacheCommand
 from poly.cli_commands.auth import LoginCommand, StartCommand
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.branch import BranchCommand
@@ -30,6 +31,7 @@ from poly.cli_commands.sync import (
     StatusCommand,
     ValidateCommand,
 )
+from poly.cli_commands.template import TemplateCommand
 from poly.cli_commands.testing import TestingCommand
 from poly.cli_commands.utils import CompletionCommand, DocsCommand
 from poly.output.json_output import json_print
@@ -42,6 +44,7 @@ COMMANDS = [
     LoginCommand,
     StudioCommand,
     ProjectCommand,
+    TemplateCommand,
     PullCommand,
     PushCommand,
     StatusCommand,
@@ -53,6 +56,7 @@ COMMANDS = [
     BranchCommand,
     DeploymentsCommand,
     ConversationsCommand,
+    AudioCacheCommand,
     TestingCommand,
     RTCCommand,
     ChatCommand,

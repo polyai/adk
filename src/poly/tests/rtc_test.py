@@ -196,9 +196,9 @@ class TestRTC(unittest.TestCase):
         self.assertTrue(result["success"])
         mock_project.rtc_push_to_api.assert_called_once()
 
-    @patch("poly.cli_commands.rtc.questionary")
+    @patch("questionary.confirm")
     @patch("poly.cli_commands.rtc.load_project")
-    def test_rtc_push_live_interactive_confirm(self, mock_load_project, mock_questionary):
+    def test_rtc_push_live_interactive_confirm(self, mock_load_project, mock_confirm):
         """Verify interactive live push proceeds when user confirms."""
         mock_project = MagicMock()
         mock_project.rtc_load_local.return_value = {
@@ -207,17 +207,17 @@ class TestRTC(unittest.TestCase):
         }
         mock_project.check_rtc_drift.return_value = {"status": "no_metadata"}
         mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "live"}
-        mock_questionary.confirm.return_value.ask.return_value = True
+        mock_confirm.return_value.ask.return_value = True
         mock_load_project.return_value = mock_project
 
         RTCCommand.rtc_push(self.temp_dir, env="live", force=False, output_json=False)
 
-        mock_questionary.confirm.assert_called_once()
+        mock_confirm.assert_called_once()
         mock_project.rtc_push_to_api.assert_called_once()
 
-    @patch("poly.cli_commands.rtc.questionary")
+    @patch("questionary.confirm")
     @patch("poly.cli_commands.rtc.load_project")
-    def test_rtc_push_live_interactive_decline(self, mock_load_project, mock_questionary):
+    def test_rtc_push_live_interactive_decline(self, mock_load_project, mock_confirm):
         """Verify interactive live push is cancelled when user declines."""
         mock_project = MagicMock()
         mock_project.rtc_load_local.return_value = {
@@ -225,12 +225,12 @@ class TestRTC(unittest.TestCase):
             "variables": {"key": "val"},
         }
         mock_project.check_rtc_drift.return_value = {"status": "no_metadata"}
-        mock_questionary.confirm.return_value.ask.return_value = False
+        mock_confirm.return_value.ask.return_value = False
         mock_load_project.return_value = mock_project
 
         RTCCommand.rtc_push(self.temp_dir, env="live", force=False, output_json=False)
 
-        mock_questionary.confirm.assert_called_once()
+        mock_confirm.assert_called_once()
         mock_project.rtc_push_to_api.assert_not_called()
 
 
@@ -747,10 +747,10 @@ class TestRTCEdit(unittest.TestCase):
         self.assertIn("modified while you were editing", result["error"])
         mock_project.rtc_push_to_api.assert_not_called()
 
-    @patch("poly.cli_commands.rtc.questionary")
+    @patch("questionary.confirm")
     @patch("poly.cli_commands.rtc.edit_in_editor")
     @patch("poly.cli_commands.rtc.load_project")
-    def test_edit_live_declined(self, mock_load_project, mock_editor, mock_questionary):
+    def test_edit_live_declined(self, mock_load_project, mock_editor, mock_confirm):
         """Verify live edit cancelled when user declines confirmation."""
         mock_project = MagicMock()
         mock_project.rtc_fetch_config.return_value = {
@@ -759,7 +759,7 @@ class TestRTCEdit(unittest.TestCase):
             "lastUpdated": "T1",
         }
         mock_load_project.return_value = mock_project
-        mock_questionary.confirm.return_value.ask.return_value = False
+        mock_confirm.return_value.ask.return_value = False
         mock_editor.return_value = '{"flag": true}'
 
         RTCCommand.rtc_edit(self.temp_dir, env="live")
@@ -803,6 +803,68 @@ class TestRTCEdit(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertIn("validation failed", result["error"])
         mock_project.rtc_push_to_api.assert_not_called()
+
+    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.cli_commands.rtc.load_project")
+    def test_edit_null_variables_opens_empty_object_in_editor(self, mock_load_project, mock_editor):
+        """The editor gets {} when the API returns null variables, not literal null.
+
+        Projects with no RTC configured get explicit JSON null back from the API, and
+        editing "null" is not a usable starting point.
+        """
+        mock_project = MagicMock()
+        mock_project.rtc_fetch_config.return_value = {
+            "schema": None,
+            "variables": None,
+            "lastUpdated": "T1",
+        }
+        mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
+        mock_load_project.return_value = mock_project
+        mock_editor.return_value = '{"flag": true}'
+
+        RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
+
+        editor_content = mock_editor.call_args[0][0]
+        self.assertEqual(editor_content, "{}\n")
+
+    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.cli_commands.rtc.load_project")
+    def test_edit_schema_null_opens_empty_object_in_editor(self, mock_load_project, mock_editor):
+        """--schema gets {} in the editor when the API returns null schema."""
+        mock_project = MagicMock()
+        mock_project.rtc_fetch_config.return_value = {
+            "schema": None,
+            "variables": None,
+            "lastUpdated": "T1",
+        }
+        mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
+        mock_load_project.return_value = mock_project
+        mock_editor.return_value = '{"type": "object"}'
+
+        RTCCommand.rtc_edit(self.temp_dir, env="sandbox", edit_schema=True)
+
+        editor_content = mock_editor.call_args[0][0]
+        self.assertEqual(editor_content, "{}\n")
+
+    @patch("poly.cli_commands.rtc.edit_in_editor")
+    @patch("poly.cli_commands.rtc.load_project")
+    def test_edit_null_schema_skips_data_validation(self, mock_load_project, mock_editor):
+        """With a null schema there is nothing to validate against, so the edit pushes."""
+        mock_project = MagicMock()
+        mock_project.rtc_fetch_config.return_value = {
+            "schema": None,
+            "variables": None,
+            "lastUpdated": "T1",
+        }
+        mock_project.rtc_push_to_api.return_value = {"success": True, "environment": "sandbox"}
+        mock_load_project.return_value = mock_project
+        mock_editor.return_value = '{"flag": true}'
+
+        result = RTCCommand.rtc_edit(self.temp_dir, env="sandbox")
+
+        self.assertTrue(result["success"])
+        call_kwargs = mock_project.rtc_push_to_api.call_args[1]
+        self.assertEqual(call_kwargs["variables"], {"flag": True})
 
 
 class TestRTCDiff(unittest.TestCase):

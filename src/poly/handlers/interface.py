@@ -10,6 +10,7 @@ import requests
 from google.protobuf.message import Message
 
 from poly.handlers.platform_api import PlatformAPIHandler
+from poly.handlers.posthog import PosthogHandler
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.protobuf.handoff_pb2 import Handoff_SetDefault
 from poly.handlers.sdk import SourcererAPIError
@@ -137,6 +138,20 @@ class AgentStudioInterface:
         return PlatformAPIHandler.get_accounts(region)
 
     @staticmethod
+    def get_project(region: str, account_id: str, project_id: str) -> dict[str, Any]:
+        """Get the details of a specific project.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+            project_id (str): The project ID
+
+        Returns:
+            dict[str, Any]: A dictionary containing the project's details
+        """
+        return PlatformAPIHandler.get_project(region, account_id, project_id)
+
+    @staticmethod
     def get_projects(region: str, account_id: str) -> dict[str, str]:
         """Get the projects for a given account.
 
@@ -231,6 +246,38 @@ class AgentStudioInterface:
             dict[str, str]: A dictionary with the new project's 'id' and 'name'
         """
         return PlatformAPIHandler.duplicate_project(region, project_id, new_name, new_id)
+
+    @staticmethod
+    def list_template_projects(region: str) -> list[dict[str, Any]]:
+        """List available template projects.
+
+        Args:
+            region: The region to query.
+
+        Returns:
+            list[dict[str, Any]]: A list of template project summaries.
+        """
+        return SyncClientHandler(region=region).list_template_projects()
+
+    @staticmethod
+    def get_template_resources(
+        template_id: str, region: str
+    ) -> dict[type[Resource], dict[str, Resource]]:
+        """Fetch a template and return its resources.
+
+        Combines projection fetching and resource conversion in one call.
+
+        Args:
+            template_id: The template project ID.
+            region: The region to query.
+
+        Returns:
+            dict mapping resource types to their resources.
+        """
+        from poly.resources.resource import load_resources_from_projection
+
+        projection = SyncClientHandler(region=region).get_template_project_projection(template_id)
+        return load_resources_from_projection(projection)
 
     @staticmethod
     def get_deployments(
@@ -512,17 +559,20 @@ class AgentStudioInterface:
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
-    def create_branch(self, branch_name: Optional[str] = None) -> str:
+    def create_branch(
+        self, branch_name: Optional[str] = None, source_branch_id: Optional[str] = None
+    ) -> str:
         """Create a new branch in the project.
 
         Args:
             branch_name (str): The name of the new branch
+            source_branch_id (str): The ID of the source branch to create the new branch from. Defaults to 'main' if not provided.
 
         Returns:
             str: The ID of the newly created branch
         """
         try:
-            return self.sync_client.create_branch(branch_name)
+            return self.sync_client.create_branch(branch_name, source_branch_id=source_branch_id)
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
@@ -541,13 +591,13 @@ class AgentStudioInterface:
             self._handle_api_error(e)
 
     def merge_branch(
-        self, message: str, conflict_resolutions: Optional[list[dict[str, Any]]] = None
+        self, message: Optional[str], conflict_resolutions: Optional[list[dict[str, Any]]] = None
     ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
         """Merge the current branch into main.
 
         Args:
-            message (str): The merge commit message
-            conflict_resolutions (list[dict[str, Any]]): A list of conflict resolutions. Each resolution should have:
+            message (Optional[str]): The merge commit message
+            conflict_resolutions (Optional[list[dict[str, Any]]]): A list of conflict resolutions. Each resolution should have:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
                 - value: Optional custom value (only used with custom strategy)
@@ -559,6 +609,27 @@ class AgentStudioInterface:
         """
         try:
             return self.sync_client.merge_branch(message, conflict_resolutions)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def sync_branch(
+        self, conflict_resolutions: Optional[list[dict[str, Any]]] = None
+    ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
+        """Sync the current branch with it's parent.
+
+        Args:
+            conflict_resolutions (list[dict[str, Any]]): A list of conflict resolutions. Each resolution should have:
+                - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
+                - strategy: Resolution strategy - "ours", "theirs", or "base"
+                - value: Optional custom value (only used with custom strategy)
+
+        Returns:
+            success (bool): True if the sync was successful, False otherwise
+            list[dict[str, str]]: A list of conflict information if the merge failed, empty list if successful
+            list[dict[str, str]]: A list of error information if the merge failed, empty list if successful
+        """
+        try:
+            return self.sync_client.sync_branch(conflict_resolutions)
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
@@ -606,6 +677,7 @@ class AgentStudioInterface:
         channel: str = "chat.polyai",
         input_lang: Optional[str] = None,
         output_lang: Optional[str] = None,
+        sip_headers: Optional[dict[str, str]] = None,
     ) -> dict:
         """Create a new chat conversation.
 
@@ -616,6 +688,7 @@ class AgentStudioInterface:
             environment: The environment to chat against (sandbox, pre-release, live)
             variant_id: Optional variant ID (e.g. 'Voice')
             channel: The channel identifier (e.g. 'chat.polyai', 'webchat.polyai')
+            sip_headers: Optional simulated SIP headers exposed through conv.sip_headers
 
         Returns:
             dict: The API response containing the conversation ID and initial greeting
@@ -629,6 +702,7 @@ class AgentStudioInterface:
             channel,
             input_lang=input_lang,
             output_lang=output_lang,
+            sip_headers=sip_headers,
         )
 
     @staticmethod
@@ -695,6 +769,7 @@ class AgentStudioInterface:
         variant_id: Optional[str] = None,
         input_lang: str = None,
         output_lang: str = None,
+        sip_headers: Optional[dict[str, str]] = None,
     ) -> dict:
         """Create a new chat conversation against a branch deployment.
 
@@ -706,6 +781,7 @@ class AgentStudioInterface:
             lambda_deployment_version: Branch lambda version from sourcerer
             channel: The channel identifier (e.g. 'chat.polyai', 'webchat.polyai')
             variant_id: Optional variant ID (e.g. 'Voice')
+            sip_headers: Optional simulated SIP headers exposed through conv.sip_headers
 
         Returns:
             dict: The API response containing the conversation ID and initial greeting
@@ -720,6 +796,7 @@ class AgentStudioInterface:
             variant_id,
             input_lang=input_lang,
             output_lang=output_lang,
+            sip_headers=sip_headers,
         )
 
     @staticmethod
@@ -1028,6 +1105,140 @@ class AgentStudioInterface:
         )
 
     @staticmethod
+    def list_audio_cache(
+        region: str,
+        project_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        sort: Optional[str] = None,
+    ) -> dict:
+        """List cached TTS audio entries for an agent.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            limit: Max entries to return (1-200).
+            offset: Pagination offset.
+            sort: Optional sort expression, e.g. "hit_count:desc".
+
+        Returns:
+            dict: The API response with entries and total_count.
+        """
+        return PlatformAPIHandler.list_audio_cache(region, project_id, limit, offset, sort)
+
+    @staticmethod
+    def get_audio_cache_file(region: str, project_id: str, entry_id: str) -> bytes:
+        """Download the cached audio file for an audio cache entry.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID.
+
+        Returns:
+            bytes: The raw WAV audio data.
+        """
+        return PlatformAPIHandler.get_audio_cache_file(region, project_id, entry_id)
+
+    @staticmethod
+    def update_audio_cache_file(
+        region: str,
+        project_id: str,
+        entry_id: str,
+        audio_bytes: bytes,
+        filename: Optional[str] = None,
+    ) -> None:
+        """Replace the audio file for an existing cache entry.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID.
+            audio_bytes: Raw WAV audio bytes (max 6MB).
+            filename: Optional filename, sent via the X-Filename header.
+        """
+        PlatformAPIHandler.update_audio_cache_file(
+            region, project_id, entry_id, audio_bytes, filename
+        )
+
+    @staticmethod
+    def update_audio_cache_details(
+        region: str,
+        project_id: str,
+        entry_id: str,
+        audio_bytes: bytes,
+        settings: dict,
+        filename: str = "audio.wav",
+    ) -> None:
+        """Replace both the audio file and voice tuning settings for a cache entry.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID.
+            audio_bytes: Raw WAV audio bytes (max 6MB).
+            settings: Dict with "text" and "config" keys (voice tuning settings).
+            filename: Filename to use for the multipart file part.
+        """
+        PlatformAPIHandler.update_audio_cache_details(
+            region, project_id, entry_id, audio_bytes, settings, filename
+        )
+
+    @staticmethod
+    def delete_audio_cache_entry(region: str, project_id: str, entry_id: str) -> dict:
+        """Delete a cached audio entry and its associated audio file.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID.
+
+        Returns:
+            dict: The API response, e.g. {"success": True}.
+        """
+        return PlatformAPIHandler.delete_audio_cache_entry(region, project_id, entry_id)
+
+    @staticmethod
+    def bulk_delete_audio_cache(region: str, project_id: str, ids: list[str]) -> dict:
+        """Delete multiple audio cache entries by ID in a single request.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            ids: List of audio cache entry IDs to delete (max 20).
+
+        Returns:
+            dict: The API response with "deleted" and "failed" ID lists.
+        """
+        return PlatformAPIHandler.bulk_delete_audio_cache(region, project_id, ids)
+
+    @staticmethod
+    def synthesize_audio_cache(
+        region: str,
+        project_id: str,
+        entry_id: str,
+        text: str,
+        config: dict,
+        language: Optional[str] = None,
+    ) -> bytes:
+        """Generate a TTS audio preview using an existing cache entry's voice config.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            entry_id: The audio cache entry ID whose voice/provider config to use.
+            text: Text to synthesize.
+            config: Provider-specific voice tuning settings.
+            language: Optional BCP-47 language tag, e.g. "en-US".
+
+        Returns:
+            bytes: The raw WAV audio data (preview only, not saved to cache).
+        """
+        return PlatformAPIHandler.synthesize_audio_cache(
+            region, project_id, entry_id, text, config, language
+        )
+
+    @staticmethod
     def list_test_runs(
         region: str,
         project_id: str,
@@ -1190,3 +1401,111 @@ class AgentStudioInterface:
             dict: The updated RTC config.
         """
         return PlatformAPIHandler.patch_rtc_variables(region, project_id, client_env, variables)
+
+    def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
+        """Get the history of a specific branch.
+
+        Args:
+            branch_id (str): The ID of the branch
+
+        Returns:
+            list[dict[str, Any]]: A list of commit history entries for the branch
+        """
+        try:
+            return self.sync_client.get_branch_history(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def rename_branch(self, new_branch_name: str) -> bool:
+        """Rename the current branch to a new name.
+
+        Args:
+            new_branch_name (str): The new name for the current branch
+
+        Returns:
+            bool: True if the branch was renamed successfully, False otherwise
+        """
+        try:
+            return self.sync_client.rename_branch(new_branch_name)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def list_archived_branches(self) -> list[dict[str, Any]]:
+        """List soft-deleted (archived) branches for the project.
+
+        Returns:
+            list[dict[str, Any]]: A list of archived branch entries.
+        """
+        try:
+            return self.sync_client.list_archived_branches()
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def restore_branch(self, branch_id: str) -> bool:
+        """Restore a soft-deleted branch from the archive.
+
+        Args:
+            branch_id (str): The ID of the branch to restore.
+
+        Returns:
+            bool: True if the branch was restored successfully, False otherwise.
+        """
+        try:
+            return self.sync_client.restore_branch(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def tag_branch(self, branch_id: str) -> bool:
+        """Tag the current branch with a specific tag name.
+
+        Args:
+            branch_id (str): The ID of the branch to tag.
+
+        Returns:
+            bool: True if the branch was tagged successfully, False otherwise.
+        """
+        try:
+            return self.sync_client.tag_branch(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def untag_branch(self, branch_id: str) -> bool:
+        """Remove a specific tag from the current branch.
+
+        Args:
+            branch_id (str): The ID of the branch to untag.
+
+        Returns:
+            bool: True if the branch was untagged successfully, False otherwise.
+        """
+        try:
+            return self.sync_client.untag_branch(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def feature_flag_enabled(
+        self,
+        key: str,
+        identity: Optional[str] = None,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        default: bool = False,
+    ) -> bool:
+        """Check if a feature flag is enabled for a given identity.
+
+        Args:
+            key (str): The feature flag key to check.
+            identity (Optional[str]): The unique identifier for the user or entity.
+            region (Optional[str]): The region name for grouping.
+            project_id (Optional[str]): The project ID for grouping.
+            default (bool): The default value to return if the flag cannot be evaluated.
+
+        Returns:
+            bool: True if the feature flag is enabled, False otherwise.
+        """
+        return PosthogHandler.is_feature_enabled(
+            region=region,
+            key=key,
+            default=default,
+            project_id=project_id,
+        )

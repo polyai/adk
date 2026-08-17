@@ -129,6 +129,9 @@ class PhraseFilter(MultiResourceYamlResource):
         cls, yaml_dict: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> dict:
         """Replace function name with ID in a parsed YAML dict."""
+        yaml_dict = super().from_pretty_dict(
+            yaml_dict, resource_mappings=resource_mappings, **kwargs
+        )
         function_name = yaml_dict.get("function")
         if function_name:
             for resource in resource_mappings or []:
