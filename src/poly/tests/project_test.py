@@ -5,6 +5,7 @@ Uses test project in tests/test_project
 Copyright PolyAI Limited
 """
 
+import dataclasses
 import json
 import os
 import shutil
@@ -5616,6 +5617,49 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
             self.project.resources[FlowConfig][self.LOCAL_FLOW_ID].start_step, "start_step"
         )
 
+    def test_no_op_sync_sends_no_commands(self):
+        """A sandbox identical to the branch stages nothing and sends no commands.
+
+        Every command in a sync batch is another chance for the platform to reject the
+        batch, so a sync with nothing to change must be a genuine no-op.
+        """
+        with patch.object(
+            AgentStudioProject,
+            "get_remote_resources_by_name",
+            return_value=deepcopy(self.project.resources),
+        ):
+            self.assertTrue(self.project.sync_ids_with_sandbox())
+
+        self.assertFalse(self.mock_api.send_queued_commands.called)
+
+    def test_content_change_is_still_detected(self):
+        """A resource whose stored content differs from disk is still staged.
+
+        Guards the no-op assertion above against passing for the wrong reason: sync must
+        stage real differences rather than having been made blind to them.
+        """
+        staged = {}
+        self.project.resources[FlowStep][
+            f"{self.LOCAL_FLOW_ID}_start_step"
+        ].prompt = "a prompt that does not match the file on disk"
+
+        with (
+            patch.object(
+                AgentStudioProject,
+                "get_remote_resources_by_name",
+                return_value=deepcopy(self.project.resources),
+            ),
+            patch.object(
+                AgentStudioProject,
+                "_stage_commands",
+                side_effect=lambda _s, _n, updated, _d: staged.update(updated=updated),
+            ),
+        ):
+            self.project.sync_ids_with_sandbox()
+
+        updated_ids = {rid for by_id in staged.get("updated", {}).values() for rid in by_id}
+        self.assertIn(f"{self.LOCAL_FLOW_ID}_start_step", updated_ids)
+
     def test_raises_on_main_branch(self):
         """Syncing ids while on main is not allowed."""
         self.project.branch_id = "main"
@@ -5632,6 +5676,65 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
             with self.assertRaises(ValueError) as ctx:
                 self.project.sync_ids_with_sandbox()
         self.assertIn("uncommitted changes", str(ctx.exception))
+
+
+class TestProjectFixtureIntegrityTest(unittest.TestCase):
+    """The test_project fixture must look like a status file a real project would write.
+
+    A real status file is written by save_config from live resources, so every stored
+    resource matches what reading the same file off disk produces. When the fixture drifts
+    from that, tests exercise states that cannot occur in practice — and, worse, hide the
+    ones that can: sync_ids_with_sandbox decides what changed by comparing whole resources,
+    so stored values that disagree with disk make a no-op sync look like a real change.
+    """
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mappings = self.project._make_resource_mappings(self.project.resources)
+        self.by_relative_path = {
+            os.path.relpath(mapping.file_path, self.project.root_path): mapping
+            for mapping in self.mappings
+        }
+
+    def test_stored_ids_match_their_resource_ids(self):
+        """Each resource is stored under a key equal to its own resource_id."""
+        mismatched = [
+            (resource_type.__name__, stored_id, resource.resource_id)
+            for resource_type, by_id in self.project.resources.items()
+            for stored_id, resource in by_id.items()
+            if resource.resource_id != stored_id
+        ]
+        self.assertEqual(mismatched, [])
+
+    def test_stored_resources_match_a_disk_read(self):
+        """Every stored resource equals the resource read back off disk."""
+        compared = 0
+        differing = []
+        for resource_type, by_id in self.project.resources.items():
+            for stored_id, stored in by_id.items():
+                mapping = self.by_relative_path.get(stored.file_path)
+                if mapping is None:
+                    continue
+                fresh = self.project.read_local_resource(
+                    resource=mapping, resource_mappings=self.mappings
+                )
+                if not dataclasses.is_dataclass(fresh):
+                    continue
+                compared += 1
+                for field in dataclasses.fields(fresh):
+                    if not field.compare:
+                        continue
+                    stored_value = getattr(stored, field.name, None)
+                    disk_value = getattr(fresh, field.name, None)
+                    if stored_value != disk_value:
+                        differing.append(
+                            f"{resource_type.__name__} {stored_id}.{field.name}: "
+                            f"stored={stored_value!r} disk={disk_value!r}"
+                        )
+
+        # Without this the test passes vacuously if the path keying ever breaks.
+        self.assertEqual(compared, len(self.mappings))
+        self.assertEqual(differing, [])
 
 
 if __name__ == "__main__":
