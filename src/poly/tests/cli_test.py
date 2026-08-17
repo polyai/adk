@@ -3499,6 +3499,51 @@ class ConversationsCommandTest(unittest.TestCase):
         self.assertIn("2.0 MB", mock_success.call_args[0][0])
 
 
+class StudioCommandTest(unittest.TestCase):
+    """Tests for StudioCommand.open_agent_studio URL construction."""
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.project.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.studio_base_url = "https://studio.us.poly.ai/test_account/test_project"
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.cli_commands.project.json_print")
+    def test_json_output_url_targets_feature_branch(self, mock_json_print):
+        """studio --json emits a /home URL with the feature branch id as branchId."""
+        from poly.cli_commands.project import StudioCommand
+
+        self.proj.branch_id = "BRANCH-SMOHN3M1"
+
+        StudioCommand.open_agent_studio(base_path=TEST_DIR, output_json=True)
+
+        url = mock_json_print.call_args[0][0]["url"]
+        self.assertEqual(
+            url,
+            "https://studio.us.poly.ai/test_account/test_project/home?branchId=BRANCH-SMOHN3M1",
+        )
+        self.assertTrue(url.endswith("/home?branchId=BRANCH-SMOHN3M1"))
+
+    @patch("poly.cli_commands.project.json_print")
+    def test_json_output_url_targets_default_branch(self, mock_json_print):
+        """studio --json emits a /home URL with branchId=main on the default branch."""
+        from poly.cli_commands.project import StudioCommand
+
+        self.proj.branch_id = "main"
+
+        StudioCommand.open_agent_studio(base_path=TEST_DIR, output_json=True)
+
+        url = mock_json_print.call_args[0][0]["url"]
+        self.assertEqual(
+            url,
+            "https://studio.us.poly.ai/test_account/test_project/home?branchId=main",
+        )
+        self.assertTrue(url.endswith("/home?branchId=main"))
+
 class BranchHistoryTest(unittest.TestCase):
     """Tests for BranchCommand.branch_history CLI handler."""
 
