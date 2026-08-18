@@ -1,6 +1,53 @@
 # CHANGELOG
 
 
+## v0.44.3 (2026-08-18)
+
+### Bug Fixes
+
+- Bump experimental config schema ([#276](https://github.com/polyai/adk/pull/276),
+  [`ab0e1a4`](https://github.com/polyai/adk/commit/ab0e1a45c5b4909ca95270e21242714d6ed72a8b))
+
+## Summary
+
+Syncs `experimental_config_schema.yaml` with the latest schema definition to bring the ADK's local
+  validation in line with the platform.
+
+## Motivation
+
+The local experimental config schema had drifted from the source of truth, missing several newly
+  added providers/channels/fields, which could cause valid configs to fail local validation or
+  invalid configs to pass.
+
+## Changes
+
+- Added `assemblyai` and `qwen` ASR provider enum values and descriptions - Deprecated
+  `custom_language_code` in favour of `language` - Removed obsolete `asr_base_requirements`
+  (provider/model no longer required at base level) - Added `rcs.polyai` and `whatsapp.polyai`
+  channels, plus their prompt decorators - Added `raven` end-of-turn detection provider - Added
+  `analysis_enabled`, `analysis_adaptive`, `analysis_adaptive_vad` to ai-coustics audio enhancement
+  - Added `verified_context` config block - Added `on_realtime_config_updated` webhook event with
+  sandbox/pre-release/live overrides - Clarified webhook `payload_template` docs to cover multiple
+  event types, not just deployments
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Existing `ExperimentalConfigTests` in `resources_test.py` pass against the updated schema.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+
 ## v0.44.2 (2026-08-17)
 
 ### Bug Fixes
