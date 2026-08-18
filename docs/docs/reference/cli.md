@@ -831,6 +831,127 @@ The output includes a list of **reverting deployments** — the versions that wi
 
 Without `--force`, the command prompts for confirmation before proceeding.
 
+### `poly sip-trunks`
+
+Manage account-level SIP trunks and their extension-to-agent routes through the SIP
+Trunking API. By default, the command reads the account and region from the current ADK
+project or from project metadata immediately below the account directory. To run it
+without project metadata, pass `--account-id` and `--region` (`eu`, `uk`, or `us`).
+Authentication uses the same `POLY_ADK_KEY` credentials as other ADK API commands.
+
+The preferred workflow uses an account-level `sip-trunks.yaml`. Given a project at
+`pod-point-uk/charging-support`, place the file at `pod-point-uk/sip-trunks.yaml`:
+
+~~~yaml
+- id: tr-ev3vx4iqcbhaeilk2jw9qp8n
+  name: Primary carrier
+  sip_cidr:
+    - 203.0.113.0/24
+  rtp_cidr:
+    - 198.51.100.0/24
+  encrypted: true
+  hostname: tr-ev3vx4iqcbhaeilk2jw9qp8n.sbc.sip.uk.poly.ai
+  inbound_auth:
+    type: digest
+    username: carrier-user
+    realm: sbc.sip.uk.poly.ai
+  extensions:
+    - extension: "1000"
+      agent_id: charging-support
+      client_env: live
+~~~
+
+From a project directory, `manage` searches parent directories for the nearest
+`sip-trunks.yaml`:
+
+~~~bash
+poly sip-trunks manage
+poly sip-trunks manage --yes
+poly sip-trunks manage --file ../sip-trunks.yaml
+poly sip-trunks manage --rotate-auth tr-ev3vx4iqcbhaeilk2jw9qp8n
+poly sip-trunks manage --json
+~~~
+
+`manage` first validates the complete file and calculates a diff without writing or
+prompting for credentials. It displays the planned trunk, extension, credential-rotation,
+and local metadata changes, then asks whether to continue. After confirmation it creates
+missing trunks and extensions and patches changed ones. Use `--yes` to skip confirmation;
+machine-readable `--json` runs require `--yes` when changes exist. It reports only created
+or updated trunks, including their generated IDs and hostnames. If the YAML already
+matches the backend, it prints `Nothing changed.` After reconciling a trunk, `manage` writes
+the returned `id`, `hostname`, and digest `realm` back into the YAML using an atomic,
+formatting-preserving update. These generated fields are informational and are not sent in
+create or update requests. Creation and update timestamps are intentionally omitted. The
+older mapping format with a `sip_trunks:` wrapper remains readable for migration, but new
+exports use the top-level list.
+Removing a trunk entry from YAML does **not** delete the live trunk; trunk deletion remains
+an explicit command. An `extensions` list is authoritative, however: removing an extension
+entry schedules its live binding for deletion, which is shown in the `manage` diff and only
+applied after confirmation. Use `extensions: []` to remove every extension from a trunk.
+Omit the `extensions` key entirely to leave its extension bindings unmanaged.
+
+Export all existing configuration before making changes:
+
+~~~bash
+poly sip-trunks list                         # summary table
+poly sip-trunks list --output                # account-level sip-trunks.yaml
+poly sip-trunks list --output export.yaml
+poly sip-trunks list --output --force        # explicitly replace an existing file
+~~~
+
+The export includes trunk IDs, hostnames, CIDRs, readable authentication state (including
+the digest realm), and all extension bindings. Creation and update timestamps are omitted.
+The file can be passed directly back to `manage`. SIP passwords and tokens are never
+returned by the API and therefore cannot appear in the export.
+
+The export does not store a region. All projects in an account belong to the same region,
+so ADK infers it from their `project.yaml` metadata. If projects for the account disagree,
+the command stops with an error. Use `--region` when no project metadata is available.
+
+Without `--output`, `list` displays a summary table. `get` displays a detailed trunk table
+followed by its extension bindings. Pass `--json` to either command for machine-readable
+output.
+
+SIP passwords and tokens must not be stored in YAML. `manage` prompts securely when a
+secret is required: when creating authenticated trunks, changing authentication type or
+digest username, and explicitly rotating credentials. An ordinary update to a trunk whose
+authentication is unchanged never prompts for or resends its credential.
+
+Digest authentication declares only its non-secret state:
+
+~~~yaml
+inbound_auth:
+  type: digest
+  username: carrier-user
+~~~
+
+Only one inbound authentication mode can be configured:
+
+~~~yaml
+# SIP token authentication
+inbound_auth:
+  type: token
+~~~
+
+Use `type: none` to explicitly disable the trunk's current inbound authentication.
+Rotate an existing credential only through an explicit action:
+
+~~~bash
+poly sip-trunks manage --rotate-auth <trunk_id>
+~~~
+
+~~~bash
+poly sip-trunks get <trunk_id>
+poly sip-trunks delete <trunk_id>
+poly sip-trunks delete <trunk_id> --yes
+~~~
+
+`delete` asks for confirmation and prints a human-readable success message by default.
+Use `--yes` to skip confirmation. Machine-readable deletion with `--json` requires
+`--yes`.
+
+All leaf commands support `--json`, `--path`, `--account-id`, and `--region`.
+
 ## Machine-readable JSON output
 
 All core subcommands accept a `--json` flag that switches stdout to a single JSON object. This is designed for scripting, CI pipelines, and any integration that needs stable, parseable output rather than human-readable console text.
