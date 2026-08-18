@@ -119,7 +119,19 @@ The following sections describe notable feature areas available in the schema.
 
 Configure audio enhancement processing applied to the incoming audio stream before speech recognition. Three providers are available: `ai-coustics`, `dolby`, and `krisp`.
 
-#### `ai-coustics` VAD
+#### `ai-coustics`
+
+The `ai-coustics` enhancer supports audio quality analysis fields in addition to VAD tuning.
+
+##### Analysis fields
+
+| Field | Type | Description | Default |
+|---|---|---|---|
+| `analysis_enabled` | boolean | Enable inline audio quality analysis (Tyto model) on the raw inbound audio. | `false` |
+| `analysis_adaptive` | boolean | Enable adaptive enhancement tuning driven by the analysis scores. Implies `analysis_enabled`. | `false` |
+| `analysis_adaptive_vad` | boolean | Enable adaptive VAD tuning driven by the analysis scores. Requires `analysis_adaptive`. | `false` |
+
+##### VAD fields
 
 The `ai-coustics` enhancer supports a `vad` (voice activity detection) sub-object for tuning how speech is detected in the audio stream.
 
@@ -135,6 +147,9 @@ Example:
 {
   "audio_enhancement": {
     "ai-coustics": {
+      "analysis_enabled": true,
+      "analysis_adaptive": true,
+      "analysis_adaptive_vad": true,
       "vad": {
         "sensitivity": 6.0,
         "speech_hold_duration": 0.03,
@@ -336,6 +351,8 @@ The `prompts` section supports channel-specific and language-related decorator o
 |---|---|---|
 | `webchat_decorator` | string | Optional webchat-specific decorator for the `webchat.polyai` channel. |
 | `sms_decorator` | string | Optional SMS-specific decorator for the `sms.polyai` channel. |
+| `rcs_decorator` | string | Optional RCS-specific decorator for the `rcs.polyai` channel. |
+| `whatsapp_decorator` | string | Optional WhatsApp-specific decorator for the `whatsapp.polyai` channel. |
 | `voice_decorator` | string | Optional voice-specific decorator for `chat.polyai` or `sip.polyai` channels. |
 | `language_switching_instructions` | string | Optional instructions for language switching behaviour. Must contain a `{available_languages}` placeholder. |
 
@@ -345,39 +362,79 @@ Example:
 {
   "prompts": {
     "sms_decorator": "Keep responses brief and suitable for SMS.",
+    "rcs_decorator": "Keep responses brief and suitable for RCS.",
+    "whatsapp_decorator": "Keep responses brief and suitable for WhatsApp.",
     "language_switching_instructions": "You may switch to any of the following languages if the user requests it: {available_languages}."
+  }
+}
+~~~
+
+### Verified context
+
+Configure the verified context read path, which serves data from the Context Vault on each turn.
+
+| Field | Type | Description |
+|---|---|---|
+| `enabled` | boolean | Enable the per-turn fetch of verified context for function authors. |
+
+Example:
+
+~~~json
+{
+  "verified_context": {
+    "enabled": true
   }
 }
 ~~~
 
 ### Webhooks
 
-Configure webhook behavior for deployment events, including custom payload templates.
+Configure webhook behavior for deployment and configuration events, including custom payload templates.
+
+#### Event types
+
+Webhooks can be configured for the following event types:
+
+| Event | Description |
+|---|---|
+| `on_draft_published` | Triggered when a draft is published. |
+| `on_deployment` | Triggered on sandbox, pre-release, or live deployments. |
+| `on_realtime_config_updated` | Triggered when a realtime config is updated in a specific environment (sandbox, pre-release, or live). |
+
+Each event type supports per-environment webhook arrays (`sandbox`, `pre-release`, `live`).
 
 #### `payload_template`
 
-The `payload_template` field controls the JSON body sent to a webhook URL. If omitted, the default deployment payload is sent as-is.
+The `payload_template` field controls the JSON body sent to a webhook URL. If omitted, the default event payload is sent as-is.
 
 | Field | Type | Description |
 |---|---|---|
-| `payload_template` | object | Custom payload template. String values may contain `{{field}}` placeholders that are substituted with deployment event fields. |
+| `payload_template` | object | Custom payload template. String values may contain `{{field}}` placeholders that are substituted with the corresponding event field. |
 
-**Available placeholder fields:**
+**Common placeholder fields (all events):**
 
-- `deployment_id`
 - `account_id`
 - `project_id`
 - `client_env`
-- `artifact_version`
-- `deployment_type`
 - `timestamp`
 - `user`
 
+**Additional fields for `on_draft_published` and `on_deployment`:**
+
+- `deployment_id`
+- `artifact_version`
+- `deployment_type`
+
+**Additional fields for `on_realtime_config_updated`:**
+
+- `event_type`
+- `config_diff`
+
 **Special placeholder:**
 
-Use `{{payload}}` to inject the entire deployment payload object at a specific position in the template — for example, when a webhook receiver (such as GitHub's `repository_dispatch`) requires nesting under a specific key like `client_payload`.
+Use `{{payload}}` to inject the entire event payload object at a specific position in the template — for example, when a webhook receiver (such as GitHub's `repository_dispatch`) requires nesting under a specific key like `client_payload`.
 
-When `{{payload}}` is not present in the template, the deployment payload fields are merged at the top level of the rendered result.
+When `{{payload}}` is not present in the template, the event payload fields are merged at the top level of the rendered result.
 
 Example — GitHub `repository_dispatch`:
 
@@ -401,6 +458,26 @@ Example — flat template with individual fields:
       "env": "{{client_env}}",
       "version": "{{artifact_version}}",
       "deployed_by": "{{user}}"
+    }
+  }
+}
+~~~
+
+Example — `on_realtime_config_updated` webhook:
+
+~~~json
+{
+  "webhooks": {
+    "on_realtime_config_updated": {
+      "live": [
+        {
+          "url": "https://example.com/hooks/realtime-config",
+          "payload_template": {
+            "env": "{{client_env}}",
+            "diff": "{{config_diff}}"
+          }
+        }
+      ]
     }
   }
 }
