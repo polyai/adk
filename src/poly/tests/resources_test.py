@@ -60,6 +60,7 @@ from poly.resources.function import (
     FunctionLatencyControl,
     FunctionParameters,
     FunctionType,
+    LatencyControl,
 )
 from poly.resources.handoff import Handoff
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
@@ -513,6 +514,30 @@ def end_function(conv: Conversation, test_param: int):
         self.assertIn("silence_after_each_response=3000", raw)
         self.assertIn("('Please hold...', 5000)", raw)
         self.assertIn("('Still looking...', 8000)", raw)
+        self.assertNotIn("randomize=", raw)
+
+    def test_raw_includes_randomize_when_enabled(self):
+        """randomize=True is rendered on @func_latency_control when set."""
+        func = Function(
+            resource_id="123",
+            name="test_code",
+            description="A test function",
+            code=TEST_CODE,
+            parameters=[],
+            latency_control=FunctionLatencyControl(
+                enabled=True,
+                initial_delay=0,
+                interval=2,
+                delay_responses=[
+                    FunctionDelayResponse(message="One...", duration=3000),
+                    FunctionDelayResponse(message="Two...", duration=2000),
+                ],
+                randomize=True,
+            ),
+            function_type=FunctionType.GLOBAL,
+        )
+        raw = func.raw
+        self.assertIn("randomize=True", raw)
 
     def test_raw_omits_latency_control_when_disabled(self):
         """When latency_control.enabled is False, no decorator is rendered."""
@@ -540,11 +565,22 @@ def my_func(conv: Conversation):
         self.assertTrue(lc.enabled)
         self.assertEqual(lc.initial_delay, 5000)
         self.assertEqual(lc.interval, 3000)
+        self.assertFalse(lc.randomize)
         self.assertEqual(len(lc.delay_responses), 1)
         self.assertEqual(lc.delay_responses[0].message, "Hold on...")
         self.assertEqual(lc.delay_responses[0].duration, 5000)
         # Decorator should be stripped from code
         self.assertNotIn("func_latency_control", code)
+
+    def test_extract_latency_control_randomize(self):
+        """_extract_decorators parses randomize from @func_latency_control."""
+        code_with_decorator = """@func_latency_control(delay_before_responses_start=0, silence_after_each_response=2, delay_responses=[('Hold on...', 3000)], randomize=True)
+def my_func(conv: Conversation):
+    pass
+"""
+        _, _, _, lc = Function._extract_decorators(code_with_decorator, "my_func", [])
+        self.assertTrue(lc.enabled)
+        self.assertTrue(lc.randomize)
 
     def test_extract_preserves_known_delay_response_ids(self):
         """Existing delay-response IDs are preserved by message match."""
@@ -573,6 +609,7 @@ def my_func(conv: Conversation):
                 FunctionDelayResponse(id="DR-1", message="One moment...", duration=4000),
                 FunctionDelayResponse(id="DR-2", message="Almost there...", duration=6000),
             ],
+            randomize=True,
         )
         func = Function(
             resource_id="123",
@@ -586,6 +623,7 @@ def my_func(conv: Conversation):
             function_type=FunctionType.GLOBAL,
         )
         pretty = func.to_pretty(resource_mappings=[])
+        self.assertIn("randomize=True", pretty)
         reverted = Function.from_pretty(pretty, resource_mappings=[])
         code, params, desc, extracted_lc = Function._extract_decorators(
             reverted, "test_code", [], lc
@@ -593,12 +631,31 @@ def my_func(conv: Conversation):
         self.assertTrue(extracted_lc.enabled)
         self.assertEqual(extracted_lc.initial_delay, 4000)
         self.assertEqual(extracted_lc.interval, 2000)
+        self.assertTrue(extracted_lc.randomize)
         self.assertEqual(len(extracted_lc.delay_responses), 2)
         self.assertEqual(extracted_lc.delay_responses[0].message, "One moment...")
         self.assertEqual(extracted_lc.delay_responses[1].message, "Almost there...")
         # IDs are preserved
         self.assertEqual(extracted_lc.delay_responses[0].id, "DR-1")
         self.assertEqual(extracted_lc.delay_responses[1].id, "DR-2")
+
+    def test_latency_control_to_proto_includes_randomize(self):
+        """LatencyControl.to_proto sets randomize on the update command."""
+        sub = LatencyControl(
+            function_id="fn-1",
+            latency_control=FunctionLatencyControl(
+                enabled=True,
+                initial_delay=0,
+                interval=2,
+                delay_responses=[
+                    FunctionDelayResponse(id="DR-1", message="One...", duration=3000),
+                ],
+                randomize=True,
+            ),
+        )
+        proto = sub.to_proto()
+        self.assertTrue(proto.randomize)
+        self.assertTrue(proto.HasField("randomize"))
 
     def test_read_local_resource_with_latency_control(self):
         """read_local_resource correctly extracts latency control from file."""
