@@ -321,15 +321,23 @@ class DeleteGistsTest(unittest.TestCase):
     @patch("poly.cli_commands.review.GitHubAPIHandler.delete_gist")
     @patch("questionary.checkbox")
     @patch("poly.cli_commands.review.json_print")
-    def test_json_output_prints_success(self, mock_json_print, mock_checkbox, mock_delete, mock_list):
-        """With output_json=True, a success JSON object is printed after deletion."""
+    def test_json_output_without_gist_id_errors_without_prompting(
+        self, mock_json_print, mock_checkbox, mock_delete, mock_list
+    ):
+        """With output_json=True and no gist_id, a JSON error is printed and the
+        interactive checkbox prompt is never shown."""
         mock_list.return_value = self.SAMPLE_GISTS
-        first_choice = format_gist_choice(self.SAMPLE_GISTS[0])
-        mock_checkbox.return_value.ask.return_value = [first_choice]
 
         ReviewCommand.delete_gists(output_json=True)
 
-        mock_json_print.assert_called_once_with({"success": True})
+        mock_checkbox.assert_not_called()
+        mock_delete.assert_not_called()
+        mock_json_print.assert_called_once_with(
+            {
+                "success": False,
+                "error": "Please provide a gist ID to delete when using JSON output.",
+            }
+        )
 
 
 class ListGistsTest(unittest.TestCase):
