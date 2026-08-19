@@ -1305,6 +1305,42 @@
         "path": "test_document.md",
         "contents": "This is a test document.\nIt has multiple lines.\n"
       }
+    },
+    "platform_guardrails": {
+      "jailbreak_defence": {
+        "resource_id": "jailbreak_defence",
+        "name": "jailbreak_defence",
+        "enabled": true
+      },
+      "hallucination_control": {
+        "resource_id": "hallucination_control",
+        "name": "hallucination_control",
+        "enabled": false
+      },
+      "ai_identity": {
+        "resource_id": "ai_identity",
+        "name": "ai_identity",
+        "enabled": true
+      },
+      "emergency_escalation": {
+        "resource_id": "emergency_escalation",
+        "name": "emergency_escalation",
+        "enabled": true
+      },
+      "tool_call_integrity": {
+        "resource_id": "tool_call_integrity",
+        "name": "tool_call_integrity",
+        "enabled": false
+      }
+    },
+    "custom_guardrails": {
+      "CUSTOM_GUARDRAILS-no_medical_advice": {
+        "resource_id": "CUSTOM_GUARDRAILS-no_medical_advice",
+        "name": "No medical advice",
+        "prompt": "Never give medical advice. Offer to transfer the caller to a human instead.",
+        "action": "warn",
+        "enabled": true
+      }
     }
   },
   "file_structure_info": {},
