@@ -1517,7 +1517,10 @@ class AgentStudioProject:
             current_resources=self.resources,
         )
         prepush.default_new_variant_attributes(
-            new_resources, deleted_resources, current_resources=self.resources
+            new_resources,
+            deleted_resources,
+            current_resources=self.resources,
+            updated_resources=updated_resources,
         )
         prepush.filter_nondefault_variant_updates(updated_resources)
         prepush.fix_conditions_for_deleted_steps(

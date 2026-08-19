@@ -325,10 +325,25 @@ def default_new_variant_attributes(
     new_resources: ResourceMap,
     deleted_resources: ResourceMap,
     current_resources: ResourceMap,
+    updated_resources: ResourceMap | None = None,
 ) -> None:
-    """Give new variants all known (non-deleted) attributes as default values."""
-    # Add known attributes to any new variant to give it a default value
+    """Give new variants all known (non-deleted) attributes, with their local values.
+
+    A new variant is created with every known attribute. The value for each
+    attribute comes from the local variant_attributes.yaml (the new/updated
+    attribute resources being pushed, falling back to the current remote
+    ones), so the variant is created with its real values. Previously every
+    value was sent as "" and, because non-default variant updates are never
+    pushed, a variant created on a stale branch stayed blank and then won a
+    3-way merge against main's populated copy.
+    """
     deleted_attribute_ids = set(deleted_resources.get(VariantAttribute, {}).keys())
+    # Local attribute resources win over the remote snapshot: they carry the
+    # mappings for the variant being created, the remote ones cannot.
+    attribute_sources: dict[str, VariantAttribute] = {}
+    attribute_sources.update(current_resources.get(VariantAttribute, {}))
+    attribute_sources.update((updated_resources or {}).get(VariantAttribute, {}))
+    attribute_sources.update(new_resources.get(VariantAttribute, {}))
     for variant in new_resources.get(Variant, {}).values():
         if not isinstance(variant, Variant):
             raise TypeError(f"Variant is not a Variant: {variant}")
@@ -338,6 +353,11 @@ def default_new_variant_attributes(
             if aid not in deleted_attribute_ids
         ]
         variant.attribute_ids = attribute_ids
+        variant.attribute_values = {
+            aid: attribute_sources[aid].mappings.get(variant.resource_id, "")
+            for aid in attribute_ids
+            if aid in attribute_sources
+        }
 
 
 def filter_nondefault_variant_updates(updated_resources: ResourceMap) -> None:

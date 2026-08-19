@@ -29,6 +29,10 @@ class Variant(MultiResourceYamlResource):
     is_default: bool = False
     top_level_name: ClassVar[str] = "variants"
     attribute_ids: list[str] = field(default_factory=list, repr=False, init=False)
+    # Attribute values to send when the variant is created, keyed by attribute id.
+    # Populated pre-push from the local variant_attributes.yaml so a newly created
+    # variant lands with its real values rather than blanks.
+    attribute_values: dict[str, str] = field(default_factory=dict, repr=False, init=False)
 
     def __init__(
         self,
@@ -41,6 +45,7 @@ class Variant(MultiResourceYamlResource):
         self.name = name
         self.is_default = is_default
         self.attribute_ids = []
+        self.attribute_values = {}
 
     def to_yaml_dict(self) -> dict:
         yaml_dict = {
@@ -110,7 +115,10 @@ class Variant(MultiResourceYamlResource):
             id=self.resource_id,
             name=self.name,
             attribute_values=AttributeValues(
-                values={attribute_id: "" for attribute_id in self.attribute_ids}
+                values={
+                    attribute_id: self.attribute_values.get(attribute_id, "")
+                    for attribute_id in self.attribute_ids
+                }
             ),
         )
 

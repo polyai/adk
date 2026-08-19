@@ -18,6 +18,7 @@ from poly.resources import (
     ResourceMapping,
     SMSTemplate,
     Variable,
+    Variant,
     VariantAttribute,
 )
 from poly.resources.flows import (
@@ -1098,6 +1099,7 @@ class FlowUtilsTests(unittest.TestCase):
 
     # TODO: Test assigning positions to flow steps
 
+
 class ClearUnusedSettingsFromFlowStepTest(unittest.TestCase):
     """Tests for prepush.clear_unused_settings_from_flow_step.
 
@@ -1256,6 +1258,76 @@ class JsonIoTests(unittest.TestCase):
             self.assertNotIn("\\u00f4", raw)
 
             self.assertEqual(utils.read_json_file(str(path)), data)
+
+
+class DefaultNewVariantAttributesTest(unittest.TestCase):
+    """Tests for prepush.default_new_variant_attributes.
+
+    A variant created on a branch must carry the attribute values from the
+    local variant_attributes.yaml. Non-default variant updates are never
+    pushed, so if creation sends "" the variant stays blank on the branch,
+    and a later 3-way merge that prefers the branch wipes main's values.
+    """
+
+    def _attr(self, resource_id: str, mappings: dict[str, str]) -> VariantAttribute:
+        return VariantAttribute(resource_id=resource_id, name=resource_id, mappings=mappings)
+
+    def test_new_variant_gets_local_values_on_create(self):
+        new_variant = Variant(resource_id="VARIANTS-new", name="New Site")
+        current = {
+            VariantAttribute: {
+                "ATTR-a": self._attr("ATTR-a", {"VARIANTS-default": "a-default"}),
+                "ATTR-b": self._attr("ATTR-b", {"VARIANTS-default": "b-default"}),
+                "ATTR-gone": self._attr("ATTR-gone", {"VARIANTS-default": "x"}),
+            }
+        }
+        # The local attribute resources are the ones being pushed as updates and
+        # already hold the new variant's values.
+        updated = {
+            VariantAttribute: {
+                "ATTR-a": self._attr(
+                    "ATTR-a", {"VARIANTS-default": "a-default", "VARIANTS-new": "a-new"}
+                ),
+                "ATTR-b": self._attr("ATTR-b", {"VARIANTS-default": "b-default"}),
+            }
+        }
+        new = {Variant: {"VARIANTS-new": new_variant}}
+        deleted = {VariantAttribute: {"ATTR-gone": current[VariantAttribute]["ATTR-gone"]}}
+
+        prepush.default_new_variant_attributes(
+            new, deleted, current_resources=current, updated_resources=updated
+        )
+
+        self.assertEqual(sorted(new_variant.attribute_ids), ["ATTR-a", "ATTR-b"])
+        proto = new_variant.build_create_proto()
+        self.assertEqual(dict(proto.attribute_values.values), {"ATTR-a": "a-new", "ATTR-b": ""})
+
+    def test_new_attribute_and_new_variant_in_same_push(self):
+        new_variant = Variant(resource_id="VARIANTS-new", name="New Site")
+        current = {VariantAttribute: {"ATTR-a": self._attr("ATTR-a", {})}}
+        new = {
+            Variant: {"VARIANTS-new": new_variant},
+            VariantAttribute: {"ATTR-a": self._attr("ATTR-a", {"VARIANTS-new": "from-new"})},
+        }
+
+        prepush.default_new_variant_attributes(new, {}, current_resources=current)
+
+        self.assertEqual(
+            dict(new_variant.build_create_proto().attribute_values.values),
+            {"ATTR-a": "from-new"},
+        )
+
+    def test_without_local_values_falls_back_to_blank(self):
+        new_variant = Variant(resource_id="VARIANTS-new", name="New Site")
+        current = {VariantAttribute: {"ATTR-a": self._attr("ATTR-a", {"VARIANTS-default": "d"})}}
+
+        prepush.default_new_variant_attributes(
+            {Variant: {"VARIANTS-new": new_variant}}, {}, current_resources=current
+        )
+
+        self.assertEqual(
+            dict(new_variant.build_create_proto().attribute_values.values), {"ATTR-a": ""}
+        )
 
 
 if __name__ == "__main__":
