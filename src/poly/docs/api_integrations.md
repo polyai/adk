@@ -90,3 +90,7 @@ response = conv.api.salesforce.update_contact(
     json={"phone_number": "456"}
 )
 ```
+
+## Testing with mocked responses
+
+A flow that branches on an operation's response (e.g. slot negotiation, availability checks) needs that response to be deterministic to test reliably. Test cases can mock an operation's response per test — see [Tests: API mocks](tests.md#api-mocks).

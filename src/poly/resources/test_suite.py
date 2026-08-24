@@ -8,20 +8,30 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
 from typing import Any, Optional
 
-from google.protobuf.struct_pb2 import Struct
+from google.protobuf.struct_pb2 import Struct, Value
 
 import poly.resources.resource_utils as utils
 
 # import uuid
 from poly.handlers.protobuf.testing_pb2 import (
+    ApiIntegrationOverride,
+    ApiOverride,
+    ApiResponseRuleList,
     Create_TestCase,
     Delete_TestCase,
     PromptAssertion,
+    SetTestCaseApiMocks,
     SetTestCaseAssertions,
     SetTestCaseIntegrationAttributes,
     SetTestCaseSipHeaders,
     SetTestCaseTags,
     Update_TestCase,
+)
+from poly.handlers.protobuf.testing_pb2 import (
+    ApiResponse as ApiResponseProto,
+)
+from poly.handlers.protobuf.testing_pb2 import (
+    ApiResponseRule as ApiResponseRuleProto,
 )
 from poly.handlers.protobuf.testing_pb2 import (
     FunctionCallAssertion as FunctionCallAssertionProto,
@@ -32,6 +42,7 @@ from poly.handlers.protobuf.testing_pb2 import (
 from poly.handlers.protobuf.testing_pb2 import (
     TestCaseAssertion as TestCaseAssertionProto,
 )
+from poly.resources.api_integration import ApiIntegration
 from poly.resources.languages import AdditionalLanguage, DefaultLanguage
 from poly.resources.resource import ResourceMapping, SubResource, YamlResource, register_resource
 from poly.resources.variant_attributes import Variant
@@ -356,6 +367,157 @@ class TestCaseIntegrationAttributes(SubResource):
         raise NotImplementedError("Test Case Integration Attributes cannot be deleted")
 
 
+def _python_to_value(data: Any) -> Value:
+    """Convert an arbitrary JSON-compatible python value into a google.protobuf.Value.
+
+    `Struct.__setitem__` already knows how to encode any JSON-compatible python
+    value (including nested dicts/lists) into a Value — wrapping it in a
+    throwaway Struct reuses that instead of hand-rolling the encoding.
+    """
+    wrapper = Struct()
+    wrapper["value"] = data
+    value = Value()
+    value.CopyFrom(wrapper.fields["value"])
+    return value
+
+
+@dataclass
+class ApiResponse:
+    """A single mocked API response: status, body, and headers."""
+
+    status: int = 200
+    body: Any = None
+    headers: dict[str, str] = field(default_factory=dict)
+
+    def to_yaml_dict(self) -> dict:
+        response: dict[str, Any] = {"status": self.status}
+        if self.body is not None:
+            response["body"] = self.body
+        if self.headers:
+            response["headers"] = self.headers
+        return response
+
+    def to_proto(self) -> ApiResponseProto:
+        kwargs: dict[str, Any] = {
+            "status": self.status,
+            "headers": {str(key): _header_value(value) for key, value in self.headers.items()},
+        }
+        if self.body is not None:
+            kwargs["body"] = _python_to_value(self.body)
+        return ApiResponseProto(**kwargs)
+
+    @classmethod
+    def from_dict(cls, data: dict | None) -> "ApiResponse":
+        data = data or {}
+        # Mirrors _normalise_attribute: a body pushed through google.protobuf.Value
+        # (a double) reads a pushed int back as a float, producing a spurious
+        # diff on the next pull. Folding integral floats back to int here
+        # keeps a pull-after-push round trip stable.
+        return cls(
+            status=data.get("status", 200),
+            body=_normalise_attribute(data.get("body")),
+            headers=dict(data.get("headers") or {}),
+        )
+
+
+@dataclass
+class ApiResponseRule:
+    """One rule in a mocked operation's response sequence.
+
+    `repeat` mirrors the platform's semantics: unset means "respond once and
+    keep responding once matched", not "repeat forever" or "repeat zero times".
+    """
+
+    respond: ApiResponse = field(default_factory=ApiResponse)
+    repeat: Optional[int] = None
+
+    def to_yaml_dict(self) -> dict:
+        response = {"respond": self.respond.to_yaml_dict()}
+        if self.repeat is not None:
+            response["repeat"] = self.repeat
+        return response
+
+    def to_proto(self) -> ApiResponseRuleProto:
+        kwargs: dict[str, Any] = {"respond": self.respond.to_proto()}
+        if self.repeat is not None:
+            kwargs["repeat"] = self.repeat
+        return ApiResponseRuleProto(**kwargs)
+
+    @classmethod
+    def from_dict(cls, data: dict | None) -> "ApiResponseRule":
+        data = data or {}
+        return cls(respond=ApiResponse.from_dict(data.get("respond")), repeat=data.get("repeat"))
+
+
+@dataclass
+class TestCaseApiMocks(SubResource):
+    """Dataclass representing the mocked API responses on a test case.
+
+    Keyed by integration name, then operation name, matching how the platform
+    references integrations/operations elsewhere and cascades renames/deletes
+    from the api-integrations domain into existing mocks.
+    """
+
+    __test__ = False
+
+    mocks: dict[str, dict[str, list[ApiResponseRule]]] = field(default_factory=dict)
+
+    @property
+    def command_type(self) -> str:
+        return "test_case_api_mocks"
+
+    @property
+    def update_command_type(self) -> str:
+        return "set_test_case_api_mocks"
+
+    def to_yaml_dict(self) -> dict:
+        return {
+            integration_name: {
+                operation_name: [rule.to_yaml_dict() for rule in rules]
+                for operation_name, rules in operations.items()
+            }
+            for integration_name, operations in self.mocks.items()
+        }
+
+    def build_update_proto(self) -> SetTestCaseApiMocks:
+        return SetTestCaseApiMocks(
+            id=self.resource_id,
+            api_mocks=ApiOverride(
+                integrations={
+                    integration_name: ApiIntegrationOverride(
+                        operations={
+                            operation_name: ApiResponseRuleList(
+                                responses=[rule.to_proto() for rule in rules]
+                            )
+                            for operation_name, rules in operations.items()
+                        }
+                    )
+                    for integration_name, operations in self.mocks.items()
+                }
+            ),
+        )
+
+    def build_create_proto(self) -> None:
+        raise NotImplementedError("Test Case API Mocks cannot be created")
+
+    def build_delete_proto(self) -> None:
+        raise NotImplementedError("Test Case API Mocks cannot be deleted")
+
+    @classmethod
+    def from_dict(
+        cls, resource_id: str, data: dict[str, dict[str, list[dict]]] | None
+    ) -> "TestCaseApiMocks":
+        data = data or {}
+        mocks = {
+            integration_name: {
+                operation_name: [ApiResponseRule.from_dict(rule) for rule in rules or []]
+                for operation_name, rules in (operations or {}).items()
+            }
+            for integration_name, operations in data.items()
+        }
+        return cls(resource_id=resource_id, name="api_mocks", mocks=mocks)
+
+
 @register_resource("test_cases")
 @dataclass
 class TestCase(YamlResource):
@@ -374,6 +536,7 @@ class TestCase(YamlResource):
     simulated_at: Optional[str] = None
     sip_headers: "TestCaseSipHeaders" = None
     integration_attributes: "TestCaseIntegrationAttributes" = None
+    api_mocks: "TestCaseApiMocks" = None
 
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "TestCase"]:
@@ -420,6 +583,25 @@ class TestCase(YamlResource):
                 name="integration_attributes",
                 attributes=test_case_data.get("integrationAttributes") or {},
             )
+            api_mocks_raw = test_case_data.get("apiMocks") or {}
+            api_mocks = TestCaseApiMocks(
+                resource_id=test_case_id,
+                name="api_mocks",
+                mocks={
+                    integration_name: {
+                        operation_name: [
+                            ApiResponseRule.from_dict(rule)
+                            for rule in (rule_list or {}).get("responses") or []
+                        ]
+                        for operation_name, rule_list in (integration_override or {})
+                        .get("operations", {})
+                        .items()
+                    }
+                    for integration_name, integration_override in (
+                        api_mocks_raw.get("integrations") or {}
+                    ).items()
+                },
+            )
             test_cases[test_case_id] = cls(
                 resource_id=test_case_id,
                 name=test_case_data.get("name", ""),
@@ -433,6 +615,7 @@ class TestCase(YamlResource):
                 simulated_at=test_case_data.get("simulatedAt"),
                 sip_headers=sip_headers,
                 integration_attributes=integration_attributes,
+                api_mocks=api_mocks,
             )
         return test_cases
 
@@ -451,6 +634,7 @@ class TestCase(YamlResource):
         simulated_at: str | datetime | None = None,
         sip_headers: "TestCaseSipHeaders | dict | None" = None,
         integration_attributes: "TestCaseIntegrationAttributes | dict | None" = None,
+        api_mocks: "TestCaseApiMocks | dict | None" = None,
     ):
         self.resource_id = resource_id
         self.name = name
@@ -490,6 +674,12 @@ class TestCase(YamlResource):
             self.integration_attributes = TestCaseIntegrationAttributes(
                 resource_id=resource_id, name="integration_attributes"
             )
+        if isinstance(api_mocks, TestCaseApiMocks):
+            self.api_mocks = api_mocks
+        elif api_mocks:
+            self.api_mocks = TestCaseApiMocks.from_dict(resource_id, api_mocks)
+        else:
+            self.api_mocks = TestCaseApiMocks(resource_id=resource_id, name="api_mocks")
 
     @property
     def file_path(self) -> str:
@@ -520,6 +710,9 @@ class TestCase(YamlResource):
 
         if attributes := self.integration_attributes.to_yaml_dict():
             output["integration_attributes"] = attributes
+
+        if mocks := self.api_mocks.to_yaml_dict():
+            output["api_mocks"] = mocks
 
         if assert_dict := self.assertions.to_yaml_dict():
             output.update(assert_dict)
@@ -565,6 +758,7 @@ class TestCase(YamlResource):
             name="integration_attributes",
             attributes=yaml_dict.get("integration_attributes") or {},
         )
+        test_case_api_mocks = TestCaseApiMocks.from_dict(resource_id, yaml_dict.get("api_mocks"))
 
         channel = yaml_dict.get("channel")
         return cls(
@@ -580,6 +774,7 @@ class TestCase(YamlResource):
             simulated_at=yaml_dict.get("simulated_at"),
             sip_headers=test_case_sip_headers,
             integration_attributes=test_case_integration_attributes,
+            api_mocks=test_case_api_mocks,
         )
 
     @classmethod
@@ -703,6 +898,48 @@ class TestCase(YamlResource):
         # Integration attributes carry JSON types through to the agent
         _validate_attribute_value(self.integration_attributes.attributes, "integration_attributes")
 
+        # API mocks: integration must exist (when the project's integrations are known);
+        # operations aren't tracked as standalone resources, so operation names are
+        # trusted here the same way the platform trusts them when cascading renames.
+        known_integrations = {
+            m.resource_name for m in resource_mappings or [] if m.resource_type is ApiIntegration
+        }
+        for integration_name, operations in self.api_mocks.mocks.items():
+            if not integration_name:
+                raise ValueError("API mock integration name cannot be empty.")
+            if known_integrations and integration_name not in known_integrations:
+                raise ValueError(f"Unknown API integration in mocks: '{integration_name}'.")
+            for operation_name, rules in operations.items():
+                if not operation_name:
+                    raise ValueError(
+                        f"API mock for integration '{integration_name}' has an empty "
+                        "operation name."
+                    )
+                for index, rule in enumerate(rules):
+                    label = f"API mock '{integration_name}.{operation_name}'[{index}]"
+                    status = rule.respond.status
+                    if (
+                        not isinstance(status, int)
+                        or isinstance(status, bool)
+                        or not (100 <= status <= 599)
+                    ):
+                        raise ValueError(
+                            f"{label}: status '{status}' must be an HTTP status code (100-599)."
+                        )
+                    if rule.respond.body is not None:
+                        _validate_attribute_value(rule.respond.body, f"{label}.body")
+                    for header_key in rule.respond.headers:
+                        if not isinstance(header_key, str) or not header_key:
+                            raise ValueError(f"{label}: header keys must be non-empty text.")
+                    if rule.repeat is not None and (
+                        not isinstance(rule.repeat, int)
+                        or isinstance(rule.repeat, bool)
+                        or rule.repeat < 1
+                    ):
+                        raise ValueError(
+                            f"{label}: repeat '{rule.repeat}' must be a positive integer."
+                        )
+
         # `fn` is a global function, `ft` a flow function. Both are assertable.
         known_functions = {
             resource.resource_name
@@ -744,6 +981,8 @@ class TestCase(YamlResource):
                 updated.append(self.sip_headers)
             if self.integration_attributes.attributes:
                 updated.append(self.integration_attributes)
+            if self.api_mocks.mocks:
+                updated.append(self.api_mocks)
         else:
             if old_resource.assertions != self.assertions:
                 updated.append(self.assertions)
@@ -754,6 +993,8 @@ class TestCase(YamlResource):
                 updated.append(self.sip_headers)
             if old_resource.integration_attributes != self.integration_attributes:
                 updated.append(self.integration_attributes)
+            if old_resource.api_mocks != self.api_mocks:
+                updated.append(self.api_mocks)
 
         return [], updated, []
 

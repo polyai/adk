@@ -8,6 +8,7 @@ import os
 import unittest
 
 import yaml
+from google.protobuf.json_format import MessageToDict
 from jsonschema import ValidationError
 
 import poly.resources.resource_utils as resource_utils
@@ -83,9 +84,12 @@ from poly.resources.safety_filters import (
 )
 from poly.resources.sms import EnvPhoneNumbers, SMSTemplate
 from poly.resources.test_suite import (
+    ApiResponse,
+    ApiResponseRule,
     FunctionCallArgumentAssertion,
     FunctionCallAssertion,
     TestCase,
+    TestCaseApiMocks,
     TestCaseAssertion,
     TestCaseIntegrationAttributes,
     TestCaseSipHeaders,
@@ -7861,6 +7865,437 @@ class TestCaseMockContextTests(unittest.TestCase):
         self.assertEqual(test_case.sip_headers.headers, {})
         self.assertEqual(test_case.integration_attributes.attributes, {})
         self.assertNotIn("sip_headers", test_case.to_yaml_dict())
+
+
+class TestCaseApiMocksTests(unittest.TestCase):
+    """Mocked API responses (api_mocks) on a test case, for AM-960."""
+
+    RESOURCE_ID = "TEST-api_mocks"
+
+    def _test_case(self, **overrides) -> TestCase:
+        defaults = {
+            "resource_id": self.RESOURCE_ID,
+            "name": "Api mocks test",
+            "scenario": "Caller asks about their order.",
+            "channel": "chat.polyai",
+            "language": "en-GB",
+            "assertions": TestCaseAssertion(
+                resource_id=self.RESOURCE_ID, name="assertions", prompts=[], function_calls=[]
+            ),
+            "tags": TestCaseTags(resource_id=self.RESOURCE_ID, name="tags", tags=[]),
+        }
+        defaults.update(overrides)
+        return TestCase(**defaults)
+
+    def _api_mocks(self, mocks: dict) -> TestCaseApiMocks:
+        return TestCaseApiMocks(resource_id=self.RESOURCE_ID, name="api_mocks", mocks=mocks)
+
+    def _integration_mapping(self, name: str) -> ResourceMapping:
+        return ResourceMapping(
+            resource_id=f"API-{name}",
+            resource_name=name,
+            resource_type=ApiIntegration,
+            resource_prefix=None,
+            file_path=None,
+            flow_name=None,
+        )
+
+    def test_yaml_roundtrip_preserves_values_and_types(self):
+        api_mocks = self._api_mocks(
+            {
+                "crm": {
+                    "get_customer": [
+                        ApiResponseRule(
+                            respond=ApiResponse(
+                                status=200,
+                                body={"id": 1, "name": "Ada", "vip": True},
+                                headers={"x-trace-id": "abc-123"},
+                            )
+                        ),
+                        # No body, repeat set: the second rule in the sequence.
+                        ApiResponseRule(respond=ApiResponse(status=500), repeat=3),
+                    ]
+                },
+                "payments": {
+                    "charge": [
+                        # repeat unset: respond once and keep responding once matched.
+                        ApiResponseRule(respond=ApiResponse(status=201, body={"ok": True})),
+                    ]
+                },
+            }
+        )
+        test_case = self._test_case(api_mocks=api_mocks)
+
+        yaml_dict = test_case.to_yaml_dict()
+        mocks_yaml = yaml_dict["api_mocks"]
+        self.assertEqual(
+            mocks_yaml["crm"]["get_customer"][0],
+            {
+                "respond": {
+                    "status": 200,
+                    "body": {"id": 1, "name": "Ada", "vip": True},
+                    "headers": {"x-trace-id": "abc-123"},
+                }
+            },
+        )
+        self.assertNotIn("repeat", mocks_yaml["crm"]["get_customer"][0])
+        self.assertEqual(
+            mocks_yaml["crm"]["get_customer"][1], {"respond": {"status": 500}, "repeat": 3}
+        )
+        self.assertNotIn("repeat", mocks_yaml["payments"]["charge"][0])
+
+        restored = TestCase.from_yaml_dict(
+            yaml_dict, resource_id=self.RESOURCE_ID, name="Api mocks test"
+        )
+        restored_mocks = restored.api_mocks.mocks
+        first_rule = restored_mocks["crm"]["get_customer"][0]
+        self.assertEqual(first_rule.respond.status, 200)
+        self.assertEqual(first_rule.respond.body, {"id": 1, "name": "Ada", "vip": True})
+        self.assertEqual(first_rule.respond.headers, {"x-trace-id": "abc-123"})
+        self.assertIsNone(first_rule.repeat)
+
+        second_rule = restored_mocks["crm"]["get_customer"][1]
+        self.assertIsNone(second_rule.respond.body)
+        self.assertEqual(second_rule.repeat, 3)
+
+        third_rule = restored_mocks["payments"]["charge"][0]
+        self.assertEqual(third_rule.respond.body, {"ok": True})
+        self.assertIsNone(third_rule.repeat)
+
+    def test_omits_empty_values_from_yaml(self):
+        yaml_dict = self._test_case().to_yaml_dict()
+
+        self.assertNotIn("api_mocks", yaml_dict)
+
+    def test_update_command_type(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse())]}}
+            )
+        )
+
+        self.assertEqual(test_case.api_mocks.update_command_type, "set_test_case_api_mocks")
+
+    def test_build_update_proto_nests_integrations_operations_and_responses(self):
+        api_mocks = self._api_mocks(
+            {
+                "crm": {
+                    "get_customer": [
+                        ApiResponseRule(
+                            respond=ApiResponse(
+                                status=200,
+                                body={"id": 1, "flag": True, "meta": {"a": 1}},
+                                headers={"x-trace": "abc"},
+                            )
+                        ),
+                        ApiResponseRule(respond=ApiResponse(status=404), repeat=5),
+                    ],
+                    "list_customers": [
+                        ApiResponseRule(respond=ApiResponse(status=200, body=[1, 2, 3])),
+                    ],
+                },
+                "payments": {
+                    "charge": [ApiResponseRule(respond=ApiResponse(status=201, body={"ok": True}))],
+                },
+            }
+        )
+
+        proto = api_mocks.build_update_proto()
+
+        self.assertEqual(proto.id, self.RESOURCE_ID)
+        integrations = proto.api_mocks.integrations
+        self.assertCountEqual(integrations.keys(), ["crm", "payments"])
+
+        crm_operations = integrations["crm"].operations
+        self.assertCountEqual(crm_operations.keys(), ["get_customer", "list_customers"])
+
+        get_customer_responses = crm_operations["get_customer"].responses
+        self.assertEqual(len(get_customer_responses), 2)
+
+        first = get_customer_responses[0]
+        self.assertEqual(first.respond.status, 200)
+        self.assertEqual(dict(first.respond.headers), {"x-trace": "abc"})
+        self.assertEqual(
+            MessageToDict(first.respond.body), {"id": 1, "flag": True, "meta": {"a": 1}}
+        )
+        self.assertFalse(first.HasField("repeat"))
+
+        second = get_customer_responses[1]
+        self.assertEqual(second.respond.status, 404)
+        self.assertFalse(second.respond.HasField("body"))
+        self.assertTrue(second.HasField("repeat"))
+        self.assertEqual(second.repeat, 5)
+
+        list_customers_responses = crm_operations["list_customers"].responses
+        self.assertEqual(MessageToDict(list_customers_responses[0].respond.body), [1, 2, 3])
+
+        charge_responses = integrations["payments"].operations["charge"].responses
+        self.assertEqual(MessageToDict(charge_responses[0].respond.body), {"ok": True})
+
+    def test_from_projection_parses_nested_api_mocks(self):
+        projection = {
+            "testing": {
+                "testCases": {
+                    "entities": {
+                        self.RESOURCE_ID: {
+                            "name": "Api mocks test",
+                            "scenario": "Caller asks about their order.",
+                            "channel": "chat.polyai",
+                            "language": "en-GB",
+                            "apiMocks": {
+                                "integrations": {
+                                    "crm": {
+                                        "operations": {
+                                            "get_customer": {
+                                                "responses": [
+                                                    {
+                                                        "respond": {
+                                                            "status": 200,
+                                                            "body": {"id": 1},
+                                                            "headers": {"x-trace": "abc"},
+                                                        }
+                                                    },
+                                                    {"respond": {"status": 500}, "repeat": 3},
+                                                ]
+                                            }
+                                        }
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        }
+
+        test_case = TestCase.from_projection(projection)[self.RESOURCE_ID]
+        mocks = test_case.api_mocks.mocks
+
+        self.assertCountEqual(mocks.keys(), ["crm"])
+        rules = mocks["crm"]["get_customer"]
+        self.assertEqual(rules[0].respond.status, 200)
+        self.assertEqual(rules[0].respond.body, {"id": 1})
+        self.assertEqual(rules[0].respond.headers, {"x-trace": "abc"})
+        self.assertIsNone(rules[0].repeat)
+        self.assertEqual(rules[1].respond.status, 500)
+        self.assertEqual(rules[1].repeat, 3)
+
+    def test_from_projection_without_api_mocks(self):
+        projection = {
+            "testing": {
+                "testCases": {
+                    "entities": {
+                        self.RESOURCE_ID: {
+                            "name": "Api mocks test",
+                            "scenario": "Caller asks about their order.",
+                            "channel": "chat.polyai",
+                            "language": "en-GB",
+                        }
+                    }
+                }
+            }
+        }
+
+        test_case = TestCase.from_projection(projection)[self.RESOURCE_ID]
+
+        self.assertEqual(test_case.api_mocks.mocks, {})
+        self.assertNotIn("api_mocks", test_case.to_yaml_dict())
+
+    def test_subresource_pushed_on_create_when_non_empty(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+            )
+        )
+
+        _, updated, _ = test_case.get_new_updated_deleted_subresources()
+
+        self.assertIn(test_case.api_mocks, updated)
+
+    def test_subresource_omitted_on_create_when_empty(self):
+        test_case = self._test_case()
+
+        _, updated, _ = test_case.get_new_updated_deleted_subresources()
+
+        self.assertNotIn(test_case.api_mocks, updated)
+
+    def test_subresource_pushed_on_update_when_changed(self):
+        old = self._test_case()
+        new = self._test_case(
+            api_mocks=self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+            )
+        )
+
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertIn(new.api_mocks, updated)
+
+    def test_subresource_omitted_on_update_when_unchanged(self):
+        mocks = {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+        old = self._test_case(api_mocks=self._api_mocks(mocks))
+        new = self._test_case(
+            api_mocks=self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+            )
+        )
+
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertNotIn(new.api_mocks, updated)
+
+    def test_validate_accepts_a_well_formed_mock(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [
+                            ApiResponseRule(
+                                respond=ApiResponse(status=100, body={"a": 1}, headers={"x": "y"})
+                            ),
+                            ApiResponseRule(respond=ApiResponse(status=599), repeat=1),
+                        ]
+                    }
+                }
+            )
+        )
+
+        test_case.validate(resource_mappings=[self._integration_mapping("crm")])
+        # Also valid with no resource_mappings at all (integrations unknown).
+        test_case.validate()
+
+    def test_validate_rejects_bad_status(self):
+        for bad_status in (0, 999, "200", True, False):
+            with self.subTest(status=bad_status):
+                test_case = self._test_case(
+                    api_mocks=self._api_mocks(
+                        {
+                            "crm": {
+                                "get_customer": [
+                                    ApiResponseRule(respond=ApiResponse(status=bad_status))
+                                ]
+                            }
+                        }
+                    )
+                )
+
+                with self.assertRaises(ValueError) as ctx:
+                    test_case.validate()
+                self.assertIn("must be an HTTP status code", str(ctx.exception))
+
+    def test_validate_rejects_unknown_integration(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {"unknown_integration": {"get_customer": [ApiResponseRule(respond=ApiResponse())]}}
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate(resource_mappings=[self._integration_mapping("crm")])
+        self.assertIn("Unknown API integration", str(ctx.exception))
+        self.assertIn("unknown_integration", str(ctx.exception))
+
+    def test_validate_rejects_empty_integration_name(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {"": {"get_customer": [ApiResponseRule(respond=ApiResponse())]}}
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+        self.assertIn("integration name cannot be empty", str(ctx.exception))
+
+    def test_validate_rejects_empty_operation_name(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks({"crm": {"": [ApiResponseRule(respond=ApiResponse())]}})
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+        self.assertIn("empty operation name", str(ctx.exception))
+
+    def test_validate_rejects_bad_header_keys(self):
+        for headers in ({"": "v"}, {2: "v"}):
+            with self.subTest(headers=headers):
+                test_case = self._test_case(
+                    api_mocks=self._api_mocks(
+                        {
+                            "crm": {
+                                "get_customer": [
+                                    ApiResponseRule(
+                                        respond=ApiResponse(status=200, headers=headers)
+                                    )
+                                ]
+                            }
+                        }
+                    )
+                )
+
+                with self.assertRaises(ValueError) as ctx:
+                    test_case.validate()
+                self.assertIn("header keys must be non-empty text", str(ctx.exception))
+
+    def test_validate_rejects_bad_repeat(self):
+        for bad_repeat in (0, -1, 1.5, True):
+            with self.subTest(repeat=bad_repeat):
+                test_case = self._test_case(
+                    api_mocks=self._api_mocks(
+                        {
+                            "crm": {
+                                "get_customer": [
+                                    ApiResponseRule(
+                                        respond=ApiResponse(status=200), repeat=bad_repeat
+                                    )
+                                ]
+                            }
+                        }
+                    )
+                )
+
+                with self.assertRaises(ValueError) as ctx:
+                    test_case.validate()
+                self.assertIn("must be a positive integer", str(ctx.exception))
+
+    def test_validate_rejects_a_date_in_the_body(self):
+        """Reuses _validate_attribute_value, same as integration_attributes."""
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [
+                            ApiResponseRule(
+                                respond=ApiResponse(
+                                    status=200, body={"expiry": datetime.date(2026, 8, 12)}
+                                )
+                            )
+                        ]
+                    }
+                }
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+
+        message = str(ctx.exception)
+        self.assertIn("body.expiry", message)
+        self.assertIn("2026-08-12", message)
+
+    def test_api_response_from_dict_defaults(self):
+        response = ApiResponse.from_dict(None)
+
+        self.assertEqual(response.status, 200)
+        self.assertIsNone(response.body)
+        self.assertEqual(response.headers, {})
+
+    def test_api_response_from_dict_keeps_ints_as_ints(self):
+        """Mirrors _normalise_attribute: a body pushed through google.protobuf.Value
+        (a double) must not read a pushed int back as a float."""
+        response = ApiResponse.from_dict({"status": 200, "body": {"count": 2}})
+
+        self.assertEqual(response.body, {"count": 2})
+        self.assertIsInstance(response.body["count"], int)
 
 
 class ParseMultiResourcePathTests(unittest.TestCase):
