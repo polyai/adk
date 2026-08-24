@@ -5,6 +5,7 @@ Copyright PolyAI Limited
 
 import json
 import logging
+import os
 import typing as ty
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -158,6 +159,9 @@ class PlatformAPIHandler:
                 "Content-Type": "application/json",
                 "X-Poly-Source": "adk",
             }
+
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
 
         logger.info(f"Making {method} request to {url}")
 
@@ -987,6 +991,8 @@ class PlatformAPIHandler:
             "X-PolyAI-Correlation-Id": correlation_id,
             "X-Poly-Source": "adk",
         }
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
         params = {"direction": direction, "redacted": str(redacted).lower()}
 
         logger.info(f"Making GET request to {url}")
@@ -1053,6 +1059,8 @@ class PlatformAPIHandler:
             "X-PolyAI-Correlation-Id": correlation_id,
             "X-Poly-Source": "adk",
         }
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
 
         logger.info(f"Making GET request to {url}")
         response = requests.get(url, headers=headers, allow_redirects=False)
@@ -1098,6 +1106,8 @@ class PlatformAPIHandler:
             "X-Poly-Source": "adk",
             "Content-Type": "audio/wav",
         }
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
         if filename:
             headers["X-Filename"] = filename
 
@@ -1146,6 +1156,8 @@ class PlatformAPIHandler:
             "X-PolyAI-Correlation-Id": correlation_id,
             "X-Poly-Source": "adk",
         }
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
 
         logger.info(f"Making PUT request to {url}")
         response = requests.request(
@@ -1231,6 +1243,8 @@ class PlatformAPIHandler:
             "X-Poly-Source": "adk",
             "Content-Type": "application/json",
         }
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
         body: dict = {"text": text, "config": config}
         if language:
             body["language"] = language

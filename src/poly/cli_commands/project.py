@@ -1143,7 +1143,7 @@ class StudioCommand(BaseCommand):
         from poly.output.console import info
 
         project = load_project(base_path or os.getcwd(), output_json=output_json)
-        url = project.studio_base_url
+        url = f"{project.studio_base_url}/home?branchId={project.branch_id}"
         if output_json:
             json_print({"url": url})
         else:

@@ -23,8 +23,7 @@ The agent handles calls to **Maison**, a fictional restaurant. When a caller ask
 
 This tutorial covers:
 
-- creating an empty project in Agent Studio
-- initializing a local project and pulling its configuration
+- creating a new project and pulling it down locally
 - working on a branch
 - defining entities for structured data collection
 - building a multi-step flow with default steps and a function step
@@ -37,90 +36,37 @@ This tutorial covers:
 
 ## Prerequisites
 
-Before you start:
-
-- you have Python 3.14 or later installed
-- you have `uv` installed
-- you have installed the ADK: `pip install polyai-adk`
-- you have a PolyAI API key exported as `POLY_ADK_KEY`
-- **you have created an empty project in Agent Studio** — the ADK cannot create projects, it can only sync them. Open Agent Studio, create a new project, and make a note of its **account ID** and **project ID**. You will need both to initialize the local project.
-
-!!! tip "Finding your account ID and project ID"
-
-    Both IDs are visible in the Agent Studio project URL (e.g. `https://studio.poly.ai/<account_id>/<project_id>/...`) and on the project's settings page.
-
-Verify the CLI is available:
-
-~~~bash
-poly --version
-~~~
+- the ADK installed and you're signed in — see [Getting started](../get-started/get-started.md) if you haven't already
 
 ## Part 1 — Set up the project
 
-### Initialize
-
-Create a directory and run `poly init` inside it:
+### Create the project
 
 ~~~bash
 mkdir maison && cd maison
-poly init
+poly project create --name Maison
 ~~~
 
-`poly init` walks you through interactive dropdowns for region, account, and project — pick the empty project you created earlier. Single options (one region, one account) are auto-selected. If you'd rather pass the IDs from the Agent Studio URL directly, use `poly init --region <region> --account_id <account_id> --project_id <project_id>`.
+This creates a new project in Agent Studio and initializes it locally in one step — see [Getting started](../get-started/get-started.md#step-3-create-or-connect-a-project) for how project creation works in general, and [`poly project`](../reference/cli/project.md) for the full set of flags.
 
 ~~~text
 Initializing project <account_id>/<project_id>...
 ✓ Project initialized at /Users/yourname/maison/<account_id>/<project_id>
 ~~~
 
-If you prefer to pick values interactively, run `poly init` with no flags — you will be prompted for each one in turn. You can navigate with the arrow keys or start typing to filter the list.
-
-!!! info "`poly init` creates a subdirectory"
-
-    The project is created at `{cwd}/{account_id}/{project_id}`, not directly in your current directory. After init completes, change into the project directory before running any other commands:
-
-    ~~~bash
-    cd <account_id>/<project_id>
-    ~~~
-
-`poly init` also pulls the current configuration from Agent Studio automatically. There is no need to run `poly pull` separately.
-
-Your project directory now contains the initial configuration as YAML and Python files:
-
-~~~text
-<account_id>/<project_id>/
-├── project.yaml
-├── _gen/
-├── agent_settings/
-│   ├── personality.yaml
-│   ├── role.yaml
-│   └── rules.txt
-├── config/
-│   └── handoffs.yaml
-├── variables/                          # Virtual — no files on disk
-└── voice/
-    ├── configuration.yaml
-    └── speech_recognition/
-        └── asr_settings.yaml
+~~~bash
+cd <account_id>/<project_id>
 ~~~
 
-The `_gen/` directory contains auto-generated platform code. Do not edit it — it is overwritten on every pull.
-
-Files like `config/entities.yaml`, `flows/`, and `topics/` are only created when you add those resources to the project. You will create them in this tutorial.
+The project starts with just the base agent settings and voice configuration — see [Working locally](../development/working-locally.md#what-a-local-project-contains) for what a full project structure looks like. Resources like `config/entities.yaml`, `flows/`, and `topics/` don't exist yet; you'll create them as you go.
 
 ### Create a working branch
-
-It is good practice to make changes on a branch. Create one now:
 
 ~~~bash
 poly branch create booking-flow
 ~~~
 
-~~~text
-Branch 'booking-flow' created (ID: BRANCH-XXXXXXXX)
-~~~
-
-You are now on the `booking-flow` branch. Any changes you push will go to that branch in Agent Studio, leaving `main` (and Sandbox) untouched.
+You are now on the `booking-flow` branch — pushes go here instead of `main`, leaving it untouched until you merge. See [Branches, push, and pull](../development/branches-push-pull.md) for why this matters.
 
 !!! tip "Check which branch you are on"
 
@@ -143,7 +89,7 @@ custom: ""
 The file has two fields:
 
 - **`adjectives`** — a map of preset tonal traits. Each is set to `true` or `false`; every selected trait is combined into the agent's personality.
-- **`custom`** — a free-text description that can extend or replace the adjectives. It accepts `{{attr:...}}` and `{{vrbl:...}}` references, so the personality can vary per [variant](../reference/variants.md) or per call.
+- **`custom`** — a free-text description that can extend or replace the adjectives. It accepts `{{attr:...}}` and `{{vrbl:...}}` references, so the personality can vary per [variant](../reference/resources/variants.md) or per call.
 
 !!! info "Allowed adjective values"
 
@@ -222,10 +168,6 @@ entities:
 ~~~
 
 These four entities will be collected across the steps of the booking flow.
-
-!!! info "`relative_date` and round-trips"
-
-    The `relative_date: true` field is valid and is sent to the platform on push. However, date entity config may not be returned by the platform on pull, so after a `poly pull` you may see `config: {}` for the `reservation_date` entity. This is a known platform behavior and does not affect how the entity works at runtime.
 
 !!! info "Automatic ASR biasing"
 
@@ -382,10 +324,6 @@ This is what `{{fn:start_booking_flow}}` in your rules resolves to. When the mod
 
 The start function runs once at the beginning of every call, before the first user input. Use it to initialize state.
 
-!!! warning "`start_function.py` may already exist"
-
-    Projects built via Quick Agent Setup in Agent Studio often ship with a pre-populated `start_function.py` containing significant initialization logic. If the file already exists, add your initialization code to it rather than replacing it.
-
 Create or update `functions/start_function.py`:
 
 ~~~python
@@ -399,9 +337,10 @@ def start_function(conv: Conversation):
 
 ## Part 7 — Add a topic
 
-Topics tell the agent what kinds of caller utterances map to which actions. Create `topics/Make a Reservation.yaml`:
+Topics tell the agent what kinds of caller utterances map to which actions. Create `topics/make_a_reservation.yaml`:
 
 ~~~yaml
+name: Make a Reservation
 enabled: true
 content: The caller wants to make a table reservation at Maison restaurant.
 example_queries:
@@ -456,7 +395,7 @@ corrections:
 
 These rules are applied after the recognizer returns text but before the model sees it. They only touch the transcript — the caller's audio is unaffected.
 
-See the [speech recognition reference](../reference/speech_recognition.md) for the full field list, interaction styles, and barge-in settings.
+See the [speech recognition reference](../reference/resources/speech_recognition.md) for the full field list, interaction styles, and barge-in settings.
 
 ## Part 9 — Adjust how the agent speaks
 
@@ -470,11 +409,13 @@ pronunciations:
     description: Ensure the restaurant name is spoken in the intended French style
 ~~~
 
-You can add entries for any word or phrase the TTS mispronounces. See the [response control reference](../reference/response_control.md) for the full field list, including phrase filtering.
+You can add entries for any word or phrase the TTS mispronounces. See the [response control reference](../reference/resources/response_control.md) for the full field list, including phrase filtering.
 
 ## Part 10 — (Optional) Send an SMS confirmation
 
-SMS templates are fully supported by the ADK, but are not editable in the Agent Studio UI and template references of the form `{{twilio_sms:...}}` do not resolve inside UI-editable fields. To keep SMS working reliably, trigger it from code instead of from a prompt reference — that keeps every moving part inside files the ADK owns.
+!!! note "SMS is an enterprise feature"
+
+    SMS templates require an enterprise Agent Studio account. Skip this part if you're on a self-serve account.
 
 !!! info "Skip this part if you are only testing via chat"
 
@@ -532,13 +473,11 @@ def confirm_booking(conv: Conversation, flow: Flow):
     return f"Booking confirmed: table for {size} under {name} on {date} at {time}."
 ~~~
 
-Because the decision to send happens in Python, the model doesn't need to resolve `{{twilio_sms:...}}` and the UI gap for SMS templates stops mattering for this tutorial.
+Because the decision to send happens in Python, the model doesn't need to resolve `{{twilio_sms:...}}` at all.
 
-See the [SMS templates reference](../reference/sms.md) for the full field list, environment-specific sender numbers, and the `conv.send_sms` helper for free-form messages.
+See the [SMS templates reference](../reference/resources/sms.md) for the full field list, environment-specific sender numbers, and the `conv.send_sms` helper for free-form messages.
 
 ## Part 11 — Review your changes
-
-Before pushing, check what has changed:
 
 ~~~bash
 poly status
@@ -565,7 +504,7 @@ New files:
   /Users/yourname/maison/<account_id>/<project_id>/flows/booking_flow/function_steps/confirm_booking.py
   /Users/yourname/maison/<account_id>/<project_id>/functions/start_booking_flow.py
   /Users/yourname/maison/<account_id>/<project_id>/functions/start_function.py
-  /Users/yourname/maison/<account_id>/<project_id>/topics/Make a Reservation.yaml
+  /Users/yourname/maison/<account_id>/<project_id>/topics/make_a_reservation.yaml
   /Users/yourname/maison/<account_id>/<project_id>/voice/speech_recognition/keyphrase_boosting.yaml
   /Users/yourname/maison/<account_id>/<project_id>/voice/speech_recognition/transcript_corrections.yaml
   /Users/yourname/maison/<account_id>/<project_id>/voice/response_control/pronunciations.yaml
@@ -576,17 +515,9 @@ New files:
 
     The `variables/` entries appear because the ADK scans your function code for `conv.state.*` assignments and tracks each one as a variable. These entries are virtual — they do not correspond to files on disk and are not something you need to create or manage. This is expected output.
 
-To see the exact content difference for any file, run `poly diff`:
-
-~~~bash
-poly diff
-~~~
-
-This shows a unified diff of all local changes against the remote state, useful for reviewing before you push and for producing a diff for a code review.
+Run `poly diff` to see the exact content difference for any file before pushing.
 
 ## Part 12 — Push to Agent Studio
-
-Push the changes to your branch in Agent Studio:
 
 ~~~bash
 poly push
@@ -599,22 +530,16 @@ Pushed <account_id>/<project_id> to Agent Studio.
 
 The agent is now deployed to the `booking-flow` branch. Sandbox remains on `main` and is unaffected.
 
-## Part 13 — Merge and test
+## Part 13 — Test on the branch
 
-By default, `poly chat` connects to your current branch's last pushed state. On `main` it falls back to the sandbox environment. To test `booking-flow` against sandbox alongside the rest of the project, merge it into `main` first.
-
-!!! note "Merging from the CLI or Agent Studio"
-
-    Merge from the CLI with `poly branch merge '<commit message>'` (run from the `booking-flow` branch), or open the project in Agent Studio, switch to the `booking-flow` branch, and merge through the web UI. See the [Branch merging reference](../reference/branch_merge.md) for the full conflict-resolution flow, including `--interactive` and `--resolutions`.
-
-After merging, run `poly chat` against the sandbox environment:
+`poly chat` defaults to `--environment branch`, which chats against your current branch's last pushed state — exactly what you just pushed, without touching `main`:
 
 ~~~bash
-poly chat --environment sandbox
+poly chat
 ~~~
 
 ~~~text
-Starting chat for <account_id>/<project_id> (sandbox)...
+Starting chat for <account_id>/<project_id> (booking-flow)...
 Type your message. Press Ctrl+C to exit.
 
 Agent: Welcome to Maison. How can I help you today?
@@ -650,16 +575,33 @@ Agent: Your reservation is confirmed. We look forward to welcoming you to Maison
 
     If the remote state has diverged from your local copy, `poly chat --push` may write merge-conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) directly into your YAML files. If this happens, open the affected file, resolve the conflict by hand, and push again before continuing.
 
-## Part 14 — After the merge
+Keep editing, pushing, and chatting against the branch until you're happy with the behavior. Only merge once it works the way you want.
 
-After merging in Agent Studio, switch back to `main` locally:
+## Part 14 — Merge to main
+
+Merge from the CLI with `poly branch merge '<commit message>'` (run from the `booking-flow` branch), or open the project in Agent Studio, switch to the `booking-flow` branch, and merge through the web UI:
 
 ~~~bash
-poly branch switch main
-poly pull
+poly branch merge 'Add restaurant booking flow'
 ~~~
 
-Pulling after a merge keeps your local copy in sync with the normalized remote state.
+See [`poly branch merge`](../reference/cli/branch.md#poly-branch-merge) for the full conflict-resolution flow, including `--interactive` and `--resolutions`.
+
+## Part 15 — After the merge
+
+`poly branch merge` switches you back to `main` locally and pulls the merged state automatically — there's no separate `poly branch switch` or `poly pull` needed.
+
+Merging into `main` also deploys to sandbox automatically, so there's no separate deploy step either. To confirm:
+
+~~~bash
+poly deployments list
+~~~
+
+Then chat against sandbox to see the merged agent in action:
+
+~~~bash
+poly chat --environment sandbox
+~~~
 
 !!! info "YAML key order changes after a round-trip"
 
@@ -677,59 +619,66 @@ This tutorial covered a single flow with four steps. From here you can extend th
 
 **Richer error paths**: Add an explicit error step to the flow for when the booking cannot be completed. Route to it from `confirm_booking.py` using `flow.goto_step("Error")` and return a context string explaining what happened.
 
-**Call handoffs**: Define SIP transfer destinations in `config/handoffs.yaml` and trigger them from code with `conv.call_handoff(...)`. Handoffs are ADK-only — they do not have a matching editor in the Agent Studio UI — so, like SMS, the most reliable pattern is to call them from a function or function step rather than relying on a `{{ho:...}}` placeholder. See the [handoffs reference](../reference/handoffs.md).
+**Call handoffs**: Define SIP transfer destinations in `config/handoffs.yaml` and trigger them from code with `conv.call_handoff(...)`. Like SMS, handoffs require an enterprise Agent Studio account. See the [handoffs reference](../reference/resources/handoffs.md).
 
 ## Related pages
 
 <div class="grid cards" markdown>
+
+-   **Build an agent with the ADK**
+
+    ---
+
+    The general CLI and AI-agent workflows this tutorial applies to a concrete example.
+    [Open the workflow tutorial](./build-an-agent.md)
 
 -   **Flows**
 
     ---
 
     Full reference for flow configuration, step types, and conditions.
-    [Open flows](../reference/flows.md)
+    [Open flows](../reference/resources/flows.md)
 
 -   **Entities**
 
     ---
 
     All entity types and their configuration fields.
-    [Open entities](../reference/entities.md)
+    [Open entities](../reference/resources/entities.md)
 
 -   **Functions**
 
     ---
 
     How global functions, transition functions, and function steps differ.
-    [Open functions](../reference/functions.md)
+    [Open functions](../reference/resources/functions.md)
 
 -   **Topics**
 
     ---
 
     How topics connect caller intent to agent actions.
-    [Open topics](../reference/topics.md)
+    [Open topics](../reference/resources/topics.md)
 
 -   **Speech recognition**
 
     ---
 
     Keyphrase boosting, transcript corrections, and ASR settings.
-    [Open speech recognition](../reference/speech_recognition.md)
+    [Open speech recognition](../reference/resources/speech_recognition.md)
 
 -   **Response control**
 
     ---
 
     Pronunciations and phrase filtering for spoken output.
-    [Open response control](../reference/response_control.md)
+    [Open response control](../reference/resources/response_control.md)
 
 -   **Variants**
 
     ---
 
     Per-location configuration without duplicating your project.
-    [Open variants](../reference/variants.md)
+    [Open variants](../reference/resources/variants.md)
 
 </div>

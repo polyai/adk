@@ -20,6 +20,19 @@ from poly.resources import (
     Variable,
     VariantAttribute,
 )
+from poly.resources.flows import (
+    ASRBiasing,
+    ASRConfig,
+    BargeInConfig,
+    DTMFConfig,
+    FlowSettings,
+    FlowStep,
+    LLMConfig,
+    ReasoningEffort,
+    StepType,
+    VADConfig,
+)
+from poly.utils import prepush
 
 
 class MergeUtilsTests(unittest.TestCase):
@@ -1084,6 +1097,148 @@ class FlowUtilsTests(unittest.TestCase):
         self.assertIsNone(flow_name_none)
 
     # TODO: Test assigning positions to flow steps
+
+class ClearUnusedSettingsFromFlowStepTest(unittest.TestCase):
+    """Tests for prepush.clear_unused_settings_from_flow_step.
+
+    update_step_settings merges per section, so a section dropped from the local
+    YAML is read by the backend as "not updated" rather than "cleared". Removed
+    sections therefore need an explicit clear_step_settings command, using the
+    section names the backend's enum accepts.
+    """
+
+    FLOW_ID = "FLOW-abc"
+    STEP_ID = "step-1"
+    RESOURCE_ID = "FLOW-abc_step-1"
+
+    def _step(self, **settings_kwargs) -> FlowStep:
+        return FlowStep(
+            resource_id=self.RESOURCE_ID,
+            step_id=self.STEP_ID,
+            name="Step 1",
+            flow_id=self.FLOW_ID,
+            flow_name="Test Flow",
+            step_type=StepType.ADVANCED_STEP,
+            prompt="Hello",
+            settings=FlowSettings(step_id=self.STEP_ID, flow_id=self.FLOW_ID, **settings_kwargs),
+        )
+
+    def _all_sections(self) -> dict:
+        return {
+            "asr_biasing": ASRBiasing(is_enabled=True),
+            "dtmf": DTMFConfig(self.STEP_ID, self.FLOW_ID, is_enabled=True),
+            "asr": ASRConfig(provider="p", model="m"),
+            "vad": VADConfig(
+                provider="p",
+                vad_start=1.0,
+                vad_end=2.0,
+                speech_threshold=3.0,
+                silence_threshold=4.0,
+            ),
+            "barge_in": BargeInConfig(is_enabled=True),
+            "llm": LLMConfig(provider_model_id="model-1", reasoning_effort=ReasoningEffort.MEDIUM),
+        }
+
+    def _clear(self, original: FlowStep, updated: FlowStep) -> list[list[str]]:
+        """Run the prepush step and return the sections of each queued command."""
+        queued = []
+        prepush.clear_unused_settings_from_flow_step(
+            {FlowStep: {self.RESOURCE_ID: updated}},
+            current_resources={FlowStep: {self.RESOURCE_ID: original}},
+            queue_command=queued.append,
+        )
+        return [list(command.clear_step_settings.sections) for command in queued]
+
+    def test_clearing_barge_in_uses_backend_casing(self):
+        """barge_in must be sent as bargeIn — the backend validates against an enum."""
+        sections = self._all_sections()
+        original = self._step(**sections)
+        sections.pop("barge_in")
+        updated = self._step(**sections)
+
+        self.assertEqual(self._clear(original, updated), [["bargeIn"]])
+
+    def test_clearing_single_word_sections_are_passed_through(self):
+        """asr, vad and llm have the same name on both sides."""
+        for section in ("asr", "vad", "llm"):
+            with self.subTest(section):
+                sections = self._all_sections()
+                original = self._step(**sections)
+                sections.pop(section)
+                updated = self._step(**sections)
+
+                self.assertEqual(self._clear(original, updated), [[section]])
+
+    def test_clearing_every_clearable_section(self):
+        """All four clearable sections are sent in one command."""
+        original = self._step(**self._all_sections())
+        updated = self._step()
+
+        self.assertEqual(self._clear(original, updated), [["asr", "bargeIn", "llm", "vad"]])
+
+    def test_asr_biasing_and_dtmf_are_not_clearable(self):
+        """These deep-merge into legacy top-level mirrors, so the backend rejects them.
+
+        Sending them would fail validation for the whole command batch.
+        """
+        sections = self._all_sections()
+        original = self._step(**sections)
+        sections.pop("asr_biasing")
+        sections.pop("dtmf")
+        updated = self._step(**sections)
+
+        self.assertEqual(self._clear(original, updated), [])
+
+    def test_unclearable_sections_do_not_suppress_clearable_ones(self):
+        """Dropping asr_biasing alongside barge_in still clears barge_in."""
+        sections = self._all_sections()
+        original = self._step(**sections)
+        sections.pop("asr_biasing")
+        sections.pop("barge_in")
+        updated = self._step(**sections)
+
+        self.assertEqual(self._clear(original, updated), [["bargeIn"]])
+
+    def test_no_command_when_settings_unchanged(self):
+        original = self._step(**self._all_sections())
+        updated = self._step(**self._all_sections())
+
+        self.assertEqual(self._clear(original, updated), [])
+
+    def test_no_command_when_sections_are_added(self):
+        """Added sections go out via update_step_settings, not a clear."""
+        original = self._step()
+        updated = self._step(**self._all_sections())
+
+        self.assertEqual(self._clear(original, updated), [])
+
+    def test_step_missing_from_current_state_is_skipped(self):
+        """A step absent remotely (e.g. new from a linked project sync) is ignored."""
+        queued = []
+        prepush.clear_unused_settings_from_flow_step(
+            {FlowStep: {self.RESOURCE_ID: self._step()}},
+            current_resources={FlowStep: {}},
+            queue_command=queued.append,
+        )
+
+        self.assertEqual(queued, [])
+
+    def test_command_targets_the_right_step(self):
+        sections = self._all_sections()
+        original = self._step(**sections)
+        sections.pop("llm")
+
+        queued = []
+        prepush.clear_unused_settings_from_flow_step(
+            {FlowStep: {self.RESOURCE_ID: self._step(**sections)}},
+            current_resources={FlowStep: {self.RESOURCE_ID: original}},
+            queue_command=queued.append,
+        )
+
+        self.assertEqual(len(queued), 1)
+        self.assertEqual(queued[0].type, "clear_step_settings")
+        self.assertEqual(queued[0].clear_step_settings.flow_id, self.FLOW_ID)
+        self.assertEqual(queued[0].clear_step_settings.step_id, self.STEP_ID)
 
 
 class JsonIoTests(unittest.TestCase):

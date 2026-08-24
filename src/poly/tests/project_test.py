@@ -5,6 +5,7 @@ Uses test project in tests/test_project
 Copyright PolyAI Limited
 """
 
+import dataclasses
 import json
 import os
 import shutil
@@ -52,6 +53,7 @@ from poly.resources.flows import (
     ASRBiasing,
     Condition,
     DTMFConfig,
+    FlowSettings,
     StepType,
 )
 from poly.resources.function import FunctionType
@@ -212,9 +214,9 @@ class SerializationRoundTripTest(unittest.TestCase):
         self.assertEqual(restored.compute_hash(), doc.compute_hash())
 
     def test_flow_step_round_trip_excludes_sub_resource_internals(self):
-        """ASRBiasing/DTMFConfig set 'name' and 'resource_id' internally,
-        but these are not __init__ params. They must be excluded from
-        serialization so nested deserialization works.
+        """FlowSettings sets 'name' and 'resource_id' internally, but these are
+        not __init__ params. They must be excluded from serialization so nested
+        deserialization works.
         """
         step = FlowStep(
             resource_id="flow_step-1",
@@ -224,23 +226,28 @@ class SerializationRoundTripTest(unittest.TestCase):
             flow_name="Test Flow",
             step_type="advanced_step",
             prompt="Hello",
-            asr_biasing=ASRBiasing(step_id="step-1", flow_id="flow-123"),
-            dtmf_config=DTMFConfig(step_id="step-1", flow_id="flow-123"),
+            settings=FlowSettings(
+                step_id="step-1",
+                flow_id="flow-123",
+                asr_biasing=ASRBiasing(is_enabled=True),
+                dtmf=DTMFConfig(step_id="step-1", flow_id="flow-123"),
+            ),
         )
         serialized = resource_utils.resource_to_dict(step)
-        asr_dict = serialized["asr_biasing"]
-        dtmf_dict = serialized["dtmf_config"]
+        settings_dict = serialized["settings"]
 
         # Internal fields must not leak into serialized output
-        self.assertNotIn("name", asr_dict)
-        self.assertNotIn("resource_id", asr_dict)
-        self.assertNotIn("name", dtmf_dict)
-        self.assertNotIn("resource_id", dtmf_dict)
+        self.assertNotIn("name", settings_dict)
+        self.assertNotIn("resource_id", settings_dict)
+        for section in ("asr_biasing", "dtmf"):
+            self.assertNotIn("name", settings_dict[section])
+            self.assertNotIn("resource_id", settings_dict[section])
 
         # Deserialize back — must not raise TypeError
         restored = FlowStep(**serialized)
         self.assertEqual(restored.name, "Test Step")
-        self.assertEqual(restored.asr_biasing.step_id, "step-1")
+        self.assertEqual(restored.settings.step_id, "step-1")
+        self.assertTrue(restored.settings.asr_biasing.is_enabled)
 
 
 class DiscoverLocalResourcesTest(unittest.TestCase):
@@ -2207,9 +2214,9 @@ class PushProjectTest(unittest.TestCase):
 
     def test_push_project_modified_sub_resources_dtmf(self):
         project_data = deepcopy(PROJECT_DATA)
-        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["dtmf_config"][
-            "is_enabled"
-        ] = True
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["settings"][
+            "dtmf"
+        ]["is_enabled"] = True
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
         success, message, commands = project.push_project(force=True)
@@ -2218,7 +2225,8 @@ class PushProjectTest(unittest.TestCase):
         self.mock_api_handler.queue_resources.assert_called_once()
         call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
-        self.assertIn(DTMFConfig, updated_resources)
+        # DTMF is pushed as part of the step's combined settings sub-resource.
+        self.assertIn(FlowSettings, updated_resources)
 
     def test_push_project_new_sub_resources_condition(self):
         project_data = deepcopy(PROJECT_DATA)
@@ -2274,9 +2282,9 @@ class PushProjectTest(unittest.TestCase):
         """Test pushing an updated ASRBiasing sub-resource"""
         project_data = deepcopy(PROJECT_DATA)
         # Modify ASR biasing in project_data
-        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["asr_biasing"][
-            "custom_keywords"
-        ] = ["NewKeyword1", "NewKeyword2"]
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["settings"][
+            "asr_biasing"
+        ]["custom_keywords"] = ["NewKeyword1", "NewKeyword2"]
 
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
@@ -2286,7 +2294,8 @@ class PushProjectTest(unittest.TestCase):
         self.mock_api_handler.queue_resources.assert_called_once()
         call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
-        self.assertIn(ASRBiasing, updated_resources)
+        # ASR biasing is pushed as part of the step's combined settings sub-resource.
+        self.assertIn(FlowSettings, updated_resources)
 
     def test_push_project_mixed_changes(self):
         project_data = deepcopy(PROJECT_DATA)
@@ -2305,9 +2314,9 @@ class PushProjectTest(unittest.TestCase):
             "function_type": "global",
         }
         # Modified resource in subresource
-        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["asr_biasing"][
-            "is_enabled"
-        ] = False
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["settings"][
+            "asr_biasing"
+        ]["is_enabled"] = False
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
         success, message, commands = project.push_project(force=True)
@@ -2319,7 +2328,7 @@ class PushProjectTest(unittest.TestCase):
         updated_resources = call_args.kwargs["updated_resources"]
         deleted_resources = call_args.kwargs["deleted_resources"]
         self.assertIn(Topic, new_resources)
-        self.assertIn(ASRBiasing, updated_resources)
+        self.assertIn(FlowSettings, updated_resources)
         self.assertIn(FlowStep, updated_resources)
         self.assertIn(Function, deleted_resources)
 
@@ -3981,6 +3990,107 @@ class MigrateFlowStepResourceIdsTest(unittest.TestCase):
         self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
 
 
+class MigrateFlowStepSettingsTest(unittest.TestCase):
+    """Tests for migrate_flow_step_settings status dict migration."""
+
+    @staticmethod
+    def _legacy_status_dict() -> dict:
+        return {
+            "resources": {
+                "flow_steps": {
+                    "FLOW-abc_step-1": {
+                        "resource_id": "FLOW-abc_step-1",
+                        "step_id": "step-1",
+                        "flow_id": "FLOW-abc",
+                        "asr_biasing": {
+                            "is_enabled": True,
+                            "custom_keywords": ["hello"],
+                            # Internals set by the config class, not __init__ args
+                            "step_id": "step-1",
+                            "flow_id": "FLOW-abc",
+                            "resource_id": "FLOW-abc.step-1",
+                            "name": "asr",
+                        },
+                        "dtmf_config": {
+                            "is_enabled": True,
+                            "max_digits": 4,
+                            "step_id": "step-1",
+                            "flow_id": "FLOW-abc",
+                            "resource_id": "FLOW-abc.step-1",
+                            "name": "dtmf",
+                        },
+                    },
+                },
+            },
+        }
+
+    def test_folds_legacy_keys_into_settings(self):
+        """Legacy top-level asr_biasing/dtmf_config move under settings."""
+        from poly.migration_utils import migrate_flow_step_settings
+
+        status_dict = self._legacy_status_dict()
+        migrate_flow_step_settings(status_dict)
+
+        settings = status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"]["settings"]
+        # dtmf_config is renamed to dtmf to match FlowSettings
+        self.assertEqual(
+            settings,
+            {
+                "asr_biasing": {"is_enabled": True, "custom_keywords": ["hello"]},
+                "dtmf": {"is_enabled": True, "max_digits": 4},
+            },
+        )
+
+    def test_migrated_dict_loads_into_flow_settings(self):
+        """The migrated shape is accepted by FlowStep, which is the point of the migration."""
+        from poly.migration_utils import migrate_flow_step_settings
+
+        status_dict = self._legacy_status_dict()
+        migrate_flow_step_settings(status_dict)
+        resource_dict = status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"]
+
+        step = FlowStep(
+            resource_id=resource_dict["resource_id"],
+            name="Step 1",
+            step_id=resource_dict["step_id"],
+            flow_id=resource_dict["flow_id"],
+            flow_name="Test Flow",
+            step_type="advanced_step",
+            prompt="Hello",
+            settings=resource_dict["settings"],
+        )
+        self.assertTrue(step.settings.asr_biasing.is_enabled)
+        self.assertEqual(step.settings.asr_biasing.custom_keywords, ["hello"])
+        self.assertEqual(step.settings.dtmf.max_digits, 4)
+
+    def test_existing_settings_take_precedence(self):
+        """A newer status dict already carrying settings is not overwritten."""
+        from poly.migration_utils import migrate_flow_step_settings
+
+        status_dict = self._legacy_status_dict()
+        status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"]["settings"] = {
+            "asr_biasing": {"is_enabled": False},
+        }
+
+        migrate_flow_step_settings(status_dict)
+
+        settings = status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"]["settings"]
+        self.assertFalse(settings["asr_biasing"]["is_enabled"])
+        # The section missing from the newer format is still back-filled
+        self.assertEqual(settings["dtmf"], {"is_enabled": True, "max_digits": 4})
+
+    def test_steps_without_legacy_keys_are_untouched(self):
+        """Steps with no legacy config gain no settings key."""
+        from poly.migration_utils import migrate_flow_step_settings
+
+        status_dict = {
+            "resources": {"flow_steps": {"FLOW-abc_step-1": {"resource_id": "FLOW-abc_step-1"}}}
+        }
+
+        migrate_flow_step_settings(status_dict)
+
+        self.assertNotIn("settings", status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"])
+
 class SyncBranchProject(unittest.TestCase):
     """Tests for AgentStudioProject.sync_branch."""
 
@@ -5296,6 +5406,335 @@ class RtcPullEnvTest(unittest.TestCase):
         self.assertNotIn("data_file", result)
         self.assertTrue(os.path.exists(os.path.join(self.env_dir, "schema.json")))
         self.assertFalse(os.path.exists(os.path.join(self.env_dir, "data.json")))
+
+
+class SyncIdsWithSandboxTest(unittest.TestCase):
+    """Tests for sync_ids_with_sandbox adopting sandbox resource ids."""
+
+    LOCAL_FLOW_ID = "FLOW_CONFIG-test_flow"
+    SANDBOX_FLOW_ID = "FLOW-sandbox-assigned-id"
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.project.branch_id = "branch-1"
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "branch-1"
+        self.mock_api.send_queued_commands.return_value = True
+        self.project._api_handler = self.mock_api
+        patch.object(AgentStudioProject, "save_config").start()
+        self.addCleanup(patch.stopall)
+
+    def _sandbox_resources_with_reassigned_flow_id(self, without_start_step: bool = False):
+        """Sandbox resources identical to local, except test_flow has a different flow id.
+
+        Mirrors a flow that was created on main after the branch was cut: the files are the
+        same, but the platform assigned the flow a new id, so the sandbox steps carry a
+        `{sandbox_flow_id}_{step_id}` composite resource id.
+
+        Args:
+            without_start_step: omit the start step from the sandbox, so it looks like a
+                step added on this branch with no sandbox counterpart.
+        """
+        sandbox = deepcopy(self.project.resources)
+        for resource_type, resources_by_id in sandbox.items():
+            rekeyed = {}
+            for resource in resources_by_id.values():
+                if isinstance(resource, FlowConfig) and resource.resource_id == self.LOCAL_FLOW_ID:
+                    resource.resource_id = self.SANDBOX_FLOW_ID
+                elif getattr(resource, "flow_id", None) == self.LOCAL_FLOW_ID:
+                    if without_start_step and resource.resource_id.endswith("_start_step"):
+                        continue
+                    resource.flow_id = self.SANDBOX_FLOW_ID
+                    resource.resource_id = resource.resource_id.replace(
+                        self.LOCAL_FLOW_ID, self.SANDBOX_FLOW_ID, 1
+                    )
+                rekeyed[resource.resource_id] = resource
+            sandbox[resource_type] = rekeyed
+        return sandbox
+
+    def test_start_step_is_bare_step_id_when_sandbox_reassigned_the_flow_id(self):
+        """The synced flow config's start_step keeps only the step id, with no flow id prefix.
+
+        start_step is stored as a name locally and resolved back to an id by stripping the
+        flow id prefix off the step's composite resource id. If the mapping's flow_id is the
+        stale local one while the step id has already moved to the sandbox flow id, nothing
+        is stripped and the platform rejects the flow with "Start step ID does not exist".
+        """
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id()
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+        ):
+            self.assertTrue(self.project.sync_ids_with_sandbox())
+
+        synced_flow = self.project.resources[FlowConfig][self.SANDBOX_FLOW_ID]
+        self.assertEqual(synced_flow.start_step, "start_step")
+
+    def test_start_step_is_bare_step_id_when_the_start_step_is_new_on_the_branch(self):
+        """A start step with no sandbox counterpart is still re-pointed at the synced flow id.
+
+        A step added on the branch keeps its `{local_flow_id}_{step_id}` id, so if only
+        flow_id is translated the prefix and flow_id disagree and the flow id stays welded
+        onto start_step exactly as it did in the unfixed case.
+        """
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id(
+            without_start_step=True
+        )
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+        ):
+            self.assertTrue(self.project.sync_ids_with_sandbox())
+
+        synced_flow = self.project.resources[FlowConfig][self.SANDBOX_FLOW_ID]
+        self.assertEqual(synced_flow.start_step, "start_step")
+
+    def test_branch_only_step_is_rekeyed_onto_the_sandbox_flow_id(self):
+        """A step added on the branch adopts the sandbox flow id in its composite id."""
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id(
+            without_start_step=True
+        )
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+        ):
+            self.project.sync_ids_with_sandbox()
+
+        steps = self.project.resources[FlowStep]
+        self.assertIn(f"{self.SANDBOX_FLOW_ID}_start_step", steps)
+        self.assertNotIn(f"{self.LOCAL_FLOW_ID}_start_step", steps)
+        # No step is left straddling the two flow ids.
+        self.assertEqual(
+            [
+                step.resource_id
+                for step in steps.values()
+                if step.flow_id == self.SANDBOX_FLOW_ID
+                and not step.resource_id.startswith(f"{self.SANDBOX_FLOW_ID}_")
+            ],
+            [],
+        )
+
+    def test_two_flows_reassigned_at_once_do_not_contaminate_each_other(self):
+        """Each flow's steps are re-keyed onto their own flow's synced id.
+
+        `FLOW_CONFIG-test_flow` is a string prefix of `FLOW_CONFIG-test_flow_with_punctuation`,
+        so a rewrite that matched flow ids by substring rather than per-resource could strip
+        the wrong prefix and move one flow's steps under the other.
+        """
+        other_local_id = "FLOW_CONFIG-test_flow_with_punctuation"
+        other_sandbox_id = "FLOW-sandbox-other-id"
+        renames = {self.LOCAL_FLOW_ID: self.SANDBOX_FLOW_ID, other_local_id: other_sandbox_id}
+
+        sandbox = deepcopy(self.project.resources)
+        for resource_type, resources_by_id in sandbox.items():
+            rekeyed = {}
+            for resource in resources_by_id.values():
+                if isinstance(resource, FlowConfig) and resource.resource_id in renames:
+                    resource.resource_id = renames[resource.resource_id]
+                elif getattr(resource, "flow_id", None) in renames:
+                    old_flow_id = resource.flow_id
+                    resource.flow_id = renames[old_flow_id]
+                    if resource.resource_id.startswith(f"{old_flow_id}_"):
+                        resource.resource_id = (
+                            f"{resource.flow_id}_"
+                            f"{resource.resource_id.removeprefix(f'{old_flow_id}_')}"
+                        )
+                rekeyed[resource.resource_id] = resource
+            sandbox[resource_type] = rekeyed
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox
+        ):
+            self.assertTrue(self.project.sync_ids_with_sandbox())
+
+        self.assertEqual(
+            self.project.resources[FlowConfig][self.SANDBOX_FLOW_ID].start_step, "start_step"
+        )
+        self.assertEqual(
+            self.project.resources[FlowConfig][other_sandbox_id].start_step, "welcome_step"
+        )
+        # Every step sits under its own flow's synced id, with a matching composite prefix.
+        for step in self.project.resources[FlowStep].values():
+            if step.flow_id in renames.values():
+                self.assertTrue(
+                    step.resource_id.startswith(f"{step.flow_id}_"),
+                    f"{step.resource_id} does not sit under its flow {step.flow_id}",
+                )
+
+    def test_flow_scoped_function_ids_are_not_rewritten(self):
+        """Flow-scoped functions keep their ids: only composite step ids embed the flow id.
+
+        A Function belonging to a flow carries a flow_id but its resource_id
+        (`FUNCTION-process_data`) does not embed it. Prepending the synced flow id to such
+        an id would corrupt it, so the rewrite must apply only to composite ids.
+        """
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id()
+        flow_scoped_function_ids = {
+            function.resource_id
+            for function in self.project.resources[Function].values()
+            if getattr(function, "flow_id", None) == self.LOCAL_FLOW_ID
+        }
+        self.assertTrue(flow_scoped_function_ids, "fixture must have flow-scoped functions")
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+        ):
+            self.project.sync_ids_with_sandbox()
+
+        synced_function_ids = set(self.project.resources[Function])
+        self.assertTrue(flow_scoped_function_ids <= synced_function_ids)
+        self.assertEqual(
+            [rid for rid in synced_function_ids if rid.startswith(f"{self.SANDBOX_FLOW_ID}_")],
+            [],
+        )
+
+    def test_flow_and_steps_adopt_sandbox_ids(self):
+        """Both the flow config and its steps are re-keyed onto the sandbox flow id."""
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id()
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+        ):
+            self.project.sync_ids_with_sandbox()
+
+        self.assertIn(self.SANDBOX_FLOW_ID, self.project.resources[FlowConfig])
+        self.assertNotIn(self.LOCAL_FLOW_ID, self.project.resources[FlowConfig])
+
+        start_step = self.project.resources[FlowStep][f"{self.SANDBOX_FLOW_ID}_start_step"]
+        self.assertEqual(start_step.flow_id, self.SANDBOX_FLOW_ID)
+
+    def test_ids_unchanged_when_sandbox_ids_already_match(self):
+        """A sandbox whose ids already match the branch leaves local resource ids alone."""
+        with patch.object(
+            AgentStudioProject,
+            "get_remote_resources_by_name",
+            return_value=deepcopy(self.project.resources),
+        ):
+            self.assertTrue(self.project.sync_ids_with_sandbox())
+
+        self.assertIn(self.LOCAL_FLOW_ID, self.project.resources[FlowConfig])
+        self.assertEqual(
+            self.project.resources[FlowConfig][self.LOCAL_FLOW_ID].start_step, "start_step"
+        )
+
+    def test_no_op_sync_sends_no_commands(self):
+        """A sandbox identical to the branch stages nothing and sends no commands.
+
+        Every command in a sync batch is another chance for the platform to reject the
+        batch, so a sync with nothing to change must be a genuine no-op.
+        """
+        with patch.object(
+            AgentStudioProject,
+            "get_remote_resources_by_name",
+            return_value=deepcopy(self.project.resources),
+        ):
+            self.assertTrue(self.project.sync_ids_with_sandbox())
+
+        self.assertFalse(self.mock_api.send_queued_commands.called)
+
+    def test_content_change_is_still_detected(self):
+        """A resource whose stored content differs from disk is still staged.
+
+        Guards the no-op assertion above against passing for the wrong reason: sync must
+        stage real differences rather than having been made blind to them.
+        """
+        staged = {}
+        self.project.resources[FlowStep][
+            f"{self.LOCAL_FLOW_ID}_start_step"
+        ].prompt = "a prompt that does not match the file on disk"
+
+        with (
+            patch.object(
+                AgentStudioProject,
+                "get_remote_resources_by_name",
+                return_value=deepcopy(self.project.resources),
+            ),
+            patch.object(
+                AgentStudioProject,
+                "_stage_commands",
+                side_effect=lambda _s, _n, updated, _d: staged.update(updated=updated),
+            ),
+        ):
+            self.project.sync_ids_with_sandbox()
+
+        updated_ids = {rid for by_id in staged.get("updated", {}).values() for rid in by_id}
+        self.assertIn(f"{self.LOCAL_FLOW_ID}_start_step", updated_ids)
+
+    def test_raises_on_main_branch(self):
+        """Syncing ids while on main is not allowed."""
+        self.project.branch_id = "main"
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.sync_ids_with_sandbox()
+        self.assertIn("Cannot sync ids while on main branch", str(ctx.exception))
+
+    def test_raises_when_there_are_uncommitted_changes(self):
+        """Uncommitted local changes must be committed before ids can be synced."""
+        with patch.object(
+            AgentStudioProject, "get_diffs", return_value={"topics/topic_1.yaml": "a diff"}
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                self.project.sync_ids_with_sandbox()
+        self.assertIn("uncommitted changes", str(ctx.exception))
+
+
+class TestProjectFixtureIntegrityTest(unittest.TestCase):
+    """The test_project fixture must look like a status file a real project would write.
+
+    A real status file is written by save_config from live resources, so every stored
+    resource matches what reading the same file off disk produces. When the fixture drifts
+    from that, tests exercise states that cannot occur in practice — and, worse, hide the
+    ones that can: sync_ids_with_sandbox decides what changed by comparing whole resources,
+    so stored values that disagree with disk make a no-op sync look like a real change.
+    """
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mappings = self.project._make_resource_mappings(self.project.resources)
+        self.by_relative_path = {
+            os.path.relpath(mapping.file_path, self.project.root_path): mapping
+            for mapping in self.mappings
+        }
+
+    def test_stored_ids_match_their_resource_ids(self):
+        """Each resource is stored under a key equal to its own resource_id."""
+        mismatched = [
+            (resource_type.__name__, stored_id, resource.resource_id)
+            for resource_type, by_id in self.project.resources.items()
+            for stored_id, resource in by_id.items()
+            if resource.resource_id != stored_id
+        ]
+        self.assertEqual(mismatched, [])
+
+    def test_stored_resources_match_a_disk_read(self):
+        """Every stored resource equals the resource read back off disk."""
+        compared = 0
+        differing = []
+        for resource_type, by_id in self.project.resources.items():
+            for stored_id, stored in by_id.items():
+                mapping = self.by_relative_path.get(stored.file_path)
+                if mapping is None:
+                    continue
+                fresh = self.project.read_local_resource(
+                    resource=mapping, resource_mappings=self.mappings
+                )
+                if not dataclasses.is_dataclass(fresh):
+                    continue
+                compared += 1
+                for field in dataclasses.fields(fresh):
+                    if not field.compare:
+                        continue
+                    stored_value = getattr(stored, field.name, None)
+                    disk_value = getattr(fresh, field.name, None)
+                    if stored_value != disk_value:
+                        differing.append(
+                            f"{resource_type.__name__} {stored_id}.{field.name}: "
+                            f"stored={stored_value!r} disk={disk_value!r}"
+                        )
+
+        # Without this the test passes vacuously if the path keying ever breaks.
+        self.assertEqual(compared, len(self.mappings))
+        self.assertEqual(differing, [])
 
 
 if __name__ == "__main__":

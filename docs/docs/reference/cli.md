@@ -1,7 +1,9 @@
 ---
 title: CLI reference
-description: Reference for the core commands provided by the PolyAI ADK CLI.
+description: Index of every command provided by the PolyAI ADK CLI, with the flags shared across all of them.
 ---
+
+# CLI reference
 
 <p class="lead">
 The PolyAI ADK is accessed through the <code>poly</code> command.
@@ -35,34 +37,70 @@ poly push --help
 
     The installed CLI is the fastest way to confirm the commands and flags available in your local environment.
 
-## Core commands
+## Commands
 
-### `poly start`
+### Setting up
 
-End-to-end onboarding for **self-serve** accounts on [studio.poly.ai](https://studio.poly.ai). `poly start` is hardcoded to the `studio` region — for any other region, use [`poly login`](#poly-login).
+| Command | Purpose |
+|---|---|
+| [`poly login`](./cli/login.md) | Sign in to, or sign up for, an Agent Studio account |
+| [`poly start`](./cli/start.md) | Create an account and a project in one step |
+| [`poly init`](./cli/init.md) | Connect a local folder to an existing project |
+| [`poly project`](./cli/project.md) | Create and manage Agent Studio projects |
+| [`poly template`](./cli/template.md) | Browse and load example project templates |
+| [`poly completion`](./cli/completion.md) | Output a shell completion script |
 
-`poly start`:
+### Editing and syncing
 
-1. Opens a browser window so you can sign up or sign in to a self-serve workspace.
-2. Generates an API key (or reuses your existing one) and writes it to `~/.poly/credentials.json` under the `studio` region.
-3. Optionally creates a new Agent Studio project and pulls it down locally.
+| Command | Purpose |
+|---|---|
+| [`poly pull`](./cli/pull.md) | Pull remote configuration into the local project |
+| [`poly push`](./cli/push.md) | Push local changes to Agent Studio |
+| [`poly status`](./cli/status.md) | List changed files |
+| [`poly diff`](./cli/diff.md) | Show local changes in detail |
+| [`poly revert`](./cli/revert.md) | Discard local changes |
+| [`poly format`](./cli/format.md) | Format resource files |
+| [`poly validate`](./cli/validate.md) | Validate the project locally |
 
-If the ADK detects an existing API key in the credential file or environment, `poly start` asks whether to use it. Accept and the command skips ahead to the project-creation prompt; decline and it runs the full sign-in flow.
+### Branches and review
 
-Examples:
+| Command | Purpose |
+|---|---|
+| [`poly branch`](./cli/branch.md) | Create, switch, inspect, and merge branches |
+| [`poly review`](./cli/review.md) | Publish a diff for review |
 
-~~~bash
-poly start
-poly start --base-path /path/to/projects
-~~~
+### Testing and inspection
+
+| Command | Purpose |
+|---|---|
+| [`poly chat`](./cli/chat.md) | Talk to the agent interactively |
+| [`poly test`](./cli/test.md) | Run and inspect simulated conversation tests |
+| [`poly conversations`](./cli/conversations.md) | List and inspect real conversations |
+| [`poly docs`](./cli/docs.md) | Output resource documentation |
+
+### Deployment and configuration
+
+| Command | Purpose |
+|---|---|
+| [`poly deployments`](./cli/deployments.md) | List, promote, and roll back deployments |
+| [`poly rtc`](./cli/rtc.md) | Manage per-environment Real-Time Configuration |
+| [`poly audio-cache`](./cli/audio-cache.md) | Inspect and replace cached TTS audio |
+| [`poly studio`](./cli/studio.md) | Open the project in the Agent Studio web app |
+
+## Shared flags
+
+Most commands accept the same four flags:
 
 | Flag | Description |
 |---|---|
-| `--base-path` | Base path to initialize the project in. Defaults to the current working directory. |
+| `--path PATH` | Base path to the project. Defaults to the current working directory. |
+| `--json` | Print a single JSON object on stdout, for scripting. See below. |
+| `--verbose` | Show full error tracebacks. |
+| `--debug` | Display debug logs. |
 
-### `poly login`
+!!! tip "Run commands from the project folder"
 
-Sign in to an existing Agent Studio account and save API key credentials for the CLI. Works against any region — including `studio`, which makes `poly login --region studio` a viable alternative to `poly start` for self-serve users on a new machine who already have an account and don't need to create a project.
+    ADK commands are expected to be run from within your local project directory. If needed, use `--path` to point to a project explicitly.
 
 `poly login`:
 
@@ -1128,11 +1166,16 @@ poly functions validate --json
 poly functions deploy --json
 ~~~
 
+### `--json` contract
+
 When `--json` is used:
 
 - stdout contains exactly one JSON object
 - the process exits with code `0` on success and non-zero on failure
 - human-readable console messages are suppressed
+- error responses always include `{ "success": false, "error": "...", "traceback": "..." }`
+
+The exact top-level keys vary by command — each command's page documents its own output shape.
 
 !!! info "`--interactive` and `--json` cannot be used together"
 
@@ -1142,208 +1185,24 @@ When `--json` is used:
 
     When `--json` is used with `poly deployments promote` or `poly deployments rollback`, the confirmation prompt is automatically skipped (equivalent to passing `--force`).
 
-### JSON output shapes
+### Advanced JSON-driven workflows
 
-The exact fields vary by command. Common fields include:
+A few commands support extra flags for piping JSON between invocations instead of hitting the API each time:
 
-| Command | Key fields |
-|---|---|
-| `poly status --json` | `files_with_conflicts`, `modified_files`, `new_files`, `deleted_files` |
-| `poly push --json` | `success`, `message`, `dry_run` |
-| `poly pull --json` | `success`, `files_with_conflicts` |
-| `poly validate --json` | `valid`, `errors` |
-| `poly diff --json` | `diffs` |
-| `poly revert --json` | `success`, `files_reverted` |
-| `poly branch list --json` | `current_branch`, `branches` |
-| `poly branch create --json` | `success`, `new_branch_id`, `branch_name` |
-| `poly branch switch --json` | `success`, `switched_to`, `dry_run` |
-| `poly branch current --json` | `current_branch` |
-| `poly branch delete --json` | `success`, `deleted` |
-| `poly branch merge --json` | `success`; on conflict: `conflicts`, `errors` |
-| `poly format --json` | `success`, `check_only`, `format_errors`, `affected`, `ty_ran`, `ty_returncode`, `ty_timed_out` |
-| `poly init --json` | `success`, `root_path` |
-| `poly project create --json` | `success`, `root_path` (via init); on error: `success`, `error` |
-| `poly chat --json` | `conversations` (array); optional `push` (when `--push` is used) |
-| `poly deployments show --json` | `success`, `deployment`, `active_deployment_hashes`, `included_deployments`, `is_rollback` |
-| `poly deployments promote --json` | `success`, `from_hash`, `to_env`, `message`, `included_deployments`; `dry_run` when `--dry-run` is used |
-| `poly deployments rollback --json` | `success`, `target_hash`, `message`, `reverted_deployments`; `dry_run` when `--dry-run` is used |
-| `poly conversations list --json` | `conversations`, `count`, `limit`, `offset` |
-| `poly conversations get --json` | full conversation detail object |
-| `poly conversations get-audio --json` | `success`, `conversation_id`, `direction`, `redacted`, `output_path`, `size_bytes` |
-| `poly audio-cache list --json` | `entries`, `total_count` |
-| `poly audio-cache get-file --json` | `success`, `entry_id`, `output_path`, `size_bytes` |
-| `poly audio-cache update-file --json` | `success`, `entry_id`, `size_bytes` |
-| `poly audio-cache update-details --json` | `success`, `entry_id`, `size_bytes` |
-| `poly audio-cache delete --json` | `success` |
-| `poly audio-cache bulk-delete --json` | `deleted`, `failed` |
-| `poly audio-cache synthesize --json` | `success`, `entry_id`, `output_path`, `size_bytes` |
-
-For `poly branch delete --json`, when a branch that was the current branch is deleted, the response also includes `"switched_to": "main"`.
-
-For `poly branch merge --json`, a successful merge returns `{ "success": true }`. When conflicts or errors are present, the response includes `"conflicts"` and `"errors"` arrays containing the raw conflict and error objects from the platform.
-
-For `poly deployments show --json`, the response includes:
-
-- `deployment` — the full deployment record for the requested version hash.
-- `active_deployment_hashes` — a map of environment names to the currently active version hash in each environment.
-- `included_deployments` — the list of sandbox deployments included since the predecessor version in the queried environment.
-- `is_rollback` — `true` if the deployment is a rollback to an older version.
-
-Error responses always include `{ "success": false, "error": "...", "traceback": "..." }`.
-
-!!! info "`init` with `--json` requires explicit flags"
-
-    When using `poly init --json`, you must supply `--region`, `--account_id`, and `--project_id` explicitly. Interactive prompts are not supported in JSON mode.
-
-!!! info "`poly project create` with `--json` requires explicit flags"
-
-    When using `poly project create --json`, you must supply `--region`, `--account_id`, and `--name` explicitly. Interactive prompts are not supported in JSON mode.
-
-#### `poly chat --json` output shape
-
-When `--json` is used with `poly chat`, the command emits a single JSON object when the session ends:
-
-~~~json
-{
-  "conversations": [
-    {
-      "conversation_id": "conv-123",
-      "url": "https://...",
-      "turns": [
-        { "input": null, "response": "Hello! How can I help?", "conversation_ended": false },
-        { "input": "What are your hours?", "response": "We are open 9am–5pm.", "conversation_ended": false }
-      ]
-    }
-  ]
-}
-~~~
-
-- `conversations` is an array because `/restart` in scripted input produces multiple entries.
-- `turns[0]` is always the agent greeting, with `"input": null`.
-- If `--push` is also supplied, the output includes a `push` key: `{ "push": { "success": true, "message": "..." } }`.
-- If `--functions`, `--flows`, or `--state` are also set, the relevant metadata fields are included in each turn.
-
-#### `poly conversations get-audio --json` output shape
-
-When `--json` is used with `poly conversations get-audio`, the audio is still written to disk and the command emits a JSON summary:
-
-~~~json
-{
-  "success": true,
-  "conversation_id": "KA-123",
-  "direction": "combined",
-  "redacted": false,
-  "output_path": "KA-123.wav",
-  "size_bytes": 2000000
-}
-~~~
-
-#### `poly deployments promote --json` output shape
-
-~~~json
-{
-  "success": true,
-  "from_hash": "abc123456xyz",
-  "to_env": "pre-release",
-  "message": "Release notes here",
-  "included_deployments": [...]
-}
-~~~
-
-On dry run, `"dry_run": true` is added and `"success"` reflects the pre-flight state without any changes being made. On error, `"success": false` and `"error": "..."` are returned.
-
-#### `poly deployments rollback --json` output shape
-
-~~~json
-{
-  "success": true,
-  "target_hash": "def789012xyz",
-  "message": "Rolling back due to regression",
-  "reverted_deployments": [...]
-}
-~~~
-
-On dry run, `"dry_run": true` is added. On error, `"success": false` and `"error": "..."` are returned.
-
-### `poly push --output-json-commands`
-
-Adds a `commands` array to the JSON output of `poly push`, containing the serialized Agent Studio commands that were staged. Useful for dry-run review and integration testing.
-
-~~~bash
-poly push --json --dry-run --output-json-commands
-~~~
-
-The output will include a `commands` key with each command serialized from its protobuf representation.
-
-### Driving pull/push from a captured projection
-
-The `--from-projection` flag on `pull`, `push`, `init`, and `branch switch` lets you supply a projection JSON directly (as a string or via stdin with `-`) instead of fetching it from the API. This is useful for offline workflows and integration testing.
+| Flag | Commands | Description |
+|---|---|---|
+| `--from-projection <source>` | `pull`, `push`, `init`, `branch switch` | Supply a projection JSON directly (file path, inline string, or `-` for stdin) instead of fetching it from the API. Useful for offline workflows and integration testing. |
+| `--output-json-projection` | `pull`, `init`, `branch switch` | Include the projection in the `--json` output, so it can be captured and fed into another command's `--from-projection`. |
+| `--output-json-commands` | `push` | Add a `commands` array to the `--json` output, containing the serialized Agent Studio commands that were staged. Useful for dry-run review and integration testing. |
 
 ~~~bash
 poly pull --from-projection - < projection.json
 poly push --from-projection '{"topics": [...], ...}'
-cat projection.json | poly pull --from-projection -
-~~~
-
-The `--output-json-projection` flag on `pull`, `init`, and `branch switch` includes the projection in the JSON output when `--json` is also set. This lets you capture a projection from one command and feed it into another.
-
-~~~bash
 poly pull --json --output-json-projection | jq .projection > proj.json
-poly push --from-projection - < proj.json
+poly push --json --dry-run --output-json-commands
 ~~~
-
-
-## Working pattern
-
-A typical CLI workflow looks like this:
-
-1. create a new project with `poly project create` or initialize an existing one with `poly init`
-2. pull with `poly pull` if needed to refresh local state
-3. create or switch to a branch
-4. edit files
-5. inspect changes with `poly status` and `poly diff`
-6. validate with `poly validate`
-7. push with `poly push`
-8. optionally review with `poly review`
-9. test or chat with the agent using `poly chat`
-10. browse and debug conversations with `poly conversations list` and `poly conversations get`
-11. merge the branch with `poly branch merge '<message>'`
-12. promote to pre-release or live with `poly deployments promote`
-
-!!! info "Run commands from the project folder"
-
-    ADK commands are expected to be run from within your local project directory. If needed, use the <code>--path</code> flag to point to a project explicitly.
 
 ## Related pages
 
-<div class="grid cards" markdown>
-
--   **Build an agent**
-
-    ---
-
-    See how the CLI fits into a real workflow.
-    [Open the tutorial](../tutorials/build-an-agent.md)
-
--   **Branch merging**
-
-    ---
-
-    Conflict resolution, `--interactive` flow, and `--resolutions` JSON for `poly branch merge`.
-    [Open branch merging](./branch_merge.md)
-
--   **Tests**
-
-    ---
-
-    Write and manage simulated conversation tests in `test_suite/`.
-    [Open tests](./tests.md)
-
--   **Working locally**
-
-    ---
-
-    How the CLI fits into the daily edit/push/test loop.
-    [Open working locally](../concepts/working-locally.md)
-
-</div>
+- [Working locally](../development/working-locally.md) — the edit, push, and test loop these commands fit into
+- [Resource reference](./resources.md) — the resources these commands operate on

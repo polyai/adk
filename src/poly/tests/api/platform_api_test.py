@@ -4,6 +4,7 @@ Copyright PolyAI Limited
 """
 
 import json
+import os
 import unittest
 from unittest.mock import patch
 
@@ -71,9 +72,7 @@ class CreateChat(unittest.TestCase):
             sip_headers=sip_headers,
         )
 
-        self.assertEqual(
-            mock_make_request.call_args.kwargs["data"]["sip_headers"], sip_headers
-        )
+        self.assertEqual(mock_make_request.call_args.kwargs["data"]["sip_headers"], sip_headers)
 
     @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
     def test_draft_chat_includes_sip_headers(self, mock_make_request):
@@ -88,9 +87,7 @@ class CreateChat(unittest.TestCase):
             sip_headers=sip_headers,
         )
 
-        self.assertEqual(
-            mock_make_request.call_args.kwargs["data"]["sip_headers"], sip_headers
-        )
+        self.assertEqual(mock_make_request.call_args.kwargs["data"]["sip_headers"], sip_headers)
 
 
 class MakeRequest(unittest.TestCase):
@@ -857,6 +854,108 @@ class StartAndEndFunctions(unittest.TestCase):
 
         self.assertEqual(mock_request.call_args.kwargs["method"], "PUT")
         self.assertIn("/functions/end", mock_request.call_args.kwargs["url"])
+
+
+def _make_request_headers() -> dict:
+    """Call make_request with the network mocked and return the headers it sent."""
+    with (
+        patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key"),
+        patch("poly.handlers.platform_api.requests.request") as mock_request,
+    ):
+        mock_request.return_value = make_mock_response(200, json_body={})
+        PlatformAPIHandler.make_request("studio", "/adk/v1/accounts")
+        return mock_request.call_args.kwargs["headers"]
+
+
+def _get_conversation_audio_headers() -> dict:
+    """Call get_conversation_audio with the network mocked and return the headers it sent."""
+    with (
+        patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key"),
+        patch("poly.handlers.platform_api.requests.get") as mock_get,
+    ):
+        mock_get.return_value = make_mock_response(200, content=b"audio")
+        PlatformAPIHandler.get_conversation_audio("studio", "agent-1", "conv-1")
+        return mock_get.call_args.kwargs["headers"]
+
+
+def _get_audio_cache_file_headers() -> dict:
+    """Call get_audio_cache_file with the network mocked and return the headers it sent."""
+    with (
+        patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key"),
+        patch("poly.handlers.platform_api.requests.get") as mock_get,
+    ):
+        mock_get.return_value = make_mock_response(200, content=b"audio")
+        PlatformAPIHandler.get_audio_cache_file("studio", "agent-1", "entry-1")
+        return mock_get.call_args.kwargs["headers"]
+
+
+def _update_audio_cache_file_headers() -> dict:
+    """Call update_audio_cache_file with the network mocked and return the headers it sent."""
+    with (
+        patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key"),
+        patch("poly.handlers.platform_api.requests.request") as mock_request,
+    ):
+        mock_request.return_value = make_mock_response(204)
+        PlatformAPIHandler.update_audio_cache_file("studio", "agent-1", "entry-1", b"audio")
+        return mock_request.call_args.kwargs["headers"]
+
+
+def _update_audio_cache_details_headers() -> dict:
+    """Call update_audio_cache_details with the network mocked and return the headers it sent."""
+    with (
+        patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key"),
+        patch("poly.handlers.platform_api.requests.request") as mock_request,
+    ):
+        mock_request.return_value = make_mock_response(204)
+        PlatformAPIHandler.update_audio_cache_details(
+            "studio", "agent-1", "entry-1", b"audio", {"text": "hi", "config": {}}
+        )
+        return mock_request.call_args.kwargs["headers"]
+
+
+def _synthesize_audio_cache_headers() -> dict:
+    """Call synthesize_audio_cache with the network mocked and return the headers it sent."""
+    with (
+        patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key"),
+        patch("poly.handlers.platform_api.requests.request") as mock_request,
+    ):
+        mock_request.return_value = make_mock_response(200, content=b"audio")
+        PlatformAPIHandler.synthesize_audio_cache("studio", "agent-1", "entry-1", "hi", {})
+        return mock_request.call_args.kwargs["headers"]
+
+
+# Every handler method that builds its own request headers, mapped to a helper that
+# invokes it against a mocked transport and hands back the headers it tried to send.
+HEADER_BUILDING_METHODS = {
+    "make_request": _make_request_headers,
+    "get_conversation_audio": _get_conversation_audio_headers,
+    "get_audio_cache_file": _get_audio_cache_file_headers,
+    "update_audio_cache_file": _update_audio_cache_file_headers,
+    "update_audio_cache_details": _update_audio_cache_details_headers,
+    "synthesize_audio_cache": _synthesize_audio_cache_headers,
+}
+
+
+class UserEmailHeader(unittest.TestCase):
+    """Tests that ADK_COMMAND_USER_OVERRIDE is forwarded as the X-PolyAI-Email header."""
+
+    def test_override_email_is_sent_by_every_request(self):
+        """Every method that builds headers attributes the request to the override email."""
+        for method_name, send_request in HEADER_BUILDING_METHODS.items():
+            with (
+                self.subTest(method=method_name),
+                patch.dict(os.environ, {"ADK_COMMAND_USER_OVERRIDE": "dev@poly.ai"}),
+            ):
+                self.assertEqual(send_request()["X-PolyAI-Email"], "dev@poly.ai")
+
+    def test_email_header_omitted_when_override_unset(self):
+        """With no override set, no method sends an X-PolyAI-Email header at all."""
+        for method_name, send_request in HEADER_BUILDING_METHODS.items():
+            with (
+                self.subTest(method=method_name),
+                patch.dict(os.environ, {}, clear=True),
+            ):
+                self.assertNotIn("X-PolyAI-Email", send_request())
 
 
 if __name__ == "__main__":

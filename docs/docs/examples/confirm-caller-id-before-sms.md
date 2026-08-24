@@ -109,21 +109,21 @@ sms_templates:
     ---
 
     Reference for SMS template structure and variable substitution.
-    [Open SMS templates](../reference/sms.md)
+    [Open SMS templates](../reference/resources/sms.md)
 
 -   **Variables**
 
     ---
 
     How `conv.state` variables are discovered and referenced.
-    [Open variables](../reference/variables.md)
+    [Open variables](../reference/resources/variables.md)
 
 -   **Anti-patterns**
 
     ---
 
     Why prose conditionals on variable presence are unreliable.
-    [Open anti-patterns](../concepts/anti-patterns.md)
+    [Open resource architecture](../development/resource-architecture.md#common-mistakes)
 
 -   **Conversation object reference**
 
