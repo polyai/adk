@@ -143,6 +143,27 @@ class PlatformGuardrail(MultiResourceYamlResource):
                 f"Must be one of: {', '.join(valid_names)}"
             )
 
+    @classmethod
+    def validate_collection(cls, resources: dict[str, "PlatformGuardrail"]) -> None:
+        """Ensure every guardrail in the fixed platform catalog is present locally.
+
+        The catalog is fixed by the platform, so a missing entry means the local
+        file has drifted (e.g. a line was deleted by hand) rather than reflecting
+        a real platform state.
+        """
+        present_names = {guardrail.name for guardrail in resources.values()}
+        catalog_names = {
+            _guardrail_name_to_yaml(value.name)
+            for value in GuardrailName.DESCRIPTOR.values
+            if value.name != "GUARDRAIL_NAME_UNSPECIFIED"
+        }
+        missing = sorted(catalog_names - present_names)
+        if missing:
+            raise ValueError(
+                f"Missing platform guardrail(s) in {GUARDRAILS_FILE}: {', '.join(missing)}. "
+                "Run 'poly pull' to sync the full guardrail catalog."
+            )
+
     @property
     def command_type(self) -> str:
         """Get the update type for updating the resource."""

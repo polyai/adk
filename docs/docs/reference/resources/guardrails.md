@@ -104,6 +104,7 @@ custom_guardrails:
 Validation rejects a `guardrails.yaml` that doesn't satisfy these rules:
 
 - Every platform guardrail's `name` must be one of the fixed catalog names; anything else is rejected with the list of valid names.
+- Every platform guardrail in the fixed catalog must be present in the file — none can be missing, though any can be `enabled: false`.
 - Every platform and custom guardrail's `enabled` must be a boolean (`true`/`false`, unquoted).
 - A custom guardrail's `name`, `prompt`, and `action` are all required.
 - Any `{{prefix:name}}` reference in a custom guardrail's `action` must use one of the supported prefixes above, and must resolve to a resource that actually exists.

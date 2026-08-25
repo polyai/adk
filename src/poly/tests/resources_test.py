@@ -3758,7 +3758,6 @@ class EntityTests(unittest.TestCase):
         self.assertIsNone(entity_without_config.validate())
 
 
-
 TEST_FUNCTION_STEP_CODE = """def process_data(conv: Conversation, flow: Flow):
     \"\"\"Process some data.\"\"\"
     return "processed"
@@ -8553,12 +8552,69 @@ class PlatformGuardrailTests(unittest.TestCase):
 
     def test_validate_quoted_enabled_raises(self):
         """A YAML-quoted boolean ('true') is rejected with an actionable message."""
-        guardrail = PlatformGuardrail(
-            resource_id="ai_identity", name="ai_identity", enabled="true"
-        )
+        guardrail = PlatformGuardrail(resource_id="ai_identity", name="ai_identity", enabled="true")
         with self.assertRaises(ValueError) as cm:
             guardrail.validate()
         self.assertIn("Must be true or false (unquoted)", str(cm.exception))
+
+    @staticmethod
+    def _catalog_names() -> set[str]:
+        """The fixed platform guardrail catalog, derived from the GuardrailName proto enum.
+
+        e.g. GUARDRAIL_NAME_JAILBREAK_DEFENCE -> "jailbreak_defence".
+        """
+        from poly.handlers.protobuf.guardrails_pb2 import GuardrailName
+
+        return {
+            value.name.removeprefix("GUARDRAIL_NAME_").lower()
+            for value in GuardrailName.DESCRIPTOR.values
+            if value.name != "GUARDRAIL_NAME_UNSPECIFIED"
+        }
+
+    @classmethod
+    def _full_collection(cls) -> dict:
+        """A complete local collection: one PlatformGuardrail per catalog entry."""
+        return {
+            name: PlatformGuardrail(resource_id=name, name=name) for name in cls._catalog_names()
+        }
+
+    def test_validate_collection_passes_when_whole_catalog_is_present(self):
+        """A collection covering every catalog guardrail is valid."""
+        self.assertIsNone(PlatformGuardrail.validate_collection(self._full_collection()))
+
+    def test_validate_collection_missing_one_guardrail_raises_naming_it(self):
+        """Deleting a single guardrail from the file is reported by name, with a fix."""
+        collection = self._full_collection()
+        self.assertIn("ai_identity", collection)
+        del collection["ai_identity"]
+
+        with self.assertRaises(ValueError) as cm:
+            PlatformGuardrail.validate_collection(collection)
+        message = str(cm.exception)
+        self.assertIn("Missing platform guardrail(s)", message)
+        self.assertIn("ai_identity", message)
+        self.assertIn("poly pull", message)
+
+    def test_validate_collection_missing_several_guardrails_names_all_of_them(self):
+        """Every missing guardrail is listed, not just the first one found."""
+        collection = self._full_collection()
+        for name in ("ai_identity", "jailbreak_defence"):
+            self.assertIn(name, collection)
+            del collection[name]
+
+        with self.assertRaises(ValueError) as cm:
+            PlatformGuardrail.validate_collection(collection)
+        message = str(cm.exception)
+        self.assertIn("ai_identity", message)
+        self.assertIn("jailbreak_defence", message)
+
+    def test_validate_collection_empty_raises_listing_the_full_catalog(self):
+        """An empty collection means the whole catalog has drifted away locally."""
+        with self.assertRaises(ValueError) as cm:
+            PlatformGuardrail.validate_collection({})
+        message = str(cm.exception)
+        for name in self._catalog_names():
+            self.assertIn(name, message)
 
     def test_build_update_proto_maps_short_name_back_to_enum(self):
         """The update proto carries a single Guardrail with the platform enum name."""
@@ -8569,9 +8625,7 @@ class PlatformGuardrailTests(unittest.TestCase):
         )
         proto = guardrail.build_update_proto()
         self.assertEqual(len(proto.guardrails), 1)
-        self.assertEqual(
-            proto.guardrails[0].name, GuardrailName.GUARDRAIL_NAME_JAILBREAK_DEFENCE
-        )
+        self.assertEqual(proto.guardrails[0].name, GuardrailName.GUARDRAIL_NAME_JAILBREAK_DEFENCE)
         self.assertFalse(proto.guardrails[0].enabled)
 
     def test_build_create_proto_not_supported(self):
@@ -8723,8 +8777,7 @@ class CustomGuardrailTests(unittest.TestCase):
                             "id": "5ee46d81-99bc-4fc9-8046-e517948134a4",
                             "name": "Customer Information",
                             "prompt": (
-                                "Triggerswhenever you are about to repeat "
-                                "customer information"
+                                "Triggerswhenever you are about to repeat customer information"
                             ),
                             "action": "Call {{fn:default-function}}",
                             "enabled": True,
@@ -8769,9 +8822,7 @@ class CustomGuardrailTests(unittest.TestCase):
 
     def test_from_projection_defaults_missing_fields(self):
         """Fields absent from the projection fall back to empty strings and enabled=True."""
-        projection = {
-            "guardrails": {"customGuardrails": {"entities": {"CUSTOM_GUARDRAILS-1": {}}}}
-        }
+        projection = {"guardrails": {"customGuardrails": {"entities": {"CUSTOM_GUARDRAILS-1": {}}}}}
         guardrail = CustomGuardrail.from_projection(projection)["CUSTOM_GUARDRAILS-1"]
         self.assertEqual(guardrail.name, "")
         self.assertEqual(guardrail.prompt, "")
@@ -9444,9 +9495,7 @@ class DocumentFromProjection(unittest.TestCase):
     def test_keeps_document_with_empty_content(self):
         """An empty 'content' is a readable but empty document, not a permission failure."""
         projection = {
-            "documents": {
-                "documents": {"entities": {"DOC-1": {"path": "empty.md", "content": ""}}}
-            }
+            "documents": {"documents": {"entities": {"DOC-1": {"path": "empty.md", "content": ""}}}}
         }
         documents = Document.from_projection(projection)
         self.assertEqual(list(documents), ["DOC-1"])
