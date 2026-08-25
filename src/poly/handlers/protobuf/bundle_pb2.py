@@ -12,7 +12,7 @@ from google.protobuf.internal import builder as _builder
 _sym_db = _symbol_database.Default()
 
 
-from agent_v3.cli.sourcerer_sdk.protobuf import snapshot_pb2 as snapshot__pb2
+from poly.handlers.protobuf import snapshot_pb2 as snapshot__pb2
 from google.protobuf import struct_pb2 as google_dot_protobuf_dot_struct__pb2
 
 

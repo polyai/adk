@@ -12,7 +12,7 @@ from google.protobuf.internal import builder as _builder
 _sym_db = _symbol_database.Default()
 
 
-from agent_v3.cli.sourcerer_sdk.protobuf import knowledge_base_pb2 as knowledge__base__pb2
+from poly.handlers.protobuf import knowledge_base_pb2 as knowledge__base__pb2
 
 
 DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x16\x63hild_overwrites.proto\x12\x10\x63hild_overwrites\x1a\x14knowledge_base.proto\"H\n\x0f\x43hildOverwrites\x12\x35\n\x0eknowledge_base\x18\x01 \x01(\x0b\x32\x1d.knowledge_base.KnowledgeBaseb\x06proto3')
