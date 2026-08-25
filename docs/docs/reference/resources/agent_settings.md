@@ -25,6 +25,7 @@ agent_settings/
 ├── personality.yaml
 ├── role.yaml
 ├── rules.txt
+├── guardrails.yaml                 # Optional
 ├── safety_filters.yaml             # Optional
 └── experimental_config.json        # Optional
 ~~~
@@ -50,6 +51,12 @@ agent_settings/
     ---
 
     Provides plain-text instructions the agent should follow on every turn.
+
+-   **Guardrails**
+
+    ---
+
+    Platform and custom checks that constrain agent behavior at runtime.
 
 -   **Languages**
 
@@ -215,6 +222,12 @@ That kind of logic belongs in flows and Python functions.
 - concise instructions that apply broadly
 - deterministic logic handled in code or flow transitions
 
+## Guardrails
+
+The optional `guardrails.yaml` file configures platform and custom guardrails — runtime checks that constrain what the agent can say or do.
+
+See the [Guardrails reference](./guardrails.md) for full field descriptions, validation rules, and examples.
+
 ## Languages
 
 The optional `languages.yaml` file configures which languages the agent supports. When present, it defines the default language and any additional languages.
@@ -244,6 +257,13 @@ See the [Safety filters reference](./safety_filters.md) for field descriptions, 
 
     Learn how referenced global functions are defined and used.
     [Open functions](./functions.md)
+
+-   **Guardrails**
+
+    ---
+
+    Configure platform and custom guardrails that constrain agent behavior.
+    [Open guardrails](./guardrails.md)
 
 -   **Languages**
 
