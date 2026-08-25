@@ -13,3 +13,6 @@ dependencies = [
     "pymdown-extensions==10.14.3",
     "pygments==2.18.0",
 ]
+
+[tool.setuptools]
+packages = []

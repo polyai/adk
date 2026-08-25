@@ -14,8 +14,15 @@ A CLI and Python package for managing [Agent Studio](https://studio.us.poly.ai) 
 
 ## Installation
 
+
+Via Pip:
 ```bash
 pip install polyai-adk
+```
+
+Via [UV](https://docs.astral.sh/uv/):
+```bash
+uv tool install polyai-adk
 ```
 
 Once installed, use the `poly` command to manage your projects:
