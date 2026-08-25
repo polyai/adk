@@ -1,6 +1,114 @@
 # CHANGELOG
 
 
+## v0.44.4 (2026-08-25)
+
+### Bug Fixes
+
+- Accept flow functions in test case function call assertions
+  ([#283](https://github.com/polyai/adk/pull/283),
+  [`98cb18a`](https://github.com/polyai/adk/commit/98cb18a4951fe4f75caf2624a3bd8d556b0a1abb))
+
+## Summary
+
+`function_call_assertions` only accepted global functions, so an assertion naming a flow function
+  was rejected as unknown. Agent Studio accepts either — the assertion can be created in the UI and
+  read back by `poly pull` — so the ADK was rejecting files it had just written.
+
+## Motivation
+
+[DEVP-618](https://linear.app/poly-ai/issue/DEVP-618/allow-flow-functions-in-function-call-assertions)
+
+~~~ Validation error in test_suite/dummy_test.yaml: Unknown function in assertion:
+  register_phone_number ~~~
+
+`register_phone_number` is at `flows/idnv/functions/`. Validation fails per project, so while such a
+  test case exists `poly validate` fails for the whole project and CI goes red on any PR touching
+  it.
+
+## Changes
+
+- `TestCase.validate` accepts both function prefixes: `fn` (global) and `ft` (flow). Unknown names
+  still raise - Update the docs that stated the global-only rule as intended
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Three tests in `TestCaseTests` — global passes, flow passes, unknown still raises. Confirmed the
+  flow test fails on `main` and passes here. Nothing covered this check before.
+
+Also ran the patched validator over the real `adapthealth-usp` project offline (219 functions, 166
+  of them flow-local): the test case that triggered this now validates. Not pushed to Agent Studio.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1310 passed; 2
+  `posthog_test.py` failures are pre-existing on clean `main`) - [x] No breaking changes — this only
+  widens what validates - [x] Commit messages follow [conventional
+  commits](https://www.conventionalcommits.org/)
+
+## Note for reviewers
+
+Function steps and start/end functions have no prefix and stay rejected — they aren't LLM-callable.
+  If the platform does accept assertions on them, covering that is harder: the empty prefix also
+  covers every non-function resource, so unmapped names would stop being distinguishable from valid
+  ones.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+### Documentation
+
+- Refresh install method, CLI/resource reference, and structure
+  ([#278](https://github.com/polyai/adk/pull/278),
+  [`1debb5f`](https://github.com/polyai/adk/commit/1debb5f647917865c4b0b47222057b814a44a6be))
+
+## Summary
+
+Brings the docs site up to date: the recommended install method, a full pass over the CLI and
+  resource reference sections, and a clearer directory structure for maintaining them going forward.
+
+## Motivation
+
+The reference docs had drifted from the CLI's actual `--help` output and source behavior, had
+  inconsistent structure page-to-page, and were missing several real commands/resources entirely
+  (e.g. `poly project duplicate`, the `poly deployments ab-test` group, the `api_integrations`
+  resource). Separately, the recommended install method needed updating to `uv tool install`.
+
+## Changes
+
+- Update the install method (`uv tool install polyai-adk`) across the README and docs - Rewrite the
+  CLI reference (`reference/cli/`) against `--help` output and source, fixing incorrect
+  flags/examples and documenting previously-undocumented commands - Rewrite the resource reference
+  (`reference/resources/`) against source and the platform's own bundled docs, adding a new
+  `api_integrations.md` page and validation sections throughout - Move `reference/resources/*.md`
+  and `reference/cli/*.md` into their own subdirectories, and `tooling.md` to its own top-level nav
+  section - Add a `CLAUDE.md` to each of `reference/cli/` and `reference/resources/` documenting the
+  required page structure, so future additions stay consistent - Fix broken links, duplicated
+  content between pages (e.g. `testing.md`/`observability.md`), and several stale or unverified
+  platform claims in the tutorials
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+`uv run mkdocs build --strict` passes with no warnings.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+
 ## v0.44.3 (2026-08-18)
 
 ### Bug Fixes

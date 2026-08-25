@@ -162,11 +162,11 @@ prompt_assertions:
 
 ## Function call assertions
 
-Each function call assertion checks that a global function was called and, optionally, with specific argument values.
+Each function call assertion checks that a function was called and, optionally, with specific argument values.
 
 | Field | Description |
 |---|---|
-| `name` | Global function name. Must match a function in `functions/`. |
+| `name` | Function name. Must match a global function in `functions/` or a flow function in `flows/<flow>/functions/`. |
 | `arguments` | List of argument assertions. May be empty to check only that the function was called. |
 
 Argument assertion fields:
@@ -235,7 +235,7 @@ prompt_assertions:
 - `simulated_at`, if set, must be a valid ISO 8601 datetime
 - `caller_number`, if set, must be text — an unquoted number is rejected rather than converted
 - `integration_attributes` values must be text, numbers, `true`/`false`, `null`, lists, or nested maps; an unquoted date is rejected with the quoted form to use instead; keys must be text
-- each `function_call_assertions[*].name` must match a global function under `functions/`
+- each `function_call_assertions[*].name` must match a global function under `functions/` or a flow function under `flows/<flow>/functions/`
 - each argument's `value_type` must be one of `string`, `integer`, `number`, `boolean`
 - the filename must match the normalized `name`
 
@@ -292,7 +292,7 @@ Good coverage of a project usually includes:
 
     ---
 
-    Reference for the global functions named in function call assertions.
+    Reference for the functions named in function call assertions.
     [Open functions](./functions.md)
 
 -   **Variants**
