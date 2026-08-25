@@ -1053,65 +1053,6 @@ def print_audio_cache_entries(entries: list[dict[str, Any]]) -> None:
     console.print(table)
 
 
-def print_functions(functions: list[dict[str, Any]]) -> None:
-    """Print a table of Functions (from the public Functions API).
-
-    Args:
-        functions: List of function dicts (as returned by the functions list API).
-    """
-    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
-    table.add_column("Function ID", style="bold yellow", no_wrap=True)
-    table.add_column("Name", no_wrap=True)
-    table.add_column("Type", no_wrap=True)
-    table.add_column("Active", no_wrap=True)
-    table.add_column("Usage", no_wrap=True, justify="right")
-    table.add_column("Description", overflow="fold")
-
-    for fn in functions:
-        table.add_row(
-            str(fn.get("function_id", "—")),
-            fn.get("name", "—"),
-            fn.get("function_type") or "—",
-            "yes" if fn.get("active") else "no",
-            str(fn.get("usage_count", 0)),
-            fn.get("description") or "—",
-        )
-
-    console.print(table)
-
-
-def print_function_detail(fn: dict[str, Any]) -> None:
-    """Print detailed information for a single Function.
-
-    Args:
-        fn: The function dict (as returned by the functions get API).
-    """
-    console.print(
-        f"[bold]Function[/bold] [yellow]{fn.get('name', '—')}[/yellow] "
-        f"({fn.get('function_id', '—')})"
-    )
-    console.print(f"Type: {fn.get('function_type') or '—'}")
-    console.print(f"Description: {fn.get('description') or '—'}")
-    console.print(f"Active: {'yes' if fn.get('active') else 'no'}")
-    console.print(f"Usage count: {fn.get('usage_count', 0)}")
-    console.print(f"Version: {fn.get('version') or '—'}")
-
-    if parameters := fn.get("parameters"):
-        console.print("Parameters:")
-        for p in parameters:
-            console.print(
-                f"  - {p.get('name')} ({p.get('type')}): {p.get('description', '')}".rstrip()
-            )
-
-    if errors := fn.get("errors"):
-        console.print("[error]Errors:[/error]")
-        for err in errors:
-            console.print(f"  [error]-[/error] line {err.get('lineno')}: {err.get('message')}")
-
-    console.print()
-    print_code(fn.get("code", ""))
-
-
 def print_function_references(references: list[dict[str, Any]]) -> None:
     """Print the flow steps that reference a Function.
 
