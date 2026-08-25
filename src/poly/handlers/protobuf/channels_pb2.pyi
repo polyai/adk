@@ -1,9 +1,9 @@
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
-from agent_v3.cli.sourcerer_sdk.protobuf import llm_settings_pb2 as _llm_settings_pb2
-from agent_v3.cli.sourcerer_sdk.protobuf import content_filter_settings_pb2 as _content_filter_settings_pb2
-from agent_v3.cli.sourcerer_sdk.protobuf import asr_settings_pb2 as _asr_settings_pb2
-from agent_v3.cli.sourcerer_sdk.protobuf import agent_settings_pb2 as _agent_settings_pb2
-from agent_v3.cli.sourcerer_sdk.protobuf import asr_pb2 as _asr_pb2
+from poly.handlers.protobuf import llm_settings_pb2 as _llm_settings_pb2
+from poly.handlers.protobuf import content_filter_settings_pb2 as _content_filter_settings_pb2
+from poly.handlers.protobuf import asr_settings_pb2 as _asr_settings_pb2
+from poly.handlers.protobuf import agent_settings_pb2 as _agent_settings_pb2
+from poly.handlers.protobuf import asr_pb2 as _asr_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor

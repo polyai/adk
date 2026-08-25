@@ -1,9 +1,9 @@
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
-from agent_v3.cli.sourcerer_sdk.protobuf import functions_pb2 as _functions_pb2
-from agent_v3.cli.sourcerer_sdk.protobuf import handoff_pb2 as _handoff_pb2
-from agent_v3.cli.sourcerer_sdk.protobuf import sms_pb2 as _sms_pb2
-from agent_v3.cli.sourcerer_sdk.protobuf import variant_pb2 as _variant_pb2
-from agent_v3.cli.sourcerer_sdk.protobuf import entities_pb2 as _entities_pb2
+from poly.handlers.protobuf import functions_pb2 as _functions_pb2
+from poly.handlers.protobuf import handoff_pb2 as _handoff_pb2
+from poly.handlers.protobuf import sms_pb2 as _sms_pb2
+from poly.handlers.protobuf import variant_pb2 as _variant_pb2
+from poly.handlers.protobuf import entities_pb2 as _entities_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
