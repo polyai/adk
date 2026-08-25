@@ -17,6 +17,7 @@ from poly.resources.channel_settings import (
     VoiceGreeting,
     VoiceStylePrompt,
 )
+from poly.resources.child_topic import ChildTopic
 from poly.resources.documents import Document
 from poly.resources.entities import (
     Entity,

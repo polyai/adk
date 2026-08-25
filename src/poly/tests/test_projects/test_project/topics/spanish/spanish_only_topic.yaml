@@ -1,0 +1,7 @@
+name: Spanish Only Topic
+enabled: true
+actions: Responde en español usando {{fn:test_function}} y {{attr:customer-name}}.
+content: Este tema solo se aplica cuando la variante en español está activa.
+example_queries:
+- ¿Cómo puedo ayudarte?
+- ¿Qué servicios ofrecen?
