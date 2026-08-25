@@ -485,6 +485,64 @@ class TestCaseApiMocks:
         }
         return cls(mocks=mocks)
 
+    def validate(self, known_integrations: set[str]) -> None:
+        """Validate the mocked API responses.
+
+        `known_integrations` is empty when the project's integrations aren't known
+        (e.g. no resource_mappings passed in), in which case the integration-name
+        check is skipped rather than rejecting everything.
+
+        Operations aren't tracked as standalone resources, so operation names are
+        trusted here the same way the platform trusts them when cascading renames.
+        """
+        for integration_name, operations in self.mocks.items():
+            if not integration_name:
+                raise ValueError("API mock integration name cannot be empty.")
+            if known_integrations and integration_name not in known_integrations:
+                raise ValueError(f"Unknown API integration in mocks: '{integration_name}'.")
+            for operation_name, rules in operations.items():
+                if not operation_name:
+                    raise ValueError(
+                        f"API mock for integration '{integration_name}' has an empty "
+                        "operation name."
+                    )
+                if not rules:
+                    raise ValueError(
+                        f"API mock '{integration_name}.{operation_name}' must have at least "
+                        "one response rule."
+                    )
+                for index, rule in enumerate(rules):
+                    label = f"API mock '{integration_name}.{operation_name}'[{index}]"
+                    status = rule.respond.status
+                    if (
+                        not isinstance(status, int)
+                        or isinstance(status, bool)
+                        or not (100 <= status <= 599)
+                    ):
+                        raise ValueError(
+                            f"{label}: status '{status}' must be an HTTP status code (100-599)."
+                        )
+                    if rule.respond.body is not None:
+                        _validate_attribute_value(rule.respond.body, f"{label}.body")
+                    for header_key in rule.respond.headers:
+                        if not isinstance(header_key, str) or not header_key:
+                            raise ValueError(f"{label}: header keys must be non-empty text.")
+                    if rule.repeat is not None:
+                        if (
+                            not isinstance(rule.repeat, int)
+                            or isinstance(rule.repeat, bool)
+                            or rule.repeat == 0
+                            or rule.repeat < -1
+                        ):
+                            raise ValueError(
+                                f"{label}: repeat '{rule.repeat}' must be a positive integer or -1."
+                            )
+                        if rule.repeat == -1 and index != len(rules) - 1:
+                            raise ValueError(
+                                f"{label}: repeat=-1 (respond forever) is only valid on the "
+                                "last response rule for an operation."
+                            )
+
 
 @dataclass
 class TestCaseApiOperationMock(SubResource):
@@ -906,59 +964,11 @@ class TestCase(YamlResource):
         # Integration attributes carry JSON types through to the agent
         _validate_attribute_value(self.integration_attributes.attributes, "integration_attributes")
 
-        # API mocks: integration must exist (when the project's integrations are known);
-        # operations aren't tracked as standalone resources, so operation names are
-        # trusted here the same way the platform trusts them when cascading renames.
+        # API mocks: integration must exist (when the project's integrations are known).
         known_integrations = {
             m.resource_name for m in resource_mappings or [] if m.resource_type is ApiIntegration
         }
-        for integration_name, operations in self.api_mocks.mocks.items():
-            if not integration_name:
-                raise ValueError("API mock integration name cannot be empty.")
-            if known_integrations and integration_name not in known_integrations:
-                raise ValueError(f"Unknown API integration in mocks: '{integration_name}'.")
-            for operation_name, rules in operations.items():
-                if not operation_name:
-                    raise ValueError(
-                        f"API mock for integration '{integration_name}' has an empty "
-                        "operation name."
-                    )
-                if not rules:
-                    raise ValueError(
-                        f"API mock '{integration_name}.{operation_name}' must have at least "
-                        "one response rule."
-                    )
-                for index, rule in enumerate(rules):
-                    label = f"API mock '{integration_name}.{operation_name}'[{index}]"
-                    status = rule.respond.status
-                    if (
-                        not isinstance(status, int)
-                        or isinstance(status, bool)
-                        or not (100 <= status <= 599)
-                    ):
-                        raise ValueError(
-                            f"{label}: status '{status}' must be an HTTP status code (100-599)."
-                        )
-                    if rule.respond.body is not None:
-                        _validate_attribute_value(rule.respond.body, f"{label}.body")
-                    for header_key in rule.respond.headers:
-                        if not isinstance(header_key, str) or not header_key:
-                            raise ValueError(f"{label}: header keys must be non-empty text.")
-                    if rule.repeat is not None:
-                        if (
-                            not isinstance(rule.repeat, int)
-                            or isinstance(rule.repeat, bool)
-                            or rule.repeat == 0
-                            or rule.repeat < -1
-                        ):
-                            raise ValueError(
-                                f"{label}: repeat '{rule.repeat}' must be a positive integer or -1."
-                            )
-                        if rule.repeat == -1 and index != len(rules) - 1:
-                            raise ValueError(
-                                f"{label}: repeat=-1 (respond forever) is only valid on the "
-                                "last response rule for an operation."
-                            )
+        self.api_mocks.validate(known_integrations)
 
         # `fn` is a global function, `ft` a flow function. Both are assertable.
         known_functions = {
@@ -1037,6 +1047,7 @@ class TestCase(YamlResource):
                 - Deleted subresources
         """
         updated = []
+        deleted = []
 
         if not old_resource:
             updated.append(self.assertions)
@@ -1059,8 +1070,9 @@ class TestCase(YamlResource):
             mock_updates, mock_deletes = self._diff_api_mocks(old_resource.api_mocks.mocks)
 
         updated.extend(mock_updates)
+        deleted.extend(mock_deletes)
 
-        return [], updated, mock_deletes
+        return [], updated, deleted
 
     @property
     def command_type(self) -> str:
