@@ -703,16 +703,16 @@ class TestCase(YamlResource):
         # Integration attributes carry JSON types through to the agent
         _validate_attribute_value(self.integration_attributes.attributes, "integration_attributes")
 
-        # Function name is valid
-        known_global_functions = {
+        # `fn` is a global function, `ft` a flow function. Both are assertable.
+        known_functions = {
             resource.resource_name
             for resource in resource_mappings or []
-            if resource.resource_prefix == "fn"
+            if resource.resource_prefix in ("fn", "ft")
         }
         for function_call in self.assertions.function_calls:
             if not function_call.name:
                 raise ValueError("Function call assertion must have a name")
-            if known_global_functions and function_call.name not in known_global_functions:
+            if known_functions and function_call.name not in known_functions:
                 raise ValueError(f"Unknown function in assertion: {function_call.name}")
             for argument in function_call.arguments:
                 if argument.value_type not in ALLOWED_TYPES:

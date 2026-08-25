@@ -7357,6 +7357,72 @@ class TestCaseTests(unittest.TestCase):
             ]
         )
 
+    def _test_case_asserting_function(self, function_name: str) -> TestCase:
+        resource_id = "TEST-function_assertion"
+        return TestCase(
+            resource_id=resource_id,
+            name="Function assertion",
+            scenario="Give a phone number.",
+            channel="chat.polyai",
+            language="en-GB",
+            assertions=TestCaseAssertion(
+                resource_id=resource_id,
+                name="assertions",
+                prompts=[],
+                function_calls=[
+                    FunctionCallAssertion(
+                        name=function_name,
+                        arguments=[
+                            FunctionCallArgumentAssertion(
+                                parameter_name="phone_number",
+                                expected_value="123123",
+                                value_type="string",
+                            )
+                        ],
+                    )
+                ],
+            ),
+            tags=TestCaseTags(resource_id=resource_id, name="tags", tags=[]),
+        )
+
+    def _function_mappings(self) -> list[ResourceMapping]:
+        return [
+            ResourceMapping(
+                resource_id="fn-transfer",
+                resource_name="transfer_call",
+                resource_type=Function,
+                resource_prefix="fn",
+                file_path="functions/transfer_call.py",
+                flow_name=None,
+            ),
+            ResourceMapping(
+                resource_id="ft-register",
+                resource_name="register_phone_number",
+                resource_type=Function,
+                resource_prefix="ft",
+                file_path="flows/idnv/functions/register_phone_number.py",
+                flow_name="idnv",
+            ),
+        ]
+
+    def test_validate_accepts_global_function_assertion(self):
+        self._test_case_asserting_function("transfer_call").validate(
+            resource_mappings=self._function_mappings()
+        )
+
+    def test_validate_accepts_flow_function_assertion(self):
+        """A flow function is assertable: the platform accepts it, so the ADK must too."""
+        self._test_case_asserting_function("register_phone_number").validate(
+            resource_mappings=self._function_mappings()
+        )
+
+    def test_validate_rejects_unknown_function_assertion(self):
+        with self.assertRaises(ValueError) as cm:
+            self._test_case_asserting_function("register_phone_numbr").validate(
+                resource_mappings=self._function_mappings()
+            )
+        self.assertIn("Unknown function in assertion: register_phone_numbr", str(cm.exception))
+
     def test_get_new_updated_deleted_subresources(self):
         test_case = self._sample_test_case()
         new, updated, deleted = test_case.get_new_updated_deleted_subresources()
