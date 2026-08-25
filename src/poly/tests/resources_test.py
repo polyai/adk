@@ -1643,8 +1643,42 @@ class ChildTopicSerializationTests(unittest.TestCase):
         """Child topics live at topics/<variant>/<topic>.yaml, beside the base topics."""
         self.assertEqual(
             TEST_CHILD_TOPIC.file_path,
-            os.path.join("topics", "Spanish", "opening_hours.yaml"),
+            os.path.join("topics", "spanish", "opening_hours.yaml"),
         )
+
+    def test_file_path_lowercases_the_variant_folder(self):
+        """The variant folder is lowercased like every other name in a topic path."""
+        child_topic = ChildTopic(
+            resource_id="TOPIC-v1-1",
+            name="Opening Hours",
+            variant_id="VARIANT-1",
+            variant_name="Variant 1",
+            actions="",
+            content="",
+            example_queries=[],
+        )
+
+        self.assertEqual(
+            child_topic.file_path,
+            os.path.join("topics", "variant_1", "opening_hours.yaml"),
+        )
+
+    def test_file_path_without_a_variant_raises(self):
+        """A child topic with no variant has no determinable path."""
+        child_topic = ChildTopic(
+            resource_id="TOPIC-orphan",
+            name="Opening Hours",
+            variant_id=None,
+            variant_name=None,
+            actions="",
+            content="",
+            example_queries=[],
+        )
+
+        with self.assertRaises(ValueError) as cm:
+            child_topic.file_path
+
+        self.assertIn("has no variant", str(cm.exception))
 
     def test_file_path_cleans_variant_and_topic_names(self):
         """Names with spaces and punctuation are cleaned into path-safe segments."""
@@ -1660,11 +1694,7 @@ class ChildTopicSerializationTests(unittest.TestCase):
 
         self.assertEqual(
             child_topic.file_path,
-            os.path.join(
-                "topics",
-                resource_utils.clean_name("Latin America", lowercase=False),
-                f"{resource_utils.clean_name('Billing & Refunds')}.yaml",
-            ),
+            os.path.join("topics", "latin_america", "billing_refunds.yaml"),
         )
 
 
@@ -1772,7 +1802,11 @@ example_queries:
 
         self.assertEqual(child_topic.name, "Opening Hours")
         self.assertIsNone(child_topic.variant_id)
-        self.assertIsNone(child_topic.variant_name)
+        # The folder is kept as a fallback so file_path stays usable during discovery.
+        self.assertEqual(child_topic.variant_name, "Spanish")
+        self.assertEqual(
+            child_topic.file_path, os.path.join("topics", "spanish", "opening_hours.yaml")
+        )
 
     def test_unknown_variant_folder_leaves_variant_unresolved(self):
         """A folder that matches no known variant resolves to no variant ID."""
@@ -1785,7 +1819,12 @@ example_queries:
             )
 
         self.assertIsNone(child_topic.variant_id)
-        self.assertIsNone(child_topic.variant_name)
+        self.assertEqual(child_topic.variant_name, "Klingon")
+
+        # It still fails validation, since the folder names no known variant.
+        with self.assertRaises(ValueError) as cm:
+            child_topic.validate(resource_mappings=CHILD_TOPIC_MAPPINGS)
+        self.assertIn("not inside a known variant folder", str(cm.exception))
 
     def test_base_topic_depth_path_leaves_variant_unresolved(self):
         """A file directly in topics/ has no variant folder, so the variant stays unset."""

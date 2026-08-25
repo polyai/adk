@@ -399,11 +399,11 @@
         "name": "Spanish Only Topic",
         "variant_id": "VARIANT-spanish",
         "variant_name": "spanish",
-        "actions": "Responde en español usando {{fn:FUNCTION-test_function}} y {{attr:customer-name}}.",
-        "content": "Este tema solo se aplica cuando la variante en español está activa.",
+        "actions": "Handle this request in Spanish using {{fn:FUNCTION-test_function}} and {{attr:customer-name}}.",
+        "content": "This topic only applies when the Spanish variant is active.",
         "example_queries": [
-          "¿Cómo puedo ayudarte?",
-          "¿Qué servicios ofrecen?"
+          "How can I help you?",
+          "What services do you offer?"
         ],
         "enabled": true
       }

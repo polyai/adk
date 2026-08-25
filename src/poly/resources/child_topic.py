@@ -43,12 +43,14 @@ def _get_variant_folder_from_path(file_path: str) -> Optional[str]:
 def _get_variant_from_folder(
     variant_folder: str, resource_mappings: list[ResourceMapping]
 ) -> tuple[Optional[str], Optional[str]]:
-    """Resolve a variant folder name to (variant_id, variant_name) via resource mappings."""
+    """Resolve a variant folder name to (variant_id, variant_name) via resource mappings.
+
+    Both sides are put through clean_name so a variant declared as "Variant 1" matches its
+    folder on disk, which is written lowercased as "variant_1".
+    """
+    folder = utils.clean_name(variant_folder)
     for resource in resource_mappings:
-        if (
-            resource.resource_type == Variant
-            and utils.clean_name(resource.resource_name, lowercase=False) == variant_folder
-        ):
+        if resource.resource_type == Variant and utils.clean_name(resource.resource_name) == folder:
             return resource.resource_id, resource.resource_name
     return None, None
 
@@ -135,8 +137,17 @@ class ChildTopic(Topic):
 
     @cached_property
     def file_path(self) -> str:
-        """Get the file path for the child topic."""
-        variant_folder = utils.clean_name(self.variant_name, lowercase=False)
+        """Get the file path for the child topic.
+
+        The variant folder is lowercased like every other name in a topic path, so a
+        variant named "Variant 1" lives at topics/variant_1/.
+        """
+        if not self.variant_name:
+            raise ValueError(
+                f"Child topic '{self.name}' has no variant, so its file path cannot be "
+                "determined. It must live in a variant folder under topics/."
+            )
+        variant_folder = utils.clean_name(self.variant_name)
         file_name = f"{utils.clean_name(self.name)}.yaml"
         return os.path.join("topics", variant_folder, file_name)
 
@@ -187,6 +198,12 @@ class ChildTopic(Topic):
             else (None, None)
         )
 
+        # An unresolved variant is reported by validate(), not raised here -- discovery
+        # calls this with no resource mappings purely to recover the resource's real name.
+        # Fall back to the folder as read from disk so file_path can still be built until
+        # then; validate() still rejects it, because variant_id is left unset.
+        variant_name = variant_name or variant_folder
+
         # Delegates to Topic.read_local_resource, which performs the same
         # filename-vs-name match check.
         return super().read_local_resource(
@@ -217,7 +234,7 @@ class ChildTopic(Topic):
         # Names must be unique within (base topics + this variant's child topics) -- but
         # the same name can be reused by a child topic in a different variant.
         own_clean_name = utils.clean_name(self.name)
-        own_variant_folder = utils.clean_name(self.variant_name, lowercase=False)
+        own_variant_folder = utils.clean_name(self.variant_name)
         for resource in resource_mappings:
             if resource.resource_id == self.resource_id:
                 continue
@@ -233,7 +250,8 @@ class ChildTopic(Topic):
             if (
                 resource.resource_type == ChildTopic
                 and utils.clean_name(resource.resource_name) == own_clean_name
-                and _get_variant_folder_from_path(resource.file_path) == own_variant_folder
+                and utils.clean_name(_get_variant_folder_from_path(resource.file_path) or "")
+                == own_variant_folder
             ):
                 raise ValueError(
                     f"Child topic '{self.name}' duplicates another child topic in the same "
