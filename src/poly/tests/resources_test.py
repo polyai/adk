@@ -1942,19 +1942,41 @@ class ChildTopicValidateTests(unittest.TestCase):
             TEST_CHILD_TOPIC.validate(resource_mappings=mappings)
 
         self.assertIn(
-            "Child topic 'Opening Hours' duplicates another child topic in the same "
-            "variant ('Opening Hours')",
+            "Child topic 'Opening Hours' has the same name as child topic 'Opening Hours' "
+            "in variant 'spanish'",
             str(cm.exception),
         )
 
-    def test_name_matching_a_child_topic_in_a_different_variant_is_valid(self):
-        """Name uniqueness is scoped per variant, so other variants may reuse the name."""
+    def test_name_matching_a_child_topic_in_a_different_variant_raises(self):
+        """Name uniqueness spans every variant, so another variant may not reuse the name."""
         mappings = CHILD_TOPIC_MAPPINGS + [
             ResourceMapping(
                 resource_id="TOPIC-fr-1",
                 resource_name="Opening Hours",
                 resource_type=ChildTopic,
                 file_path=os.path.join("topics", "French", "opening_hours.yaml"),
+                resource_prefix="topic",
+                flow_name=None,
+            ),
+        ]
+
+        with self.assertRaises(ValueError) as cm:
+            TEST_CHILD_TOPIC.validate(resource_mappings=mappings)
+
+        self.assertIn(
+            "Child topic 'Opening Hours' has the same name as child topic 'Opening Hours' "
+            "in variant 'french'",
+            str(cm.exception),
+        )
+
+    def test_name_not_used_by_any_other_topic_is_valid(self):
+        """A name no other base or child topic uses passes validation."""
+        mappings = CHILD_TOPIC_MAPPINGS + [
+            ResourceMapping(
+                resource_id="TOPIC-fr-1",
+                resource_name="Closing Times",
+                resource_type=ChildTopic,
+                file_path=os.path.join("topics", "French", "closing_times.yaml"),
                 resource_prefix="topic",
                 flow_name=None,
             ),
@@ -3120,6 +3142,46 @@ extracted_entities:
 - customer_name
 prompt: Hello, how can I help you?
 """
+
+
+class FlowStepOrphanedFromFlowTests(unittest.TestCase):
+    """A step whose flow config is missing must not crash before it can be reported."""
+
+    def test_missing_flow_config_falls_back_to_the_folder_name(self):
+        """Reading with no flow mapping keeps the folder, so file_path stays usable.
+
+        Project discovery reads a step before the flow mappings exist. Leaving flow_name
+        unset made file_path raise AttributeError while diffing.
+        """
+        with mock_read_from_file(FLOW_STEP_RAW):
+            step = FlowStep.read_local_resource(
+                file_path=os.path.join("flows", "orphan_flow", "steps", "test_step.yaml"),
+                resource_id="temp_id",
+                resource_name="Test Step",
+                resource_mappings=[],
+            )
+
+        self.assertEqual(step.flow_name, "orphan_flow")
+        self.assertEqual(
+            step.file_path, os.path.join("flows", "orphan_flow", "steps", "test_step.yaml")
+        )
+
+    def test_file_path_without_a_flow_raises(self):
+        """A step with no flow at all has no determinable path."""
+        step = FlowStep(
+            resource_id="temp_id",
+            name="start_step",
+            step_id="start_step",
+            flow_id=None,
+            flow_name=None,
+            step_type=StepType.ADVANCED_STEP,
+            prompt="hello",
+        )
+
+        with self.assertRaises(ValueError) as cm:
+            step.file_path
+
+        self.assertIn("does not belong to a flow", str(cm.exception))
 
 
 class FlowStepTests(unittest.TestCase):

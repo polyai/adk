@@ -657,6 +657,11 @@ class FlowStep(BaseFlowStep, YamlResource):
     @cached_property
     def file_path(self) -> str:
         """File path for the resource."""
+        if not self.flow_name:
+            raise ValueError(
+                f"Step '{self.name}' does not belong to a flow, so its file path cannot be "
+                "determined. It must live in a flow folder under flows/."
+            )
         return os.path.join(
             "flows",
             utils.clean_name(self.flow_name),
@@ -680,6 +685,11 @@ class FlowStep(BaseFlowStep, YamlResource):
 
         # Extract flow_id from resource mappings
         flow_id, flow_name = utils.get_flow_id_from_flow_name(flow_folder_name, resource_mappings)
+
+        # A step whose flow config is missing or unreadable resolves to no flow. Fall back
+        # to the folder as read from disk so file_path stays usable -- discovery reads a
+        # step before the flow mappings exist, and validate() reports the missing flow.
+        flow_name = flow_name or flow_folder_name
 
         contents = cls.read_from_file(file_path)
         try:
@@ -1755,6 +1765,11 @@ class FunctionStep(Function, BaseFlowStep):
     @cached_property
     def file_path(self) -> str:
         """File path for the resource."""
+        if not self.flow_name:
+            raise ValueError(
+                f"Function step '{self.name}' does not belong to a flow, so its file path "
+                "cannot be determined. It must live in a flow folder under flows/."
+            )
         file_name = f"{self.name}.py"
         flow_name = utils.clean_name(self.flow_name)
         return os.path.join("flows", flow_name, "function_steps", file_name)
@@ -1810,6 +1825,10 @@ class FunctionStep(Function, BaseFlowStep):
             flow_id, flow_name = utils.get_flow_id_from_flow_name(
                 flow_folder_name, resource_mappings
             )
+
+        # See FlowStep.read_local_resource: keep the folder as a fallback so file_path
+        # stays usable when the flow config is missing.
+        flow_name = flow_name or flow_folder_name
 
         step_id = resource_id.removeprefix(f"{flow_id}_")
 

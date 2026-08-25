@@ -4,8 +4,8 @@ A child topic is a KB Topic scoped to a single variant: it only applies when tha
 is active. It lives in a separate collection from the base `knowledge_base.topics` --
 `ChildOverwrites.knowledge_base` on the platform's Snapshot message -- gets its own
 platform-assigned ID independent of any base topic (there is no backend link field between
-a child topic and a base topic), and its name must be unique within the base topics and
-that variant's other child topics (a name can repeat across different variants).
+a child topic and a base topic), and its name must be unique across the base topics and
+every child topic, including those belonging to other variants.
 
 Copyright PolyAI Limited
 """
@@ -231,33 +231,29 @@ class ChildTopic(Topic):
                 "Check config/variant_attributes.yaml."
             )
 
-        # Names must be unique within (base topics + this variant's child topics) -- but
-        # the same name can be reused by a child topic in a different variant.
+        # The platform requires a topic name to be unique across the base topics and every
+        # child topic, in every variant -- not just within this one. Enforce that here so
+        # the clash is reported against the offending file rather than as a push failure.
         own_clean_name = utils.clean_name(self.name)
-        own_variant_folder = utils.clean_name(self.variant_name)
         for resource in resource_mappings:
             if resource.resource_id == self.resource_id:
                 continue
-            if (
-                resource.resource_type == Topic
-                and utils.clean_name(resource.resource_name) == own_clean_name
-            ):
-                raise ValueError(
-                    f"Child topic '{self.name}' has the same name as base topic "
-                    f"'{resource.resource_name}'. Names must be unique within topics + "
-                    "a variant's child topics."
+            if resource.resource_type not in (Topic, ChildTopic):
+                continue
+            if utils.clean_name(resource.resource_name) != own_clean_name:
+                continue
+
+            if resource.resource_type == Topic:
+                clash = f"base topic '{resource.resource_name}'"
+            else:
+                variant_folder = _get_variant_folder_from_path(resource.file_path)
+                clash = f"child topic '{resource.resource_name}'" + (
+                    f" in variant '{utils.clean_name(variant_folder)}'" if variant_folder else ""
                 )
-            if (
-                resource.resource_type == ChildTopic
-                and utils.clean_name(resource.resource_name) == own_clean_name
-                and utils.clean_name(_get_variant_folder_from_path(resource.file_path) or "")
-                == own_variant_folder
-            ):
-                raise ValueError(
-                    f"Child topic '{self.name}' duplicates another child topic in the same "
-                    f"variant ('{resource.resource_name}'). Names must be unique within "
-                    "topics + a variant's child topics."
-                )
+            raise ValueError(
+                f"Child topic '{self.name}' has the same name as {clash}. Topic names must "
+                "be unique across all topics and child topics, including across variants."
+            )
 
     def build_update_proto(self) -> KnowledgeBase_UpdateTopic:
         """Create a proto for updating the resource."""
