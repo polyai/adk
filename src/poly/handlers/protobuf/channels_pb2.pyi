@@ -1,9 +1,9 @@
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
-from poly.handlers.protobuf import llm_settings_pb2 as _llm_settings_pb2
-from poly.handlers.protobuf import content_filter_settings_pb2 as _content_filter_settings_pb2
-from poly.handlers.protobuf import asr_settings_pb2 as _asr_settings_pb2
-from poly.handlers.protobuf import agent_settings_pb2 as _agent_settings_pb2
-from poly.handlers.protobuf import asr_pb2 as _asr_pb2
+from agent_v3.cli.sourcerer_sdk.protobuf import llm_settings_pb2 as _llm_settings_pb2
+from agent_v3.cli.sourcerer_sdk.protobuf import content_filter_settings_pb2 as _content_filter_settings_pb2
+from agent_v3.cli.sourcerer_sdk.protobuf import asr_settings_pb2 as _asr_settings_pb2
+from agent_v3.cli.sourcerer_sdk.protobuf import agent_settings_pb2 as _agent_settings_pb2
+from agent_v3.cli.sourcerer_sdk.protobuf import asr_pb2 as _asr_pb2
 from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
@@ -129,8 +129,18 @@ class AudioEnhancement(_message.Message):
     ai_coustics: AICousticsEnhancement
     def __init__(self, ai_coustics: _Optional[_Union[AICousticsEnhancement, _Mapping]] = ...) -> None: ...
 
+class AmbienceSettings(_message.Message):
+    __slots__ = ("enabled", "preset", "loudness")
+    ENABLED_FIELD_NUMBER: _ClassVar[int]
+    PRESET_FIELD_NUMBER: _ClassVar[int]
+    LOUDNESS_FIELD_NUMBER: _ClassVar[int]
+    enabled: bool
+    preset: str
+    loudness: float
+    def __init__(self, enabled: bool = ..., preset: _Optional[str] = ..., loudness: _Optional[float] = ...) -> None: ...
+
 class VoiceChannel(_message.Message):
-    __slots__ = ("config", "asr_settings", "disclaimer", "vad_config", "audio_enhancement", "silence_filler_utterances", "asr_config", "barge_in_config")
+    __slots__ = ("config", "asr_settings", "disclaimer", "vad_config", "audio_enhancement", "silence_filler_utterances", "asr_config", "barge_in_config", "ambience")
     CONFIG_FIELD_NUMBER: _ClassVar[int]
     ASR_SETTINGS_FIELD_NUMBER: _ClassVar[int]
     DISCLAIMER_FIELD_NUMBER: _ClassVar[int]
@@ -139,6 +149,7 @@ class VoiceChannel(_message.Message):
     SILENCE_FILLER_UTTERANCES_FIELD_NUMBER: _ClassVar[int]
     ASR_CONFIG_FIELD_NUMBER: _ClassVar[int]
     BARGE_IN_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    AMBIENCE_FIELD_NUMBER: _ClassVar[int]
     config: ChannelConfig
     asr_settings: _asr_settings_pb2.ASRSettings
     disclaimer: _agent_settings_pb2.DisclaimerMessage
@@ -147,7 +158,8 @@ class VoiceChannel(_message.Message):
     silence_filler_utterances: FillerUtterances
     asr_config: _asr_pb2.Asr
     barge_in_config: BargeInConfig
-    def __init__(self, config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., asr_settings: _Optional[_Union[_asr_settings_pb2.ASRSettings, _Mapping]] = ..., disclaimer: _Optional[_Union[_agent_settings_pb2.DisclaimerMessage, _Mapping]] = ..., vad_config: _Optional[_Union[VADConfig, _Mapping]] = ..., audio_enhancement: _Optional[_Union[AudioEnhancement, _Mapping]] = ..., silence_filler_utterances: _Optional[_Union[FillerUtterances, _Mapping]] = ..., asr_config: _Optional[_Union[_asr_pb2.Asr, _Mapping]] = ..., barge_in_config: _Optional[_Union[BargeInConfig, _Mapping]] = ...) -> None: ...
+    ambience: AmbienceSettings
+    def __init__(self, config: _Optional[_Union[ChannelConfig, _Mapping]] = ..., asr_settings: _Optional[_Union[_asr_settings_pb2.ASRSettings, _Mapping]] = ..., disclaimer: _Optional[_Union[_agent_settings_pb2.DisclaimerMessage, _Mapping]] = ..., vad_config: _Optional[_Union[VADConfig, _Mapping]] = ..., audio_enhancement: _Optional[_Union[AudioEnhancement, _Mapping]] = ..., silence_filler_utterances: _Optional[_Union[FillerUtterances, _Mapping]] = ..., asr_config: _Optional[_Union[_asr_pb2.Asr, _Mapping]] = ..., barge_in_config: _Optional[_Union[BargeInConfig, _Mapping]] = ..., ambience: _Optional[_Union[AmbienceSettings, _Mapping]] = ...) -> None: ...
 
 class WebChatChannel(_message.Message):
     __slots__ = ("config", "status")
@@ -346,6 +358,12 @@ class VoiceChannel_UpdateTemperature(_message.Message):
 class VoiceChannel_ResetTemperature(_message.Message):
     __slots__ = ()
     def __init__(self) -> None: ...
+
+class VoiceChannel_UpdateAmbience(_message.Message):
+    __slots__ = ("ambience",)
+    AMBIENCE_FIELD_NUMBER: _ClassVar[int]
+    ambience: AmbienceSettings
+    def __init__(self, ambience: _Optional[_Union[AmbienceSettings, _Mapping]] = ...) -> None: ...
 
 class WebChatChannel_UpdateStatus(_message.Message):
     __slots__ = ("status",)

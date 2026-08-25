@@ -1,4 +1,4 @@
-from poly.handlers.protobuf import knowledge_base_pb2 as _knowledge_base_pb2
+from agent_v3.cli.sourcerer_sdk.protobuf import knowledge_base_pb2 as _knowledge_base_pb2
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from typing import ClassVar as _ClassVar, Mapping as _Mapping, Optional as _Optional, Union as _Union

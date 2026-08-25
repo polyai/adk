@@ -1,0 +1,12 @@
+load("@rules_python//python:defs.bzl", "py_library")
+
+py_library(
+    name = "ragdoll_service_grpc_pb2",
+    srcs = ["ragdoll_service_grpc_pb2.py"],
+    pyi_srcs = ["ragdoll_service_grpc_pb2.pyi"],
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//poly_platform/ragdoll/pb:ragdoll_types_pb2",
+        "@pip//protobuf",
+    ],
+)
