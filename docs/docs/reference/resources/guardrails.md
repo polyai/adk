@@ -41,7 +41,7 @@ agent_settings/
 ## Platform guardrails
 
 !!! note "Fixed catalog — enable or disable only"
-    The catalog of platform guardrails is fixed by the platform. You can enable or disable each one with `poly push`, but you cannot create a new platform guardrail or delete an existing one via the ADK.
+    The catalog of platform guardrails is fixed by the platform. You can enable or disable each one, but you cannot create a new platform guardrail or delete an existing one via the ADK.
 
 ### The catalog
 
@@ -87,16 +87,7 @@ Custom guardrails live under an optional `custom_guardrails` list in the same fi
 
 `action` is the only field scanned for references — a reference written in `prompt` is treated as plain text.
 
-| Syntax | Meaning |
-|---|---|
-| `{{fn:function_name}}` | [Global function](./functions.md) |
-| `{{twilio_sms:template_name}}` | [SMS template](./sms.md) |
-| `{{ho:handoff_name}}` | [Handoff](./handoffs.md) |
-| `{{attr:attribute_name}}` | [Variant attribute](./variants.md) |
-| `{{vrbl:variable_name}}` | [State variable](./variables.md) |
-| `{{tn:translation_key}}` | [Translation](./translations.md) |
-
-Flow transition functions (`{{ft:...}}`) and entity references (`{{entity:...}}`) are not supported in a guardrail action and fail validation.
+It accepts every prefix in the [resource references table](../../development/resource-architecture.md#resource-references) except two: flow transition functions (`{{ft:...}}`) and entities (`{{entity:...}}`) fail validation in a guardrail action.
 
 ### Example
 
@@ -110,7 +101,7 @@ custom_guardrails:
 
 ## Validation
 
-`poly push` rejects a `guardrails.yaml` that doesn't satisfy these rules:
+Validation rejects a `guardrails.yaml` that doesn't satisfy these rules:
 
 - Every platform guardrail's `name` must be one of the fixed catalog names; anything else is rejected with the list of valid names.
 - Every platform and custom guardrail's `enabled` must be a boolean (`true`/`false`, unquoted).
@@ -119,7 +110,6 @@ custom_guardrails:
 
 ## Best practices
 
-- Only add a custom guardrail for behavior a rule or prompt instruction hasn't reliably caught in testing — they add latency to every turn.
 - Keep `prompt` focused on the trigger condition and `action` focused on the response; don't fold both into one field.
 - Disable a platform or custom guardrail with `enabled: false` instead of deleting it, so it's easy to re-enable later.
 
