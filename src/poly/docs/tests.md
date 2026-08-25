@@ -160,9 +160,9 @@ Each rule has:
   - **status**: HTTP status code (100–599).
   - **body** (optional): Response body. Keeps its type through to the flow, same rules as `integration_attributes` — quote dates, and only text, numbers, `true`/`false`, `null`, lists and nested maps are supported.
   - **headers** (optional): Response headers, always sent as text.
-- **repeat** (optional): How many times to return this response before moving to the next rule in the list. Omit it to respond once (the platform default — not "forever" and not "zero times"). The last rule in a list is used for any calls beyond what the earlier rules cover.
+- **repeat** (optional): How many times to return this response before moving to the next rule in the list. Omit it to respond once. Set it to `-1` to respond with this rule forever — only valid on the last rule in a list. `0` and other negative values are rejected. Once a list's rules are exhausted (no trailing `-1` rule), further calls to that operation fall through to the real API.
 
-The integration name must match an existing `api_integration` resource in the project; `push` rejects an unknown one. Operation names aren't cross-checked against the integration's configured operations — as with the rest of the integration/operations relationship, a rename or delete of the underlying operation is expected to be reconciled by re-editing the mock, not caught by static validation.
+The integration name must match an existing `api_integration` resource in the project; `push` rejects an unknown one. Operation names aren't cross-checked against the integration's configured operations at push time — instead, renaming or deleting the underlying operation automatically cascades to any mocks that reference it, the same way the platform handles the rest of the integration/operations relationship.
 
 ## Prompt assertions
 
@@ -205,7 +205,7 @@ On `push`, each test case is validated:
 - **variant**, if specified, must match an existing variant in the project.
 - **function_call_assertions**: each function name must match a global function (`functions/`) or a flow function (`flows/<flow>/functions/`) in the project, and each argument's `value_type` must be one of `string`, `integer`, `number`, or `boolean`.
 - **integration_attributes**: values must be text, numbers, `true`/`false`, `null`, lists or nested maps. An unquoted date is rejected with the quoted form to use instead, and keys must be text.
-- **api_mocks**: the integration name must match an existing `api_integration` resource; each rule's `status` must be a valid HTTP status code (100–599); `body`, if set, follows the same type rules as `integration_attributes`; `repeat`, if set, must be a positive integer.
+- **api_mocks**: the integration name must match an existing `api_integration` resource; each operation must have at least one response rule; each rule's `status` must be a valid HTTP status code (100–599); `body`, if set, follows the same type rules as `integration_attributes`; `repeat`, if set, must be a positive integer or `-1` (respond forever), and `-1` is only allowed on the last rule for an operation.
 
 ## Best practices
 

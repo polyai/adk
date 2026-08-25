@@ -424,8 +424,10 @@ class ApiResponse:
 class ApiResponseRule:
     """One rule in a mocked operation's response sequence.
 
-    `repeat` mirrors the platform's semantics: unset means "respond once and
-    keep responding once matched", not "repeat forever" or "repeat zero times".
+    `repeat` mirrors the platform's semantics: unset means respond once, then
+    advance to the next rule. `-1` means respond forever with this rule and is
+    only valid on the last rule in the list. `0` and other negative values are
+    rejected.
     """
 
     respond: ApiResponse = field(default_factory=ApiResponse)
@@ -915,6 +917,11 @@ class TestCase(YamlResource):
                         f"API mock for integration '{integration_name}' has an empty "
                         "operation name."
                     )
+                if not rules:
+                    raise ValueError(
+                        f"API mock '{integration_name}.{operation_name}' must have at least "
+                        "one response rule."
+                    )
                 for index, rule in enumerate(rules):
                     label = f"API mock '{integration_name}.{operation_name}'[{index}]"
                     status = rule.respond.status
@@ -931,14 +938,21 @@ class TestCase(YamlResource):
                     for header_key in rule.respond.headers:
                         if not isinstance(header_key, str) or not header_key:
                             raise ValueError(f"{label}: header keys must be non-empty text.")
-                    if rule.repeat is not None and (
-                        not isinstance(rule.repeat, int)
-                        or isinstance(rule.repeat, bool)
-                        or rule.repeat < 1
-                    ):
-                        raise ValueError(
-                            f"{label}: repeat '{rule.repeat}' must be a positive integer."
-                        )
+                    if rule.repeat is not None:
+                        if (
+                            not isinstance(rule.repeat, int)
+                            or isinstance(rule.repeat, bool)
+                            or rule.repeat == 0
+                            or rule.repeat < -1
+                        ):
+                            raise ValueError(
+                                f"{label}: repeat '{rule.repeat}' must be a positive integer or -1."
+                            )
+                        if rule.repeat == -1 and index != len(rules) - 1:
+                            raise ValueError(
+                                f"{label}: repeat=-1 (respond forever) is only valid on the "
+                                "last response rule for an operation."
+                            )
 
         # `fn` is a global function, `ft` a flow function. Both are assertable.
         known_functions = {

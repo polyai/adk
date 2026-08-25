@@ -7918,7 +7918,7 @@ class TestCaseApiMocksTests(unittest.TestCase):
                 },
                 "payments": {
                     "charge": [
-                        # repeat unset: respond once and keep responding once matched.
+                        # repeat unset: respond once, then advance to the next rule.
                         ApiResponseRule(respond=ApiResponse(status=201, body={"ok": True})),
                     ]
                 },
@@ -8215,6 +8215,13 @@ class TestCaseApiMocksTests(unittest.TestCase):
             test_case.validate()
         self.assertIn("empty operation name", str(ctx.exception))
 
+    def test_validate_rejects_an_operation_with_no_response_rules(self):
+        test_case = self._test_case(api_mocks=self._api_mocks({"crm": {"get_customer": []}}))
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+        self.assertIn("must have at least one response rule", str(ctx.exception))
+
     def test_validate_rejects_bad_header_keys(self):
         for headers in ({"": "v"}, {2: "v"}):
             with self.subTest(headers=headers):
@@ -8237,7 +8244,7 @@ class TestCaseApiMocksTests(unittest.TestCase):
                 self.assertIn("header keys must be non-empty text", str(ctx.exception))
 
     def test_validate_rejects_bad_repeat(self):
-        for bad_repeat in (0, -1, 1.5, True):
+        for bad_repeat in (0, -2, 1.5, True):
             with self.subTest(repeat=bad_repeat):
                 test_case = self._test_case(
                     api_mocks=self._api_mocks(
@@ -8256,6 +8263,40 @@ class TestCaseApiMocksTests(unittest.TestCase):
                 with self.assertRaises(ValueError) as ctx:
                     test_case.validate()
                 self.assertIn("must be a positive integer", str(ctx.exception))
+
+    def test_validate_accepts_repeat_negative_one_on_last_rule(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [
+                            ApiResponseRule(respond=ApiResponse(status=503), repeat=1),
+                            ApiResponseRule(respond=ApiResponse(status=200), repeat=-1),
+                        ]
+                    }
+                }
+            )
+        )
+
+        test_case.validate()
+
+    def test_validate_rejects_repeat_negative_one_not_on_last_rule(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [
+                            ApiResponseRule(respond=ApiResponse(status=503), repeat=-1),
+                            ApiResponseRule(respond=ApiResponse(status=200)),
+                        ]
+                    }
+                }
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+        self.assertIn("only valid on the last response rule", str(ctx.exception))
 
     def test_validate_rejects_a_date_in_the_body(self):
         """Reuses _validate_attribute_value, same as integration_attributes."""
