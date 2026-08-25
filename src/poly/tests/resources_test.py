@@ -90,6 +90,7 @@ from poly.resources.test_suite import (
     FunctionCallAssertion,
     TestCase,
     TestCaseApiMocks,
+    TestCaseApiOperationMock,
     TestCaseAssertion,
     TestCaseIntegrationAttributes,
     TestCaseSipHeaders,
@@ -3759,7 +3760,6 @@ class EntityTests(unittest.TestCase):
             config={},  # FREE_TEXT has no required config fields
         )
         self.assertIsNone(entity_without_config.validate())
-
 
 
 TEST_FUNCTION_STEP_CODE = """def process_data(conv: Conversation, flow: Flow):
@@ -7888,7 +7888,7 @@ class TestCaseApiMocksTests(unittest.TestCase):
         return TestCase(**defaults)
 
     def _api_mocks(self, mocks: dict) -> TestCaseApiMocks:
-        return TestCaseApiMocks(resource_id=self.RESOURCE_ID, name="api_mocks", mocks=mocks)
+        return TestCaseApiMocks(mocks=mocks)
 
     def _integration_mapping(self, name: str) -> ResourceMapping:
         return ResourceMapping(
@@ -7967,52 +7967,49 @@ class TestCaseApiMocksTests(unittest.TestCase):
 
         self.assertNotIn("api_mocks", yaml_dict)
 
+    def _operation_mock(self, **overrides) -> TestCaseApiOperationMock:
+        defaults = {
+            "resource_id": f"{self.RESOURCE_ID}:crm:get_customer",
+            "name": "api_mocks",
+            "integration_name": "crm",
+            "operation_name": "get_customer",
+            "test_case_id": self.RESOURCE_ID,
+        }
+        defaults.update(overrides)
+        return TestCaseApiOperationMock(**defaults)
+
     def test_update_command_type(self):
-        test_case = self._test_case(
-            api_mocks=self._api_mocks(
-                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse())]}}
-            )
+        self.assertEqual(
+            self._operation_mock().update_command_type, "update_test_case_api_operation_mock"
         )
 
-        self.assertEqual(test_case.api_mocks.update_command_type, "set_test_case_api_mocks")
-
-    def test_build_update_proto_nests_integrations_operations_and_responses(self):
-        api_mocks = self._api_mocks(
-            {
-                "crm": {
-                    "get_customer": [
-                        ApiResponseRule(
-                            respond=ApiResponse(
-                                status=200,
-                                body={"id": 1, "flag": True, "meta": {"a": 1}},
-                                headers={"x-trace": "abc"},
-                            )
-                        ),
-                        ApiResponseRule(respond=ApiResponse(status=404), repeat=5),
-                    ],
-                    "list_customers": [
-                        ApiResponseRule(respond=ApiResponse(status=200, body=[1, 2, 3])),
-                    ],
-                },
-                "payments": {
-                    "charge": [ApiResponseRule(respond=ApiResponse(status=201, body={"ok": True}))],
-                },
-            }
+    def test_delete_command_type(self):
+        self.assertEqual(
+            self._operation_mock().delete_command_type, "delete_test_case_api_operation_mock"
         )
 
-        proto = api_mocks.build_update_proto()
+    def test_build_update_proto_targets_one_operation(self):
+        operation_mock = self._operation_mock(
+            rules=[
+                ApiResponseRule(
+                    respond=ApiResponse(
+                        status=200,
+                        body={"id": 1, "flag": True, "meta": {"a": 1}},
+                        headers={"x-trace": "abc"},
+                    )
+                ),
+                ApiResponseRule(respond=ApiResponse(status=404), repeat=5),
+            ]
+        )
+
+        proto = operation_mock.build_update_proto()
 
         self.assertEqual(proto.id, self.RESOURCE_ID)
-        integrations = proto.api_mocks.integrations
-        self.assertCountEqual(integrations.keys(), ["crm", "payments"])
+        self.assertEqual(proto.integration_name, "crm")
+        self.assertEqual(proto.operation_name, "get_customer")
+        self.assertEqual(len(proto.responses), 2)
 
-        crm_operations = integrations["crm"].operations
-        self.assertCountEqual(crm_operations.keys(), ["get_customer", "list_customers"])
-
-        get_customer_responses = crm_operations["get_customer"].responses
-        self.assertEqual(len(get_customer_responses), 2)
-
-        first = get_customer_responses[0]
+        first = proto.responses[0]
         self.assertEqual(first.respond.status, 200)
         self.assertEqual(dict(first.respond.headers), {"x-trace": "abc"})
         self.assertEqual(
@@ -8020,17 +8017,22 @@ class TestCaseApiMocksTests(unittest.TestCase):
         )
         self.assertFalse(first.HasField("repeat"))
 
-        second = get_customer_responses[1]
+        second = proto.responses[1]
         self.assertEqual(second.respond.status, 404)
         self.assertFalse(second.respond.HasField("body"))
         self.assertTrue(second.HasField("repeat"))
         self.assertEqual(second.repeat, 5)
 
-        list_customers_responses = crm_operations["list_customers"].responses
-        self.assertEqual(MessageToDict(list_customers_responses[0].respond.body), [1, 2, 3])
+    def test_build_delete_proto_targets_one_operation(self):
+        proto = self._operation_mock().build_delete_proto()
 
-        charge_responses = integrations["payments"].operations["charge"].responses
-        self.assertEqual(MessageToDict(charge_responses[0].respond.body), {"ok": True})
+        self.assertEqual(proto.id, self.RESOURCE_ID)
+        self.assertEqual(proto.integration_name, "crm")
+        self.assertEqual(proto.operation_name, "get_customer")
+
+    def test_build_create_proto_not_implemented(self):
+        with self.assertRaises(NotImplementedError):
+            self._operation_mock().build_create_proto()
 
     def test_from_projection_parses_nested_api_mocks(self):
         projection = {
@@ -8108,16 +8110,23 @@ class TestCaseApiMocksTests(unittest.TestCase):
             )
         )
 
-        _, updated, _ = test_case.get_new_updated_deleted_subresources()
+        _, updated, deleted = test_case.get_new_updated_deleted_subresources()
 
-        self.assertIn(test_case.api_mocks, updated)
+        mock_updates = [u for u in updated if isinstance(u, TestCaseApiOperationMock)]
+        self.assertEqual(len(mock_updates), 1)
+        pushed = mock_updates[0]
+        self.assertEqual(pushed.integration_name, "crm")
+        self.assertEqual(pushed.operation_name, "get_customer")
+        self.assertEqual(pushed.rules, [ApiResponseRule(respond=ApiResponse(status=200))])
+        self.assertEqual(deleted, [])
 
     def test_subresource_omitted_on_create_when_empty(self):
         test_case = self._test_case()
 
-        _, updated, _ = test_case.get_new_updated_deleted_subresources()
+        _, updated, deleted = test_case.get_new_updated_deleted_subresources()
 
-        self.assertNotIn(test_case.api_mocks, updated)
+        self.assertFalse(any(isinstance(u, TestCaseApiOperationMock) for u in updated))
+        self.assertEqual(deleted, [])
 
     def test_subresource_pushed_on_update_when_changed(self):
         old = self._test_case()
@@ -8127,9 +8136,13 @@ class TestCaseApiMocksTests(unittest.TestCase):
             )
         )
 
-        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+        _, updated, deleted = new.get_new_updated_deleted_subresources(old)
 
-        self.assertIn(new.api_mocks, updated)
+        mock_updates = [u for u in updated if isinstance(u, TestCaseApiOperationMock)]
+        self.assertEqual(len(mock_updates), 1)
+        self.assertEqual(mock_updates[0].integration_name, "crm")
+        self.assertEqual(mock_updates[0].operation_name, "get_customer")
+        self.assertEqual(deleted, [])
 
     def test_subresource_omitted_on_update_when_unchanged(self):
         mocks = {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
@@ -8140,9 +8153,56 @@ class TestCaseApiMocksTests(unittest.TestCase):
             )
         )
 
-        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+        _, updated, deleted = new.get_new_updated_deleted_subresources(old)
 
-        self.assertNotIn(new.api_mocks, updated)
+        self.assertFalse(any(isinstance(u, TestCaseApiOperationMock) for u in updated))
+        self.assertEqual(deleted, [])
+
+    def test_subresource_updates_only_the_changed_operation(self):
+        """Changing one operation must not re-push a sibling operation that's untouched."""
+        old = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [ApiResponseRule(respond=ApiResponse(status=200))],
+                        "list_customers": [ApiResponseRule(respond=ApiResponse(status=200))],
+                    }
+                }
+            )
+        )
+        new = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [ApiResponseRule(respond=ApiResponse(status=503))],
+                        "list_customers": [ApiResponseRule(respond=ApiResponse(status=200))],
+                    }
+                }
+            )
+        )
+
+        _, updated, deleted = new.get_new_updated_deleted_subresources(old)
+
+        self.assertEqual(len(updated), 1)
+        self.assertEqual(updated[0].operation_name, "get_customer")
+        self.assertEqual(deleted, [])
+
+    def test_subresource_deleted_when_operation_removed(self):
+        old = self._test_case(
+            api_mocks=self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+            )
+        )
+        new = self._test_case()
+
+        _, updated, deleted = new.get_new_updated_deleted_subresources(old)
+
+        self.assertEqual(updated, [])
+        self.assertEqual(len(deleted), 1)
+        deleted_mock = deleted[0]
+        self.assertIsInstance(deleted_mock, TestCaseApiOperationMock)
+        self.assertEqual(deleted_mock.integration_name, "crm")
+        self.assertEqual(deleted_mock.operation_name, "get_customer")
 
     def test_validate_accepts_a_well_formed_mock(self):
         test_case = self._test_case(
@@ -9299,9 +9359,7 @@ class DocumentFromProjection(unittest.TestCase):
     def test_keeps_document_with_empty_content(self):
         """An empty 'content' is a readable but empty document, not a permission failure."""
         projection = {
-            "documents": {
-                "documents": {"entities": {"DOC-1": {"path": "empty.md", "content": ""}}}
-            }
+            "documents": {"documents": {"entities": {"DOC-1": {"path": "empty.md", "content": ""}}}}
         }
         documents = Document.from_projection(projection)
         self.assertEqual(list(documents), ["DOC-1"])

@@ -11,27 +11,25 @@ from typing import Any, Optional
 from google.protobuf.struct_pb2 import Struct, Value
 
 import poly.resources.resource_utils as utils
-
-# import uuid
-from poly.handlers.protobuf.testing_pb2 import (
-    ApiIntegrationOverride,
-    ApiOverride,
-    ApiResponseRuleList,
-    Create_TestCase,
-    Delete_TestCase,
-    PromptAssertion,
-    SetTestCaseApiMocks,
-    SetTestCaseAssertions,
-    SetTestCaseIntegrationAttributes,
-    SetTestCaseSipHeaders,
-    SetTestCaseTags,
-    Update_TestCase,
-)
 from poly.handlers.protobuf.testing_pb2 import (
     ApiResponse as ApiResponseProto,
 )
 from poly.handlers.protobuf.testing_pb2 import (
     ApiResponseRule as ApiResponseRuleProto,
+)
+
+# import uuid
+from poly.handlers.protobuf.testing_pb2 import (
+    Create_TestCase,
+    Delete_TestCase,
+    DeleteTestCaseApiOperationMock,
+    PromptAssertion,
+    SetTestCaseAssertions,
+    SetTestCaseIntegrationAttributes,
+    SetTestCaseSipHeaders,
+    SetTestCaseTags,
+    Update_TestCase,
+    UpdateTestCaseApiOperationMock,
 )
 from poly.handlers.protobuf.testing_pb2 import (
     FunctionCallAssertion as FunctionCallAssertionProto,
@@ -452,25 +450,19 @@ class ApiResponseRule:
 
 
 @dataclass
-class TestCaseApiMocks(SubResource):
-    """Dataclass representing the mocked API responses on a test case.
+class TestCaseApiMocks:
+    """Container for the mocked API responses on a test case.
 
     Keyed by integration name, then operation name, matching how the platform
     references integrations/operations elsewhere and cascades renames/deletes
-    from the api-integrations domain into existing mocks.
+    from the api-integrations domain into existing mocks. Not itself pushed —
+    each (integration, operation) pair is diffed and pushed independently as
+    a `TestCaseApiOperationMock`, mirroring `ApiIntegrationEnvironments`.
     """
 
     __test__ = False
 
     mocks: dict[str, dict[str, list[ApiResponseRule]]] = field(default_factory=dict)
-
-    @property
-    def command_type(self) -> str:
-        return "test_case_api_mocks"
-
-    @property
-    def update_command_type(self) -> str:
-        return "set_test_case_api_mocks"
 
     def to_yaml_dict(self) -> dict:
         return {
@@ -481,34 +473,8 @@ class TestCaseApiMocks(SubResource):
             for integration_name, operations in self.mocks.items()
         }
 
-    def build_update_proto(self) -> SetTestCaseApiMocks:
-        return SetTestCaseApiMocks(
-            id=self.resource_id,
-            api_mocks=ApiOverride(
-                integrations={
-                    integration_name: ApiIntegrationOverride(
-                        operations={
-                            operation_name: ApiResponseRuleList(
-                                responses=[rule.to_proto() for rule in rules]
-                            )
-                            for operation_name, rules in operations.items()
-                        }
-                    )
-                    for integration_name, operations in self.mocks.items()
-                }
-            ),
-        )
-
-    def build_create_proto(self) -> None:
-        raise NotImplementedError("Test Case API Mocks cannot be created")
-
-    def build_delete_proto(self) -> None:
-        raise NotImplementedError("Test Case API Mocks cannot be deleted")
-
     @classmethod
-    def from_dict(
-        cls, resource_id: str, data: dict[str, dict[str, list[dict]]] | None
-    ) -> "TestCaseApiMocks":
+    def from_dict(cls, data: dict[str, dict[str, list[dict]]] | None) -> "TestCaseApiMocks":
         data = data or {}
         mocks = {
             integration_name: {
@@ -517,7 +483,49 @@ class TestCaseApiMocks(SubResource):
             }
             for integration_name, operations in data.items()
         }
-        return cls(resource_id=resource_id, name="api_mocks", mocks=mocks)
+        return cls(mocks=mocks)
+
+
+@dataclass
+class TestCaseApiOperationMock(SubResource):
+    """One (integration, operation) pair's mocked response rules on a test case.
+
+    The backend has no "set the whole api_mocks map" command — each operation's
+    rule list is created/updated/deleted independently, so this is pushed as its
+    own SubResource per pair, matching how `ApiIntegrationConfig` is pushed per
+    environment rather than `ApiIntegration` pushing its environments in one shot.
+    """
+
+    __test__ = False
+
+    resource_id: str = ""
+    name: str = ""
+    integration_name: str = ""
+    operation_name: str = ""
+    rules: list[ApiResponseRule] = field(default_factory=list)
+    test_case_id: str = ""  # Set by parent when yielding from get_new_updated_deleted_subresources
+
+    @property
+    def command_type(self) -> str:
+        return "test_case_api_operation_mock"
+
+    def build_update_proto(self) -> UpdateTestCaseApiOperationMock:
+        return UpdateTestCaseApiOperationMock(
+            id=self.test_case_id,
+            integration_name=self.integration_name,
+            operation_name=self.operation_name,
+            responses=[rule.to_proto() for rule in self.rules],
+        )
+
+    def build_delete_proto(self) -> DeleteTestCaseApiOperationMock:
+        return DeleteTestCaseApiOperationMock(
+            id=self.test_case_id,
+            integration_name=self.integration_name,
+            operation_name=self.operation_name,
+        )
+
+    def build_create_proto(self) -> None:
+        raise NotImplementedError("Test Case API Operation Mock cannot be created independently.")
 
 
 @register_resource("test_cases")
@@ -587,8 +595,6 @@ class TestCase(YamlResource):
             )
             api_mocks_raw = test_case_data.get("apiMocks") or {}
             api_mocks = TestCaseApiMocks(
-                resource_id=test_case_id,
-                name="api_mocks",
                 mocks={
                     integration_name: {
                         operation_name: [
@@ -679,9 +685,9 @@ class TestCase(YamlResource):
         if isinstance(api_mocks, TestCaseApiMocks):
             self.api_mocks = api_mocks
         elif api_mocks:
-            self.api_mocks = TestCaseApiMocks.from_dict(resource_id, api_mocks)
+            self.api_mocks = TestCaseApiMocks.from_dict(api_mocks)
         else:
-            self.api_mocks = TestCaseApiMocks(resource_id=resource_id, name="api_mocks")
+            self.api_mocks = TestCaseApiMocks()
 
     @property
     def file_path(self) -> str:
@@ -760,7 +766,7 @@ class TestCase(YamlResource):
             name="integration_attributes",
             attributes=yaml_dict.get("integration_attributes") or {},
         )
-        test_case_api_mocks = TestCaseApiMocks.from_dict(resource_id, yaml_dict.get("api_mocks"))
+        test_case_api_mocks = TestCaseApiMocks.from_dict(yaml_dict.get("api_mocks"))
 
         channel = yaml_dict.get("channel")
         return cls(
@@ -971,6 +977,50 @@ class TestCase(YamlResource):
                         f"Invalid value type for function call assertion argument: {argument.value_type}"
                     )
 
+    def _diff_api_mocks(
+        self, old_mocks: dict[str, dict[str, list[ApiResponseRule]]]
+    ) -> tuple[list[SubResource], list[SubResource]]:
+        """Diff api_mocks against `old_mocks`, one (integration, operation) pair at a time.
+
+        There's no "set the whole map" command for api_mocks (unlike sip_headers/
+        integration_attributes), so each changed or new pair becomes its own update,
+        and each pair present in `old_mocks` but gone from `self.api_mocks.mocks`
+        becomes its own delete.
+        """
+        updated: list[SubResource] = []
+        seen_pairs: set[tuple[str, str]] = set()
+
+        for integration_name, operations in self.api_mocks.mocks.items():
+            for operation_name, rules in operations.items():
+                seen_pairs.add((integration_name, operation_name))
+                old_rules = old_mocks.get(integration_name, {}).get(operation_name)
+                if old_rules != rules:
+                    updated.append(
+                        TestCaseApiOperationMock(
+                            resource_id=f"{self.resource_id}:{integration_name}:{operation_name}",
+                            name="api_mocks",
+                            integration_name=integration_name,
+                            operation_name=operation_name,
+                            rules=rules,
+                            test_case_id=self.resource_id,
+                        )
+                    )
+
+        deleted: list[SubResource] = [
+            TestCaseApiOperationMock(
+                resource_id=f"{self.resource_id}:{integration_name}:{operation_name}",
+                name="api_mocks",
+                integration_name=integration_name,
+                operation_name=operation_name,
+                test_case_id=self.resource_id,
+            )
+            for integration_name, operations in old_mocks.items()
+            for operation_name in operations
+            if (integration_name, operation_name) not in seen_pairs
+        ]
+
+        return updated, deleted
+
     def get_new_updated_deleted_subresources(
         self, old_resource: Optional["TestCase"] = None
     ) -> tuple[list[SubResource], list[SubResource], list[SubResource]]:
@@ -995,8 +1045,7 @@ class TestCase(YamlResource):
                 updated.append(self.sip_headers)
             if self.integration_attributes.attributes:
                 updated.append(self.integration_attributes)
-            if self.api_mocks.mocks:
-                updated.append(self.api_mocks)
+            mock_updates, mock_deletes = self._diff_api_mocks({})
         else:
             if old_resource.assertions != self.assertions:
                 updated.append(self.assertions)
@@ -1007,10 +1056,11 @@ class TestCase(YamlResource):
                 updated.append(self.sip_headers)
             if old_resource.integration_attributes != self.integration_attributes:
                 updated.append(self.integration_attributes)
-            if old_resource.api_mocks != self.api_mocks:
-                updated.append(self.api_mocks)
+            mock_updates, mock_deletes = self._diff_api_mocks(old_resource.api_mocks.mocks)
 
-        return [], updated, []
+        updated.extend(mock_updates)
+
+        return [], updated, mock_deletes
 
     @property
     def command_type(self) -> str:
