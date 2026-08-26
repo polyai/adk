@@ -13,7 +13,7 @@ import requests
 
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
-from poly.handlers.wren_api import stream_wren_turn
+from poly.handlers.wren_api import stream_wren_input_response, stream_wren_turn
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
 from poly.utils import retrieve_api_key
@@ -33,6 +33,13 @@ _ERROR_MESSAGES: dict[str, str] = {
     "llm_rate_limited": "Wren is rate-limited — try again in a moment.",
     "llm_unavailable": "The Wren service is unavailable — try again.",
     "llm_internal": "The Wren service is unavailable — try again.",
+    "llm_stream_interrupted": "The response stream was interrupted — try again.",
+    "llm_invalid_request": "Wren sent an invalid request to the model — try rephrasing.",
+    "file_resolution_failed": "Wren couldn't resolve an attached file.",
+    "usage_tracking_failed": "Usage tracking failed — try again.",
+    "conversation_not_found": "Session not found — check --session-id or start a new session.",
+    "invalid_request": "Wren rejected the request as invalid.",
+    "internal": "The Wren service hit an internal error — try again.",
     "run_in_progress": "A run is already in progress for this session — wait for it to finish.",
     "unauthorized": "Not authorized for this project. Check your login (poly login) and project access.",
 }
@@ -56,14 +63,24 @@ class TurnResult:
     report: dict[str, str] | None = None
 
 
-def _build_context(project: AgentStudioProject) -> dict[str, str]:
-    """Build the agent context dict from the loaded project."""
+def _build_context(project: AgentStudioProject, mode: str | None = None) -> dict[str, str]:
+    """Build the agent context dict from the loaded project.
+
+    Args:
+        project: The loaded project.
+        mode: Gate handling mode — "interactive" for the REPL (gates block and
+            are answered over input_response), "auto" for single-shot runs
+            (the server answers its own gates). Pinned explicitly rather than
+            relying on the server default.
+    """
     ctx: dict[str, str] = {
         "accountId": project.account_id,
         "projectId": project.project_id,
     }
     if project.branch_id:
         ctx["branchId"] = project.branch_id
+    if mode:
+        ctx["mode"] = mode
     return ctx
 
 
@@ -377,8 +394,68 @@ def _print_exit_summary(session_id: str | None) -> None:
         )
 
 
-def _collect_user_input(event: dict[str, Any]) -> str | None:
-    """Interactively collect a user-input gate response via questionary."""
+_FREEFORM_CHOICE = "Other (type an answer)"
+
+# Declining a secret gate: the value shape differs per kind (user-input.ts).
+_SECRET_DECLINE_VALUES: dict[str, dict[str, Any]] = {
+    "secret": {"created": False, "reason": "cancelled"},
+    "edit-secret": {"updated": False, "reason": "cancelled"},
+    "delete-secret": {"deleted": False, "reason": "cancelled"},
+}
+
+
+def _collect_question_answers(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Collect answers for a question gate as typed answer items."""
+    import questionary
+
+    from poly.output.console import plain
+
+    questions = event.get("questions", [])
+    if not questions:
+        return None
+
+    plain("[info]Wren needs input:[/info]")
+    answers: list[dict[str, Any]] = []
+    for q in questions:
+        question_text = q.get("question", "")
+        options = [str(o) for o in q.get("options", []) or []]
+        # allowFreeform defaults to True when absent: never trap the user in a
+        # fixed option list on an older server that doesn't send the field.
+        allow_freeform = q.get("allowFreeform", True)
+        allow_multiple = q.get("allowMultiple", False)
+
+        if options and allow_multiple:
+            selected = questionary.checkbox(question_text, choices=options).ask()
+            if selected is None:
+                return None
+            answers.append({"selected": [str(s) for s in selected]})
+            continue
+
+        if options:
+            choices = options + ([_FREEFORM_CHOICE] if allow_freeform else [])
+            answer = questionary.select(question_text, choices=choices).ask()
+            if answer is None:
+                return None
+            if answer != _FREEFORM_CHOICE:
+                answers.append({"selected": [str(answer)]})
+                continue
+            # Fall through to a free-text prompt.
+
+        text = questionary.text(question_text).ask()
+        if text is None:
+            return None
+        answers.append({"selected": [], "freeform": str(text)})
+
+    return {"inputKind": "question", "value": {"answers": answers}}
+
+
+def _collect_user_input(event: dict[str, Any]) -> dict[str, Any] | None:
+    """Interactively collect a user-input gate response via questionary.
+
+    Returns a typed answer ({"inputKind", "value"}) matching the server's
+    userInputAnswerSchema, ready to send back as an input_response message,
+    or None if the user cancelled (the run stays paused).
+    """
     import questionary
     from rich.markdown import Markdown
     from rich.panel import Panel
@@ -388,29 +465,7 @@ def _collect_user_input(event: dict[str, Any]) -> str | None:
     input_kind = event.get("inputKind", "")
 
     if input_kind == "question":
-        questions = event.get("questions", [])
-        if not questions:
-            return None
-        plain("[info]Wren needs input:[/info]")
-        answers = []
-        for q in questions:
-            question_text = q.get("question", "")
-            options = q.get("options", [])
-            if options:
-                option_labels = [str(o) for o in options] + ["Other (type an answer)"]
-                answer = questionary.select(question_text, choices=option_labels).ask()
-                if answer is None:
-                    return None
-                if answer == "Other (type an answer)":
-                    answer = questionary.text(question_text).ask()
-                    if answer is None:
-                        return None
-            else:
-                answer = questionary.text(question_text).ask()
-                if answer is None:
-                    return None
-            answers.append(f"{question_text}: {answer}")
-        return "\n".join(answers)
+        return _collect_question_answers(event)
 
     elif input_kind == "plan":
         title = event.get("title", "Plan")
@@ -425,16 +480,43 @@ def _collect_user_input(event: dict[str, Any]) -> str | None:
         if choice is None or choice == "Cancel":
             return None
         if choice == "Approve":
-            return "Approved, go ahead."
+            return {"inputKind": "plan", "value": {"approved": True}}
         feedback = questionary.text("Your feedback:").ask()
-        return feedback
+        if feedback is None:
+            return None
+        return {"inputKind": "plan", "value": {"approved": False, "feedback": str(feedback)}}
 
-    elif input_kind in ("secret", "edit-secret", "delete-secret"):
+    elif input_kind in _SECRET_DECLINE_VALUES:
+        # Decline explicitly rather than leaving the run hanging: the agent
+        # learns the CLI can't do this and records it as a blocker.
         warning(
-            "Wren needs a secret configured — "
-            "this isn't supported in the CLI. Use Agent Studio, then continue here."
+            "Secrets can't be managed from the CLI — declining this request. "
+            "Configure the secret in Agent Studio, then ask Wren to continue."
         )
-        return None
+        return {"inputKind": input_kind, "value": _SECRET_DECLINE_VALUES[input_kind]}
+
+    return None
+
+
+def _answer_as_prompt(event: dict[str, Any], answer: dict[str, Any]) -> str | None:
+    """Flatten a typed gate answer into prose, for servers without requestId."""
+    value = answer.get("value", {})
+    kind = answer.get("inputKind")
+
+    if kind == "plan":
+        if value.get("approved"):
+            return "Approved, go ahead."
+        return value.get("feedback") or None
+
+    if kind == "question":
+        questions = event.get("questions", []) or []
+        lines = []
+        for q, item in zip(questions, value.get("answers", [])):
+            selected = item.get("selected") or []
+            text = ", ".join(str(s) for s in selected) or item.get("freeform", "")
+            if text:
+                lines.append(f"{q.get('question', '')}: {text}")
+        return "\n".join(lines) or None
 
     return None
 
@@ -714,25 +796,31 @@ def _stream_turn(
     json_mode: bool = False,
     first_turn: bool = True,
     no_pull: bool = False,
+    mode: str | None = None,
+    agent_name: str | None = None,
+    input_response: tuple[str, dict[str, Any]] | None = None,
 ) -> TurnResult:
     """Stream a single wren turn, rendering events to the console.
 
     Args:
         project: The loaded project.
         api_key: PAT for authentication.
-        prompt: User prompt to send.
+        prompt: User prompt to send (ignored when input_response is set).
         session_id: Session ID to continue, or None for new session.
         verbose: Whether to show verbose output.
         json_mode: Suppress console output and accumulate for JSON.
         first_turn: Whether this is the first turn of the session.
         no_pull: If True, skip automatic pulling on apply.
+        mode: Gate handling mode for the request context.
+        agent_name: Optional top-level agent override.
+        input_response: (requestId, answer) answering a pending gate instead of
+            sending a new prompt. Resumes the paused run on a fresh stream.
 
     Returns:
         TurnResult with session state and what happened.
     """
     from poly.output.console import error
 
-    context = _build_context(project)
     result = TurnResult(session_id=session_id)
     display = _TurnDisplay(enabled=not json_mode)
 
@@ -740,15 +828,30 @@ def _stream_turn(
         if not no_pull and not json_mode:
             _pull_local(project)
 
-    try:
-        _render_events(
-            stream_wren_turn(
+    def _open_stream() -> Iterable[dict[str, Any]]:
+        if input_response is not None and session_id:
+            request_id, answer = input_response
+            # The resumed run keeps the mode it was started with.
+            return stream_wren_input_response(
                 region=project.region,
                 api_key=api_key,
-                prompt=prompt,
-                context=context,
+                request_id=request_id,
+                answer=answer,
+                context=_build_context(project),
                 session_id=session_id,
-            ),
+            )
+        return stream_wren_turn(
+            region=project.region,
+            api_key=api_key,
+            prompt=prompt,
+            context=_build_context(project, mode=mode),
+            session_id=session_id,
+            agent_name=agent_name,
+        )
+
+    try:
+        _render_events(
+            _open_stream(),
             result,
             display,
             verbose=verbose,
@@ -767,9 +870,14 @@ def _stream_turn(
             # the caller's wait-and-retry loop handles this silently.
             result.error = {"code": "run_in_progress", "message": str(e)}
         else:
+            # 400 bodies carry the server's validation detail, e.g.
+            # "Invalid request: context.projectId: Required".
             result.error = {"code": f"http_{status_code}", "message": str(e)}
             if not json_mode:
-                error(f"Request failed: {e}")
+                if status_code == 400 and input_response is not None:
+                    error(f"That request is no longer pending — send a new message. ({e})")
+                else:
+                    error(f"Request failed: {e}")
             if status_code in (401, 403):
                 result.fatal = True
     except requests.ConnectionError:
@@ -827,11 +935,15 @@ def _turn_with_retry(
     json_mode: bool = False,
     first_turn: bool = True,
     no_pull: bool = False,
+    mode: str | None = None,
+    agent_name: str | None = None,
+    input_response: tuple[str, dict[str, Any]] | None = None,
 ) -> TurnResult:
     """Run a turn, waiting and retrying while a previous run is still in progress.
 
     Suspended runs (subagent dispatch) keep working server-side after the SSE
-    stream closes; a new prompt gets a 409 until they finish.
+    stream closes; a new prompt gets a 409 until they finish. Only
+    run_in_progress is retried — a stale gate answer must not loop.
     """
     import time
 
@@ -848,6 +960,9 @@ def _turn_with_retry(
             json_mode=json_mode,
             first_turn=first_turn,
             no_pull=no_pull,
+            mode=mode,
+            agent_name=agent_name,
+            input_response=input_response,
         )
         busy = bool(result.error) and result.error.get("code") == "run_in_progress"
         if not busy:
@@ -948,6 +1063,9 @@ class WrenCommand(BaseCommand):
                 default=False,
                 help="Start even if there are local uncommitted changes (they will be overwritten).",
             )
+            # Dev tool: override the top-level agent (server default:
+            # "orchestrator"). Non-top-level agents are rejected by the server.
+            parser.add_argument("--agent", type=str, default=None, help=SUPPRESS)
             # Dev tool: render a downloaded conversation JSON through the real
             # renderer, no project or API access needed.
             parser.add_argument("--replay", type=str, default=None, help=SUPPRESS)
@@ -973,6 +1091,7 @@ class WrenCommand(BaseCommand):
         no_pull = getattr(args, "no_pull", False)
         force = getattr(args, "force", False)
         session_id = getattr(args, "session_id", None)
+        agent_name = getattr(args, "agent", None)
 
         if json_mode and not single_message:
             json_print({"success": False, "error": "--json requires --message (-m)"})
@@ -1006,11 +1125,13 @@ class WrenCommand(BaseCommand):
             sys.exit(1)
 
         if json_mode:
-            cls._run_json(project, api_key, single_message, session_id, no_pull)
+            cls._run_json(project, api_key, single_message, session_id, no_pull, agent_name)
         elif single_message:
-            cls._run_single(project, api_key, single_message, session_id, no_pull, verbose)
+            cls._run_single(
+                project, api_key, single_message, session_id, no_pull, verbose, agent_name
+            )
         else:
-            cls._run_interactive(project, api_key, session_id, no_pull, verbose)
+            cls._run_interactive(project, api_key, session_id, no_pull, verbose, agent_name)
 
     @classmethod
     def _run_replay(cls, path: str, delay_ms: int, verbose: bool) -> None:
@@ -1075,6 +1196,7 @@ class WrenCommand(BaseCommand):
         message: str,
         session_id: str | None,
         no_pull: bool,
+        agent_name: str | None = None,
     ) -> None:
         """Single-shot JSON mode — emit one JSON object and exit."""
         result = _turn_with_retry(
@@ -1086,6 +1208,11 @@ class WrenCommand(BaseCommand):
             json_mode=True,
             first_turn=True,
             no_pull=no_pull,
+            # Auto: the server answers its own gates so a scripted single-shot
+            # run always reaches a terminal state ("headless" would instead
+            # feed error strings to the agent's gate tools).
+            mode="auto",
+            agent_name=agent_name,
         )
         output: dict[str, Any] = {
             "success": result.error is None,
@@ -1100,7 +1227,10 @@ class WrenCommand(BaseCommand):
             "pull": None,
             "usage": result.usage,
             "pendingInput": (
-                {"inputKind": result.pending_input.get("inputKind")}
+                {
+                    "inputKind": result.pending_input.get("inputKind"),
+                    "requestId": result.pending_input.get("requestId"),
+                }
                 if result.pending_input
                 else None
             ),
@@ -1123,6 +1253,7 @@ class WrenCommand(BaseCommand):
         session_id: str | None,
         no_pull: bool,
         verbose: bool,
+        agent_name: str | None = None,
     ) -> None:
         """Single-shot interactive mode — one prompt, then pull."""
         from poly.output.console import plain
@@ -1136,7 +1267,15 @@ class WrenCommand(BaseCommand):
             json_mode=False,
             first_turn=True,
             no_pull=no_pull,
+            # See _run_json: a non-looping invocation can't answer gates.
+            mode="auto",
+            agent_name=agent_name,
         )
+        if result.pending_input:
+            plain(
+                "[muted]  Wren is waiting for input — resume with: "
+                f"poly wren --session-id {result.session_id}[/muted]"
+            )
         if result.suspended:
             plain(
                 "[muted]  Wren is continuing to work remotely — "
@@ -1152,6 +1291,7 @@ class WrenCommand(BaseCommand):
         session_id: str | None,
         no_pull: bool,
         verbose: bool,
+        agent_name: str | None = None,
     ) -> None:
         """Interactive REPL mode."""
         from poly.output.console import plain
@@ -1166,12 +1306,15 @@ class WrenCommand(BaseCommand):
         prompt_session = _make_prompt_session()
         first_turn = True
         pending_pull = False
+        # Either a typed gate answer to resume with, or (older servers that
+        # send no requestId) a plain prompt to send as the next message.
+        pending_response: tuple[str, dict[str, Any]] | None = None
         auto_prompt: str | None = None
 
         try:
             while True:
-                if auto_prompt is not None:
-                    user_input = auto_prompt
+                if pending_response is not None or auto_prompt is not None:
+                    user_input = auto_prompt or ""
                     auto_prompt = None
                 else:
                     try:
@@ -1194,7 +1337,12 @@ class WrenCommand(BaseCommand):
                     json_mode=False,
                     first_turn=first_turn,
                     no_pull=no_pull,
+                    # Interactive: real gates, answered over input_response.
+                    mode="interactive",
+                    agent_name=agent_name,
+                    input_response=pending_response,
                 )
+                pending_response = None
                 session_id = turn.session_id or session_id
                 first_turn = False
 
@@ -1211,9 +1359,15 @@ class WrenCommand(BaseCommand):
                     pending_pull = not no_pull
 
                 if turn.pending_input:
-                    response = _collect_user_input(turn.pending_input)
-                    if response:
-                        auto_prompt = response
+                    request_id = turn.pending_input.get("requestId")
+                    answer = _collect_user_input(turn.pending_input)
+                    if answer:
+                        if request_id and session_id:
+                            pending_response = (str(request_id), answer)
+                        else:
+                            # Older server: no requestId to resume with, so
+                            # fall back to sending the answer as a prompt.
+                            auto_prompt = _answer_as_prompt(turn.pending_input, answer)
                         continue
 
                 if turn.fatal:

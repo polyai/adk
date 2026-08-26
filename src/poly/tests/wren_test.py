@@ -695,5 +695,511 @@ class TurnWithRetryTests(unittest.TestCase):
         self.assertEqual(mock_turn.call_count, 1)
 
 
+class BuildContextTests(unittest.TestCase):
+    """Tests for _build_context."""
+
+    def test_context_without_mode_omits_mode_key(self) -> None:
+        """No mode argument means no "mode" in the context sent to the server."""
+        from poly.cli_commands.wren import _build_context
+
+        context = _build_context(_make_project())
+        self.assertEqual(
+            context,
+            {"accountId": "test-account", "projectId": "test-project", "branchId": "main"},
+        )
+
+    def test_context_with_mode_includes_mode_key(self) -> None:
+        """A mode argument is pinned explicitly into the context."""
+        from poly.cli_commands.wren import _build_context
+
+        context = _build_context(_make_project(), mode="interactive")
+        self.assertEqual(context["mode"], "interactive")
+
+
+class ClientMessageBodyTests(unittest.TestCase):
+    """Tests for the JSON bodies POSTed to the wren endpoint."""
+
+    @patch("poly.handlers.wren_api.requests.post")
+    def test_prompt_body_is_schema_first(self, mock_post: MagicMock) -> None:
+        """A plain prompt sends type/content/context and nothing else."""
+        from poly.handlers.wren_api import stream_wren_turn
+
+        mock_post.return_value = _fake_sse_response([{"type": "complete", "depth": 0}])
+        list(stream_wren_turn("studio", "key", "hi", {"accountId": "a"}))
+        self.assertEqual(
+            mock_post.call_args.kwargs["json"],
+            {"type": "prompt", "content": "hi", "context": {"accountId": "a"}},
+        )
+
+    @patch("poly.handlers.wren_api.requests.post")
+    def test_prompt_body_includes_session_and_agent_when_given(self, mock_post: MagicMock) -> None:
+        """Session ID and agent name are added when provided."""
+        from poly.handlers.wren_api import stream_wren_turn
+
+        mock_post.return_value = _fake_sse_response([{"type": "complete", "depth": 0}])
+        list(
+            stream_wren_turn(
+                "studio",
+                "key",
+                "hi",
+                {"accountId": "a"},
+                session_id="sess-1",
+                agent_name="planner",
+            )
+        )
+        body = mock_post.call_args.kwargs["json"]
+        self.assertEqual(body["sessionId"], "sess-1")
+        self.assertEqual(body["agentName"], "planner")
+
+    @patch("poly.handlers.wren_api.requests.post")
+    def test_empty_session_and_agent_are_omitted(self, mock_post: MagicMock) -> None:
+        """Falsy session ID and agent name must not be sent as empty strings."""
+        from poly.handlers.wren_api import stream_wren_turn
+
+        mock_post.return_value = _fake_sse_response([{"type": "complete", "depth": 0}])
+        list(stream_wren_turn("studio", "key", "hi", {"accountId": "a"}, "", ""))
+        body = mock_post.call_args.kwargs["json"]
+        self.assertNotIn("sessionId", body)
+        self.assertNotIn("agentName", body)
+
+    @patch("poly.handlers.wren_api.requests.post")
+    def test_input_response_body(self, mock_post: MagicMock) -> None:
+        """Answering a gate sends an input_response message with requestId and answer."""
+        from poly.handlers.wren_api import stream_wren_input_response
+
+        mock_post.return_value = _fake_sse_response([{"type": "complete", "depth": 0}])
+        answer = {"inputKind": "plan", "value": {"approved": True}}
+        list(
+            stream_wren_input_response(
+                "studio", "key", "req-1", answer, {"accountId": "a"}, "sess-1"
+            )
+        )
+        self.assertEqual(
+            mock_post.call_args.kwargs["json"],
+            {
+                "type": "input_response",
+                "sessionId": "sess-1",
+                "context": {"accountId": "a"},
+                "requestId": "req-1",
+                "answer": answer,
+            },
+        )
+
+
+class InputResponseStreamTests(unittest.TestCase):
+    """Tests for terminal-event semantics on a resumed input_response stream."""
+
+    @patch("poly.handlers.wren_api.requests.post")
+    def test_stops_at_top_level_complete(self, mock_post: MagicMock) -> None:
+        """A depth-0 non-suspended complete ends the resumed stream."""
+        from poly.handlers.wren_api import stream_wren_input_response
+
+        mock_post.return_value = _fake_sse_response(
+            [
+                {"type": "message_delta", "depth": 0, "delta": "resuming"},
+                {"type": "complete", "depth": 0},
+                {"type": "message_delta", "depth": 0, "delta": "should not arrive"},
+            ]
+        )
+        events = list(
+            stream_wren_input_response("studio", "key", "req-1", {}, {"accountId": "a"}, "sess-1")
+        )
+        self.assertEqual([e["type"] for e in events], ["message_delta", "complete"])
+
+    @patch("poly.handlers.wren_api.requests.post")
+    def test_continues_past_suspended_complete(self, mock_post: MagicMock) -> None:
+        """A suspended complete is mid-chain — the resumed stream keeps going."""
+        from poly.handlers.wren_api import stream_wren_input_response
+
+        mock_post.return_value = _fake_sse_response(
+            [
+                {"type": "complete", "depth": 0, "suspended": True},
+                {"type": "message_delta", "depth": 0, "delta": "still going"},
+                {"type": "complete", "depth": 0},
+            ]
+        )
+        events = list(
+            stream_wren_input_response("studio", "key", "req-1", {}, {"accountId": "a"}, "sess-1")
+        )
+        self.assertEqual(len(events), 3)
+
+
+def _fake_error_response(body: dict | ValueError) -> MagicMock:
+    """Build a fake 400 response whose json() returns body (or raises it)."""
+    import requests
+
+    response = MagicMock()
+    response.ok = False
+    response.status_code = 400
+    if isinstance(body, ValueError):
+        response.json.side_effect = body
+    else:
+        response.json.return_value = body
+    response.raise_for_status.side_effect = requests.HTTPError(response=response)
+    return response
+
+
+class ValidationErrorDetailTests(unittest.TestCase):
+    """Tests for surfacing the server's 400 validation detail."""
+
+    @patch("poly.handlers.wren_api.requests.post")
+    def test_error_detail_becomes_the_exception_message(self, mock_post: MagicMock) -> None:
+        """A JSON error body is raised as the HTTPError message."""
+        import requests
+
+        from poly.handlers.wren_api import stream_wren_turn
+
+        detail = "Invalid request: context.projectId: Required"
+        mock_post.return_value = _fake_error_response({"error": detail})
+        with self.assertRaises(requests.HTTPError) as ctx:
+            list(stream_wren_turn("studio", "key", "hi", {}))
+        self.assertEqual(str(ctx.exception), detail)
+
+    @patch("poly.handlers.wren_api.requests.post")
+    def test_non_json_body_propagates_original_error(self, mock_post: MagicMock) -> None:
+        """When the body isn't JSON, raise_for_status's own error propagates."""
+        import requests
+
+        from poly.handlers.wren_api import stream_wren_turn
+
+        response = _fake_error_response(ValueError("not json"))
+        original = response.raise_for_status.side_effect
+        mock_post.return_value = response
+        with self.assertRaises(requests.HTTPError) as ctx:
+            list(stream_wren_turn("studio", "key", "hi", {}))
+        self.assertIs(ctx.exception, original)
+
+
+class CollectUserInputTests(unittest.TestCase):
+    """Tests for _collect_user_input's typed answer shapes."""
+
+    @patch("questionary.select")
+    def test_single_select_question(self, mock_select: MagicMock) -> None:
+        """Picking one option yields a single-entry selected list."""
+        from poly.cli_commands.wren import _collect_user_input
+
+        mock_select.return_value.ask.return_value = "Blue"
+        event = {
+            "inputKind": "question",
+            "questions": [{"question": "Favourite colour?", "options": ["Blue", "Red"]}],
+        }
+        self.assertEqual(
+            _collect_user_input(event),
+            {"inputKind": "question", "value": {"answers": [{"selected": ["Blue"]}]}},
+        )
+
+    @patch("questionary.checkbox")
+    def test_multi_select_question_uses_checkbox(self, mock_checkbox: MagicMock) -> None:
+        """allowMultiple questions collect every checked option."""
+        from poly.cli_commands.wren import _collect_user_input
+
+        mock_checkbox.return_value.ask.return_value = ["Blue", "Red"]
+        event = {
+            "inputKind": "question",
+            "questions": [
+                {
+                    "question": "Which colours?",
+                    "options": ["Blue", "Red", "Green"],
+                    "allowMultiple": True,
+                }
+            ],
+        }
+        answer = _collect_user_input(event)
+        self.assertEqual(answer["value"]["answers"], [{"selected": ["Blue", "Red"]}])
+
+    @patch("questionary.text")
+    @patch("questionary.select")
+    def test_other_choice_falls_through_to_freeform(
+        self, mock_select: MagicMock, mock_text: MagicMock
+    ) -> None:
+        """Choosing "Other" prompts for text and records it as freeform."""
+        from poly.cli_commands.wren import _collect_user_input
+
+        mock_select.return_value.ask.return_value = "Other (type an answer)"
+        mock_text.return_value.ask.return_value = "typed text"
+        event = {
+            "inputKind": "question",
+            "questions": [{"question": "Favourite colour?", "options": ["Blue"]}],
+        }
+        answer = _collect_user_input(event)
+        self.assertEqual(answer["value"]["answers"], [{"selected": [], "freeform": "typed text"}])
+
+    @patch("questionary.select")
+    def test_freeform_disabled_hides_other_choice(self, mock_select: MagicMock) -> None:
+        """allowFreeform=False offers only the server's options."""
+        from poly.cli_commands.wren import _collect_user_input
+
+        mock_select.return_value.ask.return_value = "Blue"
+        event = {
+            "inputKind": "question",
+            "questions": [
+                {"question": "Favourite colour?", "options": ["Blue", "Red"], "allowFreeform": False}
+            ],
+        }
+        _collect_user_input(event)
+        self.assertEqual(mock_select.call_args.kwargs["choices"], ["Blue", "Red"])
+
+    @patch("questionary.text")
+    def test_question_without_options_prompts_for_text(self, mock_text: MagicMock) -> None:
+        """An option-less question is answered entirely as freeform."""
+        from poly.cli_commands.wren import _collect_user_input
+
+        mock_text.return_value.ask.return_value = "Because I like it"
+        event = {"inputKind": "question", "questions": [{"question": "Why?"}]}
+        answer = _collect_user_input(event)
+        self.assertEqual(
+            answer["value"]["answers"], [{"selected": [], "freeform": "Because I like it"}]
+        )
+
+    @patch("questionary.select")
+    def test_cancelled_question_returns_none(self, mock_select: MagicMock) -> None:
+        """Ctrl-C at the prompt (ask() -> None) leaves the gate unanswered."""
+        from poly.cli_commands.wren import _collect_user_input
+
+        mock_select.return_value.ask.return_value = None
+        event = {
+            "inputKind": "question",
+            "questions": [{"question": "Favourite colour?", "options": ["Blue"]}],
+        }
+        self.assertIsNone(_collect_user_input(event))
+
+    @patch("questionary.select")
+    def test_plan_approved(self, mock_select: MagicMock) -> None:
+        """Approving a plan yields approved=True."""
+        from poly.cli_commands.wren import _collect_user_input
+
+        mock_select.return_value.ask.return_value = "Approve"
+        answer = _collect_user_input({"inputKind": "plan", "title": "Plan", "content": "# Steps"})
+        self.assertEqual(answer, {"inputKind": "plan", "value": {"approved": True}})
+
+    @patch("questionary.text")
+    @patch("questionary.select")
+    def test_plan_feedback(self, mock_select: MagicMock, mock_text: MagicMock) -> None:
+        """Giving feedback yields approved=False plus the feedback text."""
+        from poly.cli_commands.wren import _collect_user_input
+
+        mock_select.return_value.ask.return_value = "Give feedback"
+        mock_text.return_value.ask.return_value = "Add error handling"
+        answer = _collect_user_input({"inputKind": "plan", "content": "# Steps"})
+        self.assertEqual(
+            answer,
+            {"inputKind": "plan", "value": {"approved": False, "feedback": "Add error handling"}},
+        )
+
+    @patch("questionary.select")
+    def test_plan_cancelled_returns_none(self, mock_select: MagicMock) -> None:
+        """Cancelling a plan gate leaves the run paused."""
+        from poly.cli_commands.wren import _collect_user_input
+
+        mock_select.return_value.ask.return_value = "Cancel"
+        self.assertIsNone(_collect_user_input({"inputKind": "plan", "content": "# Steps"}))
+
+    def test_secret_gate_is_declined(self) -> None:
+        """Secret creation can't be done from the CLI, so it's declined."""
+        from poly.cli_commands.wren import _collect_user_input
+
+        self.assertEqual(
+            _collect_user_input({"inputKind": "secret", "name": "API_KEY"}),
+            {"inputKind": "secret", "value": {"created": False, "reason": "cancelled"}},
+        )
+
+    def test_edit_secret_gate_is_declined(self) -> None:
+        """Editing a secret declines with updated=False."""
+        from poly.cli_commands.wren import _collect_user_input
+
+        self.assertEqual(
+            _collect_user_input({"inputKind": "edit-secret"}),
+            {"inputKind": "edit-secret", "value": {"updated": False, "reason": "cancelled"}},
+        )
+
+    def test_delete_secret_gate_is_declined(self) -> None:
+        """Deleting a secret declines with deleted=False."""
+        from poly.cli_commands.wren import _collect_user_input
+
+        self.assertEqual(
+            _collect_user_input({"inputKind": "delete-secret"}),
+            {"inputKind": "delete-secret", "value": {"deleted": False, "reason": "cancelled"}},
+        )
+
+    def test_unknown_kind_returns_none(self) -> None:
+        """An unrecognised gate kind can't be answered."""
+        from poly.cli_commands.wren import _collect_user_input
+
+        self.assertIsNone(_collect_user_input({"inputKind": "some_future_gate"}))
+
+
+class AnswerAsPromptTests(unittest.TestCase):
+    """Tests for _answer_as_prompt, the prose fallback for typed answers."""
+
+    def test_plan_approval_becomes_go_ahead(self) -> None:
+        """An approved plan flattens to a plain go-ahead."""
+        from poly.cli_commands.wren import _answer_as_prompt
+
+        answer = {"inputKind": "plan", "value": {"approved": True}}
+        self.assertEqual(_answer_as_prompt({}, answer), "Approved, go ahead.")
+
+    def test_plan_feedback_becomes_the_feedback_text(self) -> None:
+        """Plan feedback is sent verbatim as the prompt."""
+        from poly.cli_commands.wren import _answer_as_prompt
+
+        answer = {"inputKind": "plan", "value": {"approved": False, "feedback": "Use webhooks"}}
+        self.assertEqual(_answer_as_prompt({}, answer), "Use webhooks")
+
+    def test_plan_rejection_without_feedback_is_none(self) -> None:
+        """A rejection with no feedback has no prose to send."""
+        from poly.cli_commands.wren import _answer_as_prompt
+
+        self.assertIsNone(_answer_as_prompt({}, {"inputKind": "plan", "value": {"approved": False}}))
+
+    def test_questions_become_question_answer_lines(self) -> None:
+        """Each question pairs with its answer as one "Q: A" line."""
+        from poly.cli_commands.wren import _answer_as_prompt
+
+        event = {"questions": [{"question": "Colour?"}, {"question": "Sizes?"}]}
+        answer = {
+            "inputKind": "question",
+            "value": {
+                "answers": [
+                    {"selected": [], "freeform": "Blue"},
+                    {"selected": ["S", "M"]},
+                ]
+            },
+        }
+        self.assertEqual(_answer_as_prompt(event, answer), "Colour?: Blue\nSizes?: S, M")
+
+    def test_empty_answers_return_none(self) -> None:
+        """Nothing selected and nothing typed means no prompt to send."""
+        from poly.cli_commands.wren import _answer_as_prompt
+
+        event = {"questions": [{"question": "Colour?"}]}
+        answer = {"inputKind": "question", "value": {"answers": [{"selected": [], "freeform": ""}]}}
+        self.assertIsNone(_answer_as_prompt(event, answer))
+
+    def test_unknown_kind_returns_none(self) -> None:
+        """An unrecognised answer kind has no prose form."""
+        from poly.cli_commands.wren import _answer_as_prompt
+
+        self.assertIsNone(_answer_as_prompt({}, {"inputKind": "secret", "value": {}}))
+
+
+class StreamTurnRoutingTests(unittest.TestCase):
+    """Tests for how _stream_turn chooses between prompt and input_response."""
+
+    @patch("poly.cli_commands.wren.stream_wren_input_response")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
+    def test_mode_reaches_the_prompt_context(
+        self, mock_turn: MagicMock, mock_input_response: MagicMock
+    ) -> None:
+        """The mode kwarg is pinned into the context sent with a prompt."""
+        mock_turn.return_value = iter([{"type": "complete", "totalSteps": 1, "usageByAgent": {}}])
+        _stream_turn(_make_project(), "key", "hi", None, json_mode=True, mode="interactive")
+        mock_input_response.assert_not_called()
+        self.assertEqual(mock_turn.call_args.kwargs["context"]["mode"], "interactive")
+
+    @patch("poly.cli_commands.wren.stream_wren_input_response")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
+    def test_agent_name_forwarded(
+        self, mock_turn: MagicMock, mock_input_response: MagicMock
+    ) -> None:
+        """An agent_name override is forwarded to the SSE client."""
+        mock_turn.return_value = iter([{"type": "complete", "totalSteps": 1, "usageByAgent": {}}])
+        _stream_turn(_make_project(), "key", "hi", None, json_mode=True, agent_name="planner")
+        self.assertEqual(mock_turn.call_args.kwargs["agent_name"], "planner")
+
+    @patch("poly.cli_commands.wren.stream_wren_input_response")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
+    def test_input_response_resumes_paused_run(
+        self, mock_turn: MagicMock, mock_input_response: MagicMock
+    ) -> None:
+        """With a session and a pending answer, the run resumes over input_response."""
+        mock_input_response.return_value = iter(
+            [{"type": "complete", "totalSteps": 1, "usageByAgent": {}}]
+        )
+        answer = {"inputKind": "plan", "value": {"approved": True}}
+        _stream_turn(
+            _make_project(),
+            "key",
+            "",
+            "sess-1",
+            json_mode=True,
+            mode="interactive",
+            input_response=("req-1", answer),
+        )
+        mock_turn.assert_not_called()
+        kwargs = mock_input_response.call_args.kwargs
+        self.assertEqual(kwargs["request_id"], "req-1")
+        self.assertEqual(kwargs["answer"], answer)
+        self.assertEqual(kwargs["session_id"], "sess-1")
+        # The resumed run keeps the mode it was started with, so none is sent.
+        self.assertNotIn("mode", kwargs["context"])
+
+    @patch("poly.cli_commands.wren.stream_wren_input_response")
+    @patch("poly.cli_commands.wren.stream_wren_turn")
+    def test_input_response_without_session_falls_back_to_prompt(
+        self, mock_turn: MagicMock, mock_input_response: MagicMock
+    ) -> None:
+        """Without a session ID there's no run to resume, so a prompt is sent."""
+        mock_turn.return_value = iter([{"type": "complete", "totalSteps": 1, "usageByAgent": {}}])
+        _stream_turn(
+            _make_project(),
+            "key",
+            "Approved, go ahead.",
+            None,
+            json_mode=True,
+            input_response=("req-1", {"inputKind": "plan", "value": {"approved": True}}),
+        )
+        mock_input_response.assert_not_called()
+        self.assertEqual(mock_turn.call_args.kwargs["prompt"], "Approved, go ahead.")
+
+
+class ErrorCodeMappingTests(unittest.TestCase):
+    """Tests that newly added server error codes are recorded on the result."""
+
+    @patch("poly.cli_commands.wren.stream_wren_turn")
+    def test_invalid_request_recorded(self, mock_stream: MagicMock) -> None:
+        """An invalid_request error is surfaced without being fatal."""
+        mock_stream.return_value = iter(
+            [{"type": "error", "errorCode": "invalid_request", "message": "bad body"}]
+        )
+        result = _stream_turn(_make_project(), "key", "hi", None, json_mode=True)
+        self.assertEqual(result.error["code"], "invalid_request")
+        self.assertFalse(result.fatal)
+
+    @patch("poly.cli_commands.wren.stream_wren_turn")
+    def test_conversation_not_found_recorded(self, mock_stream: MagicMock) -> None:
+        """A stale --session-id surfaces as conversation_not_found."""
+        mock_stream.return_value = iter(
+            [{"type": "error", "errorCode": "conversation_not_found", "message": "gone"}]
+        )
+        result = _stream_turn(_make_project(), "key", "hi", None, json_mode=True)
+        self.assertEqual(result.error["code"], "conversation_not_found")
+
+    @patch("poly.cli_commands.wren.stream_wren_turn")
+    def test_stream_interrupted_recorded(self, mock_stream: MagicMock) -> None:
+        """A dropped model stream is retryable, not fatal."""
+        mock_stream.return_value = iter(
+            [{"type": "error", "errorCode": "llm_stream_interrupted", "message": "dropped"}]
+        )
+        result = _stream_turn(_make_project(), "key", "hi", None, json_mode=True, first_turn=True)
+        self.assertEqual(result.error["code"], "llm_stream_interrupted")
+        self.assertFalse(result.fatal)
+
+    def test_new_codes_all_have_friendly_messages(self) -> None:
+        """Every newly added code maps to a human-readable message."""
+        from poly.cli_commands.wren import _ERROR_MESSAGES
+
+        for code in (
+            "llm_stream_interrupted",
+            "llm_invalid_request",
+            "file_resolution_failed",
+            "usage_tracking_failed",
+            "conversation_not_found",
+            "invalid_request",
+            "internal",
+        ):
+            with self.subTest(code=code):
+                self.assertTrue(_ERROR_MESSAGES.get(code))
+
+
 if __name__ == "__main__":
     unittest.main()
