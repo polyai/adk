@@ -332,13 +332,17 @@ class AgentStudioInterface:
             self._handle_api_error(e)
 
     def pull_resources(
-        self, projection_json: Optional[dict[str, Any]] = None
+        self,
+        projection_json: Optional[dict[str, Any]] = None,
+        include_api_mocks: bool = False,
     ) -> tuple[dict[type[Resource], dict[str, Resource]], dict[str, Any]]:
         """Fetch all resources for the specific project.
 
         Args:
             projection_json (Optional[dict[str, Any]]): A dictionary containing the projection.
                 If provided, the projection will be used instead of fetching it from the API.
+            include_api_mocks (bool): If True, tell the platform to include test case
+                api_mocks in the returned projection (gated behind the api mock editor FF).
 
         Returns:
             dict[type[Resource], dict[str, Resource]]: A dictionary mapping resource types to
@@ -350,7 +354,7 @@ class AgentStudioInterface:
         if projection_json is not None:
             return load_resources_from_projection(projection_json), projection_json
         try:
-            projection = self.sync_client.pull_projection()
+            projection = self.sync_client.pull_projection(include_api_mocks=include_api_mocks)
             return load_resources_from_projection(projection), projection
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
@@ -678,6 +682,7 @@ class AgentStudioInterface:
         input_lang: Optional[str] = None,
         output_lang: Optional[str] = None,
         sip_headers: Optional[dict[str, str]] = None,
+        api_mock_editor: bool = False,
     ) -> dict:
         """Create a new chat conversation.
 
@@ -689,6 +694,8 @@ class AgentStudioInterface:
             variant_id: Optional variant ID (e.g. 'Voice')
             channel: The channel identifier (e.g. 'chat.polyai', 'webchat.polyai')
             sip_headers: Optional simulated SIP headers exposed through conv.sip_headers
+            api_mock_editor: If True, tell the platform to intercept API integration
+                calls using the test case's api_mocks (gated behind the api mock editor FF)
 
         Returns:
             dict: The API response containing the conversation ID and initial greeting
@@ -703,6 +710,7 @@ class AgentStudioInterface:
             input_lang=input_lang,
             output_lang=output_lang,
             sip_headers=sip_headers,
+            api_mock_editor=api_mock_editor,
         )
 
     @staticmethod
@@ -770,6 +778,7 @@ class AgentStudioInterface:
         input_lang: str = None,
         output_lang: str = None,
         sip_headers: Optional[dict[str, str]] = None,
+        api_mock_editor: bool = False,
     ) -> dict:
         """Create a new chat conversation against a branch deployment.
 
@@ -782,6 +791,8 @@ class AgentStudioInterface:
             channel: The channel identifier (e.g. 'chat.polyai', 'webchat.polyai')
             variant_id: Optional variant ID (e.g. 'Voice')
             sip_headers: Optional simulated SIP headers exposed through conv.sip_headers
+            api_mock_editor: If True, tell the platform to intercept API integration
+                calls using the test case's api_mocks (gated behind the api mock editor FF)
 
         Returns:
             dict: The API response containing the conversation ID and initial greeting
@@ -797,6 +808,7 @@ class AgentStudioInterface:
             input_lang=input_lang,
             output_lang=output_lang,
             sip_headers=sip_headers,
+            api_mock_editor=api_mock_editor,
         )
 
     @staticmethod

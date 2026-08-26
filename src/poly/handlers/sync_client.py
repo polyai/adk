@@ -111,13 +111,18 @@ class SyncClientHandler:
         return projection
 
     def pull_branch_projection(
-        self, branch_id: str, at_sequence: Optional[int] = None
+        self,
+        branch_id: str,
+        at_sequence: Optional[int] = None,
+        include_api_mocks: bool = False,
     ) -> dict[str, Any]:
         """Fetch projection for a specific branch, optionally at a historical sequence.
 
         Args:
             branch_id: The branch whose projection to fetch.
             at_sequence: When provided, fetches the projection at this sequence number.
+            include_api_mocks: If True, ask the platform to include test case
+                api_mocks in the projection (gated behind the api mock editor FF).
 
         Returns:
             The raw projection dict for the branch.
@@ -127,18 +132,27 @@ class SyncClientHandler:
             + (f" at sequence {at_sequence}" if at_sequence is not None else "")
         )
         projection = self.sdk.fetch_projection(
-            force_refresh=True, branch_id=branch_id, at_sequence=at_sequence
+            force_refresh=True,
+            branch_id=branch_id,
+            at_sequence=at_sequence,
+            include_api_mocks=include_api_mocks,
         )
         return projection
 
-    def pull_projection(self) -> dict[str, Any]:
+    def pull_projection(self, include_api_mocks: bool = False) -> dict[str, Any]:
         """Fetch the raw projection for the current branch.
+
+        Args:
+            include_api_mocks: If True, ask the platform to include test case
+                api_mocks in the projection (gated behind the api mock editor FF).
 
         Returns:
             The raw projection dict.
         """
         self.assert_branch_exists()
-        projection = self.pull_branch_projection(branch_id=self.sdk.branch_id)
+        projection = self.pull_branch_projection(
+            branch_id=self.sdk.branch_id, include_api_mocks=include_api_mocks
+        )
         logger.debug(f"Projection: {projection}")
         logger.info(
             f"Successfully fetched project data for project {self.project_id} "

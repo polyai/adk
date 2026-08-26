@@ -85,6 +85,52 @@ class CreateChat(unittest.TestCase):
 
         self.assertEqual(mock_make_request.call_args.kwargs["data"]["sip_headers"], sip_headers)
 
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_standard_chat_requests_api_mock_editor_when_enabled(self, mock_make_request):
+        """api_mock_editor=True asks the platform to intercept API calls with the test mocks."""
+        PlatformAPIHandler.create_chat(
+            "uk-1",
+            "ACCOUNT-123",
+            "PROJECT-123",
+            api_mock_editor=True,
+        )
+
+        self.assertIs(mock_make_request.call_args.kwargs["data"]["apiMockEditor"], True)
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_standard_chat_omits_api_mock_editor_by_default(self, mock_make_request):
+        """The apiMockEditor key is left out entirely rather than sent as False."""
+        PlatformAPIHandler.create_chat("uk-1", "ACCOUNT-123", "PROJECT-123")
+
+        self.assertNotIn("apiMockEditor", mock_make_request.call_args.kwargs["data"])
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_draft_chat_requests_api_mock_editor_when_enabled(self, mock_make_request):
+        """api_mock_editor=True is forwarded on branch (draft) chats too."""
+        PlatformAPIHandler.create_draft_chat(
+            "uk-1",
+            "ACCOUNT-123",
+            "PROJECT-123",
+            "artifact-version",
+            "lambda-version",
+            api_mock_editor=True,
+        )
+
+        self.assertIs(mock_make_request.call_args.kwargs["data"]["apiMockEditor"], True)
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_draft_chat_omits_api_mock_editor_by_default(self, mock_make_request):
+        """The apiMockEditor key is left out entirely rather than sent as False."""
+        PlatformAPIHandler.create_draft_chat(
+            "uk-1",
+            "ACCOUNT-123",
+            "PROJECT-123",
+            "artifact-version",
+            "lambda-version",
+        )
+
+        self.assertNotIn("apiMockEditor", mock_make_request.call_args.kwargs["data"])
+
 
 class MakeRequest(unittest.TestCase):
     """Tests for PlatformAPIHandler.make_request HTTP behaviour."""

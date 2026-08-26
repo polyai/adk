@@ -50,6 +50,7 @@ from poly.resources.resource import (
     _parse_multi_resource_path,
     load_resources_from_projection,
 )
+from poly.resources.test_suite import TestCaseApiMocks
 from poly.utils import prepush
 
 logger = logging.getLogger(__name__)
@@ -361,7 +362,8 @@ class AgentStudioProject:
 
         try:
             project.resources, projection = project.api_handler.pull_resources(
-                projection_json=projection_json
+                projection_json=projection_json,
+                include_api_mocks=project.api_mock_editor_enabled,
             )
         except ValueError:
             if os.path.exists(project_path):
@@ -370,6 +372,7 @@ class AgentStudioProject:
                 shutil.rmtree(account_path)
             raise
 
+        project._strip_disabled_api_mocks(project.resources)
         project._check_no_duplicate_resource_paths(project.resources)
 
         resource_mappings: list[ResourceMapping] = project._make_resource_mappings(
@@ -448,7 +451,11 @@ class AgentStudioProject:
         Returns:
             A tuple of (resources dict, projection dict).
         """
-        resources, projection = self.api_handler.pull_resources(projection_json=projection_json)
+        resources, projection = self.api_handler.pull_resources(
+            projection_json=projection_json,
+            include_api_mocks=self.api_mock_editor_enabled,
+        )
+        self._strip_disabled_api_mocks(resources)
         self._check_no_duplicate_resource_paths(resources)
 
         self.resources = resources
@@ -562,12 +569,14 @@ class AgentStudioProject:
         # -------
 
         incoming_resources, projection = self.api_handler.pull_resources(
-            projection_json=projection_json
+            projection_json=projection_json,
+            include_api_mocks=self.api_mock_editor_enabled,
         )
         # Only update branch id if we used the API to pull the resources
         if projection_json is None:
             self.branch_id = self.api_handler.branch_id
 
+        self._strip_disabled_api_mocks(incoming_resources)
         self._check_no_duplicate_resource_paths(incoming_resources)
         # -------
         # Update resources
@@ -1248,6 +1257,8 @@ class AgentStudioProject:
                 resource_mapping.resource_id
             ] = local_resource
 
+        self._strip_disabled_api_mocks(new_state)
+
         # 3. Work out kept resources that have changed
         new_resources: ResourceMap = {}
         updated_resources: ResourceMap = {}
@@ -1768,7 +1779,10 @@ class AgentStudioProject:
                 self.region, self.account_id, self.project_id, branch_id
             )
             logger.info(f"Pulling resources from branch '{name}'...")
-            resources, _ = branch_api_handler.pull_resources()
+            resources, _ = branch_api_handler.pull_resources(
+                include_api_mocks=self.api_mock_editor_enabled
+            )
+            self._strip_disabled_api_mocks(resources)
             return resources
 
         # 3) Deployment version hash prefix -> deployment resources
@@ -2549,6 +2563,7 @@ class AgentStudioProject:
                 input_lang=input_lang,
                 output_lang=output_lang,
                 sip_headers=sip_headers,
+                api_mock_editor=self.api_mock_editor_enabled,
             )
 
         return AgentStudioInterface.create_chat(
@@ -2561,6 +2576,7 @@ class AgentStudioProject:
             input_lang=input_lang,
             output_lang=output_lang,
             sip_headers=sip_headers,
+            api_mock_editor=self.api_mock_editor_enabled,
         )
 
     def send_message(
@@ -3077,6 +3093,8 @@ class AgentStudioProject:
             )
 
             new_state.setdefault(mapping.resource_type, {})[mapping.resource_id] = local_resource
+
+        self._strip_disabled_api_mocks(new_state)
 
         # 3. Compare new_state vs self.resources by file_path -> new/deleted/updated
         deleted_resources: ResourceMap = {}
@@ -3888,3 +3906,24 @@ class AgentStudioProject:
         return live_head is not None and (
             sandbox_head is None or _parse_created_at(live_head) >= _parse_created_at(sandbox_head)
         )
+
+    @cached_property
+    def api_mock_editor_enabled(self) -> bool:
+        """Check if the API mock editor (test case `api_mocks`) feature is enabled."""
+        return self.api_handler.feature_flag_enabled(
+            key="testify-v2-1",
+            region=self.region,
+            project_id=self.project_id,
+            default=False,
+        )
+
+    def _strip_disabled_api_mocks(self, resources: "ResourceMap") -> None:
+        """Clear `TestCase.api_mocks` in-place while the api mock editor FF is off.
+
+        Keeps api_mocks dark end-to-end: never read from the platform, never
+        diffed against, and never pushed back up.
+        """
+        if self.api_mock_editor_enabled:
+            return
+        for test_case in resources.get(TestCase, {}).values():
+            test_case.api_mocks = TestCaseApiMocks()

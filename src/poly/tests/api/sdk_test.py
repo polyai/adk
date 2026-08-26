@@ -93,6 +93,32 @@ class FetchProjection(unittest.TestCase):
 
         self.assertEqual(session.get.call_count, 2)
 
+    def test_include_api_mocks_sends_api_mock_editor_param(self):
+        """include_api_mocks=True asks the platform for test case api_mocks."""
+        sdk = build_sdk()
+        session = MagicMock()
+        session.get.return_value = make_mock_response(
+            200, json_body={"projection": {}, "lastKnownSequence": "1"}
+        )
+        sdk._session = session
+
+        sdk.fetch_projection(include_api_mocks=True)
+
+        self.assertEqual(session.get.call_args.kwargs["params"], {"apiMockEditor": True})
+
+    def test_api_mock_editor_param_omitted_when_api_mocks_not_requested(self):
+        """The apiMockEditor param is left off entirely rather than sent as False."""
+        sdk = build_sdk()
+        session = MagicMock()
+        session.get.return_value = make_mock_response(
+            200, json_body={"projection": {}, "lastKnownSequence": "1"}
+        )
+        sdk._session = session
+
+        sdk.fetch_projection(at_sequence=7, include_api_mocks=False)
+
+        self.assertEqual(session.get.call_args.kwargs["params"], {"atSequence": 7})
+
     def test_request_failure_raises_sourcerer_error(self):
         """A failing projection request raises SourcererAPIError."""
         sdk = build_sdk()

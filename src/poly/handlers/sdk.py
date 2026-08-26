@@ -522,6 +522,7 @@ class SourcererSDK:
         force_refresh: bool = False,
         branch_id: Optional[str] = None,
         at_sequence: Optional[int] = None,
+        include_api_mocks: bool = False,
     ) -> dict[str, Any]:
         """Fetch the projection from the API.
 
@@ -531,6 +532,8 @@ class SourcererSDK:
                 When provided, caching is skipped entirely.
             at_sequence: Return the projection at this historical event-sequence
                 number. Implies *force_refresh* and skips caching.
+            include_api_mocks: If True, tell the platform to include test case
+                api_mocks in the projection (gated behind the api mock editor FF).
 
         Returns:
             The projection data as a dictionary.
@@ -550,6 +553,8 @@ class SourcererSDK:
         params: dict[str, Any] = {}
         if at_sequence is not None:
             params["atSequence"] = at_sequence
+        if include_api_mocks:
+            params["apiMockEditor"] = True
 
         try:
             response = self.session.get(url, params=params or None)

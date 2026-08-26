@@ -58,6 +58,7 @@ from poly.resources.flows import (
 )
 from poly.resources.function import FunctionType
 from poly.resources.resource import MultiResourceYamlResource
+from poly.resources.test_suite import ApiResponse, ApiResponseRule, TestCaseApiMocks
 from poly.tests.testing_utils import mock_read_from_file
 
 DIR = os.path.dirname(os.path.abspath(__file__))
@@ -3661,6 +3662,112 @@ class ResolveTestsTest(unittest.TestCase):
             self.project.resolve_tests(files=["no_such_test.yaml"])
 
 
+class ApiMockEditorFeatureFlagTest(unittest.TestCase):
+    """Gating of test case `api_mocks` behind the api mock editor feature flag."""
+
+    def setUp(self):
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        patch.object(AgentStudioProject, "save_config").start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _test_case_with_mocks(self) -> TestCase:
+        """A test case carrying a single mocked API response."""
+        return TestCase(
+            resource_id="TEST-1",
+            name="Order lookup",
+            scenario="Caller asks about their order.",
+            channel="chat.polyai",
+            language="en-GB",
+            assertions=TestCaseAssertion(
+                resource_id="TEST-1", name="assertions", prompts=[], function_calls=[]
+            ),
+            tags=TestCaseTags(resource_id="TEST-1", name="tags", tags=[]),
+            api_mocks=TestCaseApiMocks(
+                mocks={
+                    "crm": {
+                        "get_customer": [
+                            ApiResponseRule(respond=ApiResponse(status=200, body={"id": 1}))
+                        ]
+                    }
+                }
+            ),
+        )
+
+    def test_flag_is_read_from_posthog_for_the_current_project(self):
+        """The cached property returns the PostHog value for the testify-v2-1 key."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.feature_flag_enabled.return_value = True
+
+        self.assertTrue(project.api_mock_editor_enabled)
+        self.mock_api_handler.feature_flag_enabled.assert_called_once_with(
+            key="testify-v2-1",
+            region=project.region,
+            project_id=project.project_id,
+            default=False,
+        )
+
+    def test_disabled_flag_clears_api_mocks_on_test_cases(self):
+        """With the flag off, api_mocks are emptied so they are never diffed or pushed."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.feature_flag_enabled.return_value = False
+        test_case = self._test_case_with_mocks()
+
+        project._strip_disabled_api_mocks({TestCase: {test_case.resource_id: test_case}})
+
+        self.assertEqual(test_case.api_mocks, TestCaseApiMocks())
+
+    def test_enabled_flag_leaves_api_mocks_untouched(self):
+        """With the flag on, stripping is a no-op and the mocks survive."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.feature_flag_enabled.return_value = True
+        test_case = self._test_case_with_mocks()
+
+        project._strip_disabled_api_mocks({TestCase: {test_case.resource_id: test_case}})
+
+        self.assertEqual(test_case.api_mocks.mocks["crm"]["get_customer"][0].respond.status, 200)
+
+    def test_load_project_drops_api_mocks_returned_by_the_platform_when_disabled(self):
+        """Even if the platform sends api_mocks back, a disabled flag strips them on load."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.feature_flag_enabled.return_value = False
+        test_case = self._test_case_with_mocks()
+        self.mock_api_handler.pull_resources.return_value = (
+            {TestCase: {test_case.resource_id: test_case}},
+            {},
+        )
+
+        resources, _ = project.load_project()
+
+        self.assertEqual(resources[TestCase]["TEST-1"].api_mocks, TestCaseApiMocks())
+        self.mock_api_handler.pull_resources.assert_called_once_with(
+            projection_json=None, include_api_mocks=False
+        )
+
+    def test_load_project_requests_api_mocks_from_the_platform_when_enabled(self):
+        """With the flag on, the pull asks the platform to include api_mocks."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.feature_flag_enabled.return_value = True
+        test_case = self._test_case_with_mocks()
+        self.mock_api_handler.pull_resources.return_value = (
+            {TestCase: {test_case.resource_id: test_case}},
+            {},
+        )
+
+        resources, _ = project.load_project()
+
+        self.assertEqual(
+            resources[TestCase]["TEST-1"].api_mocks.mocks["crm"]["get_customer"][0].respond.status,
+            200,
+        )
+        self.mock_api_handler.pull_resources.assert_called_once_with(
+            projection_json=None, include_api_mocks=True
+        )
+
+
 class FetchProjectTest(unittest.TestCase):
     """Tests for the fetch_project method."""
 
@@ -3669,6 +3776,7 @@ class FetchProjectTest(unittest.TestCase):
         self.mock_api_handler = patch.object(
             AgentStudioProject, "api_handler", new_callable=MagicMock
         ).start()
+        self.mock_api_handler.feature_flag_enabled.return_value = False
         self.mock_save_config = patch.object(AgentStudioProject, "save_config").start()
 
     def tearDown(self):
@@ -3690,7 +3798,9 @@ class FetchProjectTest(unittest.TestCase):
         self.assertEqual(projection, expected_projection)
         self.assertEqual(project.resources, expected_resources)
         self.assertEqual(project._not_loaded_resources, [])
-        self.mock_api_handler.pull_resources.assert_called_once_with(projection_json=None)
+        self.mock_api_handler.pull_resources.assert_called_once_with(
+            projection_json=None, include_api_mocks=False
+        )
 
     def test_fetch_without_branch_updates_branch_id_from_api(self):
         """When no projection_json, branch_id should be updated from api_handler."""
@@ -3748,7 +3858,7 @@ class FetchProjectTest(unittest.TestCase):
 
         self.assertEqual(project.branch_id, original_branch_id)
         self.mock_api_handler.pull_resources.assert_called_once_with(
-            projection_json={"cached": "projection"}
+            projection_json={"cached": "projection"}, include_api_mocks=False
         )
 
     def test_fetch_calls_save_config(self):
@@ -4090,6 +4200,7 @@ class MigrateFlowStepSettingsTest(unittest.TestCase):
         migrate_flow_step_settings(status_dict)
 
         self.assertNotIn("settings", status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"])
+
 
 class SyncBranchProject(unittest.TestCase):
     """Tests for AgentStudioProject.sync_branch."""
@@ -5477,9 +5588,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
         flow_id is translated the prefix and flow_id disagree and the flow id stays welded
         onto start_step exactly as it did in the unfixed case.
         """
-        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id(
-            without_start_step=True
-        )
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id(without_start_step=True)
 
         with patch.object(
             AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
@@ -5491,9 +5600,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
 
     def test_branch_only_step_is_rekeyed_onto_the_sandbox_flow_id(self):
         """A step added on the branch adopts the sandbox flow id in its composite id."""
-        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id(
-            without_start_step=True
-        )
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id(without_start_step=True)
 
         with patch.object(
             AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
@@ -5542,9 +5649,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
                 rekeyed[resource.resource_id] = resource
             sandbox[resource_type] = rekeyed
 
-        with patch.object(
-            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox
-        ):
+        with patch.object(AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox):
             self.assertTrue(self.project.sync_ids_with_sandbox())
 
         self.assertEqual(

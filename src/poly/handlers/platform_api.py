@@ -453,6 +453,7 @@ class PlatformAPIHandler:
         input_lang: ty.Optional[str] = None,
         output_lang: ty.Optional[str] = None,
         sip_headers: ty.Optional[dict[str, str]] = None,
+        api_mock_editor: bool = False,
     ) -> dict:
         """Create a new chat conversation.
 
@@ -466,6 +467,8 @@ class PlatformAPIHandler:
             input_lang: Optional language code of the input message, e.g. "en-GB" or "fr-FR"
             output_lang: Optional language code for the agent's response,
             sip_headers: Optional simulated SIP headers exposed through conv.sip_headers
+            api_mock_editor: If True, tell the platform to intercept API integration
+                calls using the test case's api_mocks (gated behind the api mock editor FF)
 
         Returns:
             dict: The API response containing the conversation ID
@@ -483,6 +486,8 @@ class PlatformAPIHandler:
             data["tts_lang_code"] = output_lang
         if sip_headers:
             data["sip_headers"] = sip_headers
+        if api_mock_editor:
+            data["apiMockEditor"] = True
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
     @staticmethod
@@ -567,6 +572,7 @@ class PlatformAPIHandler:
         input_lang: ty.Optional[str] = None,
         output_lang: ty.Optional[str] = None,
         sip_headers: ty.Optional[dict[str, str]] = None,
+        api_mock_editor: bool = False,
     ) -> dict:
         """Create a new chat conversation against a branch deployment.
 
@@ -581,6 +587,8 @@ class PlatformAPIHandler:
             input_lang: Optional language code of the input message, e.g. "en-GB" or "fr-FR"
             output_lang: Optional language code for the agent's response, e.g. "en-
             sip_headers: Optional simulated SIP headers exposed through conv.sip_headers
+            api_mock_editor: If True, tell the platform to intercept API integration
+                calls using the test case's api_mocks (gated behind the api mock editor FF)
 
         Returns:
             dict: The API response containing the conversation ID
@@ -599,6 +607,8 @@ class PlatformAPIHandler:
             data["tts_lang_code"] = output_lang
         if sip_headers:
             data["sip_headers"] = sip_headers
+        if api_mock_editor:
+            data["apiMockEditor"] = True
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data=data)
 
     @staticmethod
