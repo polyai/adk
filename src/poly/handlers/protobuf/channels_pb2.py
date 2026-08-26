@@ -20,17 +20,17 @@ from poly.handlers.protobuf import agent_settings_pb2 as agent__settings__pb2
 from poly.handlers.protobuf import asr_pb2 as asr__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0e\x63hannels.proto\x12\x08\x63hannels\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x12llm_settings.proto\x1a\x1d\x63ontent_filter_settings.proto\x1a\x12\x61sr_settings.proto\x1a\x14\x61gent_settings.proto\x1a\tasr.proto\"\xb1\x01\n\x0bStylePrompt\x12\x0e\n\x06prompt\x18\x01 \x01(\t\x12\x12\n\ncreated_at\x18\x02 \x01(\t\x12\x12\n\ncreated_by\x18\x03 \x01(\t\x12\x33\n\nupdated_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x00\x88\x01\x01\x12\x17\n\nupdated_by\x18\x05 \x01(\tH\x01\x88\x01\x01\x42\r\n\x0b_updated_atB\r\n\x0b_updated_by\"/\n\x1dStylePrompt_UpdateStylePrompt\x12\x0e\n\x06prompt\x18\x01 \x01(\t\"\x82\x02\n\rChannelConfig\x12/\n\x0cllm_settings\x18\x01 \x01(\x0b\x32\x19.llm_settings.LLMSettings\x12+\n\x0cstyle_prompt\x18\x02 \x01(\x0b\x32\x15.channels.StylePrompt\x12!\n\x08greeting\x18\x03 \x01(\x0b\x32\x0f.agent.Greeting\x12\x46\n\x0esafety_filters\x18\x04 \x01(\x0b\x32..content_filter_settings.ContentFilterSettings\x12\x18\n\x0btemperature\x18\x05 \x01(\x02H\x00\x88\x01\x01\x42\x0e\n\x0c_temperature\".\n\tVADConfig\x12!\n\x19speech_end_window_seconds\x18\x01 \x01(\x01\"\xdf\x01\n\rBargeInConfig\x12\x14\n\x07\x65nabled\x18\x01 \x01(\x08H\x00\x88\x01\x01\x12\x1f\n\x12\x61llowed_first_turn\x18\x02 \x01(\x08H\x01\x88\x01\x01\x12\x19\n\x0cmax_per_call\x18\x03 \x01(\x05H\x02\x88\x01\x01\x12(\n\x1bmin_speech_duration_seconds\x18\x04 \x01(\x01H\x03\x88\x01\x01\x42\n\n\x08_enabledB\x15\n\x13_allowed_first_turnB\x0f\n\r_max_per_callB\x1e\n\x1c_min_speech_duration_seconds\"\xd6\x01\n\x10\x46illerUtterances\x12\x0f\n\x07\x65nabled\x18\x01 \x01(\x08\x12\x38\n\nutterances\x18\x02 \x03(\x0b\x32$.channels.FillerUtterances.Utterance\x12\x11\n\trandomize\x18\x05 \x01(\x08\x12 \n\x18initial_interval_seconds\x18\x06 \x01(\x01\x12\x18\n\x10interval_seconds\x18\x07 \x01(\x01\x1a\x1c\n\tUtterance\x12\x0f\n\x07message\x18\x01 \x01(\tJ\x04\x08\x03\x10\x04J\x04\x08\x04\x10\x05\"\xa8\x02\n\x15\x41ICousticsEnhancement\x12\x0f\n\x07\x65nabled\x18\x01 \x01(\x08\x12G\n\x12model_quality_tier\x18\x02 \x01(\x0e\x32+.channels.AICousticsEnhancement.QualityTier\x12\x17\n\x0fnoise_reduction\x18\x03 \x01(\x02\x12\x12\n\nvoice_gain\x18\x04 \x01(\x02\x12\x12\n\nnoise_gate\x18\x05 \x01(\x08\"t\n\x0bQualityTier\x12\x1c\n\x18QUALITY_TIER_UNSPECIFIED\x10\x00\x12\x19\n\x15QUALITY_TIER_STANDARD\x10\x01\x12\x15\n\x11QUALITY_TIER_HIGH\x10\x02\x12\x15\n\x11QUALITY_TIER_FAST\x10\x03\"V\n\x10\x41udioEnhancement\x12\x36\n\x0b\x61i_coustics\x18\x01 \x01(\x0b\x32\x1f.channels.AICousticsEnhancementH\x00\x42\n\n\x08provider\"\x85\x03\n\x0cVoiceChannel\x12\'\n\x06\x63onfig\x18\x01 \x01(\x0b\x32\x17.channels.ChannelConfig\x12/\n\x0c\x61sr_settings\x18\x02 \x01(\x0b\x32\x19.asr_settings.ASRSettings\x12,\n\ndisclaimer\x18\x03 \x01(\x0b\x32\x18.agent.DisclaimerMessage\x12\'\n\nvad_config\x18\x04 \x01(\x0b\x32\x13.channels.VADConfig\x12\x35\n\x11\x61udio_enhancement\x18\x05 \x01(\x0b\x32\x1a.channels.AudioEnhancement\x12=\n\x19silence_filler_utterances\x18\x06 \x01(\x0b\x32\x1a.channels.FillerUtterances\x12\x1c\n\nasr_config\x18\x07 \x01(\x0b\x32\x08.asr.Asr\x12\x30\n\x0f\x62\x61rge_in_config\x18\x08 \x01(\x0b\x32\x17.channels.BargeInConfig\"b\n\x0eWebChatChannel\x12\'\n\x06\x63onfig\x18\x01 \x01(\x0b\x32\x17.channels.ChannelConfig\x12\'\n\x06status\x18\x02 \x01(\x0e\x32\x17.channels.ChannelStatus\"]\n\x08\x43hannels\x12%\n\x05voice\x18\x01 \x01(\x0b\x32\x16.channels.VoiceChannel\x12*\n\x08web_chat\x18\x02 \x01(\x0b\x32\x18.channels.WebChatChannel\"w\n\x16\x43hannel_UpdateGreeting\x12+\n\x0c\x63hannel_type\x18\x01 \x01(\x0e\x32\x15.channels.ChannelType\x12\x30\n\x08greeting\x18\x02 \x01(\x0b\x32\x1e.agent.Greeting_UpdateGreeting\"\x87\x01\n\x19\x43hannel_UpdateStylePrompt\x12+\n\x0c\x63hannel_type\x18\x01 \x01(\x0e\x32\x15.channels.ChannelType\x12=\n\x0cstyle_prompt\x18\x02 \x01(\x0b\x32\'.channels.StylePrompt_UpdateStylePrompt\"\xae\x01\n\x1b\x43hannel_UpdateSafetyFilters\x12+\n\x0c\x63hannel_type\x18\x01 \x01(\x0e\x32\x15.channels.ChannelType\x12\x62\n\x0esafety_filters\x18\x02 \x01(\x0b\x32J.content_filter_settings.ContentFilterSettings_UpdateContentFilterSettings\"\x8b\x01\n\x19\x43hannel_UpdateLLMSettings\x12+\n\x0c\x63hannel_type\x18\x01 \x01(\x0e\x32\x15.channels.ChannelType\x12\x41\n\x0cllm_settings\x18\x02 \x01(\x0b\x32+.llm_settings.LLMSettings_UpdateLLMSettings\"b\n\x14\x43hannel_UpdateStatus\x12\x38\n\x07webchat\x18\x01 \x01(\x0b\x32%.channels.WebChatChannel_UpdateStatusH\x00\x42\x10\n\x0e\x63hannel_status\"c\n\x1eVoiceChannel_UpdateASRSettings\x12\x41\n\x0c\x61sr_settings\x18\x01 \x01(\x0b\x32+.asr_settings.ASRSettings_UpdateASRSettings\"e\n\x1dVoiceChannel_UpdateDisclaimer\x12\x44\n\ndisclaimer\x18\x01 \x01(\x0b\x32\x30.agent.DisclaimerMessage_UpdateDisclaimerMessage\"G\n\x1cVoiceChannel_UpdateVadConfig\x12\'\n\nvad_config\x18\x01 \x01(\x0b\x32\x13.channels.VADConfig\"\x1d\n\x1bVoiceChannel_ResetVadConfig\"\\\n#VoiceChannel_UpdateAudioEnhancement\x12\x35\n\x11\x61udio_enhancement\x18\x01 \x01(\x0b\x32\x1a.channels.AudioEnhancement\"$\n\"VoiceChannel_ResetAudioEnhancement\"k\n*VoiceChannel_UpdateSilenceFillerUtterances\x12=\n\x19silence_filler_utterances\x18\x01 \x01(\x0b\x32\x1a.channels.FillerUtterances\"+\n)VoiceChannel_ResetSilenceFillerUtterances\"<\n\x1cVoiceChannel_UpdateAsrConfig\x12\x1c\n\nasr_config\x18\x01 \x01(\x0b\x32\x08.asr.Asr\"\x1d\n\x1bVoiceChannel_ResetAsrConfig\"\xf2\x01\n VoiceChannel_UpdateBargeInConfig\x12\x14\n\x07\x65nabled\x18\x01 \x01(\x08H\x00\x88\x01\x01\x12\x1f\n\x12\x61llowed_first_turn\x18\x02 \x01(\x08H\x01\x88\x01\x01\x12\x19\n\x0cmax_per_call\x18\x03 \x01(\x05H\x02\x88\x01\x01\x12(\n\x1bmin_speech_duration_seconds\x18\x04 \x01(\x01H\x03\x88\x01\x01\x42\n\n\x08_enabledB\x15\n\x13_allowed_first_turnB\x0f\n\r_max_per_callB\x1e\n\x1c_min_speech_duration_seconds\"!\n\x1fVoiceChannel_ResetBargeInConfig\"J\n\x1eVoiceChannel_UpdateTemperature\x12\x18\n\x0btemperature\x18\x01 \x01(\x02H\x00\x88\x01\x01\x42\x0e\n\x0c_temperature\"\x1f\n\x1dVoiceChannel_ResetTemperature\"F\n\x1bWebChatChannel_UpdateStatus\x12\'\n\x06status\x18\x01 \x01(\x0e\x32\x17.channels.ChannelStatus*&\n\x0b\x43hannelType\x12\t\n\x05VOICE\x10\x00\x12\x0c\n\x08WEB_CHAT\x10\x01*-\n\rChannelStatus\x12\x0f\n\x0bNOT_CREATED\x10\x00\x12\x0b\n\x07\x43REATED\x10\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0e\x63hannels.proto\x12\x08\x63hannels\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x12llm_settings.proto\x1a\x1d\x63ontent_filter_settings.proto\x1a\x12\x61sr_settings.proto\x1a\x14\x61gent_settings.proto\x1a\tasr.proto\"\xb1\x01\n\x0bStylePrompt\x12\x0e\n\x06prompt\x18\x01 \x01(\t\x12\x12\n\ncreated_at\x18\x02 \x01(\t\x12\x12\n\ncreated_by\x18\x03 \x01(\t\x12\x33\n\nupdated_at\x18\x04 \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x00\x88\x01\x01\x12\x17\n\nupdated_by\x18\x05 \x01(\tH\x01\x88\x01\x01\x42\r\n\x0b_updated_atB\r\n\x0b_updated_by\"/\n\x1dStylePrompt_UpdateStylePrompt\x12\x0e\n\x06prompt\x18\x01 \x01(\t\"\x82\x02\n\rChannelConfig\x12/\n\x0cllm_settings\x18\x01 \x01(\x0b\x32\x19.llm_settings.LLMSettings\x12+\n\x0cstyle_prompt\x18\x02 \x01(\x0b\x32\x15.channels.StylePrompt\x12!\n\x08greeting\x18\x03 \x01(\x0b\x32\x0f.agent.Greeting\x12\x46\n\x0esafety_filters\x18\x04 \x01(\x0b\x32..content_filter_settings.ContentFilterSettings\x12\x18\n\x0btemperature\x18\x05 \x01(\x02H\x00\x88\x01\x01\x42\x0e\n\x0c_temperature\".\n\tVADConfig\x12!\n\x19speech_end_window_seconds\x18\x01 \x01(\x01\"\xdf\x01\n\rBargeInConfig\x12\x14\n\x07\x65nabled\x18\x01 \x01(\x08H\x00\x88\x01\x01\x12\x1f\n\x12\x61llowed_first_turn\x18\x02 \x01(\x08H\x01\x88\x01\x01\x12\x19\n\x0cmax_per_call\x18\x03 \x01(\x05H\x02\x88\x01\x01\x12(\n\x1bmin_speech_duration_seconds\x18\x04 \x01(\x01H\x03\x88\x01\x01\x42\n\n\x08_enabledB\x15\n\x13_allowed_first_turnB\x0f\n\r_max_per_callB\x1e\n\x1c_min_speech_duration_seconds\"\xd6\x01\n\x10\x46illerUtterances\x12\x0f\n\x07\x65nabled\x18\x01 \x01(\x08\x12\x38\n\nutterances\x18\x02 \x03(\x0b\x32$.channels.FillerUtterances.Utterance\x12\x11\n\trandomize\x18\x05 \x01(\x08\x12 \n\x18initial_interval_seconds\x18\x06 \x01(\x01\x12\x18\n\x10interval_seconds\x18\x07 \x01(\x01\x1a\x1c\n\tUtterance\x12\x0f\n\x07message\x18\x01 \x01(\tJ\x04\x08\x03\x10\x04J\x04\x08\x04\x10\x05\"\xa8\x02\n\x15\x41ICousticsEnhancement\x12\x0f\n\x07\x65nabled\x18\x01 \x01(\x08\x12G\n\x12model_quality_tier\x18\x02 \x01(\x0e\x32+.channels.AICousticsEnhancement.QualityTier\x12\x17\n\x0fnoise_reduction\x18\x03 \x01(\x02\x12\x12\n\nvoice_gain\x18\x04 \x01(\x02\x12\x12\n\nnoise_gate\x18\x05 \x01(\x08\"t\n\x0bQualityTier\x12\x1c\n\x18QUALITY_TIER_UNSPECIFIED\x10\x00\x12\x19\n\x15QUALITY_TIER_STANDARD\x10\x01\x12\x15\n\x11QUALITY_TIER_HIGH\x10\x02\x12\x15\n\x11QUALITY_TIER_FAST\x10\x03\"V\n\x10\x41udioEnhancement\x12\x36\n\x0b\x61i_coustics\x18\x01 \x01(\x0b\x32\x1f.channels.AICousticsEnhancementH\x00\x42\n\n\x08provider\"\x85\x03\n\x0cVoiceChannel\x12\'\n\x06\x63onfig\x18\x01 \x01(\x0b\x32\x17.channels.ChannelConfig\x12/\n\x0c\x61sr_settings\x18\x02 \x01(\x0b\x32\x19.asr_settings.ASRSettings\x12,\n\ndisclaimer\x18\x03 \x01(\x0b\x32\x18.agent.DisclaimerMessage\x12\'\n\nvad_config\x18\x04 \x01(\x0b\x32\x13.channels.VADConfig\x12\x35\n\x11\x61udio_enhancement\x18\x05 \x01(\x0b\x32\x1a.channels.AudioEnhancement\x12=\n\x19silence_filler_utterances\x18\x06 \x01(\x0b\x32\x1a.channels.FillerUtterances\x12\x1c\n\nasr_config\x18\x07 \x01(\x0b\x32\x08.asr.Asr\x12\x30\n\x0f\x62\x61rge_in_config\x18\x08 \x01(\x0b\x32\x17.channels.BargeInConfig\"b\n\x0eWebChatChannel\x12\'\n\x06\x63onfig\x18\x01 \x01(\x0b\x32\x17.channels.ChannelConfig\x12\'\n\x06status\x18\x02 \x01(\x0e\x32\x17.channels.ChannelStatus\"K\n\x14SmsComplianceKeyword\x12\x0f\n\x07keyword\x18\x01 \x01(\t\x12\x0e\n\x06\x61\x63tion\x18\x02 \x01(\t\x12\x12\n\nauto_reply\x18\x03 \x01(\t\"\x81\x01\n\x11SmsBehaviorConfig\x12\r\n\x05tones\x18\x01 \x03(\t\x12\x11\n\temoji_use\x18\x02 \x01(\t\x12\x10\n\x08sign_off\x18\x03 \x01(\t\x12\x0e\n\x06opener\x18\x04 \x01(\t\x12\x13\n\x0b\x64\x61te_format\x18\x05 \x01(\t\x12\x13\n\x0btime_format\x18\x06 \x01(\t\"\xc5\x02\n\nSmsChannel\x12\'\n\x06\x63onfig\x18\x01 \x01(\x0b\x32\x17.channels.ChannelConfig\x12\'\n\x06status\x18\x02 \x01(\x0e\x32\x17.channels.ChannelStatus\x12\x1b\n\x13sender_phone_number\x18\x03 \x01(\t\x12\x1d\n\x15\x63hannel_behavior_mode\x18\x04 \x01(\t\x12\x34\n\x0f\x62\x65havior_config\x18\x05 \x01(\x0b\x32\x1b.channels.SmsBehaviorConfig\x12\x16\n\x0e\x65nding_message\x18\x06 \x01(\t\x12\x1e\n\x16\x65rror_fallback_message\x18\x07 \x01(\t\x12;\n\x13\x63ompliance_keywords\x18\x08 \x03(\x0b\x32\x1e.channels.SmsComplianceKeyword\"\x80\x01\n\x08\x43hannels\x12%\n\x05voice\x18\x01 \x01(\x0b\x32\x16.channels.VoiceChannel\x12*\n\x08web_chat\x18\x02 \x01(\x0b\x32\x18.channels.WebChatChannel\x12!\n\x03sms\x18\x03 \x01(\x0b\x32\x14.channels.SmsChannel\"\x93\x02\n\x19SmsChannel_UpdateSettings\x12\x1b\n\x13sender_phone_number\x18\x01 \x01(\t\x12\x1d\n\x15\x63hannel_behavior_mode\x18\x02 \x01(\t\x12\x34\n\x0f\x62\x65havior_config\x18\x03 \x01(\x0b\x32\x1b.channels.SmsBehaviorConfig\x12\x16\n\x0e\x65nding_message\x18\x04 \x01(\t\x12\x1e\n\x16\x65rror_fallback_message\x18\x05 \x01(\t\x12;\n\x13\x63ompliance_keywords\x18\x06 \x03(\x0b\x32\x1e.channels.SmsComplianceKeyword\x12\x0f\n\x07\x65nabled\x18\x07 \x01(\x08\"w\n\x16\x43hannel_UpdateGreeting\x12+\n\x0c\x63hannel_type\x18\x01 \x01(\x0e\x32\x15.channels.ChannelType\x12\x30\n\x08greeting\x18\x02 \x01(\x0b\x32\x1e.agent.Greeting_UpdateGreeting\"\x87\x01\n\x19\x43hannel_UpdateStylePrompt\x12+\n\x0c\x63hannel_type\x18\x01 \x01(\x0e\x32\x15.channels.ChannelType\x12=\n\x0cstyle_prompt\x18\x02 \x01(\x0b\x32\'.channels.StylePrompt_UpdateStylePrompt\"\xae\x01\n\x1b\x43hannel_UpdateSafetyFilters\x12+\n\x0c\x63hannel_type\x18\x01 \x01(\x0e\x32\x15.channels.ChannelType\x12\x62\n\x0esafety_filters\x18\x02 \x01(\x0b\x32J.content_filter_settings.ContentFilterSettings_UpdateContentFilterSettings\"\x8b\x01\n\x19\x43hannel_UpdateLLMSettings\x12+\n\x0c\x63hannel_type\x18\x01 \x01(\x0e\x32\x15.channels.ChannelType\x12\x41\n\x0cllm_settings\x18\x02 \x01(\x0b\x32+.llm_settings.LLMSettings_UpdateLLMSettings\"b\n\x14\x43hannel_UpdateStatus\x12\x38\n\x07webchat\x18\x01 \x01(\x0b\x32%.channels.WebChatChannel_UpdateStatusH\x00\x42\x10\n\x0e\x63hannel_status\"c\n\x1eVoiceChannel_UpdateASRSettings\x12\x41\n\x0c\x61sr_settings\x18\x01 \x01(\x0b\x32+.asr_settings.ASRSettings_UpdateASRSettings\"e\n\x1dVoiceChannel_UpdateDisclaimer\x12\x44\n\ndisclaimer\x18\x01 \x01(\x0b\x32\x30.agent.DisclaimerMessage_UpdateDisclaimerMessage\"G\n\x1cVoiceChannel_UpdateVadConfig\x12\'\n\nvad_config\x18\x01 \x01(\x0b\x32\x13.channels.VADConfig\"\x1d\n\x1bVoiceChannel_ResetVadConfig\"\\\n#VoiceChannel_UpdateAudioEnhancement\x12\x35\n\x11\x61udio_enhancement\x18\x01 \x01(\x0b\x32\x1a.channels.AudioEnhancement\"$\n\"VoiceChannel_ResetAudioEnhancement\"k\n*VoiceChannel_UpdateSilenceFillerUtterances\x12=\n\x19silence_filler_utterances\x18\x01 \x01(\x0b\x32\x1a.channels.FillerUtterances\"+\n)VoiceChannel_ResetSilenceFillerUtterances\"<\n\x1cVoiceChannel_UpdateAsrConfig\x12\x1c\n\nasr_config\x18\x01 \x01(\x0b\x32\x08.asr.Asr\"\x1d\n\x1bVoiceChannel_ResetAsrConfig\"\xf2\x01\n VoiceChannel_UpdateBargeInConfig\x12\x14\n\x07\x65nabled\x18\x01 \x01(\x08H\x00\x88\x01\x01\x12\x1f\n\x12\x61llowed_first_turn\x18\x02 \x01(\x08H\x01\x88\x01\x01\x12\x19\n\x0cmax_per_call\x18\x03 \x01(\x05H\x02\x88\x01\x01\x12(\n\x1bmin_speech_duration_seconds\x18\x04 \x01(\x01H\x03\x88\x01\x01\x42\n\n\x08_enabledB\x15\n\x13_allowed_first_turnB\x0f\n\r_max_per_callB\x1e\n\x1c_min_speech_duration_seconds\"!\n\x1fVoiceChannel_ResetBargeInConfig\"J\n\x1eVoiceChannel_UpdateTemperature\x12\x18\n\x0btemperature\x18\x01 \x01(\x02H\x00\x88\x01\x01\x42\x0e\n\x0c_temperature\"\x1f\n\x1dVoiceChannel_ResetTemperature\"F\n\x1bWebChatChannel_UpdateStatus\x12\'\n\x06status\x18\x01 \x01(\x0e\x32\x17.channels.ChannelStatus*/\n\x0b\x43hannelType\x12\t\n\x05VOICE\x10\x00\x12\x0c\n\x08WEB_CHAT\x10\x01\x12\x07\n\x03SMS\x10\x02*-\n\rChannelStatus\x12\x0f\n\x0bNOT_CREATED\x10\x00\x12\x0b\n\x07\x43REATED\x10\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'channels_pb2', _globals)
 if _descriptor._USE_C_DESCRIPTORS == False:
   DESCRIPTOR._options = None
-  _globals['_CHANNELTYPE']._serialized_start=3946
-  _globals['_CHANNELTYPE']._serialized_end=3984
-  _globals['_CHANNELSTATUS']._serialized_start=3986
-  _globals['_CHANNELSTATUS']._serialized_end=4031
+  _globals['_CHANNELTYPE']._serialized_start=4797
+  _globals['_CHANNELTYPE']._serialized_end=4844
+  _globals['_CHANNELSTATUS']._serialized_start=4846
+  _globals['_CHANNELSTATUS']._serialized_end=4891
   _globals['_STYLEPROMPT']._serialized_start=166
   _globals['_STYLEPROMPT']._serialized_end=343
   _globals['_STYLEPROMPT_UPDATESTYLEPROMPT']._serialized_start=345
@@ -55,46 +55,54 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   _globals['_VOICECHANNEL']._serialized_end=1923
   _globals['_WEBCHATCHANNEL']._serialized_start=1925
   _globals['_WEBCHATCHANNEL']._serialized_end=2023
-  _globals['_CHANNELS']._serialized_start=2025
-  _globals['_CHANNELS']._serialized_end=2118
-  _globals['_CHANNEL_UPDATEGREETING']._serialized_start=2120
-  _globals['_CHANNEL_UPDATEGREETING']._serialized_end=2239
-  _globals['_CHANNEL_UPDATESTYLEPROMPT']._serialized_start=2242
-  _globals['_CHANNEL_UPDATESTYLEPROMPT']._serialized_end=2377
-  _globals['_CHANNEL_UPDATESAFETYFILTERS']._serialized_start=2380
-  _globals['_CHANNEL_UPDATESAFETYFILTERS']._serialized_end=2554
-  _globals['_CHANNEL_UPDATELLMSETTINGS']._serialized_start=2557
-  _globals['_CHANNEL_UPDATELLMSETTINGS']._serialized_end=2696
-  _globals['_CHANNEL_UPDATESTATUS']._serialized_start=2698
-  _globals['_CHANNEL_UPDATESTATUS']._serialized_end=2796
-  _globals['_VOICECHANNEL_UPDATEASRSETTINGS']._serialized_start=2798
-  _globals['_VOICECHANNEL_UPDATEASRSETTINGS']._serialized_end=2897
-  _globals['_VOICECHANNEL_UPDATEDISCLAIMER']._serialized_start=2899
-  _globals['_VOICECHANNEL_UPDATEDISCLAIMER']._serialized_end=3000
-  _globals['_VOICECHANNEL_UPDATEVADCONFIG']._serialized_start=3002
-  _globals['_VOICECHANNEL_UPDATEVADCONFIG']._serialized_end=3073
-  _globals['_VOICECHANNEL_RESETVADCONFIG']._serialized_start=3075
-  _globals['_VOICECHANNEL_RESETVADCONFIG']._serialized_end=3104
-  _globals['_VOICECHANNEL_UPDATEAUDIOENHANCEMENT']._serialized_start=3106
-  _globals['_VOICECHANNEL_UPDATEAUDIOENHANCEMENT']._serialized_end=3198
-  _globals['_VOICECHANNEL_RESETAUDIOENHANCEMENT']._serialized_start=3200
-  _globals['_VOICECHANNEL_RESETAUDIOENHANCEMENT']._serialized_end=3236
-  _globals['_VOICECHANNEL_UPDATESILENCEFILLERUTTERANCES']._serialized_start=3238
-  _globals['_VOICECHANNEL_UPDATESILENCEFILLERUTTERANCES']._serialized_end=3345
-  _globals['_VOICECHANNEL_RESETSILENCEFILLERUTTERANCES']._serialized_start=3347
-  _globals['_VOICECHANNEL_RESETSILENCEFILLERUTTERANCES']._serialized_end=3390
-  _globals['_VOICECHANNEL_UPDATEASRCONFIG']._serialized_start=3392
-  _globals['_VOICECHANNEL_UPDATEASRCONFIG']._serialized_end=3452
-  _globals['_VOICECHANNEL_RESETASRCONFIG']._serialized_start=3454
-  _globals['_VOICECHANNEL_RESETASRCONFIG']._serialized_end=3483
-  _globals['_VOICECHANNEL_UPDATEBARGEINCONFIG']._serialized_start=3486
-  _globals['_VOICECHANNEL_UPDATEBARGEINCONFIG']._serialized_end=3728
-  _globals['_VOICECHANNEL_RESETBARGEINCONFIG']._serialized_start=3730
-  _globals['_VOICECHANNEL_RESETBARGEINCONFIG']._serialized_end=3763
-  _globals['_VOICECHANNEL_UPDATETEMPERATURE']._serialized_start=3765
-  _globals['_VOICECHANNEL_UPDATETEMPERATURE']._serialized_end=3839
-  _globals['_VOICECHANNEL_RESETTEMPERATURE']._serialized_start=3841
-  _globals['_VOICECHANNEL_RESETTEMPERATURE']._serialized_end=3872
-  _globals['_WEBCHATCHANNEL_UPDATESTATUS']._serialized_start=3874
-  _globals['_WEBCHATCHANNEL_UPDATESTATUS']._serialized_end=3944
+  _globals['_SMSCOMPLIANCEKEYWORD']._serialized_start=2025
+  _globals['_SMSCOMPLIANCEKEYWORD']._serialized_end=2100
+  _globals['_SMSBEHAVIORCONFIG']._serialized_start=2103
+  _globals['_SMSBEHAVIORCONFIG']._serialized_end=2232
+  _globals['_SMSCHANNEL']._serialized_start=2235
+  _globals['_SMSCHANNEL']._serialized_end=2560
+  _globals['_CHANNELS']._serialized_start=2563
+  _globals['_CHANNELS']._serialized_end=2691
+  _globals['_SMSCHANNEL_UPDATESETTINGS']._serialized_start=2694
+  _globals['_SMSCHANNEL_UPDATESETTINGS']._serialized_end=2969
+  _globals['_CHANNEL_UPDATEGREETING']._serialized_start=2971
+  _globals['_CHANNEL_UPDATEGREETING']._serialized_end=3090
+  _globals['_CHANNEL_UPDATESTYLEPROMPT']._serialized_start=3093
+  _globals['_CHANNEL_UPDATESTYLEPROMPT']._serialized_end=3228
+  _globals['_CHANNEL_UPDATESAFETYFILTERS']._serialized_start=3231
+  _globals['_CHANNEL_UPDATESAFETYFILTERS']._serialized_end=3405
+  _globals['_CHANNEL_UPDATELLMSETTINGS']._serialized_start=3408
+  _globals['_CHANNEL_UPDATELLMSETTINGS']._serialized_end=3547
+  _globals['_CHANNEL_UPDATESTATUS']._serialized_start=3549
+  _globals['_CHANNEL_UPDATESTATUS']._serialized_end=3647
+  _globals['_VOICECHANNEL_UPDATEASRSETTINGS']._serialized_start=3649
+  _globals['_VOICECHANNEL_UPDATEASRSETTINGS']._serialized_end=3748
+  _globals['_VOICECHANNEL_UPDATEDISCLAIMER']._serialized_start=3750
+  _globals['_VOICECHANNEL_UPDATEDISCLAIMER']._serialized_end=3851
+  _globals['_VOICECHANNEL_UPDATEVADCONFIG']._serialized_start=3853
+  _globals['_VOICECHANNEL_UPDATEVADCONFIG']._serialized_end=3924
+  _globals['_VOICECHANNEL_RESETVADCONFIG']._serialized_start=3926
+  _globals['_VOICECHANNEL_RESETVADCONFIG']._serialized_end=3955
+  _globals['_VOICECHANNEL_UPDATEAUDIOENHANCEMENT']._serialized_start=3957
+  _globals['_VOICECHANNEL_UPDATEAUDIOENHANCEMENT']._serialized_end=4049
+  _globals['_VOICECHANNEL_RESETAUDIOENHANCEMENT']._serialized_start=4051
+  _globals['_VOICECHANNEL_RESETAUDIOENHANCEMENT']._serialized_end=4087
+  _globals['_VOICECHANNEL_UPDATESILENCEFILLERUTTERANCES']._serialized_start=4089
+  _globals['_VOICECHANNEL_UPDATESILENCEFILLERUTTERANCES']._serialized_end=4196
+  _globals['_VOICECHANNEL_RESETSILENCEFILLERUTTERANCES']._serialized_start=4198
+  _globals['_VOICECHANNEL_RESETSILENCEFILLERUTTERANCES']._serialized_end=4241
+  _globals['_VOICECHANNEL_UPDATEASRCONFIG']._serialized_start=4243
+  _globals['_VOICECHANNEL_UPDATEASRCONFIG']._serialized_end=4303
+  _globals['_VOICECHANNEL_RESETASRCONFIG']._serialized_start=4305
+  _globals['_VOICECHANNEL_RESETASRCONFIG']._serialized_end=4334
+  _globals['_VOICECHANNEL_UPDATEBARGEINCONFIG']._serialized_start=4337
+  _globals['_VOICECHANNEL_UPDATEBARGEINCONFIG']._serialized_end=4579
+  _globals['_VOICECHANNEL_RESETBARGEINCONFIG']._serialized_start=4581
+  _globals['_VOICECHANNEL_RESETBARGEINCONFIG']._serialized_end=4614
+  _globals['_VOICECHANNEL_UPDATETEMPERATURE']._serialized_start=4616
+  _globals['_VOICECHANNEL_UPDATETEMPERATURE']._serialized_end=4690
+  _globals['_VOICECHANNEL_RESETTEMPERATURE']._serialized_start=4692
+  _globals['_VOICECHANNEL_RESETTEMPERATURE']._serialized_end=4723
+  _globals['_WEBCHATCHANNEL_UPDATESTATUS']._serialized_start=4725
+  _globals['_WEBCHATCHANNEL_UPDATESTATUS']._serialized_end=4795
 # @@protoc_insertion_point(module_scope)

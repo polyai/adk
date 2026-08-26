@@ -88,57 +88,82 @@ nav:
   - Home: index.md
 
   - Get started:
-      - Getting started: get-started/get-started.md
       - What is the PolyAI ADK?: get-started/what-is-the-adk.md
+      - Getting started: get-started/get-started.md
       - Walkthrough video: get-started/walkthrough-video.md
-      - Prerequisites: get-started/prerequisites.md
-      - First commands: get-started/first-commands.md
+
+  - Development:
+      - Working locally: development/working-locally.md
+      - Resource architecture: development/resource-architecture.md
+      - Branches, push, and pull: development/branches-push-pull.md
+      - Testing: development/testing.md
+      - Observability: development/observability.md
+      - Environments and deployment: development/environments-and-deployment.md
+      - Real-time configuration: development/real-time-configuration.md
+      - Audio caching: development/audio-caching.md
 
   - Tutorials:
       - Tutorials: tutorials/index.md
       - Build an agent with the ADK: tutorials/build-an-agent.md
       - Build a restaurant booking agent: tutorials/restaurant-booking-agent.md
-
-  - Core concepts:
-      - Working locally: concepts/working-locally.md
-      - Resource architecture: concepts/resource-architecture.md
-      - Multi-user workflows and guardrails: concepts/multi-user-and-guardrails.md
-      - Anti-patterns: concepts/anti-patterns.md
-
-  - Examples:
-      - Examples: examples/index.md
-      - Confirm caller ID before SMS: examples/confirm-caller-id-before-sms.md
-      - Venue-specific goodbye: examples/venue-specific-goodbye.md
-      - SMS link with transfer fallback: examples/sms-or-transfer-fallback.md
+      - Examples:
+          - Examples: examples/index.md
+          - Confirm caller ID before SMS: examples/confirm-caller-id-before-sms.md
+          - Venue-specific goodbye: examples/venue-specific-goodbye.md
+          - SMS link with transfer fallback: examples/sms-or-transfer-fallback.md
 
   - Reference:
-      - CLI reference: reference/cli.md
-      - Branch merging: reference/branch_merge.md
-      - Tests: reference/tests.md
-      - Tooling: reference/tooling.md
+      - CLI reference:
+          - Overview: reference/cli.md
+          - login: reference/cli/login.md
+          - start: reference/cli/start.md
+          - init: reference/cli/init.md
+          - project: reference/cli/project.md
+          - template: reference/cli/template.md
+          - pull: reference/cli/pull.md
+          - push: reference/cli/push.md
+          - status: reference/cli/status.md
+          - diff: reference/cli/diff.md
+          - revert: reference/cli/revert.md
+          - format: reference/cli/format.md
+          - validate: reference/cli/validate.md
+          - branch: reference/cli/branch.md
+          - review: reference/cli/review.md
+          - chat: reference/cli/chat.md
+          - test: reference/cli/test.md
+          - conversations: reference/cli/conversations.md
+          - deployments: reference/cli/deployments.md
+          - rtc: reference/cli/rtc.md
+          - audio-cache: reference/cli/audio-cache.md
+          - docs: reference/cli/docs.md
+          - studio: reference/cli/studio.md
+          - completion: reference/cli/completion.md
 
-      - Agent configuration:
-          - Agent settings: reference/agent_settings.md
-          - Voice settings: reference/voice_settings.md
-          - Chat settings: reference/chat_settings.md
-          - Safety filters: reference/safety_filters.md
-          - Languages: reference/languages.md
-          - Experimental config: reference/experimental_config.md
+      - Resource reference:
+          - Overview: reference/resources.md
+          - Agent settings: reference/resources/agent_settings.md
+          - Topics: reference/resources/topics.md
+          - Functions: reference/resources/functions.md
+          - Flows: reference/resources/flows.md
+          - API integrations: reference/resources/api_integrations.md
+          - Entities: reference/resources/entities.md
+          - Handoffs: reference/resources/handoffs.md
+          - SMS templates: reference/resources/sms.md
+          - Variants: reference/resources/variants.md
+          - Variables: reference/resources/variables.md
+          - Translations: reference/resources/translations.md
+          - Voice settings: reference/resources/voice_settings.md
+          - Chat settings: reference/resources/chat_settings.md
+          - Speech recognition: reference/resources/speech_recognition.md
+          - Response control: reference/resources/response_control.md
+          - Safety filters: reference/resources/safety_filters.md
+          - Languages: reference/resources/languages.md
+          - Experimental config: reference/resources/experimental_config.md
+          - Tests: reference/resources/tests.md
+          - Context documents: reference/resources/context.md
 
-      - Project resources:
-          - Flows: reference/flows.md
-          - Functions: reference/functions.md
-          - Topics: reference/topics.md
-          - Entities: reference/entities.md
-          - Variables: reference/variables.md
-          - Variants: reference/variants.md
-          - Handoffs: reference/handoffs.md
-          - SMS templates: reference/sms.md
-          - Translations: reference/translations.md
-
-      - Voice controls:
-          - Speech recognition: reference/speech_recognition.md
-          - Response control: reference/response_control.md
+  - Tooling:
+    - Overview: tooling/tooling.md
 
   - Community:
       - Discord: community/discord.md

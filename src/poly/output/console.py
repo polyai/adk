@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 """
 
 import json
+import logging
 import os
 import sys
 from collections.abc import Callable
@@ -15,11 +16,14 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from rich import box
 from rich.console import Console, Group
+from rich.live import Live
 from rich.panel import Panel
+from rich.spinner import Spinner
 from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 from rich.theme import Theme
+from rich.tree import Tree
 
 # Global verbose flag — set by CLI before commands run
 _verbose = False
@@ -41,6 +45,8 @@ _theme = Theme(
 
 console = Console(theme=_theme, stderr=False)
 err_console = Console(theme=_theme, stderr=True)
+
+logger = logging.getLogger(__name__)
 
 
 def set_verbose(verbose: bool) -> None:
@@ -81,18 +87,31 @@ def print_status(
     project_id: str,
     last_updated: str,
     branch: str,
+    account_name: str = None,
+    project_name: str = None,
+    parent_branch: str = None,
+    created_by: str = None,
+    is_diverged: bool = None,
+    title: str = "Project Status",
 ) -> None:
     """Print project status in a styled panel."""
     table = Table(show_header=False, box=None, padding=(0, 1))
     table.add_column("Key", style="label", no_wrap=True)
     table.add_column("Value")
     table.add_row("Region", region)
-    table.add_row("Account ID", account_id)
-    table.add_row("Project ID", project_id)
+    table.add_row("Workspace", f"{account_name} ({account_id})" if account_name else account_id)
+    table.add_row("Project", f"{project_name} ({project_id})" if project_name else project_id)
     table.add_row("Last Pulled", last_updated)
     table.add_row("Current Branch", branch)
+    if parent_branch is not None:
+        table.add_row("Parent Branch", parent_branch)
+    if created_by is not None:
+        table.add_row("Created By", created_by)
+    if is_diverged is not None:
+        diverged_text = "Yes (parent has advanced past fork point)" if is_diverged else "No"
+        table.add_row("Diverged", diverged_text)
 
-    console.print(Panel(table, title="[bold]Project Status[/bold]", border_style="cyan"))
+    console.print(Panel(table, title=f"[bold]{title}[/bold]", border_style="cyan"))
 
 
 def print_file_list(title: str, files: list[str], style: str) -> None:
@@ -109,7 +128,104 @@ def print_diff(diff: str) -> None:
     console.print(Syntax(diff, "diff", theme="ansi_dark", line_numbers=False))
 
 
-def print_branches(branches: dict[str, str] | list[str], current_branch: str | None) -> None:
+def print_agents(agents: list[dict[str, Any]]) -> None:
+    """Print a table of agents.
+
+    Args:
+        agents: List of agent record dicts from the API.
+    """
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Agent ID", style="bold yellow", no_wrap=True)
+    table.add_column("Name", no_wrap=True)
+    table.add_column("Updated", no_wrap=True)
+    table.add_column("Branches", justify="right", no_wrap=True)
+    for agent in agents:
+        updated = _format_iso_timestamp(agent.get("updatedAt", ""))
+        branches = str(agent.get("branchCount", 0))
+        table.add_row(
+            agent.get("agentId", "—"),
+            agent.get("agentName", "—"),
+            updated,
+            branches,
+        )
+    console.print(table)
+
+
+def _convert_flat_branches_to_tree(branches: dict[str, Any]) -> list[dict[str, Any]]:
+    """Group a flat branches dict into a forest of nodes linked by parentBranchId.
+
+    Two passes are required: branches can be listed in any order — including a
+    child appearing before its own parent — so every node must exist before any
+    parent lookup runs.
+    """
+    nodes = {
+        meta.get("branchId"): {"name": name, "meta": meta, "children": []}
+        for name, meta in branches.items()
+    }
+
+    roots = []
+    for node in nodes.values():
+        parent = nodes.get(node["meta"].get("parentBranchId"))
+        (parent["children"] if parent is not None else roots).append(node)
+    return roots
+
+
+def print_releases_branches(branches: dict[str, Any], current_branch: str | None) -> None:
+    """Print branches as a tree reflecting parent/child (branch-from-branch) relationships."""
+
+    def label(node: dict[str, Any]) -> str:
+        name = node["name"]
+        text = f"[success]{name}[/success]" if name == current_branch else name
+        if tag := node["meta"].get("tag"):
+            text += f" [info]({tag})[/info]"
+        if name == current_branch:
+            text += " [muted](current)[/muted]"
+        return text
+
+    def add(parent_tree: Tree, node: dict[str, Any]) -> None:
+        branch_tree = parent_tree.add(label(node))
+        for child in sorted(node["children"], key=lambda n: n["name"]):
+            add(branch_tree, child)
+
+    console.print("[label]Branches:[/label]")
+    tree = Tree("", hide_root=True, guide_style="dim")
+    for root in sorted(_convert_flat_branches_to_tree(branches), key=lambda n: n["name"]):
+        add(tree, root)
+    console.print(tree)
+
+
+def flatten_branch_tree(
+    branches: dict[str, Any], current_branch: str | None
+) -> list[tuple[str, str]]:
+    """Flatten the parent/child branch tree into (display_title, branch_name) pairs.
+
+    For use in flat pickers (e.g. questionary) that have no native tree rendering —
+    hierarchy is conveyed via indentation and connector characters in the title,
+    while the value stays the plain branch name.
+    """
+
+    def label(name: str) -> str:
+        return f"{name} (current)" if name == current_branch else name
+
+    def walk(nodes: list[dict[str, Any]], indent: str) -> list[tuple[str, str]]:
+        lines = []
+        nodes = sorted(nodes, key=lambda n: n["name"])
+        for i, node in enumerate(nodes):
+            is_last = i == len(nodes) - 1
+            connector = "└─ " if is_last else "├─ "
+            lines.append((indent + connector + label(node["name"]), node["name"]))
+            extension = "   " if is_last else "│  "
+            lines.extend(walk(node["children"], indent + extension))
+        return lines
+
+    lines = []
+    for root in sorted(_convert_flat_branches_to_tree(branches), key=lambda n: n["name"]):
+        lines.append((label(root["name"]), root["name"]))
+        lines.extend(walk(root["children"], ""))
+    return lines
+
+
+def print_branches(branches: dict[str, Any] | list[str], current_branch: str | None) -> None:
     """Print branch list with current branch highlighted."""
     console.print("[label]Branches:[/label]")
     items = branches.keys() if isinstance(branches, dict) else branches
@@ -118,6 +234,93 @@ def print_branches(branches: dict[str, str] | list[str], current_branch: str | N
             console.print(f"  [success]* {name}[/success] [muted](current)[/muted]")
         else:
             console.print(f"    {name}")
+
+
+def resolve_parent_branch_label(
+    branch: dict[str, Any],
+    name_by_branch_id: dict[str, str] | None = None,
+    archived_branch_ids: set[str] | None = None,
+) -> str:
+    """Describe an archived branch's parent for display.
+
+    Archived branches carry only a ``parentBranchId``, which is meaningless to a
+    user. Resolve it to a name where possible: ``main`` stands for itself, other
+    ids are looked up in ``name_by_branch_id`` (built from the archive itself and,
+    where needed, the active branches). An id with no known name falls back to the
+    id so the row is never silently blank.
+
+    A parent that is itself archived is marked ``(archived)`` — restoring a child
+    does not bring its parent back, so that distinction is load-bearing.
+
+    Returns plain text, not markup: this also labels the interactive restore
+    picker, which renders literally.
+    """
+    parent_branch_id = branch.get("parentBranchId")
+    if not parent_branch_id:
+        return "—"
+    if parent_branch_id == "main":
+        return "main"
+
+    label = (name_by_branch_id or {}).get(parent_branch_id, parent_branch_id)
+    if parent_branch_id in (archived_branch_ids or set()):
+        return f"{label} (archived)"
+    return label
+
+
+def print_archived_branches(
+    branches: list[dict[str, Any]], name_by_branch_id: dict[str, str] | None = None
+) -> None:
+    """Print a table of archived (soft-deleted) branches.
+
+    Args:
+        branches: Archived branch entries as returned by the platform.
+        name_by_branch_id: Branch id to name, used to render each row's parent.
+    """
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Branch", no_wrap=True)
+    table.add_column("ID", style="muted", no_wrap=True)
+    table.add_column("Parent", no_wrap=True)
+    table.add_column("Archived", no_wrap=True)
+    table.add_column("Expires", no_wrap=True)
+
+    # Derived here rather than passed in so it cannot drift from the rows shown.
+    archived_branch_ids = {b["branchId"] for b in branches if b.get("branchId")}
+
+    for branch in branches:
+        archived_at = _format_iso_timestamp(branch.get("archivedAt", ""))
+        days_left = branch.get("daysLeft")
+        expires = f"{days_left} days left" if days_left is not None else "—"
+        table.add_row(
+            branch.get("name", "—"),
+            branch.get("branchId", "—"),
+            resolve_parent_branch_label(branch, name_by_branch_id, archived_branch_ids),
+            archived_at,
+            expires,
+        )
+
+    console.print(table)
+
+
+def print_branch_history(commits: list[dict[str, Any]]) -> None:
+    """Print a table of branch history commits."""
+    if not commits:
+        console.print("[muted]No commits found for this branch.[/muted]")
+        return
+
+    table = Table(box=None, show_header=False, header_style="bold", padding=(0, 1))
+    table.add_column("Merged At", no_wrap=True)
+    table.add_column("Branch", no_wrap=True)
+    table.add_column("Merged By", no_wrap=True)
+
+    for commit in commits:
+        merged_at = _format_iso_timestamp(commit.get("mergedAt", ""))
+        table.add_row(
+            merged_at,
+            commit.get("branchName", "—"),
+            commit.get("mergedBy", "—"),
+        )
+
+    console.print(table)
 
 
 def print_validation_errors(errors: list[str]) -> None:
@@ -602,13 +805,125 @@ def print_deployment_show(
     console.print(f"Message: {deployment_message}")
     console.print()
 
-    if not included_deployments:
-        console.print("[muted]No intermediate deployments.[/muted]")
-    else:
+    if included_deployments:
         count = len(included_deployments)
         label = "Reverted deployments" if is_rollback else "Included deployments"
         console.print(f"[label]{label} ({count}):[/label]")
         print_deployments(included_deployments, {})
+
+
+# ── A/B Tests ────────────────────────────────────────────────────────
+
+
+def _ab_test_status(ab_test: dict[str, Any]) -> str:
+    """Derive a styled status string from an A/B test record."""
+    if ab_test.get("ended_at"):
+        return "[dim]ended[/dim]"
+    return "[bold green]active[/bold green]"
+
+
+def print_ab_tests(
+    ab_tests: list[dict[str, Any]],
+    deployments: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    """Print a table of A/B tests.
+
+    Args:
+        ab_tests: List of A/B test records.
+        deployments: Optional mapping of deployment ID to deployment dict
+            for enriched display (version hash, message).
+    """
+    if not ab_tests:
+        info("No A/B tests found.")
+        return
+    deps = deployments or {}
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("ID", style="bold yellow", no_wrap=True)
+    table.add_column("Name", overflow="fold")
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Traffic %", justify="right", no_wrap=True)
+    table.add_column("Control", no_wrap=True)
+    table.add_column("Variant", no_wrap=True)
+    table.add_column("Created", no_wrap=True)
+    for t in ab_tests:
+        control_id = t.get("control_deployment_id") or "—"
+        variant_id = t.get("variant_deployment_id") or "—"
+        table.add_row(
+            t.get("id", "—"),
+            t.get("name", "—"),
+            _ab_test_status(t),
+            str(t.get("traffic_percentage", "—")),
+            _format_dep_label(deps.get(control_id), control_id),
+            _format_dep_label(deps.get(variant_id), variant_id),
+            _format_iso_timestamp(t.get("created_at", "")),
+        )
+    console.print(table)
+
+
+def _format_dep_label(dep: dict[str, Any] | None, dep_id: str) -> str:
+    """Build a human-readable label for a deployment."""
+    if not dep:
+        return dep_id
+    version = (dep.get("version_hash") or "")[:9]
+    msg = (dep.get("deployment_metadata") or {}).get("deployment_message", "") or ""
+    if version and msg:
+        return f"{version}  [bold]{msg}[/bold]"
+    if version:
+        return version
+    return dep_id
+
+
+def print_ab_test_detail(
+    ab_test: dict[str, Any] | None,
+    deployments: dict[str, dict[str, Any]] | None = None,
+) -> None:
+    """Print detailed information for a single A/B test.
+
+    Args:
+        ab_test: A single A/B test record, or None.
+        deployments: Optional mapping of deployment ID to deployment dict
+            for enriched display (version hash, message).
+    """
+    if not ab_test:
+        info("No active A/B test.")
+        return
+
+    deps = deployments or {}
+    traffic = ab_test.get("traffic_percentage", "—")
+    control_id = ab_test.get("control_deployment_id", "—")
+    variant_id = ab_test.get("variant_deployment_id", "—")
+    control_label = _format_dep_label(deps.get(control_id), control_id)
+    variant_label = _format_dep_label(deps.get(variant_id), variant_id)
+
+    if isinstance(traffic, int):
+        control_traffic = f"{100 - traffic}%"
+        variant_traffic = f"{traffic}%"
+    else:
+        control_traffic = "—"
+        variant_traffic = "—"
+
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column("Key", style="cyan", no_wrap=True)
+    table.add_column("Value")
+    table.add_row("Name", ab_test.get("name", "—"))
+    table.add_row("Status", _ab_test_status(ab_test))
+    table.add_row(
+        "Control",
+        f"[dim]({control_traffic} traffic)[/dim]  {control_label}",
+    )
+    table.add_row(
+        "Variant",
+        f"[dim]({variant_traffic} traffic)[/dim]  {variant_label}",
+    )
+    table.add_row("Created By", ab_test.get("created_by", "—"))
+    table.add_row("Created", _format_iso_timestamp(ab_test.get("created_at", "")))
+    if ab_test.get("ended_at"):
+        table.add_row("Ended", _format_iso_timestamp(ab_test["ended_at"]))
+    if ab_test.get("chosen_deployment_id"):
+        winner_id = ab_test["chosen_deployment_id"]
+        winner_label = _format_dep_label(deps.get(winner_id), winner_id)
+        table.add_row("Winner", winner_label)
+    console.print(Panel(table, title="[bold]A/B Test[/bold]", border_style="cyan"))
 
 
 # ── Conversations ────────────────────────────────────────────────────
@@ -695,6 +1010,40 @@ def print_conversations(
             row.append(c.get("variantId") or "—")
         row.extend([handoff, summary])
         table.add_row(*row)
+
+    console.print(table)
+
+
+def print_audio_cache_entries(entries: list[dict[str, Any]]) -> None:
+    """Print a table of audio cache entry summaries.
+
+    Args:
+        entries: List of audio cache entry dicts (as returned by the
+            audio cache list API).
+    """
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("ID", style="bold yellow", no_wrap=True)
+    table.add_column("Transcript", overflow="fold")
+    table.add_column("Provider", no_wrap=True)
+    table.add_column("Voice", no_wrap=True)
+    table.add_column("Duration", no_wrap=True, justify="right")
+    table.add_column("Hits", no_wrap=True, justify="right")
+    table.add_column("Cached At", no_wrap=True)
+
+    for e in entries:
+        cached_at = e.get("cached_at") or "—"
+        if cached_at != "—":
+            cached_at = _format_iso_timestamp(cached_at)
+        duration = f"{e.get('duration', 0):.1f}s"
+        table.add_row(
+            str(e.get("id", "—")),
+            e.get("transcript", "—"),
+            e.get("provider", "—"),
+            e.get("provider_voice_id", "—"),
+            duration,
+            str(e.get("hit_count", 0)),
+            cached_at,
+        )
 
     console.print(table)
 
@@ -836,6 +1185,12 @@ def handle_exception(exc: Exception) -> None:
                 prefix = msg
                 break
 
+        # MergeConflictError subclasses ValueError, so override the generic prefix.
+        from poly.resources.resource_utils import MergeConflictError
+
+        if isinstance(exc, MergeConflictError):
+            prefix = "Merge conflict"
+
         # requests.HTTPError
         try:
             import requests
@@ -853,3 +1208,417 @@ def handle_exception(exc: Exception) -> None:
         err_console.print("[muted]Run with --verbose for the full traceback.[/muted]")
 
     sys.exit(1)
+
+
+# TESTING
+
+
+_COMPACT_THRESHOLD = 20
+_RECENT_COUNT = 10
+
+_TEST_STATUS_STYLES = {
+    "passed": ("Passed", "green"),
+    "failed": ("Failed", "red"),
+    "error": ("Error", "red"),
+    "errored": ("Error", "red"),
+    "timed_out": ("Timed Out", "red"),
+}
+
+_PENDING_STATUSES = {"pending", "running", "in_progress"}
+_FAILURE_STATUSES = {"failed", "error", "errored", "timed_out"}
+_ERROR_STATUSES = {"error", "errored", "timed_out"}
+
+
+def _build_test_table(
+    test_results: list[dict],
+    test_names: dict[str, str],
+    finished: bool = False,
+) -> Table:
+    """Build a Rich table for test run results (full mode, ≤ 20 tests)."""
+    table = Table(show_header=False, show_edge=False, pad_edge=False)
+    table.add_column("test", no_wrap=True)
+    table.add_column("status", no_wrap=True)
+    for entry in test_results:
+        case_id = entry.get("testCaseId", "")
+        name = test_names.get(case_id, case_id)
+        status = entry.get("status", "pending")
+        if finished and status in _PENDING_STATUSES:
+            status = "error"
+        label, style = _TEST_STATUS_STYLES.get(status, ("Pending", "yellow"))
+        if status in _PENDING_STATUSES:
+            status_cell = Spinner(
+                "dots",
+                text=f"[{style}]{label}[/{style}]",
+                style=style,
+            )
+        else:
+            status_cell = Text(f"{label}", style=style)
+        table.add_row(name, status_cell)
+    return table
+
+
+def _build_compact_display(
+    completed: list[dict],
+    total: int,
+    test_names: dict[str, str],
+) -> Group:
+    """Build the compact rolling display (> 20 tests)."""
+    done = len(completed)
+    passed = sum(1 for e in completed if e.get("status") not in _FAILURE_STATUSES)
+    failed = sum(1 for e in completed if e.get("status") in _FAILURE_STATUSES)
+    pending = total - done
+    header = Spinner(
+        "dots",
+        text=(
+            "Running tests: "
+            f"Passed: [green]{passed}[/green]  "
+            f"Failed: [red]{failed}[/red]  "
+            f"Pending: [yellow]{pending}[/yellow]"
+        ),
+        style="info",
+    )
+    recent = completed[-_RECENT_COUNT:]
+    lines: list[Text] = []
+    if len(completed) > _RECENT_COUNT:
+        lines.append(Text("  ...", style="dim"))
+    for entry in recent:
+        case_id = entry.get("testCaseId", "")
+        name = test_names.get(case_id, case_id)
+        status = entry.get("status", "")
+        if status in _FAILURE_STATUSES:
+            lines.append(Text(f"  ✗ {name}", style="red"))
+        else:
+            lines.append(Text(f"  ✓ {name}", style="green"))
+    return Group(header, *lines)
+
+
+def _print_test_failures(
+    merged: list[dict],
+    test_names: dict[str, str],
+) -> None:
+    """Print failed test details with assertion reasons."""
+    failures = [e for e in merged if e.get("status") == "failed"]
+    errors = [e for e in merged if e.get("status") in _ERROR_STATUSES]
+    if not failures and not errors:
+        return
+
+    if errors:
+        console.print()
+        console.print("[error]Errors:[/error]")
+        for entry in errors:
+            case_id = entry.get("testCaseId", "")
+            name = test_names.get(case_id, case_id)
+            console.print(
+                f"  [red]✗ {name}[/red] [muted]({case_id})[/muted]"
+                f" - [muted]{entry.get('status')}[/muted]"
+            )
+            conv_id = entry.get("rawConversation", {}).get("id", "")
+            console.print(f"    [muted]Conversation ID: {conv_id}[/muted]")
+
+    if not failures:
+        return
+
+    console.print()
+    console.print("[error]Failed:[/error]")
+    for entry in failures:
+        case_id = entry.get("testCaseId", "")
+        name = test_names.get(case_id, case_id)
+        console.print(f"  [red]✗ {name}[/red] [muted]({case_id})[/muted]")
+
+        results = entry.get("results") or {}
+        prompt_assertions = results.get("prompt_assertion_results") or []
+        for assertion in prompt_assertions:
+            if assertion.get("is_pass"):
+                continue
+            prompt = assertion.get("prompt", "")
+            reason = assertion.get("reason", "")
+            console.print(f"    {prompt}")
+            console.print(f"    [muted]→ {reason}[/muted]")
+
+        function_assertions = results.get("function_call_failures") or []
+        for assertion in function_assertions:
+            if assertion.get("is_pass"):
+                continue
+            function_name = assertion.get("name", "")
+            failure_reason = assertion.get("failure_reason", "")
+            function_error = assertion.get("error", "")
+            console.print(f"    {function_name}()")
+            console.print(f"    [muted]→ {failure_reason}[/muted]")
+            if function_error:
+                console.print(f"    [muted]→ {function_error}[/muted]")
+
+        conv_id = entry.get("rawConversation", {}).get("id", "")
+        console.print(f"    [muted]Conversation ID: {conv_id}[/muted]")
+
+        console.print()
+
+
+def print_test_run_list(result: dict) -> None:
+    """Print a table of test runs.
+
+    Args:
+        result: API response dict with a 'testRuns' key.
+    """
+    runs = result.get("testRuns") or []
+    if not runs:
+        warning("No test runs found.")
+        return
+
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
+    table.add_column("Run ID", style="bold yellow", no_wrap=True)
+    table.add_column("Started", no_wrap=True)
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Total", no_wrap=True, justify="right")
+    table.add_column("Passed", no_wrap=True, justify="right")
+    table.add_column("Failed", no_wrap=True, justify="right")
+    table.add_column("Errors", no_wrap=True, justify="right")
+    table.add_column("Run", no_wrap=True)
+
+    for run in runs:
+        status = run.get("status", "unknown")
+        passed = run.get("passedCount", 0)
+        failed = run.get("failedCount", 0)
+        errors = run.get("errorCount", 0)
+
+        if status == "completed" and failed == 0 and errors == 0:
+            status_display = "[green]completed[/green]"
+        elif status == "completed":
+            status_display = "[yellow]completed[/yellow]"
+        elif status in _PENDING_STATUSES:
+            status_display = f"[cyan]{status}[/cyan]"
+        else:
+            status_display = status
+
+        started = run.get("startedAt") or "—"
+        if started != "—":
+            started = _format_iso_timestamp(started)
+
+        table.add_row(
+            run.get("id", "—"),
+            started,
+            status_display,
+            str(run.get("testCaseCount", "—")),
+            f"[green]{passed}[/green]",
+            f"[red]{failed}[/red]" if failed else str(failed),
+            f"[red]{errors}[/red]" if errors else str(errors),
+            run.get("startedBy") or "—",
+        )
+
+    console.print(table)
+
+
+def print_test_run_summary(result: dict) -> None:
+    """Print a summary of a test run."""
+    table = Table(show_header=False, box=None, padding=(0, 1))
+    table.add_column("key", style="label", no_wrap=True)
+    table.add_column("value")
+    table.add_row("Run ID", result.get("id", "—"))
+    table.add_row("Status", result.get("status", "—"))
+    table.add_row("Tests", str(result.get("testCaseCount", "—")))
+    table.add_row(
+        "Results",
+        f"[green]{result.get('passedCount', 0)} passed[/green], "
+        f"[red]{result.get('failedCount', 0)} failed[/red], "
+        f"[red]{result.get('errorCount', 0)} errors[/red]",
+    )
+    table.add_row("Started", result.get("startedAt", "—"))
+    table.add_row("Started By", result.get("startedBy", "—"))
+    console.print(table)
+
+    test_history = result.get("testHistory") or []
+    if not test_history:
+        return
+
+    console.print()
+    results_table = Table(
+        show_header=True,
+        header_style="bold",
+        box=None,
+        padding=(0, 1),
+    )
+    results_table.add_column("Test", no_wrap=True)
+    results_table.add_column("Status", no_wrap=True)
+    results_table.add_column("Test Case ID", style="muted", no_wrap=True)
+    for entry in test_history:
+        case_id = entry.get("testCaseId", "")
+        snapshot = entry.get("testCaseSnapshot") or {}
+        name = snapshot.get("name", case_id)
+        status = entry.get("status", "unknown")
+        _, style = _TEST_STATUS_STYLES.get(status, ("", "yellow"))
+        results_table.add_row(name, Text(status, style=style), case_id)
+    console.print(results_table)
+
+
+def print_test_detail(entry: dict) -> None:
+    """Print detailed results for a single test."""
+    snapshot = entry.get("testCaseSnapshot") or {}
+    name = snapshot.get("name", entry.get("testCaseId", "—"))
+    status = entry.get("status", "unknown")
+    _, style = _TEST_STATUS_STYLES.get(status, ("", "yellow"))
+
+    console.print(f"[bold]{name}[/bold] [{style}]{status}[/{style}]")
+    console.print()
+
+    results = entry.get("results") or {}
+
+    prompt_assertions = results.get("prompt_assertion_results") or []
+    if prompt_assertions:
+        console.print("[label]Assertions:[/label]")
+        for a in prompt_assertions:
+            passed = a.get("is_pass", False)
+            mark = "[green]✓[/green]" if passed else "[red]✗[/red]"
+            console.print(f"  {mark} {a.get('prompt', '')}")
+            reason = a.get("reason", "")
+            if reason:
+                console.print(f"    [muted]→ {reason}[/muted]")
+        console.print()
+
+    fn_failures = results.get("function_call_failures") or []
+    if fn_failures:
+        console.print("[label]Function Call Failures:[/label]")
+        for f in fn_failures:
+            console.print(f"  [red]✗ {f.get('name', '')}()[/red]")
+            if f.get("failure_reason"):
+                console.print(f"    [muted]→ {f['failure_reason']}[/muted]")
+            if f.get("error"):
+                console.print(f"    [muted]→ {f['error']}[/muted]")
+        console.print()
+
+    raw_conv = entry.get("rawConversation") or {}
+    turns = raw_conv.get("turns") or []
+    if turns:
+        console.print("[label]Conversation:[/label]")
+        for turn in turns:
+            user_input = turn.get("user_input", "")
+            agent_response = turn.get("agent_response", "")
+            if user_input:
+                console.print(f"  [cyan]User:[/cyan] {user_input}")
+            if agent_response:
+                console.print(f"  [yellow]Agent:[/yellow] {agent_response}")
+            fns = turn.get("function_calls") or []
+            for fn in fns:
+                fn_name = fn.get("name", "")
+                fn_args = fn.get("arguments") or {}
+                args_str = ", ".join(f"{k}={v}" for k, v in fn_args.items() if v)
+                console.print(f"  [muted]→ {fn_name}({args_str})[/muted]")
+            console.print()
+
+
+def poll_test_run_live(
+    get_test_run: Callable[[str], dict],
+    test_run_id: str,
+    matched_tests: list,
+    poll_interval: int = 5,
+    max_consecutive_errors: int = 5,
+) -> dict:
+    """Poll a test run with a live-updating display.
+
+    Transient errors from `get_test_run` (e.g. a 500 while the run is still
+    in progress on the platform) are tolerated up to `max_consecutive_errors`
+    in a row before giving up, since the run itself keeps going server-side
+    even if a status poll fails.
+
+    Args:
+        get_test_run: Callable that takes a test run ID and returns the run dict.
+        test_run_id: The test run ID to poll.
+        matched_tests: List of TestCase objects (must have resource_id and name).
+        poll_interval: Seconds between polls.
+        max_consecutive_errors: Consecutive failed polls tolerated before giving up.
+
+    Returns:
+        dict: The final test run response, or {} if polling was abandoned
+        without ever receiving a successful response.
+    """
+    import time
+
+    import requests
+
+    total = len(matched_tests)
+    test_names = {t.resource_id: t.name for t in matched_tests}
+    pending_results = [{"testCaseId": t.resource_id, "status": "pending"} for t in matched_tests]
+    compact = total > _COMPACT_THRESHOLD
+
+    seen_done: set[str] = set()
+    completed_ordered: list[dict] = []
+
+    merged = pending_results
+    result: dict = {}
+    consecutive_errors = 0
+    initial = (
+        _build_compact_display([], total, test_names)
+        if compact
+        else _build_test_table(merged, test_names)
+    )
+    with Live(initial, console=console, refresh_per_second=10) as live:
+        while True:
+            time.sleep(poll_interval)
+
+            try:
+                result = get_test_run(test_run_id)
+            except requests.exceptions.RequestException as exc:
+                consecutive_errors += 1
+                logger.warning(
+                    f"Poll {consecutive_errors}/{max_consecutive_errors} for test run "
+                    f"{test_run_id} failed: {exc}"
+                )
+                if consecutive_errors >= max_consecutive_errors:
+                    warning(
+                        f"Lost contact with the platform while polling test run "
+                        f"{test_run_id} ({consecutive_errors} consecutive failures). "
+                        f"The run may still be in progress — check its status with "
+                        f"[bold]poly test show {test_run_id}[/bold]."
+                    )
+                    return result
+                continue
+
+            consecutive_errors = 0
+            test_results = result.get("testHistory", [])
+
+            actual_by_id = {r.get("testCaseId"): r for r in test_results}
+            merged = [actual_by_id.get(p.get("testCaseId"), p) for p in pending_results]
+
+            for entry in merged:
+                cid = entry.get("testCaseId", "")
+                st = entry.get("status", "pending")
+                if st not in _PENDING_STATUSES and cid not in seen_done:
+                    seen_done.add(cid)
+                    completed_ordered.append(entry)
+
+            if compact:
+                live.update(_build_compact_display(completed_ordered, total, test_names))
+            else:
+                live.update(_build_test_table(merged, test_names))
+
+            status = result.get("status", "")
+            if status not in _PENDING_STATUSES:
+                for entry in merged:
+                    if entry.get("status") in _PENDING_STATUSES:
+                        entry["status"] = "error"
+                if compact:
+                    for entry in merged:
+                        cid = entry.get("testCaseId", "")
+                        if cid not in seen_done:
+                            seen_done.add(cid)
+                            completed_ordered.append(entry)
+                    live.update(_build_compact_display(completed_ordered, total, test_names))
+                else:
+                    live.update(_build_test_table(merged, test_names, finished=True))
+                break
+
+    _print_test_failures(merged, test_names)
+
+    passed = result.get("passedCount", 0)
+    failed = result.get("failedCount", 0)
+    error_count = result.get("errorCount", 0)
+    total_count = result.get("testCaseCount", total)
+
+    if failed or error_count:
+        error(
+            f"Test run {result.get('status', 'unknown')}: "
+            f"{passed}/{total_count} passed, "
+            f"{failed} failed, {error_count} errors"
+        )
+    else:
+        success(f"Test run {result.get('status', 'unknown')}: {passed}/{total_count} passed")
+
+    return result

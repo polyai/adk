@@ -17,9 +17,11 @@ from poly.resources.resource import (
     MultiResourceYamlResource,
     ResourceMapping,
     _parse_multi_resource_path,
+    register_resource,
 )
 
 
+@register_resource("pronunciations")
 @dataclass
 class Pronunciation(MultiResourceYamlResource):
     """Dataclass representing a TTS Rule"""
@@ -53,6 +55,30 @@ class Pronunciation(MultiResourceYamlResource):
         self.description = description
         self.position = position
 
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "Pronunciation"]:
+        """Parse pronunciations from a projection dict."""
+        pronunciations = {}
+        index = 0
+        for pronunciation_id, pronunciation_data in (
+            projection.get("pronunciations", {})
+            .get("pronunciations", {})
+            .get("entities", {})
+            .items()
+        ):
+            pronunciations[pronunciation_id] = cls(
+                resource_id=pronunciation_id,
+                name=pronunciation_data.get("name", ""),
+                regex=pronunciation_data.get("regex", ""),
+                replacement=pronunciation_data.get("replacement", ""),
+                case_sensitive=pronunciation_data.get("caseSensitive", False),
+                language_code=pronunciation_data.get("languageCode", ""),
+                description=pronunciation_data.get("description", ""),
+                position=index,
+            )
+            index += 1
+        return pronunciations
+
     @property
     def file_path(self) -> str:
         # pronunciation rules don't have names
@@ -81,7 +107,7 @@ class Pronunciation(MultiResourceYamlResource):
     ) -> "Pronunciation":
         return cls(
             resource_id=resource_id,
-            name=yaml_dict.get("name", ""),
+            name=yaml_dict.get("name") or name,
             regex=yaml_dict.get("regex", ""),
             replacement=yaml_dict.get("replacement", ""),
             case_sensitive=yaml_dict.get("case_sensitive", False),
@@ -145,9 +171,11 @@ class Pronunciation(MultiResourceYamlResource):
                 f"Resource with name {resource_clean_name} not found in {true_file_path}"
             )
 
-        return cls.from_yaml_dict(
+        instance = cls.from_yaml_dict(
             yaml_dict, resource_id=resource_id, name="", position=position, **kwargs
         )
+        utils.check_yaml_field_types(instance)
+        return instance
 
     @property
     def command_type(self) -> str:

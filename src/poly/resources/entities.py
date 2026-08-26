@@ -25,7 +25,7 @@ from poly.handlers.protobuf.entities_pb2 import (
     PhoneNumberConfig,
     TimeConfig,
 )
-from poly.resources.resource import MultiResourceYamlResource, ResourceMapping
+from poly.resources.resource import MultiResourceYamlResource, ResourceMapping, register_resource
 
 
 class EntityType(str, Enum):
@@ -75,6 +75,7 @@ EXPECTED_ENTITY_CONFIG_FIELDS: dict[EntityType, dict[str, type | tuple]] = {
 }
 
 
+@register_resource("entities")
 @dataclass
 class Entity(MultiResourceYamlResource):
     """Dataclass representing an Agent Studio Entity"""
@@ -102,6 +103,22 @@ class Entity(MultiResourceYamlResource):
             else entity_type
         )
         self.config = utils.convert_keys_to_snake_case(config or {})
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "Entity"]:
+        """Parse entities from a projection dict."""
+        entities = {}
+        for entity_id, entity_data in (
+            projection.get("entities", {}).get("entities", {}).get("entities", {}).items()
+        ):
+            entities[entity_id] = cls(
+                resource_id=entity_id,
+                name=entity_data["name"],
+                description=entity_data.get("description", ""),
+                entity_type=entity_data.get("type"),
+                config=entity_data.get("config", {}).get("value", {}),
+            )
+        return entities
 
     @staticmethod
     def get_resource_prefix(**kwargs) -> str:
@@ -131,7 +148,7 @@ class Entity(MultiResourceYamlResource):
         """Create an instance from YAML data and identity fields."""
         return cls(
             resource_id=resource_id,
-            name=yaml_data.get("name", ""),
+            name=yaml_data.get("name") or name,
             description=(yaml_data.get("description") or "").strip(),
             entity_type=EntityType(yaml_data.get("entity_type")),
             config=yaml_data.get("config", {}),

@@ -79,7 +79,7 @@ class FunctionDelayResponse(_message.Message):
     def __init__(self, id: _Optional[str] = ..., message: _Optional[str] = ..., duration: _Optional[int] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., references: _Optional[_Union[FunctionDelayResponseReferences, _Mapping]] = ...) -> None: ...
 
 class FunctionLatencyControl(_message.Message):
-    __slots__ = ("enabled", "delay_responses", "initial_delay", "interval", "created_at", "created_by", "updated_at", "updated_by")
+    __slots__ = ("enabled", "delay_responses", "initial_delay", "interval", "created_at", "created_by", "updated_at", "updated_by", "randomize")
     ENABLED_FIELD_NUMBER: _ClassVar[int]
     DELAY_RESPONSES_FIELD_NUMBER: _ClassVar[int]
     INITIAL_DELAY_FIELD_NUMBER: _ClassVar[int]
@@ -88,6 +88,7 @@ class FunctionLatencyControl(_message.Message):
     CREATED_BY_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
     UPDATED_BY_FIELD_NUMBER: _ClassVar[int]
+    RANDOMIZE_FIELD_NUMBER: _ClassVar[int]
     enabled: bool
     delay_responses: _containers.RepeatedCompositeFieldContainer[FunctionDelayResponse]
     initial_delay: int
@@ -96,7 +97,8 @@ class FunctionLatencyControl(_message.Message):
     created_by: str
     updated_at: _timestamp_pb2.Timestamp
     updated_by: str
-    def __init__(self, enabled: bool = ..., delay_responses: _Optional[_Iterable[_Union[FunctionDelayResponse, _Mapping]]] = ..., initial_delay: _Optional[int] = ..., interval: _Optional[int] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ...) -> None: ...
+    randomize: bool
+    def __init__(self, enabled: bool = ..., delay_responses: _Optional[_Iterable[_Union[FunctionDelayResponse, _Mapping]]] = ..., initial_delay: _Optional[int] = ..., interval: _Optional[int] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., randomize: bool = ...) -> None: ...
 
 class FunctionReferences(_message.Message):
     __slots__ = ("flow_steps", "topics", "stop_keywords", "behaviour", "variables")
@@ -196,16 +198,18 @@ class FunctionParameterUpdate(_message.Message):
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., description: _Optional[str] = ..., type: _Optional[str] = ...) -> None: ...
 
 class FunctionCreateLatencyControl(_message.Message):
-    __slots__ = ("enabled", "delay_responses", "initial_delay", "interval")
+    __slots__ = ("enabled", "delay_responses", "initial_delay", "interval", "randomize")
     ENABLED_FIELD_NUMBER: _ClassVar[int]
     DELAY_RESPONSES_FIELD_NUMBER: _ClassVar[int]
     INITIAL_DELAY_FIELD_NUMBER: _ClassVar[int]
     INTERVAL_FIELD_NUMBER: _ClassVar[int]
+    RANDOMIZE_FIELD_NUMBER: _ClassVar[int]
     enabled: bool
     delay_responses: _containers.RepeatedCompositeFieldContainer[FunctionDelayResponse]
     initial_delay: int
     interval: int
-    def __init__(self, enabled: bool = ..., delay_responses: _Optional[_Iterable[_Union[FunctionDelayResponse, _Mapping]]] = ..., initial_delay: _Optional[int] = ..., interval: _Optional[int] = ...) -> None: ...
+    randomize: bool
+    def __init__(self, enabled: bool = ..., delay_responses: _Optional[_Iterable[_Union[FunctionDelayResponse, _Mapping]]] = ..., initial_delay: _Optional[int] = ..., interval: _Optional[int] = ..., randomize: bool = ...) -> None: ...
 
 class Function_CreateFunction(_message.Message):
     __slots__ = ("id", "name", "description", "parameters", "code", "errors", "latency_control", "references", "archived")
@@ -286,15 +290,17 @@ class DelayResponsesUpdate(_message.Message):
     def __init__(self, delay_responses: _Optional[_Iterable[_Union[DelayResponseUpdate, _Mapping]]] = ...) -> None: ...
 
 class Function_UpdateLatencyControl(_message.Message):
-    __slots__ = ("function_id", "enabled", "delay_responses", "initial_delay", "interval")
+    __slots__ = ("function_id", "enabled", "delay_responses", "initial_delay", "interval", "randomize")
     FUNCTION_ID_FIELD_NUMBER: _ClassVar[int]
     ENABLED_FIELD_NUMBER: _ClassVar[int]
     DELAY_RESPONSES_FIELD_NUMBER: _ClassVar[int]
     INITIAL_DELAY_FIELD_NUMBER: _ClassVar[int]
     INTERVAL_FIELD_NUMBER: _ClassVar[int]
+    RANDOMIZE_FIELD_NUMBER: _ClassVar[int]
     function_id: str
     enabled: bool
     delay_responses: DelayResponsesUpdate
     initial_delay: int
     interval: int
-    def __init__(self, function_id: _Optional[str] = ..., enabled: bool = ..., delay_responses: _Optional[_Union[DelayResponsesUpdate, _Mapping]] = ..., initial_delay: _Optional[int] = ..., interval: _Optional[int] = ...) -> None: ...
+    randomize: bool
+    def __init__(self, function_id: _Optional[str] = ..., enabled: bool = ..., delay_responses: _Optional[_Union[DelayResponsesUpdate, _Mapping]] = ..., initial_delay: _Optional[int] = ..., interval: _Optional[int] = ..., randomize: bool = ...) -> None: ...

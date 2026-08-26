@@ -29,6 +29,10 @@ components:
         - fano
         - nemo
         - deepgram
+        - soniox
+        - assemblyai
+        - raven
+        - qwen
 
     asr_common_config_properties:
       type: object
@@ -43,6 +47,10 @@ components:
             - riva: Riva in-house speech recognition engine
             - openai: OpenAI realtime API
             - deepgram: Deepgram cloud speech recognition
+            - soniox: Soniox real-time cloud speech recognition
+            - assemblyai: AssemblyAI v3 Streaming speech recognition
+            - raven: PolyAI Raven Omni speech recognition
+            - qwen: PolyAI-hosted Qwen3-ASR speech recognition
         model:
           type: string
           minLength: 1
@@ -55,6 +63,11 @@ components:
               architecture, size, decoder type, and latency characteristics
             - openai: "gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"
             - deepgram: "nova-3", "nova-2"
+            - soniox: "stt-rt-v5"
+            - assemblyai: "universal-3-5-pro" (GA), "u3-rt-pro-beta-1" (private beta);
+              other AssemblyAI streaming model IDs are passed through
+            - raven: "raven-omni"
+            - qwen: "qwen3-asr-1.7b"
         language:
           type: string
           minLength: 2
@@ -136,9 +149,11 @@ components:
           properties:
             custom_language_code:
               type: string
+              deprecated: true
               description: >
-                Custom language code to pass to the ASR model, for providers
-                accepting non-standard language codes such as "multi" or "esen-US".
+                Deprecated: use the `language` field instead, which now behaves
+                identically. Retained for backwards compatibility with existing
+                configs. If both are set, `custom_language_code` takes precedence.
             flow_overrides:
               $ref: "#/components/schemas/asr_flow_overrides_map"
 
@@ -151,24 +166,23 @@ components:
           description: Whether to use the asr_lib for experimental ASR providers.
           default: false
 
-    asr_base_requirements:
-      type: object
-      description: Base-level ASR requirements ensuring provider and model are both present
-      required:
-        - provider
-        - model
-
     channel_name_enum:
       type: string
       enum:
         - webchat.polyai
         - sip.polyai
         - chat.polyai
+        - sms.polyai
+        - rcs.polyai
+        - whatsapp.polyai
       description: |-
         Recognized channel names in the platform:
         - webchat.polyai: Web chat channel
         - sip.polyai: SIP/voice channel
         - chat.polyai: Chat channel
+        - sms.polyai: SMS conversational channel
+        - rcs.polyai: RCS conversational channel
+        - whatsapp.polyai: WhatsApp conversational channel
 
     llm_inference_parameters:
       type: object
@@ -275,7 +289,6 @@ components:
       allOf:
         - $ref: "#/components/schemas/asr_common_config_properties"
         - $ref: "#/components/schemas/asr_base_properties"
-        - $ref: "#/components/schemas/asr_base_requirements"
         - type: object
           description: |-
             ASR configuration details.
@@ -387,7 +400,7 @@ components:
       properties:
         provider:
           type: string
-          enum: ["smart_turn"]
+          enum: ["smart_turn", "raven"]
           description: The end of turn detection provider. Only available if using ASR lib.
         threshold:
           type: number
@@ -442,6 +455,49 @@ components:
               minimum: 0
               maximum: 1000
               default: 100
+            analysis_enabled:
+              type: boolean
+              description: Enable inline audio quality analysis (Tyto model) on the raw inbound audio.
+              default: false
+            analysis_adaptive:
+              type: boolean
+              description: >
+                Enable adaptive enhancement tuning driven by the analysis scores.
+                Implies analysis_enabled.
+              default: false
+            analysis_adaptive_vad:
+              type: boolean
+              description: >
+                Enable adaptive VAD tuning driven by the analysis scores.
+                Requires analysis_adaptive.
+              default: false
+            vad:
+              type: object
+              description: Voice activity detection configuration for the ai-coustics enhancer
+              properties:
+                sensitivity:
+                  type: number
+                  description: >
+                    Energy threshold for speech detection. Energy threshold = 10^(-sensitivity).
+                    Higher values detect quieter speech.
+                  minimum: 1.0
+                  maximum: 15.0
+                  default: 6.0
+                speech_hold_duration:
+                  type: number
+                  description: >
+                    How long the VAD continues to report speech after the audio signal
+                    no longer contains speech (in seconds). Useful for bridging short pauses.
+                  minimum: 0.0
+                  default: 0.03
+                minimum_speech_duration:
+                  type: number
+                  description: >
+                    How long speech must be present before the VAD considers it speech (in seconds).
+                    Helps filter out short non-speech sounds like clicks or coughs.
+                  minimum: 0.0
+                  maximum: 1.0
+                  default: 0.0
         krisp:
           type: object
           description: Krisp audio enhancement configuration (noise cancellation)
@@ -584,6 +640,25 @@ components:
                 post_delay_sec:
                   type: number
                   description: Seconds before the next utterance after a backchannel utterance is played.
+            interruption_granularity:
+              type: string
+              enum: ["word", "sentence", "sentence_keep", "chunk"]
+              description: Controls where the split happens during barge-in. word=audio-timing split, sentence=drop interrupted sentence, sentence_keep=keep interrupted sentence, chunk=drop entire TTS chunk.
+            interruption_display:
+              type: string
+              enum: ["ellipsis", "tags", "strip", "none", "barge"]
+              description: Controls how interrupted text appears in Agent Studio msg.Text (and LLM if interruption_display_llm is not set). ellipsis=append "...", tags=wrap unsaid in <interrupted> XML, strip=drop unsaid silently, none=keep full text, barge=append "[BARGE IN]" marker.
+            interruption_display_llm:
+              type: string
+              enum: ["ellipsis", "tags", "strip", "none", "barge"]
+              description: LLM-specific override for interrupted text display. Inherits from interruption_display when absent.
+            truncate_interrupted_utterances:
+              type: boolean
+              default: false
+              description: When true, function-output utterances on interrupted turns are truncated to only the said (heard) portion, dropping unsaid text. Useful when TTS utterances are attached to function outputs and should reflect what the caller actually heard. Defaults to false.
+            annotate_interrupted_function_calls:
+              type: boolean
+              description: When true, function call results on interrupted turns are annotated with said/unsaid context so the LLM can judge whether the initiating question was fully communicated. Defaults to false.
         flow_overrides:
           type: object
           description: Flow-specific barge-in configuration overrides. Each key should be a flow name.
@@ -716,7 +791,7 @@ components:
           type: object
           description: >
             Functions that bypass the barrier and execute immediately.
-
+            
             WARNING: These functions will be erased from history if the user
             resumes speaking during execution. You should ensure that there are no
             external side effects like a POST API call, otherwise there will be phantom
@@ -873,9 +948,21 @@ components:
         webchat_decorator:
           type: string
           description: Optional webchat-specific decorator for webchat.polyai channel
+        sms_decorator:
+          type: string
+          description: Optional SMS-specific decorator for sms.polyai channel
+        rcs_decorator:
+          type: string
+          description: Optional RCS-specific decorator for rcs.polyai channel
+        whatsapp_decorator:
+          type: string
+          description: Optional WhatsApp-specific decorator for whatsapp.polyai channel
         voice_decorator:
           type: string
           description: Optional voice-specific decorator for chat.polyai or sip.polyai channels
+        language_switching_instructions:
+          type: string
+          description: Optional instructions for language switching behaviour. Must contain "{available_languages}" placeholder.
       additionalProperties: false
 
     webchat:
@@ -888,6 +975,16 @@ components:
           default: false
       additionalProperties: false
 
+    language_switching:
+      type: object
+      description: Configuration for automatic language switching behaviour.
+      properties:
+        explicit_only:
+          type: boolean
+          default: false
+          description: When true, the agent only switches language when the user explicitly asks. When false (default), the agent may also switch spontaneously based on detected language in the transcription.
+      additionalProperties: false
+
     memory:
       type: object
       description: Configure Agent Memory features.
@@ -895,7 +992,7 @@ components:
         identifier_source:
           type: string
           description: >
-            Custom source for the memory lookup identifier.
+            Custom source for the memory lookup identifier. 
             If not set, defaults to the caller/callee phone number.
           pattern: "^(sip_headers|integration_attributes|state):.+$"
         repeat_caller:
@@ -917,6 +1014,14 @@ components:
               description: >
                 List of state keys which should be mapped to Agent Memory.
                 Only those listed will be exposed / persisted to memory.
+
+    verified_context:
+      type: object
+      description: Configure the verified context read path (served from the Context Vault).
+      properties:
+        enabled:
+          type: boolean
+          description: Enable the per-turn fetch of verified context for function authors.
 
     filler_utterances:
       type: object
@@ -1448,15 +1553,19 @@ components:
           type: object
           description: >
             Custom payload template that controls the JSON body sent to the webhook URL.
-            If omitted, the default deployment payload is sent as-is.
-            String values may contain {{field}} placeholders (e.g. {{project_id}}) 
-            that are substituted with the corresponding deployment event field. 
-            Available fields: deployment_id, account_id, project_id,
-            client_env, artifact_version, deployment_type, timestamp, user.
-            Note: Use the special {{payload}} value to inject the entire deployment payload
+            If omitted, the default event payload is sent as-is.
+            String values may contain {{field}} placeholders (e.g. {{project_id}})
+            that are substituted with the corresponding event field.
+            Available fields depend on the event the webhook is attached to.
+            All events provide: account_id, project_id, client_env, timestamp, user.
+            on_draft_published and on_deployment additionally provide:
+            deployment_id, artifact_version, deployment_type.
+            on_realtime_config_updated additionally provides:
+            event_type, config_diff.
+            Note: Use the special {{payload}} value to inject the entire event payload
             object at a specific position in the template (e.g. for GitHub repository_dispatch
-            which requires nesting under client_payload). 
-            When {{payload}} is not used, the deployment payload fields are merged at the top 
+            which requires nesting under client_payload).
+            When {{payload}} is not used, the event payload fields are merged at the top
             level of the rendered result.
           additionalProperties: true
 
@@ -1490,6 +1599,28 @@ components:
               description: Webhooks to trigger for live deployments
               items:
                 $ref: "#/components/schemas/webhook_config"
+        on_realtime_config_updated:
+          type: object
+          description:
+            Webhooks to trigger when a realtime config is updated in a specific
+            environment
+          additionalProperties: false
+          properties:
+            sandbox:
+              type: array
+              description: Webhooks to trigger for sandbox realtime config updates
+              items:
+                $ref: "#/components/schemas/webhook_config"
+            pre-release:
+              type: array
+              description: Webhooks to trigger for pre-release realtime config updates
+              items:
+                $ref: "#/components/schemas/webhook_config"
+            live:
+              type: array
+              description: Webhooks to trigger for live realtime config updates
+              items:
+                $ref: "#/components/schemas/webhook_config"
 
     additional_features:
       type: object
@@ -1514,10 +1645,14 @@ components:
           $ref: "#/components/schemas/backchannelling"
         prompts:
           $ref: "#/components/schemas/prompts"
+        language_switching:
+          $ref: "#/components/schemas/language_switching"
         webchat:
           $ref: "#/components/schemas/webchat"
         memory:
           $ref: "#/components/schemas/memory"
+        verified_context:
+          $ref: "#/components/schemas/verified_context"
         realtime:
           $ref: "#/components/schemas/realtime"
         filler_utterances:

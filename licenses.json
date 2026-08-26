@@ -31,6 +31,11 @@
   },
   {
     "License": "MIT License",
+    "Name": "backoff",
+    "URL": "https://github.com/litl/backoff"
+  },
+  {
+    "License": "MIT License",
     "Name": "cattrs",
     "URL": "https://catt.rs"
   },
@@ -58,6 +63,11 @@
     "License": "Python Software Foundation License",
     "Name": "distlib",
     "URL": "https://github.com/pypa/distlib"
+  },
+  {
+    "License": "Apache Software License",
+    "Name": "distro",
+    "URL": "https://github.com/python-distro/distro"
   },
   {
     "License": "MIT License",
@@ -138,6 +148,11 @@
     "License": "MIT License",
     "Name": "pluggy",
     "URL": "UNKNOWN"
+  },
+  {
+    "License": "MIT",
+    "Name": "posthog",
+    "URL": "https://github.com/posthog/posthog-python"
   },
   {
     "License": "MIT",
@@ -238,6 +253,11 @@
     "License": "MIT License",
     "Name": "ty",
     "URL": "https://github.com/astral-sh/ty/"
+  },
+  {
+    "License": "PSF-2.0",
+    "Name": "typing_extensions",
+    "URL": "https://github.com/python/typing_extensions"
   },
   {
     "License": "MIT",

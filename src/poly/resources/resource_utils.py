@@ -13,12 +13,14 @@ import os
 import re
 import subprocess
 import sys
+import types
+import typing
+from dataclasses import fields, is_dataclass
 from difflib import unified_diff
 from enum import Enum
 from io import StringIO
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Callable, Optional, Union
 
-import langcodes
 import ruamel.yaml as yaml
 
 logger = logging.getLogger(__name__)
@@ -151,6 +153,29 @@ def get_diff(original: str, updated: str) -> str:
     return "\n".join(diff)
 
 
+class MergeConflictError(ValueError):
+    """Raised when resource file(s) contain unresolved merge conflict markers.
+
+    Callers pass the offending file path(s); the message is derived from them.
+    """
+
+    def __init__(self, file_paths: "str | list[str]"):
+        # dedupe: several resources can share one conflicted multi-resource file
+        paths = [file_paths] if isinstance(file_paths, str) else list(dict.fromkeys(file_paths))
+        self.file_paths = paths
+        if len(paths) == 1:
+            message = f"{paths[0]} — resolve the conflict markers before continuing"
+        else:
+            message = "resolve the conflict markers in:\n- " + "\n- ".join(paths)
+        super().__init__(message)
+
+
+def raise_if_merge_conflicts(conflict_files: list[str]) -> None:
+    """Raise a single aggregated error if any files contain merge conflict markers."""
+    if conflict_files:
+        raise MergeConflictError(conflict_files)
+
+
 def contains_merge_conflict(string: str) -> bool:
     """Check if the string contains merge conflict markers."""
     has_start = False
@@ -276,27 +301,47 @@ def validate_references(
     return len(invalid_references) == 0, invalid_references
 
 
+def _build_reference_replacer(
+    resource_mappings: list["ResourceMapping"],
+    flow_folder_name: str = None,
+    *,
+    names_to_ids: bool,
+) -> "Callable[[re.Match], str]":
+    """Build a regex replacer that rewrites {{prefix:from}} references to {{prefix:to}}.
+
+    Args:
+        resource_mappings: Mappings providing the name<->id lookup.
+        flow_folder_name: Restricts flow-scoped mappings to the current flow.
+        names_to_ids: When True, map names -> ids; when False, ids -> names.
+    """
+    # Build dict for O(1) lookups: (prefix, from) -> to
+    lookup: dict[tuple[str, str], str] = {}
+    for rm in resource_mappings:
+        if rm.flow_name and clean_name(rm.flow_name) not in (None, flow_folder_name):
+            continue
+        if rm.resource_prefix:
+            if names_to_ids:
+                lookup[(rm.resource_prefix, rm.resource_name)] = rm.resource_id
+            else:
+                lookup[(rm.resource_prefix, rm.resource_id)] = rm.resource_name
+
+    def _replacer(match: re.Match) -> str:
+        key = (match.group(1), match.group(2))
+        if key in lookup:
+            return f"{{{{{key[0]}:{lookup[key]}}}}}"
+        return match.group(0)
+
+    return _replacer
+
+
 def replace_resource_ids_with_names(
     prompt: str,
     resource_mappings: list["ResourceMapping"],
     flow_folder_name: str = None,
 ) -> str:
     """Replace resource IDs with names in the prompt string."""
-    # Build dict for O(1) lookups: (prefix, id) -> name
-    id_to_name: dict[tuple[str, str], str] = {}
-    for rm in resource_mappings:
-        if rm.flow_name and clean_name(rm.flow_name) not in (None, flow_folder_name):
-            continue
-        if rm.resource_prefix:
-            id_to_name[(rm.resource_prefix, rm.resource_id)] = rm.resource_name
-
-    def _replacer(match: re.Match) -> str:
-        key = (match.group(1), match.group(2))
-        if key in id_to_name:
-            return f"{{{{{key[0]}:{id_to_name[key]}}}}}"
-        return match.group(0)
-
-    return _REFERENCE_PATTERN.sub(_replacer, prompt)
+    replacer = _build_reference_replacer(resource_mappings, flow_folder_name, names_to_ids=False)
+    return _REFERENCE_PATTERN.sub(replacer, prompt)
 
 
 def replace_resource_names_with_ids(
@@ -305,21 +350,33 @@ def replace_resource_names_with_ids(
     flow_folder_name: str = None,
 ) -> str:
     """Replace resource names with IDs in the prompt string."""
-    # Build dict for O(1) lookups: (prefix, name) -> id
-    name_to_id: dict[tuple[str, str], str] = {}
-    for rm in resource_mappings:
-        if rm.flow_name and clean_name(rm.flow_name) not in (None, flow_folder_name):
-            continue
-        if rm.resource_prefix:
-            name_to_id[(rm.resource_prefix, rm.resource_name)] = rm.resource_id
+    replacer = _build_reference_replacer(resource_mappings, flow_folder_name, names_to_ids=True)
+    return _REFERENCE_PATTERN.sub(replacer, prompt)
 
-    def _replacer(match: re.Match) -> str:
-        key = (match.group(1), match.group(2))
-        if key in name_to_id:
-            return f"{{{{{key[0]}:{name_to_id[key]}}}}}"
-        return match.group(0)
 
-    return _REFERENCE_PATTERN.sub(_replacer, prompt)
+def replace_resource_names_with_ids_in_data(
+    data: object,
+    resource_mappings: list["ResourceMapping"],
+    flow_folder_name: str = None,
+) -> object:
+    """Replace resource names with IDs in every scalar string leaf of a parsed structure.
+
+    Recursively walks dicts and lists, rewriting {{prefix:name}} references in string
+    values; keys and non-string values are left unchanged. Returns freshly constructed
+    dict/list containers.
+    """
+    replacer = _build_reference_replacer(resource_mappings, flow_folder_name, names_to_ids=True)
+
+    def _walk(node: object) -> object:
+        if isinstance(node, dict):
+            return {k: _walk(v) for k, v in node.items()}
+        if isinstance(node, list):
+            return [_walk(item) for item in node]
+        if isinstance(node, str):
+            return _REFERENCE_PATTERN.sub(replacer, node)
+        return node
+
+    return _walk(data)
 
 
 def get_flow_id_from_flow_name(
@@ -561,7 +618,82 @@ def convert_keys_to_snake_case(dict_obj: dict) -> dict:
 
 def is_valid_language_code(code: str) -> bool:
     """Check if the given code is a valid BCP 47 language code."""
+    import langcodes
+
     return langcodes.tag_is_valid(code)
+
+
+def _unwrap_optional(hint: type) -> type:
+    """Strip Optional[X] / X | None down to X."""
+    origin = typing.get_origin(hint)
+    if origin is Union or origin is types.UnionType:
+        args = [a for a in typing.get_args(hint) if a is not type(None)]
+        if len(args) == 1:
+            return args[0]
+    return hint
+
+
+_SCALAR_TYPES = (str, int, float, bool)
+
+
+def _matches_scalar(value: object, expected: type) -> bool:
+    """Check if a value matches a scalar type, with YAML-aware compatibility.
+
+    bool is excluded from int/float checks because YAML's yes/no auto-cast
+    should not silently pass as a number. int is accepted for float because
+    YAML parses 500 as int but 500.0 as float — both are valid numerics.
+    """
+    if expected is float:
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if expected is int:
+        return isinstance(value, int) and not isinstance(value, bool)
+    return isinstance(value, expected)
+
+
+def check_yaml_field_types(instance: object, _path: str = "") -> None:
+    """Validate that scalar and list[scalar] fields have the correct type after YAML parsing."""
+    hints = typing.get_type_hints(type(instance))
+    for f in fields(instance):
+        value = getattr(instance, f.name)
+        if value is None:
+            continue
+        hint = _unwrap_optional(hints.get(f.name, type(None)))
+        field_path = f"{_path}.{f.name}" if _path else f.name
+
+        if hint in _SCALAR_TYPES and not _matches_scalar(value, hint):
+            raise ValueError(
+                f"'{field_path}' should be {hint.__name__} but got {type(value).__name__}."
+            )
+        list_args = typing.get_args(hint) if typing.get_origin(hint) is list else ()
+        if list_args and list_args[0] in _SCALAR_TYPES:
+            expected_item_type = list_args[0]
+            if not isinstance(value, list):
+                raise ValueError(
+                    f"'{field_path}' should be a list of {expected_item_type.__name__} "
+                    f"but got {type(value).__name__}."
+                )
+            for i, item in enumerate(value):
+                if not _matches_scalar(item, expected_item_type):
+                    raise ValueError(
+                        f"'{field_path}[{i}]' should be {expected_item_type.__name__} "
+                        f"but got {type(item).__name__}."
+                    )
+        dict_args = typing.get_args(hint) if typing.get_origin(hint) is dict else ()
+        if len(dict_args) == 2 and isinstance(value, dict):
+            key_type, val_type = dict_args
+            for k, v in value.items():
+                if key_type in _SCALAR_TYPES and not _matches_scalar(k, key_type):
+                    raise ValueError(
+                        f"'{field_path}' has key {k!r} which should be {key_type.__name__} "
+                        f"but got {type(k).__name__}."
+                    )
+                if val_type in _SCALAR_TYPES and not _matches_scalar(v, val_type):
+                    raise ValueError(
+                        f"'{field_path}[{k!r}]' should be {val_type.__name__} "
+                        f"but got {type(v).__name__}."
+                    )
+        if is_dataclass(value) and not isinstance(value, type):
+            check_yaml_field_types(value, field_path)
 
 
 def assign_flow_positions(

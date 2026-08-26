@@ -9,14 +9,14 @@ from typing import ClassVar, Optional
 
 from google.protobuf.message import Message
 
+import poly.resources.resource_utils as utils
 from poly.handlers.protobuf.channels_pb2 import Channel_UpdateSafetyFilters, ChannelType
 from poly.handlers.protobuf.content_filter_settings_pb2 import (
     AzureContentFilter,
     AzureContentFilterCategory,
     ContentFilterSettings_UpdateContentFilterSettings,
 )
-import poly.resources.resource_utils as utils
-from poly.resources.resource import ResourceMapping, YamlResource
+from poly.resources.resource import ResourceMapping, YamlResource, register_resource
 
 PRECISION_MAPPING = {"LOOSE": "lenient", "MEDIUM": "medium", "STRICT": "strict"}
 PRECISION_MAPPING_INVERSE = {v: k for k, v in PRECISION_MAPPING.items()}
@@ -70,6 +70,24 @@ class SafetyFilterCategory:
             is_active=self.enabled,
             precision=self.precision,
         )
+
+
+def parse_safety_filter_config(sf_config: dict) -> dict:
+    """Parse category data from a camelCase azure projection dict."""
+    category_mapping = {
+        "violence": "violence",
+        "hate": "hate",
+        "sexual": "sexual",
+        "self_harm": "selfHarm",
+    }
+    parsed = {}
+    for cat, proj_key in category_mapping.items():
+        category_data = sf_config.get(proj_key, {})
+        parsed[cat] = SafetyFilterCategory(
+            enabled=category_data.get("isActive", False),
+            precision=category_data.get("precision", "MEDIUM"),
+        )
+    return parsed
 
 
 def _build_azure_config(categories: dict) -> AzureContentFilter:
@@ -237,11 +255,29 @@ class _BaseSafetyFilters(YamlResource):
         raise NotImplementedError("Delete operation not supported for safety filters.")
 
 
+@register_resource("safety_filters")
 @dataclass
 class GeneralSafetyFilters(_BaseSafetyFilters):
     """Resource class for managing general (project-level) safety filter settings."""
 
     _hide_global_enable: ClassVar[bool] = True  # enabled derived from categories
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "GeneralSafetyFilters"]:
+        """Parse general safety filters from a projection dict."""
+        data = projection.get("contentFilterSettings", {})
+        if not data:
+            return {}
+        sf_config = data.get("azureConfig", {})
+        return {
+            "safety_filters": cls(
+                resource_id="safety_filters",
+                name="safety_filters",
+                enabled=not data.get("disabled", False),
+                filter_type=data.get("type", "azure"),
+                categories=parse_safety_filter_config(sf_config),
+            )
+        }
 
     @property
     def file_path(self) -> str:
@@ -314,6 +350,7 @@ class ChannelSafetyFilters(_BaseSafetyFilters):
         return [file_path]
 
 
+@register_resource("voice_safety_filters")
 @dataclass
 class VoiceSafetyFilters(ChannelSafetyFilters):
     """Voice channel safety filter settings."""
@@ -321,13 +358,53 @@ class VoiceSafetyFilters(ChannelSafetyFilters):
     channel_type: ClassVar[ChannelType] = ChannelType.VOICE
     channel_subpath: ClassVar[str] = "voice"
 
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "VoiceSafetyFilters"]:
+        """Parse voice safety filters from a projection dict."""
+        voice_config = projection.get("channels", {}).get("voice", {}).get("config", {}) or {}
+        voice_safety_filters = voice_config.get("safetyFilters", None)
+        if not voice_safety_filters:
+            return {}
+        sf_config = voice_safety_filters.get("azureConfig", {})
+        return {
+            "voice_safety_filters": cls(
+                resource_id="voice_safety_filters",
+                name="voice_safety_filters",
+                enabled=not voice_safety_filters.get("disabled", False),
+                filter_type=voice_safety_filters.get("type", "azure"),
+                categories=parse_safety_filter_config(sf_config),
+            )
+        }
 
+
+@register_resource("chat_safety_filters")
 @dataclass
 class ChatSafetyFilters(ChannelSafetyFilters):
     """Chat (web chat) channel safety filter settings."""
 
     channel_type: ClassVar[ChannelType] = ChannelType.WEB_CHAT
     channel_subpath: ClassVar[str] = "chat"
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "ChatSafetyFilters"]:
+        """Parse chat safety filters from a projection dict."""
+        web_chat_settings = projection.get("channels", {}).get("webChat", {})
+        if not web_chat_settings.get("status", False):
+            return {}
+        chat_config = web_chat_settings.get("config", {}) or {}
+        chat_safety_filters = chat_config.get("safetyFilters", None)
+        if not chat_safety_filters:
+            return {}
+        sf_config = chat_safety_filters.get("azureConfig", {})
+        return {
+            "chat_safety_filters": cls(
+                resource_id="chat_safety_filters",
+                name="chat_safety_filters",
+                enabled=not chat_safety_filters.get("disabled", False),
+                filter_type=chat_safety_filters.get("type", "azure"),
+                categories=parse_safety_filter_config(sf_config),
+            )
+        }
 
     def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         """Validate the chat safety filters resource."""

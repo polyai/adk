@@ -4,7 +4,7 @@
 # type: ignore
 
 
-from runtime.value_extraction_types import EntityType
+from .value_extraction_types import EntityType
 
 
 __all__ = ["EntityValidationResult"]

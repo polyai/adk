@@ -5,15 +5,15 @@
 
 
 from typing import Any, Literal, NewType
-import runtime.external_events as external_events
-from runtime.agentic_dial import AgenticDialData
-from runtime.entity_validator import EntityValidationResult
-from runtime.history import AgentResponse, UserInput
-from runtime.integrations.integrations import Integrations
-from runtime.memory import Memory
-from runtime.sms import OutgoingSMS, OutgoingSMSTemplate, SMSTemplate
-from runtime.webchat import WebchatInterface
-from runtime.attachment import Attachment
+from .external_events import GenericExternalEvent, SMSReceived
+from .agentic_dial import AgenticDialData
+from .entity_validator import EntityValidationResult
+from .history import AgentResponse, UserInput
+from .integrations.integrations import Integrations
+from .memory import Memory
+from .sms import OutgoingSMS, OutgoingSMSTemplate, SMSTemplate
+from .webchat import WebchatInterface
+from .attachment import Attachment
 
 
 __all__ = [
@@ -538,11 +538,11 @@ class Conversation:
         integration_attributes: dict[str, Any] | None = ...,
         memory: Memory | None = ...,
         metric_events: list[MetricEvent] | None = ...,
-        sms_received: list[external_events.SMSReceived] | None = ...,
+        sms_received: list[SMSReceived] | None = ...,
         realtime_config: dict[str, Any] | None = ...,
         functions: dict[str, Any] | None = ...,
         vpc_enabled: bool | None = ...,
-        generic_external_events: list[external_events.GenericExternalEvent] | None = ...,
+        generic_external_events: list[GenericExternalEvent] | None = ...,
         channel_type: Literal["sms", "VOICE", "sip.polyai"] | None = ...,
         entities: dict[str, EntityValidationResult] | None = ...,
         apis: list[ApiIntegrationData] | None = ...,

@@ -5,24 +5,22 @@ description: Go from zero to a working local agent project in minutes using the 
 
 # Getting started
 
-The fastest way to get up and running is entirely from the command line. Two steps — install the ADK, then sign in — take you from an empty machine to a local project you can edit, push, and deploy. Sign-in uses `poly start` (self-serve) or `poly login` (enterprise), described below.
+Three steps — install the ADK, sign in, then create or connect a project — take you from an empty machine to a local project you can edit, push, and deploy.
 
 ---
 
 ## Step 1 — Install the ADK
 
-You need **uv** to manage the Python environment. If you already have it, skip the first line.
+It is recommended to use **uv** to manage the Python environment. If you already have it, skip the first line.
 
 ```bash
 curl -LsSf https://astral.sh/uv/install.sh | sh   # or: brew install uv
 ```
 
-Then create a virtual environment and install the ADK:
+Then install the ADK as a tool:
 
 ```bash
-uv venv --python=3.14 --seed
-source .venv/bin/activate
-pip install polyai-adk
+uv tool install polyai-adk
 ```
 
 Confirm it worked:
@@ -31,70 +29,62 @@ Confirm it worked:
 poly --help
 ```
 
-!!! info "Suppress SyntaxWarnings from platform-generated code"
-
-    Platform-generated code uses regex patterns (such as `\d`) that trigger `SyntaxWarning` in Python 3.14's stricter string handling. This produces 40+ warning lines on every `poly` command and obscures normal output.
-
-    To suppress them, set this before running any `poly` command:
-
-    ```bash
-    export PYTHONWARNINGS=ignore
-    ```
-
 !!! tip "Optional — install the VS Code / Cursor extension"
 
-    If you plan to work in **VS Code** or **Cursor**, you can also install the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) for resource-aware editing on top of the CLI. The extension is additive — the `poly` command remains the source of truth for every workflow.
+    If you plan to work in **VS Code** or **Cursor**, you can also install the [PolyAI ADK extension](../tooling/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) for resource-aware editing on top of the CLI. The extension is additive — the `poly` command remains the source of truth for every workflow.
 
 ## Step 2 — Sign in and set up your API key
 
-The right setup path depends on the type of Agent Studio account you have:
+`poly login` is the sign-in path for every account type:
 
-- **Self-serve accounts** (signed up at [studio.poly.ai](https://studio.poly.ai)) — use [`poly start`](#self-serve-accounts-poly-start) for an end-to-end setup that creates an account, an API key, and an optional first project.
-- **Enterprise accounts** (a workspace provisioned by PolyAI on a regional cluster such as `us-1`, `euw-1`, or `uk-1`) — use [`poly login --region <region>`](#enterprise-accounts-poly-login-or-manual-api-key) to sign in through your browser, or create an API key in the Agent Studio UI and [export it manually](#manual-api-key-export). `poly start` is self-serve only and does not work against enterprise clusters.
+```bash
+poly login
+```
 
-If you're not sure which you have, your PolyAI contact can confirm.
+It opens a browser window, fetches (or creates) an API key for your user, and saves it to `~/.poly/credentials.json` so future `poly` commands pick it up automatically — no environment variables to manage. The browser step can happen on any device, not just the machine running the CLI.
 
-### Self-serve accounts — `poly start`
+You are asked to pick a region. Choose based on your account type:
+
+| Region | Account type |
+|---|---|
+| `studio` | Self-serve — signed up at [studio.poly.ai](https://studio.poly.ai) |
+| `us-1`, `euw-1`, `uk-1` | Enterprise — a workspace provisioned by PolyAI |
+
+To skip the prompt, pass the region directly:
+
+```bash
+poly login --region studio   # or us-1, euw-1, uk-1
+```
+
+If you're not sure which account type you have, your PolyAI contact can confirm.
+
+!!! warning "Creating an account"
+    Only self-serve accounts can be created through `poly login`. Enterprise clusters are provisioned by PolyAI — if you need an enterprise workspace, get in touch with your PolyAI contact.
+
+To sign in to more than one region from the same machine, re-run `poly login` for each — the credential file stores them side by side.
+
+### Shortcut for self-serve — `poly start`
+
+If you are a self-serve user, you can use `poly start` to create an account and a project in one command:
 
 ```bash
 poly start
 ```
 
-`poly start` handles everything you need to authenticate:
-
-1. **Sign up or sign in** — opens a browser window for authentication. This can be on any device, not just the machine running the CLI.
-2. **API key** — generates a key and saves it to `~/.poly/credentials.json`. Future `poly` commands pick it up automatically — no environment variables to manage.
+1. **Sign up or sign in** — opens a browser window for authentication.
+2. **API key** — generates a key and saves it to `~/.poly/credentials.json`.
 3. **Create a project** — optionally creates a new Agent Studio project and pulls it down locally so you can start editing immediately.
 
-!!! tip "Already have a self-serve account?"
-    If `poly start` detects an existing API key (from the credential file or an environment variable), it asks whether to keep using it — accept and you skip straight to the project creation step. Decline and it runs the full sign-in flow again.
+`poly start` is self-serve only and does not work against enterprise clusters. On an enterprise workspace, use `poly login` above.
 
-### Enterprise accounts — `poly login` or manual API key { #enterprise-accounts-poly-login-or-manual-api-key }
+### Manual API key export { #manual-api-key-export }
 
-Enterprise workspaces have two options. `poly login` is the quickest path for most users; the manual export is the fallback if you can't authenticate through the browser (for example, on a CI runner).
+If you would rather store your credentials in an environment variable - in a CI for example - create the key yourself in the Agent Studio UI:
 
-#### Option 1 — `poly login` (recommended)
+1. Log in to Agent Studio and go to your account.
+2. In the **Personal Access Token** tab (next to the **Profile** tab), click **+ Token**.
 
-```bash
-poly login --region us-1   # or euw-1, uk-1
-```
-
-`poly login`:
-
-1. Opens a browser window so you can sign in to your enterprise workspace.
-2. Fetches (or creates) an API key for your user.
-3. Saves it to `~/.poly/credentials.json` under the region you specified, so future `poly` commands pick it up automatically.
-
-If you omit `--region`, the CLI prompts you to pick one. To sign in to more than one region from the same machine, re-run `poly login` with each region — the credential file stores them side by side.
-
-#### Option 2 — Manual API key export { #manual-api-key-export }
-
-If you'd rather create the key yourself in the Agent Studio UI:
-
-1. Log in to Agent Studio for your region and open your workspace.
-2. In the **API Keys** tab (next to the **Users** tab), click **+ API key**.
-
-![Generating an API key in Agent Studio — API Keys tab selected, showing the + API key button in the top-right](../assets/api-keys-tab.png)
+![Agent Studio account page with the Personal Access Token tab selected, showing the + Token button](../assets/personal-access-token.png)
 
 Then export the key:
 
@@ -102,104 +92,9 @@ Then export the key:
 export POLY_ADK_KEY=<your-api-key>
 ```
 
-To make it permanent, add the export line to your shell profile (`~/.zshrc` or `~/.bashrc`). If you work across more than one region, use the region-scoped variables in [per-region API keys](#per-region-api-keys) below.
+To make it permanent, add the export line to your shell profile (`~/.zshrc` or `~/.bashrc`).
 
-!!! info "How the ADK resolves API keys"
-    The ADK checks for credentials in the following order:
-
-    1. **Credential file** — `~/.poly/credentials.json` (written by `poly start` or `poly login`)
-    2. **Region-specific env var** — e.g. `POLY_ADK_KEY_US`
-    3. **General env var** — `POLY_ADK_KEY`
-
-    The first match wins. If nothing is found, the CLI raises an error.
-
-## Step 3 — Start building
-
-If `poly start` created a project for you, `cd` into the project directory. Otherwise, connect to an existing project:
-
-```bash
-poly init
-```
-
-[`poly init`](../reference/cli.md#poly-init) walks you through interactive dropdowns to pick a region, account, and project, then pulls the configuration locally.
-
-From inside your project directory, the core workflow is:
-
-```bash
-poly status              # see what's changed
-poly diff                # inspect changes in detail
-poly branch create dev   # work on a branch
-poly push                # push changes to Agent Studio
-poly chat                # talk to your agent
-```
-
-Edit flows, functions, topics, and other resources in your editor of choice — they're just YAML and Python files. Push when you're ready to test in Agent Studio.
-
-<div class="grid cards" markdown>
-
--   **Build an agent with the ADK**
-
-    ---
-
-    Follow the full step-by-step tutorial for local development.
-    [Open the tutorial](../tutorials/build-an-agent.md)
-
--   **First commands**
-
-    ---
-
-    Explore the full set of CLI commands available to you.
-    [Open first commands](./first-commands.md)
-
-</div>
-
----
-
-## Seed an agent from your website
-
-If you're starting from scratch and want a working baseline, you can generate an agent from your company website inside Agent Studio. This gives you topics and agent settings pre-populated from your site's public content — a useful starting point before building locally.
-
-1. Open [Agent Studio](https://studio.poly.ai) for self-serve, or your region's URL for enterprise, and sign in with the same account you authenticated with above.
-2. Click **+ Agent** → **Quick Agent Setup**.
-3. Enter your website URL and click **Create agent**.
-
-![Quick setup button Agent Studio](../assets/quick-agent-setup.png)
-
-Agent Studio crawls your site and generates a configuration — usually within a few minutes. Once it's ready, pull it into your local project:
-
-```bash
-poly pull
-```
-
-!!! tip "What gets generated"
-
-    Agent Studio populates **topics** (knowledge base entries) and basic **agent settings** (personality, role, rules) from your website's public content. It does not generate flows, variants, entities, handoffs, or integrations — those are for you to build locally with the ADK.
-
----
-
-## Already have an agent in Agent Studio?
-
-If you have an existing project — built in the browser, by a PolyAI team, or by any other method — connect it to the ADK with `poly init` once your API key is set up:
-
-```bash
-# Self-serve accounts:
-poly start                       # sign in and save your API key (skip if already done)
-poly init                        # interactive prompts to pick region, account, and project
-
-# Enterprise accounts (poly login — recommended):
-poly login --region us-1         # or euw-1, uk-1
-poly init
-
-# Enterprise accounts (manual key export, fallback):
-export POLY_ADK_KEY=<your-api-key>   # see "Manual API key export" above
-poly init
-```
-
-`poly init` creates a local directory and pulls the full project configuration. From there the standard `poly status` / `poly push` / `poly pull` workflow applies.
-
----
-
-## Per-region API keys
+### Per-region API keys
 
 If you work across multiple regions, you can set region-scoped environment variables. The ADK checks the credential file first, then region-scoped env vars, then `POLY_ADK_KEY`.
 
@@ -209,25 +104,101 @@ If you work across multiple regions, you can set region-scoped environment varia
 | `euw-1` | `POLY_ADK_KEY_EUW` |
 | `uk-1` | `POLY_ADK_KEY_UK` |
 | `studio` | `POLY_ADK_KEY_STUDIO` |
-| `staging` | `POLY_ADK_KEY_STAGING` |
-| `dev` | `POLY_ADK_KEY_DEV` |
 
 ```bash
 export POLY_ADK_KEY_US=<your-us-api-key>
 export POLY_ADK_KEY=<your-fallback-api-key>   # used for any other region
 ```
 
+!!! info "How the ADK resolves API keys"
+    The ADK checks for credentials in the following order:
+
+    1. **Credential file** — `~/.poly/credentials.json` (written by `poly login` or `poly start`)
+    2. **Region-specific env var** — e.g. `POLY_ADK_KEY_US`
+    3. **General env var** — `POLY_ADK_KEY`
+
+    The first match wins. If nothing is found, the CLI raises an error.
+
+!!! tip "Workspace scoped API keys"
+    Credentials from `poly login` are Personal Access Tokens and are user-scoped. If you would rather use a workspace-scoped API key, look for the API keys tab in your workspace settings.
+
+## Step 3 — Create or connect a project
+
+To create a new Agent Studio project and pull it down locally:
+
+```bash
+poly project create
+```
+
+To connect an existing project:
+
+```bash
+poly init
+```
+
+[`poly init`](../reference/cli/init.md) walks you through interactive dropdowns to pick a region, account, and project, then pulls the configuration locally.
+
+Either command places the project in a directory named after your account and project IDs:
+
+```bash
+cd <account_id>/<project_id>
+```
+
+From inside your project directory, the core workflow is:
+
+```bash
+poly status              # see what's changed
+poly diff                # inspect changes in detail
+poly branch create dev   # work on a branch
+poly push                # push changes to Agent Studio
+poly chat                # talk to your agent
+poly branch merge        # merge branch back into main
+```
+
+Edit flows, functions, topics, and other resources in your editor of choice — they're just YAML and Python files. Push when you're ready to test in Agent Studio.
+
 ---
 
-## Next step
+## Start an agent from a template
+
+If you want a pre-built starting point, `poly template` lets you browse and load one.
+
+```bash
+poly template list          # see available templates
+poly template load          # opens a picker
+poly template load <name>   # load a specific template
+```
+
+You can also load a template when you first create a project — `poly project create` offers it once the project exists.
+
+!!! warning "Loading a template overwrites local resources"
+    `poly template load` replaces your local project resources with the template contents. Push or back up any local work you want to keep before loading.
+
+---
+
+## Next steps
 
 <div class="grid cards" markdown>
 
--   **What is the ADK?**
+-   **Watch the walkthrough**
 
     ---
 
-    Understand what the ADK does and how it fits into Agent Studio.
-    [Read the overview](./what-is-the-adk.md)
+    See a practical demonstration of the ADK in use.
+    [Open the walkthrough video](./walkthrough-video.md)
+
+-   **Build an agent with the ADK**
+
+    ---
+
+    Follow the full step-by-step tutorial for local development.
+    [Open the tutorial](../tutorials/build-an-agent.md)
+
+-   **CLI reference**
+
+    ---
+
+    Explore the full set of `poly` commands and their flags.
+    [Open CLI reference](../reference/cli.md)
 
 </div>
