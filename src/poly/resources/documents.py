@@ -14,6 +14,8 @@ from poly.handlers.protobuf.documents_pb2 import (
 )
 from poly.resources.resource import Resource, register_resource
 
+PLATFORM_CONTEXT_FILE = "CONTEXT.MD"
+
 
 @register_resource("documents")
 @dataclass
@@ -22,10 +24,6 @@ class Document(Resource):
 
     path: str
     contents: str
-
-    def __post_init__(self) -> None:
-        """Normalize path to uppercase to match platform convention."""
-        self.path = self.path.upper()
 
     @cached_property
     def file_path(self) -> str:
@@ -49,7 +47,10 @@ class Document(Resource):
 
     def validate(self, **kwargs) -> None:
         """Validate the resource."""
-        pass
+        if self.path.upper() == PLATFORM_CONTEXT_FILE and self.path != PLATFORM_CONTEXT_FILE:
+            raise ValueError(
+                f"Document path must be {PLATFORM_CONTEXT_FILE} (case-sensitive) for the platform context file."
+            )
 
     @classmethod
     def read_local_resource(
@@ -118,7 +119,7 @@ class Document(Resource):
         for file_name in os.listdir(context_path):
             if not file_name.upper().endswith(".MD"):
                 continue
-            file_path = os.path.join(context_path, file_name.upper())
+            file_path = os.path.join(context_path, file_name)
             file_paths.append(file_path)
 
         return file_paths
@@ -129,12 +130,16 @@ class Document(Resource):
         for document_id, document_data in (
             projection.get("documents", {}).get("documents", {}).get("entities", {}).items()
         ):
+            # The projection carries the proto field name, "content". An entity without it is
+            # one the current user lacks read permission for, so skip it.
+            if "content" not in document_data:
+                continue
             path = document_data.get("path", "") or ""
-            name = path.removesuffix(".md")
+            name = path.removesuffix(".md").removesuffix(".MD")
             documents[document_id] = Document(
                 resource_id=document_id,
                 name=name,
                 path=path,
-                contents=document_data.get("content", ""),
+                contents=document_data["content"],
             )
         return documents

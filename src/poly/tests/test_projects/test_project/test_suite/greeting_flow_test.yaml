@@ -5,6 +5,13 @@ language: en-GB
 tags:
 - booking
 - smoke
+api_mocks:
+  customer_api:
+    get_confirmation_status:
+    - respond:
+        status: 200
+        body:
+          confirmed: true
 prompt_assertions:
 - The agent offers to help with booking
 function_call_assertions:

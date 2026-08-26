@@ -12,10 +12,11 @@ from google.protobuf.internal import builder as _builder
 _sym_db = _symbol_database.Default()
 
 
+from google.protobuf import struct_pb2 as google_dot_protobuf_dot_struct__pb2
 from google.protobuf import timestamp_pb2 as google_dot_protobuf_dot_timestamp__pb2
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rtesting.proto\x12\x07testing\x1a\x1fgoogle/protobuf/timestamp.proto\"6\n\x07Testing\x12%\n\ntest_cases\x18\x01 \x03(\x0b\x32\x11.testing.TestCaseJ\x04\x08\x02\x10\x03\"{\n\x1d\x46unctionCallAssertionArgument\x12\x12\n\nvalue_type\x18\x01 \x01(\t\x12\x16\n\x0e\x61ssertion_type\x18\x02 \x01(\t\x12\x1b\n\x0e\x65xpected_value\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\x11\n\x0f_expected_value\"\xd6\x01\n\x15\x46unctionCallAssertion\x12\x0c\n\x04name\x18\x01 \x01(\t\x12@\n\targuments\x18\x02 \x03(\x0b\x32-.testing.FunctionCallAssertion.ArgumentsEntry\x12\x13\n\x0bis_asserted\x18\x03 \x01(\x08\x1aX\n\x0e\x41rgumentsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x35\n\x05value\x18\x02 \x01(\x0b\x32&.testing.FunctionCallAssertionArgument:\x02\x38\x01\" \n\x0fPromptAssertion\x12\r\n\x05value\x18\x01 \x01(\t\"\x83\x01\n\x11TestCaseAssertion\x12*\n\x06prompt\x18\x01 \x01(\x0b\x32\x18.testing.PromptAssertionH\x00\x12\x37\n\rfunction_call\x18\x02 \x01(\x0b\x32\x1e.testing.FunctionCallAssertionH\x00\x42\t\n\x07payload\"\xda\x03\n\x08TestCase\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x10\n\x08scenario\x18\x03 \x01(\t\x12\x17\n\nvariant_id\x18\x06 \x01(\tH\x00\x88\x01\x01\x12\x10\n\x08language\x18\x07 \x01(\t\x12\x12\n\ncreated_by\x18\x08 \x01(\t\x12.\n\ncreated_at\x18\t \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x17\n\nupdated_by\x18\n \x01(\tH\x01\x88\x01\x01\x12\x33\n\nupdated_at\x18\x0b \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x02\x88\x01\x01\x12\x0c\n\x04tags\x18\x0c \x03(\t\x12\x35\n\x0csimulated_at\x18\r \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x03\x88\x01\x01\x12.\n\nassertions\x18\x0f \x03(\x0b\x32\x1a.testing.TestCaseAssertion\x12\x14\n\x07\x63hannel\x18\x10 \x01(\tH\x04\x88\x01\x01\x42\r\n\x0b_variant_idB\r\n\x0b_updated_byB\r\n\x0b_updated_atB\x0f\n\r_simulated_atB\n\n\x08_channelJ\x04\x08\x04\x10\x05J\x04\x08\x05\x10\x06J\x04\x08\x0e\x10\x0f\"\xed\x01\n\x0f\x43reate_TestCase\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x10\n\x08scenario\x18\x03 \x01(\t\x12\x17\n\nvariant_id\x18\x04 \x01(\tH\x00\x88\x01\x01\x12\x10\n\x08language\x18\x05 \x01(\t\x12\x35\n\x0csimulated_at\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x01\x88\x01\x01\x12\x14\n\x07\x63hannel\x18\t \x01(\tH\x02\x88\x01\x01\x42\r\n\x0b_variant_idB\x0f\n\r_simulated_atB\n\n\x08_channelJ\x04\x08\x06\x10\x07J\x04\x08\x08\x10\t\"\x9f\x02\n\x0fUpdate_TestCase\x12\n\n\x02id\x18\x01 \x01(\t\x12\x11\n\x04name\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x15\n\x08scenario\x18\x03 \x01(\tH\x01\x88\x01\x01\x12\x17\n\nvariant_id\x18\x04 \x01(\tH\x02\x88\x01\x01\x12\x15\n\x08language\x18\x05 \x01(\tH\x03\x88\x01\x01\x12\x35\n\x0csimulated_at\x18\x07 \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x04\x88\x01\x01\x12\x14\n\x07\x63hannel\x18\t \x01(\tH\x05\x88\x01\x01\x42\x07\n\x05_nameB\x0b\n\t_scenarioB\r\n\x0b_variant_idB\x0b\n\t_languageB\x0f\n\r_simulated_atB\n\n\x08_channelJ\x04\x08\x06\x10\x07J\x04\x08\x08\x10\t\"\x1d\n\x0f\x44\x65lete_TestCase\x12\n\n\x02id\x18\x01 \x01(\t\"Y\n\x15SetTestCaseAssertions\x12\n\n\x02id\x18\x01 \x01(\t\x12.\n\nassertions\x18\x03 \x03(\x0b\x32\x1a.testing.TestCaseAssertionJ\x04\x08\x02\x10\x03\"+\n\x0fSetTestCaseTags\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04tags\x18\x02 \x03(\tb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\rtesting.proto\x12\x07testing\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"6\n\x07Testing\x12%\n\ntest_cases\x18\x01 \x03(\x0b\x32\x11.testing.TestCaseJ\x04\x08\x02\x10\x03\"{\n\x1d\x46unctionCallAssertionArgument\x12\x12\n\nvalue_type\x18\x01 \x01(\t\x12\x16\n\x0e\x61ssertion_type\x18\x02 \x01(\t\x12\x1b\n\x0e\x65xpected_value\x18\x03 \x01(\tH\x00\x88\x01\x01\x42\x11\n\x0f_expected_value\"\xd6\x01\n\x15\x46unctionCallAssertion\x12\x0c\n\x04name\x18\x01 \x01(\t\x12@\n\targuments\x18\x02 \x03(\x0b\x32-.testing.FunctionCallAssertion.ArgumentsEntry\x12\x13\n\x0bis_asserted\x18\x03 \x01(\x08\x1aX\n\x0e\x41rgumentsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\x35\n\x05value\x18\x02 \x01(\x0b\x32&.testing.FunctionCallAssertionArgument:\x02\x38\x01\" \n\x0fPromptAssertion\x12\r\n\x05value\x18\x01 \x01(\t\"\x83\x01\n\x11TestCaseAssertion\x12*\n\x06prompt\x18\x01 \x01(\x0b\x32\x18.testing.PromptAssertionH\x00\x12\x37\n\rfunction_call\x18\x02 \x01(\x0b\x32\x1e.testing.FunctionCallAssertionH\x00\x42\t\n\x07payload\"\xa7\x01\n\x0b\x41piResponse\x12\x0e\n\x06status\x18\x01 \x01(\x05\x12$\n\x04\x62ody\x18\x02 \x01(\x0b\x32\x16.google.protobuf.Value\x12\x32\n\x07headers\x18\x03 \x03(\x0b\x32!.testing.ApiResponse.HeadersEntry\x1a.\n\x0cHeadersEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"X\n\x0f\x41piResponseRule\x12%\n\x07respond\x18\x01 \x01(\x0b\x32\x14.testing.ApiResponse\x12\x13\n\x06repeat\x18\x02 \x01(\x05H\x00\x88\x01\x01\x42\t\n\x07_repeat\"B\n\x13\x41piResponseRuleList\x12+\n\tresponses\x18\x01 \x03(\x0b\x32\x18.testing.ApiResponseRule\"\xae\x01\n\x16\x41piIntegrationOverride\x12\x43\n\noperations\x18\x01 \x03(\x0b\x32/.testing.ApiIntegrationOverride.OperationsEntry\x1aO\n\x0fOperationsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12+\n\x05value\x18\x02 \x01(\x0b\x32\x1c.testing.ApiResponseRuleList:\x02\x38\x01\"\xa1\x01\n\x0b\x41piOverride\x12<\n\x0cintegrations\x18\x01 \x03(\x0b\x32&.testing.ApiOverride.IntegrationsEntry\x1aT\n\x11IntegrationsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12.\n\x05value\x18\x02 \x01(\x0b\x32\x1f.testing.ApiIntegrationOverride:\x02\x38\x01\"\x92\x06\n\x08TestCase\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x10\n\x08scenario\x18\x03 \x01(\t\x12\x17\n\nvariant_id\x18\x06 \x01(\tH\x00\x88\x01\x01\x12\x10\n\x08language\x18\x07 \x01(\t\x12\x12\n\ncreated_by\x18\x08 \x01(\t\x12.\n\ncreated_at\x18\t \x01(\x0b\x32\x1a.google.protobuf.Timestamp\x12\x17\n\nupdated_by\x18\n \x01(\tH\x01\x88\x01\x01\x12\x33\n\nupdated_at\x18\x0b \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x02\x88\x01\x01\x12\x0c\n\x04tags\x18\x0c \x03(\t\x12\x35\n\x0csimulated_at\x18\r \x01(\x0b\x32\x1a.google.protobuf.TimestampH\x03\x88\x01\x01\x12.\n\nassertions\x18\x0f \x03(\x0b\x32\x1a.testing.TestCaseAssertion\x12\x14\n\x07\x63hannel\x18\x10 \x01(\tH\x04\x88\x01\x01\x12\x15\n\x08severity\x18\x12 \x01(\tH\x05\x88\x01\x01\x12,\n\tapi_mocks\x18\x13 \x01(\x0b\x32\x14.testing.ApiOverrideH\x06\x88\x01\x01\x12\x1a\n\rcaller_number\x18\x14 \x01(\tH\x07\x88\x01\x01\x12\x36\n\x0bsip_headers\x18\x15 \x03(\x0b\x32!.testing.TestCase.SipHeadersEntry\x12\x37\n\x16integration_attributes\x18\x16 \x01(\x0b\x32\x17.google.protobuf.Struct\x1a\x31\n\x0fSipHeadersEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x42\r\n\x0b_variant_idB\r\n\x0b_updated_byB\r\n\x0b_updated_atB\x0f\n\r_simulated_atB\n\n\x08_channelB\x0b\n\t_severityB\x0c\n\n_api_mocksB\x10\n\x0e_caller_numberJ\x04\x08\x04\x10\x05J\x04\x08\x05\x10\x06J\x04\x08\x0e\x10\x0fJ\x04\x08\x11\x10\x12\"\x85\x02\n\x0f\x43reate_TestCase\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04name\x18\x02 \x01(\t\x12\x10\n\x08scenario\x18\x03 \x01(\t\x12\x17\n\nvariant_id\x18\x04 \x01(\tH\x00\x88\x01\x01\x12\x10\n\x08language\x18\x05 \x01(\t\x12\x19\n\x0csimulated_at\x18\n \x01(\tH\x01\x88\x01\x01\x12\x14\n\x07\x63hannel\x18\t \x01(\tH\x02\x88\x01\x01\x12\x1a\n\rcaller_number\x18\x0b \x01(\tH\x03\x88\x01\x01\x42\r\n\x0b_variant_idB\x0f\n\r_simulated_atB\n\n\x08_channelB\x10\n\x0e_caller_numberJ\x04\x08\x06\x10\x07J\x04\x08\x07\x10\x08J\x04\x08\x08\x10\t\"\xb7\x02\n\x0fUpdate_TestCase\x12\n\n\x02id\x18\x01 \x01(\t\x12\x11\n\x04name\x18\x02 \x01(\tH\x00\x88\x01\x01\x12\x15\n\x08scenario\x18\x03 \x01(\tH\x01\x88\x01\x01\x12\x17\n\nvariant_id\x18\x04 \x01(\tH\x02\x88\x01\x01\x12\x15\n\x08language\x18\x05 \x01(\tH\x03\x88\x01\x01\x12\x19\n\x0csimulated_at\x18\n \x01(\tH\x04\x88\x01\x01\x12\x14\n\x07\x63hannel\x18\t \x01(\tH\x05\x88\x01\x01\x12\x1a\n\rcaller_number\x18\x0b \x01(\tH\x06\x88\x01\x01\x42\x07\n\x05_nameB\x0b\n\t_scenarioB\r\n\x0b_variant_idB\x0b\n\t_languageB\x0f\n\r_simulated_atB\n\n\x08_channelB\x10\n\x0e_caller_numberJ\x04\x08\x06\x10\x07J\x04\x08\x07\x10\x08J\x04\x08\x08\x10\t\"\x1d\n\x0f\x44\x65lete_TestCase\x12\n\n\x02id\x18\x01 \x01(\t\"Y\n\x15SetTestCaseAssertions\x12\n\n\x02id\x18\x01 \x01(\t\x12.\n\nassertions\x18\x03 \x03(\x0b\x32\x1a.testing.TestCaseAssertionJ\x04\x08\x02\x10\x03\"+\n\x0fSetTestCaseTags\x12\n\n\x02id\x18\x01 \x01(\t\x12\x0c\n\x04tags\x18\x02 \x03(\t\"E\n\x13SetTestCaseSeverity\x12\n\n\x02id\x18\x01 \x01(\t\x12\x15\n\x08severity\x18\x02 \x01(\tH\x00\x88\x01\x01\x42\x0b\n\t_severity\"\x8b\x01\n\x1eUpdateTestCaseApiOperationMock\x12\n\n\x02id\x18\x01 \x01(\t\x12\x18\n\x10integration_name\x18\x02 \x01(\t\x12\x16\n\x0eoperation_name\x18\x03 \x01(\t\x12+\n\tresponses\x18\x04 \x03(\x0b\x32\x18.testing.ApiResponseRule\"^\n\x1e\x44\x65leteTestCaseApiOperationMock\x12\n\n\x02id\x18\x01 \x01(\t\x12\x18\n\x10integration_name\x18\x02 \x01(\t\x12\x16\n\x0eoperation_name\x18\x03 \x01(\t\"\x9b\x01\n\x15SetTestCaseSipHeaders\x12\n\n\x02id\x18\x01 \x01(\t\x12\x43\n\x0bsip_headers\x18\x02 \x03(\x0b\x32..testing.SetTestCaseSipHeaders.SipHeadersEntry\x1a\x31\n\x0fSipHeadersEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\"g\n SetTestCaseIntegrationAttributes\x12\n\n\x02id\x18\x01 \x01(\t\x12\x37\n\x16integration_attributes\x18\x02 \x01(\x0b\x32\x17.google.protobuf.Structb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -24,28 +25,68 @@ if _descriptor._USE_C_DESCRIPTORS == False:
   DESCRIPTOR._options = None
   _globals['_FUNCTIONCALLASSERTION_ARGUMENTSENTRY']._options = None
   _globals['_FUNCTIONCALLASSERTION_ARGUMENTSENTRY']._serialized_options = b'8\001'
-  _globals['_TESTING']._serialized_start=59
-  _globals['_TESTING']._serialized_end=113
-  _globals['_FUNCTIONCALLASSERTIONARGUMENT']._serialized_start=115
-  _globals['_FUNCTIONCALLASSERTIONARGUMENT']._serialized_end=238
-  _globals['_FUNCTIONCALLASSERTION']._serialized_start=241
-  _globals['_FUNCTIONCALLASSERTION']._serialized_end=455
-  _globals['_FUNCTIONCALLASSERTION_ARGUMENTSENTRY']._serialized_start=367
-  _globals['_FUNCTIONCALLASSERTION_ARGUMENTSENTRY']._serialized_end=455
-  _globals['_PROMPTASSERTION']._serialized_start=457
-  _globals['_PROMPTASSERTION']._serialized_end=489
-  _globals['_TESTCASEASSERTION']._serialized_start=492
-  _globals['_TESTCASEASSERTION']._serialized_end=623
-  _globals['_TESTCASE']._serialized_start=626
-  _globals['_TESTCASE']._serialized_end=1100
-  _globals['_CREATE_TESTCASE']._serialized_start=1103
-  _globals['_CREATE_TESTCASE']._serialized_end=1340
-  _globals['_UPDATE_TESTCASE']._serialized_start=1343
-  _globals['_UPDATE_TESTCASE']._serialized_end=1630
-  _globals['_DELETE_TESTCASE']._serialized_start=1632
-  _globals['_DELETE_TESTCASE']._serialized_end=1661
-  _globals['_SETTESTCASEASSERTIONS']._serialized_start=1663
-  _globals['_SETTESTCASEASSERTIONS']._serialized_end=1752
-  _globals['_SETTESTCASETAGS']._serialized_start=1754
-  _globals['_SETTESTCASETAGS']._serialized_end=1797
+  _globals['_APIRESPONSE_HEADERSENTRY']._options = None
+  _globals['_APIRESPONSE_HEADERSENTRY']._serialized_options = b'8\001'
+  _globals['_APIINTEGRATIONOVERRIDE_OPERATIONSENTRY']._options = None
+  _globals['_APIINTEGRATIONOVERRIDE_OPERATIONSENTRY']._serialized_options = b'8\001'
+  _globals['_APIOVERRIDE_INTEGRATIONSENTRY']._options = None
+  _globals['_APIOVERRIDE_INTEGRATIONSENTRY']._serialized_options = b'8\001'
+  _globals['_TESTCASE_SIPHEADERSENTRY']._options = None
+  _globals['_TESTCASE_SIPHEADERSENTRY']._serialized_options = b'8\001'
+  _globals['_SETTESTCASESIPHEADERS_SIPHEADERSENTRY']._options = None
+  _globals['_SETTESTCASESIPHEADERS_SIPHEADERSENTRY']._serialized_options = b'8\001'
+  _globals['_TESTING']._serialized_start=89
+  _globals['_TESTING']._serialized_end=143
+  _globals['_FUNCTIONCALLASSERTIONARGUMENT']._serialized_start=145
+  _globals['_FUNCTIONCALLASSERTIONARGUMENT']._serialized_end=268
+  _globals['_FUNCTIONCALLASSERTION']._serialized_start=271
+  _globals['_FUNCTIONCALLASSERTION']._serialized_end=485
+  _globals['_FUNCTIONCALLASSERTION_ARGUMENTSENTRY']._serialized_start=397
+  _globals['_FUNCTIONCALLASSERTION_ARGUMENTSENTRY']._serialized_end=485
+  _globals['_PROMPTASSERTION']._serialized_start=487
+  _globals['_PROMPTASSERTION']._serialized_end=519
+  _globals['_TESTCASEASSERTION']._serialized_start=522
+  _globals['_TESTCASEASSERTION']._serialized_end=653
+  _globals['_APIRESPONSE']._serialized_start=656
+  _globals['_APIRESPONSE']._serialized_end=823
+  _globals['_APIRESPONSE_HEADERSENTRY']._serialized_start=777
+  _globals['_APIRESPONSE_HEADERSENTRY']._serialized_end=823
+  _globals['_APIRESPONSERULE']._serialized_start=825
+  _globals['_APIRESPONSERULE']._serialized_end=913
+  _globals['_APIRESPONSERULELIST']._serialized_start=915
+  _globals['_APIRESPONSERULELIST']._serialized_end=981
+  _globals['_APIINTEGRATIONOVERRIDE']._serialized_start=984
+  _globals['_APIINTEGRATIONOVERRIDE']._serialized_end=1158
+  _globals['_APIINTEGRATIONOVERRIDE_OPERATIONSENTRY']._serialized_start=1079
+  _globals['_APIINTEGRATIONOVERRIDE_OPERATIONSENTRY']._serialized_end=1158
+  _globals['_APIOVERRIDE']._serialized_start=1161
+  _globals['_APIOVERRIDE']._serialized_end=1322
+  _globals['_APIOVERRIDE_INTEGRATIONSENTRY']._serialized_start=1238
+  _globals['_APIOVERRIDE_INTEGRATIONSENTRY']._serialized_end=1322
+  _globals['_TESTCASE']._serialized_start=1325
+  _globals['_TESTCASE']._serialized_end=2111
+  _globals['_TESTCASE_SIPHEADERSENTRY']._serialized_start=1919
+  _globals['_TESTCASE_SIPHEADERSENTRY']._serialized_end=1968
+  _globals['_CREATE_TESTCASE']._serialized_start=2114
+  _globals['_CREATE_TESTCASE']._serialized_end=2375
+  _globals['_UPDATE_TESTCASE']._serialized_start=2378
+  _globals['_UPDATE_TESTCASE']._serialized_end=2689
+  _globals['_DELETE_TESTCASE']._serialized_start=2691
+  _globals['_DELETE_TESTCASE']._serialized_end=2720
+  _globals['_SETTESTCASEASSERTIONS']._serialized_start=2722
+  _globals['_SETTESTCASEASSERTIONS']._serialized_end=2811
+  _globals['_SETTESTCASETAGS']._serialized_start=2813
+  _globals['_SETTESTCASETAGS']._serialized_end=2856
+  _globals['_SETTESTCASESEVERITY']._serialized_start=2858
+  _globals['_SETTESTCASESEVERITY']._serialized_end=2927
+  _globals['_UPDATETESTCASEAPIOPERATIONMOCK']._serialized_start=2930
+  _globals['_UPDATETESTCASEAPIOPERATIONMOCK']._serialized_end=3069
+  _globals['_DELETETESTCASEAPIOPERATIONMOCK']._serialized_start=3071
+  _globals['_DELETETESTCASEAPIOPERATIONMOCK']._serialized_end=3165
+  _globals['_SETTESTCASESIPHEADERS']._serialized_start=3168
+  _globals['_SETTESTCASESIPHEADERS']._serialized_end=3323
+  _globals['_SETTESTCASESIPHEADERS_SIPHEADERSENTRY']._serialized_start=1919
+  _globals['_SETTESTCASESIPHEADERS_SIPHEADERSENTRY']._serialized_end=1968
+  _globals['_SETTESTCASEINTEGRATIONATTRIBUTES']._serialized_start=3325
+  _globals['_SETTESTCASEINTEGRATIONATTRIBUTES']._serialized_end=3428
 # @@protoc_insertion_point(module_scope)

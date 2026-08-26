@@ -31,6 +31,7 @@ from poly.cli_commands.sync import (
     StatusCommand,
     ValidateCommand,
 )
+from poly.cli_commands.template import TemplateCommand
 from poly.cli_commands.testing import TestingCommand
 from poly.cli_commands.utils import CompletionCommand, DocsCommand
 from poly.cli_commands.wren import WrenCommand
@@ -44,6 +45,7 @@ COMMANDS = [
     LoginCommand,
     StudioCommand,
     ProjectCommand,
+    TemplateCommand,
     PullCommand,
     PushCommand,
     StatusCommand,

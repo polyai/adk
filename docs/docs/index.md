@@ -9,32 +9,59 @@ Build and edit Agent Studio projects locally with the **PolyAI ADK**, then push 
 
 The ADK gives you a local, Git-like workflow for Agent Studio projects: pull, edit with standard tooling, validate, and push.
 
-## From zero to a local project
+## Prerequisites
 
-A few commands take you from an empty machine to a working local copy of your agent:
+**Required**:
+
+- [uv](https://docs.astral.sh/uv/getting-started/installation/) for package management
+
+## Install
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh   # install uv (skip if you have it)
-uv venv --python=3.14 --seed
-source .venv/bin/activate
-pip install polyai-adk
-poly start                                          # self-serve sign-up, API key, and project in one go
+uv tool install polyai-adk
 ```
 
-`poly start` is for self-serve accounts on [studio.poly.ai](https://studio.poly.ai). If your workspace is on an enterprise cluster (`us-1`, `euw-1`, `uk-1`), run `poly login --region <region>` instead — or export your API key manually. See [Getting started](get-started/get-started.md#enterprise-accounts-poly-login-or-manual-api-key).
+## Authentication
 
-See [Getting started](get-started/get-started.md) for the full walkthrough, [Prerequisites](get-started/prerequisites.md) for local tool setup, and [First commands](get-started/first-commands.md) for a guide to `poly init` and the core CLI.
+You can login or sign up to a PolyAI Agent Studio account using the `login` command. Select your account's region if you are an enterprise user or "studio" if you have a self-serve account.
+```bash
+poly login
+```
 
-## Start here
+You can also export your API key manually and set it as an environment variable. See [Getting started](get-started/get-started.md#manual-api-key-export).
+
+!!! warning "Creating an account"
+    It is only possible to create self-serve accounts. If you require an account and are a PolyAI enterprise customer, please get in touch with your PolyAI contact.
+
+## Start building
+
+Create a new project:
+```bash
+poly project create
+```
+
+Load an existing project:
+```bash
+poly init
+```
+
+Open your project:
+```bash
+cd <account_id>/<project_id>
+```
+
+Begin making changes and use the CLI to sync changes back to Agent Studio
+```bash
+poly diff # See changes made
+poly push # Push changes back to Agent Studio
+poly chat # Test changes by chatting against your agent
+```
+
+See [Getting started](get-started/get-started.md) for the full walkthrough.
+
+## Next steps
 
 <div class="grid cards" markdown>
-
--   **Not sure where to start?**
-
-    ---
-
-    Build a working voice agent from your website in minutes, then pull it into the ADK.
-    [Open getting started guide](get-started/get-started.md)
 
 -   **What is the ADK?**
 
@@ -43,12 +70,20 @@ See [Getting started](get-started/get-started.md) for the full walkthrough, [Pre
     Understand what the ADK does and where it fits in the Agent Studio workflow.
     [Read the overview](get-started/what-is-the-adk.md)
 
+-   **Getting started**
+
+    ---
+
+    The full walkthrough — both account types, the manual API key fallback, and multi-region setups.
+    [Open getting started](get-started/get-started.md)
+
 -   **Build an agent**
 
     ---
 
     Follow the end-to-end workflow from project setup to deployment.
     [Open the tutorial](tutorials/build-an-agent.md)
+
 
 -   **CLI reference**
 
@@ -57,22 +92,11 @@ See [Getting started](get-started/get-started.md) for the full walkthrough, [Pre
     See every `poly` command and its flags.
     [Open CLI reference](reference/cli.md)
 
+-   **Resource reference**
+
+    ---
+
+    See ADK resources and how to use them.
+    [Open resource reference](reference/resources.md)
+
 </div>
-
-## What this site covers
-
-This documentation follows the developer journey:
-
-- understanding what the ADK is and how it fits into Agent Studio
-- installing it and running the first commands
-- building, reviewing, and deploying agents
-- reference for all CLI commands, resource types, and tooling
-
-## Recommended path
-
-If you are new to the ADK, follow this order:
-
-1. follow **Getting started** — install the ADK, set up your API key (`poly start` for self-serve, `poly login` or a manual export for enterprise), and create your first project
-2. read **What is the PolyAI ADK?**
-3. use **First commands** — explore the core CLI commands
-4. continue to **Build an agent with the ADK**
