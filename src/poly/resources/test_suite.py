@@ -407,6 +407,17 @@ class ApiResponse:
     @classmethod
     def from_dict(cls, data: dict | None) -> "ApiResponse":
         data = data or {}
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"'respond' must be a mapping with 'status' (and optional 'body'/'headers'), "
+                f"got {type(data).__name__}: {data!r}"
+            )
+        headers = data.get("headers") or {}
+        if not isinstance(headers, dict):
+            raise ValueError(
+                f"'respond.headers' must be a mapping of header name to value, "
+                f"got {type(headers).__name__}: {headers!r}"
+            )
         # Mirrors _normalise_attribute: a body pushed through google.protobuf.Value
         # (a double) reads a pushed int back as a float, producing a spurious
         # diff on the next pull. Folding integral floats back to int here
@@ -414,7 +425,7 @@ class ApiResponse:
         return cls(
             status=data.get("status", 200),
             body=_normalise_attribute(data.get("body")),
-            headers=dict(data.get("headers") or {}),
+            headers=dict(headers),
         )
 
 
@@ -446,6 +457,11 @@ class ApiResponseRule:
     @classmethod
     def from_dict(cls, data: dict | None) -> "ApiResponseRule":
         data = data or {}
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"Response rule must be a mapping with 'respond' (and optional 'repeat'), "
+                f"got {type(data).__name__}: {data!r}"
+            )
         return cls(respond=ApiResponse.from_dict(data.get("respond")), repeat=data.get("repeat"))
 
 
@@ -476,13 +492,36 @@ class TestCaseApiMocks:
     @classmethod
     def from_dict(cls, data: dict[str, dict[str, list[dict]]] | None) -> "TestCaseApiMocks":
         data = data or {}
-        mocks = {
-            integration_name: {
-                operation_name: [ApiResponseRule.from_dict(rule) for rule in rules or []]
-                for operation_name, rules in (operations or {}).items()
-            }
-            for integration_name, operations in data.items()
-        }
+        if not isinstance(data, dict):
+            raise ValueError(
+                f"api_mocks must be a mapping of integration name to operations, "
+                f"got {type(data).__name__}: {data!r}"
+            )
+        mocks: dict[str, dict[str, list[ApiResponseRule]]] = {}
+        for integration_name, operations in data.items():
+            operations = operations or {}
+            if not isinstance(operations, dict):
+                raise ValueError(
+                    f"api_mocks.{integration_name} must be a mapping of operation name to a "
+                    f"list of response rules, got {type(operations).__name__}: {operations!r}"
+                )
+            mocks[integration_name] = {}
+            for operation_name, rules in operations.items():
+                rules = rules or []
+                if not isinstance(rules, list):
+                    raise ValueError(
+                        f"api_mocks.{integration_name}.{operation_name} must be a list of "
+                        f"response rules, got {type(rules).__name__}: {rules!r}"
+                    )
+                parsed_rules = []
+                for index, rule in enumerate(rules):
+                    try:
+                        parsed_rules.append(ApiResponseRule.from_dict(rule))
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"api_mocks.{integration_name}.{operation_name}[{index}]: {exc}"
+                        ) from exc
+                mocks[integration_name][operation_name] = parsed_rules
         return cls(mocks=mocks)
 
     def validate(self, known_integrations: set[str]) -> None:

@@ -8398,6 +8398,78 @@ class TestCaseApiMocksTests(unittest.TestCase):
         self.assertEqual(response.body, {"count": 2})
         self.assertIsInstance(response.body["count"], int)
 
+    def test_api_response_from_dict_rejects_non_mapping(self):
+        """A scalar where the 'respond' mapping belongs is a clear error, not an AttributeError."""
+        with self.assertRaises(ValueError) as ctx:
+            ApiResponse.from_dict("not a dict")
+
+        message = str(ctx.exception)
+        self.assertIn("'respond' must be a mapping", message)
+        self.assertIn("str", message)
+
+    def test_api_response_rule_from_dict_rejects_non_mapping(self):
+        """A scalar where a response rule mapping belongs is a clear error."""
+        with self.assertRaises(ValueError) as ctx:
+            ApiResponseRule.from_dict("not a dict")
+
+        message = str(ctx.exception)
+        self.assertIn("Response rule must be a mapping", message)
+        self.assertIn("str", message)
+
+    def test_from_dict_rejects_non_mapping_api_mocks(self):
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict("not a dict at all")
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks must be a mapping", message)
+        self.assertIn("str", message)
+
+    def test_from_dict_rejects_non_mapping_integration(self):
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict({"crm": "not a dict"})
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks.crm", message)
+        self.assertIn("must be a mapping of operation name", message)
+        self.assertIn("str", message)
+
+    def test_from_dict_rejects_non_list_operation(self):
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict({"crm": {"get_customer": "not a list"}})
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks.crm.get_customer", message)
+        self.assertIn("must be a list", message)
+        self.assertIn("str", message)
+
+    def test_from_dict_rejects_non_mapping_rule_with_index_in_path(self):
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict({"crm": {"get_customer": ["not a dict"]}})
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks.crm.get_customer[0]", message)
+        self.assertIn("Response rule must be a mapping", message)
+
+    def test_from_dict_rejects_non_mapping_respond_with_index_in_path(self):
+        """The nested 'respond' error is re-raised with the full location prepended."""
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict({"crm": {"get_customer": [{"respond": "not a dict"}]}})
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks.crm.get_customer[0]", message)
+        self.assertIn("'respond' must be a mapping", message)
+
+    def test_from_dict_rejects_non_mapping_headers_with_index_in_path(self):
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict(
+                {"crm": {"get_customer": [{"respond": {"headers": "not a dict"}}]}}
+            )
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks.crm.get_customer[0]", message)
+        self.assertIn("respond.headers", message)
+        self.assertIn("must be a mapping", message)
+
 
 class ParseMultiResourcePathTests(unittest.TestCase):
     """Tests for _parse_multi_resource_path including Windows drive-letter handling."""
