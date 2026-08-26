@@ -782,7 +782,9 @@ class TestCase(YamlResource):
         if isinstance(api_mocks, TestCaseApiMocks):
             self.api_mocks = api_mocks
         elif api_mocks:
-            self.api_mocks = TestCaseApiMocks.from_dict(api_mocks)
+            # resource_to_dict wraps a plain dataclass's field under its own name,
+            # unlike a SubResource — so a status-file dict here is {"mocks": {...}}.
+            self.api_mocks = TestCaseApiMocks.from_dict(api_mocks.get("mocks", api_mocks))
         else:
             self.api_mocks = TestCaseApiMocks()
 

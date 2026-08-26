@@ -1244,17 +1244,19 @@
         "variant": null,
         "language": "en-GB",
         "api_mocks": {
-          "customer_api": {
-            "get_confirmation_status": [
-              {
-                "respond": {
-                  "status": 200,
-                  "body": {
-                    "confirmed": true
+          "mocks": {
+            "customer_api": {
+              "get_confirmation_status": [
+                {
+                  "respond": {
+                    "status": 200,
+                    "body": {
+                      "confirmed": true
+                    }
                   }
                 }
-              }
-            ]
+              ]
+            }
           }
         }
       },

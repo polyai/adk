@@ -8398,6 +8398,19 @@ class TestCaseApiMocksTests(unittest.TestCase):
         self.assertEqual(response.body, {"count": 2})
         self.assertIsInstance(response.body["count"], int)
 
+    def test_api_mocks_round_trips_through_resource_to_dict(self):
+        """TestCaseApiMocks isn't a SubResource, so resource_to_dict wraps its
+        one field as {"mocks": {...}} rather than matching __init__ directly
+        (unlike sip_headers/integration_attributes). Reloading that dict through
+        TestCase(**d) — as project status-file loading does — must not treat
+        "mocks" itself as a fake integration name."""
+        mocks = {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+        test_case = self._test_case(api_mocks=self._api_mocks(mocks))
+
+        reloaded = TestCase(**resource_utils.resource_to_dict(test_case))
+
+        self.assertEqual(reloaded.api_mocks.mocks, mocks)
+
     def test_api_response_from_dict_rejects_non_mapping(self):
         """A scalar where the 'respond' mapping belongs is a clear error, not an AttributeError."""
         with self.assertRaises(ValueError) as ctx:
