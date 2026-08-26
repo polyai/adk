@@ -4,10 +4,15 @@ Copyright PolyAI Limited
 """
 
 import unittest
+from unittest.mock import MagicMock, PropertyMock, patch
+
+from rich.console import Console, ConsoleDimensions
 
 from poly.output.console import (
+    _TerminalPager,
     console,
     flatten_branch_tree,
+    paged_output,
     print_archived_branches,
     print_branch_history,
     print_releases_branches,
@@ -380,3 +385,154 @@ class ArchivedParentMarkerTest(unittest.TestCase):
 
         self.assertIn("Active Release", output)
         self.assertNotIn("(archived)", output)
+
+
+class TerminalPagerTest(unittest.TestCase):
+    """Tests for _TerminalPager, which pages only when output overflows the screen."""
+
+    SCREEN_HEIGHT = 25
+
+    def setUp(self):
+        size_patcher = patch.object(
+            Console,
+            "size",
+            new_callable=PropertyMock,
+            return_value=ConsoleDimensions(80, self.SCREEN_HEIGHT),
+        )
+        size_patcher.start()
+        self.addCleanup(size_patcher.stop)
+
+    def _show(self, content: str, env: dict | None = None):
+        """Run the pager over content, returning (written_directly, popen_mock)."""
+        written = []
+        with (
+            patch.object(
+                Console,
+                "file",
+                new_callable=PropertyMock,
+                return_value=MagicMock(write=written.append),
+            ),
+            patch("poly.output.console.subprocess.Popen") as mock_popen,
+            patch.dict("os.environ", env or {}, clear=True),
+        ):
+            _TerminalPager().show(content)
+        return "".join(written), mock_popen
+
+    def test_content_shorter_than_screen_is_written_directly(self):
+        """Output that fits on one screen bypasses the pager entirely."""
+        content = "row\n" * (self.SCREEN_HEIGHT - 1)
+
+        written, mock_popen = self._show(content)
+
+        self.assertEqual(written, content)
+        mock_popen.assert_not_called()
+
+    def test_content_longer_than_screen_is_piped_to_the_pager(self):
+        """Output that overflows the screen is handed to the pager, not stdout."""
+        content = "row\n" * (self.SCREEN_HEIGHT + 10)
+
+        written, mock_popen = self._show(content)
+
+        self.assertEqual(written, "")
+        mock_popen.assert_called_once()
+        # The pipe is entered as a context manager, so the write lands on __enter__.
+        pipe = mock_popen.return_value.stdin.__enter__.return_value
+        pipe.write.assert_called_once_with(content)
+
+    def test_less_defaults_to_git_flags_when_unset(self):
+        """With LESS unset the pager inherits git's FRX, so it behaves like git."""
+        content = "row\n" * (self.SCREEN_HEIGHT + 10)
+
+        _, mock_popen = self._show(content)
+
+        self.assertEqual(mock_popen.call_args.kwargs["env"]["LESS"], "FRX")
+
+    def test_user_set_less_is_preserved(self):
+        """A user's own LESS wins over our default, matching git's behaviour."""
+        content = "row\n" * (self.SCREEN_HEIGHT + 10)
+
+        _, mock_popen = self._show(content, env={"LESS": "S"})
+
+        self.assertEqual(mock_popen.call_args.kwargs["env"]["LESS"], "S")
+
+    def test_pager_command_honours_the_pager_env_var(self):
+        """PAGER selects the pager binary, falling back to less when unset."""
+        content = "row\n" * (self.SCREEN_HEIGHT + 10)
+
+        _, with_pager = self._show(content, env={"PAGER": "bat"})
+        _, without_pager = self._show(content)
+
+        self.assertEqual(with_pager.call_args[0][0], "bat")
+        self.assertEqual(without_pager.call_args[0][0], "less")
+
+    def test_unusable_pager_falls_back_to_writing_output(self):
+        """If the pager cannot be spawned the output is dumped rather than lost."""
+        content = "row\n" * (self.SCREEN_HEIGHT + 10)
+        written = []
+        with (
+            patch.object(
+                Console,
+                "file",
+                new_callable=PropertyMock,
+                return_value=MagicMock(write=written.append),
+            ),
+            patch("poly.output.console.subprocess.Popen", side_effect=OSError("no less")),
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            _TerminalPager().show(content)
+
+        self.assertEqual("".join(written), content)
+
+    def test_quitting_the_pager_early_is_not_an_error(self):
+        """A broken pipe from quitting mid-write is swallowed, not raised."""
+        content = "row\n" * (self.SCREEN_HEIGHT + 10)
+        with (
+            patch.object(Console, "file", new_callable=PropertyMock, return_value=MagicMock()),
+            patch("poly.output.console.subprocess.Popen") as mock_popen,
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            pipe = mock_popen.return_value.stdin.__enter__.return_value
+            pipe.write.side_effect = BrokenPipeError()
+
+            _TerminalPager().show(content)
+
+        mock_popen.return_value.wait.assert_called_once()
+
+
+class PagedOutputTest(unittest.TestCase):
+    """Tests for the paged_output context manager's TTY and enabled guards."""
+
+    def test_no_paging_when_stdout_is_not_a_terminal(self):
+        """Piped and redirected output is never paged, matching git."""
+        with (
+            patch.object(Console, "is_terminal", new_callable=PropertyMock, return_value=False),
+            patch.object(console, "pager") as mock_pager,
+        ):
+            with paged_output():
+                pass
+
+        mock_pager.assert_not_called()
+
+    def test_no_paging_when_explicitly_disabled(self):
+        """Passing enabled=False opts a caller out even on a terminal."""
+        with (
+            patch.object(Console, "is_terminal", new_callable=PropertyMock, return_value=True),
+            patch.object(console, "pager") as mock_pager,
+        ):
+            with paged_output(enabled=False):
+                pass
+
+        mock_pager.assert_not_called()
+
+    def test_paging_uses_the_terminal_pager_with_styles(self):
+        """On a terminal the custom pager is used, with styles kept for colour."""
+        with (
+            patch.object(Console, "is_terminal", new_callable=PropertyMock, return_value=True),
+            patch.object(console, "pager") as mock_pager,
+        ):
+            with paged_output():
+                pass
+
+        mock_pager.assert_called_once()
+        self.assertIsInstance(mock_pager.call_args.kwargs["pager"], _TerminalPager)
+        self.assertTrue(mock_pager.call_args.kwargs["styles"])
