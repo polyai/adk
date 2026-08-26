@@ -690,23 +690,12 @@ class TestCase(YamlResource):
                 name="integration_attributes",
                 attributes=test_case_data.get("integrationAttributes") or {},
             )
-            api_mocks_raw = test_case_data.get("apiMocks") or {}
-            api_mocks = TestCaseApiMocks(
-                mocks={
-                    integration_name: {
-                        operation_name: [
-                            ApiResponseRule.from_dict(rule)
-                            for rule in (rule_list or {}).get("responses") or []
-                        ]
-                        for operation_name, rule_list in (integration_override or {})
-                        .get("operations", {})
-                        .items()
-                    }
-                    for integration_name, integration_override in (
-                        api_mocks_raw.get("integrations") or {}
-                    ).items()
-                },
-            )
+            # The projection's apiMocks is already flat — {integration: {operation:
+            # [rule, ...]}} — matching TestCaseApiMocks.from_dict directly. The
+            # integrations/operations/responses wrapper is only the protobuf wire
+            # shape used internally between agent-stream's backend and its own
+            # store; it never reaches the projection.
+            api_mocks = TestCaseApiMocks.from_dict(test_case_data.get("apiMocks"))
             test_cases[test_case_id] = cls(
                 resource_id=test_case_id,
                 name=test_case_data.get("name", ""),

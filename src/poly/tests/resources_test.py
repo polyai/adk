@@ -8034,7 +8034,11 @@ class TestCaseApiMocksTests(unittest.TestCase):
         with self.assertRaises(NotImplementedError):
             self._operation_mock().build_create_proto()
 
-    def test_from_projection_parses_nested_api_mocks(self):
+    def test_from_projection_parses_flat_api_mocks(self):
+        """The projection's apiMocks is flat — {integration: {operation: [rule,
+        ...]}} — matching the redux entity slice (test-cases.ts), not the nested
+        integrations/operations/responses shape used by the protobuf wire format
+        internal to agent-stream."""
         projection = {
             "testing": {
                 "testCases": {
@@ -8045,23 +8049,17 @@ class TestCaseApiMocksTests(unittest.TestCase):
                             "channel": "chat.polyai",
                             "language": "en-GB",
                             "apiMocks": {
-                                "integrations": {
-                                    "crm": {
-                                        "operations": {
-                                            "get_customer": {
-                                                "responses": [
-                                                    {
-                                                        "respond": {
-                                                            "status": 200,
-                                                            "body": {"id": 1},
-                                                            "headers": {"x-trace": "abc"},
-                                                        }
-                                                    },
-                                                    {"respond": {"status": 500}, "repeat": 3},
-                                                ]
+                                "crm": {
+                                    "get_customer": [
+                                        {
+                                            "respond": {
+                                                "status": 200,
+                                                "body": {"id": 1},
+                                                "headers": {"x-trace": "abc"},
                                             }
-                                        }
-                                    }
+                                        },
+                                        {"respond": {"status": 500}, "repeat": 3},
+                                    ]
                                 }
                             },
                         }
