@@ -45,13 +45,13 @@ There are two common ways to build with the ADK:
 
 ## Local project structure
 
-See [Working locally — What a local project contains](../concepts/working-locally.md#what-a-local-project-contains) for the full directory tree. In short, the project mirrors what Agent Studio understands: `agent_settings/`, `flows/`, `functions/`, `topics/`, `voice/`, `chat/`, and `config/`.
+See [Working locally — What a local project contains](../development/working-locally.md#what-a-local-project-contains) for the full directory tree. In short, the project mirrors what Agent Studio understands: `agent_settings/`, `flows/`, `functions/`, `topics/`, `voice/`, `chat/`, and `config/`.
 
 ## Workflow 1 - CLI workflow
 
 The CLI workflow is the manual developer path. You use the ADK directly, edit the project locally, and push changes back to Agent Studio.
 
-You can run this workflow in whichever editing surface you prefer: a plain terminal, or **VS Code** / **Cursor** with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) for resource-aware navigation and validation. Both count as the CLI workflow — the difference is only the editing surface.
+You can run this workflow in whichever editing surface you prefer: a plain terminal, or **VS Code** / **Cursor** with the [PolyAI ADK extension](../tooling/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) for resource-aware navigation and validation. Both count as the CLI workflow — the difference is only the editing surface.
 
 ### Step 1 - Initialize your project
 
@@ -61,7 +61,7 @@ Link a local folder to an existing Agent Studio project. The agent must already 
 poly init
 ~~~
 
-`poly init` walks you through interactive dropdowns for region, account, and project. It creates the project directory and pulls the current configuration. Change into the project directory before running any further commands. See [First commands](../get-started/first-commands.md) for flag options and details.
+`poly init` walks you through interactive dropdowns for region, account, and project. It creates the project directory and pulls the current configuration. Change into the project directory before running any further commands. See [`poly init`](../reference/cli/init.md) for flag options and details.
 
 ### Step 2 - Set up the environment
 
@@ -100,31 +100,31 @@ poly docs flows functions topics
 ~~~
 
 Resource-specific documentation is available in the reference section:
-[agent settings](../reference/agent_settings.md),
-[voice settings](../reference/voice_settings.md),
-[chat settings](../reference/chat_settings.md),
-[flows](../reference/flows.md),
-[functions](../reference/functions.md),
-[topics](../reference/topics.md),
-[entities](../reference/entities.md),
-[handoffs](../reference/handoffs.md),
-[variants](../reference/variants.md),
-[SMS templates](../reference/sms.md),
-[variables](../reference/variables.md),
-[speech recognition](../reference/speech_recognition.md),
-[response control](../reference/response_control.md),
-[safety filters](../reference/safety_filters.md),
-[languages](../reference/languages.md),
-[translations](../reference/translations.md), and
-[experimental config](../reference/experimental_config.md).
+[agent settings](../reference/resources/agent_settings.md),
+[voice settings](../reference/resources/voice_settings.md),
+[chat settings](../reference/resources/chat_settings.md),
+[flows](../reference/resources/flows.md),
+[functions](../reference/resources/functions.md),
+[topics](../reference/resources/topics.md),
+[entities](../reference/resources/entities.md),
+[handoffs](../reference/resources/handoffs.md),
+[variants](../reference/resources/variants.md),
+[SMS templates](../reference/resources/sms.md),
+[variables](../reference/resources/variables.md),
+[speech recognition](../reference/resources/speech_recognition.md),
+[response control](../reference/resources/response_control.md),
+[safety filters](../reference/resources/safety_filters.md),
+[languages](../reference/resources/languages.md),
+[translations](../reference/resources/translations.md), and
+[experimental config](../reference/resources/experimental_config.md).
 
 ### Step 5 - Customize the agent
 
 This is the core build phase. Create a branch, edit resources locally, track changes, and push them back.
 
-!!! tip "Read the anti-patterns page first"
+!!! tip "Know the common mistakes before you edit"
 
-    Before editing, review the [common anti-patterns](../concepts/anti-patterns.md) to avoid flow control bugs, logging noise, and prompt logic mistakes that are easy to introduce but hard to debug.
+    Review [common flow mistakes](../reference/resources/flows.md#common-mistakes) to avoid control-flow bugs, and [resource architecture](../development/resource-architecture.md#common-mistakes) for where content and logic belong.
 
 #### Branching
 
@@ -137,7 +137,7 @@ poly branch list
 
 #### Functions
 
-Create or modify backend functions the agent calls at runtime. See the [functions reference](../reference/functions.md) for the full API.
+Create or modify backend functions the agent calls at runtime. See the [functions reference](../reference/resources/functions.md) for the full API.
 
 Typical locations include:
 
@@ -148,39 +148,39 @@ Typical locations include:
 
 #### Topics
 
-Add or edit [knowledge-base topics](../reference/topics.md) used for retrieval.
+Add or edit [knowledge-base topics](../reference/resources/topics.md) used for retrieval.
 
 #### Agent settings
 
-Update the [personality, role, and rules](../reference/agent_settings.md) that define the agent's global behavior.
+Update the [personality, role, and rules](../reference/resources/agent_settings.md) that define the agent's global behavior.
 
 #### Flows
 
-Build [conversation flows](../reference/flows.md), including prompts, step transitions, [entities](../reference/entities.md), and function steps.
+Build [conversation flows](../reference/resources/flows.md), including prompts, step transitions, [entities](../reference/resources/entities.md), and function steps.
 
 #### Channel-specific settings
 
-Adjust greeting messages, disclaimers, and style prompts for [voice](../reference/voice_settings.md) and [chat](../reference/chat_settings.md).
+Adjust greeting messages, disclaimers, and style prompts for [voice](../reference/resources/voice_settings.md) and [chat](../reference/resources/chat_settings.md).
 
 #### Safety filters
 
-Configure [content safety filtering](../reference/safety_filters.md) at the project level and per channel.
+Configure [content safety filtering](../reference/resources/safety_filters.md) at the project level and per channel.
 
 #### Handoffs, SMS, and variants
 
-Define [escalation paths](../reference/handoffs.md), [SMS templates](../reference/sms.md), and [per-variant configuration](../reference/variants.md).
+Define [escalation paths](../reference/resources/handoffs.md), [SMS templates](../reference/resources/sms.md), and [per-variant configuration](../reference/resources/variants.md).
 
 #### Languages and translations
 
-Configure [supported languages](../reference/languages.md) and [localized text strings](../reference/translations.md) for multilingual agents.
+Configure [supported languages](../reference/resources/languages.md) and [localized text strings](../reference/resources/translations.md) for multilingual agents.
 
 #### ASR and response control
 
-Tune [speech recognition](../reference/speech_recognition.md) and control [TTS behavior](../reference/response_control.md).
+Tune [speech recognition](../reference/resources/speech_recognition.md) and control [TTS behavior](../reference/resources/response_control.md).
 
 #### Experimental config
 
-Enable or tune [experimental features](../reference/experimental_config.md) where needed.
+Enable or tune [experimental features](../reference/resources/experimental_config.md) where needed.
 
 ### Step 6 - Track and validate changes
 
@@ -262,12 +262,12 @@ poly review create --before main --after my-feature
 
 Make test calls, inspect transcripts, refine prompts, flows, and functions, and then re-push.
 
-### Step 10 - Deploy to production
+### Step 10 - Merge and promote
 
-Once the changes are pushed and validated, merge the branch in Agent Studio and deploy the project.
+Once the changes are pushed and validated, merge the branch into `main`. This deploys automatically to sandbox; promote to pre-release and then live with `poly deployments promote` when you're ready. See [environments and deployment](../development/environments-and-deployment.md).
 
 !!! note "Merging from the CLI or the Agent Studio web UI"
-    Merge from the CLI with `poly branch merge '<commit message>'`, which merges the current branch into `main`. You can also merge through the Agent Studio web UI by switching to the branch and clicking **Merge**. After merging, run `poly chat --environment sandbox` to test. See the [Branch merging reference](../reference/branch_merge.md) for the full conflict-resolution flow.
+    Merge from the CLI with `poly branch merge '<commit message>'`, or through the Agent Studio web UI by switching to the branch and clicking **Merge**. Merging switches you back to `main` locally — see [`poly branch merge`](../reference/cli/branch.md#poly-branch-merge) for the full conflict-resolution flow.
 
 ### Step 11 - Monitor performance
 
@@ -275,7 +275,7 @@ Use Agent Studio analytics to monitor containment, CSAT, handle time, and flagge
 
 ## Workflow 2 - AI-agent workflow
 
-The AI-agent workflow uses a coding agent — such as **Claude Code**, or an in-editor agent in **VS Code** or **Cursor** paired with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) — to run the same development loop on your behalf.
+The AI-agent workflow uses a coding agent — such as **Claude Code**, or an in-editor agent in **VS Code** or **Cursor** paired with the [PolyAI ADK extension](../tooling/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) — to run the same development loop on your behalf.
 
 <div class="grid cards" markdown>
 
@@ -436,12 +436,7 @@ Check that the key parts of the agent look correct:
 - knowledge base entries
 - API integrations
 
-Once everything looks right:
-
-1. merge the branch into `main` — either with [`poly branch merge`](../reference/branch_merge.md) from the CLI or through the Agent Studio web UI
-2. deploy the project
-
-At that point, the agent is live.
+Once everything looks right, merge the branch into `main` — either with [`poly branch merge`](../reference/cli/branch.md#poly-branch-merge) from the CLI or through the Agent Studio web UI. Merging deploys automatically to sandbox; promote to pre-release and then live with `poly deployments promote` when you're ready. See [environments and deployment](../development/environments-and-deployment.md).
 
 ## CLI command overview
 
@@ -485,7 +480,7 @@ At that point, the agent is live.
 
     Understand resource architecture, local development patterns, and team workflows.
 
-    [Open core concepts](../concepts/working-locally.md)
+    [Open core concepts](../development/working-locally.md)
 
 -   **CLI reference**
 

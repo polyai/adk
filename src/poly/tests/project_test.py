@@ -5,14 +5,17 @@ Uses test project in tests/test_project
 Copyright PolyAI Limited
 """
 
+import dataclasses
 import json
 import os
+import shutil
+import tempfile
 import unittest
 from copy import deepcopy
 from unittest.mock import MagicMock, patch
 
 import poly.resources.resource_utils as resource_utils
-from poly.project import AgentStudioProject
+from poly.project import AgentStudioProject, DeploymentMode
 from poly.resources import (
     AsrSettings,
     ChatGreeting,
@@ -50,6 +53,7 @@ from poly.resources.flows import (
     ASRBiasing,
     Condition,
     DTMFConfig,
+    FlowSettings,
     StepType,
 )
 from poly.resources.function import FunctionType
@@ -210,9 +214,9 @@ class SerializationRoundTripTest(unittest.TestCase):
         self.assertEqual(restored.compute_hash(), doc.compute_hash())
 
     def test_flow_step_round_trip_excludes_sub_resource_internals(self):
-        """ASRBiasing/DTMFConfig set 'name' and 'resource_id' internally,
-        but these are not __init__ params. They must be excluded from
-        serialization so nested deserialization works.
+        """FlowSettings sets 'name' and 'resource_id' internally, but these are
+        not __init__ params. They must be excluded from serialization so nested
+        deserialization works.
         """
         step = FlowStep(
             resource_id="flow_step-1",
@@ -222,23 +226,28 @@ class SerializationRoundTripTest(unittest.TestCase):
             flow_name="Test Flow",
             step_type="advanced_step",
             prompt="Hello",
-            asr_biasing=ASRBiasing(step_id="step-1", flow_id="flow-123"),
-            dtmf_config=DTMFConfig(step_id="step-1", flow_id="flow-123"),
+            settings=FlowSettings(
+                step_id="step-1",
+                flow_id="flow-123",
+                asr_biasing=ASRBiasing(is_enabled=True),
+                dtmf=DTMFConfig(step_id="step-1", flow_id="flow-123"),
+            ),
         )
         serialized = resource_utils.resource_to_dict(step)
-        asr_dict = serialized["asr_biasing"]
-        dtmf_dict = serialized["dtmf_config"]
+        settings_dict = serialized["settings"]
 
         # Internal fields must not leak into serialized output
-        self.assertNotIn("name", asr_dict)
-        self.assertNotIn("resource_id", asr_dict)
-        self.assertNotIn("name", dtmf_dict)
-        self.assertNotIn("resource_id", dtmf_dict)
+        self.assertNotIn("name", settings_dict)
+        self.assertNotIn("resource_id", settings_dict)
+        for section in ("asr_biasing", "dtmf"):
+            self.assertNotIn("name", settings_dict[section])
+            self.assertNotIn("resource_id", settings_dict[section])
 
         # Deserialize back — must not raise TypeError
         restored = FlowStep(**serialized)
         self.assertEqual(restored.name, "Test Step")
-        self.assertEqual(restored.asr_biasing.step_id, "step-1")
+        self.assertEqual(restored.settings.step_id, "step-1")
+        self.assertTrue(restored.settings.asr_biasing.is_enabled)
 
 
 class DiscoverLocalResourcesTest(unittest.TestCase):
@@ -680,6 +689,39 @@ class ProjectStatusTest(unittest.TestCase):
         self.assertEqual(new_files, [])
         self.assertEqual(deleted_files, [])
 
+    def test_project_status_merge_conflict_in_multi_resource_yaml(self):
+        """A conflicted multi-resource YAML file is listed (not raised) by project_status.
+
+        The conflict is detected during discovery (discover_resources ->
+        _get_top_level_data); project_status collects the true file path into
+        files_with_conflicts and skips that file's resources instead of raising or
+        counting them as deleted.
+        """
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        entities_path = os.path.join(TEST_DIR, "config", "entities.yaml")
+        # The multi-resource file is cached by mtime; clear it so the mock is read.
+        Entity._file_cache.clear()
+
+        conflicted_entities = (
+            "entities:\n"
+            "<<<<<<<\n"
+            "  - name: customer_name\n"
+            "    entity_type: name_config\n"
+            "=======\n"
+            "  - name: caller_name\n"
+            "    entity_type: name_config\n"
+            ">>>>>>>\n"
+        )
+
+        with mock_read_from_file({entities_path: conflicted_entities}):
+            files_with_conflicts, modified_files, new_files, deleted_files = (
+                project.project_status()
+            )
+
+        self.assertEqual(files_with_conflicts, [entities_path])
+        # The conflicted file's entities must not be reported as deleted.
+        self.assertFalse(any(entities_path in path for path in deleted_files))
+
     def test_project_status_mixed_changes(self):
         project_data = deepcopy(PROJECT_DATA)
         # Remove a function so it seems there's a new one
@@ -922,6 +964,93 @@ class GetDiffsTest(unittest.TestCase):
             "flows", "test_flow_with_punctuation!", "steps", "welcome_step.yaml"
         )
         self.assertNotIn(step_path, diffs)
+
+    def test_get_diffs_raises_when_single_file_resource_has_conflict(self):
+        """A merge conflict in a function .py file makes get_diffs raise."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        func_path = os.path.join(TEST_DIR, "functions", "test_function.py")
+
+        conflicted_code = (
+            "from _gen import *  # <AUTO GENERATED>\n\n"
+            "def test_function(conv: Conversation):\n"
+            "<<<<<<<\n"
+            '    return "ours"\n'
+            "=======\n"
+            '    return "theirs"\n'
+            ">>>>>>>\n"
+        )
+
+        with mock_read_from_file({func_path: conflicted_code}):
+            with self.assertRaises(resource_utils.MergeConflictError) as ctx:
+                project.get_diffs()
+
+        self.assertIn(func_path, str(ctx.exception))
+
+    def test_get_diffs_raises_when_multi_resource_yaml_has_conflict(self):
+        """A conflict in a multi-resource YAML file makes get_diffs raise.
+
+        For multi-resource YAML files the guard fires during discovery
+        (discover_resources -> _get_top_level_data), before get_diffs reaches its
+        own conflict-collecting loops, so the error is raised with the true on-disk
+        .yaml path rather than a synthetic sub-resource path.
+        """
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        entities_path = os.path.join(TEST_DIR, "config", "entities.yaml")
+        # The multi-resource file is cached by mtime; clear it so the mock is read.
+        Entity._file_cache.clear()
+
+        conflicted_entities = (
+            "entities:\n"
+            "<<<<<<<\n"
+            "  - name: customer_name\n"
+            "    entity_type: name_config\n"
+            "=======\n"
+            "  - name: caller_name\n"
+            "    entity_type: name_config\n"
+            ">>>>>>>\n"
+        )
+
+        with mock_read_from_file({entities_path: conflicted_entities}):
+            with self.assertRaises(resource_utils.MergeConflictError) as ctx:
+                project.get_diffs()
+
+        # The reported path is the true .yaml file, not a synthetic sub-resource path.
+        self.assertIn(entities_path, str(ctx.exception))
+
+    def test_get_diffs_aggregates_conflicts_from_multiple_files(self):
+        """When two single-file resources conflict, the raised error lists both paths."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        func_path = os.path.join(TEST_DIR, "functions", "test_function.py")
+        other_func_path = os.path.join(TEST_DIR, "functions", "validate_email.py")
+
+        conflicted_code = (
+            "from _gen import *  # <AUTO GENERATED>\n\n"
+            "def test_function(conv: Conversation):\n"
+            "<<<<<<<\n"
+            '    return "ours"\n'
+            "=======\n"
+            '    return "theirs"\n'
+            ">>>>>>>\n"
+        )
+        other_conflicted_code = (
+            "from _gen import *  # <AUTO GENERATED>\n\n"
+            "def validate_email(conv: Conversation):\n"
+            "<<<<<<<\n"
+            "    return True\n"
+            "=======\n"
+            "    return False\n"
+            ">>>>>>>\n"
+        )
+
+        with mock_read_from_file(
+            {func_path: conflicted_code, other_func_path: other_conflicted_code}
+        ):
+            with self.assertRaises(resource_utils.MergeConflictError) as ctx:
+                project.get_diffs()
+
+        message = str(ctx.exception)
+        self.assertIn(func_path, message)
+        self.assertIn(other_func_path, message)
 
 
 class CleanResourcesBeforePushTest(unittest.TestCase):
@@ -2085,9 +2214,9 @@ class PushProjectTest(unittest.TestCase):
 
     def test_push_project_modified_sub_resources_dtmf(self):
         project_data = deepcopy(PROJECT_DATA)
-        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["dtmf_config"][
-            "is_enabled"
-        ] = True
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["settings"][
+            "dtmf"
+        ]["is_enabled"] = True
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
         success, message, commands = project.push_project(force=True)
@@ -2096,7 +2225,8 @@ class PushProjectTest(unittest.TestCase):
         self.mock_api_handler.queue_resources.assert_called_once()
         call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
-        self.assertIn(DTMFConfig, updated_resources)
+        # DTMF is pushed as part of the step's combined settings sub-resource.
+        self.assertIn(FlowSettings, updated_resources)
 
     def test_push_project_new_sub_resources_condition(self):
         project_data = deepcopy(PROJECT_DATA)
@@ -2152,9 +2282,9 @@ class PushProjectTest(unittest.TestCase):
         """Test pushing an updated ASRBiasing sub-resource"""
         project_data = deepcopy(PROJECT_DATA)
         # Modify ASR biasing in project_data
-        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["asr_biasing"][
-            "custom_keywords"
-        ] = ["NewKeyword1", "NewKeyword2"]
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["settings"][
+            "asr_biasing"
+        ]["custom_keywords"] = ["NewKeyword1", "NewKeyword2"]
 
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
@@ -2164,7 +2294,8 @@ class PushProjectTest(unittest.TestCase):
         self.mock_api_handler.queue_resources.assert_called_once()
         call_args = self.mock_api_handler.queue_resources.call_args
         updated_resources = call_args.kwargs["updated_resources"]
-        self.assertIn(ASRBiasing, updated_resources)
+        # ASR biasing is pushed as part of the step's combined settings sub-resource.
+        self.assertIn(FlowSettings, updated_resources)
 
     def test_push_project_mixed_changes(self):
         project_data = deepcopy(PROJECT_DATA)
@@ -2183,9 +2314,9 @@ class PushProjectTest(unittest.TestCase):
             "function_type": "global",
         }
         # Modified resource in subresource
-        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["asr_biasing"][
-            "is_enabled"
-        ] = False
+        project_data["resources"]["flow_steps"]["FLOW_CONFIG-test_flow_start_step"]["settings"][
+            "asr_biasing"
+        ]["is_enabled"] = False
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
 
         success, message, commands = project.push_project(force=True)
@@ -2197,7 +2328,7 @@ class PushProjectTest(unittest.TestCase):
         updated_resources = call_args.kwargs["updated_resources"]
         deleted_resources = call_args.kwargs["deleted_resources"]
         self.assertIn(Topic, new_resources)
-        self.assertIn(ASRBiasing, updated_resources)
+        self.assertIn(FlowSettings, updated_resources)
         self.assertIn(FlowStep, updated_resources)
         self.assertIn(Function, deleted_resources)
 
@@ -3178,18 +3309,21 @@ class PullProjectFromEnvTest(unittest.TestCase):
     def test_no_changes_produces_no_conflicts(self):
         """Pulling when the deployment matches local resources produces no conflicts."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        original_resources = deepcopy(project.resources)
         incoming_resources = deepcopy(project.resources)
         self.mock_get_remote.return_value = incoming_resources
 
         files_with_conflicts = project.pull_project_from_env(env="live")
 
         self.assertEqual(files_with_conflicts, [])
-        self.assertEqual(project.resources, incoming_resources)
-        self.mock_save_config.assert_called_once()
+        # Resources in memory are NOT updated — env pull only writes files
+        self.assertEqual(project.resources, original_resources)
+        self.mock_save_config.assert_not_called()
 
     def test_remote_modification_applied_to_disk(self):
         """A resource modified in the deployment snapshot is written to disk."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        original_resources = deepcopy(project.resources)
         incoming_resources = deepcopy(project.resources)
         func_id = "FUNCTION-test_function"
         modified_func = deepcopy(incoming_resources[Function][func_id])
@@ -3200,7 +3334,8 @@ class PullProjectFromEnvTest(unittest.TestCase):
         files_with_conflicts = project.pull_project_from_env(env="live")
 
         self.assertEqual(files_with_conflicts, [])
-        self.assertEqual(project.resources[Function][func_id].code, modified_func.code)
+        # In-memory resources unchanged; file was written to disk
+        self.assertEqual(project.resources, original_resources)
         self.assertTrue(self.mock_save_to_file.called or self.mock_resource_save.called)
 
     def test_new_remote_resource_written_locally(self):
@@ -3220,7 +3355,9 @@ class PullProjectFromEnvTest(unittest.TestCase):
         files_with_conflicts = project.pull_project_from_env(env="live")
 
         self.assertEqual(files_with_conflicts, [])
-        self.assertIn("TOPIC-live_only_topic", project.resources.get(Topic, {}))
+        # In-memory resources unchanged; new resource was written to disk only
+        self.assertNotIn("TOPIC-live_only_topic", project.resources.get(Topic, {}))
+        self.assertTrue(self.mock_resource_save.called)
 
     # ------------------------------------------------------------------
     # Force-overwrite semantics (always on for pull_project_from_env)
@@ -3229,6 +3366,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
     def test_local_changes_overwritten_without_conflicts(self):
         """Local modifications are silently overwritten — force is always True."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        original_resources = deepcopy(project.resources)
         incoming_resources = deepcopy(project.resources)
         func_id = "FUNCTION-test_function"
         incoming_resources[Function][
@@ -3236,20 +3374,12 @@ class PullProjectFromEnvTest(unittest.TestCase):
         ].code = 'def test_function(conv: Conversation):\n    return "From live"\n'
         self.mock_get_remote.return_value = incoming_resources
 
-        with mock_read_from_file(
-            {
-                os.path.join(
-                    TEST_DIR, "functions", "test_function.py"
-                ): 'from _gen import *  # <AUTO GENERATED>\n\ndef test_function(conv: Conversation):\n    return "Local diverged"\n'
-            }
-        ):
-            files_with_conflicts = project.pull_project_from_env(env="pre-release")
+        files_with_conflicts = project.pull_project_from_env(env="pre-release")
 
         self.assertEqual(files_with_conflicts, [])
-        self.assertEqual(
-            project.resources[Function][func_id].code,
-            incoming_resources[Function][func_id].code,
-        )
+        # In-memory resources unchanged; file overwritten on disk
+        self.assertEqual(project.resources, original_resources)
+        self.assertTrue(self.mock_resource_save.called)
 
     def test_locally_added_resource_deleted_when_absent_from_deployment(self):
         """A locally-added resource absent from the deployment is deleted."""
@@ -3263,20 +3393,21 @@ class PullProjectFromEnvTest(unittest.TestCase):
 
         self.assertEqual(files_with_conflicts, [])
         self.mock_os_remove.assert_called()
-        self.assertNotIn("TOPIC-Topic 1", project.resources.get(Topic, {}))
+        # In-memory resources unchanged; deletion only affects disk
+        self.assertIn("TOPIC-Topic 1", project.resources.get(Topic, {}))
 
     # ------------------------------------------------------------------
     # Side-effects: config + imports saved
     # ------------------------------------------------------------------
 
-    def test_save_config_and_imports_called_on_success(self):
-        """save_config and save_imports are always called after a successful pull."""
+    def test_save_config_not_called_and_imports_saved_on_success(self):
+        """save_config must NOT be called (env changes are local); save_imports is called."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         self.mock_get_remote.return_value = deepcopy(project.resources)
 
         project.pull_project_from_env(env="live")
 
-        self.mock_save_config.assert_called_once()
+        self.mock_save_config.assert_not_called()
         self.mock_save_imports.assert_called_once()
 
     def test_save_config_not_called_when_no_deployment(self):
@@ -3530,6 +3661,155 @@ class ResolveTestsTest(unittest.TestCase):
             self.project.resolve_tests(files=["no_such_test.yaml"])
 
 
+class FetchProjectTest(unittest.TestCase):
+    """Tests for the fetch_project method."""
+
+    def setUp(self):
+        """Set up common mocks — only api_handler and save_config, no file I/O mocks."""
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.mock_save_config = patch.object(AgentStudioProject, "save_config").start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_fetch_without_branch_updates_resources_and_returns_them(self):
+        """fetch_project() without a branch fetches remote state and returns projection."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        expected_resources = deepcopy(project.resources)
+        expected_projection = {"some": "projection"}
+        self.mock_api_handler.pull_resources.return_value = (
+            expected_resources,
+            expected_projection,
+        )
+        self.mock_api_handler.branch_id = "remote-branch-id"
+
+        projection = project.fetch_project()
+
+        self.assertEqual(projection, expected_projection)
+        self.assertEqual(project.resources, expected_resources)
+        self.assertEqual(project._not_loaded_resources, [])
+        self.mock_api_handler.pull_resources.assert_called_once_with(projection_json=None)
+
+    def test_fetch_without_branch_updates_branch_id_from_api(self):
+        """When no projection_json, branch_id should be updated from api_handler."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {},
+        )
+        self.mock_api_handler.branch_id = "api-branch-42"
+
+        project.fetch_project()
+
+        self.assertEqual(project.branch_id, "api-branch-42")
+
+    def test_fetch_with_valid_branch_switches_branch_then_fetches(self):
+        """fetch_project(branch_name=...) switches to that branch before pulling."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.get_branches.return_value = {
+            "main": {"branchId": "branch-1"},
+            "dev": {"branchId": "branch-2"},
+        }
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {},
+        )
+        self.mock_api_handler.branch_id = "branch-2"
+
+        project.fetch_project(branch_name="dev")
+
+        self.mock_api_handler.get_branches.assert_called_once()
+        self.mock_api_handler.switch_branch.assert_called_once_with("branch-2")
+        self.assertEqual(project.branch_id, "branch-2")
+
+    def test_fetch_with_nonexistent_branch_raises_value_error(self):
+        """fetch_project raises ValueError when the branch does not exist."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.get_branches.return_value = {"main": {"branchId": "branch-1"}}
+
+        with self.assertRaises(ValueError, msg="Branch 'no-such-branch' does not exist."):
+            project.fetch_project(branch_name="no-such-branch")
+
+        self.mock_api_handler.pull_resources.assert_not_called()
+
+    def test_fetch_with_projection_json_does_not_update_branch_id_from_api(self):
+        """When projection_json is provided, branch_id should NOT be overwritten from API."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        original_branch_id = project.branch_id
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {"cached": True},
+        )
+        self.mock_api_handler.branch_id = "should-not-be-used"
+
+        project.fetch_project(projection_json={"cached": "projection"})
+
+        self.assertEqual(project.branch_id, original_branch_id)
+        self.mock_api_handler.pull_resources.assert_called_once_with(
+            projection_json={"cached": "projection"}
+        )
+
+    def test_fetch_calls_save_config(self):
+        """fetch_project always calls save_config to persist the status file."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {},
+        )
+        self.mock_api_handler.branch_id = "b"
+
+        project.fetch_project()
+
+        self.mock_save_config.assert_called_once()
+
+    def test_fetch_does_not_write_resource_files(self):
+        """fetch_project must not call Resource.save() — it only updates in-memory state."""
+        mock_resource_save = patch.object(Resource, "save").start()
+        mock_save_to_file = patch.object(Resource, "save_to_file").start()
+
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {},
+        )
+        self.mock_api_handler.branch_id = "b"
+
+        project.fetch_project()
+
+        mock_resource_save.assert_not_called()
+        mock_save_to_file.assert_not_called()
+
+    def test_fetch_updates_file_structure_info(self):
+        """fetch_project should recompute file_structure_info from the new resources."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        new_resources = deepcopy(project.resources)
+        self.mock_api_handler.pull_resources.return_value = (new_resources, {})
+        self.mock_api_handler.branch_id = "b"
+
+        project.fetch_project()
+
+        expected_info = project.compute_file_structure_info(new_resources)
+        self.assertEqual(project.file_structure_info, expected_info)
+
+    def test_fetch_with_branch_sets_branch_id_before_api_override(self):
+        """When both branch_name and no projection_json, branch_id ends up as api value."""
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.get_branches.return_value = {"staging": {"branchId": "staging-id"}}
+        self.mock_api_handler.pull_resources.return_value = (
+            deepcopy(project.resources),
+            {},
+        )
+        # After pull, the api_handler.branch_id may differ from the branch dict value
+        self.mock_api_handler.branch_id = "staging-id"
+
+        project.fetch_project(branch_name="staging")
+
+        # Since projection_json is None, branch_id is set from api_handler.branch_id
+        self.assertEqual(project.branch_id, "staging-id")
+
+
 class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
     """Tests that _update_pulled_resources and _update_multi_resource_yaml_resources
     delete local resources when their entire resource type is absent from incoming."""
@@ -3710,6 +3990,234 @@ class MigrateFlowStepResourceIdsTest(unittest.TestCase):
         self.assertEqual(flow_steps["FLOW-abc_step-1"]["resource_id"], "FLOW-abc_step-1")
 
 
+class MigrateFlowStepSettingsTest(unittest.TestCase):
+    """Tests for migrate_flow_step_settings status dict migration."""
+
+    @staticmethod
+    def _legacy_status_dict() -> dict:
+        return {
+            "resources": {
+                "flow_steps": {
+                    "FLOW-abc_step-1": {
+                        "resource_id": "FLOW-abc_step-1",
+                        "step_id": "step-1",
+                        "flow_id": "FLOW-abc",
+                        "asr_biasing": {
+                            "is_enabled": True,
+                            "custom_keywords": ["hello"],
+                            # Internals set by the config class, not __init__ args
+                            "step_id": "step-1",
+                            "flow_id": "FLOW-abc",
+                            "resource_id": "FLOW-abc.step-1",
+                            "name": "asr",
+                        },
+                        "dtmf_config": {
+                            "is_enabled": True,
+                            "max_digits": 4,
+                            "step_id": "step-1",
+                            "flow_id": "FLOW-abc",
+                            "resource_id": "FLOW-abc.step-1",
+                            "name": "dtmf",
+                        },
+                    },
+                },
+            },
+        }
+
+    def test_folds_legacy_keys_into_settings(self):
+        """Legacy top-level asr_biasing/dtmf_config move under settings."""
+        from poly.migration_utils import migrate_flow_step_settings
+
+        status_dict = self._legacy_status_dict()
+        migrate_flow_step_settings(status_dict)
+
+        settings = status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"]["settings"]
+        # dtmf_config is renamed to dtmf to match FlowSettings
+        self.assertEqual(
+            settings,
+            {
+                "asr_biasing": {"is_enabled": True, "custom_keywords": ["hello"]},
+                "dtmf": {"is_enabled": True, "max_digits": 4},
+            },
+        )
+
+    def test_migrated_dict_loads_into_flow_settings(self):
+        """The migrated shape is accepted by FlowStep, which is the point of the migration."""
+        from poly.migration_utils import migrate_flow_step_settings
+
+        status_dict = self._legacy_status_dict()
+        migrate_flow_step_settings(status_dict)
+        resource_dict = status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"]
+
+        step = FlowStep(
+            resource_id=resource_dict["resource_id"],
+            name="Step 1",
+            step_id=resource_dict["step_id"],
+            flow_id=resource_dict["flow_id"],
+            flow_name="Test Flow",
+            step_type="advanced_step",
+            prompt="Hello",
+            settings=resource_dict["settings"],
+        )
+        self.assertTrue(step.settings.asr_biasing.is_enabled)
+        self.assertEqual(step.settings.asr_biasing.custom_keywords, ["hello"])
+        self.assertEqual(step.settings.dtmf.max_digits, 4)
+
+    def test_existing_settings_take_precedence(self):
+        """A newer status dict already carrying settings is not overwritten."""
+        from poly.migration_utils import migrate_flow_step_settings
+
+        status_dict = self._legacy_status_dict()
+        status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"]["settings"] = {
+            "asr_biasing": {"is_enabled": False},
+        }
+
+        migrate_flow_step_settings(status_dict)
+
+        settings = status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"]["settings"]
+        self.assertFalse(settings["asr_biasing"]["is_enabled"])
+        # The section missing from the newer format is still back-filled
+        self.assertEqual(settings["dtmf"], {"is_enabled": True, "max_digits": 4})
+
+    def test_steps_without_legacy_keys_are_untouched(self):
+        """Steps with no legacy config gain no settings key."""
+        from poly.migration_utils import migrate_flow_step_settings
+
+        status_dict = {
+            "resources": {"flow_steps": {"FLOW-abc_step-1": {"resource_id": "FLOW-abc_step-1"}}}
+        }
+
+        migrate_flow_step_settings(status_dict)
+
+        self.assertNotIn("settings", status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"])
+
+class SyncBranchProject(unittest.TestCase):
+    """Tests for AgentStudioProject.sync_branch."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def _make_branches(self, *branch_ids):
+        """Build a branches dict with the given branch IDs."""
+        return {bid: {"branchId": bid, "name": f"name-{bid}"} for bid in branch_ids}
+
+    def test_branch_not_found_raises(self):
+        """A branch_id not present in any branch metadata raises ValueError."""
+        self.project.branch_id = "nonexistent-branch"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main", "branch-1")
+
+            with self.assertRaises(ValueError) as ctx:
+                self.project.sync_branch()
+
+        self.assertIn("nonexistent-branch", str(ctx.exception))
+        self.assertIn("does not exist", str(ctx.exception))
+
+    def test_main_branch_raises(self):
+        """Syncing the main branch raises ValueError."""
+        self.project.branch_id = "main"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main")
+
+            with self.assertRaises(ValueError) as ctx:
+                self.project.sync_branch()
+
+        self.assertIn("main", str(ctx.exception))
+        self.assertIn("not supported", str(ctx.exception))
+
+    def test_uncommitted_changes_raises(self):
+        """Uncommitted changes (non-empty get_diffs) raises ValueError listing the diffs."""
+        self.project.branch_id = "branch-1"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main", "branch-1")
+            with patch.object(self.project, "get_diffs", return_value={"topic/foo": "modified"}):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.sync_branch()
+
+        self.assertIn("uncommitted changes", str(ctx.exception))
+        self.assertIn("topic/foo", str(ctx.exception))
+
+    def test_invalid_resolution_missing_path(self):
+        """A resolution dict missing 'path' raises ValueError."""
+        self.project.branch_id = "branch-1"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main", "branch-1")
+            with patch.object(self.project, "get_diffs", return_value=None):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.sync_branch(conflict_resolutions=[{"strategy": "ours"}])
+
+        self.assertIn("path", str(ctx.exception))
+        self.assertIn("strategy", str(ctx.exception))
+
+    def test_invalid_resolution_missing_strategy(self):
+        """A resolution dict missing 'strategy' raises ValueError."""
+        self.project.branch_id = "branch-1"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main", "branch-1")
+            with patch.object(self.project, "get_diffs", return_value=None):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.sync_branch(conflict_resolutions=[{"path": ["users", "name"]}])
+
+        self.assertIn("path", str(ctx.exception))
+        self.assertIn("strategy", str(ctx.exception))
+
+    def test_invalid_resolution_bad_strategy(self):
+        """A strategy not in {ours, theirs, base} raises ValueError."""
+        self.project.branch_id = "branch-1"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main", "branch-1")
+            with patch.object(self.project, "get_diffs", return_value=None):
+                with self.assertRaises(ValueError) as ctx:
+                    self.project.sync_branch(
+                        conflict_resolutions=[{"path": ["users", "name"], "strategy": "invalid"}]
+                    )
+
+        self.assertIn("Invalid conflict resolution strategy", str(ctx.exception))
+        self.assertIn("invalid", str(ctx.exception))
+
+    def test_successful_sync_pulls_and_returns_true(self):
+        """On success, pull_project(force=True) is called and (True, [], []) is returned."""
+        self.project.branch_id = "branch-1"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main", "branch-1")
+            mock_api.sync_branch.return_value = (True, [], [])
+            with patch.object(self.project, "get_diffs", return_value=None):
+                with patch.object(self.project, "pull_project") as mock_pull:
+                    result = self.project.sync_branch()
+
+        self.assertEqual(result, (True, [], []))
+        mock_pull.assert_called_once_with(force=True)
+        mock_api.sync_branch.assert_called_once_with(conflict_resolutions=None)
+
+    def test_sync_with_conflicts_returns_false(self):
+        """When the API reports conflicts, returns (False, conflicts, errors) without pulling."""
+        self.project.branch_id = "branch-1"
+        conflicts = [{"path": "topic/foo", "type": "content"}]
+        errors = [{"message": "merge error"}]
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main", "branch-1")
+            mock_api.sync_branch.return_value = (False, conflicts, errors)
+            with patch.object(self.project, "get_diffs", return_value=None):
+                with patch.object(self.project, "pull_project") as mock_pull:
+                    result = self.project.sync_branch()
+
+        self.assertEqual(result, (False, conflicts, errors))
+        mock_pull.assert_not_called()
+
+    def test_none_resolutions_accepted(self):
+        """Passing None for conflict_resolutions skips validation and works."""
+        self.project.branch_id = "branch-1"
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.get_branches.return_value = self._make_branches("main", "branch-1")
+            mock_api.sync_branch.return_value = (True, [], [])
+            with patch.object(self.project, "get_diffs", return_value=None):
+                with patch.object(self.project, "pull_project"):
+                    result = self.project.sync_branch(conflict_resolutions=None)
+
+        self.assertEqual(result, (True, [], []))
+        mock_api.sync_branch.assert_called_once_with(conflict_resolutions=None)
+
+
 class GetBranchHistoryProject(unittest.TestCase):
     """Tests for AgentStudioProject.get_branch_history."""
 
@@ -3805,53 +4313,1428 @@ class RestoreBranchProject(unittest.TestCase):
     def setUp(self):
         self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
-    def test_empty_name_raises_value_error(self):
-        """An empty branch name raises ValueError."""
-        with self.assertRaises(ValueError) as ctx:
-            self.project.restore_branch("")
-
-        self.assertIn("Branch name must be provided", str(ctx.exception))
-
-    def test_branch_not_in_archive_raises_value_error(self):
-        """A name not found in the archive raises ValueError."""
+    def test_empty_branch_id_raises_value_error(self):
+        """An empty branch id raises ValueError before any API call."""
         with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
-            mock_api.list_archived_branches.return_value = [
-                {"branchId": "b-1", "name": "other-branch"}
-            ]
-
             with self.assertRaises(ValueError) as ctx:
-                self.project.restore_branch("no-such-branch")
+                self.project.restore_branch("")
 
-        self.assertIn("not found in archive", str(ctx.exception))
+        self.assertIn("Branch id must be provided", str(ctx.exception))
+        mock_api.restore_branch.assert_not_called()
 
-    def test_successful_restore_returns_true(self):
-        """A valid restore looks up the branch ID and delegates to api_handler."""
+    def test_restore_delegates_the_branch_id_to_the_api(self):
+        """A branch id present in the archive is restored."""
         with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
             mock_api.list_archived_branches.return_value = [
-                {"branchId": "b-1", "name": "old-branch", "archivedAt": "2026-07-01"},
+                {"branchId": "BRANCH-1", "name": "old-branch"},
             ]
             mock_api.restore_branch.return_value = True
 
-            result = self.project.restore_branch("old-branch")
+            result = self.project.restore_branch("BRANCH-1")
 
         self.assertTrue(result)
-        mock_api.restore_branch.assert_called_once_with("b-1")
+        mock_api.restore_branch.assert_called_once_with("BRANCH-1")
 
-    def test_duplicate_name_raises_value_error(self):
-        """Multiple archived branches with the same name raises ValueError."""
+    def test_branch_id_not_in_archive_raises_value_error(self):
+        """An id that is not archived is refused before any restore is attempted."""
         with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
             mock_api.list_archived_branches.return_value = [
-                {"branchId": "BRANCH-1", "name": "release"},
-                {"branchId": "BRANCH-2", "name": "release"},
+                {"branchId": "BRANCH-1", "name": "old-branch"},
             ]
 
             with self.assertRaises(ValueError) as ctx:
-                self.project.restore_branch("release")
+                self.project.restore_branch("BRANCH-NOPE")
 
-        self.assertIn("Multiple archived branches", str(ctx.exception))
-        self.assertIn("BRANCH-1", str(ctx.exception))
-        self.assertIn("BRANCH-2", str(ctx.exception))
+        self.assertIn("not found in archive", str(ctx.exception))
         mock_api.restore_branch.assert_not_called()
+
+    def test_matching_is_by_id_not_name(self):
+        """A branch name is not accepted, even when it is unique in the archive."""
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.list_archived_branches.return_value = [
+                {"branchId": "BRANCH-1", "name": "old-branch"},
+            ]
+
+            with self.assertRaises(ValueError):
+                self.project.restore_branch("old-branch")
+
+        mock_api.restore_branch.assert_not_called()
+
+    def test_api_failure_is_returned_to_the_caller(self):
+        """A False from the API layer is passed through rather than raised."""
+        with patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock) as mock_api:
+            mock_api.list_archived_branches.return_value = [
+                {"branchId": "BRANCH-1", "name": "old-branch"},
+            ]
+            mock_api.restore_branch.return_value = False
+
+            self.assertFalse(self.project.restore_branch("BRANCH-1"))
+
+
+class DiffBranchTest(unittest.TestCase):
+    """Tests for the diff_branch method."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "main"
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def _make_branches(self, entries):
+        """Build a branches dict from a list of (name, branchId, extras) tuples."""
+        branches = {}
+        for name, branch_id, extras in entries:
+            meta = {"branchId": branch_id}
+            meta.update(extras)
+            branches[name] = meta
+        return branches
+
+    def _make_topic(self, resource_id, name, content):
+        """Create a Topic with all required fields."""
+        return Topic(
+            resource_id=resource_id,
+            name=name,
+            actions="",
+            content=content,
+            example_queries=[],
+        )
+
+    def test_on_main_with_no_branch_name_raises_value_error(self):
+        """Calling diff_branch() while on main without specifying a branch raises ValueError."""
+        self.project.branch_id = "main"
+        self.mock_api.get_branches.return_value = self._make_branches([("main", "main", {})])
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.diff_branch()
+        self.assertIn("Cannot diff main branch", str(ctx.exception))
+
+    def test_named_branch_not_found_raises_value_error(self):
+        """Specifying a branch name that doesn't exist raises ValueError."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [("main", "main", {}), ("feature-a", "branch-a-id", {})]
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.diff_branch(branch_name="nonexistent")
+        self.assertIn("does not exist", str(ctx.exception))
+
+    def test_happy_path_returns_diffs(self):
+        """diff_branch returns diffs between fork-point parent and current branch state."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-x",
+                    "branch-x-id",
+                    {"parentBranchId": "main", "parentSequence": "42"},
+                ),
+            ]
+        )
+
+        parent_topic = self._make_topic("TOPIC-1", "Greetings", "Hello original")
+        branch_topic = self._make_topic("TOPIC-1", "Greetings", "Hello updated")
+        parent_resources = {Topic: {"TOPIC-1": parent_topic}}
+        branch_resources = {Topic: {"TOPIC-1": branch_topic}}
+
+        self.mock_api.pull_branch_resources.side_effect = [
+            parent_resources,
+            branch_resources,
+        ]
+
+        diffs = self.project.diff_branch(branch_name="feature-x")
+
+        self.assertIsNotNone(diffs)
+        self.assertEqual(len(diffs), 1)
+        topic_path = os.path.join("topics", "greetings.yaml")
+        self.assertIn(topic_path, diffs)
+        self.assertIn("-content: Hello original", diffs[topic_path])
+        self.assertIn("+content: Hello updated", diffs[topic_path])
+
+        # Verify pull_branch_resources called with correct args
+        calls = self.mock_api.pull_branch_resources.call_args_list
+        self.assertEqual(calls[0].args, ("main", 42))
+        self.assertEqual(calls[1].args, ("branch-x-id",))
+
+    def test_no_changes_returns_none(self):
+        """When parent and branch have identical resources, diff_branch returns None."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-y",
+                    "branch-y-id",
+                    {"parentBranchId": "main", "parentSequence": "10"},
+                ),
+            ]
+        )
+
+        topic = self._make_topic("TOPIC-1", "Hours", "9am-5pm")
+        identical_resources = {Topic: {"TOPIC-1": topic}}
+
+        self.mock_api.pull_branch_resources.side_effect = [
+            identical_resources,
+            deepcopy(identical_resources),
+        ]
+
+        result = self.project.diff_branch(branch_name="feature-y")
+        self.assertIsNone(result)
+
+    def test_null_parent_sequence_falls_back_to_latest(self):
+        """When parentSequence is null, pull_branch_resources is called with at_sequence=None."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-z",
+                    "branch-z-id",
+                    {"parentBranchId": "main", "parentSequence": None},
+                ),
+            ]
+        )
+
+        topic = self._make_topic("TOPIC-1", "Hours", "9am-5pm")
+        self.mock_api.pull_branch_resources.side_effect = [
+            {Topic: {"TOPIC-1": topic}},
+            {Topic: {"TOPIC-1": deepcopy(topic)}},
+        ]
+
+        self.project.diff_branch(branch_name="feature-z")
+
+        # Parent projection should be fetched with at_sequence=None (latest)
+        parent_call = self.mock_api.pull_branch_resources.call_args_list[0]
+        self.assertEqual(parent_call.args[0], "main")
+        self.assertIsNone(parent_call.args[1])
+
+    def test_file_path_filtering(self):
+        """Only diffs matching the provided file_paths are returned."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-f",
+                    "branch-f-id",
+                    {"parentBranchId": "main", "parentSequence": "5"},
+                ),
+            ]
+        )
+
+        topic_a = self._make_topic("TOPIC-A", "Topic A", "old A")
+        topic_b = self._make_topic("TOPIC-B", "Topic B", "old B")
+        parent_resources = {
+            Topic: {"TOPIC-A": topic_a, "TOPIC-B": topic_b},
+        }
+
+        topic_a_new = self._make_topic("TOPIC-A", "Topic A", "new A")
+        topic_b_new = self._make_topic("TOPIC-B", "Topic B", "new B")
+        branch_resources = {
+            Topic: {"TOPIC-A": topic_a_new, "TOPIC-B": topic_b_new},
+        }
+
+        self.mock_api.pull_branch_resources.side_effect = [
+            parent_resources,
+            branch_resources,
+        ]
+
+        topic_a_path = os.path.join("topics", "topic_a.yaml")
+        diffs = self.project.diff_branch(branch_name="feature-f", file_paths=[topic_a_path])
+
+        self.assertIsNotNone(diffs)
+        self.assertIn(topic_a_path, diffs)
+        topic_b_path = os.path.join("topics", "topic_b.yaml")
+        self.assertNotIn(topic_b_path, diffs)
+
+    def test_file_path_filtering_no_matches_returns_none(self):
+        """When file_paths filter excludes all diffs, returns None."""
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "feature-g",
+                    "branch-g-id",
+                    {"parentBranchId": "main", "parentSequence": "5"},
+                ),
+            ]
+        )
+
+        topic = self._make_topic("TOPIC-1", "Hours", "old")
+        topic_new = self._make_topic("TOPIC-1", "Hours", "new")
+
+        self.mock_api.pull_branch_resources.side_effect = [
+            {Topic: {"TOPIC-1": topic}},
+            {Topic: {"TOPIC-1": topic_new}},
+        ]
+
+        result = self.project.diff_branch(
+            branch_name="feature-g",
+            file_paths=["nonexistent/file.yaml"],
+        )
+        self.assertIsNone(result)
+
+    def test_current_branch_used_when_no_name_specified(self):
+        """When no branch_name given, uses the current branch."""
+        self.project.branch_id = "branch-cur-id"
+        self.mock_api.branch_id = "branch-cur-id"
+        self.mock_api.get_branches.return_value = self._make_branches(
+            [
+                ("main", "main", {}),
+                (
+                    "current-branch",
+                    "branch-cur-id",
+                    {"parentBranchId": "main", "parentSequence": "7"},
+                ),
+            ]
+        )
+
+        topic = self._make_topic("TOPIC-1", "FAQ", "same")
+        self.mock_api.pull_branch_resources.side_effect = [
+            {Topic: {"TOPIC-1": topic}},
+            {Topic: {"TOPIC-1": deepcopy(topic)}},
+        ]
+
+        result = self.project.diff_branch()
+        self.assertIsNone(result)
+
+        # Should have used the current branch's metadata
+        branch_call = self.mock_api.pull_branch_resources.call_args_list[1]
+        self.assertEqual(branch_call.args, ("branch-cur-id",))
+
+
+class GetBranchesReturnTypeTest(unittest.TestCase):
+    """Tests for the updated get_branches return type (dict of metadata dicts)."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def test_returns_current_branch_name_and_metadata_dict(self):
+        """get_branches returns (current_name, {name: metadata_dict})."""
+        self.project.branch_id = "branch-abc"
+        self.mock_api.branch_id = "branch-abc"
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+            "my-feature": {"branchId": "branch-abc", "parentBranchId": "main"},
+        }
+
+        current_name, branches = self.project.get_branches()
+
+        self.assertEqual(current_name, "my-feature")
+        self.assertIn("main", branches)
+        self.assertIn("my-feature", branches)
+        self.assertEqual(branches["my-feature"]["branchId"], "branch-abc")
+        self.assertEqual(branches["my-feature"]["parentBranchId"], "main")
+
+    def test_returns_none_when_local_branch_not_found(self):
+        """When the local branch_id doesn't match any remote branch, current_name is None."""
+        self.project.branch_id = "deleted-branch-id"
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+        }
+
+        current_name, branches = self.project.get_branches()
+
+        self.assertIsNone(current_name)
+        self.assertEqual(len(branches), 1)
+
+
+class BranchTaggingTest(unittest.TestCase):
+    """Tests for AgentStudioProject.tag_branch and untag_branch."""
+
+    BRANCHES = {
+        "main": {"branchId": "main"},
+        "feature-a": {"branchId": "branch-a", "parentBranchId": "main"},
+    }
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.get_branches.return_value = deepcopy(self.BRANCHES)
+        self.mock_api.tag_branch.return_value = True
+        self.mock_api.untag_branch.return_value = True
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+        self._set_current_branch("branch-a")
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def _set_current_branch(self, branch_id: str) -> None:
+        """Put the project and its API handler on the given branch.
+
+        The ``api_handler`` property re-reads ``branch_id`` from the handler on
+        every access, so both sides have to agree.
+        """
+        self.project.branch_id = branch_id
+        self.mock_api.branch_id = branch_id
+
+    def test_tags_current_branch_by_default(self):
+        """With no branch name the current branch's id is tagged."""
+        self.assertTrue(self.project.tag_branch())
+
+        self.mock_api.tag_branch.assert_called_once_with("branch-a")
+
+    def test_untags_current_branch_by_default(self):
+        """With no branch name the current branch's id is untagged."""
+        self.assertTrue(self.project.untag_branch())
+
+        self.mock_api.untag_branch.assert_called_once_with("branch-a")
+
+    def test_named_branch_is_resolved_to_its_id(self):
+        """An explicit branch name is resolved to the branch id before the API call."""
+        self._set_current_branch("main")
+
+        self.project.tag_branch("feature-a")
+
+        self.mock_api.tag_branch.assert_called_once_with("branch-a")
+
+    def test_rejects_unknown_branch_name(self):
+        """A name that is not in the branch list is refused before any API call."""
+        for method in (self.project.tag_branch, self.project.untag_branch):
+            with self.subTest(method=method.__name__):
+                with self.assertRaises(ValueError) as ctx:
+                    method("no-such-branch")
+
+                self.assertIn("no-such-branch", str(ctx.exception))
+
+        self.mock_api.tag_branch.assert_not_called()
+        self.mock_api.untag_branch.assert_not_called()
+
+    def test_rejects_current_branch_missing_from_branch_list(self):
+        """A local branch id with no remote counterpart is reported rather than tagged."""
+        self._set_current_branch("branch-gone")
+
+        for method in (self.project.tag_branch, self.project.untag_branch):
+            with self.subTest(method=method.__name__):
+                with self.assertRaises(ValueError) as ctx:
+                    method()
+
+                self.assertIn("branch-gone", str(ctx.exception))
+
+    def test_rejects_main_branch(self):
+        """Main carries the live deployment, so it can be neither tagged nor untagged."""
+        self._set_current_branch("main")
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.tag_branch()
+        self.assertIn("Tagging 'main' branch is not supported", str(ctx.exception))
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.untag_branch()
+        self.assertIn("Untagging 'main' branch is not supported", str(ctx.exception))
+
+        self.mock_api.tag_branch.assert_not_called()
+        self.mock_api.untag_branch.assert_not_called()
+
+    def test_rejects_main_when_named_explicitly(self):
+        """Naming main explicitly is refused the same way as being on it."""
+        self._set_current_branch("branch-a")
+
+        with self.assertRaises(ValueError):
+            self.project.tag_branch("main")
+
+        self.mock_api.tag_branch.assert_not_called()
+
+    def test_api_failure_is_returned_to_the_caller(self):
+        """A False from the API layer is passed through, not raised."""
+        self.mock_api.tag_branch.return_value = False
+        self.mock_api.untag_branch.return_value = False
+
+        self.assertFalse(self.project.tag_branch())
+        self.assertFalse(self.project.untag_branch())
+
+
+class UsingSimplifiedDeploymentsTest(unittest.TestCase):
+    """Tests for the AgentStudioProject.using_simplified_deployments property."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "main"
+        self.mock_api.feature_flag_enabled.return_value = True
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def _build_project(self, flag_value: bool) -> AgentStudioProject:
+        """Build a fresh project whose flag resolves to the given value.
+
+        A fresh instance is required per value because the property is cached.
+        """
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        api = MagicMock()
+        api.branch_id = "main"
+        api.feature_flag_enabled.return_value = flag_value
+        project._api_handler = api
+        return project
+
+    def test_reads_the_deployment_simplification_flag_for_this_project(self):
+        """The flag is looked up by key and scoped to the project's region and id."""
+        self.assertTrue(self.project.using_simplified_deployments)
+
+        self.mock_api.feature_flag_enabled.assert_called_once_with(
+            key="deployment-simplification",
+            region=self.project.region,
+            project_id=self.project.project_id,
+            default=False,
+        )
+
+    def test_defaults_to_disabled_when_the_flag_cannot_be_read(self):
+        """`default=False` is passed so an unreachable PostHog gates the new commands off."""
+        self.project.using_simplified_deployments
+
+        self.assertFalse(self.mock_api.feature_flag_enabled.call_args.kwargs["default"])
+
+    def test_returns_the_flag_value(self):
+        """Whatever the flag resolves to is what the property reports."""
+        for value in (True, False):
+            with self.subTest(value=value):
+                project = self._build_project(value)
+
+                self.assertEqual(project.using_simplified_deployments, value)
+
+    def test_flag_is_evaluated_once_and_cached(self):
+        """Repeated reads reuse the cached value instead of re-evaluating the flag."""
+        first = self.project.using_simplified_deployments
+        second = self.project.using_simplified_deployments
+
+        self.assertEqual(first, second)
+        self.mock_api.feature_flag_enabled.assert_called_once()
+
+    def test_does_not_query_deployments_when_flag_is_disabled(self):
+        """Deployments are only fetched once the feature flag is confirmed enabled."""
+        project = self._build_project(flag_value=False)
+
+        self.assertFalse(project.using_simplified_deployments)
+        project.api_handler.get_deployments.assert_not_called()
+
+    def _deployment(self, created_at: str, deleted: bool = False) -> dict:
+        """Build a minimal deployment dict for convergence checks."""
+        return {"created_at": created_at, "deleted": deleted}
+
+    def _set_deployments(self, api: MagicMock, live: list, sandbox: list) -> None:
+        """Stub get_deployments to return a different list per client_env."""
+        api.get_deployments.side_effect = (
+            lambda *args, **kwargs: live if kwargs["client_env"] == "live" else sandbox
+        )
+
+    def test_converges_when_no_deployments_exist_in_either_environment(self):
+        """With no deployments anywhere, there's nothing for live to lag behind."""
+        self._set_deployments(self.mock_api, live=[], sandbox=[])
+
+        self.assertTrue(self.project.using_simplified_deployments)
+
+    def test_convergence_depends_on_relative_head_timestamps(self):
+        """Live is converged once its head is at least as new as sandbox's."""
+        earlier, later = "Mon, 01 Jan 2026 10:00:00 GMT", "Mon, 01 Jan 2026 12:00:00 GMT"
+        cases = {
+            "live newer": ((later, earlier), True),
+            "equal": ((later, later), True),
+            "live older": ((earlier, later), False),
+            "only live has deployments": ((earlier, None), True),
+            "only sandbox has deployments": ((None, earlier), False),
+        }
+        for name, ((live_time, sandbox_time), expected) in cases.items():
+            with self.subTest(name):
+                live = [self._deployment(live_time)] if live_time else []
+                sandbox = [self._deployment(sandbox_time)] if sandbox_time else []
+                self._set_deployments(self.mock_api, live=live, sandbox=sandbox)
+                self.project.__dict__.pop("using_simplified_deployments", None)
+
+                self.assertEqual(self.project.using_simplified_deployments, expected)
+
+    def test_skips_deleted_deployments_to_find_the_head(self):
+        """A deleted deployment at the top of the list is not treated as the head."""
+        self._set_deployments(
+            self.mock_api,
+            live=[
+                self._deployment("Mon, 01 Jan 2026 14:00:00 GMT", deleted=True),
+                self._deployment("Mon, 01 Jan 2026 10:00:00 GMT"),
+            ],
+            sandbox=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT")],
+        )
+
+        # The live head (10:00, ignoring the deleted 14:00 entry) is older than sandbox's (12:00).
+        self.assertFalse(self.project.using_simplified_deployments)
+
+
+class DeploymentModePropertyTest(unittest.TestCase):
+    """Tests for the AgentStudioProject.deployment_mode property."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "main"
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.save_config_patcher.start()
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def test_reads_mode_from_remote_project_config(self):
+        """Each recognised config value maps to the matching enum member."""
+        for value, expected in (
+            ("simple", DeploymentMode.SIMPLE),
+            ("releases", DeploymentMode.RELEASES),
+            ("releases_branches", DeploymentMode.RELEASES_BRANCHES),
+        ):
+            with self.subTest(value=value):
+                self.project._deployment_mode = None
+                self.mock_api.get_project.return_value = {"config": {"deployment_mode": value}}
+
+                self.assertEqual(self.project.deployment_mode, expected)
+
+    def test_defaults_to_releases_when_config_missing(self):
+        """A missing 'config', missing 'deployment_mode', or null config all default to releases."""
+        for payload in (
+            {"projectId": "test_project"},
+            {"config": {"other_setting": True}},
+            {"config": None},
+        ):
+            with self.subTest(payload=payload):
+                self.project._deployment_mode = None
+                self.mock_api.get_project.return_value = payload
+
+                self.assertEqual(self.project.deployment_mode, DeploymentMode.RELEASES)
+
+    def test_mode_is_fetched_once_and_cached(self):
+        """Repeated reads reuse the cached mode instead of re-querying the API."""
+        self.mock_api.get_project.return_value = {"config": {"deployment_mode": "simple"}}
+
+        first = self.project.deployment_mode
+        second = self.project.deployment_mode
+
+        self.assertEqual(first, second)
+        self.mock_api.get_project.assert_called_once()
+
+
+class CreateBranchDeploymentModeTest(unittest.TestCase):
+    """Tests for the deployment-mode guards in AgentStudioProject.create_branch."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.create_branch.return_value = "new-branch-id"
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.mock_save_config = self.save_config_patcher.start()
+        self._set_current_branch("main")
+
+    def tearDown(self):
+        self.save_config_patcher.stop()
+
+    def _set_deployment_mode(self, mode: str) -> None:
+        """Make the remote project report the given deployment mode."""
+        self.mock_api.get_project.return_value = {"config": {"deployment_mode": mode}}
+
+    def _set_current_branch(self, branch_id: str) -> None:
+        """Put the project and its API handler on the given branch."""
+        self.project.branch_id = branch_id
+        self.mock_api.branch_id = branch_id
+
+    # -- simple mode: at most one branch may exist at a time --
+
+    def test_simple_mode_creates_branch_when_only_main_exists(self):
+        """In simple mode a branch can be created while main is the only branch."""
+        self._set_deployment_mode("simple")
+        self._set_current_branch("main")
+        self.mock_api.get_branches.return_value = {"main": {"branchId": "main"}}
+
+        new_branch_id = self.project.create_branch("my-feature")
+
+        self.assertEqual(new_branch_id, "new-branch-id")
+        self.mock_api.create_branch.assert_called_once_with("my-feature", "main")
+        self.assertEqual(self.project.branch_id, "new-branch-id")
+        self.mock_save_config.assert_called()
+
+    def test_simple_mode_rejects_second_branch(self):
+        """In simple mode a second branch is refused while another branch exists."""
+        self._set_deployment_mode("simple")
+        self._set_current_branch("main")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+            "existing": {"branchId": "branch-existing", "parentBranchId": "main"},
+        }
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.create_branch("my-feature")
+
+        self.assertIn("simple deployment mode", str(ctx.exception))
+        self.mock_api.create_branch.assert_not_called()
+        self.assertEqual(self.project.branch_id, "main")
+
+    # -- releases mode: branches may only be created from main --
+
+    def test_releases_mode_creates_branch_from_main(self):
+        """In releases mode main is a valid source branch."""
+        self._set_deployment_mode("releases")
+        self._set_current_branch("main")
+
+        new_branch_id = self.project.create_branch("my-feature")
+
+        self.assertEqual(new_branch_id, "new-branch-id")
+        self.mock_api.create_branch.assert_called_once_with("my-feature", "main")
+        self.assertEqual(self.project.branch_id, "new-branch-id")
+
+    def test_releases_mode_rejects_non_main_source_branch(self):
+        """In releases mode creating a branch from another branch is refused."""
+        self._set_deployment_mode("releases")
+        self._set_current_branch("branch-feature-a")
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.create_branch("my-feature")
+
+        self.assertIn("releases deployment mode", str(ctx.exception))
+        self.mock_api.create_branch.assert_not_called()
+        self.assertEqual(self.project.branch_id, "branch-feature-a")
+
+    # -- releases_branches mode: source branch must be a direct child of main --
+
+    def test_releases_branches_mode_creates_branch_from_direct_child_of_main(self):
+        """A branch whose parent is main may be used as the source branch."""
+        self._set_deployment_mode("releases_branches")
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+            "feature-a": {"branchId": "branch-feature-a", "parentBranchId": "main"},
+        }
+
+        new_branch_id = self.project.create_branch("my-feature")
+
+        self.assertEqual(new_branch_id, "new-branch-id")
+        self.mock_api.create_branch.assert_called_once_with("my-feature", "branch-feature-a")
+        self.assertEqual(self.project.branch_id, "new-branch-id")
+        self.mock_save_config.assert_called()
+
+    def test_releases_branches_mode_rejects_grandchild_of_main(self):
+        """A branch whose parent is not main is too deep to branch from again."""
+        self._set_deployment_mode("releases_branches")
+        self._set_current_branch("branch-feature-a-child")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main"},
+            "feature-a": {"branchId": "branch-feature-a", "parentBranchId": "main"},
+            "feature-a-child": {
+                "branchId": "branch-feature-a-child",
+                "parentBranchId": "branch-feature-a",
+            },
+        }
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.create_branch("my-feature")
+
+        self.assertIn("depth", str(ctx.exception))
+        self.mock_api.create_branch.assert_not_called()
+
+    def test_releases_branches_mode_rejects_branch_missing_from_remote(self):
+        """A local branch that no longer exists remotely cannot be branched from."""
+        self._set_deployment_mode("releases_branches")
+        self._set_current_branch("branch-deleted")
+        self.mock_api.get_branches.return_value = {"main": {"branchId": "main"}}
+
+        with self.assertRaises(ValueError):
+            self.project.create_branch("my-feature")
+
+        self.mock_api.create_branch.assert_not_called()
+
+    def test_releases_branches_mode_creates_branch_from_main(self):
+        """Main itself may be used as the source branch, even though it has no parent."""
+        self._set_deployment_mode("releases_branches")
+        self._set_current_branch("main")
+        self.mock_api.get_branches.return_value = {"main": {"branchId": "main", "name": "main"}}
+
+        new_branch_id = self.project.create_branch("my-feature")
+
+        self.assertEqual(new_branch_id, "new-branch-id")
+        self.mock_api.create_branch.assert_called_once_with("my-feature", "main")
+        self.assertEqual(self.project.branch_id, "new-branch-id")
+        self.mock_save_config.assert_called()
+
+    # -- source_branch_name: create from a branch other than the current one --
+
+    def test_named_source_branch_overrides_the_current_branch(self):
+        """Passing source_branch_name resolves that branch's id and validates against it,
+        not against whatever branch the user currently has checked out."""
+        self._set_deployment_mode("releases_branches")
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {"branchId": "branch-feature-a", "parentBranchId": "main"},
+            "feature-b": {"branchId": "branch-feature-b", "parentBranchId": "main"},
+        }
+
+        new_branch_id = self.project.create_branch("my-feature", source_branch_name="feature-b")
+
+        self.assertEqual(new_branch_id, "new-branch-id")
+        self.mock_api.create_branch.assert_called_once_with("my-feature", "branch-feature-b")
+        self.assertEqual(self.project.branch_id, "new-branch-id")
+
+    def test_unknown_source_branch_is_rejected_without_creating(self):
+        """Naming a branch that does not exist remotely fails before anything is created."""
+        self._set_deployment_mode("releases_branches")
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {"main": {"branchId": "main"}}
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.create_branch("my-feature", source_branch_name="no-such-branch")
+
+        self.assertEqual(str(ctx.exception), "Branch 'no-such-branch' does not exist.")
+        self.mock_api.create_branch.assert_not_called()
+        self.assertEqual(self.project.branch_id, "branch-feature-a")
+
+    def test_deployment_mode_guards_validate_the_named_source_not_the_current_branch(self):
+        """The same per-mode guards apply, but keyed off source_branch_name when given."""
+        branches = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {"branchId": "branch-feature-a", "parentBranchId": "main"},
+            "feature-b": {"branchId": "branch-feature-b", "parentBranchId": "main"},
+            "feature-b-child": {
+                "branchId": "branch-feature-b-child",
+                "parentBranchId": "branch-feature-b",
+            },
+        }
+        cases = {
+            "releases allows main by name from elsewhere": ("releases", "main", None),
+            "releases rejects a named non-main source": (
+                "releases",
+                "feature-b",
+                "releases deployment mode",
+            ),
+            "releases_branches rejects a named grandchild of main": (
+                "releases_branches",
+                "feature-b-child",
+                "depth",
+            ),
+        }
+        for description, (mode, source_branch_name, expected_error) in cases.items():
+            with self.subTest(description):
+                self.project._deployment_mode = None  # deployment_mode caches on first access
+                self._set_deployment_mode(mode)
+                self._set_current_branch("branch-feature-a")
+                self.mock_api.get_branches.return_value = branches
+                self.mock_api.create_branch.reset_mock()
+
+                if expected_error:
+                    with self.assertRaises(ValueError) as ctx:
+                        self.project.create_branch(
+                            "my-feature", source_branch_name=source_branch_name
+                        )
+                    self.assertIn(expected_error, str(ctx.exception))
+                    self.mock_api.create_branch.assert_not_called()
+                else:
+                    self.project.create_branch("my-feature", source_branch_name=source_branch_name)
+                    self.mock_api.create_branch.assert_called_once_with("my-feature", "main")
+
+
+class MergeBranchTest(unittest.TestCase):
+    """Tests for AgentStudioProject.merge_branch."""
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.merge_branch.return_value = (True, [], [])
+        self.project._api_handler = self.mock_api
+        self.save_config_patcher = patch.object(AgentStudioProject, "save_config")
+        self.mock_save_config = self.save_config_patcher.start()
+        # merge_branch refuses to run with uncommitted changes; default to a clean tree.
+        self.get_diffs_patcher = patch.object(AgentStudioProject, "get_diffs", return_value={})
+        self.mock_get_diffs = self.get_diffs_patcher.start()
+        # A successful merge switches to the parent branch; assert on the call, don't sync.
+        self.switch_branch_patcher = patch.object(
+            AgentStudioProject, "switch_branch", return_value=(True, {})
+        )
+        self.mock_switch_branch = self.switch_branch_patcher.start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _set_current_branch(self, branch_id: str) -> None:
+        """Put the project and its API handler on the given branch."""
+        self.project.branch_id = branch_id
+        self.mock_api.branch_id = branch_id
+
+    def test_merging_direct_child_of_main_switches_to_main(self):
+        """A branch whose parent is main lands the user back on main after merging."""
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {
+                "branchId": "branch-feature-a",
+                "name": "feature-a",
+                "parentBranchId": "main",
+            },
+        }
+
+        result = self.project.merge_branch("ship it")
+
+        self.assertEqual(result, (True, [], []))
+        self.mock_api.merge_branch.assert_called_once_with(
+            message="ship it", conflict_resolutions=None
+        )
+        self.mock_switch_branch.assert_called_once_with("main", force=True)
+
+    def test_merging_with_unresolvable_parent_falls_back_to_main(self):
+        """If parentBranchId is missing/unresolvable, the merge still succeeds and lands on main."""
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {
+                "branchId": "branch-feature-a",
+                "name": "feature-a",
+                # No parentBranchId — simulates a branch created before lineage tracking existed.
+            },
+        }
+
+        result = self.project.merge_branch("ship it")
+
+        self.assertEqual(result, (True, [], []))
+        self.mock_switch_branch.assert_called_once_with("main", force=True)
+
+    def test_merging_grandchild_switches_to_its_parent_branch(self):
+        """A branch nested under a release branch lands on that release branch, not main."""
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "Release 1": {
+                "branchId": "branch-release-1",
+                "name": "Release 1",
+                "parentBranchId": "main",
+            },
+            "feature-a": {
+                "branchId": "branch-feature-a",
+                "name": "feature-a",
+                "parentBranchId": "branch-release-1",
+            },
+        }
+
+        result = self.project.merge_branch("ship it")
+
+        self.assertEqual(result, (True, [], []))
+        self.mock_switch_branch.assert_called_once_with("Release 1", force=True)
+
+    def test_failed_merge_returns_conflicts_and_stays_on_branch(self):
+        """When the platform reports a failure, conflicts pass through and no switch happens."""
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {
+                "branchId": "branch-feature-a",
+                "name": "feature-a",
+                "parentBranchId": "main",
+            },
+        }
+        conflicts = [{"path": ["flows", "f1", "name"], "oursValue": "a", "theirsValue": "b"}]
+        errors = [{"path": ["flows", "f1"], "message": "boom"}]
+        self.mock_api.merge_branch.return_value = (False, conflicts, errors)
+
+        success, returned_conflicts, returned_errors = self.project.merge_branch("ship it")
+
+        self.assertFalse(success)
+        self.assertEqual(returned_conflicts, conflicts)
+        self.assertEqual(returned_errors, errors)
+        self.mock_switch_branch.assert_not_called()
+
+    def test_merging_from_main_is_rejected(self):
+        """Main has nothing to merge into, so merging from it is refused."""
+        self._set_current_branch("main")
+        self.mock_api.get_branches.return_value = {"main": {"branchId": "main", "name": "main"}}
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.merge_branch("ship it")
+
+        self.assertIn("main", str(ctx.exception))
+        self.mock_api.merge_branch.assert_not_called()
+
+    def test_merging_branch_missing_from_remote_is_rejected(self):
+        """A local branch that no longer exists remotely cannot be merged."""
+        self._set_current_branch("branch-deleted")
+        self.mock_api.get_branches.return_value = {"main": {"branchId": "main", "name": "main"}}
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.merge_branch("ship it")
+
+        self.assertIn("branch-deleted", str(ctx.exception))
+        self.mock_api.merge_branch.assert_not_called()
+
+    def test_merging_with_uncommitted_changes_is_rejected(self):
+        """Local edits must be pushed before merging."""
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {
+                "branchId": "branch-feature-a",
+                "name": "feature-a",
+                "parentBranchId": "main",
+            },
+        }
+        self.mock_get_diffs.return_value = {"flows/my_flow.yaml": "some diff"}
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.merge_branch("ship it")
+
+        self.assertIn("uncommitted", str(ctx.exception))
+        self.mock_api.merge_branch.assert_not_called()
+
+    def test_conflict_resolution_without_strategy_is_rejected(self):
+        """Every conflict resolution must say how the conflict should be resolved."""
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {
+                "branchId": "branch-feature-a",
+                "name": "feature-a",
+                "parentBranchId": "main",
+            },
+        }
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.merge_branch("ship it", conflict_resolutions=[{"path": ["flows", "f1"]}])
+
+        self.assertIn("strategy", str(ctx.exception))
+        self.mock_api.merge_branch.assert_not_called()
+
+    def test_conflict_resolution_with_unknown_strategy_is_rejected(self):
+        """Only 'ours', 'theirs', and 'base' are valid resolution strategies."""
+        self._set_current_branch("branch-feature-a")
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": "main", "name": "main"},
+            "feature-a": {
+                "branchId": "branch-feature-a",
+                "name": "feature-a",
+                "parentBranchId": "main",
+            },
+        }
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.merge_branch(
+                "ship it",
+                conflict_resolutions=[{"path": ["flows", "f1"], "strategy": "mine"}],
+            )
+
+        self.assertIn("mine", str(ctx.exception))
+        self.mock_api.merge_branch.assert_not_called()
+
+
+class RtcPullEnvTest(unittest.TestCase):
+    """Tests for AgentStudioProject.rtc_pull_env writing RTC files to disk."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project = AgentStudioProject.from_dict(deepcopy(EMPTY_PROJECT_DATA), self.temp_dir)
+        self.env_dir = os.path.join(self.temp_dir, "real_time_configuration", "draft_and_sandbox")
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _read_json(self, file_name: str) -> object:
+        with open(os.path.join(self.env_dir, file_name), "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    def test_pull_env_writes_schema_and_data_returned_by_api(self):
+        """Schema and variables from the API are written to schema.json and data.json."""
+        config = {
+            "schema": {"type": "object", "properties": {"flag": {"type": "boolean"}}},
+            "variables": {"flag": True},
+            "lastUpdated": "2026-01-01T00:00:00Z",
+        }
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            result = self.project.rtc_pull_env("sandbox")
+
+        self.assertEqual(result["environment"], "sandbox")
+        self.assertEqual(self._read_json("schema.json"), config["schema"])
+        self.assertEqual(self._read_json("data.json"), config["variables"])
+
+    def test_pull_env_writes_empty_dicts_when_api_returns_null(self):
+        """A project with no RTC configured writes {} to disk, never literal null.
+
+        The API returns explicit JSON null (not a missing key) for schema/variables when
+        RTC has never been configured, and null is not valid content for these files.
+        """
+        config = {"schema": None, "variables": None, "lastUpdated": "2026-01-01T00:00:00Z"}
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            self.project.rtc_pull_env("sandbox")
+
+        self.assertEqual(self._read_json("schema.json"), {})
+        self.assertEqual(self._read_json("data.json"), {})
+
+    def test_pull_env_metadata_records_empty_dicts_when_api_returns_null(self):
+        """The stored baseline metadata is {} rather than being left unset on null."""
+        config = {"schema": None, "variables": None, "lastUpdated": "2026-01-01T00:00:00Z"}
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            self.project.rtc_pull_env("sandbox")
+
+        self.assertEqual(self.project.rtc_metadata["sandbox"]["base_schema"], {})
+        self.assertEqual(self.project.rtc_metadata["sandbox"]["base_data"], {})
+        self.assertEqual(
+            self.project.rtc_metadata["sandbox"]["last_updated"], "2026-01-01T00:00:00Z"
+        )
+
+    def test_pull_env_null_config_round_trips_through_rtc_load_local(self):
+        """Files written from a null API response can be read back as empty dicts."""
+        config = {"schema": None, "variables": None, "lastUpdated": "2026-01-01T00:00:00Z"}
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            self.project.rtc_pull_env("sandbox")
+
+        loaded = self.project.rtc_load_local("sandbox")
+
+        self.assertEqual(loaded, {"schema": {}, "variables": {}})
+
+    def test_pull_env_schema_only_does_not_write_data_file(self):
+        """schema_only writes schema.json and leaves data.json absent."""
+        config = {"schema": {"type": "object"}, "variables": {"flag": True}, "lastUpdated": "T1"}
+
+        with patch.object(AgentStudioProject, "rtc_fetch_config", return_value=config):
+            result = self.project.rtc_pull_env("sandbox", schema_only=True)
+
+        self.assertNotIn("data_file", result)
+        self.assertTrue(os.path.exists(os.path.join(self.env_dir, "schema.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.env_dir, "data.json")))
+
+
+class SyncIdsWithSandboxTest(unittest.TestCase):
+    """Tests for sync_ids_with_sandbox adopting sandbox resource ids."""
+
+    LOCAL_FLOW_ID = "FLOW_CONFIG-test_flow"
+    SANDBOX_FLOW_ID = "FLOW-sandbox-assigned-id"
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.project.branch_id = "branch-1"
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "branch-1"
+        self.mock_api.send_queued_commands.return_value = True
+        self.project._api_handler = self.mock_api
+        patch.object(AgentStudioProject, "save_config").start()
+        self.addCleanup(patch.stopall)
+
+    def _sandbox_resources_with_reassigned_flow_id(self, without_start_step: bool = False):
+        """Sandbox resources identical to local, except test_flow has a different flow id.
+
+        Mirrors a flow that was created on main after the branch was cut: the files are the
+        same, but the platform assigned the flow a new id, so the sandbox steps carry a
+        `{sandbox_flow_id}_{step_id}` composite resource id.
+
+        Args:
+            without_start_step: omit the start step from the sandbox, so it looks like a
+                step added on this branch with no sandbox counterpart.
+        """
+        sandbox = deepcopy(self.project.resources)
+        for resource_type, resources_by_id in sandbox.items():
+            rekeyed = {}
+            for resource in resources_by_id.values():
+                if isinstance(resource, FlowConfig) and resource.resource_id == self.LOCAL_FLOW_ID:
+                    resource.resource_id = self.SANDBOX_FLOW_ID
+                elif getattr(resource, "flow_id", None) == self.LOCAL_FLOW_ID:
+                    if without_start_step and resource.resource_id.endswith("_start_step"):
+                        continue
+                    resource.flow_id = self.SANDBOX_FLOW_ID
+                    resource.resource_id = resource.resource_id.replace(
+                        self.LOCAL_FLOW_ID, self.SANDBOX_FLOW_ID, 1
+                    )
+                rekeyed[resource.resource_id] = resource
+            sandbox[resource_type] = rekeyed
+        return sandbox
+
+    def test_start_step_is_bare_step_id_when_sandbox_reassigned_the_flow_id(self):
+        """The synced flow config's start_step keeps only the step id, with no flow id prefix.
+
+        start_step is stored as a name locally and resolved back to an id by stripping the
+        flow id prefix off the step's composite resource id. If the mapping's flow_id is the
+        stale local one while the step id has already moved to the sandbox flow id, nothing
+        is stripped and the platform rejects the flow with "Start step ID does not exist".
+        """
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id()
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+        ):
+            self.assertTrue(self.project.sync_ids_with_sandbox())
+
+        synced_flow = self.project.resources[FlowConfig][self.SANDBOX_FLOW_ID]
+        self.assertEqual(synced_flow.start_step, "start_step")
+
+    def test_start_step_is_bare_step_id_when_the_start_step_is_new_on_the_branch(self):
+        """A start step with no sandbox counterpart is still re-pointed at the synced flow id.
+
+        A step added on the branch keeps its `{local_flow_id}_{step_id}` id, so if only
+        flow_id is translated the prefix and flow_id disagree and the flow id stays welded
+        onto start_step exactly as it did in the unfixed case.
+        """
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id(
+            without_start_step=True
+        )
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+        ):
+            self.assertTrue(self.project.sync_ids_with_sandbox())
+
+        synced_flow = self.project.resources[FlowConfig][self.SANDBOX_FLOW_ID]
+        self.assertEqual(synced_flow.start_step, "start_step")
+
+    def test_branch_only_step_is_rekeyed_onto_the_sandbox_flow_id(self):
+        """A step added on the branch adopts the sandbox flow id in its composite id."""
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id(
+            without_start_step=True
+        )
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+        ):
+            self.project.sync_ids_with_sandbox()
+
+        steps = self.project.resources[FlowStep]
+        self.assertIn(f"{self.SANDBOX_FLOW_ID}_start_step", steps)
+        self.assertNotIn(f"{self.LOCAL_FLOW_ID}_start_step", steps)
+        # No step is left straddling the two flow ids.
+        self.assertEqual(
+            [
+                step.resource_id
+                for step in steps.values()
+                if step.flow_id == self.SANDBOX_FLOW_ID
+                and not step.resource_id.startswith(f"{self.SANDBOX_FLOW_ID}_")
+            ],
+            [],
+        )
+
+    def test_two_flows_reassigned_at_once_do_not_contaminate_each_other(self):
+        """Each flow's steps are re-keyed onto their own flow's synced id.
+
+        `FLOW_CONFIG-test_flow` is a string prefix of `FLOW_CONFIG-test_flow_with_punctuation`,
+        so a rewrite that matched flow ids by substring rather than per-resource could strip
+        the wrong prefix and move one flow's steps under the other.
+        """
+        other_local_id = "FLOW_CONFIG-test_flow_with_punctuation"
+        other_sandbox_id = "FLOW-sandbox-other-id"
+        renames = {self.LOCAL_FLOW_ID: self.SANDBOX_FLOW_ID, other_local_id: other_sandbox_id}
+
+        sandbox = deepcopy(self.project.resources)
+        for resource_type, resources_by_id in sandbox.items():
+            rekeyed = {}
+            for resource in resources_by_id.values():
+                if isinstance(resource, FlowConfig) and resource.resource_id in renames:
+                    resource.resource_id = renames[resource.resource_id]
+                elif getattr(resource, "flow_id", None) in renames:
+                    old_flow_id = resource.flow_id
+                    resource.flow_id = renames[old_flow_id]
+                    if resource.resource_id.startswith(f"{old_flow_id}_"):
+                        resource.resource_id = (
+                            f"{resource.flow_id}_"
+                            f"{resource.resource_id.removeprefix(f'{old_flow_id}_')}"
+                        )
+                rekeyed[resource.resource_id] = resource
+            sandbox[resource_type] = rekeyed
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox
+        ):
+            self.assertTrue(self.project.sync_ids_with_sandbox())
+
+        self.assertEqual(
+            self.project.resources[FlowConfig][self.SANDBOX_FLOW_ID].start_step, "start_step"
+        )
+        self.assertEqual(
+            self.project.resources[FlowConfig][other_sandbox_id].start_step, "welcome_step"
+        )
+        # Every step sits under its own flow's synced id, with a matching composite prefix.
+        for step in self.project.resources[FlowStep].values():
+            if step.flow_id in renames.values():
+                self.assertTrue(
+                    step.resource_id.startswith(f"{step.flow_id}_"),
+                    f"{step.resource_id} does not sit under its flow {step.flow_id}",
+                )
+
+    def test_flow_scoped_function_ids_are_not_rewritten(self):
+        """Flow-scoped functions keep their ids: only composite step ids embed the flow id.
+
+        A Function belonging to a flow carries a flow_id but its resource_id
+        (`FUNCTION-process_data`) does not embed it. Prepending the synced flow id to such
+        an id would corrupt it, so the rewrite must apply only to composite ids.
+        """
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id()
+        flow_scoped_function_ids = {
+            function.resource_id
+            for function in self.project.resources[Function].values()
+            if getattr(function, "flow_id", None) == self.LOCAL_FLOW_ID
+        }
+        self.assertTrue(flow_scoped_function_ids, "fixture must have flow-scoped functions")
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+        ):
+            self.project.sync_ids_with_sandbox()
+
+        synced_function_ids = set(self.project.resources[Function])
+        self.assertTrue(flow_scoped_function_ids <= synced_function_ids)
+        self.assertEqual(
+            [rid for rid in synced_function_ids if rid.startswith(f"{self.SANDBOX_FLOW_ID}_")],
+            [],
+        )
+
+    def test_flow_and_steps_adopt_sandbox_ids(self):
+        """Both the flow config and its steps are re-keyed onto the sandbox flow id."""
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id()
+
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+        ):
+            self.project.sync_ids_with_sandbox()
+
+        self.assertIn(self.SANDBOX_FLOW_ID, self.project.resources[FlowConfig])
+        self.assertNotIn(self.LOCAL_FLOW_ID, self.project.resources[FlowConfig])
+
+        start_step = self.project.resources[FlowStep][f"{self.SANDBOX_FLOW_ID}_start_step"]
+        self.assertEqual(start_step.flow_id, self.SANDBOX_FLOW_ID)
+
+    def test_ids_unchanged_when_sandbox_ids_already_match(self):
+        """A sandbox whose ids already match the branch leaves local resource ids alone."""
+        with patch.object(
+            AgentStudioProject,
+            "get_remote_resources_by_name",
+            return_value=deepcopy(self.project.resources),
+        ):
+            self.assertTrue(self.project.sync_ids_with_sandbox())
+
+        self.assertIn(self.LOCAL_FLOW_ID, self.project.resources[FlowConfig])
+        self.assertEqual(
+            self.project.resources[FlowConfig][self.LOCAL_FLOW_ID].start_step, "start_step"
+        )
+
+    def test_no_op_sync_sends_no_commands(self):
+        """A sandbox identical to the branch stages nothing and sends no commands.
+
+        Every command in a sync batch is another chance for the platform to reject the
+        batch, so a sync with nothing to change must be a genuine no-op.
+        """
+        with patch.object(
+            AgentStudioProject,
+            "get_remote_resources_by_name",
+            return_value=deepcopy(self.project.resources),
+        ):
+            self.assertTrue(self.project.sync_ids_with_sandbox())
+
+        self.assertFalse(self.mock_api.send_queued_commands.called)
+
+    def test_content_change_is_still_detected(self):
+        """A resource whose stored content differs from disk is still staged.
+
+        Guards the no-op assertion above against passing for the wrong reason: sync must
+        stage real differences rather than having been made blind to them.
+        """
+        staged = {}
+        self.project.resources[FlowStep][
+            f"{self.LOCAL_FLOW_ID}_start_step"
+        ].prompt = "a prompt that does not match the file on disk"
+
+        with (
+            patch.object(
+                AgentStudioProject,
+                "get_remote_resources_by_name",
+                return_value=deepcopy(self.project.resources),
+            ),
+            patch.object(
+                AgentStudioProject,
+                "_stage_commands",
+                side_effect=lambda _s, _n, updated, _d: staged.update(updated=updated),
+            ),
+        ):
+            self.project.sync_ids_with_sandbox()
+
+        updated_ids = {rid for by_id in staged.get("updated", {}).values() for rid in by_id}
+        self.assertIn(f"{self.LOCAL_FLOW_ID}_start_step", updated_ids)
+
+    def test_raises_on_main_branch(self):
+        """Syncing ids while on main is not allowed."""
+        self.project.branch_id = "main"
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.sync_ids_with_sandbox()
+        self.assertIn("Cannot sync ids while on main branch", str(ctx.exception))
+
+    def test_raises_when_there_are_uncommitted_changes(self):
+        """Uncommitted local changes must be committed before ids can be synced."""
+        with patch.object(
+            AgentStudioProject, "get_diffs", return_value={"topics/topic_1.yaml": "a diff"}
+        ):
+            with self.assertRaises(ValueError) as ctx:
+                self.project.sync_ids_with_sandbox()
+        self.assertIn("uncommitted changes", str(ctx.exception))
+
+
+class TestProjectFixtureIntegrityTest(unittest.TestCase):
+    """The test_project fixture must look like a status file a real project would write.
+
+    A real status file is written by save_config from live resources, so every stored
+    resource matches what reading the same file off disk produces. When the fixture drifts
+    from that, tests exercise states that cannot occur in practice — and, worse, hide the
+    ones that can: sync_ids_with_sandbox decides what changed by comparing whole resources,
+    so stored values that disagree with disk make a no-op sync look like a real change.
+    """
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mappings = self.project._make_resource_mappings(self.project.resources)
+        self.by_relative_path = {
+            os.path.relpath(mapping.file_path, self.project.root_path): mapping
+            for mapping in self.mappings
+        }
+
+    def test_stored_ids_match_their_resource_ids(self):
+        """Each resource is stored under a key equal to its own resource_id."""
+        mismatched = [
+            (resource_type.__name__, stored_id, resource.resource_id)
+            for resource_type, by_id in self.project.resources.items()
+            for stored_id, resource in by_id.items()
+            if resource.resource_id != stored_id
+        ]
+        self.assertEqual(mismatched, [])
+
+    def test_stored_resources_match_a_disk_read(self):
+        """Every stored resource equals the resource read back off disk."""
+        compared = 0
+        differing = []
+        for resource_type, by_id in self.project.resources.items():
+            for stored_id, stored in by_id.items():
+                mapping = self.by_relative_path.get(stored.file_path)
+                if mapping is None:
+                    continue
+                fresh = self.project.read_local_resource(
+                    resource=mapping, resource_mappings=self.mappings
+                )
+                if not dataclasses.is_dataclass(fresh):
+                    continue
+                compared += 1
+                for field in dataclasses.fields(fresh):
+                    if not field.compare:
+                        continue
+                    stored_value = getattr(stored, field.name, None)
+                    disk_value = getattr(fresh, field.name, None)
+                    if stored_value != disk_value:
+                        differing.append(
+                            f"{resource_type.__name__} {stored_id}.{field.name}: "
+                            f"stored={stored_value!r} disk={disk_value!r}"
+                        )
+
+        # Without this the test passes vacuously if the path keying ever breaks.
+        self.assertEqual(compared, len(self.mappings))
+        self.assertEqual(differing, [])
 
 
 if __name__ == "__main__":

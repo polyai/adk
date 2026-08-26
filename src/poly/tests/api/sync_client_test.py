@@ -171,5 +171,49 @@ class RestoreBranch(unittest.TestCase):
         self.assertFalse(result)
 
 
+class TagBranch(unittest.TestCase):
+    """Tests for SyncClientHandler.tag_branch."""
+
+    def test_successful_tag_returns_true(self):
+        """A successful SDK tag call returns True."""
+        handler = build_handler()
+
+        result = handler.tag_branch("branch-1")
+
+        self.assertTrue(result)
+        handler._sdk.tag_branch.assert_called_once_with("branch-1")
+
+    def test_api_error_returns_false(self):
+        """A SourcererAPIError during tagging returns False rather than propagating."""
+        handler = build_handler()
+        handler._sdk.tag_branch.side_effect = SourcererAPIError("tag failed")
+
+        result = handler.tag_branch("branch-1")
+
+        self.assertFalse(result)
+
+
+class UntagBranch(unittest.TestCase):
+    """Tests for SyncClientHandler.untag_branch."""
+
+    def test_successful_untag_returns_true(self):
+        """A successful SDK untag call returns True."""
+        handler = build_handler()
+
+        result = handler.untag_branch("branch-1")
+
+        self.assertTrue(result)
+        handler._sdk.untag_branch.assert_called_once_with("branch-1")
+
+    def test_api_error_returns_false(self):
+        """A SourcererAPIError during untagging returns False rather than propagating."""
+        handler = build_handler()
+        handler._sdk.untag_branch.side_effect = SourcererAPIError("untag failed")
+
+        result = handler.untag_branch("branch-1")
+
+        self.assertFalse(result)
+
+
 if __name__ == "__main__":
     unittest.main()

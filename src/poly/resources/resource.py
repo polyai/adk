@@ -136,6 +136,8 @@ class Resource(BaseResource, ABC):
     def read_to_raw(cls, file_path: str, **kwargs) -> str:
         """Read the resource from a local path."""
         contents = cls.read_from_file(file_path)
+        if utils.contains_merge_conflict(contents):
+            raise utils.MergeConflictError(file_path)
         return cls.from_pretty(contents, file_path=file_path, **kwargs)
 
     @abstractmethod
@@ -352,8 +354,8 @@ class YamlResource(Resource, ABC):
     def from_pretty_dict(
         cls, yaml_dict: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
     ) -> dict:
-        """Replace resource names with IDs in a parsed YAML dict. Override in subclasses."""
-        return yaml_dict
+        """Replace resource names with IDs in a parsed YAML dict, returning a new dict."""
+        return utils.replace_resource_names_with_ids_in_data(yaml_dict, resource_mappings or [])
 
     @classmethod
     def from_pretty(
@@ -369,17 +371,23 @@ class YamlResource(Resource, ABC):
         return utils.dump_yaml(yaml_dict)
 
     @classmethod
+    def _read_yaml_dict(cls, file_path: str) -> dict:
+        """Read and parse the resource's YAML file into a dict."""
+        contents = cls.read_from_file(file_path)
+        if utils.contains_merge_conflict(contents):
+            raise utils.MergeConflictError(file_path)
+        try:
+            return utils.load_yaml(contents) or {}
+        except Exception as e:
+            raise ValueError(f"Error loading YAML file: {file_path}") from e
+
+    @classmethod
     def read_local_resource(
         cls, file_path: str, resource_id: str, resource_name: str, **kwargs
     ) -> "YamlResource":
         """Read a local YAML resource from the given file path."""
-        contents = cls.read_from_file(file_path)
         resource_mappings = kwargs.pop("resource_mappings", None)
-        contents = utils.replace_resource_names_with_ids(contents, resource_mappings or [])
-        try:
-            yaml_dict = utils.load_yaml(contents) or {}
-        except Exception as e:
-            raise ValueError(f"Error loading YAML file: {file_path}") from e
+        yaml_dict = cls._read_yaml_dict(file_path)
         yaml_dict = cls.from_pretty_dict(
             yaml_dict,
             resource_mappings=resource_mappings,
@@ -478,6 +486,8 @@ class MultiResourceYamlResource(YamlResource, ABC):
         if cached is not None and cached[0] == current_mtime:
             return cached[1]
         contents = super().read_from_file(true_file_path)
+        if utils.contains_merge_conflict(contents):
+            raise utils.MergeConflictError(true_file_path)
         top_level_yaml_dict = utils.load_yaml(contents) or {}
         cls._file_cache[true_file_path] = (current_mtime, top_level_yaml_dict)
         return top_level_yaml_dict
@@ -492,7 +502,13 @@ class MultiResourceYamlResource(YamlResource, ABC):
         cls._file_cache[true_file_path] = (new_mtime, top_level_yaml_dict)
 
     @classmethod
-    def read_from_file(cls, file_path: str) -> str:
+    def _get_matching(cls, file_path: str) -> dict:
+        """Return the parsed sub-dict for a single resource from its multi-resource file.
+
+        This is the single read seam: read_from_file dumps it to a string and _read_yaml_dict
+        returns it directly. Subclasses whose on-disk format is not a standard sub-dict (e.g.
+        a bare scalar) override this to reshape it into a dict.
+        """
         true_file_path, segments = _parse_multi_resource_path(file_path)
         top_level_name = segments[0]
         top_level_yaml_dict = cls._get_top_level_data(true_file_path)
@@ -503,7 +519,7 @@ class MultiResourceYamlResource(YamlResource, ABC):
                 raise ValueError(f"Top level YAML data is not a dict: {top_level_yaml_dict}")
             if not yaml_dict:
                 raise FileNotFoundError(f"Resource not found in {true_file_path}")
-            return utils.dump_yaml(yaml_dict)
+            return yaml_dict
 
         resource_clean_name = segments[-1]
         yaml_list = top_level_yaml_dict.get(top_level_name, [])
@@ -518,7 +534,17 @@ class MultiResourceYamlResource(YamlResource, ABC):
             raise FileNotFoundError(
                 f"Resource with name {resource_clean_name} not found in {true_file_path}"
             )
-        return utils.dump_yaml(matching_resource)
+        return matching_resource
+
+    @classmethod
+    def read_from_file(cls, file_path: str) -> str:
+        """Read a single resource's contents from its multi-resource file, as YAML."""
+        return utils.dump_yaml(cls._get_matching(file_path))
+
+    @classmethod
+    def _read_yaml_dict(cls, file_path: str) -> dict:
+        """Return the single resource's parsed sub-dict from the multi-resource file."""
+        return cls._get_matching(file_path)
 
     @classmethod
     def _find_matching(cls, yaml_list, resource_clean_name) -> Optional[dict]:

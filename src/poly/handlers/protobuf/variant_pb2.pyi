@@ -1,13 +1,42 @@
+from google.protobuf import struct_pb2 as _struct_pb2
 from google.protobuf import timestamp_pb2 as _timestamp_pb2
 from google.protobuf.internal import containers as _containers
+from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
 from typing import ClassVar as _ClassVar, Iterable as _Iterable, Mapping as _Mapping, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
 
+class AttributeKind(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
+    __slots__ = ()
+    ATTRIBUTE_KIND_STRING: _ClassVar[AttributeKind]
+    ATTRIBUTE_KIND_NUMBER: _ClassVar[AttributeKind]
+    ATTRIBUTE_KIND_BOOLEAN: _ClassVar[AttributeKind]
+    ATTRIBUTE_KIND_ENUM: _ClassVar[AttributeKind]
+    ATTRIBUTE_KIND_OBJECT: _ClassVar[AttributeKind]
+ATTRIBUTE_KIND_STRING: AttributeKind
+ATTRIBUTE_KIND_NUMBER: AttributeKind
+ATTRIBUTE_KIND_BOOLEAN: AttributeKind
+ATTRIBUTE_KIND_ENUM: AttributeKind
+ATTRIBUTE_KIND_OBJECT: AttributeKind
+
+class EnumConfig(_message.Message):
+    __slots__ = ("values",)
+    VALUES_FIELD_NUMBER: _ClassVar[int]
+    values: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, values: _Optional[_Iterable[str]] = ...) -> None: ...
+
+class AttributeType(_message.Message):
+    __slots__ = ("kind", "enum_config")
+    KIND_FIELD_NUMBER: _ClassVar[int]
+    ENUM_CONFIG_FIELD_NUMBER: _ClassVar[int]
+    kind: AttributeKind
+    enum_config: EnumConfig
+    def __init__(self, kind: _Optional[_Union[AttributeKind, str]] = ..., enum_config: _Optional[_Union[EnumConfig, _Mapping]] = ...) -> None: ...
+
 class Attribute(_message.Message):
-    __slots__ = ("id", "name", "attribute_type", "archived", "references", "created_at", "created_by", "updated_at", "updated_by")
+    __slots__ = ("id", "name", "attribute_type", "archived", "references", "created_at", "created_by", "updated_at", "updated_by", "type")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     ATTRIBUTE_TYPE_FIELD_NUMBER: _ClassVar[int]
@@ -17,6 +46,7 @@ class Attribute(_message.Message):
     CREATED_BY_FIELD_NUMBER: _ClassVar[int]
     UPDATED_AT_FIELD_NUMBER: _ClassVar[int]
     UPDATED_BY_FIELD_NUMBER: _ClassVar[int]
+    TYPE_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     attribute_type: str
@@ -26,7 +56,8 @@ class Attribute(_message.Message):
     created_by: str
     updated_at: _timestamp_pb2.Timestamp
     updated_by: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., attribute_type: _Optional[str] = ..., archived: bool = ..., references: _Optional[_Union[AttributeReferences, _Mapping]] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ...) -> None: ...
+    type: AttributeType
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., attribute_type: _Optional[str] = ..., archived: bool = ..., references: _Optional[_Union[AttributeReferences, _Mapping]] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., type: _Optional[_Union[AttributeType, _Mapping]] = ...) -> None: ...
 
 class Variant(_message.Message):
     __slots__ = ("id", "name", "is_default", "created_at", "created_by", "updated_at", "updated_by")
@@ -76,7 +107,7 @@ class VariantAttributeValues(_message.Message):
     def __init__(self, values: _Optional[_Mapping[str, AttributeValues]] = ...) -> None: ...
 
 class AttributeValues(_message.Message):
-    __slots__ = ("values",)
+    __slots__ = ("values", "typed_values")
     class ValuesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -85,11 +116,13 @@ class AttributeValues(_message.Message):
         value: str
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     VALUES_FIELD_NUMBER: _ClassVar[int]
+    TYPED_VALUES_FIELD_NUMBER: _ClassVar[int]
     values: _containers.ScalarMap[str, str]
-    def __init__(self, values: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    typed_values: _struct_pb2.Struct
+    def __init__(self, values: _Optional[_Mapping[str, str]] = ..., typed_values: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class VariantValues(_message.Message):
-    __slots__ = ("values",)
+    __slots__ = ("values", "typed_values")
     class ValuesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -98,8 +131,10 @@ class VariantValues(_message.Message):
         value: str
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     VALUES_FIELD_NUMBER: _ClassVar[int]
+    TYPED_VALUES_FIELD_NUMBER: _ClassVar[int]
     values: _containers.ScalarMap[str, str]
-    def __init__(self, values: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    typed_values: _struct_pb2.Struct
+    def __init__(self, values: _Optional[_Mapping[str, str]] = ..., typed_values: _Optional[_Union[_struct_pb2.Struct, _Mapping]] = ...) -> None: ...
 
 class AttributeReferences(_message.Message):
     __slots__ = ("topics", "flow_steps", "no_code_steps")
@@ -159,28 +194,32 @@ class Variant_DeleteVariant(_message.Message):
     def __init__(self, id: _Optional[str] = ...) -> None: ...
 
 class Variant_CreateAttribute(_message.Message):
-    __slots__ = ("id", "name", "references", "variant_values")
+    __slots__ = ("id", "name", "references", "variant_values", "type")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     REFERENCES_FIELD_NUMBER: _ClassVar[int]
     VARIANT_VALUES_FIELD_NUMBER: _ClassVar[int]
+    TYPE_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     references: AttributeReferences
     variant_values: VariantValues
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., references: _Optional[_Union[AttributeReferences, _Mapping]] = ..., variant_values: _Optional[_Union[VariantValues, _Mapping]] = ...) -> None: ...
+    type: AttributeType
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., references: _Optional[_Union[AttributeReferences, _Mapping]] = ..., variant_values: _Optional[_Union[VariantValues, _Mapping]] = ..., type: _Optional[_Union[AttributeType, _Mapping]] = ...) -> None: ...
 
 class Variant_UpdateAttribute(_message.Message):
-    __slots__ = ("id", "name", "references", "variant_values")
+    __slots__ = ("id", "name", "references", "variant_values", "type")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     REFERENCES_FIELD_NUMBER: _ClassVar[int]
     VARIANT_VALUES_FIELD_NUMBER: _ClassVar[int]
+    TYPE_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     references: AttributeReferences
     variant_values: VariantValues
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., references: _Optional[_Union[AttributeReferences, _Mapping]] = ..., variant_values: _Optional[_Union[VariantValues, _Mapping]] = ...) -> None: ...
+    type: AttributeType
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., references: _Optional[_Union[AttributeReferences, _Mapping]] = ..., variant_values: _Optional[_Union[VariantValues, _Mapping]] = ..., type: _Optional[_Union[AttributeType, _Mapping]] = ...) -> None: ...
 
 class Variant_DeleteAttribute(_message.Message):
     __slots__ = ("id",)
@@ -205,24 +244,28 @@ class Variant_ImportVariantForCsv(_message.Message):
     def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., is_default: bool = ...) -> None: ...
 
 class Variant_ImportAttributeForCsv(_message.Message):
-    __slots__ = ("id", "name", "references")
+    __slots__ = ("id", "name", "references", "type")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     REFERENCES_FIELD_NUMBER: _ClassVar[int]
+    TYPE_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     references: AttributeReferences
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., references: _Optional[_Union[AttributeReferences, _Mapping]] = ...) -> None: ...
+    type: AttributeType
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., references: _Optional[_Union[AttributeReferences, _Mapping]] = ..., type: _Optional[_Union[AttributeType, _Mapping]] = ...) -> None: ...
 
 class Variant_ImportVariantAttributeValuesForCsv(_message.Message):
-    __slots__ = ("variant_id", "attribute_id", "value")
+    __slots__ = ("variant_id", "attribute_id", "value", "typed_value")
     VARIANT_ID_FIELD_NUMBER: _ClassVar[int]
     ATTRIBUTE_ID_FIELD_NUMBER: _ClassVar[int]
     VALUE_FIELD_NUMBER: _ClassVar[int]
+    TYPED_VALUE_FIELD_NUMBER: _ClassVar[int]
     variant_id: str
     attribute_id: str
     value: str
-    def __init__(self, variant_id: _Optional[str] = ..., attribute_id: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
+    typed_value: _struct_pb2.Value
+    def __init__(self, variant_id: _Optional[str] = ..., attribute_id: _Optional[str] = ..., value: _Optional[str] = ..., typed_value: _Optional[_Union[_struct_pb2.Value, _Mapping]] = ...) -> None: ...
 
 class Variant_ImportVariants(_message.Message):
     __slots__ = ("variants", "attributes", "variant_attribute_values", "deleted_variant_ids", "deleted_attribute_ids")

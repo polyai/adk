@@ -63,7 +63,7 @@ class FetchProjection(unittest.TestCase):
         expected_url = (
             "https://sourcerer.test/accounts/acc-1/projects/proj-1/branches/branch-1/projection"
         )
-        session.get.assert_called_once_with(expected_url)
+        session.get.assert_called_once_with(expected_url, params=None)
 
     def test_cached_projection_returned_without_refetch(self):
         """A second call returns the cache without hitting the session again."""
@@ -102,6 +102,61 @@ class FetchProjection(unittest.TestCase):
 
         with self.assertRaises(SourcererAPIError):
             sdk.fetch_projection()
+
+
+class CreateBranch(unittest.TestCase):
+    """Tests for the payload SourcererSDK.create_branch posts."""
+
+    def setUp(self):
+        self.sdk = build_sdk()
+        self.session = MagicMock()
+        self.session.post.return_value = make_mock_response(
+            200, json_body={"branchId": "new-branch-id"}
+        )
+        self.sdk._session = self.session
+
+    def _posted_payload(self):
+        """The JSON body sent to the branches endpoint."""
+        return self.session.post.call_args.kwargs["json"]
+
+    def test_returns_new_branch_id_from_response(self):
+        """The branchId from the API response is returned."""
+        branch_id = self.sdk.create_branch(branch_name="my-feature")
+
+        self.assertEqual(branch_id, "new-branch-id")
+
+    def test_payload_carries_branch_name_and_expected_sequence(self):
+        """The branch name and expected sequence number are always sent."""
+        self.sdk.create_branch(expected_main_last_known_sequence=12, branch_name="my-feature")
+
+        payload = self._posted_payload()
+        self.assertEqual(payload["branchName"], "my-feature")
+        self.assertEqual(payload["expectedMainLastKnownSequence"], 12)
+
+    def test_non_main_source_branch_is_sent(self):
+        """A source branch other than main is sent as sourceBranchId."""
+        self.sdk.create_branch(branch_name="my-feature", source_branch_id="branch-parent")
+
+        self.assertEqual(self._posted_payload()["sourceBranchId"], "branch-parent")
+
+    def test_source_branch_omitted_when_not_specified(self):
+        """With no source branch the payload has no sourceBranchId key at all."""
+        self.sdk.create_branch(branch_name="my-feature")
+
+        self.assertNotIn("sourceBranchId", self._posted_payload())
+
+    def test_source_branch_omitted_when_source_is_main(self):
+        """Main is the server-side default, so it is not sent explicitly."""
+        self.sdk.create_branch(branch_name="my-feature", source_branch_id="main")
+
+        self.assertNotIn("sourceBranchId", self._posted_payload())
+
+    def test_request_failure_raises_sourcerer_error(self):
+        """A failing create request raises SourcererAPIError."""
+        self.session.post.return_value = make_mock_response(409, json_body={"error": "conflict"})
+
+        with self.assertRaises(SourcererAPIError):
+            self.sdk.create_branch(branch_name="my-feature")
 
 
 class SendCommandBatch(unittest.TestCase):

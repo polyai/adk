@@ -9,14 +9,16 @@ from io import StringIO
 from unittest.mock import MagicMock, patch
 
 from poly.cli import AgentStudioCLI
+from poly.cli_commands.audio_cache import AudioCacheCommand
 from poly.cli_commands.branch import BranchCommand
 from poly.cli_commands.chat import ChatCommand
 from poly.cli_commands.conversations import ConversationsCommand
 from poly.cli_commands.deployments import DeploymentsCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand
-from poly.cli_commands.shared import compute_diff
+from poly.cli_commands.shared import compute_diff, require_deployment_simplification
 from poly.cli_commands.sync import FormatCommand, RevertCommand
 from poly.cli_commands.utils import CompletionCommand
+from poly.project import DeploymentMode
 from poly.tests.project_test import TEST_DIR
 
 
@@ -208,6 +210,24 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         self.proj.create_branch.assert_not_called()
         self.proj.push_project.assert_not_called()
 
+    def test_branch_create_env_creates_branch_before_pulling(self):
+        """The branch must exist before env state is pulled into it.
+
+        Regression test pinning the call order explicitly: the branch is created
+        first, then env resources are pulled into it, then pushed. Checking call
+        counts/args alone wouldn't catch a reorder of these two calls.
+        """
+        manager = MagicMock()
+        manager.attach_mock(self.proj.create_branch, "create_branch")
+        manager.attach_mock(self.proj.pull_project_from_env, "pull_project_from_env")
+
+        BranchCommand.branch_create(TEST_DIR, "my-branch", env="live", force=False)
+
+        self.assertEqual(
+            [call[0] for call in manager.mock_calls],
+            ["create_branch", "pull_project_from_env"],
+        )
+
     def test_branch_create_env_force_bypasses_check(self):
         """branch create --env live --force proceeds despite local changes."""
         self.proj.get_diffs.return_value = {"file.py": "example diff"}
@@ -218,7 +238,7 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         call_kwargs = self.proj.pull_project_from_env.call_args[1]
         self.assertEqual(call_kwargs["env"], "live")
         self.assertIs(call_kwargs["format"], False)
-        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
         self.proj.push_project.assert_called_once_with(
             force=True,
             skip_validation=True,
@@ -236,7 +256,7 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         call_kwargs = self.proj.pull_project_from_env.call_args[1]
         self.assertEqual(call_kwargs["env"], "pre-release")
         self.assertIs(call_kwargs["format"], False)
-        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
         self.proj.push_project.assert_called_once_with(
             force=True,
             skip_validation=True,
@@ -245,7 +265,11 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         )
 
     def test_branch_create_env_raises_when_live_deployment_missing(self):
-        """If live (or pre-release) has no active deployment, pull_project_from_env raises."""
+        """If live (or pre-release) has no active deployment, pull_project_from_env raises.
+
+        The branch has already been created by this point (pull happens after
+        creation), so the raise leaves a branch behind with no env state pushed.
+        """
         self.proj.get_diffs.return_value = {}
         self.proj.pull_project_from_env.side_effect = ValueError(
             "No resources returned from environment 'live'."
@@ -255,11 +279,11 @@ class BranchCreateFromEnvTest(unittest.TestCase):
             BranchCommand.branch_create(TEST_DIR, "my-branch", env="live", force=False)
 
         self.assertIn("No resources returned from environment 'live'", str(ctx.exception))
+        self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
         self.proj.pull_project_from_env.assert_called_once()
         pull_kwargs = self.proj.pull_project_from_env.call_args[1]
         self.assertEqual(pull_kwargs["env"], "live")
         self.assertIs(pull_kwargs["format"], False)
-        self.proj.create_branch.assert_not_called()
         self.proj.push_project.assert_not_called()
 
     def test_branch_create_env_sandbox_skips_env_pull(self):
@@ -267,31 +291,97 @@ class BranchCreateFromEnvTest(unittest.TestCase):
         BranchCommand.branch_create(TEST_DIR, "my-branch", env="sandbox", force=False)
 
         self.proj.pull_project_from_env.assert_not_called()
-        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
         self.proj.push_project.assert_not_called()
 
-    def test_branch_create_blocked_when_not_on_main(self):
-        """branch create from non-main branch exits with an error."""
+    @patch("poly.output.console.error")
+    def test_branch_create_surfaces_deployment_mode_rejection(self, mock_error):
+        """A deployment-mode guard failure raised by the project is shown cleanly, not crashed.
+
+        The "which branches may be created from where" rules live in
+        AgentStudioProject.create_branch (they depend on the project's deployment
+        mode); the CLI catches that ValueError and reports it via error()/exit(1)
+        instead of letting it propagate as an unhandled exception.
+        """
         self.proj.branch_id = "example-feature-branch"
+        self.proj.create_branch.side_effect = ValueError(
+            "Cannot create a new branch from a non-main branch in releases deployment mode."
+        )
 
         with self.assertRaises(SystemExit) as ctx:
-            BranchCommand.branch_create(TEST_DIR, "my-branch", env="live", force=False)
+            BranchCommand.branch_create(TEST_DIR, "my-branch", env=None, force=False)
 
         self.assertEqual(ctx.exception.code, 1)
-        self.proj.pull_project_from_env.assert_not_called()
-        self.proj.create_branch.assert_not_called()
+        self.assertIn("non-main branch", mock_error.call_args[0][0])
         self.proj.push_project.assert_not_called()
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_branch_create_json_mode_surfaces_deployment_mode_rejection(self, mock_json):
+        """In --json mode, a deployment-mode guard failure is reported as JSON, not a crash."""
+        self.proj.branch_id = "example-feature-branch"
+        self.proj.create_branch.side_effect = ValueError(
+            "Cannot create a new branch from a non-main branch in releases deployment mode."
+        )
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_create(
+                TEST_DIR, "my-branch", output_json=True, env=None, force=False
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("non-main branch", payload["error"])
+
+    @patch("poly.output.console.success")
+    def test_branch_create_reports_branch_it_was_created_from(self, mock_success):
+        """The success message names the branch that was current before creation."""
+        self.proj.branch_id = "branch-a-id"
+        self.proj.get_current_branch.return_value = "feature-a"
+
+        BranchCommand.branch_create(TEST_DIR, "my-branch", env=None, force=False)
+
+        # No source branch is passed: the CLI relies on the project's own branch state.
+        self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
+        message = mock_success.call_args[0][0]
+        self.assertIn("my-branch", message)
+        self.assertIn("feature-a", message)
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_branch_create_json_reports_base_branch_from_before_the_switch(self, mock_json):
+        """JSON output describes the base branch as it was before create_branch switched."""
+        self.proj.branch_id = "branch-a-id"
+        self.proj.get_current_branch.return_value = "feature-a"
+
+        def create_and_switch(_branch_name, source_branch_name=None):
+            self.proj.branch_id = "new-branch-id"
+            return "new-branch-id"
+
+        self.proj.create_branch.side_effect = create_and_switch
+
+        BranchCommand.branch_create(TEST_DIR, "my-branch", output_json=True)
+
+        self.assertEqual(
+            mock_json.call_args[0][0],
+            {
+                "success": True,
+                "base_branch_id": "branch-a-id",
+                "base_branch_name": "feature-a",
+                "new_branch_id": "new-branch-id",
+                "branch_name": "my-branch",
+            },
+        )
 
     def test_branch_create_env_none_behaves_like_normal(self):
         """branch create with env=None skips env pull (default behavior)."""
         BranchCommand.branch_create(TEST_DIR, "my-branch", env=None, force=False)
 
         self.proj.pull_project_from_env.assert_not_called()
-        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
         self.proj.push_project.assert_not_called()
 
     def test_branch_create_env_does_not_push_when_create_branch_fails(self):
-        """After failed branch creation, push_project is not called and process exits."""
+        """After failed branch creation, neither the env pull nor push happen."""
         self.proj.get_diffs.return_value = {}
         self.proj.create_branch.return_value = None
 
@@ -299,10 +389,82 @@ class BranchCreateFromEnvTest(unittest.TestCase):
             BranchCommand.branch_create(TEST_DIR, "my-branch", env="live", force=False)
 
         self.assertEqual(ctx.exception.code, 1)
-        self.proj.pull_project_from_env.assert_called_once()
-        self.assertIs(self.proj.pull_project_from_env.call_args[1]["format"], False)
-        self.proj.create_branch.assert_called_once_with("my-branch")
+        self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name=None)
+        self.proj.pull_project_from_env.assert_not_called()
         self.proj.push_project.assert_not_called()
+
+
+class BranchCreateFromSourceBranchTest(unittest.TestCase):
+    """Tests for ``poly branch create --from <branch>``."""
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        # The user is on feature-a, but creates from feature-b via --from.
+        self.proj.branch_id = "branch-feature-a"
+        self.proj.get_current_branch.return_value = "feature-a"
+        self.proj.get_diffs.return_value = {}
+        self.proj.create_branch.return_value = "new-branch-id"
+        self.proj.get_branches.return_value = (
+            "feature-a",
+            {
+                "main": {"branchId": "main"},
+                "feature-a": {"branchId": "branch-feature-a", "parentBranchId": "main"},
+                "feature-b": {"branchId": "branch-feature-b", "parentBranchId": "main"},
+            },
+        )
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.output.console.success")
+    def test_from_flag_is_parsed_and_forwarded_as_the_source_branch(self, _mock_success):
+        """'branch create <name> --from <branch>' reaches create_branch as source_branch_name."""
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        args = cli._create_parser().parse_args(
+            ["branch", "create", "my-branch", "--from", "feature-b"]
+        )
+
+        BranchCommand.run(args)
+
+        self.proj.create_branch.assert_called_once_with("my-branch", source_branch_name="feature-b")
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_output_reports_the_source_branch_as_the_base(self, mock_json):
+        """JSON base_branch_name/base_branch_id describe the --from branch, not the current one."""
+        BranchCommand.branch_create(
+            TEST_DIR, "my-branch", output_json=True, source_branch="feature-b"
+        )
+
+        self.assertEqual(
+            mock_json.call_args[0][0],
+            {
+                "success": True,
+                "base_branch_id": "branch-feature-b",
+                "base_branch_name": "feature-b",
+                "new_branch_id": "new-branch-id",
+                "branch_name": "my-branch",
+            },
+        )
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_unknown_source_branch_is_reported_as_a_json_error(self, mock_json):
+        """An unknown --from branch is rejected by the project and reported as an error."""
+        self.proj.create_branch.side_effect = ValueError("Branch 'ghost' does not exist.")
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_create(
+                TEST_DIR, "my-branch", output_json=True, source_branch="ghost"
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(
+            mock_json.call_args[0][0],
+            {"success": False, "error": "Branch 'ghost' does not exist."},
+        )
 
 
 class BranchDeleteTest(unittest.TestCase):
@@ -375,21 +537,23 @@ class BranchDeleteTest(unittest.TestCase):
     @patch("questionary.confirm")
     @patch("poly.output.console.error")
     def test_direct_delete_when_project_raises_shows_error(self, mock_error, mock_confirm):
-        """If project.delete_branch raises, the error is shown to the user."""
+        """If project.delete_branch raises, the error is shown to the user and the command exits 1."""
         mock_confirm.return_value.ask.return_value = True
         self.proj.delete_branch.side_effect = ValueError("API failure")
 
-        BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a")
 
         mock_error.assert_called_once()
         self.assertIn("API failure", mock_error.call_args[0][0])
 
     @patch("poly.cli_commands.branch.json_print")
     def test_direct_delete_when_project_raises_json_mode(self, mock_json):
-        """If project.delete_branch raises in JSON mode, error is printed as JSON."""
+        """If project.delete_branch raises in JSON mode, error is printed as JSON and exits 1."""
         self.proj.delete_branch.side_effect = ValueError("API failure")
 
-        BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a", output_json=True)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_delete(TEST_DIR, branch_name="feature-a", output_json=True)
 
         mock_json.assert_called_once()
         payload = mock_json.call_args[0][0]
@@ -475,12 +639,13 @@ class BranchDeleteTest(unittest.TestCase):
     @patch("questionary.confirm")
     @patch("questionary.checkbox")
     @patch("poly.output.console.success")
-    def test_interactive_current_branch_label_stripped(
+    def test_interactive_current_branch_uses_choice_value(
         self, mock_success, mock_checkbox, mock_confirm
     ):
-        """The ' (current)' suffix is stripped from labels before calling delete_branch."""
+        """Selecting the current branch calls delete_branch with the plain Choice value."""
         self.proj.get_branches.return_value = ("feature-a", dict(self.SAMPLE_BRANCHES))
-        mock_checkbox.return_value.ask.return_value = ["feature-a (current)"]
+        # questionary.checkbox resolves selected Choices to their .value — mocked directly here.
+        mock_checkbox.return_value.ask.return_value = ["feature-a"]
         mock_confirm.return_value.ask.return_value = True
 
         BranchCommand.branch_delete(TEST_DIR)
@@ -522,6 +687,405 @@ class BranchDeleteTest(unittest.TestCase):
         mock_error.assert_called_once()
         mock_success.assert_called_once()
         self.assertIn("1 branch(es)", mock_success.call_args[0][0])
+
+
+class BranchCurrentTest(unittest.TestCase):
+    """Tests for BranchCommand.get_current_branch."""
+
+    BRANCH_TREE = {
+        "main": {"branchId": "main"},
+        "feature-a": {"branchId": "id-a", "parentBranchId": "main"},
+        "feature-b": {"branchId": "id-b", "parentBranchId": "feature-a"},
+    }
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _set_current_branch(self, branch_name: str | None) -> None:
+        self.proj.get_branches.return_value = (branch_name, dict(self.BRANCH_TREE))
+
+    @patch("poly.output.console.plain")
+    def test_does_not_show_parent_branch_when_parent_is_main(self, mock_plain):
+        """A branch with a parent shows both the current and parent branch."""
+        self._set_current_branch("feature-a")
+
+        BranchCommand.get_current_branch(TEST_DIR)
+
+        lines = [call.args[0] for call in mock_plain.call_args_list]
+        self.assertTrue(any("feature-a" in line for line in lines))
+        self.assertFalse(any("main" in line for line in lines))
+
+    @patch("poly.output.console.plain")
+    def test_shows_parent_branch_when_present_and_not_main(self, mock_plain):
+        """A branch with a parent shows both the current and parent branch."""
+        self._set_current_branch("feature-b")
+
+        BranchCommand.get_current_branch(TEST_DIR)
+
+        lines = [call.args[0] for call in mock_plain.call_args_list]
+        self.assertTrue(any("feature-b" in line for line in lines))
+        self.assertTrue(any("feature-a" in line for line in lines))
+
+    @patch("poly.output.console.plain")
+    def test_main_has_no_parent_branch_line(self, mock_plain):
+        """main has no parent, so only the current branch is shown."""
+        self._set_current_branch("main")
+
+        BranchCommand.get_current_branch(TEST_DIR)
+
+        mock_plain.assert_called_once()
+        self.assertIn("main", mock_plain.call_args[0][0])
+
+    @patch("poly.output.console.warning")
+    def test_no_current_branch_shows_warning(self, mock_warning):
+        """When the local branch no longer exists remotely, a warning is shown."""
+        self._set_current_branch(None)
+
+        BranchCommand.get_current_branch(TEST_DIR)
+
+        mock_warning.assert_called_once()
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_mode_includes_parent_branch(self, mock_json_print):
+        """JSON mode includes both current_branch and parent_branch."""
+        self._set_current_branch("feature-a")
+
+        BranchCommand.get_current_branch(TEST_DIR, output_json=True)
+
+        mock_json_print.assert_called_once_with(
+            {"current_branch": "feature-a", "parent_branch": "main"}
+        )
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_mode_main_has_null_parent(self, mock_json_print):
+        """JSON mode for main reports a null parent_branch."""
+        self._set_current_branch("main")
+
+        BranchCommand.get_current_branch(TEST_DIR, output_json=True)
+
+        mock_json_print.assert_called_once_with({"current_branch": "main", "parent_branch": None})
+
+
+class BranchSwitchInteractiveTest(unittest.TestCase):
+    """Tests for BranchCommand.branch_switch's interactive picker (no branch_name given)."""
+
+    # Branch metadata as returned by the platform: 'feature-a' was branched off 'main'.
+    BRANCH_TREE = {
+        "main": {"branchId": "id-main", "parentBranchId": None},
+        "feature-a": {"branchId": "id-a", "parentBranchId": "id-main"},
+    }
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.get_branches.return_value = ("main", dict(self.BRANCH_TREE))
+        self.proj.switch_branch.return_value = (True, None)
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _choices(self, mock_select) -> list[tuple[str, str]]:
+        """Return the (title, value) pairs of the choices passed to questionary.select."""
+        choices = mock_select.call_args.kwargs["choices"]
+        return [(choice.title, choice.value) for choice in choices]
+
+    @patch("questionary.select")
+    @patch("poly.output.console.success")
+    def test_releases_branches_mode_offers_tree_indented_choices(self, mock_success, mock_select):
+        """In releases_branches mode, choices show branch lineage but keep plain name values."""
+        self.proj.deployment_mode = DeploymentMode.RELEASES_BRANCHES
+        mock_select.return_value.ask.return_value = "feature-a"
+
+        BranchCommand.branch_switch(TEST_DIR)
+
+        self.assertEqual(
+            self._choices(mock_select),
+            [("main (current)", "main"), ("└─ feature-a", "feature-a")],
+        )
+        self.proj.switch_branch.assert_called_once()
+        self.assertEqual(self.proj.switch_branch.call_args[0][0], "feature-a")
+        self.assertIn("feature-a", mock_success.call_args[0][0])
+
+    @patch("questionary.select")
+    @patch("poly.output.console.success")
+    def test_simple_mode_offers_flat_choices(self, mock_success, mock_select):
+        """Outside releases_branches mode, choices are a flat list with no tree connectors."""
+        self.proj.deployment_mode = DeploymentMode.SIMPLE
+        self.proj.get_branches.return_value = (
+            "main",
+            {"main": "id-main", "feature-a": "id-a"},
+        )
+        mock_select.return_value.ask.return_value = "feature-a"
+
+        BranchCommand.branch_switch(TEST_DIR)
+
+        self.assertEqual(
+            self._choices(mock_select),
+            [("main (current)", "main"), ("feature-a", "feature-a")],
+        )
+        self.proj.switch_branch.assert_called_once()
+        self.assertEqual(self.proj.switch_branch.call_args[0][0], "feature-a")
+        self.assertIn("feature-a", mock_success.call_args[0][0])
+
+    @patch("questionary.select")
+    @patch("poly.output.console.warning")
+    def test_nothing_selected_shows_warning_and_does_not_switch(self, mock_warning, mock_select):
+        """Cancelling the picker warns the user and leaves the current branch alone."""
+        self.proj.deployment_mode = DeploymentMode.RELEASES_BRANCHES
+        mock_select.return_value.ask.return_value = None
+
+        BranchCommand.branch_switch(TEST_DIR)
+
+        self.proj.switch_branch.assert_not_called()
+        mock_warning.assert_called_once()
+        self.assertIn("No branch selected", mock_warning.call_args[0][0])
+
+    @patch("poly.output.console.plain")
+    def test_no_branches_shows_message_and_does_not_switch(self, mock_plain):
+        """When the project has no branches, a message is shown instead of a picker."""
+        self.proj.deployment_mode = DeploymentMode.RELEASES_BRANCHES
+        self.proj.get_branches.return_value = (None, {})
+
+        BranchCommand.branch_switch(TEST_DIR)
+
+        self.proj.switch_branch.assert_not_called()
+        self.assertIn("No branches found", mock_plain.call_args[0][0])
+
+
+class BranchMergeTest(unittest.TestCase):
+    """Tests for BranchCommand.branch_merge's deploy confirmation and success messaging."""
+
+    # 'feature-a' sits directly under main; 'feature-a-child' sits under the 'Release 1' branch.
+    BRANCH_TREE = {
+        "main": {"branchId": "main", "name": "main"},
+        "Release 1": {"branchId": "id-release-1", "name": "Release 1", "parentBranchId": "main"},
+        "feature-a": {"branchId": "id-a", "name": "feature-a", "parentBranchId": "main"},
+        "feature-a-child": {
+            "branchId": "id-a-child",
+            "name": "feature-a-child",
+            "parentBranchId": "id-release-1",
+        },
+    }
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.using_simplified_deployments = True
+        self.proj.merge_branch.return_value = (True, [], [])
+        self._set_current_branch("feature-a")
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _set_current_branch(self, branch_name: str) -> None:
+        """Make the project report the given branch as checked out."""
+        self.proj.get_branches.return_value = (branch_name, dict(self.BRANCH_TREE))
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.success")
+    def test_merging_into_main_merges_after_deploy_confirmation(self, mock_success, mock_confirm):
+        """Merging into main warns about live deployment and proceeds once confirmed."""
+        mock_confirm.return_value.ask.return_value = True
+
+        BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        mock_confirm.assert_called_once()
+        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.assertIn("now live", mock_success.call_args[0][0])
+
+    @patch("questionary.confirm")
+    def test_declining_deploy_confirmation_aborts_without_merging(self, mock_confirm):
+        """Answering no to the deployment prompt exits cleanly and leaves the branch unmerged."""
+        mock_confirm.return_value.ask.return_value = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        self.assertEqual(ctx.exception.code, 0)
+        self.proj.merge_branch.assert_not_called()
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.success")
+    def test_force_skips_deploy_confirmation(self, mock_success, mock_confirm):
+        """--force merges into main without asking for deployment confirmation."""
+        BranchCommand.branch_merge(TEST_DIR, message="ship it", force=True)
+
+        mock_confirm.assert_not_called()
+        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.assertIn("now live", mock_success.call_args[0][0])
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.info")
+    def test_simplified_deployments_off_skips_confirmation_for_main(self, mock_info, mock_confirm):
+        """With simplified deployments off, merging into main skips the deploy prompt too."""
+        self.proj.using_simplified_deployments = False
+
+        BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        mock_confirm.assert_not_called()
+        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.assertIn("main", mock_info.call_args[0][0])
+
+    @patch("questionary.confirm")
+    @patch("poly.output.console.info")
+    def test_merging_into_non_main_parent_skips_confirmation_and_names_parent(
+        self, mock_info, mock_confirm
+    ):
+        """Merging into a release branch deploys nothing live, so no prompt is shown."""
+        self._set_current_branch("feature-a-child")
+
+        BranchCommand.branch_merge(TEST_DIR, message="ship it")
+
+        mock_confirm.assert_not_called()
+        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.assertIn("Release 1", mock_info.call_args[0][0])
+
+    @patch("questionary.confirm")
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_mode_merges_without_confirmation(self, mock_json_print, mock_confirm):
+        """JSON mode is non-interactive, so it merges without prompting and reports success."""
+        BranchCommand.branch_merge(TEST_DIR, message="ship it", output_json=True)
+
+        mock_confirm.assert_not_called()
+        self.proj.merge_branch.assert_called_once_with(message="ship it", conflict_resolutions=None)
+        self.assertEqual(mock_json_print.call_args[0][0], {"success": True})
+
+
+class BranchSyncTest(unittest.TestCase):
+    """Tests for BranchCommand.branch_sync."""
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.using_simplified_deployments = True
+        self.proj.get_current_branch.return_value = "feature-a"
+        self.proj.sync_branch.return_value = (True, [], [])
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.output.console.error")
+    def test_sync_blocked_without_simplified_deployments(self, mock_error):
+        """Sync is refused locally rather than surfacing the platform's 404."""
+        self.proj.using_simplified_deployments = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_sync(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("simplified deployments", mock_error.call_args[0][0])
+        self.proj.sync_branch.assert_not_called()
+        self.proj.get_current_branch.assert_not_called()
+
+    @patch("poly.cli_commands.shared.json_print")
+    def test_sync_blocked_without_simplified_deployments_json(self, mock_json_print):
+        """The refusal is reported as JSON when --json is set."""
+        self.proj.using_simplified_deployments = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_sync(TEST_DIR, output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertFalse(mock_json_print.call_args[0][0]["success"])
+        self.proj.sync_branch.assert_not_called()
+
+    @patch("poly.output.console.success")
+    def test_sync_success_reports_branch_name(self, mock_success):
+        """A successful sync reports the current branch name."""
+        BranchCommand.branch_sync(TEST_DIR)
+
+        self.proj.sync_branch.assert_called_once_with(conflict_resolutions=None)
+        self.assertIn("feature-a", mock_success.call_args[0][0])
+        self.assertIn("synced successfully", mock_success.call_args[0][0])
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_mode_reports_success(self, mock_json_print):
+        """JSON mode reports success without conflicts/errors keys."""
+        BranchCommand.branch_sync(TEST_DIR, output_json=True)
+
+        self.assertEqual(mock_json_print.call_args[0][0], {"success": True})
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_mode_reports_failure_and_exits(self, mock_json_print):
+        """JSON mode reports conflicts/errors and exits non-zero on failure."""
+        conflicts = [{"path": ["a"], "type": "modify"}]
+        self.proj.sync_branch.return_value = (False, conflicts, [])
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_sync(TEST_DIR, output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        output = mock_json_print.call_args[0][0]
+        self.assertEqual(output["success"], False)
+        self.assertEqual(output["conflicts"], conflicts)
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_interactive_and_json_together_is_rejected(self, mock_json_print):
+        """--interactive and --json cannot be combined."""
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_sync(TEST_DIR, output_json=True, interactive=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.proj.sync_branch.assert_not_called()
+        self.assertFalse(mock_json_print.call_args[0][0]["success"])
+
+    @patch("poly.output.console.error")
+    def test_non_interactive_conflicts_exit_with_guidance(self, mock_error):
+        """Non-interactive conflicts print guidance and exit non-zero, without merging further."""
+        conflicts = [{"path": ["a"], "type": "modify"}]
+        self.proj.sync_branch.return_value = (False, conflicts, [])
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_sync(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.proj.sync_branch.assert_called_once_with(conflict_resolutions=None)
+        mock_error.assert_any_call("Failed to sync branch 'feature-a'.")
+
+    @patch("poly.output.console.error")
+    def test_errors_exit_before_conflict_prompt(self, mock_error):
+        """A hard error (not just conflicts) exits immediately, even without --interactive."""
+        self.proj.sync_branch.return_value = (
+            False,
+            [],
+            [{"path": "x", "message": "boom"}],
+        )
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_sync(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        mock_error.assert_any_call("- x: boom")
+
+    def test_invalid_resolutions_json_exits(self):
+        """An unparseable --resolutions value exits with an error before syncing."""
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_sync(TEST_DIR, resolutions_file="not-json")
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.proj.sync_branch.assert_not_called()
+
+    @patch("poly.output.console.success")
+    def test_inline_resolutions_json_is_parsed_and_forwarded(self, mock_success):
+        """An inline JSON array passed via --resolutions is forwarded to project.sync_branch."""
+        resolutions = [{"path": ["a"], "strategy": "ours"}]
+
+        BranchCommand.branch_sync(TEST_DIR, resolutions_file=str(resolutions).replace("'", '"'))
+
+        self.proj.sync_branch.assert_called_once_with(conflict_resolutions=resolutions)
+        mock_success.assert_called_once()
 
 
 class BranchMergeConflictHelpersTest(unittest.TestCase):
@@ -744,6 +1308,129 @@ class BranchMergeConflictHelpersTest(unittest.TestCase):
         self.assertEqual(len(table.rows), 1)
 
 
+class PollTestRunLiveTest(unittest.TestCase):
+    """Tests for poll_test_run_live error resilience (used by TestingCommand.testing_run)."""
+
+    @staticmethod
+    def _completed_run(test_id: str) -> dict:
+        """A fully-completed test run response for a single passing test."""
+        return {
+            "status": "completed",
+            "testHistory": [{"testCaseId": test_id, "status": "passed"}],
+            "passedCount": 1,
+            "failedCount": 0,
+            "errorCount": 0,
+            "testCaseCount": 1,
+        }
+
+    def setUp(self):
+        from collections import namedtuple
+
+        # Minimal stand-in for the TestCase objects poll_test_run_live expects:
+        # it only reads `.resource_id` and `.name`.
+        FakeTest = namedtuple("FakeTest", ["resource_id", "name"])
+        # All tests pass poll_interval=0 so the loop's time.sleep is a no-op
+        # and tests run instantly.
+        self.matched_tests = [FakeTest(resource_id="tc-1", name="My Test")]
+
+    def test_transient_errors_then_success_returns_completed_run(self):
+        """Recovers from a few consecutive transient errors and returns the run."""
+        import requests
+
+        from poly.output.console import poll_test_run_live
+
+        completed = self._completed_run("tc-1")
+        # First 2 polls fail transiently, the 3rd succeeds with a completed run.
+        get_test_run = MagicMock(
+            side_effect=[
+                requests.exceptions.HTTPError("500 Server Error"),
+                requests.exceptions.ConnectionError("connection reset"),
+                completed,
+            ]
+        )
+
+        result = poll_test_run_live(
+            get_test_run,
+            test_run_id="run-123",
+            matched_tests=self.matched_tests,
+            poll_interval=0,
+            max_consecutive_errors=5,
+        )
+
+        self.assertEqual(result, completed)
+        self.assertEqual(get_test_run.call_count, 3)
+
+    def test_error_counter_resets_after_successful_poll(self):
+        """A successful poll resets the counter so later errors are tolerated again."""
+        import requests
+
+        from poly.output.console import poll_test_run_live
+
+        completed = self._completed_run("tc-1")
+        # Pattern: fail, fail, succeed(pending), fail, fail, succeed(done).
+        # With max_consecutive_errors=3 this only completes if the counter
+        # resets after the pending success in the middle.
+        pending = {"status": "running", "testHistory": []}
+        get_test_run = MagicMock(
+            side_effect=[
+                requests.exceptions.HTTPError("boom"),
+                requests.exceptions.HTTPError("boom"),
+                pending,
+                requests.exceptions.HTTPError("boom"),
+                requests.exceptions.HTTPError("boom"),
+                completed,
+            ]
+        )
+
+        result = poll_test_run_live(
+            get_test_run,
+            test_run_id="run-123",
+            matched_tests=self.matched_tests,
+            poll_interval=0,
+            max_consecutive_errors=3,
+        )
+
+        self.assertEqual(result, completed)
+        self.assertEqual(get_test_run.call_count, 6)
+
+    def test_persistent_errors_give_up_and_return_empty_dict(self):
+        """After max_consecutive_errors failures it gives up without raising."""
+        import requests
+
+        from poly.output.console import poll_test_run_live
+
+        get_test_run = MagicMock(side_effect=requests.exceptions.ConnectionError("platform down"))
+
+        result = poll_test_run_live(
+            get_test_run,
+            test_run_id="run-123",
+            matched_tests=self.matched_tests,
+            poll_interval=0,
+            max_consecutive_errors=2,
+        )
+
+        # No successful poll ever happened, so the abandoned run returns {}.
+        self.assertEqual(result, {})
+        self.assertEqual(get_test_run.call_count, 2)
+
+    def test_happy_path_no_errors_returns_completed_run(self):
+        """A clean run with no errors returns the completed response on first poll."""
+        from poly.output.console import poll_test_run_live
+
+        completed = self._completed_run("tc-1")
+        get_test_run = MagicMock(return_value=completed)
+
+        result = poll_test_run_live(
+            get_test_run,
+            test_run_id="run-123",
+            matched_tests=self.matched_tests,
+            poll_interval=0,
+        )
+
+        self.assertEqual(result, completed)
+        self.assertEqual(get_test_run.call_count, 1)
+
+
 class ChatLoopTest(unittest.TestCase):
     """Tests for AgentStudioCLI._run_chat_loop.
 
@@ -889,6 +1576,31 @@ class ChatLoopTest(unittest.TestCase):
         self.assertIn("error", conversation["turns"][0])
 
 
+class ChatArgumentsTest(unittest.TestCase):
+    """Tests for chat-specific CLI argument parsing."""
+
+    @patch("poly.cli_commands.chat.ChatCommand.chat")
+    def test_sip_headers_are_parsed_and_forwarded(self, mock_chat):
+        AgentStudioCLI().main(
+            [
+                "chat",
+                "--sip-header",
+                "X-Customer-ID=12345",
+                "--sip-header",
+                "X-Token=part=two",
+            ]
+        )
+
+        self.assertEqual(
+            mock_chat.call_args.kwargs["sip_headers"],
+            {"X-Customer-ID": "12345", "X-Token": "part=two"},
+        )
+
+    def test_invalid_sip_header_is_rejected(self):
+        with self.assertRaises(SystemExit):
+            AgentStudioCLI().main(["chat", "--sip-header", "X-Customer-ID"])
+
+
 class ChatCommandTest(unittest.TestCase):
     """Tests for ChatCommand.chat.
 
@@ -935,6 +1647,25 @@ class ChatCommandTest(unittest.TestCase):
         )
 
         self.proj.create_chat_session.assert_called_once()
+
+    def test_sip_headers_are_forwarded_when_creating_session(self):
+        sip_headers = {"X-Customer-ID": "12345"}
+
+        ChatCommand.chat(
+            TEST_DIR,
+            environment="sandbox",
+            sip_headers=sip_headers,
+            input_messages=[],
+        )
+
+        self.proj.create_chat_session.assert_called_once_with(
+            "sandbox",
+            "chat.polyai",
+            None,
+            None,
+            None,
+            sip_headers=sip_headers,
+        )
 
     @patch("poly.cli_commands.chat.json_print")
     def test_json_conv_id_emits_conversations_list(self, mock_json):
@@ -1351,6 +2082,7 @@ class DeploymentsShowTest(unittest.TestCase):
         self.mock_load_patcher = patch("poly.cli_commands.deployments.load_project")
         self.mock_load = self.mock_load_patcher.start()
         self.proj = MagicMock()
+        self.proj.using_simplified_deployments = False
         self.mock_load.return_value = self.proj
 
         # Sandbox versions: [v0(newest), v1, v2, v3, v4(oldest)]
@@ -1601,6 +2333,7 @@ class DeploymentsPromoteTest(unittest.TestCase):
         self.mock_load_patcher = patch("poly.cli_commands.deployments.load_project")
         self.mock_load = self.mock_load_patcher.start()
         self.proj = MagicMock()
+        self.proj.using_simplified_deployments = False
         self.proj.get_deployments.return_value = (list(self.VERSIONS), dict(self.ACTIVE_HASHES))
         self.proj.promote_deployment.return_value = True
         self.mock_load.return_value = self.proj
@@ -1851,6 +2584,7 @@ class DeploymentsRollbackTest(unittest.TestCase):
         self.mock_load_patcher = patch("poly.cli_commands.deployments.load_project")
         self.mock_load = self.mock_load_patcher.start()
         self.proj = MagicMock()
+        self.proj.using_simplified_deployments = False
         self.proj.get_deployments.return_value = (list(self.VERSIONS), dict(self.ACTIVE_HASHES))
         self.proj.rollback_deployment.return_value = True
         self.mock_load.return_value = self.proj
@@ -2775,10 +3509,58 @@ class ConversationsCommandTest(unittest.TestCase):
         self.assertIn("2.0 MB", mock_success.call_args[0][0])
 
 
+class StudioCommandTest(unittest.TestCase):
+    """Tests for StudioCommand.open_agent_studio URL construction."""
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.project.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.studio_base_url = "https://studio.us.poly.ai/test_account/test_project"
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.cli_commands.project.json_print")
+    def test_json_output_url_targets_feature_branch(self, mock_json_print):
+        """studio --json emits a /home URL with the feature branch id as branchId."""
+        from poly.cli_commands.project import StudioCommand
+
+        self.proj.branch_id = "BRANCH-SMOHN3M1"
+
+        StudioCommand.open_agent_studio(base_path=TEST_DIR, output_json=True)
+
+        url = mock_json_print.call_args[0][0]["url"]
+        self.assertEqual(
+            url,
+            "https://studio.us.poly.ai/test_account/test_project/home?branchId=BRANCH-SMOHN3M1",
+        )
+        self.assertTrue(url.endswith("/home?branchId=BRANCH-SMOHN3M1"))
+
+    @patch("poly.cli_commands.project.json_print")
+    def test_json_output_url_targets_default_branch(self, mock_json_print):
+        """studio --json emits a /home URL with branchId=main on the default branch."""
+        from poly.cli_commands.project import StudioCommand
+
+        self.proj.branch_id = "main"
+
+        StudioCommand.open_agent_studio(base_path=TEST_DIR, output_json=True)
+
+        url = mock_json_print.call_args[0][0]["url"]
+        self.assertEqual(
+            url,
+            "https://studio.us.poly.ai/test_account/test_project/home?branchId=main",
+        )
+        self.assertTrue(url.endswith("/home?branchId=main"))
+
 class BranchHistoryTest(unittest.TestCase):
     """Tests for BranchCommand.branch_history CLI handler."""
 
-    SAMPLE_BRANCHES = {"main": "main-id", "feature-a": "branch-a-id"}
+    SAMPLE_BRANCHES = {
+        "main": {"branchId": "main-id"},
+        "feature-a": {"branchId": "branch-a-id"},
+    }
 
     def setUp(self):
         self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
@@ -2879,12 +3661,11 @@ class BranchHistoryTest(unittest.TestCase):
             {"mergedAt": f"2026-07-{i:02d}"} for i in range(1, 21)
         ]
 
-        BranchCommand.branch_history(
-            TEST_DIR, branch_name="feature-a", output_json=True, limit=3
-        )
+        BranchCommand.branch_history(TEST_DIR, branch_name="feature-a", output_json=True, limit=3)
 
         payload = mock_json.call_args[0][0]
         self.assertEqual(len(payload["history"]), 3)
+
 
 class BranchRenameTest(unittest.TestCase):
     """Tests for BranchCommand.branch_rename CLI handler."""
@@ -2982,7 +3763,8 @@ class BranchRenameTest(unittest.TestCase):
         """JSON mode outputs error when no name is provided."""
         self.proj.rename_branch.side_effect = ValueError("New branch name must be provided.")
 
-        BranchCommand.branch_rename(TEST_DIR, new_branch_name=None, output_json=True)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_rename(TEST_DIR, new_branch_name=None, output_json=True)
 
         calls = mock_json.call_args_list
         self.assertEqual(len(calls), 2)
@@ -2992,20 +3774,22 @@ class BranchRenameTest(unittest.TestCase):
 
     @patch("poly.output.console.error")
     def test_rename_exception_shows_error(self, mock_error):
-        """When rename_branch raises, the error message is shown."""
+        """When rename_branch raises, the error message is shown and the command exits 1."""
         self.proj.rename_branch.side_effect = ValueError("Branch already exists.")
 
-        BranchCommand.branch_rename(TEST_DIR, new_branch_name="existing")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_rename(TEST_DIR, new_branch_name="existing")
 
         mock_error.assert_called_once()
         self.assertIn("Branch already exists", mock_error.call_args[0][0])
 
     @patch("poly.cli_commands.branch.json_print")
     def test_rename_exception_json(self, mock_json):
-        """JSON mode outputs the error when rename_branch raises."""
+        """JSON mode outputs the error when rename_branch raises, and exits 1."""
         self.proj.rename_branch.side_effect = ValueError("Branch already exists.")
 
-        BranchCommand.branch_rename(TEST_DIR, new_branch_name="existing", output_json=True)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_rename(TEST_DIR, new_branch_name="existing", output_json=True)
 
         mock_json.assert_called_once()
         payload = mock_json.call_args[0][0]
@@ -3032,6 +3816,7 @@ class BranchListArchivedTest(unittest.TestCase):
             {
                 "branchId": "BRANCH-1",
                 "name": "old-prompts",
+                "parentBranchId": "main",
                 "archivedAt": "2026-07-05",
                 "daysLeft": 15,
             },
@@ -3041,7 +3826,7 @@ class BranchListArchivedTest(unittest.TestCase):
         BranchCommand.branch_list(TEST_DIR, archived=True)
 
         self.proj.list_archived_branches.assert_called_once()
-        mock_print.assert_called_once_with(archived)
+        mock_print.assert_called_once_with(archived, {"BRANCH-1": "old-prompts"})
 
     @patch("poly.output.console.plain")
     def test_archived_empty_shows_message(self, mock_plain):
@@ -3092,7 +3877,7 @@ class BranchRestoreTest(unittest.TestCase):
     @patch("poly.output.console.success")
     def test_successful_restore(self, mock_success):
         """A successful restore prints a success message."""
-        BranchCommand.branch_restore(TEST_DIR, branch_name="old-branch")
+        BranchCommand.branch_restore(TEST_DIR, branch_id="old-branch")
 
         self.proj.restore_branch.assert_called_once_with("old-branch")
         mock_success.assert_called_once()
@@ -3101,39 +3886,41 @@ class BranchRestoreTest(unittest.TestCase):
     @patch("poly.cli_commands.branch.json_print")
     def test_successful_restore_json(self, mock_json):
         """JSON mode outputs success and the branch name."""
-        BranchCommand.branch_restore(TEST_DIR, branch_name="old-branch", output_json=True)
+        BranchCommand.branch_restore(TEST_DIR, branch_id="old-branch", output_json=True)
 
         mock_json.assert_called_once()
         payload = mock_json.call_args[0][0]
         self.assertTrue(payload["success"])
-        self.assertEqual(payload["branch_name"], "old-branch")
+        self.assertEqual(payload["branch_id"], "old-branch")
 
     @patch("poly.output.console.error")
     def test_restore_failure(self, mock_error):
         """When restore_branch returns False, a failure message is shown."""
         self.proj.restore_branch.return_value = False
 
-        BranchCommand.branch_restore(TEST_DIR, branch_name="old-branch")
+        BranchCommand.branch_restore(TEST_DIR, branch_id="old-branch")
 
         mock_error.assert_called_once()
         self.assertIn("Failed to restore", mock_error.call_args[0][0])
 
     @patch("poly.output.console.error")
     def test_restore_not_found_shows_error(self, mock_error):
-        """When the branch isn't in the archive, the ValueError is shown."""
+        """When the branch isn't in the archive, the ValueError is shown and the command exits 1."""
         self.proj.restore_branch.side_effect = ValueError("not found in archive")
 
-        BranchCommand.branch_restore(TEST_DIR, branch_name="no-such-branch")
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_restore(TEST_DIR, branch_id="no-such-branch")
 
         mock_error.assert_called_once()
         self.assertIn("not found in archive", mock_error.call_args[0][0])
 
     @patch("poly.cli_commands.branch.json_print")
     def test_restore_not_found_json(self, mock_json):
-        """JSON mode outputs the error when restore_branch raises."""
+        """JSON mode outputs the error when restore_branch raises, and exits 1."""
         self.proj.restore_branch.side_effect = ValueError("not found in archive")
 
-        BranchCommand.branch_restore(TEST_DIR, branch_name="no-such-branch", output_json=True)
+        with self.assertRaises(SystemExit):
+            BranchCommand.branch_restore(TEST_DIR, branch_id="no-such-branch", output_json=True)
 
         mock_json.assert_called_once()
         payload = mock_json.call_args[0][0]
@@ -3141,48 +3928,22 @@ class BranchRestoreTest(unittest.TestCase):
         self.assertIn("not found in archive", payload["error"])
 
     @patch("poly.cli_commands.branch.json_print")
-    def test_duplicate_name_json(self, mock_json):
-        """JSON mode outputs the error when restore_branch raises for duplicate names."""
-        self.proj.restore_branch.side_effect = ValueError(
-            "Multiple archived branches named 'release' found"
-        )
-
-        BranchCommand.branch_restore(TEST_DIR, branch_name="release", output_json=True)
-
-        mock_json.assert_called_once()
-        payload = mock_json.call_args[0][0]
-        self.assertFalse(payload["success"])
-        self.assertIn("Multiple archived branches", payload["error"])
-
-    @patch("poly.output.console.error")
-    def test_duplicate_name_shows_error(self, mock_error):
-        """When multiple archived branches share a name, the error is shown."""
-        self.proj.restore_branch.side_effect = ValueError(
-            "Multiple archived branches named 'release' found"
-        )
-
-        BranchCommand.branch_restore(TEST_DIR, branch_name="release")
-
-        mock_error.assert_called_once()
-        self.assertIn("Multiple archived branches", mock_error.call_args[0][0])
-
-    @patch("poly.cli_commands.branch.json_print")
     def test_no_name_json_mode_exits(self, mock_json):
         """JSON mode without a branch name prints error and exits."""
         with self.assertRaises(SystemExit):
-            BranchCommand.branch_restore(TEST_DIR, branch_name=None, output_json=True)
+            BranchCommand.branch_restore(TEST_DIR, branch_id=None, output_json=True)
 
         mock_json.assert_called_once()
         payload = mock_json.call_args[0][0]
         self.assertFalse(payload["success"])
-        self.assertIn("requires a branch name", payload["error"])
+        self.assertIn("requires a branch id", payload["error"])
 
     @patch("poly.output.console.plain")
     def test_no_name_empty_archive_shows_message(self, mock_plain):
         """Interactive mode with no archived branches shows a message."""
         self.proj.list_archived_branches.return_value = []
 
-        BranchCommand.branch_restore(TEST_DIR, branch_name=None)
+        BranchCommand.branch_restore(TEST_DIR, branch_id=None)
 
         mock_plain.assert_called_once()
         self.assertIn("No archived branches", mock_plain.call_args[0][0])
@@ -3197,7 +3958,7 @@ class BranchRestoreTest(unittest.TestCase):
         ]
         mock_select.return_value.ask.return_value = None
 
-        BranchCommand.branch_restore(TEST_DIR, branch_name=None)
+        BranchCommand.branch_restore(TEST_DIR, branch_id=None)
 
         mock_warning.assert_called_once()
         self.assertIn("No branch selected", mock_warning.call_args[0][0])
@@ -3207,15 +3968,18 @@ class BranchRestoreTest(unittest.TestCase):
     def test_no_name_interactive_success(self, mock_success, mock_select):
         """Interactive mode selects a branch and restores it."""
         self.proj.list_archived_branches.return_value = [
-            {"branchId": "BRANCH-1", "name": "old-branch"},
-            {"branchId": "BRANCH-2", "name": "old-branch"},
+            {"branchId": "BRANCH-1", "name": "old-branch", "parentBranchId": "main"},
+            {"branchId": "BRANCH-2", "name": "old-branch", "parentBranchId": "BRANCH-1"},
         ]
-        mock_select.return_value.ask.return_value = "old-branch (BRANCH-2)"
-        self.proj.api_handler.restore_branch.return_value = True
+        # BRANCH-1 is the parent and is itself archived, so the label marks it.
+        mock_select.return_value.ask.return_value = (
+            "old-branch (BRANCH-2) — parent: old-branch (archived)"
+        )
+        self.proj.restore_branch.return_value = True
 
-        BranchCommand.branch_restore(TEST_DIR, branch_name=None)
+        BranchCommand.branch_restore(TEST_DIR, branch_id=None)
 
-        self.proj.api_handler.restore_branch.assert_called_once_with("BRANCH-2")
+        self.proj.restore_branch.assert_called_once_with("BRANCH-2")
         mock_success.assert_called_once()
         self.assertIn("old-branch", mock_success.call_args[0][0])
 
@@ -3224,12 +3988,514 @@ class BranchRestoreTest(unittest.TestCase):
     def test_no_name_interactive_restore_fails(self, mock_error, mock_select):
         """Interactive mode shows error when restore returns False."""
         self.proj.list_archived_branches.return_value = [
-            {"branchId": "BRANCH-1", "name": "old-branch"},
+            {"branchId": "BRANCH-1", "name": "old-branch", "parentBranchId": "main"},
         ]
-        mock_select.return_value.ask.return_value = "old-branch (BRANCH-1)"
-        self.proj.api_handler.restore_branch.return_value = False
+        mock_select.return_value.ask.return_value = "old-branch (BRANCH-1) — parent: main"
+        self.proj.restore_branch.return_value = False
 
-        BranchCommand.branch_restore(TEST_DIR, branch_name=None)
+        BranchCommand.branch_restore(TEST_DIR, branch_id=None)
 
         mock_error.assert_called_once()
         self.assertIn("Failed to restore", mock_error.call_args[0][0])
+
+
+class RequireDeploymentSimplificationTest(unittest.TestCase):
+    """Tests for the require_deployment_simplification CLI gate."""
+
+    def setUp(self):
+        self.proj = MagicMock()
+
+    @patch("poly.output.console.error")
+    def test_returns_silently_when_enabled(self, mock_error):
+        """An enabled project passes through without output or exit."""
+        self.proj.using_simplified_deployments = True
+
+        require_deployment_simplification(self.proj)
+
+        mock_error.assert_not_called()
+
+    @patch("poly.output.console.error")
+    def test_exits_with_error_when_disabled(self, mock_error):
+        """A disabled project is refused on stderr with exit code 1."""
+        self.proj.using_simplified_deployments = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            require_deployment_simplification(self.proj)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("simplified deployments", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.shared.json_print")
+    def test_reports_failure_as_json(self, mock_json_print):
+        """In JSON mode the refusal is a machine-readable payload, not stderr text."""
+        self.proj.using_simplified_deployments = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            require_deployment_simplification(self.proj, output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = mock_json_print.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("simplified deployments", payload["error"])
+
+    @patch("poly.cli_commands.shared.json_print")
+    def test_json_payload_carries_no_rich_markup(self, mock_json_print):
+        """The JSON error stays markup-free so consumers get plain text."""
+        self.proj.using_simplified_deployments = False
+
+        with self.assertRaises(SystemExit):
+            require_deployment_simplification(self.proj, output_json=True)
+
+        self.assertNotIn("[bold]", mock_json_print.call_args[0][0]["error"])
+
+
+class BranchTagTest(unittest.TestCase):
+    """Tests for BranchCommand.branch_tag and branch_untag."""
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.branch.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.using_simplified_deployments = True
+        self.proj.get_current_branch.return_value = "feature-a"
+        self.proj.tag_branch.return_value = True
+        self.proj.untag_branch.return_value = True
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.output.console.success")
+    def test_tag_success_reports_branch_name(self, mock_success):
+        """A successful tag names the branch that was staged."""
+        BranchCommand.branch_tag(TEST_DIR)
+
+        self.proj.tag_branch.assert_called_once_with()
+        self.assertIn("feature-a", mock_success.call_args[0][0])
+
+    @patch("poly.output.console.success")
+    def test_untag_success_reports_branch_name(self, mock_success):
+        """A successful untag names the branch whose tag was removed."""
+        BranchCommand.branch_untag(TEST_DIR)
+
+        self.proj.untag_branch.assert_called_once_with()
+        self.assertIn("feature-a", mock_success.call_args[0][0])
+
+    @patch("poly.output.console.error")
+    def test_tag_failure_is_reported(self, mock_error):
+        """A False from the project layer surfaces as an error."""
+        self.proj.tag_branch.return_value = False
+
+        BranchCommand.branch_tag(TEST_DIR)
+
+        self.assertIn("Failed to tag", mock_error.call_args[0][0])
+
+    @patch("poly.output.console.error")
+    def test_untag_failure_is_reported(self, mock_error):
+        """A False from the project layer surfaces as an error."""
+        self.proj.untag_branch.return_value = False
+
+        BranchCommand.branch_untag(TEST_DIR)
+
+        self.assertIn("Failed to remove tag", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.branch.json_print")
+    def test_json_mode_reports_outcome(self, mock_json_print):
+        """JSON mode reports the boolean outcome for both commands."""
+        BranchCommand.branch_tag(TEST_DIR, output_json=True)
+        self.assertEqual(mock_json_print.call_args[0][0], {"success": True})
+
+        self.proj.untag_branch.return_value = False
+        BranchCommand.branch_untag(TEST_DIR, output_json=True)
+        self.assertEqual(mock_json_print.call_args[0][0], {"success": False})
+
+    @patch("poly.output.console.error")
+    def test_tag_blocked_without_simplified_deployments(self, mock_error):
+        """Staging tags only exist under simplified deployments, so tag is gated."""
+        self.proj.using_simplified_deployments = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_tag(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("simplified deployments", mock_error.call_args[0][0])
+        self.proj.tag_branch.assert_not_called()
+
+    @patch("poly.output.console.error")
+    def test_untag_blocked_without_simplified_deployments(self, mock_error):
+        """Untag is gated on the same flag as tag."""
+        self.proj.using_simplified_deployments = False
+
+        with self.assertRaises(SystemExit) as ctx:
+            BranchCommand.branch_untag(TEST_DIR)
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("simplified deployments", mock_error.call_args[0][0])
+        self.proj.untag_branch.assert_not_called()
+
+
+class AudioCacheCommandTest(unittest.TestCase):
+    """Tests for the audio-cache CLI commands."""
+
+    SAMPLE_LIST = {
+        "entries": [
+            {
+                "id": "1",
+                "transcript": "Hello there",
+                "cached_at": "2026-05-26T10:00:00+00:00",
+                "hit_count": 3,
+                "duration": 1.2,
+                "regenerated": False,
+                "provider": "eleven_labs",
+                "provider_voice_id": "21m00Tcm4TlvDq8ikWAM",
+                "audio_filename": "1.wav",
+                "imported": False,
+                "language_code": "en-US",
+            }
+        ],
+        "total_count": 1,
+    }
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.audio_cache.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.region = "us-1"
+        self.proj.project_id = "test-project"
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.list_audio_cache")
+    @patch("poly.output.console.print_audio_cache_entries")
+    def test_list_calls_api_with_params(self, mock_print, mock_api):
+        """audio-cache list passes limit/offset/sort to the API."""
+        mock_api.return_value = self.SAMPLE_LIST
+
+        AudioCacheCommand.audio_cache_list(TEST_DIR, limit=20, offset=5, sort="hit_count:desc")
+
+        mock_api.assert_called_once_with(
+            region="us-1", project_id="test-project", limit=20, offset=5, sort="hit_count:desc"
+        )
+        mock_print.assert_called_once()
+
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.list_audio_cache")
+    @patch("poly.cli_commands.audio_cache.json_print")
+    def test_list_json_outputs_raw_response(self, mock_json, mock_api):
+        """audio-cache list --json outputs the full API response."""
+        mock_api.return_value = self.SAMPLE_LIST
+
+        AudioCacheCommand.audio_cache_list(TEST_DIR, output_json=True)
+
+        mock_json.assert_called_once_with(self.SAMPLE_LIST)
+
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.list_audio_cache")
+    @patch("poly.output.console.info")
+    def test_list_empty_shows_info(self, mock_info, mock_api):
+        """audio-cache list with no results shows info message."""
+        mock_api.return_value = {"entries": [], "total_count": 0}
+
+        AudioCacheCommand.audio_cache_list(TEST_DIR)
+
+        mock_info.assert_called_once()
+
+    @patch("builtins.open", create=True)
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.get_audio_cache_file")
+    @patch("poly.output.console.success")
+    def test_get_file_writes_file(self, mock_success, mock_api, mock_open):
+        """audio-cache get-file downloads and writes a WAV file."""
+        mock_open.return_value.__enter__ = MagicMock()
+        mock_open.return_value.__exit__ = MagicMock(return_value=False)
+        mock_api.return_value = b"\x00" * 2_000_000
+
+        AudioCacheCommand.audio_cache_get_file(TEST_DIR, "entry-1", output_path="/tmp/test.wav")
+
+        mock_api.assert_called_once_with(
+            region="us-1", project_id="test-project", entry_id="entry-1"
+        )
+        mock_success.assert_called_once()
+        self.assertIn("2.0 MB", mock_success.call_args[0][0])
+
+    @patch("builtins.open", create=True)
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.update_audio_cache_file")
+    @patch("poly.output.console.success")
+    def test_update_file_reads_and_sends_bytes(self, mock_success, mock_api, mock_open):
+        """audio-cache update-file reads the local file and sends its bytes."""
+        mock_open.return_value.__enter__.return_value.read.return_value = b"RIFF-data"
+        mock_open.return_value.__exit__ = MagicMock(return_value=False)
+
+        AudioCacheCommand.audio_cache_update_file(
+            TEST_DIR, "entry-1", "/tmp/replacement.wav", filename="clip.wav"
+        )
+
+        mock_api.assert_called_once_with(
+            region="us-1",
+            project_id="test-project",
+            entry_id="entry-1",
+            audio_bytes=b"RIFF-data",
+            filename="clip.wav",
+        )
+        mock_success.assert_called_once()
+
+    @patch("builtins.open", create=True)
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.update_audio_cache_details")
+    @patch("poly.output.console.success")
+    def test_update_details_parses_config_and_sends_settings(
+        self, mock_success, mock_api, mock_open
+    ):
+        """audio-cache update-details parses --config JSON into the settings payload."""
+        mock_open.return_value.__enter__.return_value.read.return_value = b"RIFF-data"
+        mock_open.return_value.__exit__ = MagicMock(return_value=False)
+
+        AudioCacheCommand.audio_cache_update_details(
+            TEST_DIR, "entry-1", "/tmp/replacement.wav", "hello", '{"stability": 0.5}'
+        )
+
+        mock_api.assert_called_once_with(
+            region="us-1",
+            project_id="test-project",
+            entry_id="entry-1",
+            audio_bytes=b"RIFF-data",
+            settings={"text": "hello", "config": {"stability": 0.5}},
+            filename="replacement.wav",
+        )
+        mock_success.assert_called_once()
+
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.update_audio_cache_details")
+    @patch("poly.cli_commands.audio_cache.json_print")
+    def test_update_details_invalid_config_json_exits(self, mock_json, mock_api):
+        """An invalid --config JSON string exits with an error instead of calling the API."""
+        with self.assertRaises(SystemExit):
+            AudioCacheCommand.audio_cache_update_details(
+                TEST_DIR, "entry-1", "/tmp/replacement.wav", "hello", "{not json", output_json=True
+            )
+
+        mock_api.assert_not_called()
+        mock_json.assert_called_once()
+        self.assertFalse(mock_json.call_args[0][0]["success"])
+
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.delete_audio_cache_entry")
+    @patch("poly.output.console.success")
+    def test_delete_calls_api(self, mock_success, mock_api):
+        """audio-cache delete calls the API with the entry ID."""
+        mock_api.return_value = {"success": True}
+
+        AudioCacheCommand.audio_cache_delete(TEST_DIR, "entry-1")
+
+        mock_api.assert_called_once_with(
+            region="us-1", project_id="test-project", entry_id="entry-1"
+        )
+        mock_success.assert_called_once()
+
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.bulk_delete_audio_cache")
+    @patch("poly.output.console.success")
+    def test_bulk_delete_splits_comma_separated_ids(self, mock_success, mock_api):
+        """audio-cache bulk-delete parses the --ids flag into a list."""
+        mock_api.return_value = {"deleted": ["1", "2"], "failed": []}
+
+        AudioCacheCommand.audio_cache_bulk_delete(TEST_DIR, "1, 2")
+
+        mock_api.assert_called_once_with(region="us-1", project_id="test-project", ids=["1", "2"])
+        mock_success.assert_called_once()
+
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.bulk_delete_audio_cache")
+    @patch("poly.output.console.error")
+    def test_bulk_delete_reports_failures(self, mock_error, mock_api):
+        """audio-cache bulk-delete reports IDs that failed to delete."""
+        mock_api.return_value = {"deleted": [], "failed": ["9"]}
+
+        AudioCacheCommand.audio_cache_bulk_delete(TEST_DIR, "9")
+
+        mock_error.assert_called_once()
+
+    @patch("builtins.open", create=True)
+    @patch("poly.cli_commands.audio_cache.AgentStudioInterface.synthesize_audio_cache")
+    @patch("poly.output.console.success")
+    def test_synthesize_writes_preview_file(self, mock_success, mock_api, mock_open):
+        """audio-cache synthesize downloads and writes a preview WAV file."""
+        mock_open.return_value.__enter__ = MagicMock()
+        mock_open.return_value.__exit__ = MagicMock(return_value=False)
+        mock_api.return_value = b"\x00" * 1_000_000
+
+        AudioCacheCommand.audio_cache_synthesize(TEST_DIR, "entry-1", "hello", "{}")
+
+        mock_api.assert_called_once_with(
+            region="us-1",
+            project_id="test-project",
+            entry_id="entry-1",
+            text="hello",
+            config={},
+            language=None,
+        )
+        mock_success.assert_called_once()
+        self.assertIn("entry-1-preview.wav", mock_success.call_args[0][0])
+
+
+class DeploymentsSimplifiedModeTest(unittest.TestCase):
+    """Deployment-mode awareness across the deployments command family.
+
+    Under simplified deployments main deploys straight to live and sandbox is frozen
+    at its pre-migration state, so these commands must target live rather than reading
+    or writing the stale sandbox history. Legacy-mode behaviour is covered by the
+    DeploymentsShowTest/PromoteTest/RollbackTest classes above.
+    """
+
+    VERSIONS = [
+        {
+            "id": "dep-1",
+            "version_hash": "abc123456xyz",
+            "deployment_metadata": {"deployment_message": "initial release"},
+        },
+        {
+            "id": "dep-2",
+            "version_hash": "def789012xyz",
+            "deployment_metadata": {"deployment_message": "hotfix"},
+        },
+    ]
+    ACTIVE_HASHES = {"sandbox": "abc123456xyz", "live": "abc123456xyz"}
+
+    def setUp(self):
+        self.mock_load_patcher = patch("poly.cli_commands.deployments.load_project")
+        self.mock_load = self.mock_load_patcher.start()
+        self.proj = MagicMock()
+        self.proj.get_deployments.return_value = (list(self.VERSIONS), dict(self.ACTIVE_HASHES))
+        self.proj.rollback_deployment.return_value = True
+        self.mock_load.return_value = self.proj
+
+    def tearDown(self):
+        patch.stopall()
+
+    def _client_envs_queried(self):
+        """Every client_env passed to get_deployments, positional or keyword."""
+        return [
+            call.kwargs.get("client_env", call.args[0] if call.args else None)
+            for call in self.proj.get_deployments.call_args_list
+        ]
+
+    # ── list ─────────────────────────────────────────────────────────
+
+    @patch("poly.output.console.print_deployments")
+    def test_list_defaults_to_live_when_simplified(self, _mock_print):
+        """With no --env, a converged project lists live rather than frozen sandbox."""
+        self.proj.using_simplified_deployments = True
+
+        DeploymentsCommand.deployments_list(TEST_DIR)
+
+        self.assertEqual(self._client_envs_queried(), ["live"])
+
+    @patch("poly.output.console.print_deployments")
+    def test_list_defaults_to_sandbox_when_not_simplified(self, _mock_print):
+        """An unmigrated project keeps the legacy sandbox default."""
+        self.proj.using_simplified_deployments = False
+
+        DeploymentsCommand.deployments_list(TEST_DIR)
+
+        self.assertEqual(self._client_envs_queried(), ["sandbox"])
+
+    @patch("poly.output.console.print_deployments")
+    def test_list_explicit_env_wins_when_simplified(self, _mock_print):
+        """--env sandbox still reads the frozen pre-migration history."""
+        self.proj.using_simplified_deployments = True
+
+        DeploymentsCommand.deployments_list(TEST_DIR, environment="sandbox")
+
+        self.assertEqual(self._client_envs_queried(), ["sandbox"])
+
+    # ── show ─────────────────────────────────────────────────────────
+
+    @patch("poly.output.console.print_deployment_show")
+    def test_show_defaults_to_live_when_simplified(self, _mock_print):
+        """show defaults to live, then reads sandbox for the included-deployment history."""
+        self.proj.using_simplified_deployments = True
+
+        DeploymentsCommand.deployments_show(TEST_DIR, version_hash="abc123456")
+
+        self.assertEqual(self._client_envs_queried(), ["live", "sandbox"])
+
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_show_reports_no_included_deployments_for_a_post_migration_deploy(self, mock_json):
+        """A live-only hash is absent from frozen sandbox, so nothing is bundled into it."""
+        self.proj.using_simplified_deployments = True
+        live_only = [
+            {
+                "id": "dep-live",
+                "version_hash": "live99999xyz",
+                "deployment_metadata": {"deployment_message": "merge to main"},
+            }
+        ]
+        # live holds the merge; sandbox is frozen and never saw this hash
+        self.proj.get_deployments.side_effect = [
+            (live_only, {"live": "live99999xyz"}),
+            (list(self.VERSIONS), dict(self.ACTIVE_HASHES)),
+        ]
+
+        DeploymentsCommand.deployments_show(TEST_DIR, version_hash="live99999", output_json=True)
+
+        payload = mock_json.call_args[0][0]
+        self.assertEqual(payload["included_deployments"], [])
+        self.assertFalse(payload["is_rollback"])
+
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_show_still_resolves_included_for_a_pre_migration_deploy(self, mock_json):
+        """A pre-migration promotion kept its sandbox hash, so its bundle still resolves."""
+        self.proj.using_simplified_deployments = True
+        promoted = [{**self.VERSIONS[0]}]
+        self.proj.get_deployments.side_effect = [
+            (promoted, {"live": "abc123456xyz"}),
+            (list(self.VERSIONS), dict(self.ACTIVE_HASHES)),
+        ]
+
+        DeploymentsCommand.deployments_show(TEST_DIR, version_hash="abc123456", output_json=True)
+
+        payload = mock_json.call_args[0][0]
+        self.assertEqual(
+            [d["version_hash"] for d in payload["included_deployments"]],
+            ["abc123456xyz", "def789012xyz"],
+        )
+
+    # ── promote ──────────────────────────────────────────────────────
+
+    @patch("poly.output.console.error")
+    def test_promote_blocked_when_simplified(self, mock_error):
+        """Promote is refused before any API call — the platform does not reject it."""
+        self.proj.using_simplified_deployments = True
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.deployments_promote(
+                TEST_DIR, from_deployment="abc123456", to_env="live", force=True
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.proj.promote_deployment.assert_not_called()
+        self.proj.get_deployments.assert_not_called()
+        self.assertIn("simplified deployments", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.deployments.json_print")
+    def test_promote_blocked_when_simplified_json(self, mock_json):
+        """The refusal is machine-readable in --json mode."""
+        self.proj.using_simplified_deployments = True
+
+        with self.assertRaises(SystemExit) as ctx:
+            DeploymentsCommand.deployments_promote(
+                TEST_DIR, from_deployment="abc123456", to_env="live", output_json=True
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.proj.promote_deployment.assert_not_called()
+        payload = mock_json.call_args[0][0]
+        self.assertFalse(payload["success"])
+        self.assertIn("simplified deployments", payload["error"])
+
+    # ── rollback ─────────────────────────────────────────────────────
+
+    @patch("poly.output.console.success")
+    def test_rollback_targets_live_when_simplified(self, mock_success):
+        """Rollback reads live candidates — the only target the platform accepts."""
+        self.proj.using_simplified_deployments = True
+
+        DeploymentsCommand.deployments_rollback(TEST_DIR, deployment="abc123456", force=True)
+
+        self.assertEqual(self._client_envs_queried(), ["live"])
+        self.proj.rollback_deployment.assert_called_once_with("dep-1", message="initial release")
+        self.assertIn("Live", mock_success.call_args[0][0])

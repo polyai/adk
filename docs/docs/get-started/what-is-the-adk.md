@@ -15,12 +15,12 @@ It gives you a Git-like workflow for synchronizing project configuration between
 - Build and edit Agent Studio projects locally using standard tooling
 - Synchronize project configuration with Agent Studio using `poly push` and `poly pull`
 - Branch, validate, and review changes before deployment
-- Edit and navigate projects in **VS Code** or **Cursor** with the [PolyAI ADK extension](../reference/tooling.md#polyai-adk-extension-for-vs-code-and-cursor), or pair the ADK with [AI coding agents](../reference/tooling.md#claude-code) such as **Claude Code**
+- Edit and navigate projects in **VS Code** or **Cursor** with the [PolyAI ADK extension](../tooling/tooling.md#polyai-adk-extension-for-vs-code-and-cursor), or pair the ADK with [AI coding agents](../tooling/tooling.md#claude-code) such as **Claude Code**
 - Collaborate across multiple developers on the same project
 
 ## Why it exists
 
-The ADK moves most build-and-edit work out of the browser and into your local environment. You can [merge branches](../reference/branch_merge.md) and run reviews from the CLI, while Agent Studio remains the home for deployment and production monitoring — but you no longer have to edit resources there by hand.
+The ADK moves most build-and-edit work out of the browser and into your local environment. You can [merge branches](../reference/cli/branch.md#poly-branch-merge) and run reviews from the CLI, while Agent Studio remains the home for deployment and production monitoring — but you no longer have to edit resources there by hand.
 
 Instead of editing everything directly inside Agent Studio, you pull a project locally, make changes using your normal tools, and push those changes back to the platform.
 
@@ -33,7 +33,7 @@ This makes it straightforward to:
 
 ## Multi-developer workflows
 
-The ADK supports team workflows out of the box. See [multi-user workflows and guardrails](../concepts/multi-user-and-guardrails.md) for details on branching, validation, and review.
+The ADK supports team workflows out of the box. See [multi-user workflows and guardrails](../development/branches-push-pull.md) for details on branching, validation, and review.
 
 It preserves the same guardrails as Agent Studio, so developers cannot push changes that are incompatible with the project.
 
@@ -45,25 +45,18 @@ It preserves the same guardrails as Agent Studio, so developers cannot push chan
 
 <div class="grid cards" markdown>
 
+-   **Install the ADK**
+
+    ---
+
+    Set up uv, install the ADK, and get your API key.
+    [Open getting started](./get-started.md)
+
 -   **Watch the walkthrough**
 
     ---
 
     See a practical demonstration of the ADK in use.
     [Open the walkthrough video](./walkthrough-video.md)
-
--   **Install prerequisites**
-
-    ---
-
-    Set up uv, Git, and your API key before running your first commands.
-    [Open prerequisites](./prerequisites.md)
-
--   **Run your first commands**
-
-    ---
-
-    Initialize a project, pull configuration, and push your first change.
-    [Open first commands](./first-commands.md)
 
 </div>

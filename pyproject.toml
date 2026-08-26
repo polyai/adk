@@ -75,6 +75,7 @@ omit = [
 ]
 
 [tool.pytest.ini_options]
+testpaths = ["src/poly/tests"]
 norecursedirs = [
     "test_projects",
 ]
@@ -104,6 +105,8 @@ ignore_packages = [
     "rpds-py",
     "urllib3",
     "wcwidth",
+    "posthog",
+    "typing_extensions"
 ]
 
 [tool.semantic_release]
@@ -159,7 +162,7 @@ tag_format = "v{version}"
 
 [project]
 name = "polyai-adk"
-version = "0.34.5"
+version = "0.44.4"
 description = "Agent Development Kit (ADK) — a CLI for managing Agent Studio projects locally"
 readme = "README.md"
 requires-python = ">=3.14.0"
@@ -174,7 +177,8 @@ dependencies = [
     "ruff>=0.14.0",
     "ty",
     "argcomplete>=3.0.0",
-    "langcodes==3.5.1"
+    "langcodes==3.5.1",
+    "posthog==7.35.4"
 ]
 
 [project.license]

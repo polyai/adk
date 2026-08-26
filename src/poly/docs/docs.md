@@ -75,7 +75,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 | `poly validate` | Validate project configuration locally |
 | `poly review` | Diff review page: `create` (local vs remote, version hash, or `--before`/`--after`), `list`, `delete` |
 | `poly deployments` | Manage deployments (`list`, with `--env`, `--limit`, `--offset`, `--hash`, `--details`) |
-| `poly chat` | Interactive chat session with the agent (`--environment`, `--channel`, `--functions`, `--flows`, `--state`) |
+| `poly chat` | Interactive chat session with the agent (`--environment`, `--channel`, `--sip-header`, `--functions`, `--flows`, `--state`) |
 | `poly docs` | Output resource documentation (`poly docs flows functions topics`, or `--all` for everything) |
 
 Use `poly -h` and `poly {command} -h` for more detailed information

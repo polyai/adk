@@ -30,8 +30,8 @@ class SyncClientHandler:
     def __init__(
         self,
         region: str,
-        account_id: str,
-        project_id: str,
+        account_id: Optional[str] = None,
+        project_id: Optional[str] = None,
         branch_id: Optional[str] = None,
     ):
         if region not in SourcererSDK.ENVIRONMENT_URLS:
@@ -67,6 +67,29 @@ class SyncClientHandler:
                 self._sdk.branch_id = "main"
         return self.branch_id
 
+    def list_template_projects(self) -> list[dict[str, Any]]:
+        """List available template projects.
+
+        Returns:
+            list[dict[str, Any]]: A list of template project summaries.
+        """
+        return self.sdk.list_template_projects()
+
+    def get_template_project_projection(self, template_id: str) -> dict[str, Any]:
+        """Get the full projection for a template project.
+
+        The template API returns a different shape to the sourcerer projection.
+        This method fetches and normalises it so
+        ``load_resources_from_projection`` can consume it.
+
+        Args:
+            template_id: The template project ID.
+
+        Returns:
+            dict[str, Any]: The projection in sourcerer-compatible format.
+        """
+        return self.sdk.get_template_project_projection(template_id)
+
     def pull_deployment_projection(self, deployment_id: str) -> dict[str, Any]:
         """Fetch the raw projection for a specific deployment.
 
@@ -87,17 +110,35 @@ class SyncClientHandler:
         )
         return projection
 
+    def pull_branch_projection(
+        self, branch_id: str, at_sequence: Optional[int] = None
+    ) -> dict[str, Any]:
+        """Fetch projection for a specific branch, optionally at a historical sequence.
+
+        Args:
+            branch_id: The branch whose projection to fetch.
+            at_sequence: When provided, fetches the projection at this sequence number.
+
+        Returns:
+            The raw projection dict for the branch.
+        """
+        logger.info(
+            f"Fetching projection for branch {branch_id}"
+            + (f" at sequence {at_sequence}" if at_sequence is not None else "")
+        )
+        projection = self.sdk.fetch_projection(
+            force_refresh=True, branch_id=branch_id, at_sequence=at_sequence
+        )
+        return projection
+
     def pull_projection(self) -> dict[str, Any]:
         """Fetch the raw projection for the current branch.
 
         Returns:
             The raw projection dict.
         """
-        logger.info(
-            f"Fetching project data for project {self.project_id} on branch {self.sdk.branch_id}"
-        )
         self.assert_branch_exists()
-        projection = self.sdk.fetch_projection(force_refresh=True)
+        projection = self.pull_branch_projection(branch_id=self.sdk.branch_id)
         logger.debug(f"Projection: {projection}")
         logger.info(
             f"Successfully fetched project data for project {self.project_id} "
@@ -191,7 +232,9 @@ class SyncClientHandler:
                 return False
         return False
 
-    def create_branch(self, branch_name: Optional[str] = None) -> str:
+    def create_branch(
+        self, branch_name: Optional[str] = None, source_branch_id: Optional[str] = None
+    ) -> str:
         """Create a new branch for the project
 
         Args:
@@ -200,8 +243,9 @@ class SyncClientHandler:
         Returns:
             The ID of the created branch
         """
-        self.sdk.branch_id = "main"
-        self.sdk.get_project_data()
+        sequence_number = self.sdk.fetch_last_known_sequence_number(
+            branch_id=source_branch_id or "main"
+        )
 
         if branch_name is None:
             metadata = self.sdk.create_metadata()
@@ -210,28 +254,36 @@ class SyncClientHandler:
             suffix = f"{time_suffix}-{random_suffix}"  # to avoid duplicate names
             branch_name = f"ADK-{suffix}"
 
-        logger.info(f"Creating new branch '{branch_name}' from 'main' branch")
+        logger.info(
+            f"Creating new branch '{branch_name}' from branch '{source_branch_id or 'main'}'"
+        )
 
         self.sdk.branch_id = self.sdk.create_branch(
-            expected_main_last_known_sequence=self.sdk._last_known_sequence,
+            expected_main_last_known_sequence=sequence_number,
             branch_name=branch_name,
+            source_branch_id=source_branch_id,
         )
         logger.info(
             f"Created and switched to new branch. Name:'{branch_name}' ID:'{self.sdk.branch_id}'"
         )
         return self.sdk.branch_id
 
-    def get_branches(self) -> dict[str, str]:
+    def get_branches(self) -> dict[str, dict[str, Any]]:
         """Get a list of all branches in the project.
 
         Returns:
-            dict[str, str]: A dictionary mapping branch names to branch IDs
+            A dictionary mapping branch names to their full metadata dicts.
+            Each value contains at least ``branchId``, ``parentBranchId``,
+            ``parentSequence``, ``isDiverged``, etc.  The ``main`` entry is
+            synthetic with ``branchId="main"`` and no parent info.
         """
-        branches = {"main": "main"}
+        branches: dict[str, dict[str, Any]] = {
+            "main": {"branchId": "main", "name": "main"},
+        }
         logger.info(f"Fetching branches for project {self.account_id}/{self.project_id}")
-        for branch in self.sdk.fetch_branches().get("branches"):
-            branches[branch.get("name")] = branch.get("branchId")
-        logger.info(f"Fetched {len(branches)} branches branches={branches!r}")
+        for branch in self.sdk.fetch_branches().get("branches", []):
+            branches[branch.get("name")] = branch
+        logger.info(f"Fetched {len(branches)} branches")
         return branches
 
     def delete_branch(self, branch_id: str) -> bool:
@@ -262,13 +314,13 @@ class SyncClientHandler:
         return True
 
     def merge_branch(
-        self, message: str, conflict_resolutions: Optional[list[dict[str, Any]]] = None
+        self, message: Optional[str], conflict_resolutions: Optional[list[dict[str, Any]]] = None
     ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
-        """Merge the current branch into main.
+        """Merge the current branch into its parent branch.
 
         Args:
-            message (str): The merge commit message
-            conflict_resolutions (list[dict[str, Any]]): A list of conflict resolutions. Each resolution should have:
+            message (Optional[str]): The merge commit message
+            conflict_resolutions (Optional[list[dict[str, Any]]]): A list of conflict resolutions. Each resolution should have:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
                 - value: Optional custom value (only used with custom strategy)
@@ -284,7 +336,7 @@ class SyncClientHandler:
             logger.error("Cannot merge 'main' branch into itself.")
             return False, [], []
 
-        logger.info(f"Merging branch '{self.sdk.branch_id}' into 'main'")
+        logger.info(f"Merging branch '{self.sdk.branch_id}' into its parent branch")
 
         try:
             result = self.sdk.merge_branch(
@@ -292,18 +344,63 @@ class SyncClientHandler:
                 conflict_resolutions=conflict_resolutions,
             )
         except SourcererAPIError as e:
-            logger.error(f"Failed to merge branch '{self.sdk.branch_id}' into 'main': {e}")
+            logger.error(
+                f"Failed to merge branch '{self.sdk.branch_id}' into its parent branch: {e}"
+            )
             return False, [], []
 
         if result.get("hasConflicts", False) or result.get("errors", []):
             logger.info(
-                f"Failed to merge branch '{self.sdk.branch_id}' into 'main' due to {len(result.get('conflicts', []))} conflicts and {len(result.get('errors', []))} errors"
+                f"Failed to merge branch '{self.sdk.branch_id}' into its parent branch due to {len(result.get('conflicts', []))} conflicts and {len(result.get('errors', []))} errors"
             )
             conflicts = result.get("conflicts", [])
             errors = result.get("errors", [])
             return False, conflicts, errors
 
-        logger.info(f"Successfully merged branch '{self.sdk.branch_id}' into 'main'")
+        logger.info(f"Successfully merged branch '{self.sdk.branch_id}' into its parent branch")
+        return True, [], []
+
+    def sync_branch(
+        self, conflict_resolutions: Optional[list[dict[str, Any]]] = None
+    ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
+        """Merge the parent branch into the current branch.
+
+        Args:
+            conflict_resolutions (list[dict[str, Any]]): A list of conflict resolutions. Each resolution should have:
+                - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
+                - strategy: Resolution strategy - "ours", "theirs", or "base"
+                - value: Optional custom value (only used with custom strategy)
+
+        Returns:
+            success (bool): True if the sync was successful, False otherwise
+            list[dict[str, str]]: A list of conflict information if the merge failed, empty list if successful
+            list[dict[str, str]]: A list of error information if the merge failed, empty list if successful
+        """
+        self.assert_branch_exists()
+
+        if self.sdk.branch_id == "main":
+            logger.error("Cannot sync 'main' branch — it has no parent to sync from.")
+            return False, [], []
+
+        logger.info(f"Merging parent into '{self.sdk.branch_id}'")
+
+        try:
+            result = self.sdk.sync_branch(
+                conflict_resolutions=conflict_resolutions,
+            )
+        except SourcererAPIError as e:
+            logger.error(f"Failed to sync branch '{self.sdk.branch_id}': {e}")
+            return False, [], []
+
+        if result.get("hasConflicts", False) or result.get("errors", []):
+            logger.info(
+                f"Failed to sync branch '{self.sdk.branch_id}' to {len(result.get('conflicts', []))} conflicts and {len(result.get('errors', []))} errors"
+            )
+            conflicts = result.get("conflicts", [])
+            errors = result.get("errors", [])
+            return False, conflicts, errors
+
+        logger.info(f"Successfully synced branch '{self.sdk.branch_id}'")
         return True, [], []
 
     def get_branch_chat_info(self, branch_id: str) -> dict[str, Any]:
@@ -380,4 +477,42 @@ class SyncClientHandler:
             return False
 
         logger.info(f"Successfully restored branch ID:'{branch_id}'")
+        return True
+
+    def tag_branch(self, branch_id: str) -> bool:
+        """Tag a branch with staging tag
+
+        Args:
+            branch_id (str): The ID of the branch to tag.
+        Returns:
+            bool: True if the tagging was successful, False otherwise.
+        """
+        logger.info(f"Tagging branch ID:'{branch_id}' with staging tag")
+
+        try:
+            self.sdk.tag_branch(branch_id)
+        except SourcererAPIError as e:
+            logger.error(f"Failed to tag branch ID:'{branch_id}': {e}")
+            return False
+
+        logger.info(f"Successfully tagged branch ID:'{branch_id}' with staging tag")
+        return True
+
+    def untag_branch(self, branch_id: str) -> bool:
+        """Remove staging tag from a branch
+
+        Args:
+            branch_id (str): The ID of the branch to untag.
+        Returns:
+            bool: True if the untagging was successful, False otherwise.
+        """
+        logger.info(f"Removing staging tag from branch ID:'{branch_id}'")
+
+        try:
+            self.sdk.untag_branch(branch_id)
+        except SourcererAPIError as e:
+            logger.error(f"Failed to remove staging tag from branch ID:'{branch_id}': {e}")
+            return False
+
+        logger.info(f"Successfully removed staging tag from branch ID:'{branch_id}'")
         return True
