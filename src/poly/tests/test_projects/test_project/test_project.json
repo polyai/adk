@@ -1304,6 +1304,12 @@
         "name": "test_document",
         "path": "test_document.md",
         "contents": "This is a test document.\nIt has multiple lines.\n"
+      },
+      "CONTEXT.MD": {
+        "resource_id": "CONTEXT.MD",
+        "name": "CONTEXT",
+        "path": "CONTEXT.MD",
+        "contents": "This is platform context file.\n"
       }
     }
   },
