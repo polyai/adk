@@ -8,7 +8,6 @@ Copyright PolyAI Limited
 import json
 import logging
 import os
-import subprocess
 import sys
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -19,7 +18,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from rich import box
 from rich.console import Console, Group
 from rich.live import Live
-from rich.pager import Pager
+from rich.pager import Pager, SystemPager
 from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.syntax import Syntax
@@ -58,56 +57,31 @@ def set_verbose(verbose: bool) -> None:
     _verbose = verbose
 
 
-class _TerminalPager(Pager):
+class _OverflowPager(Pager):
     """Pager that only engages when the content overflows the screen.
 
-    Rich's default pager pipes everything to ``less`` via ``pydoc``, which
-    hardcodes ``LESS`` without ``F`` (quit-if-one-screen) or ``X`` (stay out of
-    the alternate screen). A three-row table would open ``less``, demand ``q``,
-    and then vanish on quit. git avoids that by setting ``LESS=FRX`` and letting
-    ``less -F`` decide; we make the same decision here instead, so it holds for
-    whichever pager the user has configured.
+    Rich's default pager sends everything to ``less``, so even a three-row table
+    would open the pager and demand ``q``. git avoids that with ``less -F``
+    (quit-if-one-screen); deciding it here instead means it also holds for a
+    reader whose ``PAGER`` is ``bat`` or ``more``, or whose ``LESS`` has no
+    ``F``. Spawning the pager, colour passthrough, ctrl-c and quitting early are
+    all left to Rich and pydoc, which already handle them.
     """
 
     def show(self, content: str) -> None:
-        """Write content straight out if it fits, otherwise page it."""
+        """Write content straight out if it fits, otherwise hand it to the pager."""
         # Rich has already wrapped to the console width, so newlines are rows.
         if content.count("\n") < console.size.height:
             console.file.write(content)
-            return
-
-        env = os.environ.copy()
-        # git's defaults: F quits if it fits, R keeps colour, X leaves output in
-        # the scrollback. setdefault, not assignment — a user-set LESS wins.
-        env.setdefault("LESS", "FRX")
-        try:
-            proc = subprocess.Popen(
-                os.environ.get("PAGER") or "less",
-                shell=True,
-                stdin=subprocess.PIPE,
-                env=env,
-                text=True,
-                errors="backslashreplace",
-            )
-        except OSError:
-            # No usable pager — better to dump the output than to lose it.
-            console.file.write(content)
-            return
-
-        try:
-            with proc.stdin as pipe:
-                pipe.write(content)
-        except OSError:
-            # The user quit before we finished writing; the pager has the rest.
-            pass
-        proc.wait()
+        else:
+            SystemPager().show(content)
 
 
 @contextmanager
 def paged_output(enabled: bool = True) -> Iterator[None]:
     """Pipe output through the system pager when enabled and stdout is a TTY."""
     if enabled and console.is_terminal:
-        with console.pager(pager=_TerminalPager(), styles=True):
+        with console.pager(pager=_OverflowPager(), styles=True):
             yield
     else:
         yield
@@ -365,7 +339,7 @@ def print_branch_history(commits: list[dict[str, Any]]) -> None:
         console.print("[muted]No commits found for this branch.[/muted]")
         return
 
-    table = Table(box=None, show_header=False, header_style="bold", padding=(0, 1))
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
     table.add_column("Merged At", no_wrap=True)
     table.add_column("Branch", no_wrap=True)
     table.add_column("Merged By", no_wrap=True)
@@ -757,7 +731,7 @@ def print_deployments(
     if not details:
         table = Table(
             box=None,
-            show_header=False,
+            show_header=True,
             header_style="bold",
             padding=(0, 1),
         )
