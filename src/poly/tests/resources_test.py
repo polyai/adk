@@ -935,7 +935,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
         result = Function._swap_latency_control_references(
-            code, mappings, resource_utils.replace_resource_ids_with_names
+            code, mappings, names_to_ids=False
         )
 
         self.assertIn("{{vrbl:My Variable}}", result)
@@ -951,7 +951,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
         result = Function._swap_latency_control_references(
-            code, mappings, resource_utils.replace_resource_names_with_ids
+            code, mappings, names_to_ids=True
         )
 
         self.assertIn("{{vrbl:var-1}}", result)
@@ -967,7 +967,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
         result = Function._swap_latency_control_references(
-            code, mappings, resource_utils.replace_resource_ids_with_names
+            code, mappings, names_to_ids=False
         )
 
         self.assertIn("{{vrbl:My Variable}}", result)
@@ -989,7 +989,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         ]
 
         result = Function._swap_latency_control_references(
-            code, mappings, resource_utils.replace_resource_ids_with_names
+            code, mappings, names_to_ids=False
         )
 
         self.assertIn("{{vrbl:My Variable}}", result)
@@ -1001,7 +1001,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
         result = Function._swap_latency_control_references(
-            code, mappings, resource_utils.replace_resource_ids_with_names
+            code, mappings, names_to_ids=False
         )
 
         self.assertEqual(result, code)
@@ -1016,7 +1016,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
         result = Function._swap_latency_control_references(
-            code, mappings, resource_utils.replace_resource_ids_with_names
+            code, mappings, names_to_ids=False
         )
 
         self.assertEqual(result, code)
@@ -1027,7 +1027,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
         result = Function._swap_latency_control_references(
-            code, mappings, resource_utils.replace_resource_ids_with_names
+            code, mappings, names_to_ids=False
         )
 
         self.assertEqual(result, code)
@@ -1042,7 +1042,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
         result = Function._swap_latency_control_references(
-            code, mappings, resource_utils.replace_resource_ids_with_names
+            code, mappings, names_to_ids=False
         )
 
         self.assertIn("{{vrbl:unknown-id}}", result)
@@ -1057,7 +1057,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
         result = Function._swap_latency_control_references(
-            code, mappings, resource_utils.replace_resource_ids_with_names
+            code, mappings, names_to_ids=False
         )
 
         self.assertIn("{{vrbl:My Variable}}", result)
@@ -1072,7 +1072,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         )
 
         result = Function._swap_latency_control_references(
-            code, [], resource_utils.replace_resource_ids_with_names
+            code, [], names_to_ids=False
         )
 
         self.assertEqual(result, code)
@@ -1087,7 +1087,7 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
         result = Function._swap_latency_control_references(
-            code, mappings, resource_utils.replace_resource_ids_with_names
+            code, mappings, names_to_ids=False
         )
 
         self.assertEqual(result, code)
@@ -1102,13 +1102,53 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
         mappings = [self._make_variable_mapping("var-1", "My Variable")]
 
         pretty = Function._swap_latency_control_references(
-            original, mappings, resource_utils.replace_resource_ids_with_names
+            original, mappings, names_to_ids=False
         )
         restored = Function._swap_latency_control_references(
-            pretty, mappings, resource_utils.replace_resource_names_with_ids
+            pretty, mappings, names_to_ids=True
         )
 
         self.assertEqual(restored, original)
+
+    def test_swap_finds_definitions_nested_in_statements(self):
+        """Decorated definitions below the top level are still found.
+
+        _iter_function_defs skips expressions for speed, so every statement container that
+        can hold a definition needs covering — otherwise the swap silently misses them.
+        """
+        decorator = "@func_latency_control(delay_responses=[('Hi {{vrbl:var-1}}', 5)])\n"
+        bodies = {
+            "nested in a function": (
+                "def outer(conv: Conversation):\n"
+                f"    {decorator}"
+                "    def inner(conv: Conversation):\n"
+                "        pass\n"
+            ),
+            "method on a class": (
+                f"class Handler:\n    {decorator}    def method(self, conv: Conversation):\n"
+                "        pass\n"
+            ),
+            "guarded by if": (
+                f"if True:\n    {decorator}    def my_func(conv: Conversation):\n        pass\n"
+            ),
+            "inside try/except": (
+                f"try:\n    {decorator}    def my_func(conv: Conversation):\n        pass\n"
+                "except ValueError:\n    pass\n"
+            ),
+            "inside a with block": (
+                f"with open('f') as fh:\n    {decorator}"
+                "    def my_func(conv: Conversation):\n        pass\n"
+            ),
+        }
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        for label, code in bodies.items():
+            with self.subTest(label):
+                result = Function._swap_latency_control_references(
+                    code, mappings, names_to_ids=False
+                )
+                self.assertIn("{{vrbl:My Variable}}", result)
+                self.assertNotIn("{{vrbl:var-1}}", result)
 
     def test_equality_ignores_variable_references(self):
         """variable_references must not affect equality.

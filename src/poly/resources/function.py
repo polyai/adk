@@ -523,7 +523,7 @@ class Function(Resource):
                 )
 
         code = Function._swap_latency_control_references(
-            code, resource_mappings, utils.replace_resource_ids_with_names
+            code, resource_mappings, names_to_ids=False
         )
 
         return code
@@ -561,9 +561,7 @@ class Function(Resource):
 
         code = utils.restore_function_def_line(code, resource_name)
 
-        code = cls._swap_latency_control_references(
-            code, resource_mappings, utils.replace_resource_names_with_ids
-        )
+        code = cls._swap_latency_control_references(code, resource_mappings, names_to_ids=True)
 
         return code
 
@@ -584,21 +582,49 @@ class Function(Resource):
         return f"{indent}@func_latency_control({', '.join(parts)})\n"
 
     @staticmethod
+    def _iter_function_defs(node: ast.AST) -> ty.Iterator[ast.AST]:
+        """Yield every function definition under node, including nested ones.
+
+        Unlike ast.walk this never descends into expressions, which cannot contain a
+        function definition. On large data-literal modules that is the difference between
+        visiting every node and visiting only the statements.
+        """
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                yield child
+            if isinstance(child, (ast.stmt, ast.ExceptHandler)):
+                yield from Function._iter_function_defs(child)
+
+    @staticmethod
     def _swap_latency_control_references(
         code: str,
         resource_mappings: list[ResourceMapping],
-        swap_fn: ty.Callable[..., str],
+        *,
+        names_to_ids: bool,
     ) -> str:
-        """Apply swap_fn to delay response messages in @func_latency_control decorators only."""
+        """Swap references in delay response messages of @func_latency_control decorators.
+
+        Args:
+            code: The function source to rewrite.
+            resource_mappings: Mappings providing the name<->id lookup.
+            names_to_ids: When True, map names -> ids; when False, ids -> names.
+
+        Returns:
+            str: The source with delay response references swapped. Everything outside a
+            @func_latency_control decorator, the function body included, is left as-is.
+        """
+        if "func_latency_control" not in code:
+            return code
+
         try:
             module = ast.parse(code)
         except SyntaxError:
             return code
 
+        swap = utils.build_reference_swapper(resource_mappings, names_to_ids=names_to_ids)
+
         replacements: list[tuple[ast.Constant, str, str]] = []
-        for node in ast.walk(module):
-            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                continue
+        for node in Function._iter_function_defs(module):
             for decorator in node.decorator_list:
                 if not (hasattr(decorator, "func") and hasattr(decorator.func, "id")):
                     continue
@@ -613,7 +639,7 @@ class Function(Resource):
                         msg_node = elt.elts[0]
                         if isinstance(msg_node, ast.Constant) and isinstance(msg_node.value, str):
                             old_msg = msg_node.value
-                            new_msg = swap_fn(old_msg, resource_mappings)
+                            new_msg = swap(old_msg)
                             if old_msg != new_msg:
                                 replacements.append((msg_node, old_msg, new_msg))
 

@@ -334,14 +334,35 @@ def _build_reference_replacer(
     return _replacer
 
 
+def build_reference_swapper(
+    resource_mappings: list["ResourceMapping"],
+    flow_folder_name: str = None,
+    *,
+    names_to_ids: bool,
+) -> "Callable[[str], str]":
+    """Build a reusable swapper that rewrites references in a string.
+
+    Args:
+        resource_mappings: Mappings providing the name<->id lookup.
+        flow_folder_name: Restricts flow-scoped mappings to the current flow.
+        names_to_ids: When True, map names -> ids; when False, ids -> names.
+
+    Returns:
+        Callable[[str], str]: Rewrites {{prefix:from}} references in the given string.
+    """
+    replacer = _build_reference_replacer(
+        resource_mappings, flow_folder_name, names_to_ids=names_to_ids
+    )
+    return lambda prompt: _REFERENCE_PATTERN.sub(replacer, prompt)
+
+
 def replace_resource_ids_with_names(
     prompt: str,
     resource_mappings: list["ResourceMapping"],
     flow_folder_name: str = None,
 ) -> str:
     """Replace resource IDs with names in the prompt string."""
-    replacer = _build_reference_replacer(resource_mappings, flow_folder_name, names_to_ids=False)
-    return _REFERENCE_PATTERN.sub(replacer, prompt)
+    return build_reference_swapper(resource_mappings, flow_folder_name, names_to_ids=False)(prompt)
 
 
 def replace_resource_names_with_ids(
@@ -350,8 +371,7 @@ def replace_resource_names_with_ids(
     flow_folder_name: str = None,
 ) -> str:
     """Replace resource names with IDs in the prompt string."""
-    replacer = _build_reference_replacer(resource_mappings, flow_folder_name, names_to_ids=True)
-    return _REFERENCE_PATTERN.sub(replacer, prompt)
+    return build_reference_swapper(resource_mappings, flow_folder_name, names_to_ids=True)(prompt)
 
 
 def replace_resource_names_with_ids_in_data(
