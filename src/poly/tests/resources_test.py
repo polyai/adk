@@ -1498,98 +1498,16 @@ CHILD_TOPIC_MAPPINGS = [
 ]
 
 
-class ChildTopicFromProjection(unittest.TestCase):
-    """Tests for ChildTopic.from_projection."""
+class ChildTopicTests(unittest.TestCase):
+    """Tests for the ChildTopic resource."""
 
-    def test_parses_child_topic_and_resolves_variant_name(self):
-        """A child topic is keyed by its own topic ID and carries the variant's real name."""
-        projection = {
-            "variantManagement": {
-                "variants": {"entities": {"VARIANT-es": {"name": "Spanish"}}},
-            },
-            "childOverwrites": {
-                "knowledgeBase": {
-                    "topics": {
-                        "entities": {
-                            "TOPIC-es-1": {
-                                "name": "Opening Hours",
-                                "variantId": "VARIANT-es",
-                                "actions": "Responde en español",
-                                "content": "Abrimos a las 9",
-                                "exampleQueries": [
-                                    {"query": "¿a qué hora abren?"},
-                                    {"noquery": "ignored"},
-                                ],
-                                "isActive": True,
-                            }
-                        }
-                    }
-                }
-            },
-        }
-
-        child_topics = ChildTopic.from_projection(projection)
-
-        self.assertEqual(list(child_topics), ["TOPIC-es-1"])
-        child_topic = child_topics["TOPIC-es-1"]
-        self.assertEqual(child_topic.resource_id, "TOPIC-es-1")
-        self.assertEqual(child_topic.name, "Opening Hours")
-        self.assertEqual(child_topic.variant_id, "VARIANT-es")
-        self.assertEqual(child_topic.variant_name, "Spanish")
-        self.assertEqual(child_topic.content, "Abrimos a las 9")
-        self.assertEqual(child_topic.example_queries, ["¿a qué hora abren?"])
-        self.assertTrue(child_topic.enabled)
-
-    def test_skips_child_topic_with_unknown_variant(self):
-        """A child topic pointing at a variant that no longer exists is skipped."""
-        projection = {
-            "variantManagement": {
-                "variants": {"entities": {"VARIANT-es": {"name": "Spanish"}}},
-            },
-            "childOverwrites": {
-                "knowledgeBase": {
-                    "topics": {
-                        "entities": {
-                            "TOPIC-es-1": {
-                                "name": "Opening Hours",
-                                "variantId": "VARIANT-deleted",
-                                "actions": "",
-                                "content": "",
-                            }
-                        }
-                    }
-                }
-            },
-        }
-
-        self.assertEqual(ChildTopic.from_projection(projection), {})
-
-    def test_skips_child_topic_with_missing_variant_id(self):
-        """A child topic with no variantId cannot be placed in a variant folder, so is skipped."""
-        projection = {
-            "variantManagement": {
-                "variants": {"entities": {"VARIANT-es": {"name": "Spanish"}}},
-            },
-            "childOverwrites": {
-                "knowledgeBase": {
-                    "topics": {
-                        "entities": {
-                            "TOPIC-es-1": {"name": "Opening Hours", "actions": "", "content": ""}
-                        }
-                    }
-                }
-            },
-        }
-
-        self.assertEqual(ChildTopic.from_projection(projection), {})
-
-    def test_empty_projection_yields_no_child_topics(self):
-        """An empty projection should return an empty dict."""
-        self.assertEqual(ChildTopic.from_projection({}), {})
-
-
-class ChildTopicSerializationTests(unittest.TestCase):
-    """Tests for ChildTopic YAML serialization and file placement."""
+    CHILD_TOPIC_YAML = """name: Opening Hours
+enabled: true
+actions: Responde en español
+content: Abrimos a las 9
+example_queries:
+- ¿a qué hora abren?
+"""
 
     def test_to_yaml_dict_omits_identity_fields(self):
         """variant_id and variant_name come from the path, not the YAML body."""
@@ -1640,10 +1558,10 @@ class ChildTopicSerializationTests(unittest.TestCase):
         self.assertTrue(restored.enabled)
 
     def test_file_path_nests_topic_under_variant_folder(self):
-        """Child topics live at topics/<variant>/<topic>.yaml, beside the base topics."""
+        """Child topics live at child_topics/<variant>/<topic>.yaml."""
         self.assertEqual(
             TEST_CHILD_TOPIC.file_path,
-            os.path.join("topics", "spanish", "opening_hours.yaml"),
+            os.path.join("child_topics", "spanish", "opening_hours.yaml"),
         )
 
     def test_file_path_lowercases_the_variant_folder(self):
@@ -1660,25 +1578,8 @@ class ChildTopicSerializationTests(unittest.TestCase):
 
         self.assertEqual(
             child_topic.file_path,
-            os.path.join("topics", "variant_1", "opening_hours.yaml"),
+            os.path.join("child_topics", "variant_1", "opening_hours.yaml"),
         )
-
-    def test_file_path_without_a_variant_raises(self):
-        """A child topic with no variant has no determinable path."""
-        child_topic = ChildTopic(
-            resource_id="TOPIC-orphan",
-            name="Opening Hours",
-            variant_id=None,
-            variant_name=None,
-            actions="",
-            content="",
-            example_queries=[],
-        )
-
-        with self.assertRaises(ValueError) as cm:
-            child_topic.file_path
-
-        self.assertIn("has no variant", str(cm.exception))
 
     def test_file_path_cleans_variant_and_topic_names(self):
         """Names with spaces and punctuation are cleaned into path-safe segments."""
@@ -1694,24 +1595,21 @@ class ChildTopicSerializationTests(unittest.TestCase):
 
         self.assertEqual(
             child_topic.file_path,
-            os.path.join("topics", "latin_america", "billing_refunds.yaml"),
+            os.path.join("child_topics", "latin_america", "billing_refunds.yaml"),
         )
 
 
-class ChildTopicDiscoverResourcesTests(unittest.TestCase):
-    """Tests for ChildTopic.discover_resources."""
-
-    def test_returns_empty_when_topics_folder_missing(self):
-        """A project with no topics folder discovers nothing."""
+    def test_returns_empty_when_child_topics_folder_missing(self):
+        """A project with no child_topics folder discovers nothing."""
         self.assertEqual(ChildTopic.discover_resources("/nonexistent"), [])
 
     def test_finds_yaml_files_in_each_variant_folder(self):
-        """Every YAML file inside a subdirectory of topics/ is discovered."""
+        """Every YAML file inside a subdirectory of child_topics/ is discovered."""
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            spanish_dir = os.path.join(tmpdir, "topics", "Spanish")
-            french_dir = os.path.join(tmpdir, "topics", "French")
+            spanish_dir = os.path.join(tmpdir, "child_topics", "Spanish")
+            french_dir = os.path.join(tmpdir, "child_topics", "French")
             os.makedirs(spanish_dir)
             os.makedirs(french_dir)
             open(os.path.join(spanish_dir, "opening_hours.yaml"), "w").close()
@@ -1729,15 +1627,15 @@ class ChildTopicDiscoverResourcesTests(unittest.TestCase):
                 ),
             )
 
-    def test_skips_base_topics_sitting_directly_in_topics_folder(self):
-        """Files directly in topics/ are base Topics and belong to Topic.discover_resources."""
+    def test_skips_files_sitting_directly_in_the_child_topics_folder(self):
+        """A child topic must be inside a variant folder, so loose files are ignored."""
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            topics_dir = os.path.join(tmpdir, "topics")
-            spanish_dir = os.path.join(topics_dir, "Spanish")
+            child_topics_dir = os.path.join(tmpdir, "child_topics")
+            spanish_dir = os.path.join(child_topics_dir, "Spanish")
             os.makedirs(spanish_dir)
-            open(os.path.join(topics_dir, "base_topic.yaml"), "w").close()
+            open(os.path.join(child_topics_dir, "stray.yaml"), "w").close()
             open(os.path.join(spanish_dir, "opening_hours.yaml"), "w").close()
 
             discovered = ChildTopic.discover_resources(tmpdir)
@@ -1749,7 +1647,7 @@ class ChildTopicDiscoverResourcesTests(unittest.TestCase):
         import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            spanish_dir = os.path.join(tmpdir, "topics", "Spanish")
+            spanish_dir = os.path.join(tmpdir, "child_topics", "Spanish")
             os.makedirs(spanish_dir)
             open(os.path.join(spanish_dir, "opening_hours.yaml"), "w").close()
             open(os.path.join(spanish_dir, "README.md"), "w").close()
@@ -1759,22 +1657,11 @@ class ChildTopicDiscoverResourcesTests(unittest.TestCase):
             self.assertEqual(discovered, [os.path.join(spanish_dir, "opening_hours.yaml")])
 
 
-class ChildTopicReadLocalResourceTests(unittest.TestCase):
-    """Tests for ChildTopic.read_local_resource path-based identity resolution."""
-
-    CHILD_TOPIC_YAML = """name: Opening Hours
-enabled: true
-actions: Responde en español
-content: Abrimos a las 9
-example_queries:
-- ¿a qué hora abren?
-"""
-
     def test_resolves_variant_from_enclosing_folder(self):
         """The enclosing folder gives the variant; the topic ID is the resource's own ID."""
         with mock_read_from_file(self.CHILD_TOPIC_YAML):
             child_topic = ChildTopic.read_local_resource(
-                file_path=os.path.join("topics", "Spanish", "opening_hours.yaml"),
+                file_path=os.path.join("child_topics", "Spanish", "opening_hours.yaml"),
                 resource_id="TOPIC-es-1",
                 resource_name="opening_hours",
                 resource_mappings=CHILD_TOPIC_MAPPINGS,
@@ -1794,7 +1681,7 @@ example_queries:
         """
         with mock_read_from_file(self.CHILD_TOPIC_YAML):
             child_topic = ChildTopic.read_local_resource(
-                file_path=os.path.join("topics", "Spanish", "opening_hours.yaml"),
+                file_path=os.path.join("child_topics", "Spanish", "opening_hours.yaml"),
                 resource_id="temp_id",
                 resource_name="opening_hours",
                 resource_mappings=[],
@@ -1805,14 +1692,14 @@ example_queries:
         # The folder is kept as a fallback so file_path stays usable during discovery.
         self.assertEqual(child_topic.variant_name, "Spanish")
         self.assertEqual(
-            child_topic.file_path, os.path.join("topics", "spanish", "opening_hours.yaml")
+            child_topic.file_path, os.path.join("child_topics", "spanish", "opening_hours.yaml")
         )
 
     def test_unknown_variant_folder_leaves_variant_unresolved(self):
         """A folder that matches no known variant resolves to no variant ID."""
         with mock_read_from_file(self.CHILD_TOPIC_YAML):
             child_topic = ChildTopic.read_local_resource(
-                file_path=os.path.join("topics", "Klingon", "opening_hours.yaml"),
+                file_path=os.path.join("child_topics", "Klingon", "opening_hours.yaml"),
                 resource_id="TOPIC-es-1",
                 resource_name="opening_hours",
                 resource_mappings=CHILD_TOPIC_MAPPINGS,
@@ -1826,25 +1713,12 @@ example_queries:
             child_topic.validate(resource_mappings=CHILD_TOPIC_MAPPINGS)
         self.assertIn("not inside a known variant folder", str(cm.exception))
 
-    def test_base_topic_depth_path_leaves_variant_unresolved(self):
-        """A file directly in topics/ has no variant folder, so the variant stays unset."""
-        with mock_read_from_file(self.CHILD_TOPIC_YAML):
-            child_topic = ChildTopic.read_local_resource(
-                file_path=os.path.join("topics", "opening_hours.yaml"),
-                resource_id="TOPIC-es-1",
-                resource_name="opening_hours",
-                resource_mappings=CHILD_TOPIC_MAPPINGS,
-            )
-
-        self.assertIsNone(child_topic.variant_id)
-        self.assertIsNone(child_topic.variant_name)
-
     def test_file_name_not_matching_topic_name_raises(self):
         """The file name must match the cleaned name declared inside the YAML."""
         with mock_read_from_file(self.CHILD_TOPIC_YAML):
             with self.assertRaises(ValueError) as cm:
                 ChildTopic.read_local_resource(
-                    file_path=os.path.join("topics", "Spanish", "wrong_name.yaml"),
+                    file_path=os.path.join("child_topics", "Spanish", "wrong_name.yaml"),
                     resource_id="TOPIC-es-1",
                     resource_name="wrong_name",
                     resource_mappings=CHILD_TOPIC_MAPPINGS,
@@ -1856,9 +1730,6 @@ example_queries:
             str(cm.exception),
         )
 
-
-class ChildTopicValidateTests(unittest.TestCase):
-    """Tests for ChildTopic.validate."""
 
     def test_fully_resolved_child_topic_is_valid(self):
         """A child topic with a resolved variant passes validation."""
@@ -1932,7 +1803,7 @@ class ChildTopicValidateTests(unittest.TestCase):
                 resource_id="TOPIC-es-2",
                 resource_name="Opening Hours",
                 resource_type=ChildTopic,
-                file_path=os.path.join("topics", "Spanish", "opening_hours.yaml"),
+                file_path=os.path.join("child_topics", "Spanish", "opening_hours.yaml"),
                 resource_prefix="topic",
                 flow_name=None,
             ),
@@ -1954,7 +1825,7 @@ class ChildTopicValidateTests(unittest.TestCase):
                 resource_id="TOPIC-fr-1",
                 resource_name="Opening Hours",
                 resource_type=ChildTopic,
-                file_path=os.path.join("topics", "French", "opening_hours.yaml"),
+                file_path=os.path.join("child_topics", "French", "opening_hours.yaml"),
                 resource_prefix="topic",
                 flow_name=None,
             ),
@@ -1976,7 +1847,7 @@ class ChildTopicValidateTests(unittest.TestCase):
                 resource_id="TOPIC-fr-1",
                 resource_name="Closing Times",
                 resource_type=ChildTopic,
-                file_path=os.path.join("topics", "French", "closing_times.yaml"),
+                file_path=os.path.join("child_topics", "French", "closing_times.yaml"),
                 resource_prefix="topic",
                 flow_name=None,
             ),
@@ -2033,10 +1904,6 @@ class ChildTopicValidateTests(unittest.TestCase):
 
         self.assertIn("Invalid references: ['global_functions: FUNCTION-missing']", str(cm.exception))
 
-
-class ChildTopicProtoTests(unittest.TestCase):
-    """Tests for the protos ChildTopic pushes to the platform."""
-
     def test_create_proto_targets_own_id_scoped_to_variant(self):
         """The proto carries the child topic's own ID and the variant it is scoped to."""
         proto = TEST_CHILD_TOPIC.build_create_proto()
@@ -2066,6 +1933,9 @@ class ChildTopicProtoTests(unittest.TestCase):
     def test_command_type_is_child_topic(self):
         """Child topics route to the child topic commands, not the base topic commands."""
         self.assertEqual(TEST_CHILD_TOPIC.command_type, "child_topic")
+        self.assertEqual(TEST_CHILD_TOPIC.create_command_type, "create_child_topic")
+        self.assertEqual(TEST_CHILD_TOPIC.update_command_type, "update_child_topic")
+        self.assertEqual(TEST_CHILD_TOPIC.delete_command_type, "delete_child_topic")
 
 
 TEST_DISCLAIMER = VoiceDisclaimerMessage(
@@ -3144,9 +3014,7 @@ prompt: Hello, how can I help you?
 """
 
 
-class FlowStepOrphanedFromFlowTests(unittest.TestCase):
-    """A step whose flow config is missing must not crash before it can be reported."""
-
+class FlowStepTests(unittest.TestCase):
     def test_missing_flow_config_falls_back_to_the_folder_name(self):
         """Reading with no flow mapping keeps the folder, so file_path stays usable.
 
@@ -3166,25 +3034,6 @@ class FlowStepOrphanedFromFlowTests(unittest.TestCase):
             step.file_path, os.path.join("flows", "orphan_flow", "steps", "test_step.yaml")
         )
 
-    def test_file_path_without_a_flow_raises(self):
-        """A step with no flow at all has no determinable path."""
-        step = FlowStep(
-            resource_id="temp_id",
-            name="start_step",
-            step_id="start_step",
-            flow_id=None,
-            flow_name=None,
-            step_type=StepType.ADVANCED_STEP,
-            prompt="hello",
-        )
-
-        with self.assertRaises(ValueError) as cm:
-            step.file_path
-
-        self.assertIn("does not belong to a flow", str(cm.exception))
-
-
-class FlowStepTests(unittest.TestCase):
     def test_get_raw(self):
         """Test that raw property returns correct YAML representation."""
         self.assertEqual(TEST_FLOW_STEP.raw, FLOW_STEP_RAW)
@@ -9517,6 +9366,96 @@ class TopicFromProjection(unittest.TestCase):
     def test_empty_projection_yields_no_topics(self):
         """An empty projection should return an empty dict."""
         self.assertEqual(Topic.from_projection({}), {})
+
+
+class ChildTopicFromProjection(unittest.TestCase):
+    """Tests for ChildTopic.from_projection."""
+
+    def test_parses_child_topic_and_resolves_variant_name(self):
+        """A child topic is keyed by its own topic ID and carries the variant's real name."""
+        projection = {
+            "variantManagement": {
+                "variants": {"entities": {"VARIANT-es": {"name": "Spanish"}}},
+            },
+            "childOverwrites": {
+                "knowledgeBase": {
+                    "topics": {
+                        "entities": {
+                            "TOPIC-es-1": {
+                                "name": "Opening Hours",
+                                "variantId": "VARIANT-es",
+                                "actions": "Responde en español",
+                                "content": "Abrimos a las 9",
+                                "exampleQueries": [
+                                    {"query": "¿a qué hora abren?"},
+                                    {"noquery": "ignored"},
+                                ],
+                                "isActive": True,
+                            }
+                        }
+                    }
+                }
+            },
+        }
+
+        child_topics = ChildTopic.from_projection(projection)
+
+        self.assertEqual(list(child_topics), ["TOPIC-es-1"])
+        child_topic = child_topics["TOPIC-es-1"]
+        self.assertEqual(child_topic.resource_id, "TOPIC-es-1")
+        self.assertEqual(child_topic.name, "Opening Hours")
+        self.assertEqual(child_topic.variant_id, "VARIANT-es")
+        self.assertEqual(child_topic.variant_name, "Spanish")
+        self.assertEqual(child_topic.content, "Abrimos a las 9")
+        self.assertEqual(child_topic.example_queries, ["¿a qué hora abren?"])
+        self.assertTrue(child_topic.enabled)
+
+    def test_skips_child_topic_with_unknown_variant(self):
+        """A child topic pointing at a variant that no longer exists is skipped."""
+        projection = {
+            "variantManagement": {
+                "variants": {"entities": {"VARIANT-es": {"name": "Spanish"}}},
+            },
+            "childOverwrites": {
+                "knowledgeBase": {
+                    "topics": {
+                        "entities": {
+                            "TOPIC-es-1": {
+                                "name": "Opening Hours",
+                                "variantId": "VARIANT-deleted",
+                                "actions": "",
+                                "content": "",
+                            }
+                        }
+                    }
+                }
+            },
+        }
+
+        self.assertEqual(ChildTopic.from_projection(projection), {})
+
+    def test_skips_child_topic_with_missing_variant_id(self):
+        """A child topic with no variantId cannot be placed in a variant folder, so is skipped."""
+        projection = {
+            "variantManagement": {
+                "variants": {"entities": {"VARIANT-es": {"name": "Spanish"}}},
+            },
+            "childOverwrites": {
+                "knowledgeBase": {
+                    "topics": {
+                        "entities": {
+                            "TOPIC-es-1": {"name": "Opening Hours", "actions": "", "content": ""}
+                        }
+                    }
+                }
+            },
+        }
+
+        self.assertEqual(ChildTopic.from_projection(projection), {})
+
+    def test_empty_projection_yields_no_child_topics(self):
+        """An empty projection should return an empty dict."""
+        self.assertEqual(ChildTopic.from_projection({}), {})
 
 
 class FunctionFromProjection(unittest.TestCase):

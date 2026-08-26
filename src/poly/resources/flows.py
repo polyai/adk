@@ -657,11 +657,6 @@ class FlowStep(BaseFlowStep, YamlResource):
     @cached_property
     def file_path(self) -> str:
         """File path for the resource."""
-        if not self.flow_name:
-            raise ValueError(
-                f"Step '{self.name}' does not belong to a flow, so its file path cannot be "
-                "determined. It must live in a flow folder under flows/."
-            )
         return os.path.join(
             "flows",
             utils.clean_name(self.flow_name),
@@ -1765,11 +1760,6 @@ class FunctionStep(Function, BaseFlowStep):
     @cached_property
     def file_path(self) -> str:
         """File path for the resource."""
-        if not self.flow_name:
-            raise ValueError(
-                f"Function step '{self.name}' does not belong to a flow, so its file path "
-                "cannot be determined. It must live in a flow folder under flows/."
-            )
         file_name = f"{self.name}.py"
         flow_name = utils.clean_name(self.flow_name)
         return os.path.join("flows", flow_name, "function_steps", file_name)

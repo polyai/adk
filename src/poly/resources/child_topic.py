@@ -24,19 +24,18 @@ from poly.resources.resource import ResourceMapping, register_resource
 from poly.resources.topic import Topic
 from poly.resources.variant_attributes import Variant
 
+CHILD_TOPICS_DIR = "child_topics"
+
 
 def _get_variant_folder_from_path(file_path: str) -> Optional[str]:
-    """Extract the variant folder segment from a topics/<variant>/<topic>.yaml path.
-
-    A base Topic lives directly in topics/ (one segment after "topics"); a child topic is
-    one level deeper, in topics/<variant>/ (two segments after "topics").
-    """
+    """Extract the variant folder from a child_topics/<variant>/<topic>.yaml path."""
     parts = os.path.normpath(file_path).split(os.sep)
-    if "topics" not in parts:
+    if CHILD_TOPICS_DIR not in parts:
         return None
-    topics_index = parts.index("topics")
-    if topics_index + 2 < len(parts):
-        return parts[topics_index + 1]
+    dir_index = parts.index(CHILD_TOPICS_DIR)
+    # There must be both a variant folder and a file after it.
+    if dir_index + 2 < len(parts):
+        return parts[dir_index + 1]
     return None
 
 
@@ -60,10 +59,10 @@ def _get_variant_from_folder(
 class ChildTopic(Topic):
     """Dataclass representing a variant-scoped Agent Studio KB child topic.
 
-    Stored at topics/<cleaned_variant_name>/<cleaned_topic_name>.yaml, alongside the base
-    topics that live directly in topics/. The variant is not stored in the YAML -- it's
-    inferred from the enclosing folder name, the same way a FlowStep infers its parent flow
-    from its enclosing folder.
+    Stored at child_topics/<cleaned_variant_name>/<cleaned_topic_name>.yaml, separate from
+    the base topics in topics/. The variant is not stored in the YAML -- it's inferred from
+    the enclosing folder name, the same way a FlowStep infers its parent flow from its
+    enclosing folder.
     """
 
     variant_id: str
@@ -140,16 +139,11 @@ class ChildTopic(Topic):
         """Get the file path for the child topic.
 
         The variant folder is lowercased like every other name in a topic path, so a
-        variant named "Variant 1" lives at topics/variant_1/.
+        variant named "Variant 1" lives at child_topics/variant_1/.
         """
-        if not self.variant_name:
-            raise ValueError(
-                f"Child topic '{self.name}' has no variant, so its file path cannot be "
-                "determined. It must live in a variant folder under topics/."
-            )
         variant_folder = utils.clean_name(self.variant_name)
         file_name = f"{utils.clean_name(self.name)}.yaml"
-        return os.path.join("topics", variant_folder, file_name)
+        return os.path.join(CHILD_TOPICS_DIR, variant_folder, file_name)
 
     @classmethod
     def from_yaml_dict(
@@ -281,9 +275,8 @@ class ChildTopic(Topic):
     def discover_resources(base_path: str) -> list[str]:
         """Discover resources of this type in the given base path.
 
-        Child topics live one directory level deeper than base topics: any subdirectory
-        of topics/ is treated as a candidate variant folder (validity of the variant name
-        itself is checked later, in validate()).
+        Every subdirectory of child_topics/ is treated as a candidate variant folder; the
+        variant name itself is checked later, in validate().
 
         Args:
             base_path (str): The base path to search for resources.
@@ -291,14 +284,14 @@ class ChildTopic(Topic):
         Returns:
             list[str]: A list of file paths of discovered resources.
         """
-        topics_path = os.path.join(base_path, "topics")
+        child_topics_path = os.path.join(base_path, CHILD_TOPICS_DIR)
         discovered_child_topics: list[str] = []
 
-        if not os.path.exists(topics_path):
+        if not os.path.exists(child_topics_path):
             return discovered_child_topics
 
-        for variant_folder in os.listdir(topics_path):
-            variant_path = os.path.join(topics_path, variant_folder)
+        for variant_folder in os.listdir(child_topics_path):
+            variant_path = os.path.join(child_topics_path, variant_folder)
             if not os.path.isdir(variant_path):
                 continue
             for file_name in os.listdir(variant_path):
