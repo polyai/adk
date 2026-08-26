@@ -1014,63 +1014,62 @@ class WrenCommand(BaseCommand):
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
-        """Register the wren subcommand and hidden glot alias."""
-        for name, help_text in [("wren", "AI-assisted agent editing."), ("glot", SUPPRESS)]:
-            parser = subparsers.add_parser(
-                name,
-                parents=[parents.verbose, parents.debug, parents.json],
-                help=help_text,
-                description=(
-                    "Start an AI-assisted editing session with Wren.\n\n"
-                    "Wren works remotely on a branch. When it finishes,\n"
-                    "changes are pulled to your local workspace.\n\n"
-                    "Examples:\n"
-                    "  poly wren\n"
-                    "  poly wren -m 'Add a transfer flow for billing'\n"
-                    "  poly wren --json -m 'Add an FAQ topic'\n"
-                    "  poly wren --session-id <id>\n"
-                ),
-                formatter_class=RawTextHelpFormatter,
-            )
-            parser.add_argument(
-                "--path",
-                type=str,
-                default=None,
-                help="Path to the project. Defaults to current directory.",
-            )
-            parser.add_argument(
-                "--message",
-                "-m",
-                type=str,
-                default=None,
-                help="Send a single prompt (non-interactive mode).",
-            )
-            parser.add_argument(
-                "--session-id",
-                type=str,
-                default=None,
-                help="Resume an existing wren session.",
-            )
-            parser.add_argument(
-                "--no-pull",
-                action="store_true",
-                default=False,
-                help="Skip pulling changes after the session ends.",
-            )
-            parser.add_argument(
-                "--force",
-                action="store_true",
-                default=False,
-                help="Start even if there are local uncommitted changes (they will be overwritten).",
-            )
-            # Dev tool: override the top-level agent (server default:
-            # "orchestrator"). Non-top-level agents are rejected by the server.
-            parser.add_argument("--agent", type=str, default=None, help=SUPPRESS)
-            # Dev tool: render a downloaded conversation JSON through the real
-            # renderer, no project or API access needed.
-            parser.add_argument("--replay", type=str, default=None, help=SUPPRESS)
-            parser.add_argument("--replay-delay", type=int, default=0, help=SUPPRESS)
-            parser.set_defaults(func=cls.run)
+        """Register the wren subcommand."""
+        parser = subparsers.add_parser(
+            "wren",
+            parents=[parents.verbose, parents.debug, parents.json],
+            help="AI-assisted agent editing",
+            description=(
+                "Start an AI-assisted editing session with Wren.\n\n"
+                "Wren works remotely on a branch. When it finishes,\n"
+                "changes are pulled to your local workspace.\n\n"
+                "Examples:\n"
+                "  poly wren\n"
+                "  poly wren -m 'Add a transfer flow for billing'\n"
+                "  poly wren --json -m 'Add an FAQ topic'\n"
+                "  poly wren --session-id <id>\n"
+            ),
+            formatter_class=RawTextHelpFormatter,
+        )
+        parser.add_argument(
+            "--path",
+            type=str,
+            default=None,
+            help="Path to the project. Defaults to current directory.",
+        )
+        parser.add_argument(
+            "--message",
+            "-m",
+            type=str,
+            default=None,
+            help="Send a single prompt (non-interactive mode).",
+        )
+        parser.add_argument(
+            "--session-id",
+            type=str,
+            default=None,
+            help="Resume an existing wren session.",
+        )
+        parser.add_argument(
+            "--no-pull",
+            action="store_true",
+            default=False,
+            help="Skip pulling changes after the session ends.",
+        )
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            default=False,
+            help="Start even if there are local uncommitted changes (they will be overwritten).",
+        )
+        # Dev tool: override the top-level agent (server default:
+        # "orchestrator"). Non-top-level agents are rejected by the server.
+        parser.add_argument("--agent", type=str, default=None, help=SUPPRESS)
+        # Dev tool: render a downloaded conversation JSON through the real
+        # renderer, no project or API access needed.
+        parser.add_argument("--replay", type=str, default=None, help=SUPPRESS)
+        parser.add_argument("--replay-delay", type=int, default=0, help=SUPPRESS)
+        parser.set_defaults(func=cls.run)
 
     @classmethod
     def run(cls, args: Namespace) -> None:

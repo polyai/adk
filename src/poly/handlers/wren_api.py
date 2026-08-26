@@ -1,4 +1,4 @@
-"""SSE client for the Wren (glot) endpoint.
+"""SSE client for the Wren endpoint.
 
 Copyright PolyAI Limited
 """
