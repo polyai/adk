@@ -101,8 +101,18 @@ poly review delete --json
 
 Without `--id`, an interactive checkbox prompt runs to select gists.
 
+!!! info "`--json` requires `--id`"
+
+    When using `--json`, you must supply `--id` explicitly. The interactive checkbox prompt is not available in JSON mode, so omitting `--id` returns a JSON error instead of prompting.
+
 `--json` output shape:
 
 ~~~json
 { "success": true }
+~~~
+
+On error (for example, when `--id` is omitted with `--json`):
+
+~~~json
+{ "success": false, "error": "Please provide a gist ID to delete when using JSON output." }
 ~~~
