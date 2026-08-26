@@ -9,7 +9,7 @@ import json
 import logging
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
@@ -57,7 +57,7 @@ def set_verbose(verbose: bool) -> None:
 
 
 @contextmanager
-def paged_output(enabled: bool = True):
+def paged_output(enabled: bool = True) -> Iterator[None]:
     """Pipe output through the system pager when enabled and stdout is a TTY."""
     if enabled and console.is_terminal:
         with console.pager(styles=True):
