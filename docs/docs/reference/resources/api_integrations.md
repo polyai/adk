@@ -153,7 +153,7 @@ response = conv.api.salesforce.update_contact(
 
     ---
 
-    Mock an operation's response with `api_mocks` so a flow that branches on it can be tested deterministically.
+    Mock an operation's response with `api_mocks` so a conversation that branches on it can be tested deterministically.
     [Open tests](./tests.md)
 
 </div>
