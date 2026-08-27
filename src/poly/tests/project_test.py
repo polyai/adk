@@ -3271,7 +3271,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
 
     def test_raises_when_no_active_deployment(self):
         """Empty resource map (e.g. live not yet deployed) raises with a clear message."""
-        self.mock_get_remote.return_value = {}
+        self.mock_get_remote.return_value = ({}, [])
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
         with self.assertRaises(ValueError) as ctx:
@@ -3283,7 +3283,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
 
     def test_raises_for_pre_release_when_not_deployed(self):
         """Same guard applies for pre-release, not just live."""
-        self.mock_get_remote.return_value = {}
+        self.mock_get_remote.return_value = ({}, [])
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
         with self.assertRaises(ValueError) as ctx:
@@ -3298,7 +3298,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
     def test_calls_get_remote_with_correct_env(self):
         """get_remote_resources_by_name is invoked with the exact env string passed in."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
-        self.mock_get_remote.return_value = deepcopy(project.resources)
+        self.mock_get_remote.return_value = (deepcopy(project.resources), [])
 
         project.pull_project_from_env(env="pre-release")
 
@@ -3313,7 +3313,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         original_resources = deepcopy(project.resources)
         incoming_resources = deepcopy(project.resources)
-        self.mock_get_remote.return_value = incoming_resources
+        self.mock_get_remote.return_value = (incoming_resources, [])
 
         files_with_conflicts = project.pull_project_from_env(env="live")
 
@@ -3331,7 +3331,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
         modified_func = deepcopy(incoming_resources[Function][func_id])
         modified_func.code = 'def test_function(conv: Conversation):\n    """Modified in live."""\n    return "Live"\n'
         incoming_resources[Function][func_id] = modified_func
-        self.mock_get_remote.return_value = incoming_resources
+        self.mock_get_remote.return_value = (incoming_resources, [])
 
         files_with_conflicts = project.pull_project_from_env(env="live")
 
@@ -3352,7 +3352,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
             example_queries=["live query"],
         )
         incoming_resources.setdefault(Topic, {})["TOPIC-live_only_topic"] = new_topic
-        self.mock_get_remote.return_value = incoming_resources
+        self.mock_get_remote.return_value = (incoming_resources, [])
 
         files_with_conflicts = project.pull_project_from_env(env="live")
 
@@ -3374,7 +3374,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
         incoming_resources[Function][
             func_id
         ].code = 'def test_function(conv: Conversation):\n    return "From live"\n'
-        self.mock_get_remote.return_value = incoming_resources
+        self.mock_get_remote.return_value = (incoming_resources, [])
 
         files_with_conflicts = project.pull_project_from_env(env="pre-release")
 
@@ -3389,7 +3389,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
         incoming_resources = deepcopy(project.resources)
         if Topic in incoming_resources and "TOPIC-Topic 1" in incoming_resources[Topic]:
             del incoming_resources[Topic]["TOPIC-Topic 1"]
-        self.mock_get_remote.return_value = incoming_resources
+        self.mock_get_remote.return_value = (incoming_resources, [])
 
         files_with_conflicts = project.pull_project_from_env(env="live")
 
@@ -3405,7 +3405,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
     def test_save_config_not_called_and_imports_saved_on_success(self):
         """save_config must NOT be called (env changes are local); save_imports is called."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
-        self.mock_get_remote.return_value = deepcopy(project.resources)
+        self.mock_get_remote.return_value = (deepcopy(project.resources), [])
 
         project.pull_project_from_env(env="live")
 
@@ -3414,7 +3414,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
 
     def test_save_config_not_called_when_no_deployment(self):
         """save_config must not be called if the deployment lookup fails."""
-        self.mock_get_remote.return_value = {}
+        self.mock_get_remote.return_value = ({}, [])
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
         with self.assertRaises(ValueError):
@@ -3537,18 +3537,41 @@ class GetRemoteResourcesByNameLocalTest(unittest.TestCase):
         """'local' should resolve to the current local filesystem state."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
-        result = project.get_remote_resources_by_name("local")
+        result, slim_resources = project.get_remote_resources_by_name("local")
 
         self.assertIsInstance(result, dict)
         self.assertGreater(len(result), 0)
+        self.assertEqual(slim_resources, project.slim_resources)
 
     def test_local_resources_match_project_resources(self):
         """Resources returned for 'local' should have the same resource types as project.resources."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
-        result = project.get_remote_resources_by_name("local")
+        result, _ = project.get_remote_resources_by_name("local")
 
         self.assertEqual(set(result.keys()), set(project.resources.keys()))
+
+    def test_every_resolution_mode_returns_a_resources_and_slim_pair(self):
+        """The return shape has to be the same whichever name resolves.
+
+        Callers unpack two values, so a branch of this method that returns a bare
+        resource map raises far from the cause - and the branch path is the one that
+        no other test exercises.
+        """
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.get_branches.return_value = {"dev": {"branchId": "BRANCH-1"}}
+        self.mock_api_handler.pull_deployment_resources.return_value = ({}, [])
+        self.mock_api_handler.get_active_deployments.return_value = {
+            "sandbox": {"deployment_id": "dep-1"}
+        }
+
+        with patch("poly.project.AgentStudioInterface") as mock_interface:
+            mock_interface.return_value.pull_resources.return_value = ({}, [], {})
+            for name in ("sandbox", "dev", "abc123456", "local", "nothing-matches-this"):
+                with self.subTest(name=name):
+                    resources, slim_resources = project.get_remote_resources_by_name(name)
+                    self.assertIsInstance(resources, dict)
+                    self.assertIsInstance(slim_resources, list)
 
     def test_hash_lookup_tolerates_none_version_hash(self):
         """A deployment record with version_hash=None should not raise TypeError during hash lookup."""
@@ -4486,8 +4509,8 @@ class DiffBranchTest(unittest.TestCase):
         branch_resources = {Topic: {"TOPIC-1": branch_topic}}
 
         self.mock_api.pull_branch_resources.side_effect = [
-            parent_resources,
-            branch_resources,
+            (parent_resources, []),
+            (branch_resources, []),
         ]
 
         diffs = self.project.diff_branch(branch_name="feature-x")
@@ -4521,8 +4544,8 @@ class DiffBranchTest(unittest.TestCase):
         identical_resources = {Topic: {"TOPIC-1": topic}}
 
         self.mock_api.pull_branch_resources.side_effect = [
-            identical_resources,
-            deepcopy(identical_resources),
+            (identical_resources, []),
+            (deepcopy(identical_resources), []),
         ]
 
         result = self.project.diff_branch(branch_name="feature-y")
@@ -4543,8 +4566,8 @@ class DiffBranchTest(unittest.TestCase):
 
         topic = self._make_topic("TOPIC-1", "Hours", "9am-5pm")
         self.mock_api.pull_branch_resources.side_effect = [
-            {Topic: {"TOPIC-1": topic}},
-            {Topic: {"TOPIC-1": deepcopy(topic)}},
+            ({Topic: {"TOPIC-1": topic}}, []),
+            ({Topic: {"TOPIC-1": deepcopy(topic)}}, []),
         ]
 
         self.project.diff_branch(branch_name="feature-z")
@@ -4580,8 +4603,8 @@ class DiffBranchTest(unittest.TestCase):
         }
 
         self.mock_api.pull_branch_resources.side_effect = [
-            parent_resources,
-            branch_resources,
+            (parent_resources, []),
+            (branch_resources, []),
         ]
 
         topic_a_path = os.path.join("topics", "topic_a.yaml")
@@ -4609,8 +4632,8 @@ class DiffBranchTest(unittest.TestCase):
         topic_new = self._make_topic("TOPIC-1", "Hours", "new")
 
         self.mock_api.pull_branch_resources.side_effect = [
-            {Topic: {"TOPIC-1": topic}},
-            {Topic: {"TOPIC-1": topic_new}},
+            ({Topic: {"TOPIC-1": topic}}, []),
+            ({Topic: {"TOPIC-1": topic_new}}, []),
         ]
 
         result = self.project.diff_branch(
@@ -4636,8 +4659,8 @@ class DiffBranchTest(unittest.TestCase):
 
         topic = self._make_topic("TOPIC-1", "FAQ", "same")
         self.mock_api.pull_branch_resources.side_effect = [
-            {Topic: {"TOPIC-1": topic}},
-            {Topic: {"TOPIC-1": deepcopy(topic)}},
+            ({Topic: {"TOPIC-1": topic}}, []),
+            ({Topic: {"TOPIC-1": deepcopy(topic)}}, []),
         ]
 
         result = self.project.diff_branch()
@@ -5507,7 +5530,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
         sandbox_resources = self._sandbox_resources_with_reassigned_flow_id()
 
         with patch.object(
-            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+            AgentStudioProject, "get_remote_resources_by_name", return_value=(sandbox_resources, [])
         ):
             self.assertTrue(self.project.sync_ids_with_sandbox())
 
@@ -5524,7 +5547,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
         sandbox_resources = self._sandbox_resources_with_reassigned_flow_id(without_start_step=True)
 
         with patch.object(
-            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+            AgentStudioProject, "get_remote_resources_by_name", return_value=(sandbox_resources, [])
         ):
             self.assertTrue(self.project.sync_ids_with_sandbox())
 
@@ -5536,7 +5559,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
         sandbox_resources = self._sandbox_resources_with_reassigned_flow_id(without_start_step=True)
 
         with patch.object(
-            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+            AgentStudioProject, "get_remote_resources_by_name", return_value=(sandbox_resources, [])
         ):
             self.project.sync_ids_with_sandbox()
 
@@ -5582,7 +5605,9 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
                 rekeyed[resource.resource_id] = resource
             sandbox[resource_type] = rekeyed
 
-        with patch.object(AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox):
+        with patch.object(
+            AgentStudioProject, "get_remote_resources_by_name", return_value=(sandbox, [])
+        ):
             self.assertTrue(self.project.sync_ids_with_sandbox())
 
         self.assertEqual(
@@ -5615,7 +5640,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
         self.assertTrue(flow_scoped_function_ids, "fixture must have flow-scoped functions")
 
         with patch.object(
-            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+            AgentStudioProject, "get_remote_resources_by_name", return_value=(sandbox_resources, [])
         ):
             self.project.sync_ids_with_sandbox()
 
@@ -5631,7 +5656,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
         sandbox_resources = self._sandbox_resources_with_reassigned_flow_id()
 
         with patch.object(
-            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+            AgentStudioProject, "get_remote_resources_by_name", return_value=(sandbox_resources, [])
         ):
             self.project.sync_ids_with_sandbox()
 
@@ -5646,7 +5671,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
         with patch.object(
             AgentStudioProject,
             "get_remote_resources_by_name",
-            return_value=deepcopy(self.project.resources),
+            return_value=(deepcopy(self.project.resources), []),
         ):
             self.assertTrue(self.project.sync_ids_with_sandbox())
 
@@ -5664,7 +5689,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
         with patch.object(
             AgentStudioProject,
             "get_remote_resources_by_name",
-            return_value=deepcopy(self.project.resources),
+            return_value=(deepcopy(self.project.resources), []),
         ):
             self.assertTrue(self.project.sync_ids_with_sandbox())
 
@@ -5685,7 +5710,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
             patch.object(
                 AgentStudioProject,
                 "get_remote_resources_by_name",
-                return_value=deepcopy(self.project.resources),
+                return_value=(deepcopy(self.project.resources), []),
             ),
             patch.object(
                 AgentStudioProject,

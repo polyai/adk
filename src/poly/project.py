@@ -523,9 +523,12 @@ class AgentStudioProject:
         Writes template resources to disk without updating the tracked state,
         so the next ``poly push`` detects the template files as changes.
         """
-        template_resources = AgentStudioInterface.get_template_resources(template_id, region)
+        template_resources, template_slim_resources = AgentStudioInterface.get_template_resources(
+            template_id, region
+        )
 
         self._not_loaded_resources = []
+        self.slim_resources = template_slim_resources
         self.save_config()
 
         # Delete only ADK-managed resource files, leaving non-ADK files intact.
@@ -637,9 +640,10 @@ class AgentStudioProject:
         Returns:
             list[str]: Always empty (force overwrite produces no conflicts).
         """
-        incoming_resources = self.get_remote_resources_by_name(env)
+        incoming_resources, slim_resources = self.get_remote_resources_by_name(env)
         if not incoming_resources:
             raise ValueError(f"No resources returned from environment '{env}'.")
+        self.slim_resources = slim_resources
         self.branch_id = self.api_handler.branch_id
 
         self._check_no_duplicate_resource_paths(incoming_resources)
@@ -1763,7 +1767,7 @@ class AgentStudioProject:
 
         return deployments, active_deployment_hashes
 
-    def get_remote_resources_by_name(self, name: str) -> ResourceMap:
+    def get_remote_resources_by_name(self, name: str) -> tuple[ResourceMap, list[ResourceMapping]]:
         """Resolve and fetch a remote project state by name.
         Supports:
         - **Environments**: sandbox / pre-release / live (active deployments)
@@ -1783,7 +1787,7 @@ class AgentStudioProject:
             deployment_id = (deployments.get(name) or {}).get("deployment_id")
             if not deployment_id:
                 logger.error(f"No active deployment found for environment '{name}'.")
-                return {}
+                return {}, []
             logger.info(f"Pulling resources from deployment '{deployment_id}' ({name})...")
             return self.api_handler.pull_deployment_resources(deployment_id)
 
@@ -1795,8 +1799,8 @@ class AgentStudioProject:
                 self.region, self.account_id, self.project_id, branch_id
             )
             logger.info(f"Pulling resources from branch '{name}'...")
-            resources, _ = branch_api_handler.pull_resources()
-            return resources
+            resources, branch_slim_resources, _ = branch_api_handler.pull_resources()
+            return resources, branch_slim_resources
 
         # 3) Deployment version hash prefix -> deployment resources
         version_hash = (name or "")[:9].lower()
@@ -1829,17 +1833,17 @@ class AgentStudioProject:
                 resources.setdefault(resource_mapping.resource_type, {})[
                     resource_mapping.resource_id
                 ] = resource
-            return resources
+            return resources, self.slim_resources
 
         logger.error(f"Name '{name}' not found in environments, branches, or deployments.")
-        return {}
+        return {}, []
 
     def diff_remote_named_versions(
         self, before_name: str, after_name: str
     ) -> Optional[dict[str, str]]:
         """Compute diffs between two remote project states (branches / envs / deployments)."""
-        before_resources = self.get_remote_resources_by_name(before_name)
-        after_resources = self.get_remote_resources_by_name(after_name)
+        before_resources, before_slim_resources = self.get_remote_resources_by_name(before_name)
+        after_resources, after_slim_resources = self.get_remote_resources_by_name(after_name)
 
         if not before_resources or not after_resources:
             logger.error(
@@ -1848,7 +1852,9 @@ class AgentStudioProject:
             )
             return None
 
-        diffs = self.diff_resource_maps(before_resources, after_resources)
+        diffs = self.diff_resource_maps(
+            before_resources, before_slim_resources, after_resources, after_slim_resources
+        )
         if diffs is None:
             logger.info(
                 f"No differences detected between names '{before_name}' and '{after_name}'."
@@ -1864,10 +1870,19 @@ class AgentStudioProject:
         """
         before_resources, before_slim_resources = load_resources_from_projection(before_projection)
         after_resources, after_slim_resources = load_resources_from_projection(after_projection)
-        return self.diff_resource_maps(before_resources, after_resources)
+        return self.diff_resource_maps(
+            before_resources,
+            before_slim_resources,
+            after_resources,
+            after_slim_resources,
+        )
 
     def diff_resource_maps(
-        self, before_resources: ResourceMap, after_resources: ResourceMap
+        self,
+        before_resources: ResourceMap,
+        before_resource_slim_mappings: list[ResourceMapping],
+        after_resources: ResourceMap,
+        after_resource_slim_mappings: list[ResourceMapping],
     ) -> Optional[dict[str, str]]:
         """Compute per-file diffs between two in-memory resource maps.
 
@@ -1883,17 +1898,13 @@ class AgentStudioProject:
         for resource_type, resources_dict in after_resources.items():
             for resource_id, resource in resources_dict.items():
                 after_resources_by_path[(resource_type, resource.file_path)] = resource
-        # Combine both resource sets to create comprehensive resource_mappings
-        # This ensures all resource references can be properly converted to pretty names
-        combined_resources: ResourceMap = {}
-        for resource_type, resources_dict in before_resources.items():
-            combined_resources[resource_type] = combined_resources.get(resource_type, {})
-            combined_resources[resource_type].update(resources_dict)
-        for resource_type, resources_dict in after_resources.items():
-            combined_resources[resource_type] = combined_resources.get(resource_type, {})
-            combined_resources[resource_type].update(resources_dict)
 
-        resource_mappings = self._make_resource_mappings(combined_resources)
+        before_resource_mappings = (
+            self._make_resource_mappings(before_resources) + before_resource_slim_mappings
+        )
+        after_resource_mappings = (
+            self._make_resource_mappings(after_resources) + after_resource_slim_mappings
+        )
 
         diffs: dict[str, str] = {}
 
@@ -1906,17 +1917,21 @@ class AgentStudioProject:
             after_resource = after_resources_by_path.get(resource_key)
 
             if before_resource and after_resource:
-                before_pretty = before_resource.to_pretty(resource_mappings=resource_mappings)
-                after_pretty = after_resource.to_pretty(resource_mappings=resource_mappings)
+                before_pretty = before_resource.to_pretty(
+                    resource_mappings=before_resource_mappings
+                )
+                after_pretty = after_resource.to_pretty(resource_mappings=after_resource_mappings)
                 if before_pretty != after_pretty:
                     diffs[before_resource.file_path] = resource_utils.get_diff(
                         before_pretty, after_pretty
                     )
             elif before_resource and not after_resource:
-                before_pretty = before_resource.to_pretty(resource_mappings=resource_mappings)
+                before_pretty = before_resource.to_pretty(
+                    resource_mappings=before_resource_mappings
+                )
                 diffs[before_resource.file_path] = resource_utils.get_diff(before_pretty, "")
             elif not before_resource and after_resource:
-                after_pretty = after_resource.to_pretty(resource_mappings=resource_mappings)
+                after_pretty = after_resource.to_pretty(resource_mappings=after_resource_mappings)
                 diffs[after_resource.file_path] = resource_utils.get_diff("", after_pretty)
 
         if not diffs:
@@ -1972,10 +1987,12 @@ class AgentStudioProject:
             )
 
         parent_id = parent_branch_id or "main"
-        parent_resources = self.api_handler.pull_branch_resources(parent_id, parent_at_sequence)
-        branch_resources = self.api_handler.pull_branch_resources(branch_id)
+        parent_resources, parent_slim_resources = self.api_handler.pull_branch_resources(
+            parent_id, parent_at_sequence
+        )
+        branch_resources, branch_slim_resources = self.api_handler.pull_branch_resources(branch_id)
 
-        return parent_resources, branch_resources
+        return parent_resources, parent_slim_resources, branch_resources, branch_slim_resources
 
     def diff_branch(
         self,
@@ -1996,8 +2013,12 @@ class AgentStudioProject:
             ValueError: If on main with no branch specified, or the branch
                 does not exist.
         """
-        parent_resources, branch_resources = self._resolve_branch_fork_point(branch_name)
-        diffs = self.diff_resource_maps(parent_resources, branch_resources)
+        parent_resources, parent_slim_resources, branch_resources, branch_slim_resources = (
+            self._resolve_branch_fork_point(branch_name)
+        )
+        diffs = self.diff_resource_maps(
+            parent_resources, parent_slim_resources, branch_resources, branch_slim_resources
+        )
 
         if diffs and file_paths:
             diffs = {fp: d for fp, d in diffs.items() if fp in file_paths}
@@ -2021,7 +2042,9 @@ class AgentStudioProject:
             ValueError: If on main with no branch specified, or the branch
                 does not exist.
         """
-        parent_resources, branch_resources = self._resolve_branch_fork_point(branch_name)
+        parent_resources, parent_slim_resources, branch_resources, branch_slim_resources = (
+            self._resolve_branch_fork_point(branch_name)
+        )
 
         parent_by_path: dict[tuple, Resource] = {}
         for resources_dict in parent_resources.values():
@@ -2033,14 +2056,12 @@ class AgentStudioProject:
             for resource in resources_dict.values():
                 branch_by_path[(type(resource), resource.file_path)] = resource
 
-        combined: ResourceMap = {}
-        for rt, rd in parent_resources.items():
-            combined[rt] = combined.get(rt, {})
-            combined[rt].update(rd)
-        for rt, rd in branch_resources.items():
-            combined[rt] = combined.get(rt, {})
-            combined[rt].update(rd)
-        resource_mappings = self._make_resource_mappings(combined)
+        before_resource_mappings = (
+            self._make_resource_mappings(parent_resources) + parent_slim_resources
+        )
+        after_resource_mappings = (
+            self._make_resource_mappings(branch_resources) + branch_slim_resources
+        )
 
         new_files: list[str] = []
         modified_files: list[str] = []
@@ -2052,9 +2073,9 @@ class AgentStudioProject:
             branch_r = branch_by_path.get(key)
 
             if parent_r and branch_r:
-                if parent_r.to_pretty(resource_mappings=resource_mappings) != branch_r.to_pretty(
-                    resource_mappings=resource_mappings
-                ):
+                if parent_r.to_pretty(
+                    resource_mappings=before_resource_mappings
+                ) != branch_r.to_pretty(resource_mappings=after_resource_mappings):
                     modified_files.append(branch_r.file_path)
             elif branch_r and not parent_r:
                 new_files.append(branch_r.file_path)
@@ -3016,7 +3037,9 @@ class AgentStudioProject:
         if self.get_diffs():
             raise ValueError("Cannot sync ids due to uncommitted changes.")
 
-        sandbox_resources = self.get_remote_resources_by_name("main")
+        # Sandbox slim mappings describe what main withheld; local files resolve their
+        # references against this branch's own slim mappings, so they are not needed here.
+        sandbox_resources, _ = self.get_remote_resources_by_name("main")
         # Build lookup by file path -> Resource
         sandbox_resource_lookup: dict[str, Resource] = {}
         for resources_dict in sandbox_resources.values():
