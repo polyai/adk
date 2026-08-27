@@ -2,21 +2,21 @@
 
 ## Overview
 
-Agent settings define the agent's identity and behavioral rules. They live in `agent_settings/` and consist of four resources: persona, personality, role, and rules.
+Agent settings define the agent's identity and behavioral rules. They live in `agent_settings/` and consist of the persona and rules, plus the superseded personality and role settings.
 
 ## File structure
 ```
 agent_settings/
-├── persona.txt                # Optional — see below
-├── personality.yaml
-├── role.yaml
+├── persona.txt                # The agent's identity
+├── personality.yaml           # Superseded by persona.txt
+├── role.yaml                  # Superseded by persona.txt
 ├── rules.txt
 └── experimental_config.json   # See experimental_config docs
 ```
 
 ## Persona (`persona.txt`)
 
-Plain-text description of who the agent is. This is what the **Role** field in Agent Studio edits — not `role.yaml`.
+Free-text description of who the agent is, and the single field that defines the agent's identity. This is what the **Role** field in Agent Studio edits — it replaces `personality.yaml` and `role.yaml`, which are no longer surfaced to builders.
 
 ### Supported references
 - `{{vrbl:variable_name}}` — variables. No other reference type is allowed.
@@ -27,12 +27,12 @@ You are a calm and polite concierge for {{vrbl:hotel_name}}. Keep answers short.
 ```
 
 ### Notes
-- The file is only pulled for projects on the `enable-persona-prompt` feature flag. Projects without it have no `persona.txt`, and that is not an error.
-- For projects that have never authored a persona, the pulled content is **derived** from `personality.yaml` and `role.yaml`. Nothing is stored server-side until someone edits it, and `poly push` sends nothing while the file is untouched.
+- For projects that predate the persona and have never authored one, the pulled content is **derived** from `personality.yaml` and `role.yaml`. Nothing is stored server-side until someone edits it, and `poly push` sends nothing while the file is untouched.
 - Editing `persona.txt` and pushing authors a real persona. From that point the content is fixed and no longer tracks `personality.yaml` / `role.yaml`.
-- `personality.yaml` and `role.yaml` still pull and push, but they no longer affect what the agent's Role field shows. `poly push` warns when you change them on a project that has a persona.
 
 ## Personality (`personality.yaml`)
+
+**Superseded by `persona.txt`.** Kept for projects that predate the persona; it still pulls and pushes, but no longer affects the agent's identity. `poly push` warns when you change it on a project that has a persona.
 
 Controls the agent's conversational tone.
 
@@ -50,6 +50,8 @@ custom: ""
 ```
 
 ## Role (`role.yaml`)
+
+**Superseded by `persona.txt`.** Kept for projects that predate the persona; it still pulls and pushes, but no longer affects the agent's identity. `poly push` warns when you change it on a project that has a persona.
 
 Defines what the agent is (its job title / purpose).
 

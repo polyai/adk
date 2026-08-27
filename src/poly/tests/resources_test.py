@@ -2294,7 +2294,7 @@ class SettingsPersonaTests(unittest.TestCase):
         )
 
     def test_from_projection_without_content(self):
-        """Test a project without the persona flag, where content is absent."""
+        """Test a persona object that carries no content."""
         self.assertEqual(
             SettingsPersona.from_projection(
                 _persona_projection(

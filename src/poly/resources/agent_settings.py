@@ -285,9 +285,9 @@ class SettingsRole(YamlResource):
 class SettingsPersona(Resource):
     """Resource class for managing the persona setting.
 
-    This is what the "Role" field in Agent Studio edits. It supersedes the
-    personality and role settings, which remain on the wire but are no longer
-    surfaced to builders.
+    A single free-text description of who the agent is, edited as the "Role"
+    field in Agent Studio. It replaces the personality and role settings, which
+    remain on the wire but are no longer surfaced to builders.
     """
 
     content: str
@@ -329,9 +329,9 @@ class SettingsPersona(Resource):
     def from_projection(cls, projection: dict) -> dict[str, "SettingsPersona"]:
         """Parse the persona setting from a projection dict.
 
-        A project without the persona feature flag still carries a persona object,
-        just without content, so absent content means the setting is not enabled
-        rather than that anything is wrong.
+        The projection carries a persona object whether or not any content was
+        ever authored, so read the content rather than the object: absent content
+        means there is nothing to write to disk, not that anything is wrong.
         """
         agent_settings = projection.get("agentSettings", {})
         persona = agent_settings.get("persona") or {}
