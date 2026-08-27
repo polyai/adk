@@ -2551,6 +2551,35 @@ class FlowStepTests(unittest.TestCase):
         """Test that raw property returns correct YAML representation for no code step."""
         self.assertEqual(TEST_NO_CODE_FLOW_STEP.raw, FLOW_NO_CODE_STEP_RAW)
 
+    def test_conditions_sorted_by_name(self):
+        """Test that conditions are serialized in alphabetical order by name."""
+        step = FlowStep(
+            resource_id="flow-123_step-1",
+            step_id="step-1",
+            name="Test Step",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.DEFAULT_STEP,
+            conditions=[
+                Condition(
+                    resource_id=f"cond-{name}",
+                    name=name,
+                    description="",
+                    condition_type=ConditionType.STEP,
+                    child_step="step-2",
+                    step_id="step-1",
+                    flow_id="flow-123",
+                )
+                for name in ["zebra", "apple", "monkey"]
+            ],
+            prompt="Hello, how can I help you?",
+            position={"x": 0.0, "y": 0.0},
+            extracted_entities=[],
+        )
+
+        condition_names = [c["name"] for c in step.to_yaml_dict()["conditions"]]
+        self.assertEqual(condition_names, ["apple", "monkey", "zebra"])
+
     def test_to_pretty(self):
         """Test converting flow step to pretty format with function name mapping."""
         resource_mappings = [
