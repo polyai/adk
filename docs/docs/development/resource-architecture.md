@@ -43,12 +43,11 @@ The last two are not peers of the first four. Agent configuration is the leaf la
 | File | Holds |
 |---|---|
 | `rules.txt` | Global behavioral instructions |
-| `personality.yaml` | Tone and manner |
-| `role.yaml` | Who the agent is and what it is for |
+| `persona.txt` | Who the agent is, in free text |
 
 Rules are **always present in the prompt**, on every turn. They are not retrieved and not conditional, which makes them the right home for instructions that are unconditionally true — "always confirm the booking reference before making changes" — and the wrong home for facts, which would consume prompt space even when irrelevant to the current turn.
 
-`personality.yaml` and `role.yaml` are narrower than rules: they accept only `{{attr:}}` and `{{vrbl:}}` references. Behavioral references such as `{{fn:}}` and `{{ho:}}` belong in `rules.txt`.
+`persona.txt` is narrower than rules: it accepts only `{{vrbl:}}` references. Behavioral references such as `{{fn:}}` and `{{ho:}}` belong in `rules.txt`.
 
 See [agent settings](../reference/resources/agent_settings.md).
 
@@ -234,7 +233,7 @@ See [voice settings](../reference/resources/voice_settings.md), [chat settings](
 |---|---|
 | A new FAQ, policy, or factual answer | Topic (`topics/`) |
 | A global behavioral rule (always do X, never do Y) | `agent_settings/rules.txt` |
-| Agent identity and tone | `agent_settings/personality.yaml` and `role.yaml` |
+| Agent identity and tone | `agent_settings/persona.txt` |
 | A multi-step guided conversation | Flow (`flows/`) |
 | Structured data collection from the caller | Entity + flow |
 | Deterministic branching or routing logic | Function (`functions/`) |

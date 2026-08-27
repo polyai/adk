@@ -14,8 +14,6 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 ├── agent_settings/                     # Agent identity and behavior
 │   ├── languages.yaml                  # Optional
 │   ├── persona.txt                     # The Agent Studio "Role" field
-│   ├── personality.yaml
-│   ├── role.yaml
 │   ├── rules.txt
 │   ├── safety_filters.yaml
 │   └── experimental_config.json        # Optional
@@ -107,7 +105,7 @@ These placeholders can be used in prompts, rules, topics, and other text fields 
 | `{{fn:function_name}}` | Global function | Rules, topics (actions), advanced step prompts |
 | `{{ft:function_name}}` | Flow transition function | Advanced step prompts (same flow only) |
 | `{{entity:entity_name}}` | Collected entity value | Flow step prompts |
-| `{{attr:attribute_name}}` | Variant attribute | Rules, prompts, topics (actions), greeting, disclaimer, personality, role |
+| `{{attr:attribute_name}}` | Variant attribute | Rules, prompts, topics (actions), greeting, disclaimer |
 | `{{twilio_sms:template_name}}` | SMS template | Rules, topics (actions) |
 | `{{ho:handoff_name}}` | Handoff destination | Rules |
 | `{{vrbl:variable_name}}` (preferred) / `$variable_name` | State variable (interchangeable; `{{vrbl:...}}` is validated) | Prompts, topic actions, SMS templates |

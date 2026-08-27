@@ -78,7 +78,7 @@ Use this for chat-specific guidance such as:
 - using bullet points for lists
 - adjusting formatting for readability
 
-This is separate from the agent's broader personality. Use it to control how the agent communicates specifically in web chat.
+This is separate from the agent's broader persona. Use it to control how the agent communicates specifically in web chat.
 
 ### Fields
 

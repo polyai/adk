@@ -69,7 +69,7 @@ additional_languages:
 
     ---
 
-    See how `languages.yaml` fits alongside personality, role, and rules.
+    See how `languages.yaml` fits alongside the persona and rules.
     [Open agent settings](./agent_settings.md)
 
 -   **Voice settings**

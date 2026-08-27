@@ -408,8 +408,6 @@ class PushCommand(BaseCommand):
                 "message": output,
                 "dry_run": dry_run,
             }
-            if project.push_warnings:
-                json_output["warnings"] = project.push_warnings
             if new_branch_name:
                 json_output["switched_to"] = new_branch_name
                 json_output["new_branch_id"] = project.branch_id
@@ -438,8 +436,6 @@ class PushCommand(BaseCommand):
 
         if new_branch_name:
             warning(f"Created and switched to new branch '{new_branch_name}'.")
-        for push_warning in project.push_warnings or []:
-            warning(push_warning)
         if push_ok:
             success(f"Pushed {project.account_id}/{project.project_id} to Agent Studio.")
         else:

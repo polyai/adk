@@ -40,9 +40,6 @@ from poly.resources import (
     Pronunciation,
     Resource,
     ResourceMapping,
-    SettingsPersona,
-    SettingsPersonality,
-    SettingsRole,
     SubResource,
     TestCase,
     Topic,
@@ -123,8 +120,6 @@ class AgentStudioProject:
     # So they aren't considered locally deleted when pushing/pulling
     # before they are saved.
     _not_loaded_resources: list[ResourceType] = None
-
-    push_warnings: list[str] = None
 
     @property
     def all_resources(self) -> list[Resource]:
@@ -1204,8 +1199,6 @@ class AgentStudioProject:
                 - List of commands serialized to protobuf.
         """
 
-        self.push_warnings = []
-
         if not dry_run:
             # If force, load latest version of the project
             # to compare against
@@ -1293,19 +1286,6 @@ class AgentStudioProject:
         new_resources.update(subresource_changes.new)
         updated_resources.update(subresource_changes.updated)
         deleted_resources.update(subresource_changes.deleted)
-
-        if new_state.get(SettingsPersona):
-            shadowed = [
-                resource.file_path
-                for resource_type in (SettingsPersonality, SettingsRole)
-                for resource in updated_resources.get(resource_type, {}).values()
-            ]
-            if shadowed:
-                self.push_warnings.append(
-                    f"{', '.join(sorted(shadowed))} changed, but this project uses "
-                    f"{next(iter(new_state[SettingsPersona].values())).file_path} — "
-                    "personality and role no longer affect the Role field in Agent Studio."
-                )
 
         if not (updated_resources or new_resources or deleted_resources):
             return False, "No changes detected", []
@@ -1552,10 +1532,6 @@ class AgentStudioProject:
             current_resources=self.resources,
             queue_command=lambda command: self.api_handler.queue_command(command),
         )
-
-        # There is no create_persona command; authoring a persona is an update.
-        if new_personas := new_resources.pop(SettingsPersona, None):
-            updated_resources.setdefault(SettingsPersona, {}).update(new_personas)
 
         return PushPhaseChangeSet(
             main=ResourceChangeSet(

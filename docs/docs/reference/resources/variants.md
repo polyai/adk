@@ -129,8 +129,6 @@ Use `{{attr:attribute_name}}` in supported text fields such as:
 - rules (`rules.txt`)
 - greeting (`welcome_message`)
 - disclaimer message
-- personality `custom`
-- role `custom`
 
 ### Example
 
