@@ -128,6 +128,8 @@ class PlatformGuardrail(MultiResourceYamlResource):
         """Validate the platform guardrail resource."""
         if not self.name:
             raise ValueError("Name is required")
+        if not isinstance(self.name, str):
+            raise ValueError(f"Invalid value {self.name!r} for 'name'. Must be a string.")
         if not isinstance(self.enabled, bool):
             raise ValueError(
                 f"Invalid value {self.enabled!r} for 'enabled'. Must be true or false (unquoted)."

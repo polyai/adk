@@ -8560,6 +8560,14 @@ class PlatformGuardrailTests(unittest.TestCase):
             guardrail.validate()
         self.assertIn("Name is required", str(cm.exception))
 
+    def test_validate_non_string_name_raises(self):
+        """An unquoted numeric name (e.g. `name: 123`) is rejected as a ValueError, not a crash."""
+        guardrail = PlatformGuardrail(resource_id="123", name=123, enabled=True)
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate()
+        self.assertIn("Invalid value 123 for 'name'", str(cm.exception))
+        self.assertIn("Must be a string", str(cm.exception))
+
     def test_validate_quoted_enabled_raises(self):
         """A YAML-quoted boolean ('true') is rejected with an actionable message."""
         guardrail = PlatformGuardrail(resource_id="ai_identity", name="ai_identity", enabled="true")
