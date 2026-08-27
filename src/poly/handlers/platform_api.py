@@ -5,6 +5,7 @@ Copyright PolyAI Limited
 
 import json
 import logging
+import os
 import typing as ty
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -17,6 +18,7 @@ from poly.utils import any_credentials_exist, retrieve_api_key
 logger = logging.getLogger(__name__)
 ACCOUNTS_URL = "/adk/v1/accounts"
 PROJECTS_URL = "/adk/v1/accounts/{account_id}/projects"
+PROJECT_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}"
 DEPLOYMENTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/deployments"
 ACTIVE_DEPLOYMENTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/deployments/active"
 CHAT_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/chat"
@@ -126,6 +128,9 @@ class PlatformAPIHandler:
                 "X-Poly-Source": "adk",
             }
 
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
+
         logger.info(f"Making {method} request to {url}")
 
         # Use requests.request() to handle all HTTP methods uniformly
@@ -224,6 +229,21 @@ class PlatformAPIHandler:
                 accounts[account.get("id")] = account.get("name")
 
         return accounts
+
+    @staticmethod
+    def get_project(region: str, account_id: str, project_id: str) -> dict:
+        """Get a specific project for a given account.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+            project_id (str): The project ID
+
+        Returns:
+            dict: The project details
+        """
+        endpoint = PROJECT_URL.format(account_id=account_id, project_id=project_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")
 
     @staticmethod
     def get_projects(region: str, account_id: str) -> dict[str, str]:
@@ -939,6 +959,8 @@ class PlatformAPIHandler:
             "X-PolyAI-Correlation-Id": correlation_id,
             "X-Poly-Source": "adk",
         }
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
         params = {"direction": direction, "redacted": str(redacted).lower()}
 
         logger.info(f"Making GET request to {url}")
@@ -1005,6 +1027,8 @@ class PlatformAPIHandler:
             "X-PolyAI-Correlation-Id": correlation_id,
             "X-Poly-Source": "adk",
         }
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
 
         logger.info(f"Making GET request to {url}")
         response = requests.get(url, headers=headers, allow_redirects=False)
@@ -1050,6 +1074,8 @@ class PlatformAPIHandler:
             "X-Poly-Source": "adk",
             "Content-Type": "audio/wav",
         }
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
         if filename:
             headers["X-Filename"] = filename
 
@@ -1098,6 +1124,8 @@ class PlatformAPIHandler:
             "X-PolyAI-Correlation-Id": correlation_id,
             "X-Poly-Source": "adk",
         }
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
 
         logger.info(f"Making PUT request to {url}")
         response = requests.request(
@@ -1183,6 +1211,8 @@ class PlatformAPIHandler:
             "X-Poly-Source": "adk",
             "Content-Type": "application/json",
         }
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
         body: dict = {"text": text, "config": config}
         if language:
             body["language"] = language

@@ -79,7 +79,7 @@ class KnowledgeBase(_message.Message):
     def __init__(self, topics: _Optional[_Iterable[_Union[KnowledgeBaseTopic, _Mapping]]] = ..., embedding_model: _Optional[str] = ...) -> None: ...
 
 class KnowledgeBaseTopic(_message.Message):
-    __slots__ = ("id", "name", "content", "actions", "example_queries", "references", "created_at", "created_by", "updated_at", "updated_by", "is_active", "variant_id")
+    __slots__ = ("id", "name", "content", "actions", "example_queries", "references", "created_at", "created_by", "updated_at", "updated_by", "is_active", "variant_id", "tags")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     CONTENT_FIELD_NUMBER: _ClassVar[int]
@@ -92,6 +92,7 @@ class KnowledgeBaseTopic(_message.Message):
     UPDATED_BY_FIELD_NUMBER: _ClassVar[int]
     IS_ACTIVE_FIELD_NUMBER: _ClassVar[int]
     VARIANT_ID_FIELD_NUMBER: _ClassVar[int]
+    TAGS_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     content: str
@@ -104,10 +105,11 @@ class KnowledgeBaseTopic(_message.Message):
     updated_by: str
     is_active: bool
     variant_id: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., content: _Optional[str] = ..., actions: _Optional[str] = ..., example_queries: _Optional[_Union[ExampleQueries, _Mapping]] = ..., references: _Optional[_Union[TopicReferences, _Mapping]] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., is_active: bool = ..., variant_id: _Optional[str] = ...) -> None: ...
+    tags: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., content: _Optional[str] = ..., actions: _Optional[str] = ..., example_queries: _Optional[_Union[ExampleQueries, _Mapping]] = ..., references: _Optional[_Union[TopicReferences, _Mapping]] = ..., created_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., created_by: _Optional[str] = ..., updated_at: _Optional[_Union[_timestamp_pb2.Timestamp, _Mapping]] = ..., updated_by: _Optional[str] = ..., is_active: bool = ..., variant_id: _Optional[str] = ..., tags: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class KnowledgeBase_CreateTopic(_message.Message):
-    __slots__ = ("id", "name", "content", "actions", "example_queries", "references", "is_active", "variant_id")
+    __slots__ = ("id", "name", "content", "actions", "example_queries", "references", "is_active", "variant_id", "tags")
     ID_FIELD_NUMBER: _ClassVar[int]
     NAME_FIELD_NUMBER: _ClassVar[int]
     CONTENT_FIELD_NUMBER: _ClassVar[int]
@@ -116,6 +118,7 @@ class KnowledgeBase_CreateTopic(_message.Message):
     REFERENCES_FIELD_NUMBER: _ClassVar[int]
     IS_ACTIVE_FIELD_NUMBER: _ClassVar[int]
     VARIANT_ID_FIELD_NUMBER: _ClassVar[int]
+    TAGS_FIELD_NUMBER: _ClassVar[int]
     id: str
     name: str
     content: str
@@ -124,7 +127,8 @@ class KnowledgeBase_CreateTopic(_message.Message):
     references: TopicReferences
     is_active: bool
     variant_id: str
-    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., content: _Optional[str] = ..., actions: _Optional[str] = ..., example_queries: _Optional[_Union[ExampleQueries, _Mapping]] = ..., references: _Optional[_Union[TopicReferences, _Mapping]] = ..., is_active: bool = ..., variant_id: _Optional[str] = ...) -> None: ...
+    tags: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, id: _Optional[str] = ..., name: _Optional[str] = ..., content: _Optional[str] = ..., actions: _Optional[str] = ..., example_queries: _Optional[_Union[ExampleQueries, _Mapping]] = ..., references: _Optional[_Union[TopicReferences, _Mapping]] = ..., is_active: bool = ..., variant_id: _Optional[str] = ..., tags: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class KnowledgeBase_UpdateTopic(_message.Message):
     __slots__ = ("id", "name", "content", "actions", "example_queries", "references", "is_active", "variant_id")
@@ -183,6 +187,14 @@ class ImportMetadata(_message.Message):
     import_timestamp: str
     file_name: str
     def __init__(self, total_topics: _Optional[int] = ..., import_timestamp: _Optional[str] = ..., file_name: _Optional[str] = ...) -> None: ...
+
+class KnowledgeBase_SetTopicTags(_message.Message):
+    __slots__ = ("id", "tags")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    TAGS_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    tags: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, id: _Optional[str] = ..., tags: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class KnowledgeBase_SetEmbeddingModel(_message.Message):
     __slots__ = ("embedding_model",)

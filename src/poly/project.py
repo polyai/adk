@@ -12,6 +12,8 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, fields
 from datetime import datetime
+from enum import Enum
+from functools import cached_property
 from typing import Any, Optional, TypeAlias
 
 from google.protobuf.message import Message
@@ -87,6 +89,14 @@ class PushPhaseChangeSet:
     post: ResourceChangeSet
 
 
+class DeploymentMode(Enum):
+    """Deployment mode for the project"""
+
+    SIMPLE = "simple"
+    RELEASES = "releases"
+    RELEASES_BRANCHES = "releases_branches"
+
+
 @dataclass
 class AgentStudioProject:
     """Dataclass representing an Agent Studio Project"""
@@ -104,6 +114,7 @@ class AgentStudioProject:
     file_structure_info: dict[str, dict[str, str]] = None
     _migration_flags: set[MigrationFlag] = None
     rtc_metadata: Optional[dict[str, dict]] = None
+    _deployment_mode: Optional[DeploymentMode] = None
 
     # Store resources that were not loaded from the status file
     # So they aren't considered locally deleted when pushing/pulling
@@ -421,10 +432,11 @@ class AgentStudioProject:
         self,
         preserve_not_loaded_resources: bool = False,
         projection_json: Optional[dict[str, Any]] = None,
-    ) -> None:
-        """Load the current state of project on Agent Studio into memory
+    ) -> tuple[dict[str, list["Resource"]], dict[str, Any]]:
+        """Load the current state of project on Agent Studio into memory.
 
-        This is used when no current resources are loaded.
+        Pulls resources from the API (or a projection dict), updates in-memory
+        state and the status file, but does **not** touch working-tree files.
 
         Args:
             preserve_not_loaded_resources: If True, retain the current
@@ -432,15 +444,53 @@ class AgentStudioProject:
                 for comparison without affecting local state).
             projection_json: If set, build resources from this projection dict
                 instead of fetching from the API (same shape as a sourcerer projection).
+
+        Returns:
+            A tuple of (resources dict, projection dict).
         """
-        resources, _ = self.api_handler.pull_resources(projection_json=projection_json)
+        resources, projection = self.api_handler.pull_resources(projection_json=projection_json)
         self._check_no_duplicate_resource_paths(resources)
 
         self.resources = resources
         self.file_structure_info = self.compute_file_structure_info(resources)
         if not preserve_not_loaded_resources:
             self._not_loaded_resources = []
+
+        if projection_json is None:
+            self.branch_id = self.api_handler.branch_id
+
         self.save_config()
+        return resources, projection
+
+    def fetch_project(
+        self,
+        branch_name: Optional[str] = None,
+        projection_json: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Fetch the latest remote state, optionally switching branch first.
+
+        Handles branch switching then delegates to ``load_project``.
+
+        Args:
+            branch_name: If provided, switch the API context to this branch
+                before fetching.  Raises ``ValueError`` if the branch does not
+                exist.
+            projection_json: If set, build resources from this projection dict
+                instead of fetching from the API.
+
+        Returns:
+            The projection dict.
+        """
+        if branch_name is not None:
+            branches = self.api_handler.get_branches()
+            if branch_name not in branches:
+                raise ValueError(f"Branch '{branch_name}' does not exist.")
+            branch_id = branches[branch_name]["branchId"]
+            self.branch_id = branch_id
+            self.api_handler.switch_branch(branch_id)
+
+        _, projection = self.load_project(projection_json=projection_json)
+        return projection
 
     @staticmethod
     def list_templates(region: str) -> list[dict[str, Any]]:
@@ -1094,7 +1144,7 @@ class AgentStudioProject:
         )
 
         # Queue new/updated/deleted resources
-        commands = []
+        commands = self.api_handler.get_queued_commands()
         if pre_changes.new or pre_changes.deleted or pre_changes.updated:
             commands.extend(
                 self.api_handler.queue_resources(
@@ -1475,6 +1525,12 @@ class AgentStudioProject:
             updated_resources,
             deleted_resources,
             current_resources=self.resources,
+        )
+
+        prepush.clear_unused_settings_from_flow_step(
+            updated_resources,
+            current_resources=self.resources,
+            queue_command=lambda command: self.api_handler.queue_command(command),
         )
 
         return PushPhaseChangeSet(
@@ -2307,16 +2363,61 @@ class AgentStudioProject:
         )
         return current_branch, branches
 
-    def create_branch(self, branch_name: str = None) -> str:
+    def create_branch(
+        self, branch_name: str = None, source_branch_name: Optional[str] = None
+    ) -> str:
         """Create a new branch in the project.
 
         Args:
             branch_name (str): The name of the new branch
+            source_branch_name (str): Name of the branch to create the new branch from.
+                Defaults to the current branch.
 
         Returns:
             str: The ID of the newly created branch
+
+        Raises:
+            ValueError: If the branch cannot be created due to deployment mode restrictions,
+                or source_branch_name does not exist.
         """
-        branch_id = self.api_handler.create_branch(branch_name)
+        branches = None
+        if source_branch_name is not None or self.deployment_mode in (
+            DeploymentMode.SIMPLE,
+            DeploymentMode.RELEASES_BRANCHES,
+        ):
+            branches = self.api_handler.get_branches()
+
+        if source_branch_name is not None:
+            if source_branch_name not in branches:
+                raise ValueError(f"Branch '{source_branch_name}' does not exist.")
+            source_branch_id = branches[source_branch_name]["branchId"]
+        else:
+            source_branch_id = self.branch_id
+
+        if self.deployment_mode == DeploymentMode.SIMPLE:
+            if len(branches) >= 2:
+                raise ValueError(
+                    "Cannot create branch. Only one branch is allowed in simple deployment mode. Please delete/merge existing branches before creating a new one."
+                )
+        if self.deployment_mode == DeploymentMode.RELEASES:
+            if source_branch_id != "main":
+                raise ValueError(
+                    "Cannot create branch. Branches can only be created from the main branch in releases deployment mode."
+                )
+        if self.deployment_mode == DeploymentMode.RELEASES_BRANCHES:
+            source_branch_meta = next(
+                (meta for meta in branches.values() if meta["branchId"] == source_branch_id),
+                None,
+            )
+            if source_branch_meta is None or (
+                not source_branch_id == "main"
+                and source_branch_meta.get("parentBranchId") != "main"
+            ):
+                raise ValueError(
+                    "Cannot create branch. Branches with depth above 2 are not allowed in releases-branches deployment mode."
+                )
+
+        branch_id = self.api_handler.create_branch(branch_name, source_branch_id)
         self.branch_id = branch_id
         self.save_config()
         return branch_id
@@ -2741,12 +2842,12 @@ class AgentStudioProject:
         return validation_errors
 
     def merge_branch(
-        self, message: str, conflict_resolutions: list[dict[str, Any]] = None
+        self, message: Optional[str], conflict_resolutions: list[dict[str, Any]] = None
     ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
         """Merge the current branch into main in the project.
 
         Args:
-            message (str): The merge commit message.
+            message (Optional[str]): The merge commit message.
             conflict_resolutions (list[dict[str, Any]]): A list of conflict
                 resolutions. Each resolution should have:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
@@ -2759,8 +2860,10 @@ class AgentStudioProject:
             list[dict[str, str]]: A list of errors
         """
         branches = self.api_handler.get_branches()
-        branch_ids = {meta["branchId"] for meta in branches.values()}
-        if self.branch_id not in branch_ids:
+        branch_meta = {meta["branchId"]: meta for meta in branches.values()}
+        current_branch_meta = branch_meta.get(self.branch_id)
+
+        if not current_branch_meta:
             raise ValueError(f"Branch {self.branch_id} does not exist.")
 
         if self.branch_id == "main":
@@ -2784,7 +2887,64 @@ class AgentStudioProject:
             message=message, conflict_resolutions=conflict_resolutions
         )
         if success:
-            self.switch_branch("main", force=True)
+            parent_branch_id = current_branch_meta.get("parentBranchId")
+            parent_branch_meta = branch_meta.get(parent_branch_id) or {}
+            parent_branch_name = parent_branch_meta.get("name")
+            if not parent_branch_name:
+                logger.warning(
+                    f"Could not resolve parent branch for '{self.branch_id}' "
+                    f"(parentBranchId={parent_branch_id!r}); defaulting to 'main'."
+                )
+                parent_branch_name = "main"
+            success, _ = self.switch_branch(parent_branch_name, force=True)
+            return success, [], []
+
+        return False, conflicts, errors
+
+    def sync_branch(
+        self, conflict_resolutions: list[dict[str, Any]] = None
+    ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
+        """Sync the current branch with its parent in the project.
+
+        Args:
+            conflict_resolutions (list[dict[str, Any]]): A list of conflict
+                resolutions. Each resolution should have:
+                - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
+                - strategy: Resolution strategy - "ours", "theirs", or "base"
+                - value: Optional custom value
+
+        Returns:
+            bool: True if the sync was successful, False otherwise
+            list[dict[str, str]]: A list of conflicts
+            list[dict[str, str]]: A list of errors
+        """
+        branches = self.api_handler.get_branches()
+        branch_ids = {meta["branchId"] for meta in branches.values()}
+        if self.branch_id not in branch_ids:
+            raise ValueError(f"Branch {self.branch_id} does not exist.")
+
+        if self.branch_id == "main":
+            raise ValueError("Syncing 'main' branch is not supported.")
+
+        if diffs := self.get_diffs():
+            raise ValueError(
+                f"Cannot sync branch with uncommitted changes, diffs: {list(diffs.keys())}"
+            )
+
+        for resolution in conflict_resolutions or []:
+            if "path" not in resolution or "strategy" not in resolution:
+                raise ValueError(f"Resolution must include 'path' and 'strategy': {resolution}")
+            if resolution["strategy"] not in {"ours", "theirs", "base"}:
+                raise ValueError(
+                    f"Invalid conflict resolution strategy: {resolution['strategy']} for path {resolution['path']}. "
+                    f"Must be one of 'ours', 'theirs', or 'base'."
+                )
+
+        success, conflicts, errors = self.api_handler.sync_branch(
+            conflict_resolutions=conflict_resolutions
+        )
+        if success:
+            self.pull_project(force=True)
             return True, [], []
 
         return False, conflicts, errors
@@ -2830,14 +2990,56 @@ class AgentStudioProject:
             for resource in resources_dict.values():
                 sandbox_resource_lookup[resource.file_path] = resource
 
-        # 1. Build sync resource_mappings: use sandbox id when there is a sandbox match by file_path
+        # 1a. Resolve synced FlowConfig ids first, so flow-scoped resources below can
+        # translate their (stale, local) flow_id to the id the flow was synced to.
+        flow_id_translation: dict[str, str] = {}
+        for resources_dict in self.resources.values():
+            for resource in resources_dict.values():
+                if not isinstance(resource, FlowConfig):
+                    continue
+                sandbox_version = sandbox_resource_lookup.get(resource.file_path)
+                flow_id_translation[resource.resource_id] = (
+                    sandbox_version.resource_id if sandbox_version else resource.resource_id
+                )
+
+        # 1b. Build sync resource_mappings: use sandbox id when there is a sandbox match by file_path
         sync_mappings: list[ResourceMapping] = []
         for resource_type, resources_dict in self.resources.items():
             for resource_id, resource in resources_dict.items():
                 sandbox_version = sandbox_resource_lookup.get(resource.file_path)
-                mapping_resource_id = (
-                    sandbox_version.resource_id if sandbox_version else resource.resource_id
-                )
+                local_flow_id = getattr(resource, "flow_id", None)
+
+                if isinstance(resource, FlowConfig):
+                    mapping_resource_id = (
+                        sandbox_version.resource_id if sandbox_version else resource.resource_id
+                    )
+                    mapping_flow_id = mapping_resource_id
+                else:
+                    mapping_flow_id = flow_id_translation.get(local_flow_id, local_flow_id)
+                    if sandbox_version:
+                        mapping_resource_id = sandbox_version.resource_id
+                    else:
+                        # No sandbox counterpart, so this resource was added on the branch and
+                        # its composite `{flow_id}_{step_id}` id still carries the pre-sync flow
+                        # id. Re-point it at the synced flow id, otherwise the prefix and flow_id
+                        # disagree and references (start_step, child_step) cannot be resolved
+                        # back to bare step ids.
+                        #
+                        # Only flow steps embed the flow id in their own id. Flow-scoped
+                        # functions also carry a flow_id but keep a standalone id, so
+                        # prepending the synced flow id to those would corrupt them.
+                        mapping_resource_id = resource.resource_id
+                        old_prefix = f"{local_flow_id}_"
+                        if (
+                            local_flow_id
+                            and mapping_flow_id != local_flow_id
+                            and issubclass(resource_type, BaseFlowStep)
+                            and mapping_resource_id.startswith(old_prefix)
+                        ):
+                            mapping_resource_id = (
+                                f"{mapping_flow_id}_{mapping_resource_id.removeprefix(old_prefix)}"
+                            )
+
                 resource_path = resource.get_path(self.root_path)
                 sync_mappings.append(
                     ResourceMapping(
@@ -2851,11 +3053,7 @@ class AgentStudioProject:
                             else getattr(resource, "flow_name", None)
                         ),
                         resource_prefix=resource.get_resource_prefix(file_path=resource.file_path),
-                        flow_id=(
-                            mapping_resource_id
-                            if isinstance(resource, FlowConfig)
-                            else getattr(resource, "flow_id", None)
-                        ),
+                        flow_id=mapping_flow_id,
                     )
                 )
 
@@ -3136,7 +3334,6 @@ class AgentStudioProject:
         )
 
     # ── RTC (Real-Time Configuration) ──
-
     RTC_ENV_TO_DIR = {
         "sandbox": "draft_and_sandbox",
         "pre-release": "pre_release",
@@ -3512,3 +3709,182 @@ class AgentStudioProject:
             ]
         except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
             return [f"Invalid schema: {e}"]
+
+    def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
+        """Get the history of a branch.
+
+        Args:
+            branch_id (str): The ID of the branch to get history for.
+
+        Returns:
+            list[dict[str, Any]]: A list of commit history entries for the branch.
+        """
+        return self.api_handler.get_branch_history(branch_id)
+
+    def rename_branch(self, new_branch_name: str) -> bool:
+        """Rename the current branch.
+
+        Args:
+            new_branch_name (str): The new name for the current branch.
+
+        Returns:
+            bool: True if the rename was successful, False otherwise.
+        """
+        if not new_branch_name:
+            raise ValueError("New branch name must be provided.")
+
+        if self.branch_id == "main":
+            raise ValueError("Renaming 'main' branch is not supported.")
+
+        branches = self.api_handler.get_branches()
+
+        if new_branch_name in branches:
+            raise ValueError(f"Branch {new_branch_name} already exists.")
+
+        success = self.api_handler.rename_branch(new_branch_name=new_branch_name)
+        return success
+
+    def list_archived_branches(self) -> list[dict[str, Any]]:
+        """List soft-deleted (archived) branches for the project.
+
+        Returns:
+            list[dict[str, Any]]: A list of archived branch entries.
+        """
+        return self.api_handler.list_archived_branches()
+
+    def restore_branch(self, branch_id: str) -> bool:
+        """Restore a soft-deleted branch from the archive.
+
+        Identified by id rather than name because archived names are not unique —
+        the same branch name can be archived repeatedly. Use
+        ``list_archived_branches`` to find the id.
+
+        Args:
+            branch_id (str): The branch id of the archived branch to restore.
+
+        Returns:
+            bool: True if the branch was restored successfully, False otherwise.
+        """
+        if not branch_id:
+            raise ValueError("Branch id must be provided.")
+
+        archived = self.api_handler.list_archived_branches()
+        if not any(branch.get("branchId") == branch_id for branch in archived):
+            raise ValueError(
+                f"Branch '{branch_id}' not found in archive. "
+                "Use 'poly branch list --archived' to see available branches."
+            )
+
+        return self.api_handler.restore_branch(branch_id)
+
+    def tag_branch(self, branch_name: str = None) -> bool:
+        """Tag the current branch with a new tag.
+
+        Args:
+            branch_name (str): The name of the branch to tag. If None, tags the current branch.
+        Returns:
+            bool: True if the tagging was successful, False otherwise.
+        """
+        branches = self.api_handler.get_branches()
+        if branch_name is None:
+            branch_id = self.branch_id
+            branch_name = next(
+                (name for name, meta in branches.items() if meta["branchId"] == branch_id), None
+            )
+            if branch_name is None:
+                raise ValueError(f"Current branch ID {branch_id} does not exist.")
+        else:
+            if branch_name not in branches:
+                raise ValueError(f"Branch {branch_name} does not exist.")
+            branch_id = branches[branch_name]["branchId"]
+
+        if branch_id == "main":
+            raise ValueError("Tagging 'main' branch is not supported.")
+
+        success = self.api_handler.tag_branch(branch_id)
+        return success
+
+    def untag_branch(self, branch_name: str = None) -> bool:
+        """Remove a tag from a branch.
+
+        Args:
+            branch_name (str): The name of the branch to untag. If None, untags the current branch.
+        Returns:
+            bool: True if the untagging was successful, False otherwise.
+        """
+        branches = self.api_handler.get_branches()
+        if branch_name is None:
+            branch_id = self.branch_id
+            branch_name = next(
+                (name for name, meta in branches.items() if meta["branchId"] == branch_id), None
+            )
+            if branch_name is None:
+                raise ValueError(f"Current branch ID {branch_id} does not exist.")
+        else:
+            if branch_name not in branches:
+                raise ValueError(f"Branch {branch_name} does not exist.")
+            branch_id = branches[branch_name]["branchId"]
+
+        if branch_id == "main":
+            raise ValueError("Untagging 'main' branch is not supported.")
+
+        success = self.api_handler.untag_branch(branch_id)
+        return success
+
+    def get_project_info(self) -> dict[str, Any]:
+        """Get basic information about the project from the API.
+
+        Returns:
+            dict[str, Any]: A dictionary containing project information.
+        """
+        return self.api_handler.get_project(self.region, self.account_id, self.project_id)
+
+    @property
+    def deployment_mode(self) -> DeploymentMode:
+        """Get the deployment mode for the project."""
+        if self._deployment_mode is None:
+            cfg = self.get_project_info().get("config") or {}
+            deployment_mode = DeploymentMode(cfg.get("deployment_mode", "releases"))
+            if (
+                deployment_mode == DeploymentMode.RELEASES_BRANCHES
+                and not self.using_simplified_deployments
+            ):
+                deployment_mode = DeploymentMode.RELEASES
+            self._deployment_mode = deployment_mode
+        return self._deployment_mode
+
+    @cached_property
+    def using_simplified_deployments(self) -> bool:
+        """Check if the project is using simplified deployments."""
+        flag_enabled = self.api_handler.feature_flag_enabled(
+            key="deployment-simplification",
+            region=self.region,
+            project_id=self.project_id,
+            default=False,
+        )
+        if not flag_enabled:
+            return False
+
+        # A project is converged if the main == live
+        # Once a project is converged, all deployments will go to live
+        # To check, look at most recent deployment in sandbox and live. If it is the same as live, then the project is converged
+        live_deployments = self.api_handler.get_deployments(
+            self.region, self.account_id, self.project_id, client_env="live"
+        )
+        sandbox_deployments = self.api_handler.get_deployments(
+            self.region, self.account_id, self.project_id, client_env="sandbox"
+        )
+
+        live_head = next((d for d in live_deployments if not d.get("deleted", False)), None)
+        sandbox_head = next((d for d in sandbox_deployments if not d.get("deleted", False)), None)
+
+        def _parse_created_at(deployment: dict) -> datetime:
+            return datetime.strptime(deployment["created_at"], "%a, %d %b %Y %H:%M:%S %Z")
+
+        if live_head is None and sandbox_head is None:
+            # No deployments in either environment, consider converged
+            return True
+
+        return live_head is not None and (
+            sandbox_head is None or _parse_created_at(live_head) >= _parse_created_at(sandbox_head)
+        )
