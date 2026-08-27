@@ -10,7 +10,7 @@ import os
 import shutil
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from datetime import datetime
 from enum import Enum
 from functools import cached_property
@@ -39,8 +39,10 @@ from poly.resources import (
     MultiResourceYamlResource,
     Pronunciation,
     Resource,
+    ResourceMap,
     ResourceMapping,
-    SubResource,
+    ResourceType,
+    SubResourceMap,
     TestCase,
     Topic,
 )
@@ -60,10 +62,6 @@ STATUS_FILE = os.path.join("_gen", ".agent_studio_config")
 
 DECORATORS = ["func_parameter", "func_description", "func_latency_control"]
 
-ResourceType: TypeAlias = type[Resource]
-ResourceMap: TypeAlias = dict[ResourceType, dict[str, Resource]]
-SubResourceType: TypeAlias = type[SubResource]
-SubResourceMap: TypeAlias = dict[SubResourceType, dict[str, SubResource]]
 DiscoveredResourcePaths: TypeAlias = dict[ResourceType, list[str]]
 ResourceUpdatePair: TypeAlias = tuple[ResourceMap, ResourceMap]
 
@@ -107,6 +105,7 @@ class AgentStudioProject:
     root_path: str
     resources: ResourceMap
     last_updated: datetime
+    slim_resources: list[ResourceMapping] = field(default_factory=list)
     branch_id: str = None
     project_name: Optional[str] = None
     account_name: Optional[str] = None
@@ -119,7 +118,7 @@ class AgentStudioProject:
     # Store resources that were not loaded from the status file
     # So they aren't considered locally deleted when pushing/pulling
     # before they are saved.
-    _not_loaded_resources: list[ResourceType] = None
+    _not_loaded_resources: list[ResourceType] = field(default_factory=list)
 
     @property
     def all_resources(self) -> list[Resource]:
@@ -160,9 +159,10 @@ class AgentStudioProject:
     @classmethod
     def _load_resources_from_status_dict(
         cls, status_dict: dict
-    ) -> tuple[ResourceMap, list[ResourceType]]:
+    ) -> tuple[ResourceMap, list[ResourceType], list[ResourceMapping]]:
         resources: ResourceMap = {}
         not_loaded_resources: list[ResourceType] = []
+        slim_resources: list[ResourceMapping] = []
         for resource_name, resource_class in RESOURCE_NAME_TO_CLASS.items():
             resource_dicts: Optional[dict[str, dict[str, Any]]] = status_dict.get(
                 "resources", {}
@@ -179,7 +179,12 @@ class AgentStudioProject:
                 )
                 for resource_id, resource_dict in resource_dicts.items()
             }
-        return resources, not_loaded_resources
+        for slim_resource_dict in status_dict.get("slim_resources", []):
+            resource_mapping = ResourceMapping.from_dict(slim_resource_dict)
+            if resource_mapping is not None:
+                slim_resources.append(resource_mapping)
+
+        return resources, not_loaded_resources, slim_resources
 
     @classmethod
     def from_file_path(cls, root_path: str) -> "AgentStudioProject":
@@ -210,7 +215,9 @@ class AgentStudioProject:
         migration_flags = run_migrations(root_path, migration_flags, status_dict=status_dict)
 
         # Load resources
-        resources, not_loaded_resources = cls._load_resources_from_status_dict(status_dict)
+        resources, not_loaded_resources, slim_resources = cls._load_resources_from_status_dict(
+            status_dict
+        )
 
         last_updated_str = status_dict.get("last_updated")
         if last_updated_str:
@@ -226,6 +233,7 @@ class AgentStudioProject:
             root_path=root_path,
             last_updated=last_updated,
             file_structure_info={},
+            slim_resources=slim_resources,
             branch_id=status_dict.get("branch_id", "main"),
             project_name=config_dict.get("project_name") or status_dict.get("project_name"),
             account_name=config_dict.get("account_name") or status_dict.get("account_name"),
@@ -246,6 +254,7 @@ class AgentStudioProject:
                 }
                 for rt, rs in self.resources.items()
             },
+            "slim_resources": [r.to_dict() for r in self.slim_resources or []],
             "last_updated": (self.last_updated.isoformat() if self.last_updated else None),
             "file_structure_info": self.file_structure_info,
             "branch_id": self.branch_id,
@@ -263,7 +272,7 @@ class AgentStudioProject:
         migration_flags = load_migration_flags(data.get("migration_flags", []))
         migration_flags = run_migrations(root_path, migration_flags, status_dict=data)
 
-        resources, not_loaded_resources = cls._load_resources_from_status_dict(data)
+        resources, not_loaded_resources, slim_resources = cls._load_resources_from_status_dict(data)
 
         file_structure_info = cls.compute_file_structure_info(resources)
 
@@ -280,6 +289,7 @@ class AgentStudioProject:
             account_name=data.get("account_name"),
             _migration_flags=migration_flags,
             _not_loaded_resources=not_loaded_resources,
+            slim_resources=slim_resources,
             rtc_metadata=data.get("rtc_metadata"),
         )
 
@@ -360,7 +370,7 @@ class AgentStudioProject:
         )
 
         try:
-            project.resources, projection = project.api_handler.pull_resources(
+            project.resources, slim_resources, projection = project.api_handler.pull_resources(
                 projection_json=projection_json
             )
         except ValueError:
@@ -372,8 +382,8 @@ class AgentStudioProject:
 
         project._check_no_duplicate_resource_paths(project.resources)
 
-        resource_mappings: list[ResourceMapping] = project._make_resource_mappings(
-            project.resources
+        resource_mappings: list[ResourceMapping] = (
+            project._make_resource_mappings(project.resources) + slim_resources
         )
 
         all_resources = project.all_resources
@@ -448,10 +458,13 @@ class AgentStudioProject:
         Returns:
             A tuple of (resources dict, projection dict).
         """
-        resources, projection = self.api_handler.pull_resources(projection_json=projection_json)
+        resources, slim_resources, projection = self.api_handler.pull_resources(
+            projection_json=projection_json
+        )
         self._check_no_duplicate_resource_paths(resources)
 
         self.resources = resources
+        self.slim_resources = slim_resources
         self.file_structure_info = self.compute_file_structure_info(resources)
         if not preserve_not_loaded_resources:
             self._not_loaded_resources = []
@@ -561,12 +574,15 @@ class AgentStudioProject:
         # Pull resources
         # -------
 
-        incoming_resources, projection = self.api_handler.pull_resources(
+        incoming_resources, slim_resources, projection = self.api_handler.pull_resources(
             projection_json=projection_json
         )
         # Only update branch id if we used the API to pull the resources
         if projection_json is None:
             self.branch_id = self.api_handler.branch_id
+
+        # Update slim resources in memory
+        self.slim_resources = slim_resources
 
         self._check_no_duplicate_resource_paths(incoming_resources)
         # -------
@@ -935,13 +951,13 @@ class AgentStudioProject:
         files_with_conflicts = []
 
         # Generate resource mappings
-        incoming_resource_mappings: list[ResourceMapping] = self._make_resource_mappings(
-            incoming_resources
+        incoming_resource_mappings: list[ResourceMapping] = (
+            self._make_resource_mappings(incoming_resources) + self.slim_resources
         )
 
         # If not force, compare with original and local changes
-        original_resource_mappings: list[ResourceMapping] = self._make_resource_mappings(
-            original_resources
+        original_resource_mappings: list[ResourceMapping] = (
+            self._make_resource_mappings(original_resources) + self.slim_resources
         )
 
         # Merging is done on a per file basis.
@@ -1220,12 +1236,16 @@ class AgentStudioProject:
                         [],
                     )
 
-                # Push Algorithm
+        # Push Algorithm
         # 1. Get new/kept/deleted resources
         new_resource_mappings, kept_resource_mappings, deleted_resource_mappings = (
             self.find_new_kept_deleted(self.discover_local_resources())
         )
         local_resource_mappings = new_resource_mappings + kept_resource_mappings
+        # Slim resources have no file to read - they exist only so that references
+        # to them still resolve to a name. Keep them out of the list we iterate,
+        # and only in the list we resolve references against.
+        resource_mappings = local_resource_mappings + self.slim_resources
 
         if format:
             # format all local resources before pushing
@@ -1242,7 +1262,7 @@ class AgentStudioProject:
         for resource_mapping in local_resource_mappings:
             local_resource = self.read_local_resource(
                 resource=resource_mapping,
-                resource_mappings=local_resource_mappings,
+                resource_mappings=resource_mappings,
             )
             new_state.setdefault(resource_mapping.resource_type, {})[
                 resource_mapping.resource_id
@@ -1293,7 +1313,7 @@ class AgentStudioProject:
         # 4. Validate all resources with new state
         if not skip_validation:
             validation_errors = self.validate_resources(
-                resources_dict=new_state, resource_mappings=local_resource_mappings
+                resources_dict=new_state, resource_mappings=resource_mappings
             )
             if validation_errors:
                 error_messages = "\n".join(validation_errors)
@@ -1324,7 +1344,6 @@ class AgentStudioProject:
         if dry_run:
             return True, "Dry run completed. No changes were pushed.", commands
         else:
-            # Update local state
             self.resources = new_state
             self.file_structure_info = self.compute_file_structure_info(self.resources)
             self.save_config()
@@ -1580,6 +1599,7 @@ class AgentStudioProject:
         deleted_files = [resource.file_path for resource in deleted_resources_mappings]
 
         local_resources_mappings = new_resources_mappings + kept_resources_mappings
+        local_resources_mappings.extend(self.slim_resources)
 
         for kept_local_resource_mapping in kept_resources_mappings:
             original_hash = self.file_structure_info.get(
@@ -1639,6 +1659,7 @@ class AgentStudioProject:
             self.find_new_kept_deleted(self.discover_local_resources())
         )
         local_resources_mappings = new_resources_mappings + kept_resources_mappings
+        local_resources_mappings.extend(self.slim_resources)
 
         for local_resource_mapping in kept_resources_mappings:
             if not all_files and file_paths and local_resource_mapping.file_path not in file_paths:
@@ -1791,10 +1812,13 @@ class AgentStudioProject:
                 self.discover_local_resources()
             )
             local_resources_mappings = new_resources_mappings + kept_resources_mappings
+            # Slim resources have no file to read - resolve references against
+            # them, but never iterate them looking for one.
+            resource_mappings = local_resources_mappings + self.slim_resources
             resources: ResourceMap = {}
             for resource_mapping in local_resources_mappings:
                 resource = self.read_local_resource(
-                    resource=resource_mapping, resource_mappings=local_resources_mappings
+                    resource=resource_mapping, resource_mappings=resource_mappings
                 )
                 resources.setdefault(resource_mapping.resource_type, {})[
                     resource_mapping.resource_id
@@ -1832,8 +1856,8 @@ class AgentStudioProject:
 
         Empty projections are valid (e.g. diffing a branch against an empty main).
         """
-        before_resources = load_resources_from_projection(before_projection)
-        after_resources = load_resources_from_projection(after_projection)
+        before_resources, before_slim_resources = load_resources_from_projection(before_projection)
+        after_resources, after_slim_resources = load_resources_from_projection(after_projection)
         return self.diff_resource_maps(before_resources, after_resources)
 
     def diff_resource_maps(
@@ -2315,6 +2339,7 @@ class AgentStudioProject:
                 and resource_type in self._not_loaded_resources
             ):
                 continue
+
             resource_id = resource_info["resource_id"]
             resource_mapping = ResourceMapping(
                 resource_id=resource_id,
@@ -2694,7 +2719,7 @@ class AgentStudioProject:
             self.discover_local_resources()
         )
         all_mappings = new_resources_mappings + kept_resources_mappings
-        resource_mappings: list[ResourceMapping] = [
+        filtered_resource_mappings: list[ResourceMapping] = [
             m
             for m in all_mappings
             if not files
@@ -2704,7 +2729,7 @@ class AgentStudioProject:
                 and _parse_multi_resource_path(m.file_path)[0] in files
             )
         ]
-        return self._format_resources(resource_mappings, check_only=check_only)
+        return self._format_resources(filtered_resource_mappings, check_only=check_only)
 
     def _format_resources(
         self, resource_mappings: list[ResourceMapping], check_only: bool = False
@@ -2779,11 +2804,13 @@ class AgentStudioProject:
         )
         local_resource_mappings = new_resource_mappings + kept_resource_mappings
 
+        resource_mappings = local_resource_mappings + self.slim_resources
+
         resources: ResourceMap = {}
         for resource_mapping in local_resource_mappings:
             local_resource = self.read_local_resource(
                 resource=resource_mapping,
-                resource_mappings=local_resource_mappings,
+                resource_mappings=resource_mappings,
             )
             resources.setdefault(resource_mapping.resource_type, {})[
                 resource_mapping.resource_id
@@ -2791,7 +2818,7 @@ class AgentStudioProject:
 
         return self.validate_resources(
             resources_dict=resources,
-            resource_mappings=local_resource_mappings,
+            resource_mappings=resource_mappings,
         )
 
     @staticmethod
@@ -3064,6 +3091,7 @@ class AgentStudioProject:
                 path = resource.file_path
                 branch_by_path[path] = (resource_type, resource_id, resource)
 
+        slim_mappings = self.slim_resources
         new_state: ResourceMap = {}
         for mapping in sync_mappings:
             relative_file_path = os.path.relpath(mapping.file_path, self.root_path)
@@ -3072,7 +3100,7 @@ class AgentStudioProject:
             sandbox_resource = sandbox_resource_lookup.get(relative_file_path, branch_resource)
             local_resource = self.read_local_resource(
                 resource=mapping,
-                resource_mappings=sync_mappings,
+                resource_mappings=[*slim_mappings, *sync_mappings],
                 original_resource=sandbox_resource,
             )
 

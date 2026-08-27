@@ -55,8 +55,12 @@ from poly.resources.resource import (
     BaseResource,
     MultiResourceYamlResource,
     Resource,
+    ResourceMap,
     ResourceMapping,
+    ResourceType,
     SubResource,
+    SubResourceMap,
+    SubResourceType,
     load_resources_from_projection,
     register_resource,
 )

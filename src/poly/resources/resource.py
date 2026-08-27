@@ -5,8 +5,8 @@ Copyright PolyAI Limited
 
 import os
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from typing import ClassVar, Optional
+from dataclasses import dataclass, field
+from typing import ClassVar, Optional, TypeAlias
 
 from google.protobuf.message import Message
 
@@ -24,6 +24,41 @@ class ResourceMapping:
     flow_name: Optional[str]
     resource_prefix: Optional[str]
     flow_id: Optional[str] = None
+
+    def to_dict(self) -> dict:
+        """Convert the mapping to a JSON serializable dictionary.
+
+        resource_type is stored by its registered name, as the class itself
+        cannot be serialized.
+        """
+        return {
+            "resource_id": self.resource_id,
+            "resource_type": RESOURCE_CLASS_TO_NAME[self.resource_type],
+            "resource_name": self.resource_name,
+            "file_path": self.file_path,
+            "flow_name": self.flow_name,
+            "resource_prefix": self.resource_prefix,
+            "flow_id": self.flow_id,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Optional["ResourceMapping"]:
+        """Rebuild a mapping from its serialized form.
+
+        Args:
+            data: A dictionary as produced by to_dict().
+
+        Returns:
+            The mapping, or None if the resource type is no longer registered.
+        """
+        mapping_data = dict(data)
+        resource_type = mapping_data.get("resource_type")
+        if isinstance(resource_type, str):
+            resource_type = RESOURCE_NAME_TO_CLASS.get(resource_type)
+        if resource_type is None:
+            return None
+        mapping_data["resource_type"] = resource_type
+        return cls(**mapping_data)
 
 
 @dataclass
@@ -75,6 +110,7 @@ class Resource(BaseResource, ABC):
 
     resource_id: str
     name: str
+    slim: bool = field(default=False, repr=False, init=False)
 
     @staticmethod
     def get_resource_prefix(**kwargs) -> str:
@@ -668,6 +704,12 @@ RESOURCE_CLASS_TO_NAME: dict[type[Resource], str] = {}
 PROJECTION_REGISTRY: list[type[Resource]] = []
 
 
+ResourceType: TypeAlias = type[Resource]
+ResourceMap: TypeAlias = dict[ResourceType, dict[str, Resource]]
+SubResourceType: TypeAlias = type[SubResource]
+SubResourceMap: TypeAlias = dict[SubResourceType, dict[str, SubResource]]
+
+
 def register_resource(name: str) -> callable:
     """Class decorator to register a resource type.
 
@@ -687,9 +729,48 @@ def register_resource(name: str) -> callable:
     return decorator
 
 
+def _filter_slim_resources(all_resources: ResourceMap) -> tuple[ResourceMap, list[ResourceMapping]]:
+    slim_resources: list[ResourceMapping] = []
+    resources: ResourceMap = {}
+
+    # Variables are slim if functions are slim
+    functions_slim = any(
+        r.slim for r in all_resources.get(RESOURCE_NAME_TO_CLASS.get("functions"), {}).values()
+    )
+
+    for resources_dict in all_resources.values():
+        for resource in resources_dict.values():
+            if isinstance(resource, RESOURCE_NAME_TO_CLASS.get("variables")):
+                resource.slim = functions_slim
+
+            if not resource.slim:
+                resources.setdefault(type(resource), {})[resource.resource_id] = resource
+                continue
+            slim_resources.append(
+                ResourceMapping(
+                    resource_id=resource.resource_id,
+                    resource_type=type(resource),
+                    resource_name=resource.name,
+                    file_path=resource.file_path,
+                    flow_name=(
+                        resource.name
+                        if type(resource).__name__ == "FlowConfig"
+                        else getattr(resource, "flow_name", None)
+                    ),
+                    resource_prefix=resource.get_resource_prefix(file_path=resource.file_path),
+                    flow_id=(
+                        resource.resource_id
+                        if type(resource).__name__ == "FlowConfig"
+                        else getattr(resource, "flow_id", None)
+                    ),
+                )
+            )
+    return resources, slim_resources
+
+
 def load_resources_from_projection(
     projection: dict,
-) -> dict[type[Resource], dict[str, Resource]]:
+) -> tuple[ResourceMap, list[ResourceMapping]]:
     """Parse a projection dict into typed Resources.
 
     Iterates all registered resource classes and calls their from_projection()
@@ -699,11 +780,16 @@ def load_resources_from_projection(
         projection: Raw projection dict from the Sourcerer API or a local file.
 
     Returns:
-        A dictionary mapping resource types to {resource_id: Resource}.
+        A tuple containing:
+        1. A dictionary mapping resource types to {resource_id: Resource}.
+        2. A list of ResourceMapping objects for slim resources.
     """
     result: dict[type[Resource], dict[str, Resource]] = {}
     for resource_cls in PROJECTION_REGISTRY:
         resources = resource_cls.from_projection(projection)
         if resources:
             result[resource_cls] = resources
-    return result
+
+    filtered_resources, slim_resources = _filter_slim_resources(result)
+
+    return filtered_resources, slim_resources

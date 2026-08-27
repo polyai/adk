@@ -10,10 +10,16 @@ Copyright PolyAI Limited
 """
 
 import unittest
+from datetime import datetime
 
 import poly.resources  # noqa: F401  - triggers resource registration
+from poly.project import AgentStudioProject
 from poly.resources.function import Function
-from poly.resources.resource import PROJECTION_REGISTRY, RESOURCE_CLASS_TO_NAME
+from poly.resources.resource import (
+    PROJECTION_REGISTRY,
+    RESOURCE_CLASS_TO_NAME,
+    load_resources_from_projection,
+)
 from poly.resources.sms import SMSTemplate
 from poly.resources.topic import Topic
 from poly.resources.variable import Variable
@@ -101,8 +107,17 @@ SKELETON_PROJECTION = {
             "ids": ["ATTR-1"],
             "entities": {"ATTR-1": {"id": "ATTR-1", "name": "brand", "references": {}}},
         },
-        "variants": {"ids": ["V-1"], "entities": {"V-1": {"id": "V-1"}}},
+        # Variant names are exposed to filtered readers so that test cases, gated
+        # on a different permission, can resolve the variant they run against.
+        "variants": {"ids": ["V-1"], "entities": {"V-1": {"id": "V-1", "name": "Default"}}},
         "variantAttributeValues": {"ids": ["V-1"], "entities": {"V-1": {"id": "V-1"}}},
+    },
+    # Likewise translation keys, which topics and behaviour rules embed as {{tn:}}.
+    "translations": {
+        "translations": {
+            "ids": ["TN-1"],
+            "entities": {"TN-1": {"id": "TN-1", "translationKey": "greeting"}},
+        }
     },
     "testing": {"testCases": {"ids": ["TC-1"], "entities": {"TC-1": {"id": "TC-1"}}}},
     "pronunciations": {"pronunciations": {"ids": ["PR-1"], "entities": {"PR-1": {"id": "PR-1"}}}},
@@ -125,31 +140,50 @@ SKELETON_PROJECTION = {
 
 # Variables and their names are the whole of the Variable resource, and the
 # variables slice keeps both, so a filtered slice is indistinguishable from - and
-# just as usable as - a full one. Nothing else should survive.
+# just as usable as - a full one.
 TYPES_READABLE_FROM_SKELETON = {"variables"}
+
+# Types whose ids appear inside a resource gated on a *different* permission.
+# These are kept as identity-only stubs so those references still resolve to a
+# name; everything else withheld is dropped entirely.
+TYPES_KEPT_AS_SLIM = {
+    "entities",
+    "functions",
+    "handoffs",
+    "sms_templates",
+    "translations",
+    "variant_attributes",
+    "variants",
+}
 
 
 class SkeletonProjectionParsing(unittest.TestCase):
     """Every registered resource must tolerate an auth-filtered projection."""
+
+    @staticmethod
+    def _parse(resource_cls):
+        return resource_cls.from_projection(SKELETON_PROJECTION)
 
     def test_no_resource_type_raises(self):
         """A slim projection must never abort the pull."""
         for resource_cls in PROJECTION_REGISTRY:
             name = RESOURCE_CLASS_TO_NAME[resource_cls]
             with self.subTest(resource=name):
-                resource_cls.from_projection(SKELETON_PROJECTION)
+                self._parse(resource_cls)
 
-    def test_only_fully_readable_types_are_represented(self):
-        """Anything the user cannot read is hidden rather than partly built."""
-        represented = {
-            RESOURCE_CLASS_TO_NAME[cls]
-            for cls in PROJECTION_REGISTRY
-            if cls.from_projection(SKELETON_PROJECTION)
-        }
-        self.assertEqual(represented, TYPES_READABLE_FROM_SKELETON)
+    def test_only_referenced_types_survive_as_slim(self):
+        """Withheld resources are dropped unless something else points at them."""
+        real, slim = set(), set()
+        for resource_cls in PROJECTION_REGISTRY:
+            name = RESOURCE_CLASS_TO_NAME[resource_cls]
+            for resource in self._parse(resource_cls).values():
+                (slim if resource.slim else real).add(name)
 
-    def test_represented_resources_survive_downstream_operations(self):
-        """Whatever is kept must be usable, not a half-built object.
+        self.assertEqual(real, TYPES_READABLE_FROM_SKELETON)
+        self.assertEqual(slim, TYPES_KEPT_AS_SLIM)
+
+    def test_readable_resources_survive_downstream_operations(self):
+        """Whatever is kept in full must be usable, not a half-built object.
 
         compute_hash and file_path run on every pull and push, so a resource
         that parses but blows up here fails far from the cause - which is how
@@ -157,10 +191,30 @@ class SkeletonProjectionParsing(unittest.TestCase):
         """
         for resource_cls in PROJECTION_REGISTRY:
             name = RESOURCE_CLASS_TO_NAME[resource_cls]
-            for resource in resource_cls.from_projection(SKELETON_PROJECTION).values():
+            for resource in self._parse(resource_cls).values():
+                if resource.slim:
+                    continue
                 with self.subTest(resource=name):
                     resource.compute_hash()
                     resource.validate()
+
+    def test_slim_resources_can_be_turned_into_mappings(self):
+        """A stub's only job is to feed the id<->name lookup.
+
+        file_path and get_resource_prefix are what _make_resource_mapping needs,
+        and both are derived from fields the skeleton actually provides. Nothing
+        else is required of a stub - notably not compute_hash or validate, which
+        would be operating on absent data.
+        """
+        for resource_cls in PROJECTION_REGISTRY:
+            name = RESOURCE_CLASS_TO_NAME[resource_cls]
+            for resource in self._parse(resource_cls).values():
+                if not resource.slim:
+                    continue
+                with self.subTest(resource=name):
+                    self.assertTrue(resource.resource_id)
+                    self.assertTrue(resource.name)
+                    resource.get_resource_prefix(file_path=resource.file_path)
 
 
 class FalsyGuardValuesAreReadable(unittest.TestCase):
@@ -245,7 +299,12 @@ class FunctionSliceIndependence(unittest.TestCase):
             },
         }
         functions = Function.from_projection(projection)
-        self.assertEqual(list(functions), ["TF-1"])
+        # The global function is referenced by topics and phrase filters, so it
+        # is kept as a stub rather than dropped - but only the readable one is
+        # a real, file-backed resource.
+        self.assertEqual(
+            {f_id: f.slim for f_id, f in functions.items()}, {"TF-1": False, "FN-1": True}
+        )
 
 
 class WithheldSlicesAreReported(unittest.TestCase):
@@ -281,6 +340,103 @@ class PrepushDerivationsAreInertWhenHidden(unittest.TestCase):
         fix_orphaned_variables(visible, new, updated, deleted, visible, lambda _: [])
 
         self.assertEqual((new, updated, deleted), ({}, {}, {}))
+
+
+class SlimResourcesSurviveTheStatusFile(unittest.TestCase):
+    """Slim resources have to outlive the process that pulled them.
+
+    Every command other than pull rehydrates from _gen/.agent_studio_config, so
+    a slim resource that is not written there is gone by the next command - and
+    with it the id<->name mapping, which makes every reference to a withheld
+    resource read back as a raw id and the file look locally modified.
+    """
+
+    def _project(self) -> AgentStudioProject:
+        resources, slim_resources = load_resources_from_projection(SKELETON_PROJECTION)
+        project = AgentStudioProject(
+            region="local",
+            account_id="ACCOUNT-1",
+            project_id="PROJECT-1",
+            root_path="/tmp/does-not-need-to-exist",
+            resources=resources,
+            slim_resources=slim_resources,
+            last_updated=datetime(2026, 1, 1),
+        )
+        project.file_structure_info = project.compute_file_structure_info(project.resources)
+        return project
+
+    @staticmethod
+    def _slim_ids(project: AgentStudioProject) -> set[tuple[str, str]]:
+        return {
+            (RESOURCE_CLASS_TO_NAME[mapping.resource_type], mapping.resource_id)
+            for mapping in project.slim_resources
+        }
+
+    def test_slim_resources_round_trip_through_to_dict(self):
+        project = self._project()
+        self.assertTrue(self._slim_ids(project), "fixture should produce slim resources")
+
+        reloaded = AgentStudioProject.from_dict(project.to_dict(), project.root_path)
+
+        self.assertEqual(self._slim_ids(reloaded), self._slim_ids(project))
+
+    def test_slim_resources_keep_their_names_when_reloaded(self):
+        """The name is the whole point - an id alone resolves nothing."""
+        project = self._project()
+        names = {m.resource_id: m.resource_name for m in project.slim_resources}
+        self.assertTrue(names, "fixture should produce slim resources")
+
+        reloaded = AgentStudioProject.from_dict(project.to_dict(), project.root_path)
+        reloaded_names = {m.resource_id: m.resource_name for m in reloaded.slim_resources}
+
+        self.assertEqual(reloaded_names, names)
+
+    def test_slim_resources_are_absent_from_file_structure_info(self):
+        """No file on disk means no baseline entry.
+
+        Otherwise find_new_kept_deleted sees a known file that discovery can
+        never turn up, and reports it deleted on every run.
+        """
+        project = self._project()
+        slim_paths = {m.file_path for m in project.slim_resources}
+        self.assertTrue(slim_paths)
+
+        self.assertEqual(slim_paths & set(project.file_structure_info), set())
+
+    def test_slim_resources_are_absent_from_the_resource_map(self):
+        """Slim resources are mappings, not resources.
+
+        Leaving them in resources means push tries to serialize a resource
+        whose substantive fields were never sent, and save writes a file for
+        something the user cannot read.
+        """
+        project = self._project()
+        self.assertTrue(project.slim_resources, "fixture should produce slim resources")
+
+        self.assertEqual(
+            [r for resources in project.resources.values() for r in resources.values() if r.slim],
+            [],
+        )
+
+    def test_slim_resources_are_carried_past_a_rebuild_from_disk(self):
+        """A push replaces resources with state re-read from local files.
+
+        Slim resources have no file, so they cannot be in that state - they
+        have to survive on slim_resources or they are lost from the status
+        file on every push.
+        """
+        project = self._project()
+        expected = self._slim_ids(project)
+        self.assertTrue(expected, "fixture should produce slim resources")
+
+        # What push does: swap in state rebuilt from the local files.
+        project.resources = {
+            resource_type: dict(resources)
+            for resource_type, resources in project.resources.items()
+        }
+
+        reloaded = AgentStudioProject.from_dict(project.to_dict(), project.root_path)
+        self.assertEqual(self._slim_ids(reloaded), expected)
 
 
 if __name__ == "__main__":

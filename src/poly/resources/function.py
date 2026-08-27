@@ -229,14 +229,15 @@ class Function(Resource):
         *,
         resource_id: str,
         name: str,
-        description: str,
-        code: str,
-        parameters: list[FunctionParameters],
-        latency_control: dict | FunctionLatencyControl,
-        function_type: FunctionType,
+        description: str = "",
+        code: str = "",
+        parameters: list[FunctionParameters] | None = None,
+        latency_control: dict | FunctionLatencyControl | None = None,
+        function_type: FunctionType | None = None,
         flow_id: str | None = None,
         flow_name: str | None = None,
         variable_references: dict | None = None,
+        slim: bool = False,
     ):
         self.resource_id = resource_id
         self.name = name
@@ -250,6 +251,7 @@ class Function(Resource):
         self.flow_name = flow_name
         self.function_type = function_type
         self.variable_references = variable_references
+        self.slim = slim
 
     @staticmethod
     def _parse_latency_control(value) -> FunctionLatencyControl:
@@ -355,10 +357,23 @@ class Function(Resource):
                 )
 
         global_functions = projection.get("functions", {}).get("functions", {}).get("entities", {})
-        if "functions" not in projection or any(
-            "code" not in func for func in global_functions.values()
-        ):
+        if "functions" not in projection:
             logger.debug("No read access to functions - they will not be pulled.")
+            global_functions = {}
+        elif any("code" not in func for func in global_functions.values()):
+            # Auth-filtered: keep id and name only, so {{fn:<id>}} in a readable
+            # topic (or a phrase filter's function) still renders as a name rather
+            # than a raw id. flow_id/flow_name stay None so the stub keeps the
+            # global function's path and "fn" prefix, not a transition's "ft".
+            # Archived functions are stubbed too, since we can't tell them apart.
+            logger.debug("No read access to functions - keeping names for references only.")
+            for func_id, func in global_functions.items():
+                functions[func_id] = cls(
+                    resource_id=func_id,
+                    name=func.get("name", ""),
+                    function_type=FunctionType.GLOBAL,
+                    slim=True,
+                )
             global_functions = {}
 
         for func_id, func in global_functions.items():

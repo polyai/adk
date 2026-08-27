@@ -43,6 +43,22 @@ class Translation(MultiResourceYamlResource):
         if not translations_data:
             return {}
 
+        # Auth-filtered: keep id and translation key only, so {{tn:<id>}} in a
+        # readable topic or behaviour rule still renders as a key, not a raw id.
+        if any(
+            "translations" not in translation_data
+            for translation_data in translations_data.values()
+        ):
+            logger.debug("No read access to translations - keeping keys for references only.")
+            return {
+                translation_id: cls(
+                    resource_id=translation_id,
+                    name=translation_data.get("translationKey", ""),
+                    slim=True,
+                )
+                for translation_id, translation_data in translations_data.items()
+            }
+
         translations = {}
         for translation_id, translation_data in translations_data.items():
             translations[translation_id] = cls(
@@ -61,10 +77,12 @@ class Translation(MultiResourceYamlResource):
         resource_id: Optional[str] = None,
         name: str = "",
         translations: dict[str, str] = None,
+        slim: bool = False,
     ):
         self.resource_id = resource_id
         self.name = name or ""
         self.translations = translations if translations is not None else {}
+        self.slim = slim
 
     @property
     def file_path(self) -> str:
