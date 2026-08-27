@@ -35,20 +35,35 @@ jobs:
         with:
           python-version: "3.14"
 
+      # python-semantic-release@v9 and publish-action@v9 are Docker actions whose image is
+      # rebuilt on every run, pip-installing their dependencies unpinned. GitPython 3.1.60
+      # removed Actor.name_email_regex, which semantic-release reads while parsing
+      # commit_author, so the actions started failing without any change on our side.
+      # Installing the tooling ourselves pins both halves. The gitpython pin can be dropped
+      # once upstream stops using the removed attribute.
+      - name: Install python-semantic-release
+        run: |
+          python -m venv /tmp/psr
+          /tmp/psr/bin/pip install --upgrade pip
+          /tmp/psr/bin/pip install \
+            "python-semantic-release==9.21.2" "gitpython==3.1.59"
+
       - name: Semantic release
         id: release
-        uses: python-semantic-release/python-semantic-release@v9
-        with:
-          github_token: ${{ steps.app-token.outputs.token }}
-          git_committer_name: github-actions[bot]
-          git_committer_email: "github-actions[bot]@users.noreply.github.com"
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GIT_COMMIT_AUTHOR: "github-actions[bot] <github-actions[bot]@users.noreply.github.com>"
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          export PATH="/tmp/psr/bin:$PATH"
+          semantic-release -v version
 
       - name: Publish to GitHub Releases
         if: steps.release.outputs.released == 'true'
-        uses: python-semantic-release/publish-action@v9
-        with:
-          github_token: ${{ steps.app-token.outputs.token }}
-          tag: ${{ steps.release.outputs.tag }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: /tmp/psr/bin/semantic-release -v publish --tag "${{ steps.release.outputs.tag }}"
 
       - name: Publish to PyPI
         if: steps.release.outputs.released == 'true'
