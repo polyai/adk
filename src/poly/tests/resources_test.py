@@ -8866,6 +8866,83 @@ class CustomGuardrailTests(unittest.TestCase):
         self.assertEqual(restored.action, guardrail.action)
         self.assertEqual(restored.enabled, guardrail.enabled)
 
+    def test_to_pretty_replaces_a_function_id_in_action_with_its_name(self):
+        """On pull, the raw ID in 'action' is swapped for the human-readable name."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="Trigger when the caller asks for a doctor.",
+            action="Call {{fn:func-123}}",
+        )
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="func-123",
+                resource_name="escalate",
+                resource_type=Function,
+                file_path="functions/escalate.py",
+                flow_name=None,
+                resource_prefix="fn",
+            )
+        ]
+        pretty_content = guardrail.to_pretty(resource_mappings=resource_mappings)
+        self.assertIn("{{fn:escalate}}", pretty_content)
+        self.assertNotIn("{{fn:func-123}}", pretty_content)
+
+    def test_to_pretty_with_no_resource_mappings_leaves_ids_unchanged(self):
+        """With nothing to map against, the action passes through verbatim."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="Trigger when the caller asks for a doctor.",
+            action="Call {{fn:func-123}}",
+        )
+        pretty_content = guardrail.to_pretty(resource_mappings=[])
+        self.assertIn("{{fn:func-123}}", pretty_content)
+
+    def test_to_pretty_leaves_the_prompt_field_untouched(self):
+        """Only 'action' carries references, so a reference-shaped token in
+        'prompt' keeps its raw ID even when that ID is mapped."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="This mentions {{fn:func-123}} but it's just prose.",
+            action="warn",
+        )
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="func-123",
+                resource_name="escalate",
+                resource_type=Function,
+                file_path="functions/escalate.py",
+                flow_name=None,
+                resource_prefix="fn",
+            )
+        ]
+        pretty_content = guardrail.to_pretty(resource_mappings=resource_mappings)
+        self.assertIn("{{fn:func-123}} but it's just prose.", pretty_content)
+
+    def test_to_pretty_from_pretty_roundtrip_restores_the_raw_yaml(self):
+        """Names written on pull are turned back into IDs on push."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="Trigger when the caller asks for a doctor.",
+            action="Call {{fn:func-123}}",
+        )
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="func-123",
+                resource_name="escalate",
+                resource_type=Function,
+                file_path="functions/escalate.py",
+                flow_name=None,
+                resource_prefix="fn",
+            )
+        ]
+        pretty_content = guardrail.to_pretty(resource_mappings=resource_mappings)
+        reverted = CustomGuardrail.from_pretty(pretty_content, resource_mappings=resource_mappings)
+        self.assertEqual(reverted, guardrail.raw)
+
     def test_file_path_and_command_type(self):
         """Custom guardrails address a named entry inside the shared guardrails.yaml."""
         guardrail = self._sample_guardrail()

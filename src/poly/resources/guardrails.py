@@ -17,7 +17,7 @@ from poly.handlers.protobuf.guardrails_pb2 import (
     Guardrails_UpdateCustomGuardrail,
     Guardrails_UpdateGuardrails,
 )
-from poly.resources.resource import MultiResourceYamlResource, register_resource
+from poly.resources.resource import MultiResourceYamlResource, ResourceMapping, register_resource
 
 GUARDRAILS_FILE = os.path.join("agent_settings", "guardrails.yaml")
 
@@ -257,6 +257,14 @@ class CustomGuardrail(MultiResourceYamlResource):
             "action": self.action,
             "prompt": self.prompt,
         }
+
+    @classmethod
+    def to_pretty_dict(
+        cls, d: dict, resource_mappings: list[ResourceMapping] = None, **kwargs
+    ) -> dict:
+        """Return the pretty dictionary."""
+        d["action"] = utils.replace_resource_ids_with_names(d["action"], resource_mappings or [])
+        return d
 
     @classmethod
     def from_yaml_dict(
