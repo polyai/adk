@@ -4,6 +4,7 @@ Copyright PolyAI Limited
 """
 
 import logging
+import math
 import os
 import re
 import uuid
@@ -33,17 +34,18 @@ from poly.handlers.protobuf.flows_pb2 import (
     Flow_DeleteStep,
     Flow_UpdateFlow,
     Flow_UpdateStep,
-    Flow_UpdateStepAsrConfig,
-    Flow_UpdateStepDtmfConfig,
+    Flow_UpdateStepSettings,
+    FlowASRConfig,
+    FlowBargeInConfig,
+    FlowLLMConfig,
+    FlowStepSettings,
+    FlowVADConfig,
     FunctionStepCondition,
     NoCodeStepCondition,
     StepAsrConfig,
-    StepAsrConfigUpdate,
     StepDtmfConfig,
-    StepDtmfConfigUpdate,
     StepPosition,
     UpdateAdvancedStep,
-    UpdateAsrKeywords,
     UpdateFunctionStep,
     UpdateFunctionStepDefinition,
     UpdateNoCodeCondition,
@@ -323,10 +325,9 @@ class BaseFlowStep(ABC):
 class FlowStep(BaseFlowStep, YamlResource):
     """Flow step resource."""
 
-    asr_biasing: Optional["ASRBiasing"]
-    dtmf_config: Optional["DTMFConfig"]
     conditions: Optional[list["Condition"]]
     extracted_entities: Optional[list[str]]
+    settings: FlowSettings
     prompt: str
 
     def __init__(
@@ -338,8 +339,7 @@ class FlowStep(BaseFlowStep, YamlResource):
         flow_name: str,
         step_type: "str | StepType",
         prompt: str,
-        asr_biasing: Optional["ASRBiasing | dict"] = None,
-        dtmf_config: Optional["DTMFConfig | dict"] = None,
+        settings: Optional["FlowSettings | dict"] = None,
         conditions: Optional[list["Condition | dict"]] = None,
         extracted_entities: Optional[list[str]] = None,
         position: Optional[dict[str, float]] = None,
@@ -353,27 +353,15 @@ class FlowStep(BaseFlowStep, YamlResource):
             raise ValueError("step_type is required for FlowStep")
         self.step_type = StepType(step_type) if isinstance(step_type, str) else step_type
 
-        if isinstance(asr_biasing, ASRBiasing):
-            self.asr_biasing = asr_biasing
-        elif asr_biasing is not None:
-            # resource_id and name are set internally by ASRBiasing.__init__;
-            asr_biasing = {k: v for k, v in asr_biasing.items() if k not in ("resource_id", "name")}
-            asr_biasing["step_id"] = self.step_id
-            asr_biasing["flow_id"] = self.flow_id
-            self.asr_biasing = ASRBiasing(**asr_biasing)
+        if isinstance(settings, FlowSettings):
+            self.settings = settings
+        elif settings is not None:
+            settings = {k: v for k, v in settings.items() if k not in ("resource_id", "name")}
+            settings["step_id"] = self.step_id
+            settings["flow_id"] = self.flow_id
+            self.settings = FlowSettings(**settings)
         else:
-            self.asr_biasing = None
-
-        if isinstance(dtmf_config, DTMFConfig):
-            self.dtmf_config = dtmf_config
-        elif dtmf_config is not None:
-            # resource_id and name are set internally by DTMFConfig.__init__;
-            dtmf_config = {k: v for k, v in dtmf_config.items() if k not in ("resource_id", "name")}
-            dtmf_config["step_id"] = self.step_id
-            dtmf_config["flow_id"] = self.flow_id
-            self.dtmf_config = DTMFConfig(**dtmf_config)
-        else:
-            self.dtmf_config = None
+            self.settings = FlowSettings(step_id=self.step_id, flow_id=self.flow_id)
 
         self.extracted_entities = extracted_entities or []
         self.conditions = [
@@ -402,8 +390,8 @@ class FlowStep(BaseFlowStep, YamlResource):
                     continue
 
                 local_resource_id = f"{flow_id}_{step_id}"
-                asr_biasing_data = step.get("asrBiasing", {})
-                dtmf_config_data = step.get("dtmfConfig", {})
+                settings = FlowSettings.from_projection(step, step_id, flow_id)
+
                 references = step.get("references", {})
                 extracted_entities = list(references.get("extractedEntities", {}).keys())
 
@@ -414,34 +402,7 @@ class FlowStep(BaseFlowStep, YamlResource):
                     flow_id=flow_id,
                     flow_name=flow_data["name"],
                     step_type=step.get("type"),
-                    asr_biasing=ASRBiasing(
-                        alphanumeric=asr_biasing_data.get("alphanumeric", False),
-                        name_spelling=asr_biasing_data.get("nameSpelling", False),
-                        numeric=asr_biasing_data.get("numeric", False),
-                        party_size=asr_biasing_data.get("partySize", False),
-                        precise_date=asr_biasing_data.get("preciseDate", False),
-                        relative_date=asr_biasing_data.get("relativeDate", False),
-                        single_number=asr_biasing_data.get("singleNumber", False),
-                        time=asr_biasing_data.get("time", False),
-                        yes_no=asr_biasing_data.get("yesNo", False),
-                        address=asr_biasing_data.get("address", False),
-                        custom_keywords=asr_biasing_data.get("customKeywords", []),
-                        is_enabled=asr_biasing_data.get("isEnabled", False),
-                        step_id=step_id,
-                        flow_id=flow_id,
-                    ),
-                    dtmf_config=DTMFConfig(
-                        is_enabled=dtmf_config_data.get("isEnabled", False),
-                        inter_digit_timeout=dtmf_config_data.get("interDigitTimeout", 0),
-                        max_digits=dtmf_config_data.get("maxDigits", 0),
-                        end_key=dtmf_config_data.get("endKey", ""),
-                        collect_while_agent_speaking=dtmf_config_data.get(
-                            "collectWhileAgentSpeaking", False
-                        ),
-                        is_pii=dtmf_config_data.get("isPii", False),
-                        step_id=step_id,
-                        flow_id=flow_id,
-                    ),
+                    settings=settings,
                     prompt=step.get("prompt", ""),
                     conditions=[
                         Condition(
@@ -480,9 +441,9 @@ class FlowStep(BaseFlowStep, YamlResource):
             "step_type": self.step_type.value,
             "name": self.name,
         }
-        if self.step_type == StepType.ADVANCED_STEP:
-            output["asr_biasing"] = self.asr_biasing.to_yaml_dict() if self.asr_biasing else {}
-            output["dtmf_config"] = self.dtmf_config.to_yaml_dict() if self.dtmf_config else {}
+        flow_settings_dict = self.settings.to_yaml_dict() if self.settings else {}
+        if flow_settings_dict:
+            output.update(flow_settings_dict)
 
         if self.step_type == StepType.DEFAULT_STEP:
             output["conditions"] = [condition.to_yaml_dict() for condition in self.conditions]
@@ -569,14 +530,9 @@ class FlowStep(BaseFlowStep, YamlResource):
             )
 
         step_type = StepType(yaml_dict.get("step_type"))
-        asr_biasing = yaml_dict.get("asr_biasing", {})
-        dtmf_config = yaml_dict.get("dtmf_config", {})
         extracted_entities = yaml_dict.get("extracted_entities", [])
-        if step_type == StepType.DEFAULT_STEP:
-            # ASR and DTMF not applicable
-            asr_biasing = {}
-            dtmf_config = {}
-        elif step_type == StepType.ADVANCED_STEP:
+        settings = FlowSettings.from_yaml_dict(yaml_dict, step_id=step_id, flow_id=flow_id)
+        if step_type == StepType.ADVANCED_STEP:
             # Conditions not applicable
             conditions = []
 
@@ -587,8 +543,7 @@ class FlowStep(BaseFlowStep, YamlResource):
             flow_id=flow_id,
             flow_name=flow_name,
             step_type=step_type,
-            asr_biasing=asr_biasing,
-            dtmf_config=dtmf_config,
+            settings=settings,
             prompt=yaml_dict.get("prompt", "").strip(),
             conditions=conditions,
             position=known_position,
@@ -839,6 +794,8 @@ class FlowStep(BaseFlowStep, YamlResource):
                 if entity_id not in entity_ids:
                     raise ValueError(f"Requested entity '{entity_id}' not found.")
 
+        self.settings.validate()
+
     def build_update_proto(
         self,
     ) -> Flow_UpdateStep | UpdateNoCodeStep:
@@ -902,8 +859,6 @@ class FlowStep(BaseFlowStep, YamlResource):
                     position=StepPosition(
                         x=self.position.get("x", 0.0), y=self.position.get("y", 0.0)
                     ),
-                    asr_biasing=self.asr_biasing.build_create_proto(),
-                    dtmf_config=self.dtmf_config.build_create_proto(),
                 ),
             )
 
@@ -977,17 +932,14 @@ class FlowStep(BaseFlowStep, YamlResource):
         new = []
         updated = []
         deleted = []
-        if self.step_type == StepType.ADVANCED_STEP and old_resource:
-            if (
-                self.asr_biasing
-                and old_resource
-                and (not old_resource.asr_biasing or self.asr_biasing != old_resource.asr_biasing)
-            ):
-                updated.append(self.asr_biasing)
-            if self.dtmf_config and (
-                not old_resource.dtmf_config or self.dtmf_config != old_resource.dtmf_config
-            ):
-                updated.append(self.dtmf_config)
+
+        old_settings = (
+            old_resource.settings
+            if old_resource
+            else FlowSettings(step_id=self.step_id, flow_id=self.flow_id)
+        )
+        if self.settings != old_settings:
+            updated.append(self.settings)
 
         if self.step_type == StepType.DEFAULT_STEP:
             old_condition_ids = (
@@ -1020,7 +972,7 @@ class FlowStep(BaseFlowStep, YamlResource):
 
 
 @dataclass
-class ASRBiasing(SubResource):
+class ASRBiasing:
     """ASR Biasing configuration."""
 
     alphanumeric: bool
@@ -1035,13 +987,9 @@ class ASRBiasing(SubResource):
     address: bool
     custom_keywords: list[str]
     is_enabled: bool
-    step_id: str
-    flow_id: str
 
     def __init__(
         self,
-        step_id: str,
-        flow_id: str,
         alphanumeric: bool = False,
         name_spelling: bool = False,
         numeric: bool = False,
@@ -1055,10 +1003,6 @@ class ASRBiasing(SubResource):
         custom_keywords: list[str] | None = None,
         is_enabled: bool = False,
     ):
-        self.name = "asr"
-        self.step_id = step_id
-        self.flow_id = flow_id
-        self.resource_id = f"{flow_id}.{step_id}"
         self.alphanumeric = alphanumeric
         self.name_spelling = name_spelling
         self.numeric = numeric
@@ -1071,11 +1015,6 @@ class ASRBiasing(SubResource):
         self.address = address
         self.custom_keywords = custom_keywords or []
         self.is_enabled = is_enabled
-
-    @property
-    def command_type(self) -> str:
-        """Get the update type for updating the resource."""
-        return "flow_step_asr_config"
 
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
@@ -1094,36 +1033,14 @@ class ASRBiasing(SubResource):
             "custom_keywords": self.custom_keywords,
         }
 
-    def build_update_proto(self) -> Flow_UpdateStepAsrConfig:
-        """Create a proto for updating the ASR biasing configuration."""
-        return Flow_UpdateStepAsrConfig(
-            flow_id=self.flow_id,
-            step_id=self.step_id,
-            asr_biasing=StepAsrConfigUpdate(
-                alphanumeric=self.alphanumeric,
-                name_spelling=self.name_spelling,
-                numeric=self.numeric,
-                party_size=self.party_size,
-                precise_date=self.precise_date,
-                relative_date=self.relative_date,
-                single_number=self.single_number,
-                time=self.time,
-                yes_no=self.yes_no,
-                address=self.address,
-                custom_keywords=UpdateAsrKeywords(
-                    custom_keywords=self.custom_keywords,
-                ),
-                is_enabled=self.is_enabled,
-            ),
-        )
+    def validate(self):
+        """Validate the ASR configuration."""
+        pass
 
-    def build_delete_proto(self):
-        """Create a proto for deleting the ASR biasing configuration."""
-        raise NotImplementedError("ASR Biasing config does not support deletion.")
-
-    def build_create_proto(self) -> StepAsrConfig:
-        """Create a proto for creating the ASR biasing configuration."""
+    def to_proto(self) -> StepAsrConfig:
+        """Convert to proto representation."""
         return StepAsrConfig(
+            is_enabled=self.is_enabled,
             alphanumeric=self.alphanumeric,
             name_spelling=self.name_spelling,
             numeric=self.numeric,
@@ -1135,12 +1052,11 @@ class ASRBiasing(SubResource):
             yes_no=self.yes_no,
             address=self.address,
             custom_keywords=self.custom_keywords,
-            is_enabled=self.is_enabled,
         )
 
 
 @dataclass
-class DTMFConfig(SubResource):
+class DTMFConfig:
     """DTMF Configuration."""
 
     is_enabled: bool
@@ -1149,8 +1065,6 @@ class DTMFConfig(SubResource):
     end_key: str
     collect_while_agent_speaking: bool
     is_pii: bool
-    step_id: str
-    flow_id: str
 
     def __init__(
         self,
@@ -1174,11 +1088,6 @@ class DTMFConfig(SubResource):
         self.collect_while_agent_speaking = collect_while_agent_speaking
         self.is_pii = is_pii
 
-    @property
-    def command_type(self) -> str:
-        """Get the update type for updating the resource."""
-        return "flow_step_dtmf_config"
-
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
         return {
@@ -1190,27 +1099,14 @@ class DTMFConfig(SubResource):
             "is_pii": self.is_pii,
         }
 
-    def build_update_proto(self) -> Flow_UpdateStepDtmfConfig:
-        """Create a proto for updating the DTMF configuration."""
-        return Flow_UpdateStepDtmfConfig(
-            flow_id=self.flow_id,
-            step_id=self.step_id,
-            dtmf_config=StepDtmfConfigUpdate(
-                is_enabled=self.is_enabled,
-                inter_digit_timeout=self.inter_digit_timeout,
-                max_digits=self.max_digits,
-                end_key=self.end_key,
-                collect_while_agent_speaking=self.collect_while_agent_speaking,
-                is_pii=self.is_pii,
-            ),
-        )
+    def validate(self):
+        """Validate the DTMF configuration."""
+        for name in ("inter_digit_timeout", "max_digits"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"DTMF {name} cannot be negative.")
 
-    def build_delete_proto(self):
-        """Create a proto for deleting the DTMF configuration."""
-        raise NotImplementedError("DTMF config deletion not implemented.")
-
-    def build_create_proto(self) -> StepDtmfConfig:
-        """Create a proto for creating the DTMF configuration."""
+    def to_proto(self) -> StepDtmfConfig:
+        """Convert to proto representation."""
         return StepDtmfConfig(
             is_enabled=self.is_enabled,
             inter_digit_timeout=self.inter_digit_timeout,
@@ -1219,6 +1115,348 @@ class DTMFConfig(SubResource):
             collect_while_agent_speaking=self.collect_while_agent_speaking,
             is_pii=self.is_pii,
         )
+
+
+def _drop_unset(values: dict) -> dict:
+    """Drop keys whose override was never set, so they don't surface as nulls in YAML."""
+    return {key: value for key, value in values.items() if value is not None}
+
+
+@dataclass
+class ASRConfig:
+    """ASR Configuration."""
+
+    # Every field is an optional override, so a step may set only some of them.
+    provider: Optional[str] = None
+    model: Optional[str] = None
+
+    def validate(self):
+        """Validate the ASR configuration."""
+        pass
+
+    def to_yaml_dict(self) -> dict:
+        """Return a dictionary suitable for YAML serialization."""
+        return _drop_unset({"provider": self.provider, "model": self.model})
+
+    def to_proto(self) -> FlowASRConfig:
+        """Convert to proto representation."""
+        return FlowASRConfig(provider=self.provider, model=self.model)
+
+
+@dataclass
+class VADConfig:
+    """VAD Configuration."""
+
+    # Every field is an optional override, so a step may set only some of them.
+    provider: Optional[str] = None
+    vad_start: Optional[float] = None
+    vad_end: Optional[float] = None
+    speech_threshold: Optional[float] = None
+    silence_threshold: Optional[float] = None
+
+    def validate(self):
+        """Validate the VAD configuration."""
+        for name in ("vad_start", "vad_end"):
+            value = getattr(self, name)
+            if value is None:
+                continue
+            if not math.isfinite(value):
+                raise ValueError(f"VAD {name} must be a finite number.")
+            if value < 0:
+                raise ValueError(f"VAD {name} cannot be negative.")
+
+    def to_yaml_dict(self) -> dict:
+        """Return a dictionary suitable for YAML serialization."""
+        return _drop_unset(
+            {
+                "provider": self.provider,
+                "vad_start": self.vad_start,
+                "vad_end": self.vad_end,
+                "speech_threshold": self.speech_threshold,
+                "silence_threshold": self.silence_threshold,
+            }
+        )
+
+    def to_proto(self) -> FlowVADConfig:
+        """Convert to proto representation."""
+        return FlowVADConfig(
+            provider=self.provider,
+            vad_start=self.vad_start,
+            vad_end=self.vad_end,
+            speech_threshold=self.speech_threshold,
+            silence_threshold=self.silence_threshold,
+        )
+
+
+@dataclass
+class BargeInConfig:
+    is_enabled: bool
+
+    def validate(self):
+        """Validate the BargeIn configuration."""
+        pass
+
+    def to_yaml_dict(self) -> dict:
+        """Return a dictionary suitable for YAML serialization."""
+        return {"is_enabled": self.is_enabled}
+
+    def to_proto(self) -> FlowBargeInConfig:
+        """Convert to proto representation."""
+        return FlowBargeInConfig(is_enabled=self.is_enabled)
+
+
+class ReasoningEffort(str, Enum):
+    """Enum for reasoning effort levels."""
+
+    UNSPECIFIED = "unspecified"
+    MINIMAL = "minimal"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    AUTO = "auto"
+
+
+# Ordinal mapping for the proto ReasoningEffort enum, which projections send as a raw int
+# rather than the string values used in YAML.
+REASONING_EFFORT_FROM_PROTO_INT = {
+    0: ReasoningEffort.UNSPECIFIED,
+    1: ReasoningEffort.MINIMAL,
+    2: ReasoningEffort.LOW,
+    3: ReasoningEffort.MEDIUM,
+    4: ReasoningEffort.HIGH,
+    5: ReasoningEffort.AUTO,
+}
+
+REASONING_EFFORT_TO_PROTO_INT = {v: k for k, v in REASONING_EFFORT_FROM_PROTO_INT.items()}
+
+
+def parse_reasoning_effort(value: "int | str | ReasoningEffort") -> ReasoningEffort:
+    """Parse a reasoning effort from a projection ordinal or a YAML string."""
+    if isinstance(value, ReasoningEffort):
+        return value
+
+    if isinstance(value, int) and not isinstance(value, bool):
+        # Projections send the proto enum's ordinal rather than its string value.
+        if value not in REASONING_EFFORT_FROM_PROTO_INT:
+            raise ValueError(
+                f"Unknown reasoning effort '{value}'. This project may use a newer "
+                "Agent Studio feature - try upgrading polyai-adk."
+            )
+        return REASONING_EFFORT_FROM_PROTO_INT[value]
+
+    try:
+        return ReasoningEffort(value)
+    except ValueError:
+        valid = ", ".join(effort.value for effort in ReasoningEffort)
+        raise ValueError(f"Invalid reasoning_effort '{value}'. Valid values: {valid}.") from None
+
+
+@dataclass
+class LLMConfig:
+    """LLM Configuration."""
+
+    # Both fields are optional overrides, so a step may set only one of them.
+    provider_model_id: Optional[str] = None
+    reasoning_effort: ReasoningEffort = ReasoningEffort.UNSPECIFIED
+
+    def validate(self):
+        """Validate the LLM configuration."""
+        pass
+
+    def to_yaml_dict(self) -> dict:
+        """Return a dictionary suitable for YAML serialization."""
+        return _drop_unset(
+            {
+                "provider_model_id": self.provider_model_id,
+                "reasoning_effort": self.reasoning_effort.value,
+            }
+        )
+
+    def to_proto(self) -> FlowLLMConfig:
+        """Convert to proto representation."""
+        return FlowLLMConfig(
+            provider_model_id=self.provider_model_id,
+            reasoning_effort=REASONING_EFFORT_TO_PROTO_INT[self.reasoning_effort],
+        )
+
+
+@dataclass
+class FlowSettings(SubResource):
+    """Flow settings resource"""
+
+    step_id: str
+    flow_id: str
+
+    asr_biasing: Optional[ASRBiasing]
+    dtmf: Optional[DTMFConfig]
+    asr: Optional[ASRConfig]
+    vad: Optional[VADConfig]
+    barge_in: Optional[BargeInConfig]
+    llm: Optional[LLMConfig]
+
+    def __init__(
+        self,
+        asr_biasing: Optional[ASRBiasing] = None,
+        dtmf: Optional[DTMFConfig] = None,
+        asr: Optional[ASRConfig] = None,
+        vad: Optional[VADConfig] = None,
+        barge_in: Optional[BargeInConfig] = None,
+        llm: Optional[LLMConfig] = None,
+        step_id: str = "",
+        flow_id: str = "",
+    ):
+        self.name = "FlowSettings"
+        self.resource_id = f"{flow_id}_{step_id}_settings"
+        self.step_id = step_id
+        self.flow_id = flow_id
+
+        if isinstance(asr_biasing, dict):
+            asr_biasing = ASRBiasing(**asr_biasing)
+        if isinstance(dtmf, dict):
+            dtmf = DTMFConfig(step_id, flow_id, **dtmf)
+        if isinstance(asr, dict):
+            asr = ASRConfig(**asr)
+        if isinstance(vad, dict):
+            vad = VADConfig(**vad)
+        if isinstance(barge_in, dict):
+            barge_in = BargeInConfig(**barge_in)
+        if isinstance(llm, dict):
+            llm = dict(llm)
+            llm["reasoning_effort"] = parse_reasoning_effort(
+                llm.get("reasoning_effort", ReasoningEffort.UNSPECIFIED)
+            )
+            llm = LLMConfig(**llm)
+
+        self.asr_biasing = asr_biasing
+        self.dtmf = dtmf
+        self.asr = asr
+        self.vad = vad
+        self.barge_in = barge_in
+        self.llm = llm
+
+    def to_yaml_dict(self) -> dict:
+        """Return a dictionary suitable for YAML serialization."""
+        output = {}
+        if self.asr_biasing and self.asr_biasing.is_enabled:
+            output["asr_biasing"] = self.asr_biasing.to_yaml_dict()
+        if self.dtmf and self.dtmf.is_enabled:
+            output["dtmf_config"] = self.dtmf.to_yaml_dict()
+        if self.asr:
+            output["asr"] = self.asr.to_yaml_dict()
+        if self.vad:
+            output["vad"] = self.vad.to_yaml_dict()
+        if self.barge_in:
+            output["barge_in"] = self.barge_in.to_yaml_dict()
+        if self.llm:
+            output["llm"] = self.llm.to_yaml_dict()
+        return output
+
+    @classmethod
+    def from_projection(cls, step: dict, step_id: str, flow_id: str) -> "FlowSettings":
+        """Parse flow step settings from a projection step dict."""
+        settings_data = step.get("settings")
+        if settings_data is None:
+            # No settings block means this step predates it entirely, so fall back to the
+            # legacy top-level fields. The backend mirrors these onto every settings update
+            # but never clears them, so once a settings block exists it must not be
+            # overridden by legacy fields — an empty settings block means the user cleared
+            # everything.
+            settings_data = {}
+            legacy_asr_biasing = step.get("asrBiasing", {})
+            legacy_dtmf = step.get("dtmfConfig", {})
+            if legacy_asr_biasing:
+                settings_data["asr_biasing"] = legacy_asr_biasing
+            if legacy_dtmf:
+                settings_data["dtmf"] = legacy_dtmf
+        else:
+            settings_data = utils.convert_keys_to_snake_case(settings_data)
+
+        asr_biasing_data = utils.convert_keys_to_snake_case(settings_data.get("asr_biasing") or {})
+        dtmf_data = utils.convert_keys_to_snake_case(settings_data.get("dtmf") or {})
+        asr_data = utils.convert_keys_to_snake_case(settings_data.get("asr") or {})
+        vad_data = utils.convert_keys_to_snake_case(settings_data.get("vad") or {})
+        barge_in_data = utils.convert_keys_to_snake_case(settings_data.get("barge_in") or {})
+        llm_data = utils.convert_keys_to_snake_case(settings_data.get("llm") or {})
+
+        return cls(
+            step_id=step_id,
+            flow_id=flow_id,
+            asr_biasing=asr_biasing_data or None,
+            dtmf=dtmf_data or None,
+            asr=asr_data or None,
+            vad=vad_data or None,
+            barge_in=barge_in_data or None,
+            llm=llm_data or None,
+        )
+
+    @classmethod
+    def from_yaml_dict(cls, yaml_dict: dict, step_id: str, flow_id: str) -> "FlowSettings":
+        """Create an instance from YAML data and identity fields."""
+        asr_biasing_data: dict = yaml_dict.get("asr_biasing", {})
+        dtmf_data: dict = yaml_dict.get("dtmf_config", {})
+        asr_data: dict = yaml_dict.get("asr", {})
+        vad_data: dict = yaml_dict.get("vad", {})
+        barge_in_data: dict = yaml_dict.get("barge_in", {})
+        llm_data: dict = yaml_dict.get("llm", {})
+
+        return cls(
+            step_id=step_id,
+            flow_id=flow_id,
+            asr_biasing=ASRBiasing(**asr_biasing_data) if asr_biasing_data else None,
+            dtmf=DTMFConfig(step_id, flow_id, **dtmf_data) if dtmf_data else None,
+            asr=ASRConfig(**asr_data) if asr_data else None,
+            vad=VADConfig(**vad_data) if vad_data else None,
+            barge_in=BargeInConfig(**barge_in_data) if barge_in_data else None,
+            llm=llm_data or None,
+        )
+
+    def validate(self, **kwargs):
+        """Validate the flow settings resource."""
+        if self.asr_biasing:
+            self.asr_biasing.validate()
+        if self.dtmf:
+            self.dtmf.validate()
+        if self.asr:
+            self.asr.validate()
+        if self.vad:
+            self.vad.validate()
+        if self.barge_in:
+            self.barge_in.validate()
+        if self.llm:
+            self.llm.validate()
+
+    def build_update_proto(self) -> Flow_UpdateStepSettings:
+        """Create a proto for updating the flow settings."""
+        return Flow_UpdateStepSettings(
+            flow_id=self.flow_id,
+            step_id=self.step_id,
+            settings=FlowStepSettings(
+                asr_biasing=self.asr_biasing.to_proto() if self.asr_biasing else None,
+                dtmf=self.dtmf.to_proto() if self.dtmf else None,
+                asr=self.asr.to_proto() if self.asr else None,
+                vad=self.vad.to_proto() if self.vad else None,
+                barge_in=self.barge_in.to_proto() if self.barge_in else None,
+                llm=self.llm.to_proto() if self.llm else None,
+            ),
+        )
+
+    def build_delete_proto(self):
+        """Create a proto for deleting the flow settings."""
+        raise NotImplementedError("Flow settings deletion is not supported.")
+
+    def build_create_proto(self):
+        """Create a proto for creating the flow settings."""
+        raise NotImplementedError("Flow settings creation is not supported.")
+
+    @property
+    def command_type(self) -> str:
+        """Get the update type for updating the resource."""
+        return "flow_settings"
+
+    @property
+    def update_command_type(self) -> str:
+        """Get the update type for updating the resource."""
+        return "update_step_settings"
 
 
 class ConditionType(str, Enum):

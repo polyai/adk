@@ -147,13 +147,15 @@ class Handoff(MultiResourceYamlResource):
         return handoffs
 
     def to_yaml_dict(self) -> dict:
-        return {
+        result = {
             "name": self.name,
             "description": self.description,
             "is_default": self.is_default,
             "sip_config": self.sip_config.to_yaml_dict(),
-            "sip_headers": self.sip_headers,
         }
+        if self.sip_headers:
+            result["sip_headers"] = self.sip_headers
+        return result
 
     @property
     def file_path(self) -> str:

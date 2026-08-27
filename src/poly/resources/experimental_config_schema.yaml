@@ -29,8 +29,10 @@ components:
         - fano
         - nemo
         - deepgram
-        - raven
         - soniox
+        - assemblyai
+        - raven
+        - qwen
 
     asr_common_config_properties:
       type: object
@@ -45,8 +47,10 @@ components:
             - riva: Riva in-house speech recognition engine
             - openai: OpenAI realtime API
             - deepgram: Deepgram cloud speech recognition
+            - soniox: Soniox real-time cloud speech recognition
+            - assemblyai: AssemblyAI v3 Streaming speech recognition
             - raven: PolyAI Raven Omni speech recognition
-            - soniox: Soniox cloud speech recognition
+            - qwen: PolyAI-hosted Qwen3-ASR speech recognition
         model:
           type: string
           minLength: 1
@@ -59,8 +63,11 @@ components:
               architecture, size, decoder type, and latency characteristics
             - openai: "gpt-4o-transcribe", "gpt-4o-mini-transcribe", "whisper-1"
             - deepgram: "nova-3", "nova-2"
-            - raven: "raven-omni"
             - soniox: "stt-rt-v5"
+            - assemblyai: "universal-3-5-pro" (GA), "u3-rt-pro-beta-1" (private beta);
+              other AssemblyAI streaming model IDs are passed through
+            - raven: "raven-omni"
+            - qwen: "qwen3-asr-1.7b"
         language:
           type: string
           minLength: 2
@@ -142,9 +149,11 @@ components:
           properties:
             custom_language_code:
               type: string
+              deprecated: true
               description: >
-                Custom language code to pass to the ASR model, for providers
-                accepting non-standard language codes such as "multi" or "esen-US".
+                Deprecated: use the `language` field instead, which now behaves
+                identically. Retained for backwards compatibility with existing
+                configs. If both are set, `custom_language_code` takes precedence.
             flow_overrides:
               $ref: "#/components/schemas/asr_flow_overrides_map"
 
@@ -157,13 +166,6 @@ components:
           description: Whether to use the asr_lib for experimental ASR providers.
           default: false
 
-    asr_base_requirements:
-      type: object
-      description: Base-level ASR requirements ensuring provider and model are both present
-      required:
-        - provider
-        - model
-
     channel_name_enum:
       type: string
       enum:
@@ -171,12 +173,16 @@ components:
         - sip.polyai
         - chat.polyai
         - sms.polyai
+        - rcs.polyai
+        - whatsapp.polyai
       description: |-
         Recognized channel names in the platform:
         - webchat.polyai: Web chat channel
         - sip.polyai: SIP/voice channel
         - chat.polyai: Chat channel
         - sms.polyai: SMS conversational channel
+        - rcs.polyai: RCS conversational channel
+        - whatsapp.polyai: WhatsApp conversational channel
 
     llm_inference_parameters:
       type: object
@@ -209,6 +215,7 @@ components:
         reasoning_effort:
           type: string
           enum:
+            - none
             - minimal
             - low
             - medium
@@ -216,6 +223,7 @@ components:
             - auto
           description: >
             LLM 'thinking time'. Supported values vary by model:
+            OpenAI GPT-5.6 models: `none`, `low`, `medium`, `high`.
             OpenAI reasoning models (GPT-5): `minimal`, `low`, `medium`, `high`.
             Raven 3.5: `auto` (model decides whether to reason, short verbosity) and `low` (always reasons, short verbosity).
             Raven v3: `low` only.
@@ -283,7 +291,6 @@ components:
       allOf:
         - $ref: "#/components/schemas/asr_common_config_properties"
         - $ref: "#/components/schemas/asr_base_properties"
-        - $ref: "#/components/schemas/asr_base_requirements"
         - type: object
           description: |-
             ASR configuration details.
@@ -395,7 +402,7 @@ components:
       properties:
         provider:
           type: string
-          enum: ["smart_turn"]
+          enum: ["smart_turn", "raven"]
           description: The end of turn detection provider. Only available if using ASR lib.
         threshold:
           type: number
@@ -450,6 +457,22 @@ components:
               minimum: 0
               maximum: 1000
               default: 100
+            analysis_enabled:
+              type: boolean
+              description: Enable inline audio quality analysis (Tyto model) on the raw inbound audio.
+              default: false
+            analysis_adaptive:
+              type: boolean
+              description: >
+                Enable adaptive enhancement tuning driven by the analysis scores.
+                Implies analysis_enabled.
+              default: false
+            analysis_adaptive_vad:
+              type: boolean
+              description: >
+                Enable adaptive VAD tuning driven by the analysis scores.
+                Requires analysis_adaptive.
+              default: false
             vad:
               type: object
               description: Voice activity detection configuration for the ai-coustics enhancer
@@ -770,7 +793,7 @@ components:
           type: object
           description: >
             Functions that bypass the barrier and execute immediately.
-
+            
             WARNING: These functions will be erased from history if the user
             resumes speaking during execution. You should ensure that there are no
             external side effects like a POST API call, otherwise there will be phantom
@@ -930,6 +953,12 @@ components:
         sms_decorator:
           type: string
           description: Optional SMS-specific decorator for sms.polyai channel
+        rcs_decorator:
+          type: string
+          description: Optional RCS-specific decorator for rcs.polyai channel
+        whatsapp_decorator:
+          type: string
+          description: Optional WhatsApp-specific decorator for whatsapp.polyai channel
         voice_decorator:
           type: string
           description: Optional voice-specific decorator for chat.polyai or sip.polyai channels
@@ -965,7 +994,7 @@ components:
         identifier_source:
           type: string
           description: >
-            Custom source for the memory lookup identifier.
+            Custom source for the memory lookup identifier. 
             If not set, defaults to the caller/callee phone number.
           pattern: "^(sip_headers|integration_attributes|state):.+$"
         repeat_caller:
@@ -987,6 +1016,14 @@ components:
               description: >
                 List of state keys which should be mapped to Agent Memory.
                 Only those listed will be exposed / persisted to memory.
+
+    verified_context:
+      type: object
+      description: Configure the verified context read path (served from the Context Vault).
+      properties:
+        enabled:
+          type: boolean
+          description: Enable the per-turn fetch of verified context for function authors.
 
     filler_utterances:
       type: object
@@ -1518,15 +1555,19 @@ components:
           type: object
           description: >
             Custom payload template that controls the JSON body sent to the webhook URL.
-            If omitted, the default deployment payload is sent as-is.
+            If omitted, the default event payload is sent as-is.
             String values may contain {{field}} placeholders (e.g. {{project_id}})
-            that are substituted with the corresponding deployment event field.
-            Available fields: deployment_id, account_id, project_id,
-            client_env, artifact_version, deployment_type, timestamp, user.
-            Note: Use the special {{payload}} value to inject the entire deployment payload
+            that are substituted with the corresponding event field.
+            Available fields depend on the event the webhook is attached to.
+            All events provide: account_id, project_id, client_env, timestamp, user.
+            on_draft_published and on_deployment additionally provide:
+            deployment_id, artifact_version, deployment_type.
+            on_realtime_config_updated additionally provides:
+            event_type, config_diff.
+            Note: Use the special {{payload}} value to inject the entire event payload
             object at a specific position in the template (e.g. for GitHub repository_dispatch
             which requires nesting under client_payload).
-            When {{payload}} is not used, the deployment payload fields are merged at the top
+            When {{payload}} is not used, the event payload fields are merged at the top
             level of the rendered result.
           additionalProperties: true
 
@@ -1560,6 +1601,28 @@ components:
               description: Webhooks to trigger for live deployments
               items:
                 $ref: "#/components/schemas/webhook_config"
+        on_realtime_config_updated:
+          type: object
+          description:
+            Webhooks to trigger when a realtime config is updated in a specific
+            environment
+          additionalProperties: false
+          properties:
+            sandbox:
+              type: array
+              description: Webhooks to trigger for sandbox realtime config updates
+              items:
+                $ref: "#/components/schemas/webhook_config"
+            pre-release:
+              type: array
+              description: Webhooks to trigger for pre-release realtime config updates
+              items:
+                $ref: "#/components/schemas/webhook_config"
+            live:
+              type: array
+              description: Webhooks to trigger for live realtime config updates
+              items:
+                $ref: "#/components/schemas/webhook_config"
 
     additional_features:
       type: object
@@ -1590,6 +1653,8 @@ components:
           $ref: "#/components/schemas/webchat"
         memory:
           $ref: "#/components/schemas/memory"
+        verified_context:
+          $ref: "#/components/schemas/verified_context"
         realtime:
           $ref: "#/components/schemas/realtime"
         filler_utterances:

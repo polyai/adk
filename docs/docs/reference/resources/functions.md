@@ -1,0 +1,322 @@
+---
+title: Functions
+description: Add deterministic logic to your agent using global functions, transition functions, function steps, and lifecycle hooks.
+---
+
+# Functions
+
+<p class="lead">
+Functions are Python files that add deterministic logic to your agent.
+They can be called by the model, used as flow steps, or run automatically at call start and end.
+</p>
+
+Functions are how the ADK handles behavior that should not be left to prompt interpretation alone.
+
+## Where functions live
+
+~~~text
+functions/
+├── start_function.py
+├── end_function.py
+└── {function_name}.py
+
+flows/{flow_name}/
+├── functions/
+│   └── {function_name}.py
+└── function_steps/
+    └── {function_step}.py
+~~~
+
+## Function types
+
+| Type | Location | Signature | Referenced as |
+|---|---|---|---|
+| Global | `functions/` | `def name(conv: Conversation, ...)` | `{{fn:name}}` |
+| Transition | `flows/{flow}/functions/` | `def name(conv: Conversation, flow: Flow, ...)` | `{{ft:name}}` |
+| Function step | `flows/{flow}/function_steps/` | `def name(conv: Conversation, flow: Flow)` | Entered by flow conditions |
+| Start | `functions/start_function.py` | `def start_function(conv: Conversation)` | Runs automatically |
+| End | `functions/end_function.py` | `def end_function(conv: Conversation)` | Runs automatically |
+
+## What functions are for
+
+Functions are useful when you need deterministic behavior such as:
+
+- validating input
+- routing based on state
+- calling APIs
+- writing metrics
+- setting variables
+- transferring calls
+- starting or ending flows explicitly
+
+<div class="grid cards" markdown>
+
+-   **Global functions**
+
+    ---
+
+    Reusable functions that can be called by the model.
+
+-   **Transition functions**
+
+    ---
+
+    Flow-local functions used for step transitions and routing.
+
+-   **Function steps**
+
+    ---
+
+    Deterministic flow steps with no LLM decision-making.
+
+-   **Lifecycle functions**
+
+    ---
+
+    Hooks that run automatically at the start or end of a call.
+
+</div>
+
+## File structure rules
+
+Every `.py` file must define a function with the same name as the file, excluding `.py`.
+
+That function is the entry point when the file is called by the model or runtime.
+
+Every function file must include this import line:
+
+~~~python
+from _gen import *  # <AUTO GENERATED>
+~~~
+
+Do not modify this line. The ADK matches it exactly when reading function files.
+This line gives you type hinting when editing the file and matches the imports automatically given to all functions at runtime.
+
+## Decorators
+
+Global and transition functions use decorators to describe themselves to the model.
+
+### Supported decorators
+
+| Decorator | Required | Purpose |
+|---|---|---|
+| `@func_description("...")` | Global and transition functions | Describes when the function should be called |
+| `@func_parameter("name", "...")` | Each parameter, except `conv` and `flow` | Describes a parameter |
+| `@func_latency_control(...)` | Optional | Configures delay messaging while the function runs |
+
+Function steps do not support `@func_description` or `@func_parameter`.
+
+### `@func_latency_control` arguments
+
+Adding this decorator to a function enables latency control for it. It accepts:
+
+| Argument | Type | Description |
+|---|---|---|
+| `delay_before_responses_start` | `int` (0–10) | How long to wait before playing the first delay message |
+| `silence_after_each_response` | `int` (0–10) | Minimum gap to leave between delay messages |
+| `delay_responses` | `list[tuple[str, int]]` | `(message, duration)` pairs to play while the function runs |
+
+~~~python
+@func_latency_control(
+    delay_before_responses_start=2,
+    silence_after_each_response=3,
+    delay_responses=[("Let me check that for you.", 3)],
+)
+~~~
+
+## Validation
+
+!!! warning "Never add `from __future__ import annotations`"
+
+    This import (PEP 563) makes type annotations evaluate as strings instead of live objects. The platform resolves `Conversation` and `Flow` parameters by inspecting the actual annotation at runtime, so a deferred annotation fails to resolve and the function errors at call time with a cryptic type error. AI coding assistants often add this import automatically whenever they see type hints — remove it if it appears in a function file.
+
+!!! warning "All parameters must have a type annotation and no default value"
+
+    Every parameter decorated with `@func_parameter` must have a Python type annotation (for example, `booking_ref: str`). Parameters without an annotation, or with an unsupported annotation such as `Optional[str]`, will raise a `ValueError` when the function is processed. Only the types listed in the table below are supported.
+
+    Default values are also not permitted. The ADK validates the function by constructing the expected signature string — `def name(conv: Conversation, param: type)` — and checking it appears literally in the code. A default value such as `param: str = ""` breaks this check and causes push to fail with `Function definition '...' not found in code`. If a parameter is logically optional, pass an explicit empty string or zero from the LLM call site instead.
+
+- Global and transition functions must have a non-empty `@func_description`, and the description text can't have leading or trailing whitespace — both raise a `ValueError` on push.
+- `delay_before_responses_start` and `silence_after_each_response` (`@func_latency_control`) must each be between 0 and 10, and `delay_responses` cannot be empty once latency control is enabled — all three raise a `ValueError` on push otherwise.
+
+## Parameter types
+
+Supported parameter types map to schema types as follows:
+
+| Python type | Schema type |
+|---|---|
+| `str` | `string` |
+| `int` | `integer` |
+| `float` | `number` |
+| `bool` | `boolean` |
+
+## Example
+
+~~~python
+from _gen import *  # <AUTO GENERATED>
+
+
+@func_description("Look up a booking by reference number.")
+@func_parameter("booking_ref", "The booking reference provided by the customer")
+@func_parameter("include_history", "Whether to include booking history")
+def lookup_booking(conv: Conversation, booking_ref: str, include_history: bool):
+    result = external_api.get_booking(booking_ref, include_history)
+    if not result:
+        return "No booking found. Ask the customer to verify the reference number."
+    conv.state.booking = str(result)
+    return f"Booking found: {result['status']}. Confirm the details with the customer."
+~~~
+
+## Naming guidance
+
+Prefer naming functions after the **event that should trigger them**, rather than the internal action they perform.
+
+### Prefer
+
+- `first_name_provided`
+- `booking_confirmed`
+
+### Avoid
+
+- `store_first_name`
+- `send_confirmation`
+
+This tells the model when to call the function.
+
+## Returns and control flow
+
+Functions can influence the conversation in several ways.
+
+| Return or action | Effect |
+|---|---|
+| `return "string"` | Injects the string as system context |
+| `conv.say("exact phrase")` | Sends or speaks exact text |
+| `conv.goto_flow("name")` | Navigates to a flow |
+| `flow.goto_step("Step Name", "reason")` | Navigates to a step |
+| `conv.exit_flow()` | Exits the current flow |
+| `conv.call_handoff(destination="...", reason="...")` | Transfers the call |
+| `return {"hangup": True}` | Ends the call |
+| `return {"transition": {"goto_flow": "...", "goto_step": "..."}}` | Navigates via a returned transition dict |
+| `return {"utterance": "...", "end_turn": False}` | Speaks and immediately continues |
+
+!!! warning "Use `end_turn=False` carefully"
+
+    Only use `end_turn=False` when the agent must continue immediately in the same turn. Do not use it when the user is expected to answer.
+
+## Calling other functions
+
+You can call functions from within functions.
+
+### Global function call
+
+~~~python
+conv.functions.my_global_function(...)
+~~~
+
+### Flow function call
+
+~~~python
+flow.functions.my_flow_function(...)
+~~~
+
+## Start function
+
+`start_function.py` runs once at call start, before the first user input.
+
+### Signature
+
+~~~python
+def start_function(conv: Conversation):
+~~~
+
+### Typical uses
+
+- initialize state
+- read SIP headers
+- set language
+- write initial metrics
+- send the agent into the first flow
+
+## End function
+
+`end_function.py` runs once at call end, after the conversation completes.
+
+### Signature
+
+~~~python
+def end_function(conv: Conversation):
+~~~
+
+### Typical uses
+
+- aggregate metrics
+- write final outcome metrics
+- trigger post-call behavior in live environments
+
+## Utility modules
+
+If a function file is not intended to be called by the model, it still needs a main function matching the filename.
+
+Decorate that main function and have it return a utility-module message. Helper functions inside the file should not be decorated.
+
+## State
+
+Functions read and write conversation state via `conv.state`. See the [Variables reference](./variables.md) for the full details on setting, reading, and referencing state in prompts.
+
+## Metrics and logging
+
+Functions are a natural place to write metrics and logs.
+
+### Metrics
+
+Examples:
+
+~~~python
+conv.write_metric("EVENT_NAME")
+conv.write_metric("NAME", value)
+conv.write_metric("NAME", write_once=True)
+~~~
+
+### Logging
+
+Examples:
+
+~~~python
+conv.log.info(...)
+conv.log.warning(...)
+conv.log.error(...)
+~~~
+
+### Good practices
+
+- use `SCREAMING_SNAKE_CASE` for metric names
+- use grouped naming patterns where helpful
+- use `write_once=True` for one-time events
+- log important outcomes around external calls and failures
+
+## Related pages
+
+<div class="grid cards" markdown>
+
+-   **Flows**
+
+    ---
+
+    See how function steps and transition functions fit into flow design.
+    [Open flows](./flows.md)
+
+-   **Variables**
+
+    ---
+
+    Learn how state variables are discovered and referenced.
+    [Open variables](./variables.md)
+
+-   **Topics**
+
+    ---
+
+    See how functions are called from topic actions using `{{fn:...}}`.
+    [Open topics](./topics.md)
+
+</div>
