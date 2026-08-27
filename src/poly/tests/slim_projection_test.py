@@ -9,15 +9,21 @@ delete, which is honest, since from that user's vantage point it does not exist.
 Copyright PolyAI Limited
 """
 
+import os
+import tempfile
 import unittest
 from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 import poly.resources  # noqa: F401  - triggers resource registration
+import poly.resources.resource_utils as resource_utils
 from poly.project import AgentStudioProject
+from poly.resources.entities import Entity
 from poly.resources.function import Function
 from poly.resources.resource import (
     PROJECTION_REGISTRY,
     RESOURCE_CLASS_TO_NAME,
+    MultiResourceYamlResource,
     load_resources_from_projection,
 )
 from poly.resources.sms import SMSTemplate
@@ -228,9 +234,7 @@ class FalsyGuardValuesAreReadable(unittest.TestCase):
     def test_empty_topic_content_is_kept(self):
         projection = {
             "knowledgeBase": {
-                "topics": {
-                    "entities": {"TOPIC-1": {"name": "empty", "content": "", "actions": ""}}
-                }
+                "topics": {"entities": {"TOPIC-1": {"name": "empty", "content": "", "actions": ""}}}
             }
         }
         self.assertEqual(list(Topic.from_projection(projection)), ["TOPIC-1"])
@@ -431,12 +435,107 @@ class SlimResourcesSurviveTheStatusFile(unittest.TestCase):
 
         # What push does: swap in state rebuilt from the local files.
         project.resources = {
-            resource_type: dict(resources)
-            for resource_type, resources in project.resources.items()
+            resource_type: dict(resources) for resource_type, resources in project.resources.items()
         }
 
         reloaded = AgentStudioProject.from_dict(project.to_dict(), project.root_path)
         self.assertEqual(self._slim_ids(reloaded), expected)
+
+
+class WithheldTypeIsRemovedFromDisk(unittest.TestCase):
+    """A type readable on one pull and withheld on the next must leave no file behind.
+
+    Withheld types are absent from incoming_resources entirely, so the local file is
+    only removed by the "entire type absent from incoming" pass. That pass batches its
+    deletions into the file cache, and a cached entry carries the pre-write mtime - so
+    if the cache is not flushed, the deletions never reach disk *and* every later read
+    in the same process sees a file state that is not on disk. The visible symptom is
+    a force pull that needs running twice before `poly diff` comes back clean.
+    """
+
+    READABLE_ENTITIES = {
+        "entities": {
+            "entities": {
+                "ids": ["ENTITY-1"],
+                "entities": {
+                    "ENTITY-1": {
+                        "id": "ENTITY-1",
+                        "name": "account_number",
+                        "description": "The caller's account number.",
+                        "type": "alphanumeric",
+                        "config": {"value": {}},
+                    }
+                },
+            }
+        }
+    }
+
+    def setUp(self):
+        self.root_path = tempfile.mkdtemp()
+        self.addCleanup(patch.stopall)
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+
+    def _project_with_readable_entities(self) -> AgentStudioProject:
+        resources, slim_resources = load_resources_from_projection(self.READABLE_ENTITIES)
+        project = AgentStudioProject(
+            region="us-1",
+            account_id="ACCOUNT-1",
+            project_id="PROJECT-1",
+            root_path=self.root_path,
+            resources=resources,
+            slim_resources=slim_resources,
+            last_updated=datetime(2026, 1, 1),
+        )
+        for entity in resources[Entity].values():
+            entity.save(self.root_path, resource_name=entity.name, resource_mappings=[])
+        project.file_structure_info = project.compute_file_structure_info(project.resources)
+        MultiResourceYamlResource._file_cache.clear()
+        return project
+
+    @property
+    def _entities_file(self) -> str:
+        return os.path.join(self.root_path, "config", "entities.yaml")
+
+    def test_one_force_pull_clears_a_type_that_became_withheld(self):
+        project = self._project_with_readable_entities()
+        self.assertIn("account_number", open(self._entities_file).read())
+
+        withheld, slim_resources = load_resources_from_projection(SKELETON_PROJECTION)
+        mock_api = patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock).start()
+        mock_api.pull_resources.return_value = (withheld, slim_resources, {})
+        patch.object(AgentStudioProject, "save_config").start()
+
+        project.pull_project(force=True)
+
+        self.assertNotIn(
+            "account_number",
+            open(self._entities_file).read(),
+            "one force pull should remove the withheld entity from disk",
+        )
+
+    def test_the_file_cache_never_disagrees_with_disk(self):
+        """A cache entry that was never flushed hides the real file from everything after it.
+
+        The entry is stamped with the file's pre-write mtime, so the mtime check that is
+        supposed to catch staleness reads it as fresh and hands back content that is not
+        on disk - which is how discovery came to miss files that were still there.
+        """
+        project = self._project_with_readable_entities()
+
+        withheld, slim_resources = load_resources_from_projection(SKELETON_PROJECTION)
+        mock_api = patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock).start()
+        mock_api.pull_resources.return_value = (withheld, slim_resources, {})
+        patch.object(AgentStudioProject, "save_config").start()
+
+        project.pull_project(force=True)
+
+        for file_path, (_, cached_dict) in MultiResourceYamlResource._file_cache.items():
+            self.assertEqual(
+                resource_utils.load_yaml(open(file_path).read()) or {},
+                cached_dict,
+                f"cached content for {file_path} does not match what is on disk",
+            )
 
 
 if __name__ == "__main__":
