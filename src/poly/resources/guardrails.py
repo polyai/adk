@@ -50,9 +50,48 @@ def _guardrail_name_from_yaml(yaml_name: str) -> str:
     return f"{_GUARDRAIL_NAME_PREFIX}{yaml_name.upper()}"
 
 
+# The fixed catalog of real platform guardrails, as full GuardrailName enum
+# strings, excluding the GUARDRAIL_NAME_UNSPECIFIED sentinel. Computed once
+# here so every consumer agrees on what counts as a valid guardrail.
+_GUARDRAIL_CATALOG: tuple[str, ...] = tuple(
+    value.name
+    for value in GuardrailName.DESCRIPTOR.values
+    if value.name != "GUARDRAIL_NAME_UNSPECIFIED"
+)
+
+
+class _GuardrailYamlResource(MultiResourceYamlResource):
+    """Shared base for the guardrail resources stored in ``GUARDRAILS_FILE``.
+
+    Platform and custom guardrails live as separate top-level lists in the
+    same file, keyed by ``top_level_name`` — discovery is otherwise identical.
+    """
+
+    @classmethod
+    def discover_resources(cls, base_path: str) -> list[str]:
+        """Discover resources of this type in the given base path."""
+        yaml_path = os.path.join(base_path, GUARDRAILS_FILE)
+        discovered: list[str] = []
+
+        if not os.path.exists(yaml_path):
+            return discovered
+
+        yaml_dict = cls._get_top_level_data(yaml_path)
+        guardrails: list[dict] = yaml_dict.get(cls.top_level_name, []) if yaml_dict else []
+
+        for guardrail in guardrails:
+            name = guardrail.get("name")
+            if not name:
+                continue
+            clean_name = utils.clean_name(name, lowercase=False)
+            discovered.append(os.path.join(yaml_path, cls.top_level_name, clean_name))
+
+        return discovered
+
+
 @register_resource("platform_guardrails")
 @dataclass
-class PlatformGuardrail(MultiResourceYamlResource):
+class PlatformGuardrail(_GuardrailYamlResource):
     """Dataclass representing an Agent Studio platform guardrail's toggle state.
 
     Platform guardrails are provided by the platform (the catalog of possible
@@ -78,10 +117,8 @@ class PlatformGuardrail(MultiResourceYamlResource):
         guardrails_map = guardrails_section.get("guardrails") or {}
 
         guardrails = {}
-        for value in GuardrailName.DESCRIPTOR.values:
-            if value.name == "GUARDRAIL_NAME_UNSPECIFIED":
-                continue
-            short_proto_name = value.name.removeprefix(_GUARDRAIL_NAME_PREFIX)
+        for proto_name in _GUARDRAIL_CATALOG:
+            short_proto_name = proto_name.removeprefix(_GUARDRAIL_NAME_PREFIX)
             entry = guardrails_map.get(short_proto_name, {})
             if not isinstance(entry, dict):
                 logger.warning(
@@ -91,7 +128,7 @@ class PlatformGuardrail(MultiResourceYamlResource):
                     entry,
                 )
                 entry = {}
-            name = _guardrail_name_to_yaml(value.name)
+            name = _guardrail_name_to_yaml(proto_name)
             guardrails[name] = cls(
                 resource_id=name,
                 name=name,
@@ -136,12 +173,8 @@ class PlatformGuardrail(MultiResourceYamlResource):
             )
 
         proto_name = _guardrail_name_from_yaml(self.name)
-        valid_names = sorted(
-            _guardrail_name_to_yaml(v.name)
-            for v in GuardrailName.DESCRIPTOR.values
-            if v.name != "GUARDRAIL_NAME_UNSPECIFIED"
-        )
-        if proto_name == "GUARDRAIL_NAME_UNSPECIFIED" or proto_name not in GuardrailName.keys():
+        if proto_name not in _GUARDRAIL_CATALOG:
+            valid_names = sorted(_guardrail_name_to_yaml(n) for n in _GUARDRAIL_CATALOG)
             raise ValueError(
                 f"Unrecognised platform guardrail '{self.name}'. "
                 f"Must be one of: {', '.join(valid_names)}"
@@ -156,11 +189,7 @@ class PlatformGuardrail(MultiResourceYamlResource):
         a real platform state.
         """
         present_names = {guardrail.name for guardrail in resources.values()}
-        catalog_names = {
-            _guardrail_name_to_yaml(value.name)
-            for value in GuardrailName.DESCRIPTOR.values
-            if value.name != "GUARDRAIL_NAME_UNSPECIFIED"
-        }
+        catalog_names = {_guardrail_name_to_yaml(n) for n in _GUARDRAIL_CATALOG}
         missing = sorted(catalog_names - present_names)
         if missing:
             raise ValueError(
@@ -187,31 +216,10 @@ class PlatformGuardrail(MultiResourceYamlResource):
         """Create a proto for deleting the resource."""
         raise NotImplementedError("Delete operation not supported for platform guardrails.")
 
-    @staticmethod
-    def discover_resources(base_path: str) -> list[str]:
-        """Discover resources of this type in the given base path."""
-        yaml_path = os.path.join(base_path, GUARDRAILS_FILE)
-        discovered: list[str] = []
-
-        if not os.path.exists(yaml_path):
-            return discovered
-
-        yaml_dict = PlatformGuardrail._get_top_level_data(yaml_path)
-        guardrails: list[dict] = yaml_dict.get("platform_guardrails", []) if yaml_dict else []
-
-        for guardrail in guardrails:
-            name = guardrail.get("name")
-            if not name:
-                continue
-            clean_name = utils.clean_name(name, lowercase=False)
-            discovered.append(os.path.join(yaml_path, PlatformGuardrail.top_level_name, clean_name))
-
-        return discovered
-
 
 @register_resource("custom_guardrails")
 @dataclass
-class CustomGuardrail(MultiResourceYamlResource):
+class CustomGuardrail(_GuardrailYamlResource):
     """Dataclass representing an Agent Studio custom guardrail.
 
     Stored as an optional ``custom_guardrails`` list in the same
@@ -332,24 +340,3 @@ class CustomGuardrail(MultiResourceYamlResource):
     def command_type(self) -> str:
         """Get the update type for updating the resource."""
         return "custom_guardrail"
-
-    @staticmethod
-    def discover_resources(base_path: str) -> list[str]:
-        """Discover resources of this type in the given base path."""
-        yaml_path = os.path.join(base_path, GUARDRAILS_FILE)
-        discovered: list[str] = []
-
-        if not os.path.exists(yaml_path):
-            return discovered
-
-        yaml_dict = CustomGuardrail._get_top_level_data(yaml_path)
-        guardrails: list[dict] = yaml_dict.get("custom_guardrails", []) if yaml_dict else []
-
-        for guardrail in guardrails:
-            name = guardrail.get("name")
-            if not name:
-                continue
-            clean_name = utils.clean_name(name, lowercase=False)
-            discovered.append(os.path.join(yaml_path, CustomGuardrail.top_level_name, clean_name))
-
-        return discovered
