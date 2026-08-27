@@ -5151,6 +5151,22 @@ class ApiIntegrationTest(unittest.TestCase):
         self.assertEqual(i2.operations[0].name, "get")
         self.assertEqual(i2.operations[0].resource_id, "")
 
+    def test_api_integration_operations_sorted_by_name(self):
+        """Operations serialize in alphabetical order by name."""
+        integration = ApiIntegration(
+            resource_id="int-1",
+            name="TestAPI",
+            operations=[
+                ApiIntegrationOperation(
+                    resource_id=f"op-{name}", name=name, method="GET", resource="/x"
+                )
+                for name in ["refund", "charge", "get_customer"]
+            ],
+        )
+
+        operation_names = [op["name"] for op in integration.to_yaml_dict()["operations"]]
+        self.assertEqual(operation_names, ["charge", "get_customer", "refund"])
+
     def test_api_integration_build_protos(self):
         """ApiIntegration build_create_proto, build_update_proto, build_delete_proto set id and environments."""
         env = ApiIntegrationEnvironments.from_dict(
@@ -7208,6 +7224,39 @@ class TestCaseTests(unittest.TestCase):
             language="en-GB",
         )
 
+    def test_assertions_sorted_by_name(self):
+        """Function call assertions and their arguments serialize in alphabetical order."""
+        assertions = TestCaseAssertion(
+            resource_id="TEST-ordering",
+            name="assertions",
+            prompts=[],
+            function_calls=[
+                FunctionCallAssertion(
+                    name=name,
+                    arguments=[
+                        FunctionCallArgumentAssertion(
+                            parameter_name=parameter_name,
+                            expected_value="value",
+                            value_type="string",
+                        )
+                        for parameter_name in ["zebra", "apple", "monkey"]
+                    ],
+                )
+                for name in ["transfer_call", "book_appointment", "lookup_order"]
+            ],
+        )
+
+        function_calls = assertions.to_yaml_dict()["function_call_assertions"]
+
+        self.assertEqual(
+            [call["name"] for call in function_calls],
+            ["book_appointment", "lookup_order", "transfer_call"],
+        )
+        self.assertEqual(
+            [arg["parameter_name"] for arg in function_calls[0]["arguments"]],
+            ["apple", "monkey", "zebra"],
+        )
+
     def test_to_yaml_dict_from_yaml_dict_roundtrip(self):
         test_case = self._sample_test_case()
         yaml_dict = test_case.to_yaml_dict()
@@ -7995,6 +8044,30 @@ class TestCaseApiMocksTests(unittest.TestCase):
         yaml_dict = self._test_case().to_yaml_dict()
 
         self.assertNotIn("api_mocks", yaml_dict)
+
+    def test_yaml_sorts_integration_and_operation_names(self):
+        """Integration/operation names serialize alphabetically; rule order is preserved."""
+        api_mocks = self._api_mocks(
+            {
+                "payments": {
+                    "refund": [ApiResponseRule(respond=ApiResponse(status=200))],
+                    "charge": [
+                        ApiResponseRule(respond=ApiResponse(status=500), repeat=2),
+                        ApiResponseRule(respond=ApiResponse(status=201)),
+                    ],
+                },
+                "crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]},
+            }
+        )
+
+        mocks_yaml = self._test_case(api_mocks=api_mocks).to_yaml_dict()["api_mocks"]
+
+        self.assertEqual(list(mocks_yaml), ["crm", "payments"])
+        self.assertEqual(list(mocks_yaml["payments"]), ["charge", "refund"])
+        self.assertEqual(
+            mocks_yaml["payments"]["charge"],
+            [{"respond": {"status": 500}, "repeat": 2}, {"respond": {"status": 201}}],
+        )
 
     def _operation_mock(self, **overrides) -> TestCaseApiOperationMock:
         defaults = {
