@@ -1,5 +1,6 @@
 # Copyright PolyAI Limited
 from poly.resources.agent_settings import (
+    SettingsPersona,
     SettingsPersonality,
     SettingsRole,
     SettingsRules,

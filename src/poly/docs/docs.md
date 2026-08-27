@@ -13,6 +13,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 ├── _gen/                               # Generated stubs - do not edit
 ├── agent_settings/                     # Agent identity and behavior
 │   ├── languages.yaml                  # Optional
+│   ├── persona.txt                     # Optional — the Agent Studio "Role" field
 │   ├── personality.yaml
 │   ├── role.yaml
 │   ├── rules.txt

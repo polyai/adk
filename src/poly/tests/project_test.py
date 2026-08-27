@@ -32,6 +32,7 @@ from poly.resources import (
     Pronunciation,
     Resource,
     ResourceMapping,
+    SettingsPersona,
     SettingsPersonality,
     SettingsRole,
     SettingsRules,
@@ -310,6 +311,10 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
         self.assertEqual(
             local_resources[SettingsRules],
             [os.path.join(TEST_DIR, "agent_settings", "rules.txt")],
+        )
+        self.assertEqual(
+            local_resources[SettingsPersona],
+            [os.path.join(TEST_DIR, "agent_settings", "persona.txt")],
         )
 
         # Finds all Functions and Flow Steps
@@ -2479,6 +2484,43 @@ class PushProjectTest(unittest.TestCase):
         self.mock_api_handler.queue_resources.assert_called_once()
         self.mock_api_handler.send_queued_commands.assert_not_called()
         self.mock_api_handler.clear_command_queue.assert_called_once()
+
+
+    def test_push_project_new_persona_is_pushed_as_an_update(self):
+        project_data = deepcopy(PROJECT_DATA)
+        project_data["resources"].pop("persona")
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, _, _ = project.push_project(force=True)
+
+        self.assertTrue(success)
+        call_args = self.mock_api_handler.queue_resources.call_args
+        self.assertNotIn(SettingsPersona, call_args.kwargs["new_resources"])
+        personas = call_args.kwargs["updated_resources"][SettingsPersona]
+        self.assertEqual([r.name for r in personas.values()], ["persona"])
+
+    def test_push_project_warns_when_legacy_settings_are_shadowed(self):
+        project_data = deepcopy(PROJECT_DATA)
+        project_data["resources"]["personality"]["PERSONALITY-personality"]["custom"] = "stale"
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, _, _ = project.push_project(force=True)
+
+        self.assertTrue(success)
+        self.assertEqual(len(project.push_warnings), 1)
+        self.assertIn("personality.yaml", project.push_warnings[0])
+        self.assertIn("persona.txt", project.push_warnings[0])
+
+    def test_push_project_does_not_warn_when_legacy_settings_are_untouched(self):
+        project_data = deepcopy(PROJECT_DATA)
+        project_data["resources"]["topics"].pop("TOPIC-Topic 1")
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+        success, _, _ = project.push_project(force=True)
+
+        self.assertTrue(success)
+        self.assertEqual(project.push_warnings, [])
+
 
 
 class ValidateProjectTest(unittest.TestCase):

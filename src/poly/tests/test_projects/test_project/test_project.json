@@ -435,6 +435,13 @@
         "custom": ""
       }
     },
+    "persona": {
+      "PERSONA-persona": {
+        "resource_id": "PERSONA-persona",
+        "name": "persona",
+        "content": "You are a calm and polite concierge.\nGreet the caller by name using {{vrbl:VAR-customer_name}}.\n"
+      }
+    },
     "rules": {
       "RULES-rules": {
         "resource_id": "RULES-rules",

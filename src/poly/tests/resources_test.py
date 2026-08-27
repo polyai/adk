@@ -14,6 +14,7 @@ from jsonschema import ValidationError
 import poly.resources.resource_utils as resource_utils
 from poly.resources.agent_settings import (
     ALLOWED_ADJECTIVES,
+    SettingsPersona,
     SettingsPersonality,
     SettingsRole,
     SettingsRules,
@@ -2183,6 +2184,135 @@ TEST_FLOW_CONFIG = FlowConfig(
     description="A test flow description",
     start_step="step-1",
 )
+
+TEST_PERSONA = SettingsPersona(
+    resource_id="persona_123",
+    name="persona",
+    content="You are a calm concierge. Greet {{vrbl:VAR-customer_name}} by name.",
+)
+
+PERSONA_VARIABLE_MAPPING = [
+    ResourceMapping(
+        resource_id="VAR-customer_name",
+        resource_name="customer_name",
+        resource_type=Variable,
+        file_path="variables/customer_name",
+        resource_prefix="vrbl",
+        flow_name=None,
+    )
+]
+
+
+def _persona_projection(persona: dict | None) -> dict:
+    agent_settings = {
+        "personality": {"adjectives": {"Polite": True}, "custom": ""},
+        "role": {"value": "Consultant", "additionalInfo": "", "custom": ""},
+    }
+    if persona is not None:
+        agent_settings["persona"] = persona
+    return {"agentSettings": agent_settings}
+
+
+class SettingsPersonaTests(unittest.TestCase):
+    def test_get_raw(self):
+        """Test that raw property returns the content string."""
+        self.assertEqual(TEST_PERSONA.raw, TEST_PERSONA.content)
+
+    def test_file_path(self):
+        """Test that the persona is stored as plain text next to the other settings."""
+        self.assertEqual(TEST_PERSONA.file_path, os.path.join("agent_settings", "persona.txt"))
+
+    def test_convert_and_unconvert_persona(self):
+        """Test roundtrip conversion: to_pretty -> from_pretty."""
+        pretty_content = TEST_PERSONA.to_pretty(resource_mappings=PERSONA_VARIABLE_MAPPING)
+        self.assertIn("{{vrbl:customer_name}}", pretty_content)
+        self.assertNotIn("{{vrbl:VAR-customer_name}}", pretty_content)
+
+        reverted = SettingsPersona.from_pretty(
+            pretty_content, resource_mappings=PERSONA_VARIABLE_MAPPING
+        )
+        self.assertEqual(reverted, TEST_PERSONA.raw)
+
+    def test_validate_variable_reference(self):
+        """Test validation accepts a known variable and rejects an unknown one."""
+        self.assertIsNone(TEST_PERSONA.validate(resource_mappings=PERSONA_VARIABLE_MAPPING))
+
+        with self.assertRaises(ValueError) as cm:
+            TEST_PERSONA.validate(resource_mappings=[])
+        self.assertIn("Invalid references: ['variables: VAR-customer_name']", str(cm.exception))
+
+    def test_validate_rejects_non_variable_references(self):
+        """Test that only variables may be referenced, unlike personality and role."""
+        persona_with_attr = SettingsPersona(
+            resource_id="persona_123",
+            name="persona",
+            content="You are a concierge for {{attr:customer-name}}.",
+        )
+        with self.assertRaises(ValueError) as cm:
+            persona_with_attr.validate(resource_mappings=[])
+        self.assertIn("Invalid reference type: attributes", str(cm.exception))
+
+    def test_build_update_proto(self):
+        """Test building the update proto, including variable references."""
+        proto = TEST_PERSONA.build_update_proto()
+        self.assertEqual(proto.content, TEST_PERSONA.content)
+        self.assertEqual(dict(proto.references.variables), {"VAR-customer_name": True})
+
+    def test_build_update_proto_without_references(self):
+        """Test that references are always sent, even when empty."""
+        proto = SettingsPersona(
+            resource_id="persona_123",
+            name="persona",
+            content="You are a calm concierge.",
+        ).build_update_proto()
+        self.assertEqual(dict(proto.references.variables), {})
+
+    def test_command_type(self):
+        """Test that pushing a persona sends update_persona."""
+        self.assertEqual(TEST_PERSONA.command_type, "persona")
+        self.assertEqual(TEST_PERSONA.update_command_type, "update_persona")
+
+    def test_create_and_delete_not_supported(self):
+        """Test that the platform offers no create or delete for the persona."""
+        with self.assertRaises(NotImplementedError):
+            TEST_PERSONA.build_create_proto()
+        with self.assertRaises(NotImplementedError):
+            TEST_PERSONA.build_delete_proto()
+
+    def test_from_projection(self):
+        """Test that persona content becomes a SettingsPersona resource."""
+        resources = SettingsPersona.from_projection(
+            _persona_projection({"content": "You are a calm Consultant."})
+        )
+        self.assertEqual(
+            resources["persona"],
+            SettingsPersona(
+                resource_id="persona",
+                name="persona",
+                content="You are a calm Consultant.",
+            ),
+        )
+
+    def test_from_projection_without_content(self):
+        """Test a project without the persona flag, where content is absent."""
+        self.assertEqual(
+            SettingsPersona.from_projection(
+                _persona_projection(
+                    {"createdAt": "", "createdBy": "", "references": {"variables": {}}}
+                )
+            ),
+            {},
+        )
+
+    def test_from_projection_without_persona(self):
+        """Test a projection with no persona key at all."""
+        self.assertEqual(SettingsPersona.from_projection(_persona_projection(None)), {})
+
+    def test_from_projection_with_empty_content(self):
+        """Test that an authored but empty persona is still a resource."""
+        resources = SettingsPersona.from_projection(_persona_projection({"content": ""}))
+        self.assertEqual(resources["persona"].content, "")
+
 
 FLOW_CONFIG_RAW = """name: Test Flow
 description: A test flow description

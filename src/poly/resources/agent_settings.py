@@ -11,7 +11,9 @@ from google.protobuf.message import Message
 
 import poly.resources.resource_utils as utils
 from poly.handlers.protobuf.agent_settings_pb2 import (
+    Persona_UpdatePersona,
     Personality_UpdatePersonality,
+    PersonaReferences,
     Role_UpdateRole,
     Rules_UpdateRules,
 )
@@ -30,6 +32,7 @@ ALLOWED_BEHAVIOUR_REFERENCES = [
     "variables",
     "translations",
 ]
+ALLOWED_PERSONA_REFERENCES = ["variables"]
 ALLOWED_ADJECTIVES = {
     "Polite",
     "Calm",
@@ -270,6 +273,125 @@ class SettingsRole(YamlResource):
             list[str]: A list of file paths of discovered resources.
         """
         file_path = os.path.join(base_path, "agent_settings", "role.yaml")
+
+        if not os.path.exists(file_path):
+            return []
+
+        return [file_path]
+
+
+@register_resource("persona")
+@dataclass
+class SettingsPersona(Resource):
+    """Resource class for managing the persona setting.
+
+    This is what the "Role" field in Agent Studio edits. It supersedes the
+    personality and role settings, which remain on the wire but are no longer
+    surfaced to builders.
+    """
+
+    content: str
+
+    @cached_property
+    def file_path(self) -> str:
+        """Get the file path for the Persona resource."""
+        return os.path.join("agent_settings", "persona.txt")
+
+    @property
+    def raw(self) -> str:
+        """Convert the resource to a raw format."""
+        return self.content
+
+    @staticmethod
+    def make_pretty(
+        contents: str, resource_mappings: list[ResourceMapping] = None, **kwargs
+    ) -> str:
+        """Replace resource IDs with resource names in the provided contents."""
+        return utils.replace_resource_ids_with_names(contents, resource_mappings or [])
+
+    @classmethod
+    def from_pretty(
+        cls, contents: str, resource_mappings: list[ResourceMapping] = None, **kwargs
+    ) -> str:
+        """Replace resource names with resource IDs in the provided contents."""
+        return utils.replace_resource_names_with_ids(contents, resource_mappings or [])
+
+    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
+        """Validate the persona resource."""
+        references = utils.get_references_from_prompt(
+            self.content, ALLOWED_PERSONA_REFERENCES, raise_on_invalid=True
+        )
+        valid, invalid_references = utils.validate_references(references, resource_mappings)
+        if not valid:
+            raise ValueError(f"Invalid references: {invalid_references}")
+
+    @classmethod
+    def from_projection(cls, projection: dict) -> dict[str, "SettingsPersona"]:
+        """Parse the persona setting from a projection dict.
+
+        A project without the persona feature flag still carries a persona object,
+        just without content, so absent content means the setting is not enabled
+        rather than that anything is wrong.
+        """
+        agent_settings = projection.get("agentSettings", {})
+        persona = agent_settings.get("persona") or {}
+        content = persona.get("content")
+        if content is None:
+            return {}
+        return {
+            "persona": cls(
+                resource_id="persona",
+                name="persona",
+                content=content,
+            )
+        }
+
+    @classmethod
+    def read_local_resource(
+        cls, file_path: str, resource_id: str, resource_name: str, **kwargs
+    ) -> "SettingsPersona":
+        """Read a local plain text resource from the given file path."""
+        content = cls.read_to_raw(file_path, **kwargs)
+        return SettingsPersona(
+            resource_id=resource_id,
+            name=resource_name,
+            content=content,
+        )
+
+    def build_update_proto(self) -> Persona_UpdatePersona:
+        """Create a proto for updating the resource."""
+
+        references = utils.get_references_from_prompt(self.content, ALLOWED_PERSONA_REFERENCES)
+
+        return Persona_UpdatePersona(
+            content=self.content,
+            references=PersonaReferences(variables=references.get("variables", {})),
+        )
+
+    def build_create_proto(self) -> Message:
+        """Create a proto for creating the resource."""
+        raise NotImplementedError("Create operation not supported for Persona settings.")
+
+    def build_delete_proto(self) -> Message:
+        """Create a proto for deleting the resource."""
+        raise NotImplementedError("Delete operation not supported for Persona settings.")
+
+    @property
+    def command_type(self) -> str:
+        """Get the update type for updating the resource."""
+        return "persona"
+
+    @staticmethod
+    def discover_resources(base_path: str) -> list[str]:
+        """Discover resources of this type in the given base path.
+
+        Args:
+            base_path (str): The base path to search for resources.
+
+        Returns:
+            list[str]: A list of file paths of discovered resources.
+        """
+        file_path = os.path.join(base_path, "agent_settings", "persona.txt")
 
         if not os.path.exists(file_path):
             return []
