@@ -8544,6 +8544,16 @@ class PlatformGuardrailTests(unittest.TestCase):
         self.assertIn("Unrecognised platform guardrail 'made_up'", str(cm.exception))
         self.assertIn("jailbreak_defence", str(cm.exception))
 
+    def test_validate_unspecified_sentinel_name_raises(self):
+        """The GUARDRAIL_NAME_UNSPECIFIED sentinel is not a real guardrail, so it is rejected."""
+        guardrail = PlatformGuardrail(resource_id="unspecified", name="unspecified", enabled=True)
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate()
+        self.assertIn("Unrecognised platform guardrail 'unspecified'", str(cm.exception))
+        # The sentinel is also absent from the list of valid options offered to the user.
+        valid_names = str(cm.exception).split("Must be one of: ")[1].split(", ")
+        self.assertNotIn("unspecified", valid_names)
+
     def test_validate_empty_name_raises(self):
         guardrail = PlatformGuardrail(resource_id="", name="")
         with self.assertRaises(ValueError) as cm:

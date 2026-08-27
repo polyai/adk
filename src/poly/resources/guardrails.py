@@ -8,6 +8,8 @@ import os
 from dataclasses import dataclass
 from typing import ClassVar
 
+from google.protobuf.message import Message
+
 import poly.resources.resource_utils as utils
 from poly.handlers.protobuf.guardrails_pb2 import (
     Guardrail,
@@ -137,7 +139,7 @@ class PlatformGuardrail(MultiResourceYamlResource):
             for v in GuardrailName.DESCRIPTOR.values
             if v.name != "GUARDRAIL_NAME_UNSPECIFIED"
         )
-        if proto_name not in GuardrailName.keys():
+        if proto_name == "GUARDRAIL_NAME_UNSPECIFIED" or proto_name not in GuardrailName.keys():
             raise ValueError(
                 f"Unrecognised platform guardrail '{self.name}'. "
                 f"Must be one of: {', '.join(valid_names)}"
@@ -175,11 +177,11 @@ class PlatformGuardrail(MultiResourceYamlResource):
             guardrails=[Guardrail(name=_guardrail_name_from_yaml(self.name), enabled=self.enabled)]
         )
 
-    def build_create_proto(self):
+    def build_create_proto(self) -> Message:
         """Create a proto for creating the resource."""
         raise NotImplementedError("Create operation not supported for platform guardrails.")
 
-    def build_delete_proto(self):
+    def build_delete_proto(self) -> Message:
         """Create a proto for deleting the resource."""
         raise NotImplementedError("Delete operation not supported for platform guardrails.")
 
