@@ -1941,14 +1941,19 @@ class AgentStudioProject:
 
     def _resolve_branch_fork_point(
         self, branch_name: Optional[str] = None
-    ) -> tuple[ResourceMap, ResourceMap]:
+    ) -> tuple[ResourceMap, list[ResourceMapping], ResourceMap, list[ResourceMapping]]:
         """Fetch parent (at fork point) and branch (latest) resource maps.
 
         Args:
             branch_name: Name of the branch. Defaults to the current branch.
 
         Returns:
-            (parent_resources, branch_resources) tuple.
+            tuple[ResourceMap, list[ResourceMapping], ResourceMap, list[ResourceMapping]]:
+                A tuple containing:
+                1. The parent's resources at the fork point.
+                2. The parent's slim resources.
+                3. The branch's latest resources.
+                4. The branch's slim resources.
 
         Raises:
             ValueError: If on main with no branch specified, or the branch
