@@ -1,6 +1,88 @@
 # CHANGELOG
 
 
+## v0.48.0 (2026-08-28)
+
+### Features
+
+- Add persona to agent settings (DEVP-624) ([#294](https://github.com/polyai/adk/pull/294),
+  [`ecc7d9d`](https://github.com/polyai/adk/commit/ecc7d9dbe7d8db9a68602f5938fb0132b4de5b66))
+
+## Summary
+
+Replaces the separate Personality and Role settings in ADK with the single free-text `persona`
+  resource that superseded them in Agent Studio. `agent_settings/persona.txt` now pulls, pushes and
+  diffs; `personality.yaml` and `role.yaml` are gone, and a migration deletes them from existing
+  project directories.
+
+## Motivation
+
+[DEVP-624](https://linear.app/poly-ai/issue/DEVP-624/add-persona-to-agent-settings-adk-is-blind-to-the-new-merged-role)
+
+On the wire the merged Role field is a new `persona` component on `agentSettings`. ADK had no
+  persona resource at all, so `pull` dropped the field builders actually author, `push` could only
+  write the dead settings, and `diff` across environments silently ignored the primary identity
+  field.
+
+## Changes
+
+- `SettingsPersona` in `resources/agent_settings.py` — plain-text `agent_settings/persona.txt`,
+  modelled on `SettingsRules`, registered via `@register_resource("persona")` - References validated
+  against `{{attr:}}` and `{{vrbl:}}` — the same two the personality and role `custom` fields
+  accepted. Attribute references travel in the content and are not tracked on the resource, since
+  `PersonaReferences` is variables-only; so were `PersonalityReferences` and `RoleReferences`, so
+  this is not new - `update_persona` always carries a `variables` map (possibly empty) — the backend
+  schema requires the key whenever `references` is sent - `from_projection` reads `persona.content`,
+  not the `persona` object — the projection always carries the object, so absent content just means
+  there is nothing to write to disk. An authored empty string is a real persona and is kept -
+  **`SettingsPersonality` and `SettingsRole` deleted.** They still exist on the wire but nothing
+  surfaces them, so keeping them registered only leaves two files that pull, push and validate while
+  affecting nothing - **Migration `removed_personality_and_role_files`** deletes
+  `agent_settings/personality.yaml` and `role.yaml` the first time a project is loaded, logging what
+  it removed and telling the builder to pull to get `persona.txt`. `file_structure_info` is
+  recomputed from the loaded resources on every load, so the stale status entries drop out on their
+  own - Docs: the packaged `docs/agent_settings.md` + `docs/docs.md`, and the mkdocs site — the
+  resource reference, architecture guide, working-locally tree, tooling/CLI tables and the
+  restaurant tutorial all walked builders through `personality.yaml` and `role.yaml`
+
+### On the compiled backfill
+
+For a project that has never authored a persona, the content the projection returns is derived
+  server-side from the old `personality` + `role` and stored nowhere. This is deliberately left
+  as-is rather than detected and skipped: `push_project` only sends resources whose on-disk hash
+  differs from the pulled snapshot, so an untouched `persona.txt` is never pushed back, and editing
+  the file authors a real persona — which is the intent. Documented in `docs/agent_settings.md`.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly docs agent_settings`) - [ ] Tested
+  against a live Agent Studio project
+
+New coverage: `SettingsPersonaTests` (15 cases — raw/pretty roundtrip, attribute and variable
+  validation, `{{fn:}}` rejection, update proto with and without references, `from_projection` for
+  present / absent-content / absent-object / empty-string) and `TestRemovePersonalityAndRoleFiles`
+  for the migration (no-op without `agent_settings/`, both files removed with the warning logged,
+  other settings files untouched).
+
+Also verified offline that a `Command(type="update_persona", ...)` builds, serialises and
+  round-trips with `references.variables` populated.
+
+Not yet run against a live project — `poly pull` / `poly push` on a real project is still
+  outstanding.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1352 passed, 112
+  subtests) - [x] No breaking changes to the `poly` CLI interface - [x] Commit messages follow
+  conventional commits
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+
+
 ## v0.47.1 (2026-08-28)
 
 ### Bug Fixes
