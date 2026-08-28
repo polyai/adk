@@ -125,7 +125,13 @@ class FunctionCallAssertion:
         ]
 
     def to_yaml_dict(self) -> dict:
-        return {"name": self.name, "arguments": [arg.to_yaml_dict() for arg in self.arguments]}
+        return {
+            "name": self.name,
+            "arguments": [
+                arg.to_yaml_dict()
+                for arg in sorted(self.arguments, key=lambda arg: arg.parameter_name)
+            ],
+        }
 
     def to_proto(self) -> FunctionCallAssertionProto:
         return FunctionCallAssertionProto(
@@ -166,7 +172,8 @@ class TestCaseAssertion(SubResource):
             response["prompt_assertions"] = self.prompts
         if self.function_calls:
             response["function_call_assertions"] = [
-                function_call.to_yaml_dict() for function_call in self.function_calls
+                function_call.to_yaml_dict()
+                for function_call in sorted(self.function_calls, key=lambda call: call.name)
             ]
         return response
 
@@ -481,12 +488,16 @@ class TestCaseApiMocks:
     mocks: dict[str, dict[str, list[ApiResponseRule]]] = field(default_factory=dict)
 
     def to_yaml_dict(self) -> dict:
+        # Integration and operation names are sorted so pulls produce stable YAML; the
+        # rules within an operation are a sequence (see `repeat`) and keep their order.
         return {
             integration_name: {
-                operation_name: [rule.to_yaml_dict() for rule in rules]
-                for operation_name, rules in operations.items()
+                operation_name: [
+                    rule.to_yaml_dict() for rule in self.mocks[integration_name][operation_name]
+                ]
+                for operation_name in sorted(self.mocks[integration_name])
             }
-            for integration_name, operations in self.mocks.items()
+            for integration_name in sorted(self.mocks)
         }
 
     @classmethod
