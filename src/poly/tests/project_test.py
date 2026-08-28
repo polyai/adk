@@ -32,8 +32,7 @@ from poly.resources import (
     Pronunciation,
     Resource,
     ResourceMapping,
-    SettingsPersonality,
-    SettingsRole,
+    SettingsPersona,
     SettingsRules,
     SMSTemplate,
     TestCase,
@@ -208,9 +207,8 @@ class SerializationRoundTripTest(unittest.TestCase):
         restored = Document(**serialized)
         self.assertEqual(restored.resource_id, "test.md")
         self.assertEqual(restored.name, "test")
-        self.assertEqual(restored.path, "TEST.MD")
-        self.assertEqual(restored.contents, "hello world\n")
-        self.assertEqual(restored.file_path, os.path.join("context", "TEST.MD"))
+        self.assertEqual(restored.path, "test.md")
+        self.assertEqual(restored.file_path, os.path.join("context", "test.md"))
         self.assertEqual(restored.compute_hash(), doc.compute_hash())
 
     def test_flow_step_round_trip_excludes_sub_resource_internals(self):
@@ -301,16 +299,12 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
             [os.path.join(TEST_DIR, "chat", "configuration.yaml", "style_prompt")],
         )
         self.assertEqual(
-            local_resources[SettingsPersonality],
-            [os.path.join(TEST_DIR, "agent_settings", "personality.yaml")],
-        )
-        self.assertEqual(
-            local_resources[SettingsRole],
-            [os.path.join(TEST_DIR, "agent_settings", "role.yaml")],
-        )
-        self.assertEqual(
             local_resources[SettingsRules],
             [os.path.join(TEST_DIR, "agent_settings", "rules.txt")],
+        )
+        self.assertEqual(
+            local_resources[SettingsPersona],
+            [os.path.join(TEST_DIR, "agent_settings", "persona.txt")],
         )
 
         # Finds all Functions and Flow Steps
@@ -429,11 +423,12 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
         )
 
         # Find Documents
-        self.assertEqual(len(local_resources[Document]), 1)
+        self.assertEqual(len(local_resources[Document]), 2)
         self.assertCountEqual(
             local_resources[Document],
             [
-                os.path.join(TEST_DIR, "context", "TEST_DOCUMENT.MD"),
+                os.path.join(TEST_DIR, "context", "test_document.md"),
+                os.path.join(TEST_DIR, "context", "CONTEXT.MD"),
             ],
         )
 

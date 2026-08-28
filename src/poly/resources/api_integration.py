@@ -338,7 +338,9 @@ class ApiIntegration(MultiResourceYamlResource):
             "name": self.name,
             "description": self.description,
             "environments": self.environments.to_yaml_dict(),
-            "operations": [op.to_yaml_dict() for op in self.operations],
+            "operations": [
+                op.to_yaml_dict() for op in sorted(self.operations, key=lambda op: op.name)
+            ],
         }
 
     @classmethod

@@ -182,7 +182,7 @@ The same settings can be configured in the Agent Studio UI. The platform docs co
 
     ---
 
-    Configure personality, role, and rules alongside project-level safety filters.
+    Configure the persona and rules alongside project-level safety filters.
     [Open agent settings](./agent_settings.md)
 
 -   **Guardrails**

@@ -8,13 +8,12 @@ import os
 import unittest
 
 import yaml
+from google.protobuf.json_format import MessageToDict
 from jsonschema import ValidationError
 
 import poly.resources.resource_utils as resource_utils
 from poly.resources.agent_settings import (
-    ALLOWED_ADJECTIVES,
-    SettingsPersonality,
-    SettingsRole,
+    SettingsPersona,
     SettingsRules,
 )
 from poly.resources.api_integration import (
@@ -60,6 +59,7 @@ from poly.resources.function import (
     FunctionLatencyControl,
     FunctionParameters,
     FunctionType,
+    LatencyControl,
 )
 from poly.resources.guardrails import CustomGuardrail, PlatformGuardrail
 from poly.resources.handoff import Handoff
@@ -84,9 +84,13 @@ from poly.resources.safety_filters import (
 )
 from poly.resources.sms import EnvPhoneNumbers, SMSTemplate
 from poly.resources.test_suite import (
+    ApiResponse,
+    ApiResponseRule,
     FunctionCallArgumentAssertion,
     FunctionCallAssertion,
     TestCase,
+    TestCaseApiMocks,
+    TestCaseApiOperationMock,
     TestCaseAssertion,
     TestCaseIntegrationAttributes,
     TestCaseSipHeaders,
@@ -514,6 +518,30 @@ def end_function(conv: Conversation, test_param: int):
         self.assertIn("silence_after_each_response=3000", raw)
         self.assertIn("('Please hold...', 5000)", raw)
         self.assertIn("('Still looking...', 8000)", raw)
+        self.assertNotIn("randomize=", raw)
+
+    def test_raw_includes_randomize_when_enabled(self):
+        """randomize=True is rendered on @func_latency_control when set."""
+        func = Function(
+            resource_id="123",
+            name="test_code",
+            description="A test function",
+            code=TEST_CODE,
+            parameters=[],
+            latency_control=FunctionLatencyControl(
+                enabled=True,
+                initial_delay=0,
+                interval=2,
+                delay_responses=[
+                    FunctionDelayResponse(message="One...", duration=3000),
+                    FunctionDelayResponse(message="Two...", duration=2000),
+                ],
+                randomize=True,
+            ),
+            function_type=FunctionType.GLOBAL,
+        )
+        raw = func.raw
+        self.assertIn("randomize=True", raw)
 
     def test_raw_omits_latency_control_when_disabled(self):
         """When latency_control.enabled is False, no decorator is rendered."""
@@ -541,11 +569,22 @@ def my_func(conv: Conversation):
         self.assertTrue(lc.enabled)
         self.assertEqual(lc.initial_delay, 5000)
         self.assertEqual(lc.interval, 3000)
+        self.assertFalse(lc.randomize)
         self.assertEqual(len(lc.delay_responses), 1)
         self.assertEqual(lc.delay_responses[0].message, "Hold on...")
         self.assertEqual(lc.delay_responses[0].duration, 5000)
         # Decorator should be stripped from code
         self.assertNotIn("func_latency_control", code)
+
+    def test_extract_latency_control_randomize(self):
+        """_extract_decorators parses randomize from @func_latency_control."""
+        code_with_decorator = """@func_latency_control(delay_before_responses_start=0, silence_after_each_response=2, delay_responses=[('Hold on...', 3000)], randomize=True)
+def my_func(conv: Conversation):
+    pass
+"""
+        _, _, _, lc = Function._extract_decorators(code_with_decorator, "my_func", [])
+        self.assertTrue(lc.enabled)
+        self.assertTrue(lc.randomize)
 
     def test_extract_preserves_known_delay_response_ids(self):
         """Existing delay-response IDs are preserved by message match."""
@@ -574,6 +613,7 @@ def my_func(conv: Conversation):
                 FunctionDelayResponse(id="DR-1", message="One moment...", duration=4000),
                 FunctionDelayResponse(id="DR-2", message="Almost there...", duration=6000),
             ],
+            randomize=True,
         )
         func = Function(
             resource_id="123",
@@ -587,6 +627,7 @@ def my_func(conv: Conversation):
             function_type=FunctionType.GLOBAL,
         )
         pretty = func.to_pretty(resource_mappings=[])
+        self.assertIn("randomize=True", pretty)
         reverted = Function.from_pretty(pretty, resource_mappings=[])
         code, params, desc, extracted_lc = Function._extract_decorators(
             reverted, "test_code", [], lc
@@ -594,12 +635,31 @@ def my_func(conv: Conversation):
         self.assertTrue(extracted_lc.enabled)
         self.assertEqual(extracted_lc.initial_delay, 4000)
         self.assertEqual(extracted_lc.interval, 2000)
+        self.assertTrue(extracted_lc.randomize)
         self.assertEqual(len(extracted_lc.delay_responses), 2)
         self.assertEqual(extracted_lc.delay_responses[0].message, "One moment...")
         self.assertEqual(extracted_lc.delay_responses[1].message, "Almost there...")
         # IDs are preserved
         self.assertEqual(extracted_lc.delay_responses[0].id, "DR-1")
         self.assertEqual(extracted_lc.delay_responses[1].id, "DR-2")
+
+    def test_latency_control_to_proto_includes_randomize(self):
+        """LatencyControl.to_proto sets randomize on the update command."""
+        sub = LatencyControl(
+            function_id="fn-1",
+            latency_control=FunctionLatencyControl(
+                enabled=True,
+                initial_delay=0,
+                interval=2,
+                delay_responses=[
+                    FunctionDelayResponse(id="DR-1", message="One...", duration=3000),
+                ],
+                randomize=True,
+            ),
+        )
+        proto = sub.to_proto()
+        self.assertTrue(proto.randomize)
+        self.assertTrue(proto.HasField("randomize"))
 
     def test_read_local_resource_with_latency_control(self):
         """read_local_resource correctly extracts latency control from file."""
@@ -900,6 +960,256 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
             Function._extract_decorators(code, "my_func", [])
         self.assertIn("booking_ref", str(ctx.exception))
         self.assertIn("unsupported type annotation", str(ctx.exception))
+
+    # -- _swap_latency_control_references tests --
+
+    def _make_variable_mapping(self, resource_id: str, resource_name: str) -> ResourceMapping:
+        """Helper to build a Variable ResourceMapping."""
+        return ResourceMapping(
+            resource_id=resource_id,
+            resource_name=resource_name,
+            resource_type=Variable,
+            file_path=f"variables/{resource_name.lower().replace(' ', '_')}.yaml",
+            resource_prefix="vrbl",
+            flow_name=None,
+        )
+
+    def _make_translation_mapping(self, resource_id: str, resource_name: str) -> ResourceMapping:
+        """Helper to build a Translation ResourceMapping."""
+        return ResourceMapping(
+            resource_id=resource_id,
+            resource_name=resource_name,
+            resource_type=Translation,
+            file_path=f"translations/{resource_name.lower().replace(' ', '_')}.yaml",
+            resource_prefix="tn",
+            flow_name=None,
+        )
+
+    def test_swap_ids_replaced_with_names_in_decorator_message(self):
+        """A variable ID reference in a delay_responses message is swapped to its name."""
+        code = (
+            "from _gen import *  # <AUTO GENERATED>\n\n"
+            "@func_latency_control(delay_responses=[('Hello {{vrbl:var-1}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertIn("{{vrbl:My Variable}}", result)
+        self.assertNotIn("{{vrbl:var-1}}", result)
+
+    def test_swap_names_replaced_with_ids_in_decorator_message(self):
+        """A variable name reference in a delay_responses message is swapped to its ID."""
+        code = (
+            "@func_latency_control(delay_responses=[('Hello {{vrbl:My Variable}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=True
+        )
+
+        self.assertIn("{{vrbl:var-1}}", result)
+        self.assertNotIn("{{vrbl:My Variable}}", result)
+
+    def test_swap_body_references_not_swapped(self):
+        """References inside the function body must NOT be touched."""
+        code = (
+            "@func_latency_control(delay_responses=[('decorator {{vrbl:var-1}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    msg = '{{vrbl:var-1}}'\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertIn("{{vrbl:My Variable}}", result)
+        body_line = [line for line in result.splitlines() if "msg = " in line][0]
+        self.assertIn("{{vrbl:var-1}}", body_line)
+
+    def test_swap_multiple_delay_responses_all_swapped(self):
+        """Every message in the delay_responses list is processed."""
+        code = (
+            "@func_latency_control(delay_responses=["
+            "('First {{vrbl:var-1}}', 3), "
+            "('Second {{tn:tn-1}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [
+            self._make_variable_mapping("var-1", "My Variable"),
+            self._make_translation_mapping("tn-1", "Greeting"),
+        ]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertIn("{{vrbl:My Variable}}", result)
+        self.assertIn("{{tn:Greeting}}", result)
+
+    def test_swap_no_decorator_returns_unchanged(self):
+        """Code without @func_latency_control is returned as-is."""
+        code = "def my_func(conv: Conversation):\n    msg = '{{vrbl:var-1}}'\n"
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertEqual(result, code)
+
+    def test_swap_decorator_without_delay_responses_returns_unchanged(self):
+        """@func_latency_control with no delay_responses keyword is returned as-is."""
+        code = (
+            "@func_latency_control(delay_before_responses_start=3)\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertEqual(result, code)
+
+    def test_swap_syntax_error_returns_unchanged(self):
+        """Unparseable code is returned as-is without raising."""
+        code = "def broken(:\n"
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertEqual(result, code)
+
+    def test_swap_no_matching_mapping_leaves_reference_unchanged(self):
+        """References with no corresponding ResourceMapping are left intact."""
+        code = (
+            "@func_latency_control(delay_responses=[('Hello {{vrbl:unknown-id}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertIn("{{vrbl:unknown-id}}", result)
+
+    def test_swap_async_function_decorator_swapped(self):
+        """References in async function decorators are also swapped."""
+        code = (
+            "@func_latency_control(delay_responses=[('Wait {{vrbl:var-1}}', 2)])\n"
+            "async def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertIn("{{vrbl:My Variable}}", result)
+        self.assertNotIn("{{vrbl:var-1}}", result)
+
+    def test_swap_empty_mappings_returns_unchanged(self):
+        """An empty mappings list means nothing can match, so code is unchanged."""
+        code = (
+            "@func_latency_control(delay_responses=[('Hello {{vrbl:var-1}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+
+        result = Function._swap_latency_control_references(
+            code, [], names_to_ids=False
+        )
+
+        self.assertEqual(result, code)
+
+    def test_swap_message_without_references_unchanged(self):
+        """A plain-text delay message with no references passes through unchanged."""
+        code = (
+            "@func_latency_control(delay_responses=[('Please hold', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertEqual(result, code)
+
+    def test_swap_roundtrip_ids_to_names_and_back(self):
+        """Swapping IDs to names and back yields the original code."""
+        original = (
+            "@func_latency_control(delay_responses=[('Hello {{vrbl:var-1}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        pretty = Function._swap_latency_control_references(
+            original, mappings, names_to_ids=False
+        )
+        restored = Function._swap_latency_control_references(
+            pretty, mappings, names_to_ids=True
+        )
+
+        self.assertEqual(restored, original)
+
+    def test_swap_finds_definitions_nested_in_statements(self):
+        """Decorated definitions below the top level are still found.
+
+        _iter_function_defs skips expressions for speed, so every statement container that
+        can hold a definition needs covering — otherwise the swap silently misses them.
+        """
+        decorator = "@func_latency_control(delay_responses=[('Hi {{vrbl:var-1}}', 5)])\n"
+        bodies = {
+            "nested in a function": (
+                "def outer(conv: Conversation):\n"
+                f"    {decorator}"
+                "    def inner(conv: Conversation):\n"
+                "        pass\n"
+            ),
+            "method on a class": (
+                f"class Handler:\n    {decorator}    def method(self, conv: Conversation):\n"
+                "        pass\n"
+            ),
+            "guarded by if": (
+                f"if True:\n    {decorator}    def my_func(conv: Conversation):\n        pass\n"
+            ),
+            "inside try/except": (
+                f"try:\n    {decorator}    def my_func(conv: Conversation):\n        pass\n"
+                "except ValueError:\n    pass\n"
+            ),
+            "inside a with block": (
+                f"with open('f') as fh:\n    {decorator}"
+                "    def my_func(conv: Conversation):\n        pass\n"
+            ),
+        }
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        for label, code in bodies.items():
+            with self.subTest(label):
+                result = Function._swap_latency_control_references(
+                    code, mappings, names_to_ids=False
+                )
+                self.assertIn("{{vrbl:My Variable}}", result)
+                self.assertNotIn("{{vrbl:var-1}}", result)
 
     def test_equality_ignores_variable_references(self):
         """variable_references must not affect equality.
@@ -1746,255 +2056,6 @@ class VoiceGreetingTests(unittest.TestCase):
             self.assertEqual(result.language_code, "en-GB")
 
 
-TEST_PERSONALITY = SettingsPersonality(
-    resource_id="personality_123",
-    name="personality",
-    adjectives={"Polite": True, "Calm": True, "Kind": False},
-    custom="",
-)
-
-PERSONALITY_RAW = """adjectives:
-  Calm: true
-  Polite: true
-custom: ''
-"""
-
-
-class SettingsPersonalityTests(unittest.TestCase):
-    def test_get_raw(self):
-        """Test that raw property returns correct YAML representation."""
-        self.assertEqual(TEST_PERSONALITY.raw, PERSONALITY_RAW)
-
-    def test_to_yaml_dict_strips_disabled_adjectives(self):
-        """Test that to_yaml_dict excludes adjectives set to False."""
-        yaml_dict = TEST_PERSONALITY.to_yaml_dict()
-        self.assertEqual(yaml_dict["adjectives"], {"Polite": True, "Calm": True})
-        self.assertNotIn("Kind", yaml_dict["adjectives"])
-
-    def test_to_yaml_dict_sorts_adjectives(self):
-        """Test that to_yaml_dict returns adjectives in sorted order."""
-        unsorted = SettingsPersonality(
-            resource_id="p1",
-            name="personality",
-            adjectives={"Polite": True, "Calm": True, "Energetic": True, "Kind": False},
-            custom="",
-        )
-        yaml_dict = unsorted.to_yaml_dict()
-        self.assertEqual(list(yaml_dict["adjectives"].keys()), ["Calm", "Energetic", "Polite"])
-
-    def test_to_yaml_dict_normalizes_empty_and_all_false(self):
-        """Test that both empty and all-false adjectives produce the same YAML dict."""
-        empty = SettingsPersonality(resource_id="p1", name="personality", adjectives={}, custom="")
-        all_false = SettingsPersonality(
-            resource_id="p2",
-            name="personality",
-            adjectives={"Polite": False, "Calm": False},
-            custom="",
-        )
-        self.assertEqual(empty.to_yaml_dict()["adjectives"], {})
-        self.assertEqual(all_false.to_yaml_dict()["adjectives"], {})
-
-    def test_to_pretty(self):
-        """Test converting personality to pretty format."""
-        pretty_content = TEST_PERSONALITY.to_pretty()
-        self.assertIn("Polite", pretty_content)
-
-    def test_convert_and_unconvert_personality(self):
-        """Test roundtrip conversion: to_pretty -> from_pretty."""
-        converted_personality = TEST_PERSONALITY.to_pretty()
-        reverted_personality = SettingsPersonality.from_pretty(converted_personality)
-        self.assertEqual(reverted_personality, TEST_PERSONALITY.raw)
-
-    def test_validate_personality_settings(self):
-        """Test validation of personality settings."""
-        self.assertIsNone(TEST_PERSONALITY.validate())
-
-        # Test with custom and other adjectives (invalid)
-        invalid_personality = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"Polite": True, "Other": True},
-            custom="Custom personality description",
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_personality.validate()
-        self.assertIn(
-            "Other adjective can only be set if no other adjectives are selected.",
-            str(cm.exception),
-        )
-
-        # Test with invalid adjectives
-        invalid_personality = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"InvalidAdjective": True},
-            custom="",
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_personality.validate()
-        self.assertIn("Enabled adjectives must be from the allowed set:", str(cm.exception))
-
-        # Test with disabled invalid adjective (valid — only enabled adjectives are checked)
-        personality_with_disabled_invalid = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"Polite": True, "InvalidAdjective": False},
-            custom="",
-        )
-        self.assertIsNone(personality_with_disabled_invalid.validate())
-
-        # Test with custom and 'Other' selected (valid case)
-        valid_personality = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"Other": True},
-            custom="Custom personality description",
-        )
-        self.assertIsNone(valid_personality.validate())
-
-        # Test with invalid function reference in custom field
-        invalid_personality = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"Other": True},
-            custom="Use {{fn:func-123}} in custom personality",
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_personality.validate()
-        self.assertIn(
-            "Invalid reference type: global_functions is not a valid reference type for this resource.",
-            str(cm.exception),
-        )
-
-    def test_build_update_proto_sends_all_allowed_adjectives(self):
-        """Test that build_update_proto sends all allowed adjectives, defaulting unset to False."""
-        personality = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"Polite": True, "InvalidAdjective": False, "Calm": True},
-            custom="",
-        )
-        proto = personality.build_update_proto()
-        adjective_values = proto.adjectives.values
-        self.assertNotIn("InvalidAdjective", adjective_values)
-        self.assertEqual(set(adjective_values.keys()), ALLOWED_ADJECTIVES)
-        self.assertTrue(adjective_values["Polite"])
-        self.assertTrue(adjective_values["Calm"])
-        self.assertFalse(adjective_values["Kind"])
-        self.assertFalse(adjective_values["Funny"])
-
-    def test_read_local_resource(self):
-        """Test reading a personality from a YAML file."""
-        test_file_pretty_content = """adjectives:
-  Polite: true
-  Calm: true
-custom: ''
-"""
-
-        with mock_read_from_file(test_file_pretty_content):
-            result = SettingsPersonality.read_local_resource(
-                file_path="agent_settings/personality.yaml",
-                resource_id="personality_123",
-                resource_name="personality",
-            )
-
-            self.assertEqual(result.resource_id, "personality_123")
-            self.assertEqual(result.name, "personality")
-            self.assertIn("Polite", result.adjectives)
-            self.assertEqual(result.custom, "")
-
-
-TEST_ROLE = SettingsRole(
-    resource_id="role_123",
-    name="role",
-    value="Customer Service Representative",
-    additional_info="Handles customer inquiries and support requests",
-    custom="",
-)
-
-ROLE_RAW = """value: Customer Service Representative
-additional_info: Handles customer inquiries and support requests
-custom: ''
-"""
-
-
-class SettingsRoleTests(unittest.TestCase):
-    def test_get_raw(self):
-        """Test that raw property returns correct YAML representation."""
-        self.assertEqual(TEST_ROLE.raw, ROLE_RAW)
-
-    def test_to_pretty(self):
-        """Test converting role to pretty format."""
-        pretty_content = TEST_ROLE.to_pretty()
-        self.assertIn("Customer Service Representative", pretty_content)
-
-    def test_convert_and_unconvert_role(self):
-        """Test roundtrip conversion: to_pretty -> from_pretty."""
-        converted_role = TEST_ROLE.to_pretty()
-        reverted_role = SettingsRole.from_pretty(converted_role)
-        self.assertEqual(reverted_role, TEST_ROLE.raw)
-
-    def test_validate_role_settings(self):
-        """Test validation of role settings."""
-        self.assertIsNone(TEST_ROLE.validate(resource_mappings=[]))
-
-        # Test with custom and non-other role (invalid)
-        invalid_role = SettingsRole(
-            resource_id="role_123",
-            name="role",
-            value="Customer Service Representative",
-            additional_info="",
-            custom="Custom role description",
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_role.validate(resource_mappings=[])
-        self.assertIn("Custom role can only be set if role is 'other'.", str(cm.exception))
-
-        # Test with custom and 'other' role (valid case)
-        valid_role = SettingsRole(
-            resource_id="role_123",
-            name="role",
-            value="Other",
-            additional_info="",
-            custom="Custom role description",
-        )
-        self.assertIsNone(valid_role.validate(resource_mappings=[]))
-
-        # Test with invalid function reference in custom field
-        invalid_role = SettingsRole(
-            resource_id="role_123",
-            name="role",
-            value="Other",
-            additional_info="",
-            custom="Use {{fn:func-123}} in custom role",
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_role.validate(resource_mappings=[])
-        self.assertIn(
-            "Invalid reference type: global_functions is not a valid reference type for this resource.",
-            str(cm.exception),
-        )
-
-    def test_read_local_resource(self):
-        """Test reading a role from a YAML file."""
-        test_file_pretty_content = """value: Customer Service Representative
-additional_info: Handles customer inquiries
-custom: ''
-"""
-
-        with mock_read_from_file(test_file_pretty_content):
-            result = SettingsRole.read_local_resource(
-                file_path="agent_settings/role.yaml",
-                resource_id="role_123",
-                resource_name="role",
-            )
-
-            self.assertEqual(result.resource_id, "role_123")
-            self.assertEqual(result.name, "role")
-            self.assertEqual(result.value, "Customer Service Representative")
-            self.assertEqual(result.additional_info, "Handles customer inquiries")
-
-
 TEST_RULES = SettingsRules(
     resource_id="rules_123",
     name="rules",
@@ -2179,6 +2240,167 @@ TEST_FLOW_CONFIG = FlowConfig(
     description="A test flow description",
     start_step="step-1",
 )
+
+TEST_PERSONA = SettingsPersona(
+    resource_id="persona_123",
+    name="persona",
+    content="You are a calm concierge. Greet {{vrbl:VAR-customer_name}} by name.",
+)
+
+PERSONA_VARIABLE_MAPPING = [
+    ResourceMapping(
+        resource_id="VAR-customer_name",
+        resource_name="customer_name",
+        resource_type=Variable,
+        file_path="variables/customer_name",
+        resource_prefix="vrbl",
+        flow_name=None,
+    ),
+    ResourceMapping(
+        resource_id="ATTR-brand_name",
+        resource_name="brand_name",
+        resource_type=VariantAttribute,
+        file_path="config/variant_attributes.yaml",
+        resource_prefix="attr",
+        flow_name=None,
+    ),
+]
+
+
+def _persona_projection(persona: dict | None) -> dict:
+    agent_settings = {"rules": {"behaviour": "Be polite and helpful"}}
+    if persona is not None:
+        agent_settings["persona"] = persona
+    return {"agentSettings": agent_settings}
+
+
+class SettingsPersonaTests(unittest.TestCase):
+    def test_get_raw(self):
+        """Test that raw property returns the content string."""
+        self.assertEqual(TEST_PERSONA.raw, TEST_PERSONA.content)
+
+    def test_file_path(self):
+        """Test that the persona is stored as plain text next to the other settings."""
+        self.assertEqual(TEST_PERSONA.file_path, os.path.join("agent_settings", "persona.txt"))
+
+    def test_convert_and_unconvert_persona(self):
+        """Test roundtrip conversion: to_pretty -> from_pretty."""
+        pretty_content = TEST_PERSONA.to_pretty(resource_mappings=PERSONA_VARIABLE_MAPPING)
+        self.assertIn("{{vrbl:customer_name}}", pretty_content)
+        self.assertNotIn("{{vrbl:VAR-customer_name}}", pretty_content)
+
+        reverted = SettingsPersona.from_pretty(
+            pretty_content, resource_mappings=PERSONA_VARIABLE_MAPPING
+        )
+        self.assertEqual(reverted, TEST_PERSONA.raw)
+
+    def test_validate_variable_reference(self):
+        """Test validation accepts a known variable and rejects an unknown one."""
+        self.assertIsNone(TEST_PERSONA.validate(resource_mappings=PERSONA_VARIABLE_MAPPING))
+
+        with self.assertRaises(ValueError) as cm:
+            TEST_PERSONA.validate(resource_mappings=[])
+        self.assertIn("Invalid references: ['variables: VAR-customer_name']", str(cm.exception))
+
+    def test_validate_attribute_reference(self):
+        """Test that attributes are accepted, as they were on personality and role."""
+        persona_with_attr = SettingsPersona(
+            resource_id="persona_123",
+            name="persona",
+            content="You are a concierge for {{attr:ATTR-brand_name}}.",
+        )
+        self.assertIsNone(persona_with_attr.validate(resource_mappings=PERSONA_VARIABLE_MAPPING))
+
+        with self.assertRaises(ValueError) as cm:
+            persona_with_attr.validate(resource_mappings=[])
+        self.assertIn("Invalid references: ['attributes: ATTR-brand_name']", str(cm.exception))
+
+    def test_validate_rejects_behavioural_references(self):
+        """Test that behavioural references belong in rules.txt, not the persona."""
+        persona_with_fn = SettingsPersona(
+            resource_id="persona_123",
+            name="persona",
+            content="You are a concierge. Use {{fn:book_table}}.",
+        )
+        with self.assertRaises(ValueError) as cm:
+            persona_with_fn.validate(resource_mappings=[])
+        self.assertIn("Invalid reference type: global_functions", str(cm.exception))
+
+    def test_build_update_proto_omits_attribute_references(self):
+        """Test that attribute references stay in the content, untracked.
+
+        PersonaReferences has a variables map and nothing else — the same shape
+        PersonalityReferences and RoleReferences had.
+        """
+        proto = SettingsPersona(
+            resource_id="persona_123",
+            name="persona",
+            content="You are a concierge for {{attr:ATTR-brand_name}}.",
+        ).build_update_proto()
+        self.assertIn("{{attr:ATTR-brand_name}}", proto.content)
+        self.assertEqual(dict(proto.references.variables), {})
+
+    def test_build_update_proto(self):
+        """Test building the update proto, including variable references."""
+        proto = TEST_PERSONA.build_update_proto()
+        self.assertEqual(proto.content, TEST_PERSONA.content)
+        self.assertEqual(dict(proto.references.variables), {"VAR-customer_name": True})
+
+    def test_build_update_proto_without_references(self):
+        """Test that references are always sent, even when empty."""
+        proto = SettingsPersona(
+            resource_id="persona_123",
+            name="persona",
+            content="You are a calm concierge.",
+        ).build_update_proto()
+        self.assertEqual(dict(proto.references.variables), {})
+
+    def test_command_type(self):
+        """Test that pushing a persona sends update_persona."""
+        self.assertEqual(TEST_PERSONA.command_type, "persona")
+        self.assertEqual(TEST_PERSONA.update_command_type, "update_persona")
+
+    def test_create_and_delete_not_supported(self):
+        """Test that the platform offers no create or delete for the persona."""
+        with self.assertRaises(NotImplementedError):
+            TEST_PERSONA.build_create_proto()
+        with self.assertRaises(NotImplementedError):
+            TEST_PERSONA.build_delete_proto()
+
+    def test_from_projection(self):
+        """Test that persona content becomes a SettingsPersona resource."""
+        resources = SettingsPersona.from_projection(
+            _persona_projection({"content": "You are a calm Consultant."})
+        )
+        self.assertEqual(
+            resources["persona"],
+            SettingsPersona(
+                resource_id="persona",
+                name="persona",
+                content="You are a calm Consultant.",
+            ),
+        )
+
+    def test_from_projection_without_content(self):
+        """Test a persona object that carries no content."""
+        self.assertEqual(
+            SettingsPersona.from_projection(
+                _persona_projection(
+                    {"createdAt": "", "createdBy": "", "references": {"variables": {}}}
+                )
+            ),
+            {},
+        )
+
+    def test_from_projection_without_persona(self):
+        """Test a projection with no persona key at all."""
+        self.assertEqual(SettingsPersona.from_projection(_persona_projection(None)), {})
+
+    def test_from_projection_with_empty_content(self):
+        """Test that an authored but empty persona is still a resource."""
+        resources = SettingsPersona.from_projection(_persona_projection({"content": ""}))
+        self.assertEqual(resources["persona"].content, "")
+
 
 FLOW_CONFIG_RAW = """name: Test Flow
 description: A test flow description
@@ -2546,6 +2768,35 @@ class FlowStepTests(unittest.TestCase):
     def test_get_raw_no_code_step(self):
         """Test that raw property returns correct YAML representation for no code step."""
         self.assertEqual(TEST_NO_CODE_FLOW_STEP.raw, FLOW_NO_CODE_STEP_RAW)
+
+    def test_conditions_sorted_by_name(self):
+        """Test that conditions are serialized in alphabetical order by name."""
+        step = FlowStep(
+            resource_id="flow-123_step-1",
+            step_id="step-1",
+            name="Test Step",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.DEFAULT_STEP,
+            conditions=[
+                Condition(
+                    resource_id=f"cond-{name}",
+                    name=name,
+                    description="",
+                    condition_type=ConditionType.STEP,
+                    child_step="step-2",
+                    step_id="step-1",
+                    flow_id="flow-123",
+                )
+                for name in ["zebra", "apple", "monkey"]
+            ],
+            prompt="Hello, how can I help you?",
+            position={"x": 0.0, "y": 0.0},
+            extracted_entities=[],
+        )
+
+        condition_names = [c["name"] for c in step.to_yaml_dict()["conditions"]]
+        self.assertEqual(condition_names, ["apple", "monkey", "zebra"])
 
     def test_to_pretty(self):
         """Test converting flow step to pretty format with function name mapping."""
@@ -5118,6 +5369,22 @@ class ApiIntegrationTest(unittest.TestCase):
         self.assertEqual(i2.operations[0].name, "get")
         self.assertEqual(i2.operations[0].resource_id, "")
 
+    def test_api_integration_operations_sorted_by_name(self):
+        """Operations serialize in alphabetical order by name."""
+        integration = ApiIntegration(
+            resource_id="int-1",
+            name="TestAPI",
+            operations=[
+                ApiIntegrationOperation(
+                    resource_id=f"op-{name}", name=name, method="GET", resource="/x"
+                )
+                for name in ["refund", "charge", "get_customer"]
+            ],
+        )
+
+        operation_names = [op["name"] for op in integration.to_yaml_dict()["operations"]]
+        self.assertEqual(operation_names, ["charge", "get_customer", "refund"])
+
     def test_api_integration_build_protos(self):
         """ApiIntegration build_create_proto, build_update_proto, build_delete_proto set id and environments."""
         env = ApiIntegrationEnvironments.from_dict(
@@ -7175,6 +7442,39 @@ class TestCaseTests(unittest.TestCase):
             language="en-GB",
         )
 
+    def test_assertions_sorted_by_name(self):
+        """Function call assertions and their arguments serialize in alphabetical order."""
+        assertions = TestCaseAssertion(
+            resource_id="TEST-ordering",
+            name="assertions",
+            prompts=[],
+            function_calls=[
+                FunctionCallAssertion(
+                    name=name,
+                    arguments=[
+                        FunctionCallArgumentAssertion(
+                            parameter_name=parameter_name,
+                            expected_value="value",
+                            value_type="string",
+                        )
+                        for parameter_name in ["zebra", "apple", "monkey"]
+                    ],
+                )
+                for name in ["transfer_call", "book_appointment", "lookup_order"]
+            ],
+        )
+
+        function_calls = assertions.to_yaml_dict()["function_call_assertions"]
+
+        self.assertEqual(
+            [call["name"] for call in function_calls],
+            ["book_appointment", "lookup_order", "transfer_call"],
+        )
+        self.assertEqual(
+            [arg["parameter_name"] for arg in function_calls[0]["arguments"]],
+            ["apple", "monkey", "zebra"],
+        )
+
     def test_to_yaml_dict_from_yaml_dict_roundtrip(self):
         test_case = self._sample_test_case()
         yaml_dict = test_case.to_yaml_dict()
@@ -7861,6 +8161,645 @@ class TestCaseMockContextTests(unittest.TestCase):
         self.assertEqual(test_case.sip_headers.headers, {})
         self.assertEqual(test_case.integration_attributes.attributes, {})
         self.assertNotIn("sip_headers", test_case.to_yaml_dict())
+
+
+class TestCaseApiMocksTests(unittest.TestCase):
+    """Mocked API responses (api_mocks) on a test case, for AM-960."""
+
+    RESOURCE_ID = "TEST-api_mocks"
+
+    def _test_case(self, **overrides) -> TestCase:
+        defaults = {
+            "resource_id": self.RESOURCE_ID,
+            "name": "Api mocks test",
+            "scenario": "Caller asks about their order.",
+            "channel": "chat.polyai",
+            "language": "en-GB",
+            "assertions": TestCaseAssertion(
+                resource_id=self.RESOURCE_ID, name="assertions", prompts=[], function_calls=[]
+            ),
+            "tags": TestCaseTags(resource_id=self.RESOURCE_ID, name="tags", tags=[]),
+        }
+        defaults.update(overrides)
+        return TestCase(**defaults)
+
+    def _api_mocks(self, mocks: dict) -> TestCaseApiMocks:
+        return TestCaseApiMocks(mocks=mocks)
+
+    def _integration_mapping(self, name: str) -> ResourceMapping:
+        return ResourceMapping(
+            resource_id=f"API-{name}",
+            resource_name=name,
+            resource_type=ApiIntegration,
+            resource_prefix=None,
+            file_path=None,
+            flow_name=None,
+        )
+
+    def test_yaml_roundtrip_preserves_values_and_types(self):
+        api_mocks = self._api_mocks(
+            {
+                "crm": {
+                    "get_customer": [
+                        ApiResponseRule(
+                            respond=ApiResponse(
+                                status=200,
+                                body={"id": 1, "name": "Ada", "vip": True},
+                                headers={"x-trace-id": "abc-123"},
+                            )
+                        ),
+                        # No body, repeat set: the second rule in the sequence.
+                        ApiResponseRule(respond=ApiResponse(status=500), repeat=3),
+                    ]
+                },
+                "payments": {
+                    "charge": [
+                        # repeat unset: respond once, then advance to the next rule.
+                        ApiResponseRule(respond=ApiResponse(status=201, body={"ok": True})),
+                    ]
+                },
+            }
+        )
+        test_case = self._test_case(api_mocks=api_mocks)
+
+        yaml_dict = test_case.to_yaml_dict()
+        mocks_yaml = yaml_dict["api_mocks"]
+        self.assertEqual(
+            mocks_yaml["crm"]["get_customer"][0],
+            {
+                "respond": {
+                    "status": 200,
+                    "body": {"id": 1, "name": "Ada", "vip": True},
+                    "headers": {"x-trace-id": "abc-123"},
+                }
+            },
+        )
+        self.assertNotIn("repeat", mocks_yaml["crm"]["get_customer"][0])
+        self.assertEqual(
+            mocks_yaml["crm"]["get_customer"][1], {"respond": {"status": 500}, "repeat": 3}
+        )
+        self.assertNotIn("repeat", mocks_yaml["payments"]["charge"][0])
+
+        restored = TestCase.from_yaml_dict(
+            yaml_dict, resource_id=self.RESOURCE_ID, name="Api mocks test"
+        )
+        restored_mocks = restored.api_mocks.mocks
+        first_rule = restored_mocks["crm"]["get_customer"][0]
+        self.assertEqual(first_rule.respond.status, 200)
+        self.assertEqual(first_rule.respond.body, {"id": 1, "name": "Ada", "vip": True})
+        self.assertEqual(first_rule.respond.headers, {"x-trace-id": "abc-123"})
+        self.assertIsNone(first_rule.repeat)
+
+        second_rule = restored_mocks["crm"]["get_customer"][1]
+        self.assertIsNone(second_rule.respond.body)
+        self.assertEqual(second_rule.repeat, 3)
+
+        third_rule = restored_mocks["payments"]["charge"][0]
+        self.assertEqual(third_rule.respond.body, {"ok": True})
+        self.assertIsNone(third_rule.repeat)
+
+    def test_omits_empty_values_from_yaml(self):
+        yaml_dict = self._test_case().to_yaml_dict()
+
+        self.assertNotIn("api_mocks", yaml_dict)
+
+    def test_yaml_sorts_integration_and_operation_names(self):
+        """Integration/operation names serialize alphabetically; rule order is preserved."""
+        api_mocks = self._api_mocks(
+            {
+                "payments": {
+                    "refund": [ApiResponseRule(respond=ApiResponse(status=200))],
+                    "charge": [
+                        ApiResponseRule(respond=ApiResponse(status=500), repeat=2),
+                        ApiResponseRule(respond=ApiResponse(status=201)),
+                    ],
+                },
+                "crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]},
+            }
+        )
+
+        mocks_yaml = self._test_case(api_mocks=api_mocks).to_yaml_dict()["api_mocks"]
+
+        self.assertEqual(list(mocks_yaml), ["crm", "payments"])
+        self.assertEqual(list(mocks_yaml["payments"]), ["charge", "refund"])
+        self.assertEqual(
+            mocks_yaml["payments"]["charge"],
+            [{"respond": {"status": 500}, "repeat": 2}, {"respond": {"status": 201}}],
+        )
+
+    def _operation_mock(self, **overrides) -> TestCaseApiOperationMock:
+        defaults = {
+            "resource_id": f"{self.RESOURCE_ID}:crm:get_customer",
+            "name": "api_mocks",
+            "integration_name": "crm",
+            "operation_name": "get_customer",
+            "test_case_id": self.RESOURCE_ID,
+        }
+        defaults.update(overrides)
+        return TestCaseApiOperationMock(**defaults)
+
+    def test_update_command_type(self):
+        self.assertEqual(
+            self._operation_mock().update_command_type, "update_test_case_api_operation_mock"
+        )
+
+    def test_delete_command_type(self):
+        self.assertEqual(
+            self._operation_mock().delete_command_type, "delete_test_case_api_operation_mock"
+        )
+
+    def test_build_update_proto_targets_one_operation(self):
+        operation_mock = self._operation_mock(
+            rules=[
+                ApiResponseRule(
+                    respond=ApiResponse(
+                        status=200,
+                        body={"id": 1, "flag": True, "meta": {"a": 1}},
+                        headers={"x-trace": "abc"},
+                    )
+                ),
+                ApiResponseRule(respond=ApiResponse(status=404), repeat=5),
+            ]
+        )
+
+        proto = operation_mock.build_update_proto()
+
+        self.assertEqual(proto.id, self.RESOURCE_ID)
+        self.assertEqual(proto.integration_name, "crm")
+        self.assertEqual(proto.operation_name, "get_customer")
+        self.assertEqual(len(proto.responses), 2)
+
+        first = proto.responses[0]
+        self.assertEqual(first.respond.status, 200)
+        self.assertEqual(dict(first.respond.headers), {"x-trace": "abc"})
+        self.assertEqual(
+            MessageToDict(first.respond.body), {"id": 1, "flag": True, "meta": {"a": 1}}
+        )
+        self.assertFalse(first.HasField("repeat"))
+
+        second = proto.responses[1]
+        self.assertEqual(second.respond.status, 404)
+        self.assertFalse(second.respond.HasField("body"))
+        self.assertTrue(second.HasField("repeat"))
+        self.assertEqual(second.repeat, 5)
+
+    def test_build_delete_proto_targets_one_operation(self):
+        proto = self._operation_mock().build_delete_proto()
+
+        self.assertEqual(proto.id, self.RESOURCE_ID)
+        self.assertEqual(proto.integration_name, "crm")
+        self.assertEqual(proto.operation_name, "get_customer")
+
+    def test_build_create_proto_not_implemented(self):
+        with self.assertRaises(NotImplementedError):
+            self._operation_mock().build_create_proto()
+
+    def test_from_projection_parses_flat_api_mocks(self):
+        """The projection's apiMocks is flat — {integration: {operation: [rule,
+        ...]}} — matching the redux entity slice (test-cases.ts), not the nested
+        integrations/operations/responses shape used by the protobuf wire format
+        internal to agent-stream."""
+        projection = {
+            "testing": {
+                "testCases": {
+                    "entities": {
+                        self.RESOURCE_ID: {
+                            "name": "Api mocks test",
+                            "scenario": "Caller asks about their order.",
+                            "channel": "chat.polyai",
+                            "language": "en-GB",
+                            "apiMocks": {
+                                "crm": {
+                                    "get_customer": [
+                                        {
+                                            "respond": {
+                                                "status": 200,
+                                                "body": {"id": 1},
+                                                "headers": {"x-trace": "abc"},
+                                            }
+                                        },
+                                        {"respond": {"status": 500}, "repeat": 3},
+                                    ]
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        }
+
+        test_case = TestCase.from_projection(projection)[self.RESOURCE_ID]
+        mocks = test_case.api_mocks.mocks
+
+        self.assertCountEqual(mocks.keys(), ["crm"])
+        rules = mocks["crm"]["get_customer"]
+        self.assertEqual(rules[0].respond.status, 200)
+        self.assertEqual(rules[0].respond.body, {"id": 1})
+        self.assertEqual(rules[0].respond.headers, {"x-trace": "abc"})
+        self.assertIsNone(rules[0].repeat)
+        self.assertEqual(rules[1].respond.status, 500)
+        self.assertEqual(rules[1].repeat, 3)
+
+    def test_from_projection_without_api_mocks(self):
+        projection = {
+            "testing": {
+                "testCases": {
+                    "entities": {
+                        self.RESOURCE_ID: {
+                            "name": "Api mocks test",
+                            "scenario": "Caller asks about their order.",
+                            "channel": "chat.polyai",
+                            "language": "en-GB",
+                        }
+                    }
+                }
+            }
+        }
+
+        test_case = TestCase.from_projection(projection)[self.RESOURCE_ID]
+
+        self.assertEqual(test_case.api_mocks.mocks, {})
+        self.assertNotIn("api_mocks", test_case.to_yaml_dict())
+
+    def test_subresource_pushed_on_create_when_non_empty(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+            )
+        )
+
+        _, updated, deleted = test_case.get_new_updated_deleted_subresources()
+
+        mock_updates = [u for u in updated if isinstance(u, TestCaseApiOperationMock)]
+        self.assertEqual(len(mock_updates), 1)
+        pushed = mock_updates[0]
+        self.assertEqual(pushed.integration_name, "crm")
+        self.assertEqual(pushed.operation_name, "get_customer")
+        self.assertEqual(pushed.rules, [ApiResponseRule(respond=ApiResponse(status=200))])
+        self.assertEqual(deleted, [])
+
+    def test_subresource_omitted_on_create_when_empty(self):
+        test_case = self._test_case()
+
+        _, updated, deleted = test_case.get_new_updated_deleted_subresources()
+
+        self.assertFalse(any(isinstance(u, TestCaseApiOperationMock) for u in updated))
+        self.assertEqual(deleted, [])
+
+    def test_subresource_pushed_on_update_when_changed(self):
+        old = self._test_case()
+        new = self._test_case(
+            api_mocks=self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+            )
+        )
+
+        _, updated, deleted = new.get_new_updated_deleted_subresources(old)
+
+        mock_updates = [u for u in updated if isinstance(u, TestCaseApiOperationMock)]
+        self.assertEqual(len(mock_updates), 1)
+        self.assertEqual(mock_updates[0].integration_name, "crm")
+        self.assertEqual(mock_updates[0].operation_name, "get_customer")
+        self.assertEqual(deleted, [])
+
+    def test_subresource_omitted_on_update_when_unchanged(self):
+        mocks = {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+        old = self._test_case(api_mocks=self._api_mocks(mocks))
+        new = self._test_case(
+            api_mocks=self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+            )
+        )
+
+        _, updated, deleted = new.get_new_updated_deleted_subresources(old)
+
+        self.assertFalse(any(isinstance(u, TestCaseApiOperationMock) for u in updated))
+        self.assertEqual(deleted, [])
+
+    def test_subresource_updates_only_the_changed_operation(self):
+        """Changing one operation must not re-push a sibling operation that's untouched."""
+        old = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [ApiResponseRule(respond=ApiResponse(status=200))],
+                        "list_customers": [ApiResponseRule(respond=ApiResponse(status=200))],
+                    }
+                }
+            )
+        )
+        new = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [ApiResponseRule(respond=ApiResponse(status=503))],
+                        "list_customers": [ApiResponseRule(respond=ApiResponse(status=200))],
+                    }
+                }
+            )
+        )
+
+        _, updated, deleted = new.get_new_updated_deleted_subresources(old)
+
+        self.assertEqual(len(updated), 1)
+        self.assertEqual(updated[0].operation_name, "get_customer")
+        self.assertEqual(deleted, [])
+
+    def test_subresource_deleted_when_operation_removed(self):
+        old = self._test_case(
+            api_mocks=self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+            )
+        )
+        new = self._test_case()
+
+        _, updated, deleted = new.get_new_updated_deleted_subresources(old)
+
+        self.assertEqual(updated, [])
+        self.assertEqual(len(deleted), 1)
+        deleted_mock = deleted[0]
+        self.assertIsInstance(deleted_mock, TestCaseApiOperationMock)
+        self.assertEqual(deleted_mock.integration_name, "crm")
+        self.assertEqual(deleted_mock.operation_name, "get_customer")
+
+    def test_validate_accepts_a_well_formed_mock(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [
+                            ApiResponseRule(
+                                respond=ApiResponse(status=100, body={"a": 1}, headers={"x": "y"})
+                            ),
+                            ApiResponseRule(respond=ApiResponse(status=599), repeat=1),
+                        ]
+                    }
+                }
+            )
+        )
+
+        test_case.validate(resource_mappings=[self._integration_mapping("crm")])
+        # Also valid with no resource_mappings at all (integrations unknown).
+        test_case.validate()
+
+    def test_validate_rejects_bad_status(self):
+        for bad_status in (0, 999, "200", True, False):
+            with self.subTest(status=bad_status):
+                test_case = self._test_case(
+                    api_mocks=self._api_mocks(
+                        {
+                            "crm": {
+                                "get_customer": [
+                                    ApiResponseRule(respond=ApiResponse(status=bad_status))
+                                ]
+                            }
+                        }
+                    )
+                )
+
+                with self.assertRaises(ValueError) as ctx:
+                    test_case.validate()
+                self.assertIn("must be an HTTP status code", str(ctx.exception))
+
+    def test_validate_rejects_unknown_integration(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {"unknown_integration": {"get_customer": [ApiResponseRule(respond=ApiResponse())]}}
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate(resource_mappings=[self._integration_mapping("crm")])
+        self.assertIn("Unknown API integration", str(ctx.exception))
+        self.assertIn("unknown_integration", str(ctx.exception))
+
+    def test_validate_rejects_empty_integration_name(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {"": {"get_customer": [ApiResponseRule(respond=ApiResponse())]}}
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+        self.assertIn("integration name cannot be empty", str(ctx.exception))
+
+    def test_validate_rejects_empty_operation_name(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks({"crm": {"": [ApiResponseRule(respond=ApiResponse())]}})
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+        self.assertIn("empty operation name", str(ctx.exception))
+
+    def test_validate_rejects_an_operation_with_no_response_rules(self):
+        test_case = self._test_case(api_mocks=self._api_mocks({"crm": {"get_customer": []}}))
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+        self.assertIn("must have at least one response rule", str(ctx.exception))
+
+    def test_validate_rejects_bad_header_keys(self):
+        for headers in ({"": "v"}, {2: "v"}):
+            with self.subTest(headers=headers):
+                test_case = self._test_case(
+                    api_mocks=self._api_mocks(
+                        {
+                            "crm": {
+                                "get_customer": [
+                                    ApiResponseRule(
+                                        respond=ApiResponse(status=200, headers=headers)
+                                    )
+                                ]
+                            }
+                        }
+                    )
+                )
+
+                with self.assertRaises(ValueError) as ctx:
+                    test_case.validate()
+                self.assertIn("header keys must be non-empty text", str(ctx.exception))
+
+    def test_validate_rejects_bad_repeat(self):
+        for bad_repeat in (0, -2, 1.5, True):
+            with self.subTest(repeat=bad_repeat):
+                test_case = self._test_case(
+                    api_mocks=self._api_mocks(
+                        {
+                            "crm": {
+                                "get_customer": [
+                                    ApiResponseRule(
+                                        respond=ApiResponse(status=200), repeat=bad_repeat
+                                    )
+                                ]
+                            }
+                        }
+                    )
+                )
+
+                with self.assertRaises(ValueError) as ctx:
+                    test_case.validate()
+                self.assertIn("must be a positive integer", str(ctx.exception))
+
+    def test_validate_accepts_repeat_negative_one_on_last_rule(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [
+                            ApiResponseRule(respond=ApiResponse(status=503), repeat=1),
+                            ApiResponseRule(respond=ApiResponse(status=200), repeat=-1),
+                        ]
+                    }
+                }
+            )
+        )
+
+        test_case.validate()
+
+    def test_validate_rejects_repeat_negative_one_not_on_last_rule(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [
+                            ApiResponseRule(respond=ApiResponse(status=503), repeat=-1),
+                            ApiResponseRule(respond=ApiResponse(status=200)),
+                        ]
+                    }
+                }
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+        self.assertIn("only valid on the last response rule", str(ctx.exception))
+
+    def test_validate_rejects_a_date_in_the_body(self):
+        """Reuses _validate_attribute_value, same as integration_attributes."""
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [
+                            ApiResponseRule(
+                                respond=ApiResponse(
+                                    status=200, body={"expiry": datetime.date(2026, 8, 12)}
+                                )
+                            )
+                        ]
+                    }
+                }
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+
+        message = str(ctx.exception)
+        self.assertIn("body.expiry", message)
+        self.assertIn("2026-08-12", message)
+
+    def test_api_response_from_dict_defaults(self):
+        response = ApiResponse.from_dict(None)
+
+        self.assertEqual(response.status, 200)
+        self.assertIsNone(response.body)
+        self.assertEqual(response.headers, {})
+
+    def test_api_response_from_dict_keeps_ints_as_ints(self):
+        """Mirrors _normalise_attribute: a body pushed through google.protobuf.Value
+        (a double) must not read a pushed int back as a float."""
+        response = ApiResponse.from_dict({"status": 200, "body": {"count": 2}})
+
+        self.assertEqual(response.body, {"count": 2})
+        self.assertIsInstance(response.body["count"], int)
+
+    def test_api_mocks_round_trips_through_resource_to_dict(self):
+        """TestCaseApiMocks isn't a SubResource, so resource_to_dict wraps its
+        one field as {"mocks": {...}} rather than matching __init__ directly
+        (unlike sip_headers/integration_attributes). Reloading that dict through
+        TestCase(**d) — as project status-file loading does — must not treat
+        "mocks" itself as a fake integration name."""
+        mocks = {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+        test_case = self._test_case(api_mocks=self._api_mocks(mocks))
+
+        reloaded = TestCase(**resource_utils.resource_to_dict(test_case))
+
+        self.assertEqual(reloaded.api_mocks.mocks, mocks)
+
+    def test_api_response_from_dict_rejects_non_mapping(self):
+        """A scalar where the 'respond' mapping belongs is a clear error, not an AttributeError."""
+        with self.assertRaises(ValueError) as ctx:
+            ApiResponse.from_dict("not a dict")
+
+        message = str(ctx.exception)
+        self.assertIn("'respond' must be a mapping", message)
+        self.assertIn("str", message)
+
+    def test_api_response_rule_from_dict_rejects_non_mapping(self):
+        """A scalar where a response rule mapping belongs is a clear error."""
+        with self.assertRaises(ValueError) as ctx:
+            ApiResponseRule.from_dict("not a dict")
+
+        message = str(ctx.exception)
+        self.assertIn("Response rule must be a mapping", message)
+        self.assertIn("str", message)
+
+    def test_from_dict_rejects_non_mapping_api_mocks(self):
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict("not a dict at all")
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks must be a mapping", message)
+        self.assertIn("str", message)
+
+    def test_from_dict_rejects_non_mapping_integration(self):
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict({"crm": "not a dict"})
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks.crm", message)
+        self.assertIn("must be a mapping of operation name", message)
+        self.assertIn("str", message)
+
+    def test_from_dict_rejects_non_list_operation(self):
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict({"crm": {"get_customer": "not a list"}})
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks.crm.get_customer", message)
+        self.assertIn("must be a list", message)
+        self.assertIn("str", message)
+
+    def test_from_dict_rejects_non_mapping_rule_with_index_in_path(self):
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict({"crm": {"get_customer": ["not a dict"]}})
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks.crm.get_customer[0]", message)
+        self.assertIn("Response rule must be a mapping", message)
+
+    def test_from_dict_rejects_non_mapping_respond_with_index_in_path(self):
+        """The nested 'respond' error is re-raised with the full location prepended."""
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict({"crm": {"get_customer": [{"respond": "not a dict"}]}})
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks.crm.get_customer[0]", message)
+        self.assertIn("'respond' must be a mapping", message)
+
+    def test_from_dict_rejects_non_mapping_headers_with_index_in_path(self):
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict(
+                {"crm": {"get_customer": [{"respond": {"headers": "not a dict"}}]}}
+            )
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks.crm.get_customer[0]", message)
+        self.assertIn("respond.headers", message)
+        self.assertIn("must be a mapping", message)
 
 
 class ParseMultiResourcePathTests(unittest.TestCase):
@@ -9394,27 +10333,25 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
         self.assertIn("bool", str(ctx.exception))
 
     def test_dict_value_wrong_type_raises(self):
-        """A dict[str, bool] field with a str value instead of bool should raise."""
-        personality = SettingsPersonality(
-            resource_id="P-1",
-            name="personality",
-            custom="fine",
-            adjectives={"Polite": "sure"},
+        """A dict[str, str] field with an int value instead of str should raise."""
+        translation = Translation(
+            resource_id="TN-1",
+            name="greeting",
+            translations={"en-GB": 1},
         )
         with self.assertRaises(ValueError) as ctx:
-            resource_utils.check_yaml_field_types(personality)
-        self.assertIn("adjectives", str(ctx.exception))
-        self.assertIn("should be bool but got str", str(ctx.exception))
+            resource_utils.check_yaml_field_types(translation)
+        self.assertIn("translations", str(ctx.exception))
+        self.assertIn("should be str but got int", str(ctx.exception))
 
     def test_dict_valid_types_passes(self):
-        """A dict[str, bool] field with correct types should not raise."""
-        personality = SettingsPersonality(
-            resource_id="P-1",
-            name="personality",
-            custom="fine",
-            adjectives={"Polite": True, "Calm": False},
+        """A dict[str, str] field with correct types should not raise."""
+        translation = Translation(
+            resource_id="TN-1",
+            name="greeting",
+            translations={"en-GB": "Hello", "fr-FR": "Bonjour"},
         )
-        resource_utils.check_yaml_field_types(personality)
+        resource_utils.check_yaml_field_types(translation)
 
     def test_int_accepted_for_float_field(self):
         """int values should be accepted where float is expected (YAML parses 500 as int)."""
@@ -9453,7 +10390,7 @@ class DocumentTests(unittest.TestCase):
 
     def test_file_path(self):
         doc = Document(resource_id="test.md", name="test", path="test.md", contents="hello")
-        self.assertEqual(doc.file_path, os.path.join("context", "TEST.MD"))
+        self.assertEqual(doc.file_path, os.path.join("context", "test.md"))
 
     def test_raw(self):
         doc = Document(resource_id="test.md", name="test", path="test.md", contents="some content")
@@ -9481,7 +10418,7 @@ class DocumentTests(unittest.TestCase):
             )
             self.assertEqual(doc.resource_id, "doc.md")
             self.assertEqual(doc.name, "doc")
-            self.assertEqual(doc.path, "DOC.MD")
+            self.assertEqual(doc.path, "doc.md")
             self.assertEqual(doc.contents, "file contents\n")
 
     def test_save_and_read_round_trip(self):
@@ -9496,12 +10433,12 @@ class DocumentTests(unittest.TestCase):
             )
             doc.save(tmpdir)
 
-            file_path = os.path.join(tmpdir, "context", "ROUND_TRIP.MD")
+            file_path = os.path.join(tmpdir, "context", "round_trip.md")
             self.assertTrue(os.path.exists(file_path))
 
             restored = Document.read_local_resource(
                 file_path=file_path,
-                resource_id="ROUND_TRIP.MD",
+                resource_id="round_trip.md",
                 resource_name="round_trip",
             )
             self.assertEqual(restored.contents, doc.contents)
@@ -9524,8 +10461,8 @@ class DocumentTests(unittest.TestCase):
             self.assertCountEqual(
                 discovered,
                 [
-                    os.path.join(context_dir, "DOC1.MD"),
-                    os.path.join(context_dir, "DOC2.MD"),
+                    os.path.join(context_dir, "doc1.md"),
+                    os.path.join(context_dir, "doc2.md"),
                 ],
             )
 
@@ -9536,16 +10473,25 @@ class DocumentTests(unittest.TestCase):
             discovered = Document.discover_resources(tmpdir)
             self.assertEqual(discovered, [])
 
-    def test_path_normalized_to_uppercase(self):
-        """Documents with different-case paths produce the same normalized path."""
+    def test_path_case_preserved(self):
+        """Document paths are stored as given, not forced to a fixed case."""
         doc_lower = Document(resource_id="ctx.md", name="ctx", path="context.md", contents="hello")
-        doc_upper = Document(resource_id="ctx.md", name="ctx", path="CONTEXT.MD", contents="hello")
         doc_mixed = Document(resource_id="ctx.md", name="ctx", path="Context.Md", contents="hello")
-        self.assertEqual(doc_lower.path, "CONTEXT.MD")
-        self.assertEqual(doc_upper.path, "CONTEXT.MD")
-        self.assertEqual(doc_mixed.path, "CONTEXT.MD")
-        self.assertEqual(doc_lower.file_path, doc_upper.file_path)
-        self.assertEqual(doc_lower.file_path, doc_mixed.file_path)
+        self.assertEqual(doc_lower.path, "context.md")
+        self.assertEqual(doc_mixed.path, "Context.Md")
+
+    def test_validate_allows_non_context_paths_in_any_case(self):
+        doc = Document(resource_id="notes.md", name="notes", path="Notes.Md", contents="hello")
+        doc.validate()
+
+    def test_validate_allows_exact_case_platform_context_file(self):
+        doc = Document(resource_id="ctx.md", name="ctx", path="CONTEXT.MD", contents="hello")
+        doc.validate()
+
+    def test_validate_rejects_wrong_case_platform_context_file(self):
+        doc = Document(resource_id="ctx.md", name="ctx", path="context.md", contents="hello")
+        with self.assertRaises(ValueError):
+            doc.validate()
 
 
 class DocumentFromProjection(unittest.TestCase):
@@ -10246,50 +11192,7 @@ class FunctionStepFromProjection(unittest.TestCase):
 
 
 class AgentSettingsFromProjection(unittest.TestCase):
-    """Tests for SettingsPersonality, SettingsRole, and SettingsRules from_projection."""
-
-    def test_personality_from_projection(self):
-        """Verify personality adjectives and custom text are parsed."""
-        projection = {
-            "agentSettings": {
-                "personality": {
-                    "adjectives": {"Friendly": True, "Professional": True},
-                    "custom": "Always be cheerful",
-                }
-            }
-        }
-        result = SettingsPersonality.from_projection(projection)
-        self.assertEqual(list(result), ["personality"])
-        personality = result["personality"]
-        self.assertIsInstance(personality, SettingsPersonality)
-        self.assertEqual(personality.adjectives, {"Friendly": True, "Professional": True})
-        self.assertEqual(personality.custom, "Always be cheerful")
-
-    def test_personality_empty_projection(self):
-        """An empty projection should return an empty dict."""
-        self.assertEqual(SettingsPersonality.from_projection({}), {})
-
-    def test_role_from_projection(self):
-        """Verify role value, additional_info, and custom are parsed."""
-        projection = {
-            "agentSettings": {
-                "role": {
-                    "value": "receptionist",
-                    "additionalInfo": "front desk",
-                    "custom": "",
-                }
-            }
-        }
-        result = SettingsRole.from_projection(projection)
-        self.assertEqual(list(result), ["role"])
-        role = result["role"]
-        self.assertIsInstance(role, SettingsRole)
-        self.assertEqual(role.value, "receptionist")
-        self.assertEqual(role.additional_info, "front desk")
-
-    def test_role_empty_projection(self):
-        """An empty projection should return an empty dict."""
-        self.assertEqual(SettingsRole.from_projection({}), {})
+    """Tests for SettingsRules from_projection."""
 
     def test_rules_from_projection(self):
         """Verify rules behaviour is parsed."""

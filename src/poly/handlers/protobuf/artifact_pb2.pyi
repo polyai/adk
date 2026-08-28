@@ -400,15 +400,23 @@ class Role(_message.Message):
     custom: str
     def __init__(self, value: _Optional[str] = ..., additional_info: _Optional[str] = ..., custom: _Optional[str] = ...) -> None: ...
 
+class Persona(_message.Message):
+    __slots__ = ("content",)
+    CONTENT_FIELD_NUMBER: _ClassVar[int]
+    content: str
+    def __init__(self, content: _Optional[str] = ...) -> None: ...
+
 class KnowledgeBaseMetadata(_message.Message):
-    __slots__ = ("rules", "personality", "role")
+    __slots__ = ("rules", "personality", "role", "persona")
     RULES_FIELD_NUMBER: _ClassVar[int]
     PERSONALITY_FIELD_NUMBER: _ClassVar[int]
     ROLE_FIELD_NUMBER: _ClassVar[int]
+    PERSONA_FIELD_NUMBER: _ClassVar[int]
     rules: Rules
     personality: Personality
     role: Role
-    def __init__(self, rules: _Optional[_Union[Rules, _Mapping]] = ..., personality: _Optional[_Union[Personality, _Mapping]] = ..., role: _Optional[_Union[Role, _Mapping]] = ...) -> None: ...
+    persona: Persona
+    def __init__(self, rules: _Optional[_Union[Rules, _Mapping]] = ..., personality: _Optional[_Union[Personality, _Mapping]] = ..., role: _Optional[_Union[Role, _Mapping]] = ..., persona: _Optional[_Union[Persona, _Mapping]] = ...) -> None: ...
 
 class KnowledgeBase(_message.Message):
     __slots__ = ("updated_at", "updated_by", "welcome_message", "knowledge_base", "additional_context", "system_prompt")
@@ -445,14 +453,16 @@ class DelayResponse(_message.Message):
     def __init__(self, message: _Optional[str] = ..., duration: _Optional[int] = ...) -> None: ...
 
 class LatencyControl(_message.Message):
-    __slots__ = ("initial_delay", "interval", "delay_responses")
+    __slots__ = ("initial_delay", "interval", "delay_responses", "randomize")
     INITIAL_DELAY_FIELD_NUMBER: _ClassVar[int]
     INTERVAL_FIELD_NUMBER: _ClassVar[int]
     DELAY_RESPONSES_FIELD_NUMBER: _ClassVar[int]
+    RANDOMIZE_FIELD_NUMBER: _ClassVar[int]
     initial_delay: int
     interval: int
     delay_responses: _containers.RepeatedCompositeFieldContainer[DelayResponse]
-    def __init__(self, initial_delay: _Optional[int] = ..., interval: _Optional[int] = ..., delay_responses: _Optional[_Iterable[_Union[DelayResponse, _Mapping]]] = ...) -> None: ...
+    randomize: bool
+    def __init__(self, initial_delay: _Optional[int] = ..., interval: _Optional[int] = ..., delay_responses: _Optional[_Iterable[_Union[DelayResponse, _Mapping]]] = ..., randomize: bool = ...) -> None: ...
 
 class Function(_message.Message):
     __slots__ = ("id", "function_id", "name", "description", "parameters", "associated_flow", "latency_control", "prefix_path")
@@ -1245,17 +1255,17 @@ class MessagingContentTemplates(_message.Message):
     def __init__(self, media_base: _Optional[str] = ..., url_base: _Optional[str] = ..., default_language: _Optional[str] = ..., language: _Optional[_Mapping[str, MessagingContentTemplateSids]] = ...) -> None: ...
 
 class MessagingContentTemplateSids(_message.Message):
-    __slots__ = ("by_card_count",)
-    class ByCardCountEntry(_message.Message):
+    __slots__ = ("by_template_key",)
+    class ByTemplateKeyEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
         VALUE_FIELD_NUMBER: _ClassVar[int]
         key: str
         value: str
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
-    BY_CARD_COUNT_FIELD_NUMBER: _ClassVar[int]
-    by_card_count: _containers.ScalarMap[str, str]
-    def __init__(self, by_card_count: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    BY_TEMPLATE_KEY_FIELD_NUMBER: _ClassVar[int]
+    by_template_key: _containers.ScalarMap[str, str]
+    def __init__(self, by_template_key: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class MessagingSessionConfig(_message.Message):
     __slots__ = ("ttl_seconds", "inactivity_warning", "close_notification")

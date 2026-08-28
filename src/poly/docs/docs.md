@@ -13,8 +13,7 @@ Each project defines an AI voice or webchat agent. Resources in the project (flo
 ├── _gen/                               # Generated stubs - do not edit
 ├── agent_settings/                     # Agent identity and behavior
 │   ├── languages.yaml                  # Optional
-│   ├── personality.yaml
-│   ├── role.yaml
+│   ├── persona.txt                     # The Agent Studio "Role" field
 │   ├── rules.txt
 │   ├── safety_filters.yaml
 │   └── experimental_config.json        # Optional
@@ -106,7 +105,7 @@ These placeholders can be used in prompts, rules, topics, and other text fields 
 | `{{fn:function_name}}` | Global function | Rules, topics (actions), advanced step prompts |
 | `{{ft:function_name}}` | Flow transition function | Advanced step prompts (same flow only) |
 | `{{entity:entity_name}}` | Collected entity value | Flow step prompts |
-| `{{attr:attribute_name}}` | Variant attribute | Rules, prompts, topics (actions), greeting, disclaimer, personality, role |
+| `{{attr:attribute_name}}` | Variant attribute | Rules, prompts, topics (actions), greeting, disclaimer |
 | `{{twilio_sms:template_name}}` | SMS template | Rules, topics (actions) |
 | `{{ho:handoff_name}}` | Handoff destination | Rules |
 | `{{vrbl:variable_name}}` (preferred) / `$variable_name` | State variable (interchangeable; `{{vrbl:...}}` is validated) | Prompts, topic actions, SMS templates |
@@ -117,7 +116,7 @@ Resource-specific documentation is available via `poly docs {resource} [resource
 
 | Name | Description |
 |------|-------------|
-| `agent_settings` | Personality, role, rules |
+| `agent_settings` | Persona, rules |
 | `api_integrations` | External HTTP API definitions |
 | `chat_settings` | Chat greeting, style prompt |
 | `context` | Context files for agent knowledge |

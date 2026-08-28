@@ -143,35 +143,7 @@ class PersonalityReferences(_message.Message):
     def __init__(self, variables: _Optional[_Mapping[str, bool]] = ...) -> None: ...
 
 class PersonaReferences(_message.Message):
-    __slots__ = ("sms", "handoff", "attributes", "globalFunctions", "variables", "translations")
-    class SmsEntry(_message.Message):
-        __slots__ = ("key", "value")
-        KEY_FIELD_NUMBER: _ClassVar[int]
-        VALUE_FIELD_NUMBER: _ClassVar[int]
-        key: str
-        value: bool
-        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
-    class HandoffEntry(_message.Message):
-        __slots__ = ("key", "value")
-        KEY_FIELD_NUMBER: _ClassVar[int]
-        VALUE_FIELD_NUMBER: _ClassVar[int]
-        key: str
-        value: bool
-        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
-    class AttributesEntry(_message.Message):
-        __slots__ = ("key", "value")
-        KEY_FIELD_NUMBER: _ClassVar[int]
-        VALUE_FIELD_NUMBER: _ClassVar[int]
-        key: str
-        value: bool
-        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
-    class GlobalFunctionsEntry(_message.Message):
-        __slots__ = ("key", "value")
-        KEY_FIELD_NUMBER: _ClassVar[int]
-        VALUE_FIELD_NUMBER: _ClassVar[int]
-        key: str
-        value: bool
-        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
+    __slots__ = ("variables",)
     class VariablesEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -179,26 +151,9 @@ class PersonaReferences(_message.Message):
         key: str
         value: bool
         def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
-    class TranslationsEntry(_message.Message):
-        __slots__ = ("key", "value")
-        KEY_FIELD_NUMBER: _ClassVar[int]
-        VALUE_FIELD_NUMBER: _ClassVar[int]
-        key: str
-        value: bool
-        def __init__(self, key: _Optional[str] = ..., value: bool = ...) -> None: ...
-    SMS_FIELD_NUMBER: _ClassVar[int]
-    HANDOFF_FIELD_NUMBER: _ClassVar[int]
-    ATTRIBUTES_FIELD_NUMBER: _ClassVar[int]
-    GLOBALFUNCTIONS_FIELD_NUMBER: _ClassVar[int]
     VARIABLES_FIELD_NUMBER: _ClassVar[int]
-    TRANSLATIONS_FIELD_NUMBER: _ClassVar[int]
-    sms: _containers.ScalarMap[str, bool]
-    handoff: _containers.ScalarMap[str, bool]
-    attributes: _containers.ScalarMap[str, bool]
-    globalFunctions: _containers.ScalarMap[str, bool]
     variables: _containers.ScalarMap[str, bool]
-    translations: _containers.ScalarMap[str, bool]
-    def __init__(self, sms: _Optional[_Mapping[str, bool]] = ..., handoff: _Optional[_Mapping[str, bool]] = ..., attributes: _Optional[_Mapping[str, bool]] = ..., globalFunctions: _Optional[_Mapping[str, bool]] = ..., variables: _Optional[_Mapping[str, bool]] = ..., translations: _Optional[_Mapping[str, bool]] = ...) -> None: ...
+    def __init__(self, variables: _Optional[_Mapping[str, bool]] = ...) -> None: ...
 
 class Persona(_message.Message):
     __slots__ = ("content", "references", "created_at", "created_by", "updated_at", "updated_by")

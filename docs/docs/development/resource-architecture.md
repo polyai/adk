@@ -46,10 +46,11 @@ The last two are not peers of the first four. Agent configuration is the leaf la
 | `personality.yaml` | Tone and manner |
 | `role.yaml` | Who the agent is and what it is for |
 | `guardrails.yaml` | Checks that constrain what the agent can say or do |
+| `persona.txt` | Who the agent is, in free text |
 
 Rules are **always present in the prompt**, on every turn. They are not retrieved and not conditional, which makes them the right home for instructions that are unconditionally true — "always confirm the booking reference before making changes" — and the wrong home for facts, which would consume prompt space even when irrelevant to the current turn.
 
-`personality.yaml` and `role.yaml` are narrower than rules: they accept only `{{attr:}}` and `{{vrbl:}}` references. Behavioral references such as `{{fn:}}` and `{{ho:}}` belong in `rules.txt`.
+`persona.txt` is narrower than rules: it accepts only `{{attr:}}` and `{{vrbl:}}` references. Behavioral references such as `{{fn:}}` and `{{ho:}}` belong in `rules.txt`.
 
 `guardrails.yaml` covers the same ground as rules from the other side. A rule is an instruction in the prompt, which the model can still be talked out of; a guardrail is a check evaluated against the conversation, with its own action when it trips. That makes them easy to confuse — "never give medical advice" is a plausible entry in either. Write it as a rule first, and add a guardrail when testing shows the rule alone isn't holding. The platform also ships a fixed catalog of guardrails you can only toggle, covering the failure modes no prompt reliably prevents on its own, such as jailbreak attempts.
 
@@ -238,7 +239,7 @@ See [voice settings](../reference/resources/voice_settings.md), [chat settings](
 | A new FAQ, policy, or factual answer | Topic (`topics/`) |
 | A global behavioral rule (always do X, never do Y) | `agent_settings/rules.txt` |
 | Enforcement for a rule the model keeps working around | Guardrail (`agent_settings/guardrails.yaml`) |
-| Agent identity and tone | `agent_settings/personality.yaml` and `role.yaml` |
+| Agent identity and tone | `agent_settings/persona.txt` |
 | A multi-step guided conversation | Flow (`flows/`) |
 | Structured data collection from the caller | Entity + flow |
 | Deterministic branching or routing logic | Function (`functions/`) |
