@@ -1,6 +1,69 @@
 # CHANGELOG
 
 
+## v0.47.0 (2026-08-28)
+
+### Features
+
+- Allow variable and translation id<->name swap for delay control utterances
+  ([#186](https://github.com/polyai/adk/pull/186),
+  [`0d320db`](https://github.com/polyai/adk/commit/0d320db919c55906c03fbb88d9214bedf94a7d6c))
+
+## Summary
+
+Scopes the `{{prefix:value}}` reference swap in `Function.make_pretty`/`from_pretty` to only delay
+  control utterance messages, using AST to precisely locate the string literals within
+  `@func_latency_control` decorators.
+
+## Motivation
+
+- `make_pretty` had a bug: `replace_resource_ids_with_names` return value was silently discarded -
+  `from_pretty` applied `replace_resource_names_with_ids` to the entire function code instead of
+  only delay control messages - `validate()` had a bug where `resource_mappings` parameter was
+  overwritten by `kwargs.get("resource_mappings")` (always `None` after the signature change)
+
+## Changes
+
+- Add `_swap_latency_control_references` static method that uses AST to find `@func_latency_control`
+  decorator message strings and applies swap via positional replacement - Fix `make_pretty` to use
+  targeted swap (previously no-op due to unused return value) - Scope `from_pretty` swap to delay
+  control utterances only - Fix `validate()` parameter shadowing bug - Add
+  `DELAY_CONTROL_REFERENCES` constant and delay response reference validation in `validate()` - Add
+  `resource_utils.build_reference_swapper` so the name↔id lookup can be built once and reused across
+  many strings; `replace_resource_ids_with_names` / `replace_resource_names_with_ids` are now thin
+  wrappers over it - Add tests for `_swap_latency_control_references` covering both directions, body
+  isolation, definitions nested in statements, edge cases, and roundtrip
+
+## Performance
+
+The swap runs once per function per command, so it is scoped to stay cheap: it returns immediately
+  unless `func_latency_control` appears in the source (only 11.7% of functions use it), builds the
+  reference lookup once per call rather than once per message, and walks statements only.
+
+Measured against local checkouts of 45 real projects (4,619 function files), versus `main`:
+
+| Measurement | `main` | This PR | Noise floor | |---|---|---|---| | Full local resource read, 16
+  projects | 3520 ms | 3682 ms (+4.6%) | ±1.6% | | `poly status`, 9 projects | 12698 ms | 12441 ms
+  (−2.0%) | ±6% |
+
+`poly status` is a null result — the difference is smaller than the command's own run-to-run
+  variance.
+
+The statement-only traversal was checked against the whole corpus: identical function-definition
+  sets to `ast.walk` on all 4,619 files, and byte-identical swap output across 9,238 comparisons.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.46.0 (2026-08-28)
 
 ### Features
