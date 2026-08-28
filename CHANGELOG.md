@@ -1,6 +1,194 @@
 # CHANGELOG
 
 
+## v0.45.0 (2026-08-28)
+
+### Bug Fixes
+
+- Accept none reasoning effort in experimental config
+  ([#292](https://github.com/polyai/adk/pull/292),
+  [`e8333c3`](https://github.com/polyai/adk/commit/e8333c33f5b2e87449e90b94dc7b1d9886ae3884))
+
+## Summary
+
+Adds `none` to the `reasoning_effort` enum in the bundled experimental config schema, and documents
+  which models take it.
+
+## Motivation
+
+The platform now accepts `reasoning_effort: none` — it is the supported low-latency value for OpenAI
+  GPT-5.6 models, which do not accept the older GPT-5 `minimal`. The bundled schema is what `poly
+  validate` / CI check an `experimental_config` against, so without this a project that legitimately
+  sets `none` validates in Agent Studio but fails validation here, and the usual "remove it to pass
+  CI" workaround silently reverts the setting on merge.
+
+## Changes
+
+- `src/poly/resources/experimental_config_schema.yaml`: add `none` to the `reasoning_effort` enum
+  and a description line for the GPT-5.6 supported set (`none`, `low`, `medium`, `high`), keeping
+  the existing per-model lines unchanged.
+
+Out of scope: the flow-step `ReasoningEffort` enum in `resources/flows.py` is bound to proto
+  ordinals, so a `none` member there needs the proto enum to carry one first. This PR only widens
+  the experimental config schema.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+Schema-only change; `pytest src/poly/tests/project_test.py` (the experimental config validation
+  tests) passes — 233 passed.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass (no Python changed) - [x] `pytest` passes -
+  [x] No breaking changes to the `poly` CLI interface — this only widens what validates - [x] Commit
+  messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+- Align handoff/review behavior with refreshed docs ([#279](https://github.com/polyai/adk/pull/279),
+  [`3940c12`](https://github.com/polyai/adk/commit/3940c12cbb3af0d88793a0b8fbb93ee2e719e430))
+
+## Summary
+
+Two small code fixes discovered while writing the resource and CLI reference docs, so behavior
+  matches what's now documented. Stacked on #278 — this PR's diff is just the files below once that
+  one merges.
+
+## Motivation
+
+Auditing `handoffs.md` and `reference/cli/review.md` against source surfaced two spots where actual
+  behavior didn't match what a reasonable reading of the docs (or the `--json` contract documented
+  elsewhere in the CLI reference) would expect.
+
+## Changes
+
+- `src/poly/resources/handoff.py`: omit `sip_headers` from the serialized YAML when empty instead of
+  always writing it out, matching its documented optional status -
+  `src/poly/cli_commands/review.py`: `poly review delete --json` now returns a JSON error instead of
+  falling through to an interactive checkbox prompt when no gist ID is given, consistent with the
+  "`--json` requires explicit flags" pattern documented for other commands -
+  `src/poly/tests/github_api_test.py`: updated the one test that encoded the old
+  (interactive-fallback) behavior to assert the new error-and-return behavior instead; the existing
+  "gist ID + `--json`" success-path test was unaffected
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+- Stop forcing document paths to uppercase, guard platform context file case
+  ([#281](https://github.com/polyai/adk/pull/281),
+  [`8be0deb`](https://github.com/polyai/adk/commit/8be0deb7f2fb701de7be103bf645dae3861cb553))
+
+## Summary
+
+Stops forcing every Document's path to uppercase on construction, and instead only enforces
+  exact-case for the platform's special `CONTEXT.MD` context file.
+
+## Motivation
+
+#231 normalized all document paths to uppercase to fix a case-sensitivity conflict, but that
+  force-uppercased every document rather than just the one path (`CONTEXT.MD`) the platform treats
+  specially, causing unwanted renames for ordinary documents. `discover_resources()` also still
+  forced the discovered path to uppercase, which could construct a file path that doesn't exist on
+  case-sensitive filesystems.
+
+## Changes
+
+- Removed `Document.__post_init__` uppercase normalization; paths now preserve their original case -
+  `validate()` now only errors when a path case-insensitively matches `CONTEXT.MD` but isn't the
+  exact-case `CONTEXT.MD` - `discover_resources()` no longer force-uppercases discovered file names
+  - `from_projection()` strips both `.md` and `.MD` suffixes when deriving `name` - Updated existing
+  tests for preserved-case behavior; added tests for the `CONTEXT.MD` validation and a `CONTEXT.MD`
+  fixture
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+### Documentation
+
+- Auto-update from 8be0deb ([#287](https://github.com/polyai/adk/pull/287),
+  [`038eed6`](https://github.com/polyai/adk/commit/038eed616fe4c948888c8b20a1d6d83e557bfc74))
+
+Update docs for context
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+### Features
+
+- Support API integration mocks on test cases ([#284](https://github.com/polyai/adk/pull/284),
+  [`42a5616`](https://github.com/polyai/adk/commit/42a56165945d70f0d5b4a729d058c3a4576d29f4))
+
+## Summary
+
+Adds `api_mocks` support to test cases — mock an API integration operation's response
+  (status/body/headers, with a `repeat` sequence) so flows that branch on API responses can be
+  tested deterministically during simulation.
+
+## Motivation
+
+Closes AM-960
+
+## Changes
+
+- New `ApiResponse`, `ApiResponseRule`, `TestCaseApiMocks` dataclasses in `test_suite.py`, wired
+  into `TestCase` YAML load/dump, `from_projection`, and `push` diffing, following the existing
+  `SubResource` pattern (`TestCaseIntegrationAttributes`, `TestCaseSipHeaders`). - Push-time
+  validation: integration name must match a known `api_integration` resource, `status` must be
+  100–599, `body` follows the same type rules as `integration_attributes`, each operation needs at
+  least one response rule, and `repeat` must be a positive integer or `-1` (respond forever) — `-1`
+  only valid on the last rule in an operation's list. - Cross-checked `repeat`/`-1` semantics and
+  rename/delete cascading behavior against the platform runtime (`genai_lambda_runtime`) and the web
+  app (`platform_ui/apps/agent-stream` + `jupiter`) to make sure the CLI's validation and docs match
+  actual platform behavior. - Docs: new "API mocks" section in `tests.md` with a YAML example,
+  cross-linked from `api_integrations.md`.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1332 passed) - [x] No
+  breaking changes to the `poly` CLI interface - [x] Commit messages follow conventional commits
+
+## Screenshots / Logs
+
+N/A
+
+---------
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+
 ## v0.44.4 (2026-08-25)
 
 ### Bug Fixes
