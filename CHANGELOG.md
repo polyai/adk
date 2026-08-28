@@ -1,6 +1,49 @@
 # CHANGELOG
 
 
+## v0.45.1 (2026-08-28)
+
+### Bug Fixes
+
+- Surface merge API errors and use a fresh sequence for merge/sync
+  ([#295](https://github.com/polyai/adk/pull/295),
+  [`8be3f53`](https://github.com/polyai/adk/commit/8be3f539a3638a30aabe4901b1d98de9c69ba553))
+
+## Summary
+
+Make `merge_branch`/`sync_branch` send a freshly fetched branch sequence instead of the
+  projection-cached one, and return the Sourcerer API error to callers instead of swallowing it.
+  `poly branch merge`/`sync` print a retry hint on a sequence mismatch.
+
+## Motivation
+
+A draft deployment finishing mid-merge appends a `deploymentCompleted` event to the branch, so
+  Sourcerer rejects the merge with `SEQUENCE_MISMATCH`. Today that surfaces as a blank `Merge
+  failed:` and a retry resends the same stale sequence.
+
+## Changes
+
+- `sdk.merge_branch` / `sdk.sync_branch`: fetch the sequence via
+  `fetch_last_known_sequence_number()` before the call (as `delete_branch` already does) -
+  `sync_client.merge_branch` / `sync_branch`: return the `SourcererAPIError` message in `errors`
+  (`{"path": [], "message": ...}`) instead of `(False, [], [])` - `poly branch merge` / `poly branch
+  sync`: print "The branch changed while merging… Re-run the merge." when an error is a sequence
+  mismatch
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.45.0 (2026-08-28)
 
 ### Bug Fixes
