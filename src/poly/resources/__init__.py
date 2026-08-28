@@ -40,6 +40,7 @@ from poly.resources.function import (
     FunctionParameters,
     FunctionType,
 )
+from poly.resources.guardrails import CustomGuardrail, PlatformGuardrail
 from poly.resources.handoff import (
     Handoff,
     HandoffSipConfig,

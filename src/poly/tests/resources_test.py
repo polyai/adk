@@ -61,6 +61,7 @@ from poly.resources.function import (
     FunctionType,
     LatencyControl,
 )
+from poly.resources.guardrails import CustomGuardrail, PlatformGuardrail
 from poly.resources.handoff import Handoff
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.languages import (
@@ -9340,6 +9341,773 @@ class AdditionalLanguageTests(unittest.TestCase):
         with self.assertRaises(ValueError) as cm:
             lang.validate(resource_mappings=mappings)
         self.assertIn("Duplicate language code", str(cm.exception))
+
+
+class PlatformGuardrailTests(unittest.TestCase):
+    """Tests for the PlatformGuardrail resource (toggles for platform-provided guardrails)."""
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+
+    def test_from_projection_reads_explicit_enabled_per_entry(self):
+        """guardrails.guardrails is a map keyed by short suffix, each an explicit toggle."""
+        projection = {
+            "guardrails": {
+                "guardrails": {
+                    "JAILBREAK_DEFENCE": {"enabled": False},
+                    "HALLUCINATION_CONTROL": {"enabled": True},
+                }
+            }
+        }
+        guardrails = PlatformGuardrail.from_projection(projection)
+        self.assertFalse(guardrails["jailbreak_defence"].enabled)
+        self.assertTrue(guardrails["hallucination_control"].enabled)
+
+    def test_from_projection_matches_the_real_account_payload(self):
+        """Regression test pinned to an actual observed projection payload."""
+        projection = {
+            "guardrails": {
+                "guardrails": {
+                    "JAILBREAK_DEFENCE": {"enabled": False},
+                    "HALLUCINATION_CONTROL": {"enabled": True},
+                    "AI_IDENTITY": {"enabled": False},
+                    "EMERGENCY_ESCALATION": {"enabled": True},
+                    "TOOL_CALL_INTEGRITY": {"enabled": True},
+                }
+            }
+        }
+        guardrails = PlatformGuardrail.from_projection(projection)
+        self.assertEqual(
+            {name: g.enabled for name, g in guardrails.items()},
+            {
+                "jailbreak_defence": False,
+                "hallucination_control": True,
+                "ai_identity": False,
+                "emergency_escalation": True,
+                "tool_call_integrity": True,
+            },
+        )
+
+    def test_from_projection_emits_the_full_catalog(self):
+        """Every known guardrail gets a resource, even if absent from the map."""
+        projection = {"guardrails": {"guardrails": {"AI_IDENTITY": {"enabled": False}}}}
+        guardrails = PlatformGuardrail.from_projection(projection)
+        self.assertEqual(
+            set(guardrails),
+            {
+                "jailbreak_defence",
+                "hallucination_control",
+                "ai_identity",
+                "emergency_escalation",
+                "tool_call_integrity",
+            },
+        )
+        self.assertFalse(guardrails["ai_identity"].enabled)
+
+    def test_from_projection_defaults_missing_entries_to_enabled(self):
+        """A guardrail absent from the map defaults to enabled."""
+        projection = {"guardrails": {"guardrails": {"AI_IDENTITY": {"enabled": False}}}}
+        guardrails = PlatformGuardrail.from_projection(projection)
+        self.assertTrue(guardrails["jailbreak_defence"].enabled)
+
+    def test_from_projection_skips_non_object_entries_without_raising(self):
+        """A malformed (non-dict) map value is logged and skipped, defaulting to enabled."""
+        projection = {
+            "guardrails": {
+                "guardrails": {
+                    "JAILBREAK_DEFENCE": "unexpected-bare-string",
+                    "AI_IDENTITY": {"enabled": False},
+                }
+            }
+        }
+        with self.assertLogs("poly.resources.guardrails", level="WARNING"):
+            guardrails = PlatformGuardrail.from_projection(projection)
+        self.assertTrue(guardrails["jailbreak_defence"].enabled)
+        self.assertFalse(guardrails["ai_identity"].enabled)
+
+    def test_from_projection_no_guardrails_section_yields_nothing(self):
+        """When the projection has no guardrails section at all, no resources are emitted."""
+        self.assertEqual(PlatformGuardrail.from_projection({}), {})
+
+    def test_from_projection_empty_map_yields_all_enabled(self):
+        """An empty guardrails map still yields the full catalog, all enabled."""
+        projection = {"guardrails": {"guardrails": {}}}
+        guardrails = PlatformGuardrail.from_projection(projection)
+        self.assertEqual(len(guardrails), 5)
+        self.assertTrue(all(g.enabled for g in guardrails.values()))
+
+    def test_to_yaml_dict_from_yaml_dict_roundtrip(self):
+        """to_yaml_dict then from_yaml_dict preserves the name and toggle state."""
+        guardrail = PlatformGuardrail(
+            resource_id="hallucination_control", name="hallucination_control", enabled=False
+        )
+        yaml_dict = guardrail.to_yaml_dict()
+        self.assertEqual(yaml_dict, {"name": "hallucination_control", "enabled": False})
+
+        restored = PlatformGuardrail.from_yaml_dict(
+            yaml_dict, resource_id="hallucination_control", name="hallucination_control"
+        )
+        self.assertEqual(restored.name, guardrail.name)
+        self.assertEqual(restored.enabled, guardrail.enabled)
+
+    def test_from_yaml_dict_falls_back_to_identity_name(self):
+        """When the YAML has no name field, the identity name is used."""
+        guardrail = PlatformGuardrail.from_yaml_dict(
+            {"enabled": True}, resource_id="ai_identity", name="ai_identity"
+        )
+        self.assertEqual(guardrail.name, "ai_identity")
+
+    def test_file_path(self):
+        """All platform guardrails live in agent_settings/guardrails.yaml."""
+        guardrail = PlatformGuardrail(resource_id="jailbreak_defence", name="jailbreak_defence")
+        expected = os.path.join(
+            "agent_settings", "guardrails.yaml", "platform_guardrails", "jailbreak_defence"
+        )
+        self.assertEqual(guardrail.file_path, expected)
+
+    def test_command_type(self):
+        guardrail = PlatformGuardrail(resource_id="jailbreak_defence", name="jailbreak_defence")
+        self.assertEqual(guardrail.command_type, "guardrails")
+
+    def test_validate_passes_for_a_known_guardrail_name(self):
+        guardrail = PlatformGuardrail(
+            resource_id="emergency_escalation", name="emergency_escalation", enabled=False
+        )
+        self.assertIsNone(guardrail.validate())
+
+    def test_validate_unrecognised_name_raises_and_lists_valid_names(self):
+        """An unknown guardrail name is rejected with the list of valid options."""
+        guardrail = PlatformGuardrail(resource_id="made_up", name="made_up")
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate()
+        self.assertIn("Unrecognised platform guardrail 'made_up'", str(cm.exception))
+        self.assertIn("jailbreak_defence", str(cm.exception))
+
+    def test_validate_unspecified_sentinel_name_raises(self):
+        """The GUARDRAIL_NAME_UNSPECIFIED sentinel is not a real guardrail, so it is rejected."""
+        guardrail = PlatformGuardrail(resource_id="unspecified", name="unspecified", enabled=True)
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate()
+        self.assertIn("Unrecognised platform guardrail 'unspecified'", str(cm.exception))
+        # The sentinel is also absent from the list of valid options offered to the user.
+        valid_names = str(cm.exception).split("Must be one of: ")[1].split(", ")
+        self.assertNotIn("unspecified", valid_names)
+
+    def test_validate_empty_name_raises(self):
+        guardrail = PlatformGuardrail(resource_id="", name="")
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate()
+        self.assertIn("Name is required", str(cm.exception))
+
+    def test_validate_non_string_name_raises(self):
+        """An unquoted numeric name (e.g. `name: 123`) is rejected as a ValueError, not a crash."""
+        guardrail = PlatformGuardrail(resource_id="123", name=123, enabled=True)
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate()
+        self.assertIn("Invalid value 123 for 'name'", str(cm.exception))
+        self.assertIn("Must be a string", str(cm.exception))
+
+    def test_validate_quoted_enabled_raises(self):
+        """A YAML-quoted boolean ('true') is rejected with an actionable message."""
+        guardrail = PlatformGuardrail(resource_id="ai_identity", name="ai_identity", enabled="true")
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate()
+        self.assertIn("Must be true or false (unquoted)", str(cm.exception))
+
+    @staticmethod
+    def _catalog_names() -> set[str]:
+        """The fixed platform guardrail catalog, derived from the GuardrailName proto enum.
+
+        e.g. GUARDRAIL_NAME_JAILBREAK_DEFENCE -> "jailbreak_defence".
+        """
+        from poly.handlers.protobuf.guardrails_pb2 import GuardrailName
+
+        return {
+            value.name.removeprefix("GUARDRAIL_NAME_").lower()
+            for value in GuardrailName.DESCRIPTOR.values
+            if value.name != "GUARDRAIL_NAME_UNSPECIFIED"
+        }
+
+    @classmethod
+    def _full_collection(cls) -> dict:
+        """A complete local collection: one PlatformGuardrail per catalog entry."""
+        return {
+            name: PlatformGuardrail(resource_id=name, name=name) for name in cls._catalog_names()
+        }
+
+    def test_validate_collection_passes_when_whole_catalog_is_present(self):
+        """A collection covering every catalog guardrail is valid."""
+        self.assertIsNone(PlatformGuardrail.validate_collection(self._full_collection()))
+
+    def test_validate_collection_missing_one_guardrail_raises_naming_it(self):
+        """Deleting a single guardrail from the file is reported by name, with a fix."""
+        collection = self._full_collection()
+        self.assertIn("ai_identity", collection)
+        del collection["ai_identity"]
+
+        with self.assertRaises(ValueError) as cm:
+            PlatformGuardrail.validate_collection(collection)
+        message = str(cm.exception)
+        self.assertIn("Missing platform guardrail(s)", message)
+        self.assertIn("ai_identity", message)
+        self.assertIn("poly pull", message)
+
+    def test_validate_collection_missing_several_guardrails_names_all_of_them(self):
+        """Every missing guardrail is listed, not just the first one found."""
+        collection = self._full_collection()
+        for name in ("ai_identity", "jailbreak_defence"):
+            self.assertIn(name, collection)
+            del collection[name]
+
+        with self.assertRaises(ValueError) as cm:
+            PlatformGuardrail.validate_collection(collection)
+        message = str(cm.exception)
+        self.assertIn("ai_identity", message)
+        self.assertIn("jailbreak_defence", message)
+
+    def test_validate_collection_empty_raises_listing_the_full_catalog(self):
+        """An empty collection means the whole catalog has drifted away locally."""
+        with self.assertRaises(ValueError) as cm:
+            PlatformGuardrail.validate_collection({})
+        message = str(cm.exception)
+        for name in self._catalog_names():
+            self.assertIn(name, message)
+
+    def test_build_update_proto_maps_short_name_back_to_enum(self):
+        """The update proto carries a single Guardrail with the platform enum name."""
+        from poly.handlers.protobuf.guardrails_pb2 import GuardrailName
+
+        guardrail = PlatformGuardrail(
+            resource_id="jailbreak_defence", name="jailbreak_defence", enabled=False
+        )
+        proto = guardrail.build_update_proto()
+        self.assertEqual(len(proto.guardrails), 1)
+        self.assertEqual(proto.guardrails[0].name, GuardrailName.GUARDRAIL_NAME_JAILBREAK_DEFENCE)
+        self.assertFalse(proto.guardrails[0].enabled)
+
+    def test_build_create_proto_not_supported(self):
+        """Platform guardrails cannot be created — the catalog is fixed."""
+        guardrail = PlatformGuardrail(resource_id="ai_identity", name="ai_identity")
+        with self.assertRaises(NotImplementedError):
+            guardrail.build_create_proto()
+
+    def test_build_delete_proto_not_supported(self):
+        """Platform guardrails cannot be deleted — the catalog is fixed."""
+        guardrail = PlatformGuardrail(resource_id="ai_identity", name="ai_identity")
+        with self.assertRaises(NotImplementedError):
+            guardrail.build_delete_proto()
+
+    def test_discover_resources(self):
+        """discover_resources returns one path per entry in agent_settings/guardrails.yaml."""
+        base_path = os.path.join(os.path.dirname(__file__), "test_projects", "test_project")
+        discovered = PlatformGuardrail.discover_resources(base_path)
+        self.assertCountEqual(
+            discovered,
+            [
+                os.path.join(
+                    base_path,
+                    "agent_settings",
+                    "guardrails.yaml",
+                    "platform_guardrails",
+                    name,
+                )
+                for name in (
+                    "jailbreak_defence",
+                    "hallucination_control",
+                    "ai_identity",
+                    "emergency_escalation",
+                    "tool_call_integrity",
+                )
+            ],
+        )
+
+    def test_discover_resources_missing_file(self):
+        self.assertEqual(PlatformGuardrail.discover_resources("/nonexistent"), [])
+
+    def test_discover_resources_skips_nameless_entries(self):
+        """Entries without a name are skipped rather than producing an unnamed path."""
+        yaml_content = """platform_guardrails:
+- name: jailbreak_defence
+  enabled: true
+- enabled: false
+"""
+        base_path = "."
+        yaml_path = os.path.join(base_path, "agent_settings", "guardrails.yaml")
+
+        def exists_gr(p):
+            return yaml_path in str(p) or os.path.exists(p)
+
+        def isfile_gr(p):
+            return yaml_path in str(p) or os.path.isfile(p)
+
+        def getmtime_gr(p):
+            return 1.0 if yaml_path in str(p) else os.path.getmtime(p)
+
+        with mock_read_from_file({yaml_path: yaml_content}):
+            with (
+                unittest.mock.patch(
+                    "poly.resources.guardrails.os.path.exists", side_effect=exists_gr
+                ),
+                unittest.mock.patch(
+                    "poly.resources.resource.os.path.exists", side_effect=exists_gr
+                ),
+                unittest.mock.patch(
+                    "poly.resources.resource.os.path.isfile", side_effect=isfile_gr
+                ),
+                unittest.mock.patch(
+                    "poly.resources.resource.os.path.getmtime", side_effect=getmtime_gr
+                ),
+            ):
+                discovered = PlatformGuardrail.discover_resources(base_path)
+        self.assertEqual(len(discovered), 1)
+        self.assertIn("jailbreak_defence", discovered[0])
+
+
+class CustomGuardrailTests(unittest.TestCase):
+    """Tests for the CustomGuardrail resource.
+
+    Custom guardrails share agent_settings/guardrails.yaml with platform guardrails,
+    living under an optional ``custom_guardrails`` top-level list.
+    """
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+
+    @staticmethod
+    def _sample_guardrail() -> CustomGuardrail:
+        return CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-no_medical_advice",
+            name="No medical advice",
+            prompt="Never give medical advice. Offer to transfer the caller to a human instead.",
+            action="warn",
+        )
+
+    @staticmethod
+    def _discover_from_yaml(yaml_content: str) -> list[str]:
+        """Run discover_resources against an in-memory agent_settings/guardrails.yaml."""
+        yaml_path = os.path.join(".", "agent_settings", "guardrails.yaml")
+        with mock_read_from_file({yaml_path: yaml_content}):
+            with (
+                unittest.mock.patch("poly.resources.guardrails.os.path.exists", return_value=True),
+                unittest.mock.patch("poly.resources.resource.os.path.exists", return_value=True),
+                unittest.mock.patch("poly.resources.resource.os.path.isfile", return_value=True),
+                unittest.mock.patch("poly.resources.resource.os.path.getmtime", return_value=1.0),
+            ):
+                return CustomGuardrail.discover_resources(".")
+
+    def test_from_projection_parses_all_fields(self):
+        """Custom guardrails are keyed by their entity-map id, like topics/entities."""
+        projection = {
+            "guardrails": {
+                "customGuardrails": {
+                    "entities": {
+                        "CUSTOM_GUARDRAILS-1": {
+                            "name": "No medical advice",
+                            "prompt": "Never give medical advice.",
+                            "action": "warn",
+                            "enabled": False,
+                        }
+                    }
+                }
+            }
+        }
+        guardrails = CustomGuardrail.from_projection(projection)
+        guardrail = guardrails["CUSTOM_GUARDRAILS-1"]
+        self.assertEqual(guardrail.resource_id, "CUSTOM_GUARDRAILS-1")
+        self.assertEqual(guardrail.name, "No medical advice")
+        self.assertEqual(guardrail.prompt, "Never give medical advice.")
+        self.assertEqual(guardrail.action, "warn")
+        self.assertFalse(guardrail.enabled)
+
+    def test_from_projection_matches_the_real_account_payload(self):
+        """Regression test pinned to an actual observed customGuardrails payload.
+
+        Also includes the 'ids' sibling key the real payload carries alongside
+        'entities' — it should be ignored, not treated as an entry.
+        """
+        projection = {
+            "guardrails": {
+                "customGuardrails": {
+                    "ids": ["5ee46d81-99bc-4fc9-8046-e517948134a4"],
+                    "entities": {
+                        "5ee46d81-99bc-4fc9-8046-e517948134a4": {
+                            "id": "5ee46d81-99bc-4fc9-8046-e517948134a4",
+                            "name": "Customer Information",
+                            "prompt": (
+                                "Triggerswhenever you are about to repeat customer information"
+                            ),
+                            "action": "Call {{fn:default-function}}",
+                            "enabled": True,
+                            "references": {
+                                "sms": {},
+                                "handoff": {},
+                                "attributes": {},
+                                "globalFunctions": {"default-function": True},
+                                "variables": {},
+                                "translations": {},
+                            },
+                            "createdAt": "2026-08-18T14:54:52.431Z",
+                            "createdBy": "",
+                            "updatedAt": "2026-08-18T14:54:52.431Z",
+                            "updatedBy": "",
+                        }
+                    },
+                }
+            }
+        }
+        guardrails = CustomGuardrail.from_projection(projection)
+        self.assertEqual(list(guardrails), ["5ee46d81-99bc-4fc9-8046-e517948134a4"])
+        guardrail = guardrails["5ee46d81-99bc-4fc9-8046-e517948134a4"]
+        self.assertEqual(guardrail.name, "Customer Information")
+        self.assertEqual(guardrail.action, "Call {{fn:default-function}}")
+        self.assertTrue(guardrail.enabled)
+
+    def test_from_projection_parses_multiple_entities(self):
+        """Each key in the entities map becomes its own guardrail resource."""
+        projection = {
+            "guardrails": {
+                "customGuardrails": {
+                    "entities": {
+                        "CUSTOM_GUARDRAILS-1": {"name": "First"},
+                        "CUSTOM_GUARDRAILS-2": {"name": "Second"},
+                    }
+                }
+            }
+        }
+        guardrails = CustomGuardrail.from_projection(projection)
+        self.assertEqual(set(guardrails), {"CUSTOM_GUARDRAILS-1", "CUSTOM_GUARDRAILS-2"})
+
+    def test_from_projection_defaults_missing_fields(self):
+        """Fields absent from the projection fall back to empty strings and enabled=True."""
+        projection = {"guardrails": {"customGuardrails": {"entities": {"CUSTOM_GUARDRAILS-1": {}}}}}
+        guardrail = CustomGuardrail.from_projection(projection)["CUSTOM_GUARDRAILS-1"]
+        self.assertEqual(guardrail.name, "")
+        self.assertEqual(guardrail.prompt, "")
+        self.assertEqual(guardrail.action, "")
+        self.assertTrue(guardrail.enabled)
+
+    def test_from_projection_skips_non_object_entries_without_raising(self):
+        """A malformed (non-dict) entity value is logged and skipped, not a crash."""
+        projection = {
+            "guardrails": {
+                "customGuardrails": {
+                    "entities": {
+                        "CUSTOM_GUARDRAILS-BAD": "unexpected-bare-string",
+                        "CUSTOM_GUARDRAILS-1": {"name": "Kept"},
+                    }
+                }
+            }
+        }
+        with self.assertLogs("poly.resources.guardrails", level="WARNING"):
+            guardrails = CustomGuardrail.from_projection(projection)
+        self.assertEqual(list(guardrails), ["CUSTOM_GUARDRAILS-1"])
+
+    def test_from_projection_empty_projection_yields_no_guardrails(self):
+        self.assertEqual(CustomGuardrail.from_projection({}), {})
+
+    def test_to_yaml_dict_from_yaml_dict_roundtrip(self):
+        """to_yaml_dict then from_yaml_dict preserves every field."""
+        guardrail = self._sample_guardrail()
+        yaml_dict = guardrail.to_yaml_dict()
+        self.assertEqual(yaml_dict["name"], "No medical advice")
+        self.assertEqual(yaml_dict["action"], "warn")
+        self.assertTrue(yaml_dict["enabled"])
+
+        restored = CustomGuardrail.from_yaml_dict(
+            yaml_dict,
+            resource_id="CUSTOM_GUARDRAILS-no_medical_advice",
+            name="No medical advice",
+        )
+        self.assertEqual(restored.name, guardrail.name)
+        self.assertEqual(restored.prompt, guardrail.prompt)
+        self.assertEqual(restored.action, guardrail.action)
+        self.assertEqual(restored.enabled, guardrail.enabled)
+
+    def test_to_pretty_replaces_a_function_id_in_action_with_its_name(self):
+        """On pull, the raw ID in 'action' is swapped for the human-readable name."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="Trigger when the caller asks for a doctor.",
+            action="Call {{fn:func-123}}",
+        )
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="func-123",
+                resource_name="escalate",
+                resource_type=Function,
+                file_path="functions/escalate.py",
+                flow_name=None,
+                resource_prefix="fn",
+            )
+        ]
+        pretty_content = guardrail.to_pretty(resource_mappings=resource_mappings)
+        self.assertIn("{{fn:escalate}}", pretty_content)
+        self.assertNotIn("{{fn:func-123}}", pretty_content)
+
+    def test_to_pretty_with_no_resource_mappings_leaves_ids_unchanged(self):
+        """With nothing to map against, the action passes through verbatim."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="Trigger when the caller asks for a doctor.",
+            action="Call {{fn:func-123}}",
+        )
+        pretty_content = guardrail.to_pretty(resource_mappings=[])
+        self.assertIn("{{fn:func-123}}", pretty_content)
+
+    def test_to_pretty_leaves_the_prompt_field_untouched(self):
+        """Only 'action' carries references, so a reference-shaped token in
+        'prompt' keeps its raw ID even when that ID is mapped."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="This mentions {{fn:func-123}} but it's just prose.",
+            action="warn",
+        )
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="func-123",
+                resource_name="escalate",
+                resource_type=Function,
+                file_path="functions/escalate.py",
+                flow_name=None,
+                resource_prefix="fn",
+            )
+        ]
+        pretty_content = guardrail.to_pretty(resource_mappings=resource_mappings)
+        self.assertIn("{{fn:func-123}} but it's just prose.", pretty_content)
+
+    def test_to_pretty_from_pretty_roundtrip_restores_the_raw_yaml(self):
+        """Names written on pull are turned back into IDs on push."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="Trigger when the caller asks for a doctor.",
+            action="Call {{fn:func-123}}",
+        )
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="func-123",
+                resource_name="escalate",
+                resource_type=Function,
+                file_path="functions/escalate.py",
+                flow_name=None,
+                resource_prefix="fn",
+            )
+        ]
+        pretty_content = guardrail.to_pretty(resource_mappings=resource_mappings)
+        reverted = CustomGuardrail.from_pretty(pretty_content, resource_mappings=resource_mappings)
+        self.assertEqual(reverted, guardrail.raw)
+
+    def test_file_path_and_command_type(self):
+        """Custom guardrails address a named entry inside the shared guardrails.yaml."""
+        guardrail = self._sample_guardrail()
+        expected = os.path.join(
+            "agent_settings", "guardrails.yaml", "custom_guardrails", "No_medical_advice"
+        )
+        self.assertEqual(guardrail.file_path, expected)
+        self.assertEqual(guardrail.command_type, "custom_guardrail")
+
+    def test_validate_passes_with_no_references(self):
+        self.assertIsNone(self._sample_guardrail().validate(resource_mappings=[]))
+
+    def test_validate_missing_name_raises(self):
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1", name="", prompt="A prompt", action="warn"
+        )
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate(resource_mappings=[])
+        self.assertIn("Name is required", str(cm.exception))
+
+    def test_validate_missing_prompt_raises(self):
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1", name="No medical advice", prompt="", action="warn"
+        )
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate(resource_mappings=[])
+        self.assertIn("Prompt is required", str(cm.exception))
+
+    def test_validate_missing_action_raises(self):
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="No medical advice",
+            prompt="A prompt",
+            action="",
+        )
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate(resource_mappings=[])
+        self.assertIn("Action is required", str(cm.exception))
+
+    def test_validate_passes_with_a_known_function_reference(self):
+        """References only ever live in 'action', never 'prompt'."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="Trigger when the caller asks for a doctor.",
+            action="Call {{fn:func-123}}",
+        )
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="func-123",
+                resource_name="escalate",
+                resource_type=Function,
+                file_path="functions/escalate.py",
+                flow_name=None,
+                resource_prefix="fn",
+            )
+        ]
+        self.assertIsNone(guardrail.validate(resource_mappings=resource_mappings))
+
+    def test_validate_unknown_function_reference_raises(self):
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="Trigger when the caller asks for a doctor.",
+            action="Call {{fn:func-missing}}",
+        )
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate(resource_mappings=[])
+        self.assertIn("Invalid references: ['global_functions: func-missing']", str(cm.exception))
+
+    def test_validate_transition_function_reference_type_raises(self):
+        """Flow transition functions ({{ft:...}}) are not valid in a guardrail action."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="Trigger when the caller asks for a doctor.",
+            action="Go to {{ft:step-1}}",
+        )
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate(resource_mappings=[])
+        self.assertIn("Invalid reference type: transition_functions", str(cm.exception))
+
+    def test_validate_ignores_reference_syntax_in_the_prompt_field(self):
+        """A reference-shaped token in 'prompt' is never scanned — only 'action' is.
+
+        The prompt below embeds a reference to a function that ISN'T in
+        resource_mappings; if prompt were scanned this would raise. It doesn't,
+        because only 'action' (whose own reference IS mapped) is scanned.
+        """
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="This mentions {{fn:not-a-real-function}} but it's just prose.",
+            action="Call {{fn:func-123}}",
+        )
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="func-123",
+                resource_name="escalate",
+                resource_type=Function,
+                file_path="functions/escalate.py",
+                flow_name=None,
+                resource_prefix="fn",
+            )
+        ]
+        self.assertIsNone(guardrail.validate(resource_mappings=resource_mappings))
+
+    def test_build_create_proto_includes_fields_and_references(self):
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="No medical advice",
+            prompt="Never give medical advice.",
+            action="Call {{fn:func-123}} instead of giving advice.",
+            enabled=False,
+        )
+        proto = guardrail.build_create_proto()
+        self.assertEqual(proto.id, "CUSTOM_GUARDRAILS-1")
+        self.assertEqual(proto.name, "No medical advice")
+        self.assertEqual(proto.prompt, "Never give medical advice.")
+        self.assertEqual(proto.action, "Call {{fn:func-123}} instead of giving advice.")
+        self.assertFalse(proto.enabled)
+        self.assertTrue(proto.references.global_functions["func-123"])
+
+    def test_build_update_proto_includes_fields_and_references(self):
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="No medical advice",
+            prompt="Apologise first.",
+            action="Use {{tn:TN-greeting}} to apologise first.",
+        )
+        proto = guardrail.build_update_proto()
+        self.assertEqual(proto.id, "CUSTOM_GUARDRAILS-1")
+        self.assertEqual(proto.action, "Use {{tn:TN-greeting}} to apologise first.")
+        self.assertTrue(proto.enabled)
+        self.assertTrue(proto.references.translations["TN-greeting"])
+
+    def test_build_create_proto_includes_a_reference_from_the_action_field(self):
+        """Regression test: a reference living only in 'action' is still sent."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Customer Information",
+            prompt="Triggers whenever you are about to repeat customer information",
+            action="Call {{fn:default-function}}",
+        )
+        proto = guardrail.build_create_proto()
+        self.assertTrue(proto.references.global_functions["default-function"])
+
+    def test_build_delete_proto_only_sets_the_id(self):
+        proto = self._sample_guardrail().build_delete_proto()
+        self.assertEqual(proto.id, "CUSTOM_GUARDRAILS-no_medical_advice")
+
+    def test_read_local_resource_reads_the_named_entry_from_the_shared_file(self):
+        """Reading picks the custom_guardrails entry whose name matches the path segment."""
+        base_path = os.path.join(os.path.dirname(__file__), "test_projects", "test_project")
+        file_path = os.path.join(
+            base_path, "agent_settings", "guardrails.yaml", "custom_guardrails", "No_medical_advice"
+        )
+        guardrail = CustomGuardrail.read_local_resource(
+            file_path=file_path,
+            resource_id="CUSTOM_GUARDRAILS-no_medical_advice",
+            resource_name="No medical advice",
+        )
+        self.assertEqual(guardrail.name, "No medical advice")
+        self.assertEqual(guardrail.action, "warn")
+        self.assertTrue(guardrail.enabled)
+        self.assertIn("Never give medical advice", guardrail.prompt)
+
+    def test_discover_resources(self):
+        """discover_resources returns one path per custom_guardrails entry in the shared file."""
+        base_path = os.path.join(os.path.dirname(__file__), "test_projects", "test_project")
+        discovered = CustomGuardrail.discover_resources(base_path)
+        self.assertEqual(
+            discovered,
+            [
+                os.path.join(
+                    base_path,
+                    "agent_settings",
+                    "guardrails.yaml",
+                    "custom_guardrails",
+                    "No_medical_advice",
+                )
+            ],
+        )
+
+    def test_discover_resources_missing_file(self):
+        self.assertEqual(CustomGuardrail.discover_resources("/nonexistent"), [])
+
+    def test_discover_resources_file_without_custom_guardrails_section(self):
+        """A guardrails.yaml holding only platform guardrails yields no custom guardrails."""
+        yaml_content = """platform_guardrails:
+- name: jailbreak_defence
+  enabled: true
+"""
+        self.assertEqual(self._discover_from_yaml(yaml_content), [])
+
+    def test_discover_resources_skips_nameless_entries(self):
+        """Entries without a name are skipped rather than producing an unnamed path."""
+        yaml_content = """custom_guardrails:
+- name: No medical advice
+  enabled: true
+  action: warn
+  prompt: Never give medical advice.
+- action: warn
+  prompt: A guardrail someone forgot to name.
+"""
+        discovered = self._discover_from_yaml(yaml_content)
+        self.assertEqual(len(discovered), 1)
+        self.assertIn("No_medical_advice", discovered[0])
 
 
 class ValidateWebchatSiblingsTests(unittest.TestCase):

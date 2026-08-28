@@ -185,6 +185,13 @@ The same settings can be configured in the Agent Studio UI. The platform docs co
     Configure the persona and rules alongside project-level safety filters.
     [Open agent settings](./agent_settings.md)
 
+-   **Guardrails**
+
+    ---
+
+    Runtime checks that constrain agent behavior, rather than filtering content.
+    [Open guardrails](./guardrails.md)
+
 -   **Voice settings**
 
     ---
