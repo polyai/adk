@@ -4,7 +4,7 @@
 
 Functions are Python files that add deterministic logic to your agent. They can be called by the LLM during conversation, used as flow steps, or run automatically at call start/end.
 
-> To run, validate, or inspect functions programmatically over the REST API instead of via local files, see the `poly functions` commands (`poly functions --help`).
+> To run or validate functions programmatically over the REST API instead of via local files, see the `poly functions` commands (`poly functions --help`).
 
 ## Location
 ```

@@ -35,8 +35,6 @@ FUNCTIONS_SUBCOMMAND_GROUP_ORDER = [
 
 FUNCTIONS_SUBCOMMAND_GROUPS = {
     "execute": FUNCTIONS_RUN_GROUP,
-    "references": FUNCTIONS_RUN_GROUP,
-    "type-definitions": FUNCTIONS_RUN_GROUP,
     "validate": FUNCTIONS_RUN_GROUP,
 }
 
@@ -59,11 +57,10 @@ class FunctionsCommand(BaseCommand):
                 "Manage Functions via the public Functions REST API, scoped to the\n"
                 "project's current branch. Creating, editing and deleting functions is\n"
                 "still done via the local-file/decorator workflow (poly push/poly pull);\n"
-                "this covers what that workflow can't: running, inspecting and\n"
-                "validating functions.\n\n"
+                "this covers what that workflow can't: running and validating\n"
+                "functions.\n\n"
                 "Examples:\n"
                 "  poly functions execute <function_id> --args '{\"x\": 1}'\n"
-                "  poly functions references <function_id>\n"
                 "  poly functions validate\n"
             ),
             formatter_class=GroupedRawTextHelpFormatter,
@@ -106,34 +103,6 @@ class FunctionsCommand(BaseCommand):
             formatter_class=RawTextHelpFormatter,
         )
 
-        references_parser = functions_subparsers.add_parser(
-            "references",
-            parents=[parents.path, parents.scope, parents.json, parents.verbose],
-            help="Show flow steps that reference a function.",
-            description=(
-                "List the flow steps that call a Function.\n\n"
-                "Examples:\n"
-                "  poly functions references <function_id>\n"
-            ),
-            formatter_class=RawTextHelpFormatter,
-        )
-        references_parser.add_argument("function_id", type=str, help="The function ID.")
-
-        type_definitions_parser = functions_subparsers.add_parser(
-            "type-definitions",
-            parents=[parents.path, parents.scope, parents.json, parents.verbose],
-            help="Show Python type stubs for a function, for IDE autocomplete.",
-            description=(
-                "Print the Conversation/Flow type stubs available to a Function, for\n"
-                "IDE autocomplete.\n\n"
-                "Examples:\n"
-                "  poly functions type-definitions <function_id>\n"
-                "  poly functions type-definitions <function_id> > stubs.py\n"
-            ),
-            formatter_class=RawTextHelpFormatter,
-        )
-        type_definitions_parser.add_argument("function_id", type=str, help="The function ID.")
-
         group_subcommands(
             functions_subparsers, FUNCTIONS_SUBCOMMAND_GROUPS, FUNCTIONS_SUBCOMMAND_GROUP_ORDER
         )
@@ -152,12 +121,6 @@ class FunctionsCommand(BaseCommand):
             )
         elif args.functions_subcommand == "validate":
             cls.functions_validate(args.path, output_json=args.json, **scope)
-        elif args.functions_subcommand == "references":
-            cls.functions_references(args.path, args.function_id, output_json=args.json, **scope)
-        elif args.functions_subcommand == "type-definitions":
-            cls.functions_type_definitions(
-                args.path, args.function_id, output_json=args.json, **scope
-            )
 
     @staticmethod
     def _parse_json_arg(value: str, flag: str, output_json: bool) -> Any:
@@ -261,79 +224,3 @@ class FunctionsCommand(BaseCommand):
             json_print(result)
         else:
             print_function_validation_issues(result.get("valid", False), result.get("issues", []))
-
-    @classmethod
-    def functions_references(
-        cls,
-        base_path: str,
-        function_id: str,
-        output_json: bool = False,
-        region: Optional[str] = None,
-        project_id: Optional[str] = None,
-        branch_id: Optional[str] = None,
-    ) -> None:
-        """Show the flow steps that reference a function.
-
-        Args:
-            base_path: Base path for the project.
-            function_id: The function ID.
-            output_json: If True, emit machine-readable JSON.
-            region: Explicit region, bypassing the local project.
-            project_id: Explicit project ID, bypassing the local project.
-            branch_id: Explicit branch ID, bypassing the local project.
-        """
-        from poly.output.console import print_function_references
-
-        region, project_id, branch_id = resolve_project_scope(
-            base_path, region, project_id, branch_id, output_json=output_json
-        )
-        result = AgentStudioInterface.get_function_references(
-            region=region,
-            project_id=project_id,
-            branch_id=branch_id,
-            function_id=function_id,
-        )
-
-        if output_json:
-            json_print(result)
-        else:
-            print_function_references(result.get("references", []))
-
-    @classmethod
-    def functions_type_definitions(
-        cls,
-        base_path: str,
-        function_id: str,
-        output_json: bool = False,
-        region: Optional[str] = None,
-        project_id: Optional[str] = None,
-        branch_id: Optional[str] = None,
-    ) -> None:
-        """Show Python type stubs for a function, for IDE autocomplete.
-
-        Args:
-            base_path: Base path for the project.
-            function_id: The function ID.
-            output_json: If True, emit machine-readable JSON.
-            region: Explicit region, bypassing the local project.
-            project_id: Explicit project ID, bypassing the local project.
-            branch_id: Explicit branch ID, bypassing the local project.
-        """
-        from poly.output.console import print_code
-
-        # type-definitions is agent-scoped, not branch-scoped — branch_id is
-        # only resolved here for consistency with the other subcommands'
-        # --region/--project_id/--branch_id flags, and isn't sent to the API.
-        region, project_id, _branch_id = resolve_project_scope(
-            base_path, region, project_id, branch_id, output_json=output_json
-        )
-        result = AgentStudioInterface.get_function_type_definitions(
-            region=region,
-            project_id=project_id,
-            function_id=function_id,
-        )
-
-        if output_json:
-            json_print(result)
-        else:
-            print_code(result.get("code", ""), line_numbers=False)

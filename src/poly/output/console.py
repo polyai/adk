@@ -128,11 +128,6 @@ def print_diff(diff: str) -> None:
     console.print(Syntax(diff, "diff", theme="ansi_dark", line_numbers=False))
 
 
-def print_code(code: str, line_numbers: bool = True) -> None:
-    """Print Python code with syntax highlighting."""
-    console.print(Syntax(code, "python", theme="ansi_dark", line_numbers=line_numbers))
-
-
 def print_agents(agents: list[dict[str, Any]]) -> None:
     """Print a table of agents.
 
@@ -1049,26 +1044,6 @@ def print_audio_cache_entries(entries: list[dict[str, Any]]) -> None:
             str(e.get("hit_count", 0)),
             cached_at,
         )
-
-    console.print(table)
-
-
-def print_function_references(references: list[dict[str, Any]]) -> None:
-    """Print the flow steps that reference a Function.
-
-    Args:
-        references: List of flow step reference dicts.
-    """
-    if not references:
-        console.print("[muted]No references.[/muted]")
-        return
-
-    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
-    table.add_column("Flow", no_wrap=True)
-    table.add_column("Step", no_wrap=True)
-
-    for ref in references:
-        table.add_row(ref.get("flow_name", "—"), ref.get("step_name", "—"))
 
     console.print(table)
 

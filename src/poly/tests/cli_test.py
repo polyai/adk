@@ -4447,27 +4447,6 @@ class FunctionsCommandTest(unittest.TestCase):
 
         mock_print.assert_called_once_with(False, issues)
 
-    @patch("poly.cli_commands.functions.AgentStudioInterface.get_function_references")
-    @patch("poly.output.console.print_function_references")
-    def test_references_prints_reference_list(self, mock_print, mock_api):
-        """functions references renders the reference list."""
-        references = [{"flow_id": "flow-1", "flow_name": "Main", "step_name": "step-1"}]
-        mock_api.return_value = {"references": references}
-
-        FunctionsCommand.functions_references(TEST_DIR, "fn-1")
-
-        mock_print.assert_called_once_with(references)
-
-    @patch("poly.cli_commands.functions.AgentStudioInterface.get_function_type_definitions")
-    @patch("poly.output.console.print_code")
-    def test_type_definitions_prints_code_without_line_numbers(self, mock_print, mock_api):
-        """Type stubs print unnumbered so they can be piped into a file."""
-        mock_api.return_value = {"code": "class Conversation: ..."}
-
-        FunctionsCommand.functions_type_definitions(TEST_DIR, "fn-1")
-
-        mock_print.assert_called_once_with("class Conversation: ...", line_numbers=False)
-
 
 # argparse wraps the usage line to the terminal width, which differs between the
 # Linux and Windows CI runners. Pin it so grouped-help assertions are stable.

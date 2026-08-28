@@ -57,10 +57,6 @@ RTC_VARIABLES_URL = "/v1/agents/{project_id}/real-time-configs/{client_env}/vari
 FUNCTION_EXECUTE_URL = (
     "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/execute"
 )
-FUNCTION_REFERENCES_URL = (
-    "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/references"
-)
-FUNCTION_TYPE_DEFINITIONS_URL = "/v1/agents/{project_id}/functions/{function_id}/type-definitions"
 FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
 
 
@@ -1468,40 +1464,3 @@ class PlatformAPIHandler:
         """
         endpoint = FUNCTIONS_VALIDATE_URL.format(project_id=project_id, branch_id=branch_id)
         return PlatformAPIHandler.make_request(region, endpoint, "POST")
-
-    @staticmethod
-    def get_function_references(
-        region: str, project_id: str, branch_id: str, function_id: str
-    ) -> dict:
-        """Get the flow steps that reference a function.
-
-        Args:
-            region: The region name.
-            project_id: The project ID (agent ID).
-            branch_id: The branch ID.
-            function_id: The function ID.
-
-        Returns:
-            dict: {"references": [...]}.
-        """
-        endpoint = FUNCTION_REFERENCES_URL.format(
-            project_id=project_id, branch_id=branch_id, function_id=function_id
-        )
-        return PlatformAPIHandler.make_request(region, endpoint, "GET")
-
-    @staticmethod
-    def get_function_type_definitions(region: str, project_id: str, function_id: str) -> dict:
-        """Get Python type stubs for a function, for IDE autocomplete.
-
-        Args:
-            region: The region name.
-            project_id: The project ID (agent ID).
-            function_id: The function ID.
-
-        Returns:
-            dict: {"code": ...}.
-        """
-        endpoint = FUNCTION_TYPE_DEFINITIONS_URL.format(
-            project_id=project_id, function_id=function_id
-        )
-        return PlatformAPIHandler.make_request(region, endpoint, "GET")

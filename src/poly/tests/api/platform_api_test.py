@@ -494,33 +494,6 @@ class ValidateFunctions(unittest.TestCase):
         self.assertIn("/functions/validate", mock_request.call_args.kwargs["url"])
 
 
-class FunctionReferencesAndTypeDefinitions(unittest.TestCase):
-    """Tests for the function references and type-definitions endpoints."""
-
-    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
-    def test_references_endpoint(self, mock_request, _mock_key):
-        """References are fetched from the per-function references endpoint."""
-        mock_request.return_value = make_mock_response(200, json_body={"references": []})
-
-        PlatformAPIHandler.get_function_references("studio", "agent-1", "branch-1", "fn-1")
-
-        self.assertIn("/functions/fn-1/references", mock_request.call_args.kwargs["url"])
-
-    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
-    @patch("poly.handlers.platform_api.requests.request")
-    def test_type_definitions_endpoint(self, mock_request, _mock_key):
-        """Type stubs are fetched from the agent-scoped type-definitions endpoint."""
-        mock_request.return_value = make_mock_response(200, json_body={"code": "class Conv: ..."})
-
-        result = PlatformAPIHandler.get_function_type_definitions("studio", "agent-1", "fn-1")
-
-        self.assertEqual(result, {"code": "class Conv: ..."})
-        url = mock_request.call_args.kwargs["url"]
-        self.assertIn("/agents/agent-1/functions/fn-1/type-definitions", url)
-        self.assertNotIn("/branches/", url)
-
-
 def _make_request_headers() -> dict:
     """Call make_request with the network mocked and return the headers it sent."""
     with (

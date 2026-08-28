@@ -85,7 +85,7 @@ poly push --help
 | [`poly deployments`](./cli/deployments.md) | List, promote, and roll back deployments |
 | [`poly rtc`](./cli/rtc.md) | Manage per-environment Real-Time Configuration |
 | [`poly audio-cache`](./cli/audio-cache.md) | Inspect and replace cached TTS audio |
-| [`poly functions`](./cli/functions.md) | Run, validate, and inspect Functions via the REST API |
+| [`poly functions`](./cli/functions.md) | Run and validate Functions via the REST API |
 | [`poly studio`](./cli/studio.md) | Open the project in the Agent Studio web app |
 
 ## Shared flags
@@ -141,7 +141,6 @@ poly audio-cache bulk-delete --ids id1,id2 --json
 poly audio-cache synthesize <entry_id> --text "Hello" --json
 poly functions execute <function_id> --args '{"x": 1}' --json
 poly functions validate --json
-poly functions references <function_id> --json
 ~~~
 
 ### `--json` contract
