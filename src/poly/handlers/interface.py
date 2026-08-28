@@ -12,7 +12,6 @@ from google.protobuf.message import Message
 from poly.handlers.platform_api import PlatformAPIHandler
 from poly.handlers.posthog import PosthogHandler
 from poly.handlers.protobuf.commands_pb2 import Command
-from poly.handlers.protobuf.handoff_pb2 import Handoff_SetDefault
 from poly.handlers.sdk import SourcererAPIError
 from poly.handlers.sync_client import SyncClientHandler
 from poly.resources import (
@@ -485,19 +484,6 @@ class AgentStudioInterface:
                             **{update_type: resource.build_update_proto()},
                         )
                     )
-
-            # is_default is not part of create/update protos; it requires a separate command
-            for resource_dict in [new_resources, updated_resources]:
-                for resource in resource_dict.get(Handoff, {}).values():
-                    if isinstance(resource, Handoff) and resource.is_default:
-                        commands.append(
-                            Command(
-                                type="handoff_set_default",
-                                command_id=str(uuid.uuid4()),
-                                metadata=metadata,
-                                handoff_set_default=Handoff_SetDefault(id=resource.resource_id),
-                            )
-                        )
 
             for command in commands:
                 self.sync_client.sdk.add_command_to_queue(command)
