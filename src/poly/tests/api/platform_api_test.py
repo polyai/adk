@@ -459,6 +459,24 @@ class SynthesizeAudioCache(unittest.TestCase):
             PlatformAPIHandler.synthesize_audio_cache("studio", "agent-1", "entry-1", "hi", {})
 
 
+class ListFunctions(unittest.TestCase):
+    """Tests for PlatformAPIHandler.list_functions."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_returns_the_raw_function_list(self, mock_request, _mock_key):
+        """The endpoint returns a bare array, not a {"functions": [...]} wrapper."""
+        payload = [{"id": "fn-1", "name": "my_func"}]
+        mock_request.return_value = make_mock_response(200, json_body=payload)
+
+        result = PlatformAPIHandler.list_functions("studio", "agent-1", "branch-1")
+
+        self.assertEqual(result, payload)
+        self.assertEqual(mock_request.call_args.kwargs["method"], "GET")
+        url = mock_request.call_args.kwargs["url"]
+        self.assertIn("/agents/agent-1/branches/branch-1/functions", url)
+
+
 class ExecuteFunction(unittest.TestCase):
     """Tests for PlatformAPIHandler.execute_function."""
 

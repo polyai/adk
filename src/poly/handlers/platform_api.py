@@ -54,6 +54,7 @@ RTC_CONFIGS_URL = "/v1/agents/{project_id}/real-time-configs"
 RTC_CONFIG_URL = "/v1/agents/{project_id}/real-time-configs/{client_env}"
 RTC_SCHEMA_URL = "/v1/agents/{project_id}/real-time-configs/{client_env}/schema"
 RTC_VARIABLES_URL = "/v1/agents/{project_id}/real-time-configs/{client_env}/variables"
+FUNCTIONS_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions"
 FUNCTION_EXECUTE_URL = (
     "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/execute"
 )
@@ -1424,6 +1425,24 @@ class PlatformAPIHandler:
         endpoint = RTC_VARIABLES_URL.format(project_id=project_id, client_env=client_env)
         data = {"variables": variables}
         return PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=data)
+
+    @staticmethod
+    def list_functions(region: str, project_id: str, branch_id: str) -> list[dict]:
+        """List a branch's active functions.
+
+        Not exposed as its own CLI command — used internally to resolve a
+        function name to its ID (e.g. for ``poly functions execute``).
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            list[dict]: The branch's active functions, each with "id" and "name".
+        """
+        endpoint = FUNCTIONS_URL.format(project_id=project_id, branch_id=branch_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")
 
     @staticmethod
     def execute_function(

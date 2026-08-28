@@ -1407,6 +1407,20 @@ class AgentStudioInterface:
     # from the local-file/decorator Functions synced via push/pull.
 
     @staticmethod
+    def list_functions(region: str, project_id: str, branch_id: str) -> list[dict]:
+        """List a branch's active functions.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            list[dict]: The branch's active functions, each with "id" and "name".
+        """
+        return PlatformAPIHandler.list_functions(region, project_id, branch_id)
+
+    @staticmethod
     def execute_function(
         region: str,
         project_id: str,

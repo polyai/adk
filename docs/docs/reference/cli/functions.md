@@ -14,14 +14,14 @@ Run and validate Functions using the public Functions REST API, scoped to the pr
 Examples:
 
 ~~~bash
-poly functions execute <function_id> --args '{"x": 1}'
+poly functions execute <function_name_or_id> --args '{"x": 1}'
 poly functions validate
 ~~~
 
 Every subcommand also accepts `--region`, `--project_id` and `--branch_id` directly, so `poly functions` can run headlessly (CI, scripts, or against a branch you haven't pulled locally) without a local project checkout:
 
 ~~~bash
-poly functions execute <function_id> --region us-1 --project_id abc123 --branch_id main
+poly functions execute <function_name_or_id> --region us-1 --project_id abc123 --branch_id main
 ~~~
 
 All three must be given together — if any one is set, all three are required. With none set, the current local project's region/project/branch are used, as before.
@@ -33,13 +33,13 @@ Execute a Function and print its return value, logs and runtime.
 Examples:
 
 ~~~bash
-poly functions execute <function_id>
-poly functions execute <function_id> --args '{"x": 1}'
+poly functions execute <function_name_or_id>
+poly functions execute <function_name_or_id> --args '{"x": 1}'
 ~~~
 
 | Argument | Description |
 |---|---|
-| `function_id` | The function ID. Required. |
+| `function` | The function's name or ID. Required. |
 
 | Flag | Description |
 |---|---|

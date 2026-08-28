@@ -139,7 +139,7 @@ poly audio-cache update-file <entry_id> --file replacement.wav --json
 poly audio-cache delete <entry_id> --json
 poly audio-cache bulk-delete --ids id1,id2 --json
 poly audio-cache synthesize <entry_id> --text "Hello" --json
-poly functions execute <function_id> --args '{"x": 1}' --json
+poly functions execute <function_name_or_id> --args '{"x": 1}' --json
 poly functions validate --json
 ~~~
 

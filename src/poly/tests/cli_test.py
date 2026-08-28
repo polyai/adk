@@ -4414,8 +4414,27 @@ class FunctionsCommandTest(unittest.TestCase):
         patch.stopall()
 
     @patch("poly.cli_commands.functions.AgentStudioInterface.execute_function")
-    def test_execute_parses_args_json(self, mock_api):
-        """functions execute parses --args into an object before calling the API."""
+    @patch("poly.cli_commands.functions.AgentStudioInterface.list_functions")
+    def test_execute_resolves_function_id_by_name(self, mock_list, mock_api):
+        """functions execute resolves a function name to its ID before calling the API."""
+        mock_list.return_value = [{"id": "fn-1", "name": "my_func"}]
+        mock_api.return_value = {"body": {"ok": True}, "logs": [], "runtime": 5}
+
+        FunctionsCommand.functions_execute(TEST_DIR, "my_func", '{"x": 1}')
+
+        mock_api.assert_called_once_with(
+            region="us-1",
+            project_id="test-project",
+            branch_id="branch-1",
+            function_id="fn-1",
+            args={"x": 1},
+        )
+
+    @patch("poly.cli_commands.functions.AgentStudioInterface.execute_function")
+    @patch("poly.cli_commands.functions.AgentStudioInterface.list_functions")
+    def test_execute_accepts_function_id_directly(self, mock_list, mock_api):
+        """functions execute also accepts a raw function ID, not just a name."""
+        mock_list.return_value = [{"id": "fn-1", "name": "my_func"}]
         mock_api.return_value = {"body": {"ok": True}, "logs": [], "runtime": 5}
 
         FunctionsCommand.functions_execute(TEST_DIR, "fn-1", '{"x": 1}')
@@ -4428,9 +4447,20 @@ class FunctionsCommandTest(unittest.TestCase):
             args={"x": 1},
         )
 
+    @patch("poly.cli_commands.functions.AgentStudioInterface.list_functions")
+    @patch("poly.output.console.error")
+    def test_execute_unknown_function_exits(self, mock_error, mock_list):
+        """functions execute exits cleanly when the name/ID matches no function."""
+        mock_list.return_value = [{"id": "fn-1", "name": "my_func"}]
+
+        with self.assertRaises(SystemExit):
+            FunctionsCommand.functions_execute(TEST_DIR, "not_a_function", "{}")
+
+        mock_error.assert_called_once()
+
     @patch("poly.output.console.error")
     def test_execute_invalid_args_json_exits(self, mock_error):
-        """functions execute rejects malformed --args JSON."""
+        """functions execute rejects malformed --args JSON before resolving the function."""
         with self.assertRaises(SystemExit):
             FunctionsCommand.functions_execute(TEST_DIR, "fn-1", "{not json")
 
