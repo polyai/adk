@@ -1,17 +1,20 @@
 ---
 title: Agent settings
-description: Define the agent's identity, role, and behavioral rules in the PolyAI ADK.
+description: Define the agent's identity, persona, and behavioral rules in the PolyAI ADK.
 ---
 
 # Agent settings
 
 <p class="lead">
 Agent settings define the agent's identity and behavioral rules.
-They live in <code>agent_settings/</code> and are made up of personality, role, and rules resources.
+They live in <code>agent_settings/</code> and are made up of persona and rules resources.
 </p>
 
-!!! note "Personality and role are platform-provisioned — update only"
-    The personality and role resources are created automatically by the platform when a project is created. They always exist on any Agent Studio project and can be updated with `poly push`, but cannot be created from scratch via the ADK. If these files appear in a project directory without matching entries in `.agent_studio_config` — for example, after copying a directory from another project — the push will fail with a "Create operation not supported" error. Always start a new project with [`poly init`](../cli/init.md) and [`poly pull`](../cli/pull.md) rather than copying an existing directory.
+!!! note "The persona is platform-provisioned — update only"
+    The persona resource is created automatically by the platform when a project is created. It always exists on any Agent Studio project and can be updated with `poly push`, but cannot be created from scratch via the ADK. If `persona.txt` appears in a project directory without a matching entry in `.agent_studio_config` — for example, after copying a directory from another project — the push will fail with a "Create operation not supported" error. Always start a new project with [`poly init`](../cli/init.md) and [`poly pull`](../cli/pull.md) rather than copying an existing directory.
+
+!!! warning "Personality and role have been removed"
+    The agent's identity used to be split across `personality.yaml` and `role.yaml`. Agent Studio replaced both with a single free-text persona, so the ADK no longer pulls or pushes them. A project last pulled with an older version still has the two files on disk; they are deleted the first time the project is loaded, and the ADK logs a warning telling you to run [`poly pull`](../cli/pull.md) to fetch `persona.txt`.
 
 These settings shape how the agent presents itself and how it should behave across the conversation.
 
@@ -22,8 +25,7 @@ Agent settings live under:
 ~~~text
 agent_settings/
 ├── languages.yaml                  # Optional
-├── personality.yaml
-├── role.yaml
+├── persona.txt
 ├── rules.txt
 ├── safety_filters.yaml             # Optional
 └── experimental_config.json        # Optional
@@ -33,17 +35,11 @@ agent_settings/
 
 <div class="grid cards" markdown>
 
--   **Personality**
+-   **Persona**
 
     ---
 
-    Controls the agent's tone and conversational style.
-
--   **Role**
-
-    ---
-
-    Defines what the agent is and what kind of job it performs.
+    Describes who the agent is, in free text.
 
 -   **Rules**
 
@@ -71,82 +67,34 @@ agent_settings/
 
 </div>
 
-## Personality
+## Persona
 
-The `personality.yaml` file controls the agent's conversational tone.
+The `persona.txt` file is a free-text description of who the agent is. It is the single field that defines the agent's identity, and it is what the **Role** field in Agent Studio edits.
 
-### Fields
+### Supported references
 
-| Field | Description |
+| Syntax | Meaning |
 |---|---|
-| `adjectives` | Map of personality traits to booleans |
-| `custom` | Free-text personality description |
+| `{{attr:attribute_name}}` | [Variant attribute](./variants.md) |
+| `{{vrbl:variable_name}}` | [State variable](./variables.md) |
 
-### Adjectives
+These are the same two the personality and role settings accepted, so the persona can vary per [variant](./variants.md) or per call. Behavioral references such as `{{fn:}}` and `{{ho:}}` belong in `rules.txt`.
 
-Allowed adjective values are:
+!!! warning "Attribute references are not tracked"
 
-- `Polite`
-- `Calm`
-- `Kind`
-- `Funny`
-- `Energetic`
-- `Thoughtful`
-- `Other`
-
-If `Other` is set to `true`, no other adjective can be selected.
-
-!!! info "Non-standard adjectives"
-
-    The platform may return adjectives not in the local allowed set (for example, deprecated or newly added adjectives). Validation only fails for adjectives that are **enabled** (`true`) and not in the allowed set. Disabled (`false`) non-standard adjectives pass validation and are silently excluded from the update payload when pushing.
-
-### `custom`
-
-The `custom` field is a free-text description of the personality.
-
-It supports:
-
-- `{{attr:...}}`
-- `{{vrbl:...}}`
+    `PersonaReferences` carries a variables map and nothing else, so an `{{attr:}}` reference travels in the persona text but is not recorded as a reference on the resource. The personality and role settings behaved the same way. `poly push` still validates that the attribute exists.
 
 ### Example
 
-~~~yaml
-adjectives:
-  Polite: true
-  Calm: true
-  Kind: true
-custom: ""
+~~~text
+You are a calm and polite concierge for {{vrbl:hotel_name}}. Keep answers short.
 ~~~
 
-## Role
+### Derived personas
 
-The `role.yaml` file defines what the agent is.
+A project that predates the persona and has never had one authored still pulls a `persona.txt`: the platform derives its content from the project's old personality and role settings, without storing it. Because `poly push` only sends resources whose contents have changed, an untouched file is never pushed back.
 
-This is usually the agent's role, title, or function in the business context.
-
-### Fields
-
-| Field | Description |
-|---|---|
-| `value` | Role name, such as `Customer Service Representative` |
-| `additional_info` | Extra context about the role |
-| `custom` | Free-text role description used when `value` is `other` |
-
-If `value` is set to `other`, the `custom` field is used instead.
-
-The `custom` field supports:
-
-- `{{attr:...}}`
-- `{{vrbl:...}}`
-
-### Example
-
-~~~yaml
-value: Customer Service Representative
-additional_info: Handles customer inquiries and bookings
-custom: ""
-~~~
+Editing `persona.txt` and pushing authors a real persona. From that point the content is fixed and no longer derived.
 
 ## Rules
 
@@ -231,7 +179,7 @@ See the [Safety filters reference](./safety_filters.md) for field descriptions, 
 
 - keep rules concise and actionable
 - use references instead of hard-coded values
-- use `custom` personality and role text only when you need more than the structured fields provide
+- keep the persona focused on who the agent is, and leave what it should do to the rules
 - treat rules as a global behavioral layer, not a place for detailed flow logic
 
 ## Related pages

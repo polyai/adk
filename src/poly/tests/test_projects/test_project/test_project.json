@@ -414,25 +414,11 @@
         "prompt": "You are a helpful and professional web chat assistant."
       }
     },
-    "personality": {
-      "PERSONALITY-personality": {
-        "resource_id": "PERSONALITY-personality",
-        "name": "personality",
-        "adjectives": {
-          "Polite": true,
-          "Calm": true,
-          "Kind": true
-        },
-        "custom": ""
-      }
-    },
-    "role": {
-      "ROLE-role": {
-        "resource_id": "ROLE-role",
-        "name": "role",
-        "value": "Customer Service Representative",
-        "additional_info": "Handles customer inquiries and bookings",
-        "custom": ""
+    "persona": {
+      "PERSONA-persona": {
+        "resource_id": "PERSONA-persona",
+        "name": "persona",
+        "content": "You are a calm and polite concierge.\nGreet the caller by name using {{vrbl:VAR-customer_name}}.\n"
       }
     },
     "rules": {

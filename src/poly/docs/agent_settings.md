@@ -2,49 +2,35 @@
 
 ## Overview
 
-Agent settings define the agent's identity and behavioral rules. They live in `agent_settings/` and consist of three resources: personality, role, and rules.
+Agent settings define the agent's identity and behavioral rules. They live in `agent_settings/` and consist of two resources: the persona and the rules.
 
 ## File structure
 ```
 agent_settings/
-├── personality.yaml
-├── role.yaml
+├── persona.txt                # The agent's identity
 ├── rules.txt
 └── experimental_config.json   # See experimental_config docs
 ```
 
-## Personality (`personality.yaml`)
+## Persona (`persona.txt`)
 
-Controls the agent's conversational tone.
+Free-text description of who the agent is, and the single field that defines the agent's identity. This is what the **Role** field in Agent Studio edits.
 
-### Fields
-- **adjectives**: Map of personality traits to booleans. Allowed values: `Polite`, `Calm`, `Kind`, `Funny`, `Energetic`, `Thoughtful`, `Other`. If `Other` is `true`, no other adjective can be selected.
-- **custom**: Free-text personality description. Supports `{{attr:...}}` and `{{vrbl:...}}` references.
+### Supported references
+- `{{attr:attribute_name}}` — variant attributes
+- `{{vrbl:variable_name}}` — variables
 
-### Example
-```yaml
-adjectives:
-  Polite: true
-  Calm: true
-  Kind: true
-custom: ""
-```
-
-## Role (`role.yaml`)
-
-Defines what the agent is (its job title / purpose).
-
-### Fields
-- **value**: Role name (e.g. `Customer Service Representative`). If set to `other`, the `custom` field is used.
-- **additional_info**: Extra context about the role.
-- **custom**: Free-text role description, only valid when `value` is `other`. Supports `{{attr:...}}` and `{{vrbl:...}}` references.
+The same two the personality and role settings accepted. Behavioral references such as `{{fn:...}}` and `{{ho:...}}` belong in `rules.txt`.
 
 ### Example
-```yaml
-value: Customer Service Representative
-additional_info: Handles customer inquiries and bookings
-custom: ""
+```text
+You are a calm and polite concierge for {{vrbl:hotel_name}}. Keep answers short.
 ```
+
+### Notes
+- The persona replaced the older personality and role settings, which are no longer surfaced in Agent Studio and are no longer pulled or pushed. Any `personality.yaml` / `role.yaml` left in a project from an earlier version is deleted the next time the project is loaded.
+- For projects that predate the persona and have never authored one, the pulled content is **derived** server-side from the old personality and role. Nothing is stored until someone edits it, and `poly push` sends nothing while the file is untouched.
+- Editing `persona.txt` and pushing authors a real persona. From that point the content is fixed and no longer derived.
 
 ## Rules (`rules.txt`)
 

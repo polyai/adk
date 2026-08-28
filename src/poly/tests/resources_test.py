@@ -13,9 +13,7 @@ from jsonschema import ValidationError
 
 import poly.resources.resource_utils as resource_utils
 from poly.resources.agent_settings import (
-    ALLOWED_ADJECTIVES,
-    SettingsPersonality,
-    SettingsRole,
+    SettingsPersona,
     SettingsRules,
 )
 from poly.resources.api_integration import (
@@ -2057,255 +2055,6 @@ class VoiceGreetingTests(unittest.TestCase):
             self.assertEqual(result.language_code, "en-GB")
 
 
-TEST_PERSONALITY = SettingsPersonality(
-    resource_id="personality_123",
-    name="personality",
-    adjectives={"Polite": True, "Calm": True, "Kind": False},
-    custom="",
-)
-
-PERSONALITY_RAW = """adjectives:
-  Calm: true
-  Polite: true
-custom: ''
-"""
-
-
-class SettingsPersonalityTests(unittest.TestCase):
-    def test_get_raw(self):
-        """Test that raw property returns correct YAML representation."""
-        self.assertEqual(TEST_PERSONALITY.raw, PERSONALITY_RAW)
-
-    def test_to_yaml_dict_strips_disabled_adjectives(self):
-        """Test that to_yaml_dict excludes adjectives set to False."""
-        yaml_dict = TEST_PERSONALITY.to_yaml_dict()
-        self.assertEqual(yaml_dict["adjectives"], {"Polite": True, "Calm": True})
-        self.assertNotIn("Kind", yaml_dict["adjectives"])
-
-    def test_to_yaml_dict_sorts_adjectives(self):
-        """Test that to_yaml_dict returns adjectives in sorted order."""
-        unsorted = SettingsPersonality(
-            resource_id="p1",
-            name="personality",
-            adjectives={"Polite": True, "Calm": True, "Energetic": True, "Kind": False},
-            custom="",
-        )
-        yaml_dict = unsorted.to_yaml_dict()
-        self.assertEqual(list(yaml_dict["adjectives"].keys()), ["Calm", "Energetic", "Polite"])
-
-    def test_to_yaml_dict_normalizes_empty_and_all_false(self):
-        """Test that both empty and all-false adjectives produce the same YAML dict."""
-        empty = SettingsPersonality(resource_id="p1", name="personality", adjectives={}, custom="")
-        all_false = SettingsPersonality(
-            resource_id="p2",
-            name="personality",
-            adjectives={"Polite": False, "Calm": False},
-            custom="",
-        )
-        self.assertEqual(empty.to_yaml_dict()["adjectives"], {})
-        self.assertEqual(all_false.to_yaml_dict()["adjectives"], {})
-
-    def test_to_pretty(self):
-        """Test converting personality to pretty format."""
-        pretty_content = TEST_PERSONALITY.to_pretty()
-        self.assertIn("Polite", pretty_content)
-
-    def test_convert_and_unconvert_personality(self):
-        """Test roundtrip conversion: to_pretty -> from_pretty."""
-        converted_personality = TEST_PERSONALITY.to_pretty()
-        reverted_personality = SettingsPersonality.from_pretty(converted_personality)
-        self.assertEqual(reverted_personality, TEST_PERSONALITY.raw)
-
-    def test_validate_personality_settings(self):
-        """Test validation of personality settings."""
-        self.assertIsNone(TEST_PERSONALITY.validate())
-
-        # Test with custom and other adjectives (invalid)
-        invalid_personality = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"Polite": True, "Other": True},
-            custom="Custom personality description",
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_personality.validate()
-        self.assertIn(
-            "Other adjective can only be set if no other adjectives are selected.",
-            str(cm.exception),
-        )
-
-        # Test with invalid adjectives
-        invalid_personality = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"InvalidAdjective": True},
-            custom="",
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_personality.validate()
-        self.assertIn("Enabled adjectives must be from the allowed set:", str(cm.exception))
-
-        # Test with disabled invalid adjective (valid — only enabled adjectives are checked)
-        personality_with_disabled_invalid = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"Polite": True, "InvalidAdjective": False},
-            custom="",
-        )
-        self.assertIsNone(personality_with_disabled_invalid.validate())
-
-        # Test with custom and 'Other' selected (valid case)
-        valid_personality = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"Other": True},
-            custom="Custom personality description",
-        )
-        self.assertIsNone(valid_personality.validate())
-
-        # Test with invalid function reference in custom field
-        invalid_personality = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"Other": True},
-            custom="Use {{fn:func-123}} in custom personality",
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_personality.validate()
-        self.assertIn(
-            "Invalid reference type: global_functions is not a valid reference type for this resource.",
-            str(cm.exception),
-        )
-
-    def test_build_update_proto_sends_all_allowed_adjectives(self):
-        """Test that build_update_proto sends all allowed adjectives, defaulting unset to False."""
-        personality = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"Polite": True, "InvalidAdjective": False, "Calm": True},
-            custom="",
-        )
-        proto = personality.build_update_proto()
-        adjective_values = proto.adjectives.values
-        self.assertNotIn("InvalidAdjective", adjective_values)
-        self.assertEqual(set(adjective_values.keys()), ALLOWED_ADJECTIVES)
-        self.assertTrue(adjective_values["Polite"])
-        self.assertTrue(adjective_values["Calm"])
-        self.assertFalse(adjective_values["Kind"])
-        self.assertFalse(adjective_values["Funny"])
-
-    def test_read_local_resource(self):
-        """Test reading a personality from a YAML file."""
-        test_file_pretty_content = """adjectives:
-  Polite: true
-  Calm: true
-custom: ''
-"""
-
-        with mock_read_from_file(test_file_pretty_content):
-            result = SettingsPersonality.read_local_resource(
-                file_path="agent_settings/personality.yaml",
-                resource_id="personality_123",
-                resource_name="personality",
-            )
-
-            self.assertEqual(result.resource_id, "personality_123")
-            self.assertEqual(result.name, "personality")
-            self.assertIn("Polite", result.adjectives)
-            self.assertEqual(result.custom, "")
-
-
-TEST_ROLE = SettingsRole(
-    resource_id="role_123",
-    name="role",
-    value="Customer Service Representative",
-    additional_info="Handles customer inquiries and support requests",
-    custom="",
-)
-
-ROLE_RAW = """value: Customer Service Representative
-additional_info: Handles customer inquiries and support requests
-custom: ''
-"""
-
-
-class SettingsRoleTests(unittest.TestCase):
-    def test_get_raw(self):
-        """Test that raw property returns correct YAML representation."""
-        self.assertEqual(TEST_ROLE.raw, ROLE_RAW)
-
-    def test_to_pretty(self):
-        """Test converting role to pretty format."""
-        pretty_content = TEST_ROLE.to_pretty()
-        self.assertIn("Customer Service Representative", pretty_content)
-
-    def test_convert_and_unconvert_role(self):
-        """Test roundtrip conversion: to_pretty -> from_pretty."""
-        converted_role = TEST_ROLE.to_pretty()
-        reverted_role = SettingsRole.from_pretty(converted_role)
-        self.assertEqual(reverted_role, TEST_ROLE.raw)
-
-    def test_validate_role_settings(self):
-        """Test validation of role settings."""
-        self.assertIsNone(TEST_ROLE.validate(resource_mappings=[]))
-
-        # Test with custom and non-other role (invalid)
-        invalid_role = SettingsRole(
-            resource_id="role_123",
-            name="role",
-            value="Customer Service Representative",
-            additional_info="",
-            custom="Custom role description",
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_role.validate(resource_mappings=[])
-        self.assertIn("Custom role can only be set if role is 'other'.", str(cm.exception))
-
-        # Test with custom and 'other' role (valid case)
-        valid_role = SettingsRole(
-            resource_id="role_123",
-            name="role",
-            value="Other",
-            additional_info="",
-            custom="Custom role description",
-        )
-        self.assertIsNone(valid_role.validate(resource_mappings=[]))
-
-        # Test with invalid function reference in custom field
-        invalid_role = SettingsRole(
-            resource_id="role_123",
-            name="role",
-            value="Other",
-            additional_info="",
-            custom="Use {{fn:func-123}} in custom role",
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_role.validate(resource_mappings=[])
-        self.assertIn(
-            "Invalid reference type: global_functions is not a valid reference type for this resource.",
-            str(cm.exception),
-        )
-
-    def test_read_local_resource(self):
-        """Test reading a role from a YAML file."""
-        test_file_pretty_content = """value: Customer Service Representative
-additional_info: Handles customer inquiries
-custom: ''
-"""
-
-        with mock_read_from_file(test_file_pretty_content):
-            result = SettingsRole.read_local_resource(
-                file_path="agent_settings/role.yaml",
-                resource_id="role_123",
-                resource_name="role",
-            )
-
-            self.assertEqual(result.resource_id, "role_123")
-            self.assertEqual(result.name, "role")
-            self.assertEqual(result.value, "Customer Service Representative")
-            self.assertEqual(result.additional_info, "Handles customer inquiries")
-
-
 TEST_RULES = SettingsRules(
     resource_id="rules_123",
     name="rules",
@@ -2490,6 +2239,167 @@ TEST_FLOW_CONFIG = FlowConfig(
     description="A test flow description",
     start_step="step-1",
 )
+
+TEST_PERSONA = SettingsPersona(
+    resource_id="persona_123",
+    name="persona",
+    content="You are a calm concierge. Greet {{vrbl:VAR-customer_name}} by name.",
+)
+
+PERSONA_VARIABLE_MAPPING = [
+    ResourceMapping(
+        resource_id="VAR-customer_name",
+        resource_name="customer_name",
+        resource_type=Variable,
+        file_path="variables/customer_name",
+        resource_prefix="vrbl",
+        flow_name=None,
+    ),
+    ResourceMapping(
+        resource_id="ATTR-brand_name",
+        resource_name="brand_name",
+        resource_type=VariantAttribute,
+        file_path="config/variant_attributes.yaml",
+        resource_prefix="attr",
+        flow_name=None,
+    ),
+]
+
+
+def _persona_projection(persona: dict | None) -> dict:
+    agent_settings = {"rules": {"behaviour": "Be polite and helpful"}}
+    if persona is not None:
+        agent_settings["persona"] = persona
+    return {"agentSettings": agent_settings}
+
+
+class SettingsPersonaTests(unittest.TestCase):
+    def test_get_raw(self):
+        """Test that raw property returns the content string."""
+        self.assertEqual(TEST_PERSONA.raw, TEST_PERSONA.content)
+
+    def test_file_path(self):
+        """Test that the persona is stored as plain text next to the other settings."""
+        self.assertEqual(TEST_PERSONA.file_path, os.path.join("agent_settings", "persona.txt"))
+
+    def test_convert_and_unconvert_persona(self):
+        """Test roundtrip conversion: to_pretty -> from_pretty."""
+        pretty_content = TEST_PERSONA.to_pretty(resource_mappings=PERSONA_VARIABLE_MAPPING)
+        self.assertIn("{{vrbl:customer_name}}", pretty_content)
+        self.assertNotIn("{{vrbl:VAR-customer_name}}", pretty_content)
+
+        reverted = SettingsPersona.from_pretty(
+            pretty_content, resource_mappings=PERSONA_VARIABLE_MAPPING
+        )
+        self.assertEqual(reverted, TEST_PERSONA.raw)
+
+    def test_validate_variable_reference(self):
+        """Test validation accepts a known variable and rejects an unknown one."""
+        self.assertIsNone(TEST_PERSONA.validate(resource_mappings=PERSONA_VARIABLE_MAPPING))
+
+        with self.assertRaises(ValueError) as cm:
+            TEST_PERSONA.validate(resource_mappings=[])
+        self.assertIn("Invalid references: ['variables: VAR-customer_name']", str(cm.exception))
+
+    def test_validate_attribute_reference(self):
+        """Test that attributes are accepted, as they were on personality and role."""
+        persona_with_attr = SettingsPersona(
+            resource_id="persona_123",
+            name="persona",
+            content="You are a concierge for {{attr:ATTR-brand_name}}.",
+        )
+        self.assertIsNone(persona_with_attr.validate(resource_mappings=PERSONA_VARIABLE_MAPPING))
+
+        with self.assertRaises(ValueError) as cm:
+            persona_with_attr.validate(resource_mappings=[])
+        self.assertIn("Invalid references: ['attributes: ATTR-brand_name']", str(cm.exception))
+
+    def test_validate_rejects_behavioural_references(self):
+        """Test that behavioural references belong in rules.txt, not the persona."""
+        persona_with_fn = SettingsPersona(
+            resource_id="persona_123",
+            name="persona",
+            content="You are a concierge. Use {{fn:book_table}}.",
+        )
+        with self.assertRaises(ValueError) as cm:
+            persona_with_fn.validate(resource_mappings=[])
+        self.assertIn("Invalid reference type: global_functions", str(cm.exception))
+
+    def test_build_update_proto_omits_attribute_references(self):
+        """Test that attribute references stay in the content, untracked.
+
+        PersonaReferences has a variables map and nothing else — the same shape
+        PersonalityReferences and RoleReferences had.
+        """
+        proto = SettingsPersona(
+            resource_id="persona_123",
+            name="persona",
+            content="You are a concierge for {{attr:ATTR-brand_name}}.",
+        ).build_update_proto()
+        self.assertIn("{{attr:ATTR-brand_name}}", proto.content)
+        self.assertEqual(dict(proto.references.variables), {})
+
+    def test_build_update_proto(self):
+        """Test building the update proto, including variable references."""
+        proto = TEST_PERSONA.build_update_proto()
+        self.assertEqual(proto.content, TEST_PERSONA.content)
+        self.assertEqual(dict(proto.references.variables), {"VAR-customer_name": True})
+
+    def test_build_update_proto_without_references(self):
+        """Test that references are always sent, even when empty."""
+        proto = SettingsPersona(
+            resource_id="persona_123",
+            name="persona",
+            content="You are a calm concierge.",
+        ).build_update_proto()
+        self.assertEqual(dict(proto.references.variables), {})
+
+    def test_command_type(self):
+        """Test that pushing a persona sends update_persona."""
+        self.assertEqual(TEST_PERSONA.command_type, "persona")
+        self.assertEqual(TEST_PERSONA.update_command_type, "update_persona")
+
+    def test_create_and_delete_not_supported(self):
+        """Test that the platform offers no create or delete for the persona."""
+        with self.assertRaises(NotImplementedError):
+            TEST_PERSONA.build_create_proto()
+        with self.assertRaises(NotImplementedError):
+            TEST_PERSONA.build_delete_proto()
+
+    def test_from_projection(self):
+        """Test that persona content becomes a SettingsPersona resource."""
+        resources = SettingsPersona.from_projection(
+            _persona_projection({"content": "You are a calm Consultant."})
+        )
+        self.assertEqual(
+            resources["persona"],
+            SettingsPersona(
+                resource_id="persona",
+                name="persona",
+                content="You are a calm Consultant.",
+            ),
+        )
+
+    def test_from_projection_without_content(self):
+        """Test a persona object that carries no content."""
+        self.assertEqual(
+            SettingsPersona.from_projection(
+                _persona_projection(
+                    {"createdAt": "", "createdBy": "", "references": {"variables": {}}}
+                )
+            ),
+            {},
+        )
+
+    def test_from_projection_without_persona(self):
+        """Test a projection with no persona key at all."""
+        self.assertEqual(SettingsPersona.from_projection(_persona_projection(None)), {})
+
+    def test_from_projection_with_empty_content(self):
+        """Test that an authored but empty persona is still a resource."""
+        resources = SettingsPersona.from_projection(_persona_projection({"content": ""}))
+        self.assertEqual(resources["persona"].content, "")
+
 
 FLOW_CONFIG_RAW = """name: Test Flow
 description: A test flow description
@@ -9655,27 +9565,25 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
         self.assertIn("bool", str(ctx.exception))
 
     def test_dict_value_wrong_type_raises(self):
-        """A dict[str, bool] field with a str value instead of bool should raise."""
-        personality = SettingsPersonality(
-            resource_id="P-1",
-            name="personality",
-            custom="fine",
-            adjectives={"Polite": "sure"},
+        """A dict[str, str] field with an int value instead of str should raise."""
+        translation = Translation(
+            resource_id="TN-1",
+            name="greeting",
+            translations={"en-GB": 1},
         )
         with self.assertRaises(ValueError) as ctx:
-            resource_utils.check_yaml_field_types(personality)
-        self.assertIn("adjectives", str(ctx.exception))
-        self.assertIn("should be bool but got str", str(ctx.exception))
+            resource_utils.check_yaml_field_types(translation)
+        self.assertIn("translations", str(ctx.exception))
+        self.assertIn("should be str but got int", str(ctx.exception))
 
     def test_dict_valid_types_passes(self):
-        """A dict[str, bool] field with correct types should not raise."""
-        personality = SettingsPersonality(
-            resource_id="P-1",
-            name="personality",
-            custom="fine",
-            adjectives={"Polite": True, "Calm": False},
+        """A dict[str, str] field with correct types should not raise."""
+        translation = Translation(
+            resource_id="TN-1",
+            name="greeting",
+            translations={"en-GB": "Hello", "fr-FR": "Bonjour"},
         )
-        resource_utils.check_yaml_field_types(personality)
+        resource_utils.check_yaml_field_types(translation)
 
     def test_int_accepted_for_float_field(self):
         """int values should be accepted where float is expected (YAML parses 500 as int)."""
@@ -10516,50 +10424,7 @@ class FunctionStepFromProjection(unittest.TestCase):
 
 
 class AgentSettingsFromProjection(unittest.TestCase):
-    """Tests for SettingsPersonality, SettingsRole, and SettingsRules from_projection."""
-
-    def test_personality_from_projection(self):
-        """Verify personality adjectives and custom text are parsed."""
-        projection = {
-            "agentSettings": {
-                "personality": {
-                    "adjectives": {"Friendly": True, "Professional": True},
-                    "custom": "Always be cheerful",
-                }
-            }
-        }
-        result = SettingsPersonality.from_projection(projection)
-        self.assertEqual(list(result), ["personality"])
-        personality = result["personality"]
-        self.assertIsInstance(personality, SettingsPersonality)
-        self.assertEqual(personality.adjectives, {"Friendly": True, "Professional": True})
-        self.assertEqual(personality.custom, "Always be cheerful")
-
-    def test_personality_empty_projection(self):
-        """An empty projection should return an empty dict."""
-        self.assertEqual(SettingsPersonality.from_projection({}), {})
-
-    def test_role_from_projection(self):
-        """Verify role value, additional_info, and custom are parsed."""
-        projection = {
-            "agentSettings": {
-                "role": {
-                    "value": "receptionist",
-                    "additionalInfo": "front desk",
-                    "custom": "",
-                }
-            }
-        }
-        result = SettingsRole.from_projection(projection)
-        self.assertEqual(list(result), ["role"])
-        role = result["role"]
-        self.assertIsInstance(role, SettingsRole)
-        self.assertEqual(role.value, "receptionist")
-        self.assertEqual(role.additional_info, "front desk")
-
-    def test_role_empty_projection(self):
-        """An empty projection should return an empty dict."""
-        self.assertEqual(SettingsRole.from_projection({}), {})
+    """Tests for SettingsRules from_projection."""
 
     def test_rules_from_projection(self):
         """Verify rules behaviour is parsed."""
