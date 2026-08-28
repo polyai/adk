@@ -1947,7 +1947,15 @@ PERSONA_VARIABLE_MAPPING = [
         file_path="variables/customer_name",
         resource_prefix="vrbl",
         flow_name=None,
-    )
+    ),
+    ResourceMapping(
+        resource_id="ATTR-brand_name",
+        resource_name="brand_name",
+        resource_type=VariantAttribute,
+        file_path="config/variant_attributes.yaml",
+        resource_prefix="attr",
+        flow_name=None,
+    ),
 ]
 
 
@@ -1986,16 +1994,43 @@ class SettingsPersonaTests(unittest.TestCase):
             TEST_PERSONA.validate(resource_mappings=[])
         self.assertIn("Invalid references: ['variables: VAR-customer_name']", str(cm.exception))
 
-    def test_validate_rejects_non_variable_references(self):
-        """Test that only variables may be referenced."""
+    def test_validate_attribute_reference(self):
+        """Test that attributes are accepted, as they were on personality and role."""
         persona_with_attr = SettingsPersona(
             resource_id="persona_123",
             name="persona",
-            content="You are a concierge for {{attr:customer-name}}.",
+            content="You are a concierge for {{attr:ATTR-brand_name}}.",
         )
+        self.assertIsNone(persona_with_attr.validate(resource_mappings=PERSONA_VARIABLE_MAPPING))
+
         with self.assertRaises(ValueError) as cm:
             persona_with_attr.validate(resource_mappings=[])
-        self.assertIn("Invalid reference type: attributes", str(cm.exception))
+        self.assertIn("Invalid references: ['attributes: ATTR-brand_name']", str(cm.exception))
+
+    def test_validate_rejects_behavioural_references(self):
+        """Test that behavioural references belong in rules.txt, not the persona."""
+        persona_with_fn = SettingsPersona(
+            resource_id="persona_123",
+            name="persona",
+            content="You are a concierge. Use {{fn:book_table}}.",
+        )
+        with self.assertRaises(ValueError) as cm:
+            persona_with_fn.validate(resource_mappings=[])
+        self.assertIn("Invalid reference type: global_functions", str(cm.exception))
+
+    def test_build_update_proto_omits_attribute_references(self):
+        """Test that attribute references stay in the content, untracked.
+
+        PersonaReferences has a variables map and nothing else — the same shape
+        PersonalityReferences and RoleReferences had.
+        """
+        proto = SettingsPersona(
+            resource_id="persona_123",
+            name="persona",
+            content="You are a concierge for {{attr:ATTR-brand_name}}.",
+        ).build_update_proto()
+        self.assertIn("{{attr:ATTR-brand_name}}", proto.content)
+        self.assertEqual(dict(proto.references.variables), {})
 
     def test_build_update_proto(self):
         """Test building the update proto, including variable references."""

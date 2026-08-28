@@ -17,7 +17,10 @@ agent_settings/
 Free-text description of who the agent is, and the single field that defines the agent's identity. This is what the **Role** field in Agent Studio edits.
 
 ### Supported references
-- `{{vrbl:variable_name}}` — variables. No other reference type is allowed.
+- `{{attr:attribute_name}}` — variant attributes
+- `{{vrbl:variable_name}}` — variables
+
+The same two the personality and role settings accepted. Behavioral references such as `{{fn:...}}` and `{{ho:...}}` belong in `rules.txt`.
 
 ### Example
 ```text

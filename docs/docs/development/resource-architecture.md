@@ -47,7 +47,7 @@ The last two are not peers of the first four. Agent configuration is the leaf la
 
 Rules are **always present in the prompt**, on every turn. They are not retrieved and not conditional, which makes them the right home for instructions that are unconditionally true — "always confirm the booking reference before making changes" — and the wrong home for facts, which would consume prompt space even when irrelevant to the current turn.
 
-`persona.txt` is narrower than rules: it accepts only `{{vrbl:}}` references. Behavioral references such as `{{fn:}}` and `{{ho:}}` belong in `rules.txt`.
+`persona.txt` is narrower than rules: it accepts only `{{attr:}}` and `{{vrbl:}}` references. Behavioral references such as `{{fn:}}` and `{{ho:}}` belong in `rules.txt`.
 
 See [agent settings](../reference/resources/agent_settings.md).
 

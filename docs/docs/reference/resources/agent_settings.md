@@ -75,9 +75,14 @@ The `persona.txt` file is a free-text description of who the agent is. It is the
 
 | Syntax | Meaning |
 |---|---|
+| `{{attr:attribute_name}}` | [Variant attribute](./variants.md) |
 | `{{vrbl:variable_name}}` | [State variable](./variables.md) |
 
-Variables are the only reference type the persona accepts. Behavioral references such as `{{fn:}}` and `{{ho:}}` belong in `rules.txt`.
+These are the same two the personality and role settings accepted, so the persona can vary per [variant](./variants.md) or per call. Behavioral references such as `{{fn:}}` and `{{ho:}}` belong in `rules.txt`.
+
+!!! warning "Attribute references are not tracked"
+
+    `PersonaReferences` carries a variables map and nothing else, so an `{{attr:}}` reference travels in the persona text but is not recorded as a reference on the resource. The personality and role settings behaved the same way. `poly push` still validates that the attribute exists.
 
 ### Example
 

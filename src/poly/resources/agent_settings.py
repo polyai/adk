@@ -29,7 +29,7 @@ ALLOWED_BEHAVIOUR_REFERENCES = [
     "variables",
     "translations",
 ]
-ALLOWED_PERSONA_REFERENCES = ["variables"]
+ALLOWED_PERSONA_REFERENCES = ["attributes", "variables"]
 
 
 @register_resource("persona")
@@ -111,7 +111,12 @@ class SettingsPersona(Resource):
         )
 
     def build_update_proto(self) -> Persona_UpdatePersona:
-        """Create a proto for updating the resource."""
+        """Create a proto for updating the resource.
+
+        PersonaReferences carries a variables map and nothing else, so attribute
+        references travel in the content and are not tracked. Personality and
+        role behaved the same way before the persona replaced them.
+        """
 
         references = utils.get_references_from_prompt(self.content, ALLOWED_PERSONA_REFERENCES)
 

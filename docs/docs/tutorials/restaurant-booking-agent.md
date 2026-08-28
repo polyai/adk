@@ -89,7 +89,7 @@ You are polite, calm, and warm, and you keep answers short.
 
 !!! info "Supported references"
 
-    The persona accepts `{{vrbl:...}}` references only, so it can vary per call. Behavioral references such as `{{fn:...}}` and `{{ho:...}}` belong in `rules.txt`.
+    The persona accepts `{{attr:...}}` and `{{vrbl:...}}` references, so it can vary per [variant](../reference/resources/variants.md) or per call. Behavioral references such as `{{fn:...}}` and `{{ho:...}}` belong in `rules.txt`.
 
 ### Rules
 
