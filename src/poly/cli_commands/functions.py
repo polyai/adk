@@ -23,25 +23,21 @@ from poly.cli_commands.shared import resolve_project_scope
 from poly.handlers.interface import AgentStudioInterface
 from poly.output.json_output import json_print
 
-# Section headers for `poly functions --help`: running/inspecting individual
-# functions, then deploying them. CRUD, duplication and the start/end
-# lifecycle hooks live in the local-file/decorator Functions mechanism (synced
-# via push/pull); this command family only covers what that mechanism can't do.
+# Section header for `poly functions --help`. CRUD, duplication and the
+# start/end lifecycle hooks live in the local-file/decorator Functions
+# mechanism (synced via push/pull); this command family only covers what
+# that mechanism can't do: running and inspecting functions via the REST API.
 FUNCTIONS_RUN_GROUP = "Run and inspect"
-FUNCTIONS_DEPLOY_GROUP = "Deploy"
 
 FUNCTIONS_SUBCOMMAND_GROUP_ORDER = [
     FUNCTIONS_RUN_GROUP,
-    FUNCTIONS_DEPLOY_GROUP,
 ]
 
 FUNCTIONS_SUBCOMMAND_GROUPS = {
     "execute": FUNCTIONS_RUN_GROUP,
     "references": FUNCTIONS_RUN_GROUP,
     "type-definitions": FUNCTIONS_RUN_GROUP,
-    "validate": FUNCTIONS_DEPLOY_GROUP,
-    "deploy": FUNCTIONS_DEPLOY_GROUP,
-    "deployments": FUNCTIONS_DEPLOY_GROUP,
+    "validate": FUNCTIONS_RUN_GROUP,
 }
 
 
@@ -64,11 +60,11 @@ class FunctionsCommand(BaseCommand):
                 "project's current branch. Creating, editing and deleting functions is\n"
                 "still done via the local-file/decorator workflow (poly push/poly pull);\n"
                 "this covers what that workflow can't: running, inspecting and\n"
-                "deploying functions.\n\n"
+                "validating functions.\n\n"
                 "Examples:\n"
                 "  poly functions execute <function_id> --args '{\"x\": 1}'\n"
                 "  poly functions references <function_id>\n"
-                "  poly functions deploy\n"
+                "  poly functions validate\n"
             ),
             formatter_class=GroupedRawTextHelpFormatter,
         )
@@ -95,18 +91,6 @@ class FunctionsCommand(BaseCommand):
             type=str,
             default="{}",
             help="JSON object of arguments to pass to the function. Defaults to {}.",
-        )
-
-        functions_subparsers.add_parser(
-            "deploy",
-            parents=[parents.path, parents.scope, parents.json, parents.verbose],
-            help="Deploy all draft functions on the current branch.",
-            description=(
-                "Deploy every draft Function on the current branch.\n\n"
-                "Examples:\n"
-                "  poly functions deploy\n"
-            ),
-            formatter_class=RawTextHelpFormatter,
         )
 
         functions_subparsers.add_parser(
@@ -150,18 +134,6 @@ class FunctionsCommand(BaseCommand):
         )
         type_definitions_parser.add_argument("function_id", type=str, help="The function ID.")
 
-        functions_subparsers.add_parser(
-            "deployments",
-            parents=[parents.path, parents.scope, parents.json, parents.verbose],
-            help="List function deployment history across environments.",
-            description=(
-                "Show the deployment history for the project's Functions.\n\n"
-                "Examples:\n"
-                "  poly functions deployments\n"
-            ),
-            formatter_class=RawTextHelpFormatter,
-        )
-
         group_subcommands(
             functions_subparsers, FUNCTIONS_SUBCOMMAND_GROUPS, FUNCTIONS_SUBCOMMAND_GROUP_ORDER
         )
@@ -178,8 +150,6 @@ class FunctionsCommand(BaseCommand):
                 output_json=args.json,
                 **scope,
             )
-        elif args.functions_subcommand == "deploy":
-            cls.functions_deploy(args.path, output_json=args.json, **scope)
         elif args.functions_subcommand == "validate":
             cls.functions_validate(args.path, output_json=args.json, **scope)
         elif args.functions_subcommand == "references":
@@ -188,8 +158,6 @@ class FunctionsCommand(BaseCommand):
             cls.functions_type_definitions(
                 args.path, args.function_id, output_json=args.json, **scope
             )
-        elif args.functions_subcommand == "deployments":
-            cls.functions_deployments(args.path, output_json=args.json, **scope)
 
     @staticmethod
     def _parse_json_arg(value: str, flag: str, output_json: bool) -> Any:
@@ -259,40 +227,6 @@ class FunctionsCommand(BaseCommand):
             for log_line in result.get("logs", []):
                 console.print(f"[muted]{log_line}[/muted]")
             console.print(json.dumps(result.get("body", {}), indent=2))
-
-    @classmethod
-    def functions_deploy(
-        cls,
-        base_path: str,
-        output_json: bool = False,
-        region: Optional[str] = None,
-        project_id: Optional[str] = None,
-        branch_id: Optional[str] = None,
-    ) -> None:
-        """Deploy all draft functions on the current branch.
-
-        Args:
-            base_path: Base path for the project.
-            output_json: If True, emit machine-readable JSON.
-            region: Explicit region, bypassing the local project.
-            project_id: Explicit project ID, bypassing the local project.
-            branch_id: Explicit branch ID, bypassing the local project.
-        """
-        from poly.output.console import success
-
-        region, project_id, branch_id = resolve_project_scope(
-            base_path, region, project_id, branch_id, output_json=output_json
-        )
-        result = AgentStudioInterface.deploy_functions(
-            region=region,
-            project_id=project_id,
-            branch_id=branch_id,
-        )
-
-        if output_json:
-            json_print(result)
-        else:
-            success(f"Deployed functions (version {result.get('deployment_version', 'unknown')}).")
 
     @classmethod
     def functions_validate(
@@ -387,13 +321,15 @@ class FunctionsCommand(BaseCommand):
         """
         from poly.output.console import print_code
 
-        region, project_id, branch_id = resolve_project_scope(
+        # type-definitions is agent-scoped, not branch-scoped — branch_id is
+        # only resolved here for consistency with the other subcommands'
+        # --region/--project_id/--branch_id flags, and isn't sent to the API.
+        region, project_id, _branch_id = resolve_project_scope(
             base_path, region, project_id, branch_id, output_json=output_json
         )
         result = AgentStudioInterface.get_function_type_definitions(
             region=region,
             project_id=project_id,
-            branch_id=branch_id,
             function_id=function_id,
         )
 
@@ -401,41 +337,3 @@ class FunctionsCommand(BaseCommand):
             json_print(result)
         else:
             print_code(result.get("code", ""), line_numbers=False)
-
-    @classmethod
-    def functions_deployments(
-        cls,
-        base_path: str,
-        output_json: bool = False,
-        region: Optional[str] = None,
-        project_id: Optional[str] = None,
-        branch_id: Optional[str] = None,
-    ) -> None:
-        """List function deployment history across environments.
-
-        Args:
-            base_path: Base path for the project.
-            output_json: If True, emit machine-readable JSON.
-            region: Explicit region, bypassing the local project.
-            project_id: Explicit project ID, bypassing the local project.
-            branch_id: Explicit branch ID, bypassing the local project.
-        """
-        from poly.output.console import info, print_function_deployments
-
-        region, project_id, branch_id = resolve_project_scope(
-            base_path, region, project_id, branch_id, output_json=output_json
-        )
-        result = AgentStudioInterface.list_function_deployments(
-            region=region,
-            project_id=project_id,
-            branch_id=branch_id,
-        )
-        deployments = result.get("deployments", [])
-
-        if output_json:
-            json_print(result)
-        else:
-            if not deployments:
-                info("No function deployments found.")
-                return
-            print_function_deployments(deployments)

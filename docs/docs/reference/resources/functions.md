@@ -12,7 +12,7 @@ They can be called by the model, used as flow steps, or run automatically at cal
 
 Functions are how the ADK handles behavior that should not be left to prompt interpretation alone.
 
-Creating, editing and deleting functions is always done here, via local files synced by `poly push`/`poly pull`. To run, validate, deploy or inspect a function's references headlessly (e.g. from CI) once it exists, see [`poly functions`](cli.md#poly-functions).
+Creating, editing and deleting functions is always done here, via local files synced by `poly push`/`poly pull`. To run, validate or inspect a function's references headlessly (e.g. from CI) once it exists, see [`poly functions`](../cli/functions.md).
 
 ## Where functions live
 

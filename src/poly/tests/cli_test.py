@@ -4436,16 +4436,6 @@ class FunctionsCommandTest(unittest.TestCase):
 
         mock_error.assert_called_once()
 
-    @patch("poly.cli_commands.functions.AgentStudioInterface.deploy_functions")
-    @patch("poly.output.console.success")
-    def test_deploy_reports_version(self, mock_success, mock_api):
-        """functions deploy reports the resulting deployment version."""
-        mock_api.return_value = {"deployment_version": "v3", "function_ids": ["fn-1"]}
-
-        FunctionsCommand.functions_deploy(TEST_DIR)
-
-        self.assertIn("v3", mock_success.call_args[0][0])
-
     @patch("poly.cli_commands.functions.AgentStudioInterface.validate_functions")
     @patch("poly.output.console.print_function_validation_issues")
     def test_validate_passes_valid_and_issues(self, mock_print, mock_api):
@@ -4477,16 +4467,6 @@ class FunctionsCommandTest(unittest.TestCase):
         FunctionsCommand.functions_type_definitions(TEST_DIR, "fn-1")
 
         mock_print.assert_called_once_with("class Conversation: ...", line_numbers=False)
-
-    @patch("poly.cli_commands.functions.AgentStudioInterface.list_function_deployments")
-    @patch("poly.output.console.info")
-    def test_deployments_empty_shows_info(self, mock_info, mock_api):
-        """functions deployments with no history shows an info message."""
-        mock_api.return_value = {"deployments": []}
-
-        FunctionsCommand.functions_deployments(TEST_DIR)
-
-        mock_info.assert_called_once()
 
 
 # argparse wraps the usage line to the terminal width, which differs between the
@@ -4683,7 +4663,7 @@ class GroupedFunctionsHelpOutputTest(unittest.TestCase):
 
     def test_description_examples_are_still_raw(self):
         """The hand-formatted example block must survive the grouped formatter."""
-        self.assertIn("  poly functions deploy", self.help_text)
+        self.assertIn("  poly functions validate", self.help_text)
 
     def test_no_placeholder_or_ragged_whitespace(self):
         """Same cleanup guarantees as the other grouped parsers."""

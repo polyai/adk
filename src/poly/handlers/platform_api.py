@@ -60,12 +60,8 @@ FUNCTION_EXECUTE_URL = (
 FUNCTION_REFERENCES_URL = (
     "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/references"
 )
-FUNCTION_TYPE_DEFINITIONS_URL = (
-    "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/type_definitions"
-)
+FUNCTION_TYPE_DEFINITIONS_URL = "/v1/agents/{project_id}/functions/{function_id}/type-definitions"
 FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
-FUNCTIONS_DEPLOY_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/deploy"
-FUNCTIONS_DEPLOYMENTS_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/deployments"
 
 
 class PlatformAPIHandler:
@@ -1459,21 +1455,6 @@ class PlatformAPIHandler:
         return PlatformAPIHandler.make_request(region, endpoint, "POST", data={"args": args})
 
     @staticmethod
-    def deploy_functions(region: str, project_id: str, branch_id: str) -> dict:
-        """Deploy all draft functions on a branch.
-
-        Args:
-            region: The region name.
-            project_id: The project ID (agent ID).
-            branch_id: The branch ID.
-
-        Returns:
-            dict: {"deployment_version": ..., "function_ids": [...], "deployed_at": ...}.
-        """
-        endpoint = FUNCTIONS_DEPLOY_URL.format(project_id=project_id, branch_id=branch_id)
-        return PlatformAPIHandler.make_request(region, endpoint, "POST")
-
-    @staticmethod
     def validate_functions(region: str, project_id: str, branch_id: str) -> dict:
         """Validate all functions on a branch for orphaned refs and syntax errors.
 
@@ -1509,36 +1490,18 @@ class PlatformAPIHandler:
         return PlatformAPIHandler.make_request(region, endpoint, "GET")
 
     @staticmethod
-    def get_function_type_definitions(
-        region: str, project_id: str, branch_id: str, function_id: str
-    ) -> dict:
+    def get_function_type_definitions(region: str, project_id: str, function_id: str) -> dict:
         """Get Python type stubs for a function, for IDE autocomplete.
 
         Args:
             region: The region name.
             project_id: The project ID (agent ID).
-            branch_id: The branch ID.
             function_id: The function ID.
 
         Returns:
             dict: {"code": ...}.
         """
         endpoint = FUNCTION_TYPE_DEFINITIONS_URL.format(
-            project_id=project_id, branch_id=branch_id, function_id=function_id
+            project_id=project_id, function_id=function_id
         )
-        return PlatformAPIHandler.make_request(region, endpoint, "GET")
-
-    @staticmethod
-    def list_function_deployments(region: str, project_id: str, branch_id: str) -> dict:
-        """List function deployment history across environments.
-
-        Args:
-            region: The region name.
-            project_id: The project ID (agent ID).
-            branch_id: The branch ID.
-
-        Returns:
-            dict: {"deployments": [...]}.
-        """
-        endpoint = FUNCTIONS_DEPLOYMENTS_URL.format(project_id=project_id, branch_id=branch_id)
         return PlatformAPIHandler.make_request(region, endpoint, "GET")

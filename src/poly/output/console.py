@@ -1073,32 +1073,6 @@ def print_function_references(references: list[dict[str, Any]]) -> None:
     console.print(table)
 
 
-def print_function_deployments(deployments: list[dict[str, Any]]) -> None:
-    """Print the deployment history for a project's functions.
-
-    Args:
-        deployments: List of function deployment record dicts.
-    """
-    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
-    table.add_column("Environment", style="cyan", no_wrap=True)
-    table.add_column("Deployment Version", style="bold yellow", no_wrap=True)
-    table.add_column("Deployed At", no_wrap=True)
-    table.add_column("Functions", overflow="fold")
-
-    for d in deployments:
-        deployed_at = d.get("deployed_at") or "—"
-        if deployed_at != "—":
-            deployed_at = _format_iso_timestamp(deployed_at)
-        table.add_row(
-            d.get("environment", "—"),
-            str(d.get("deployment_version", "—")),
-            deployed_at,
-            ", ".join(d.get("function_ids", [])) or "—",
-        )
-
-    console.print(table)
-
-
 def print_function_validation_issues(valid: bool, issues: list[dict[str, Any]]) -> None:
     """Print the result of validating a branch's functions.
 

@@ -1429,20 +1429,6 @@ class AgentStudioInterface:
         return PlatformAPIHandler.execute_function(region, project_id, branch_id, function_id, args)
 
     @staticmethod
-    def deploy_functions(region: str, project_id: str, branch_id: str) -> dict:
-        """Deploy all draft functions on a branch.
-
-        Args:
-            region: The region name.
-            project_id: The project ID (agent ID).
-            branch_id: The branch ID.
-
-        Returns:
-            dict: {"deployment_version": ..., "function_ids": [...], "deployed_at": ...}.
-        """
-        return PlatformAPIHandler.deploy_functions(region, project_id, branch_id)
-
-    @staticmethod
     def validate_functions(region: str, project_id: str, branch_id: str) -> dict:
         """Validate all functions on a branch.
 
@@ -1476,37 +1462,18 @@ class AgentStudioInterface:
         )
 
     @staticmethod
-    def get_function_type_definitions(
-        region: str, project_id: str, branch_id: str, function_id: str
-    ) -> dict:
+    def get_function_type_definitions(region: str, project_id: str, function_id: str) -> dict:
         """Get Python type stubs for a function, for IDE autocomplete.
 
         Args:
             region: The region name.
             project_id: The project ID (agent ID).
-            branch_id: The branch ID.
             function_id: The function ID.
 
         Returns:
             dict: {"code": ...}.
         """
-        return PlatformAPIHandler.get_function_type_definitions(
-            region, project_id, branch_id, function_id
-        )
-
-    @staticmethod
-    def list_function_deployments(region: str, project_id: str, branch_id: str) -> dict:
-        """List function deployment history across environments.
-
-        Args:
-            region: The region name.
-            project_id: The project ID (agent ID).
-            branch_id: The branch ID.
-
-        Returns:
-            dict: {"deployments": [...]}.
-        """
-        return PlatformAPIHandler.list_function_deployments(region, project_id, branch_id)
+        return PlatformAPIHandler.get_function_type_definitions(region, project_id, function_id)
 
     def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
         """Get the history of a specific branch.
