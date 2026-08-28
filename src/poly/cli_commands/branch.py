@@ -23,6 +23,11 @@ from poly.utils import merge_strings
 _BRANCH_MERGE_LONG_LINE_THRESHOLD = 800
 
 
+def _is_sequence_mismatch(errors: list[dict[str, Any]]) -> bool:
+    messages = (str(err.get("message", "")).lower() for err in errors)
+    return any("sequence mismatch" in m or "sequence_mismatch" in m for m in messages)
+
+
 def _branch_merge_conflict_file_key(path: list[str]) -> str:
     """Group field-level API conflicts by parent path (resource-ish key)."""
     if not path:
@@ -1182,6 +1187,11 @@ class BranchCommand(BaseCommand):
             plain("\n[red]Errors:[/red]")
             for err in errors:
                 error(f"- {err['path']}: {err['message']}")
+            if _is_sequence_mismatch(errors):
+                warning(
+                    "The branch changed while merging (e.g. a draft deployment finished). "
+                    "Re-run the merge."
+                )
 
         enriched = enrich_branch_merge_conflicts(conflicts) if conflicts else []
         display_conflict = [
@@ -1503,6 +1513,11 @@ class BranchCommand(BaseCommand):
             plain("\n[red]Errors:[/red]")
             for err in errors:
                 error(f"- {err['path']}: {err['message']}")
+            if _is_sequence_mismatch(errors):
+                warning(
+                    "The branch changed while syncing (e.g. a draft deployment finished). "
+                    "Re-run the sync."
+                )
 
         enriched = enrich_branch_merge_conflicts(conflicts) if conflicts else []
         display_conflict = [
