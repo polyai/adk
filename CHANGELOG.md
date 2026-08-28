@@ -1,6 +1,51 @@
 # CHANGELOG
 
 
+## v0.49.0 (2026-08-28)
+
+### Features
+
+- Add support for guardrails ([#277](https://github.com/polyai/adk/pull/277),
+  [`93cf5a5`](https://github.com/polyai/adk/commit/93cf5a512dfecf1e0d4b22b55cf44fd83496c4b3))
+
+## Summary
+
+Adds a new `guardrails` resource type to ADK, supporting both platform (toggle-only) and custom
+  (prompt/action-defined) guardrails, synced through `agent_settings/guardrails.yaml`.
+
+## Motivation
+
+Agent Studio now supports guardrails (platform-provided and custom) that were not yet representable
+  in local ADK projects. This adds first-class support so they can be pulled, edited, and pushed
+  like other resources.
+
+## Changes
+
+- Added `PlatformGuardrail` and `CustomGuardrail` resource classes in
+  `src/poly/resources/guardrails.py`, both stored in `agent_settings/guardrails.yaml` -
+  `PlatformGuardrail` supports only the `enabled` toggle against the platform's fixed guardrail
+  catalog (`GuardrailName` proto enum), with YAML-friendly short names (e.g. `jailbreak_defence`) -
+  `CustomGuardrail` supports full create/update/delete with `name`, `prompt`, `action`, and
+  `enabled` fields, plus reference validation against other resource types (`global_functions`,
+  `sms`, `handoff`, `attributes`, `variables`, `translations`) - Registered both resource classes
+  via `register_resource` and exported them from `src/poly/resources/__init__.py` - Added
+  `discover_resources`/`from_projection`/`to_yaml_dict`/`from_yaml_dict`/`validate` implementations
+  for both resource types - Added guardrails fixture (`agent_settings/guardrails.yaml`) and updated
+  `test_project.json` in the test fixture project - Added extensive unit tests in
+  `src/poly/tests/resources_test.py`
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.48.0 (2026-08-28)
 
 ### Features
