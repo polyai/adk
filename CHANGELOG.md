@@ -1,6 +1,44 @@
 # CHANGELOG
 
 
+## v0.46.0 (2026-08-28)
+
+### Features
+
+- Add randomize to @func_latency_control ([#265](https://github.com/polyai/adk/pull/265),
+  [`f9d3884`](https://github.com/polyai/adk/commit/f9d3884ee50794029081160c3b3895c2932cae96))
+
+## Summary
+
+Adds `randomize` to `@func_latency_control` so ADK projects can opt into shuffling delay responses
+  per call.
+
+## Changes
+
+- `@func_latency_control(..., randomize: bool = False)` - Parse/render/to_proto/create wiring on
+  `FunctionLatencyControl` - Updated `functions_pb2` bindings - Docs + unit tests
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (latency/randomize
+  cases) - [x] No breaking changes to the `poly` CLI interface (or migration path documented) - [x]
+  Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Example
+
+```python @func_latency_control( delay_before_responses_start=0, silence_after_each_response=2,
+  delay_responses=[("$delay_1", 3), ("$delay_2", 2)], randomize=True, ) ```
+
+---------
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+
+
 ## v0.45.1 (2026-08-28)
 
 ### Bug Fixes
