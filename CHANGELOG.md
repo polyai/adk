@@ -1,6 +1,63 @@
 # CHANGELOG
 
 
+## v0.47.1 (2026-08-28)
+
+### Bug Fixes
+
+- Sort resource collections in YAML and register fetch command
+  ([#291](https://github.com/polyai/adk/pull/291),
+  [`ae1c29d`](https://github.com/polyai/adk/commit/ae1c29d4daf07e595eb755a330f7c064c9be69c8))
+
+## Summary
+
+Sorts collections alphabetically during YAML serialization so pulls produce stable, diff-friendly
+  output. Also registers `FetchCommand` in the CLI command list — it was implemented but never wired
+  up, so `poly fetch` was unavailable.
+
+## Motivation
+
+Several collections are built by iterating a map in the platform projection — flow step conditions,
+  API integration operations, test case function call assertions and their arguments, and the
+  integration/operation keys of test case API mocks. Their serialized order followed whatever the
+  map iteration gave, so unrelated pulls could reorder blocks in a resource's YAML and create noisy
+  diffs.
+
+Separately, the `fetch` command existed in `cli_commands/sync.py` but was missing from `COMMANDS`,
+  so it never appeared in the CLI.
+
+## Changes
+
+- `FlowStep.to_yaml_dict` sorts conditions by `name` (matches the existing
+  `sorted(self.extracted_entities)` behaviour) - `ApiIntegration.to_yaml_dict` sorts operations by
+  `name` - `FunctionCallAssertion.to_yaml_dict` sorts arguments by `parameter_name`, and
+  `TestCaseAssertion.to_yaml_dict` sorts function call assertions by `name` -
+  `TestCaseApiMocks.to_yaml_dict` sorts integration and operation names; the rules within an
+  operation keep their order, since they are a sequence and `repeat` depends on it - Add
+  `FetchCommand` to the `COMMANDS` list in `cli.py` so `poly fetch` is registered - Add unit tests
+  covering each ordering, including one asserting mock rule order is preserved - `uv.lock` version
+  bump picked up from the 0.44.4 release
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly --help` now lists `fetch`) - [ ]
+  Tested against a live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1356 passed) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+``` $ uv run poly --help | grep fetch fetch Fetch the latest project state from Agent Studio ```
+
+---------
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.47.0 (2026-08-28)
 
 ### Features
