@@ -105,6 +105,7 @@ class FunctionLatencyControl:
     initial_delay: int = 0
     interval: int = 0
     delay_responses: list[FunctionDelayResponse] = field(default_factory=list)
+    randomize: bool = False
 
     def __post_init__(self):
         self.delay_responses = [
@@ -147,6 +148,7 @@ def parse_latency_control(latency_control_data: dict) -> FunctionLatencyControl:
         ),
         interval=latency_control_data.get("interval", 0),
         delay_responses=delay_responses,
+        randomize=latency_control_data.get("randomize", False),
     )
 
 
@@ -193,6 +195,7 @@ class LatencyControl(SubResource):
             delay_responses=delay_responses,
             initial_delay=self.latency_control.initial_delay if enabled else 0,
             interval=self.latency_control.interval if enabled else 0,
+            randomize=self.latency_control.randomize if enabled else False,
         )
 
     def build_update_proto(self) -> Message:
@@ -265,6 +268,7 @@ class Function(Resource):
                 initial_delay=value.get("initial_delay", value.get("initialDelay", 0)),
                 interval=value.get("interval", 0),
                 delay_responses=value.get("delay_responses", []),
+                randomize=value.get("randomize", False),
             )
         return FunctionLatencyControl()
 
@@ -568,6 +572,8 @@ class Function(Resource):
         if lc.delay_responses:
             dr_items = ", ".join(f"({dr.message!r}, {dr.duration!r})" for dr in lc.delay_responses)
             parts.append(f"delay_responses=[{dr_items}]")
+        if lc.randomize:
+            parts.append("randomize=True")
         return f"{indent}@func_latency_control({', '.join(parts)})\n"
 
     def validate(self, **kwargs) -> None:
@@ -775,12 +781,15 @@ class Function(Resource):
         interval = 0
         delay_responses: list[FunctionDelayResponse] = []
         used_delay_response_ids: set[str] = set()
+        randomize = False
 
         for kw in decorator.keywords:
             if kw.arg == "delay_before_responses_start" and isinstance(kw.value, ast.Constant):
                 initial_delay = kw.value.value
             elif kw.arg == "silence_after_each_response" and isinstance(kw.value, ast.Constant):
                 interval = kw.value.value
+            elif kw.arg == "randomize" and isinstance(kw.value, ast.Constant):
+                randomize = bool(kw.value.value)
             elif kw.arg == "delay_responses" and isinstance(kw.value, ast.List):
                 for elt in kw.value.elts:
                     if isinstance(elt, ast.Tuple) and len(elt.elts) == 2:
@@ -812,6 +821,7 @@ class Function(Resource):
             initial_delay=initial_delay,
             interval=interval,
             delay_responses=delay_responses,
+            randomize=randomize,
         )
 
     @staticmethod
@@ -964,6 +974,7 @@ class Function(Resource):
             delay_responses=delay_responses,
             initial_delay=self.latency_control.initial_delay,
             interval=self.latency_control.interval,
+            randomize=self.latency_control.randomize,
         )
 
     def build_create_proto(self) -> Message:
