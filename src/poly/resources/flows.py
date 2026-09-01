@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import math
 import os
 import re
@@ -60,6 +61,9 @@ from poly.resources.resource import (
     register_resource,
 )
 
+logger = logging.getLogger(__name__)
+
+
 FUNCTION_REGEX = re.compile(r"{{f[nt]:([\w-]+)}}")
 # Flow step names: alphanumeric, extended Latin (C0–024F, 1E00–1EFF), and _ &,/.-
 FLOW_STEP_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF_ &,/.\-]+$")
@@ -109,6 +113,10 @@ class FlowConfig(YamlResource):
         """Parse flow configs from a projection dict."""
         configs = {}
         flows = projection.get("flows", {}).get("flows", {}).get("entities", {})
+        if "flows" not in projection or any("startStepId" not in flow for flow in flows.values()):
+            logger.debug("No read access to flows - they will not be pulled.")
+            return {}
+
         for flow_id, flow_data in flows.items():
             configs[flow_id] = cls(
                 resource_id=flow_id,
@@ -368,6 +376,14 @@ class FlowStep(BaseFlowStep, YamlResource):
         """Parse flow steps (non-function) from a projection dict."""
         steps = {}
         flows = projection.get("flows", {}).get("flows", {}).get("entities", {})
+        if "flows" not in projection or any(
+            "type" not in step
+            for flow_data in flows.values()
+            for step in flow_data.get("steps", {}).get("entities", {}).values()
+        ):
+            logger.debug("No read access to flow steps - they will not be pulled.")
+            return {}
+
         for flow_id, flow_data in flows.items():
             for step_id, step in flow_data.get("steps", {}).get("entities", {}).items():
                 if step.get("type") == "function_step":
@@ -1732,6 +1748,14 @@ class FunctionStep(Function, BaseFlowStep):
         """Parse function steps from a projection dict."""
         func_steps = {}
         flows = projection.get("flows", {}).get("flows", {}).get("entities", {})
+        if "flows" not in projection or any(
+            "type" not in step
+            for flow_data in flows.values()
+            for step in flow_data.get("steps", {}).get("entities", {}).values()
+        ):
+            logger.debug("No read access to flow steps - they will not be pulled.")
+            return {}
+
         for flow_id, flow_data in flows.items():
             for step_id, step in flow_data.get("steps", {}).get("entities", {}).items():
                 if step.get("type") != "function_step":

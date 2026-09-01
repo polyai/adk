@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from functools import cached_property
@@ -20,6 +21,8 @@ from poly.resources.resource import (
     ResourceMapping,
     register_resource,
 )
+
+logger = logging.getLogger(__name__)
 
 ALLOWED_BEHAVIOUR_REFERENCES = [
     "global_functions",
@@ -199,6 +202,10 @@ class SettingsRules(Resource):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "SettingsRules"]:
         """Parse rules settings from a projection dict."""
+        if "agentSettings" not in projection:
+            logger.debug("No read access to the agent rules - it will not be pulled.")
+            return {}
+
         agent_settings = projection.get("agentSettings", {})
         rules = agent_settings.get("rules", None)
         if not rules:

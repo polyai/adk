@@ -282,7 +282,17 @@ class Function(Resource):
         """Parse functions from a projection dict."""
         functions = {}
 
+        # Functions are drawn from three projection slices gated on two different
+        # permissions ("functions" for special and global, "jupiter_flows" for
+        # transition), so each slice is checked for read access independently -
+        # losing one must not hide the others.
         special_functions = projection.get("specialFunctions", {})
+        if "specialFunctions" not in projection or any(
+            "code" not in func for func in special_functions.values()
+        ):
+            logger.debug("No read access to start/end functions - they will not be pulled.")
+            special_functions = {}
+
         for func_type_key, func in special_functions.items():
             if func.get("archived", False):
                 continue
@@ -316,6 +326,14 @@ class Function(Resource):
             )
 
         flows = projection.get("flows", {}).get("flows", {}).get("entities", {})
+        if "flows" not in projection or any(
+            "code" not in func
+            for flow_data in flows.values()
+            for func in flow_data.get("transitionFunctions", {}).get("entities", {}).values()
+        ):
+            logger.debug("No read access to transition functions - they will not be pulled.")
+            flows = {}
+
         for flow_id, flow_data in flows.items():
             for func_id, func in (
                 flow_data.get("transitionFunctions", {}).get("entities", {}).items()
@@ -345,9 +363,14 @@ class Function(Resource):
                     function_type=FunctionType.TRANSITION,
                 )
 
-        for func_id, func in (
-            projection.get("functions", {}).get("functions", {}).get("entities", {}).items()
+        global_functions = projection.get("functions", {}).get("functions", {}).get("entities", {})
+        if "functions" not in projection or any(
+            "code" not in func for func in global_functions.values()
         ):
+            logger.debug("No read access to functions - they will not be pulled.")
+            global_functions = {}
+
+        for func_id, func in global_functions.items():
             if func.get("archived", False):
                 continue
 
