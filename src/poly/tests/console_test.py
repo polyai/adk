@@ -4,10 +4,15 @@ Copyright PolyAI Limited
 """
 
 import unittest
+from unittest.mock import MagicMock, PropertyMock, patch
+
+from rich.console import Console, ConsoleDimensions
 
 from poly.output.console import (
+    _OverflowPager,
     console,
     flatten_branch_tree,
+    paged_output,
     print_archived_branches,
     print_branch_history,
     print_releases_branches,
@@ -380,3 +385,99 @@ class ArchivedParentMarkerTest(unittest.TestCase):
 
         self.assertIn("Active Release", output)
         self.assertNotIn("(archived)", output)
+
+
+class OverflowPagerTest(unittest.TestCase):
+    """Tests for _OverflowPager, which pages only when output overflows."""
+
+    SCREEN_HEIGHT = 25
+
+    def setUp(self):
+        size_patcher = patch.object(
+            Console,
+            "size",
+            new_callable=PropertyMock,
+            return_value=ConsoleDimensions(80, self.SCREEN_HEIGHT),
+        )
+        size_patcher.start()
+        self.addCleanup(size_patcher.stop)
+
+    def _show(self, content: str):
+        """Run the pager over content, returning (written_directly, system_pager)."""
+        written = []
+        with (
+            patch.object(
+                Console,
+                "file",
+                new_callable=PropertyMock,
+                return_value=MagicMock(write=written.append),
+            ),
+            patch("poly.output.console.SystemPager") as mock_system_pager,
+        ):
+            _OverflowPager().show(content)
+        return "".join(written), mock_system_pager
+
+    def test_content_shorter_than_screen_is_written_directly(self):
+        """Output that fits on one screen bypasses the pager entirely."""
+        content = "row\n" * (self.SCREEN_HEIGHT - 1)
+
+        written, mock_system_pager = self._show(content)
+
+        self.assertEqual(written, content)
+        mock_system_pager.assert_not_called()
+
+    def test_content_longer_than_screen_is_handed_to_the_pager(self):
+        """Output that overflows the screen goes to the pager, not stdout."""
+        content = "row\n" * (self.SCREEN_HEIGHT + 10)
+
+        written, mock_system_pager = self._show(content)
+
+        self.assertEqual(written, "")
+        mock_system_pager.return_value.show.assert_called_once_with(content)
+
+    def test_content_exactly_filling_the_screen_is_not_paged(self):
+        """The boundary case stays inline rather than opening the pager."""
+        content = "row\n" * (self.SCREEN_HEIGHT - 1)
+
+        _, mock_system_pager = self._show(content)
+
+        mock_system_pager.assert_not_called()
+
+
+class PagedOutputTest(unittest.TestCase):
+    """Tests for the paged_output context manager's TTY and enabled guards."""
+
+    def test_no_paging_when_stdout_is_not_a_terminal(self):
+        """Piped and redirected output is never paged, matching git."""
+        with (
+            patch.object(Console, "is_terminal", new_callable=PropertyMock, return_value=False),
+            patch.object(console, "pager") as mock_pager,
+        ):
+            with paged_output():
+                pass
+
+        mock_pager.assert_not_called()
+
+    def test_no_paging_when_explicitly_disabled(self):
+        """Passing enabled=False opts a caller out even on a terminal."""
+        with (
+            patch.object(Console, "is_terminal", new_callable=PropertyMock, return_value=True),
+            patch.object(console, "pager") as mock_pager,
+        ):
+            with paged_output(enabled=False):
+                pass
+
+        mock_pager.assert_not_called()
+
+    def test_paging_uses_the_overflow_pager_with_styles(self):
+        """On a terminal the custom pager is used, with styles kept for colour."""
+        with (
+            patch.object(Console, "is_terminal", new_callable=PropertyMock, return_value=True),
+            patch.object(console, "pager") as mock_pager,
+        ):
+            with paged_output():
+                pass
+
+        mock_pager.assert_called_once()
+        self.assertIsInstance(mock_pager.call_args.kwargs["pager"], _OverflowPager)
+        self.assertTrue(mock_pager.call_args.kwargs["styles"])

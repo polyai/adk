@@ -9,7 +9,8 @@ import json
 import logging
 import os
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -17,6 +18,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from rich import box
 from rich.console import Console, Group
 from rich.live import Live
+from rich.pager import Pager, SystemPager
 from rich.panel import Panel
 from rich.spinner import Spinner
 from rich.syntax import Syntax
@@ -53,6 +55,36 @@ def set_verbose(verbose: bool) -> None:
     """Enable or disable verbose (traceback) output."""
     global _verbose
     _verbose = verbose
+
+
+class _OverflowPager(Pager):
+    """Pager that only engages when the content overflows the screen.
+
+    Rich's default pager sends everything to ``less``, so even a three-row table
+    would open the pager and demand ``q``. git avoids that with ``less -F``
+    (quit-if-one-screen); deciding it here instead means it also holds for a
+    reader whose ``PAGER`` is ``bat`` or ``more``, or whose ``LESS`` has no
+    ``F``. Spawning the pager, colour passthrough, ctrl-c and quitting early are
+    all left to Rich and pydoc, which already handle them.
+    """
+
+    def show(self, content: str) -> None:
+        """Write content straight out if it fits, otherwise hand it to the pager."""
+        # Rich has already wrapped to the console width, so newlines are rows.
+        if content.count("\n") < console.size.height:
+            console.file.write(content)
+        else:
+            SystemPager().show(content)
+
+
+@contextmanager
+def paged_output(enabled: bool = True) -> Iterator[None]:
+    """Pipe output through the system pager when enabled and stdout is a TTY."""
+    if enabled and console.is_terminal:
+        with console.pager(pager=_OverflowPager(), styles=True):
+            yield
+    else:
+        yield
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -307,7 +339,7 @@ def print_branch_history(commits: list[dict[str, Any]]) -> None:
         console.print("[muted]No commits found for this branch.[/muted]")
         return
 
-    table = Table(box=None, show_header=False, header_style="bold", padding=(0, 1))
+    table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
     table.add_column("Merged At", no_wrap=True)
     table.add_column("Branch", no_wrap=True)
     table.add_column("Merged By", no_wrap=True)
@@ -699,7 +731,7 @@ def print_deployments(
     if not details:
         table = Table(
             box=None,
-            show_header=False,
+            show_header=True,
             header_style="bold",
             padding=(0, 1),
         )

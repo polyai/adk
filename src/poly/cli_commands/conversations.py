@@ -161,7 +161,7 @@ class ConversationsCommand(BaseCommand):
             offset: Number of conversations to skip.
             output_json: If True, emit machine-readable JSON.
         """
-        from poly.output.console import info, print_conversations
+        from poly.output.console import info, paged_output, print_conversations
 
         project = load_project(base_path, output_json=output_json)
         result = AgentStudioInterface.list_conversations(
@@ -178,7 +178,8 @@ class ConversationsCommand(BaseCommand):
             if not conversations:
                 info("No conversations found.")
                 return
-            print_conversations(conversations, url_builder=project.get_conversation_url)
+            with paged_output():
+                print_conversations(conversations, url_builder=project.get_conversation_url)
 
     @classmethod
     def conversations_get(

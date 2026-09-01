@@ -485,8 +485,8 @@ class BranchCommand(BaseCommand):
         branch_history_parser.add_argument(
             "--limit",
             type=int,
-            default=10,
-            help="Number of history entries to show. Defaults to 10.",
+            default=None,
+            help="Maximum number of history entries to show. Shows all by default.",
         )
         branch_history_parser.set_defaults(branch_subcommand="history")
 
@@ -1630,10 +1630,10 @@ class BranchCommand(BaseCommand):
         base_path: str,
         branch_name: Optional[str] = None,
         output_json: bool = False,
-        limit: int = 10,
+        limit: Optional[int] = None,
     ) -> None:
         """Show the history of a branch in the Agent Studio project."""
-        from poly.output.console import plain, print_branch_history, warning
+        from poly.output.console import paged_output, plain, print_branch_history, warning
 
         project = load_project(base_path, output_json=output_json)
 
@@ -1662,7 +1662,8 @@ class BranchCommand(BaseCommand):
             return
 
         history = project.get_branch_history(branch_id)
-        history = history[:limit]
+        if limit is not None:
+            history = history[:limit]
 
         if output_json:
             json_print({"branch_name": branch_name, "branch_id": branch_id, "history": history})
@@ -1672,8 +1673,9 @@ class BranchCommand(BaseCommand):
             plain(f"[muted]No history found for branch '{branch_name}'.[/muted]")
             return
 
-        plain(f"History for branch '{branch_name}':")
-        print_branch_history(history)
+        with paged_output():
+            plain(f"History for branch '{branch_name}':")
+            print_branch_history(history)
 
     @classmethod
     def branch_rename(
