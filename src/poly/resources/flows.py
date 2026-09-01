@@ -446,7 +446,10 @@ class FlowStep(BaseFlowStep, YamlResource):
             output.update(flow_settings_dict)
 
         if self.step_type == StepType.DEFAULT_STEP:
-            output["conditions"] = [condition.to_yaml_dict() for condition in self.conditions]
+            output["conditions"] = [
+                condition.to_yaml_dict()
+                for condition in sorted(self.conditions, key=lambda condition: condition.name)
+            ]
             output["extracted_entities"] = sorted(self.extracted_entities)
 
         output["prompt"] = self.prompt

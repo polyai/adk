@@ -152,7 +152,7 @@ Add or edit [knowledge-base topics](../reference/resources/topics.md) used for r
 
 #### Agent settings
 
-Update the [personality, role, and rules](../reference/resources/agent_settings.md) that define the agent's global behavior.
+Update the [persona and rules](../reference/resources/agent_settings.md) that define the agent's global behavior.
 
 #### Flows
 

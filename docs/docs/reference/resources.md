@@ -15,7 +15,8 @@ Every resource here follows the same sync process, including [permission-gated v
 
 | Resource | Configures | File |
 |---|---|---|
-| [Agent settings](./resources/agent_settings.md) | Personality, role, and global rules | `agent_settings/` |
+| [Agent settings](./resources/agent_settings.md) | Persona and global rules | `agent_settings/` |
+| [Guardrails](./resources/guardrails.md) | Platform and custom checks that constrain agent behavior | `agent_settings/guardrails.yaml` |
 | [Languages](./resources/languages.md) | Supported languages for a multilingual agent | `agent_settings/languages.yaml` |
 | [Experimental config](./resources/experimental_config.md) | Opt-in experimental platform features | `agent_settings/experimental_config.json` |
 

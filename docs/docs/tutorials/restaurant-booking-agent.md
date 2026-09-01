@@ -74,46 +74,22 @@ You are now on the `booking-flow` branch — pushes go here instead of `main`, l
 
 ## Part 2 — Define the agent
 
-### Personality
+### Persona
 
-Open `agent_settings/personality.yaml`. Adjust the adjectives to suit the Maison brand:
+Open `agent_settings/persona.txt` and describe who the agent is. This is the free-text field Agent Studio shows as **Role**:
 
-~~~yaml
-adjectives:
-  Polite: true
-  Calm: true
-  Kind: true
-custom: ""
+~~~text
+You are the reservations agent for Maison, an upscale French restaurant.
+You are polite, calm, and warm, and you keep answers short.
 ~~~
 
-The file has two fields:
+!!! tip "Keep identity and behavior separate"
 
-- **`adjectives`** — a map of preset tonal traits. Each is set to `true` or `false`; every selected trait is combined into the agent's personality.
-- **`custom`** — a free-text description that can extend or replace the adjectives. It accepts `{{attr:...}}` and `{{vrbl:...}}` references, so the personality can vary per [variant](../reference/resources/variants.md) or per call.
+    The persona says who the agent is. Standing instructions about what it should do belong in `rules.txt` below.
 
-!!! info "Allowed adjective values"
+!!! info "Supported references"
 
-    `adjectives` keys must come from a fixed set: `Polite`, `Calm`, `Kind`, `Funny`, `Energetic`, `Thoughtful`, and `Other`. Any other key causes `poly push` to fail with a validation error.
-
-!!! tip "How `Other` works"
-
-    `Other` is the "none of the above" switch. When you set `Other: true`, every other adjective must be `false` (or omitted) — combining `Other: true` with any other adjective set to `true` fails validation with:
-
-    ~~~text
-    Other adjective can only be set if no other adjectives are selected.
-    ~~~
-
-    Use `Other: true` together with the `custom` field when the six presets do not capture the tone you want and you would rather describe the personality entirely in free form. You do **not** need `Other: true` just to use `custom` — `custom` can always be added on top of preset adjectives to refine them further.
-
-### Role
-
-Open `agent_settings/role.yaml` and describe what the agent is:
-
-~~~yaml
-value: Restaurant Reservations Agent
-additional_info: Takes table reservations for Maison restaurant
-custom: ""
-~~~
+    The persona accepts `{{attr:...}}` and `{{vrbl:...}}` references, so it can vary per [variant](../reference/resources/variants.md) or per call. Behavioral references such as `{{fn:...}}` and `{{ho:...}}` belong in `rules.txt`.
 
 ### Rules
 

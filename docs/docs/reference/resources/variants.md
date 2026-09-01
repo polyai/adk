@@ -127,10 +127,9 @@ Use `{{attr:attribute_name}}` in supported text fields such as:
 - flow step prompts
 - [topic](./topics.md) actions (not in `content` or `example_queries`)
 - rules (`rules.txt`)
+- persona (`persona.txt`)
 - greeting (`welcome_message`)
 - disclaimer message
-- personality `custom`
-- role `custom`
 
 ### Example
 

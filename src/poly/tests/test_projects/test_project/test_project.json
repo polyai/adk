@@ -414,25 +414,11 @@
         "prompt": "You are a helpful and professional web chat assistant."
       }
     },
-    "personality": {
-      "PERSONALITY-personality": {
-        "resource_id": "PERSONALITY-personality",
-        "name": "personality",
-        "adjectives": {
-          "Polite": true,
-          "Calm": true,
-          "Kind": true
-        },
-        "custom": ""
-      }
-    },
-    "role": {
-      "ROLE-role": {
-        "resource_id": "ROLE-role",
-        "name": "role",
-        "value": "Customer Service Representative",
-        "additional_info": "Handles customer inquiries and bookings",
-        "custom": ""
+    "persona": {
+      "PERSONA-persona": {
+        "resource_id": "PERSONA-persona",
+        "name": "persona",
+        "content": "You are a calm and polite concierge.\nGreet the caller by name using {{vrbl:VAR-customer_name}}.\n"
       }
     },
     "rules": {
@@ -1326,6 +1312,42 @@
         "name": "CONTEXT",
         "path": "CONTEXT.MD",
         "contents": "This is platform context file.\n"
+      }
+    },
+    "platform_guardrails": {
+      "jailbreak_defence": {
+        "resource_id": "jailbreak_defence",
+        "name": "jailbreak_defence",
+        "enabled": true
+      },
+      "hallucination_control": {
+        "resource_id": "hallucination_control",
+        "name": "hallucination_control",
+        "enabled": false
+      },
+      "ai_identity": {
+        "resource_id": "ai_identity",
+        "name": "ai_identity",
+        "enabled": true
+      },
+      "emergency_escalation": {
+        "resource_id": "emergency_escalation",
+        "name": "emergency_escalation",
+        "enabled": true
+      },
+      "tool_call_integrity": {
+        "resource_id": "tool_call_integrity",
+        "name": "tool_call_integrity",
+        "enabled": false
+      }
+    },
+    "custom_guardrails": {
+      "CUSTOM_GUARDRAILS-no_medical_advice": {
+        "resource_id": "CUSTOM_GUARDRAILS-no_medical_advice",
+        "name": "No medical advice",
+        "prompt": "Never give medical advice. Offer to transfer the caller to a human instead.",
+        "action": "warn",
+        "enabled": true
       }
     }
   },
