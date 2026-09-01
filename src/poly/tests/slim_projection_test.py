@@ -24,6 +24,7 @@ from poly.resources.resource import (
     PROJECTION_REGISTRY,
     RESOURCE_CLASS_TO_NAME,
     MultiResourceYamlResource,
+    ResourceMapping,
     load_resources_from_projection,
 )
 from poly.resources.sms import SMSTemplate
@@ -440,6 +441,58 @@ class SlimResourcesSurviveTheStatusFile(unittest.TestCase):
 
         reloaded = AgentStudioProject.from_dict(project.to_dict(), project.root_path)
         self.assertEqual(self._slim_ids(reloaded), expected)
+
+
+class PullBaselineKeepsOriginalSlimMappings(unittest.TestCase):
+    """The merge baseline must use the slim mappings recorded with it.
+
+    pull_project swaps self.slim_resources for the incoming list before the
+    merge runs. If the baseline then resolves references against the incoming
+    mappings, a withheld resource renamed remotely renders the baseline with the
+    new name while the disk file still carries the old one - a phantom local
+    change, surfacing exactly when merge output matters most.
+    """
+
+    @staticmethod
+    def _mapping(name: str) -> ResourceMapping:
+        return ResourceMapping(
+            resource_id="ENTITY-1",
+            resource_type=Entity,
+            resource_name=name,
+            file_path=os.path.join("config", "entities.yaml", "entities", name),
+            flow_name=None,
+            resource_prefix="entity",
+            flow_id=None,
+        )
+
+    def test_pull_passes_original_and_incoming_slim_lists_separately(self):
+        original = [self._mapping("old_name")]
+        incoming = [self._mapping("new_name")]
+
+        project = AgentStudioProject(
+            region="local",
+            account_id="ACCOUNT-1",
+            project_id="PROJECT-1",
+            root_path=tempfile.mkdtemp(),
+            resources={},
+            slim_resources=original,
+            last_updated=datetime(2026, 1, 1),
+        )
+
+        self.addCleanup(patch.stopall)
+        mock_api = patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock).start()
+        mock_api.pull_resources.return_value = ({}, incoming, {})
+        patch.object(AgentStudioProject, "save_config").start()
+        mock_update = patch.object(
+            AgentStudioProject, "_update_pulled_resources", return_value=[]
+        ).start()
+
+        project.pull_project(force=False)
+
+        kwargs = mock_update.call_args.kwargs
+        self.assertEqual(kwargs["original_slim_resources"], original)
+        self.assertEqual(kwargs["incoming_slim_resources"], incoming)
+        self.assertEqual(project.slim_resources, incoming)
 
 
 class WithheldTypeIsRemovedFromDisk(unittest.TestCase):

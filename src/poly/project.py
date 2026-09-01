@@ -546,6 +546,8 @@ class AgentStudioProject:
             original_resources=empty_resources,
             incoming_resources=template_resources,
             force=True,
+            original_slim_resources=[],
+            incoming_slim_resources=template_slim_resources,
         )
 
     def pull_project(
@@ -585,9 +587,6 @@ class AgentStudioProject:
         if projection_json is None:
             self.branch_id = self.api_handler.branch_id
 
-        # Update slim resources in memory
-        self.slim_resources = slim_resources
-
         self._check_no_duplicate_resource_paths(incoming_resources)
         # -------
         # Update resources
@@ -599,6 +598,8 @@ class AgentStudioProject:
             force=force,
             format=format,
             on_save=on_save,
+            original_slim_resources=self.slim_resources,
+            incoming_slim_resources=slim_resources,
         )
 
         # -------
@@ -611,6 +612,7 @@ class AgentStudioProject:
 
         # Save the updated project configuration
         self.resources = incoming_resources
+        self.slim_resources = slim_resources
 
         # Update file_structure_info
         self.file_structure_info = self.compute_file_structure_info(incoming_resources)
@@ -644,7 +646,6 @@ class AgentStudioProject:
         incoming_resources, slim_resources = self.get_remote_resources_by_name(env)
         if not incoming_resources:
             raise ValueError(f"No resources returned from environment '{env}'.")
-        self.slim_resources = slim_resources
         self.branch_id = self.api_handler.branch_id
 
         self._check_no_duplicate_resource_paths(incoming_resources)
@@ -657,7 +658,10 @@ class AgentStudioProject:
             force=True,
             format=format,
             on_save=None,
+            original_slim_resources=self.slim_resources,
+            incoming_slim_resources=slim_resources,
         )
+        self.slim_resources = slim_resources
 
         utils.export_decorators(DECORATORS, self.root_path)
         utils.save_imports(self.root_path)
@@ -958,17 +962,20 @@ class AgentStudioProject:
         force: bool,
         format: bool = False,
         on_save: Callable[[int, int], None] | None = None,
+        *,
+        original_slim_resources: list[ResourceMapping],
+        incoming_slim_resources: list[ResourceMapping],
     ) -> list[str]:
         files_with_conflicts = []
 
         # Generate resource mappings
         incoming_resource_mappings: list[ResourceMapping] = (
-            self._make_resource_mappings(incoming_resources) + self.slim_resources
+            self._make_resource_mappings(incoming_resources) + incoming_slim_resources
         )
 
         # If not force, compare with original and local changes
         original_resource_mappings: list[ResourceMapping] = (
-            self._make_resource_mappings(original_resources) + self.slim_resources
+            self._make_resource_mappings(original_resources) + original_slim_resources
         )
 
         # Merging is done on a per file basis.
