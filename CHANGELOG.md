@@ -1,6 +1,67 @@
 # CHANGELOG
 
 
+## v0.53.0 (2026-09-01)
+
+### Documentation
+
+- Auto-update from perm updates ([#301](https://github.com/polyai/adk/pull/301),
+  [`52e7fb6`](https://github.com/polyai/adk/commit/52e7fb60a64d46c6d28ff2aa2cd6276f682f086d))
+
+Update docs
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+### Features
+
+- Page list command output and show all entries by default
+  ([#286](https://github.com/polyai/adk/pull/286),
+  [`2a7b3be`](https://github.com/polyai/adk/commit/2a7b3be378e7c2ee502d154ef55b16c9fe10f655))
+
+## Summary
+
+Pages long CLI listings through the system pager, removes the default 10-entry cap on `deployments
+  list` and `branch history`, and shows the column headers those two tables were already defining
+  but never rendering.
+
+## Motivation
+
+Listings longer than the terminal scrolled past the top, with no way back to the earliest rows short
+  of re-running with `--offset`. The 10-entry cap that made that bearable also truncated `--json`,
+  so a script could not tell a project with 10 deployments from one with 500.
+
+## Changes
+
+- Add `paged_output()` in `poly/output/console.py`. Output taller than the terminal goes to the
+  system pager; anything shorter prints inline as before. Paging is skipped entirely when stdout is
+  not a TTY, so pipes, redirects, and `--json` are unaffected. - Apply it to `deployments list`,
+  `deployments ab-test list`, `branch history`, `conversations list`, and `testing list`. -
+  `--limit` on `deployments list` and `branch history` now defaults to showing everything instead of
+  10. Both slice already-fetched data, so this costs no extra API calls. The commands where
+  `--limit` is an API request parameter — `conversations list`, `testing list`, `ab-test list` — are
+  unchanged. - Render the column headers in `print_deployments` and `print_branch_history`, which
+  defined named columns and a `header_style` but passed `show_header=False`.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+`console_test.py` covers the paging decision and the TTY/enabled guards; `cli_test.py` covers the
+  no-limit and `--limit` truncation behaviour in both rich and JSON modes.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1319 passed, 101
+  subtests) - [x] No breaking changes to the `poly` CLI interface (or migration path documented) -
+  [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`poly deployments list --json` and `poly branch history --json` now return every entry rather than
+  the most recent 10. Pass `--limit` explicitly for a bound.
+
+
 ## v0.52.0 (2026-09-01)
 
 ### Features
