@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import ClassVar, Optional
@@ -17,6 +18,8 @@ from poly.handlers.protobuf.content_filter_settings_pb2 import (
     ContentFilterSettings_UpdateContentFilterSettings,
 )
 from poly.resources.resource import ResourceMapping, YamlResource, register_resource
+
+logger = logging.getLogger(__name__)
 
 PRECISION_MAPPING = {"LOOSE": "lenient", "MEDIUM": "medium", "STRICT": "strict"}
 PRECISION_MAPPING_INVERSE = {v: k for k, v in PRECISION_MAPPING.items()}
@@ -265,6 +268,10 @@ class GeneralSafetyFilters(_BaseSafetyFilters):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "GeneralSafetyFilters"]:
         """Parse general safety filters from a projection dict."""
+        if "contentFilterSettings" not in projection:
+            logger.debug("No read access to safety filters - it will not be pulled.")
+            return {}
+
         data = projection.get("contentFilterSettings", {})
         if not data:
             return {}
@@ -361,6 +368,10 @@ class VoiceSafetyFilters(ChannelSafetyFilters):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "VoiceSafetyFilters"]:
         """Parse voice safety filters from a projection dict."""
+        if "channels" not in projection:
+            logger.debug("No read access to voice safety filters - it will not be pulled.")
+            return {}
+
         voice_config = projection.get("channels", {}).get("voice", {}).get("config", {}) or {}
         voice_safety_filters = voice_config.get("safetyFilters", None)
         if not voice_safety_filters:
@@ -388,6 +399,10 @@ class ChatSafetyFilters(ChannelSafetyFilters):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "ChatSafetyFilters"]:
         """Parse chat safety filters from a projection dict."""
+        if "channels" not in projection:
+            logger.debug("No read access to chat safety filters - it will not be pulled.")
+            return {}
+
         web_chat_settings = projection.get("channels", {}).get("webChat", {})
         if not web_chat_settings.get("status", False):
             return {}

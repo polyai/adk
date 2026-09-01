@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
@@ -44,6 +45,8 @@ from poly.resources.api_integration import ApiIntegration
 from poly.resources.languages import AdditionalLanguage, DefaultLanguage
 from poly.resources.resource import ResourceMapping, SubResource, YamlResource, register_resource
 from poly.resources.variant_attributes import Variant
+
+logger = logging.getLogger(__name__)
 
 INTERNAL_TO_CHANNEL = {
     "chat.polyai": "voice",
@@ -660,9 +663,16 @@ class TestCase(YamlResource):
     def from_projection(cls, projection: dict) -> dict[str, "TestCase"]:
         """Parse test cases from a projection dict."""
         test_cases = {}
-        for test_case_id, test_case_data in (
-            projection.get("testing", {}).get("testCases", {}).get("entities", {}).items()
+        test_cases_projection = (
+            projection.get("testing", {}).get("testCases", {}).get("entities", {})
+        )
+        if "testing" not in projection or any(
+            "scenario" not in tc for tc in test_cases_projection.values()
         ):
+            logger.debug("No read access to test cases - they will not be pulled.")
+            return {}
+
+        for test_case_id, test_case_data in test_cases_projection.items():
             prompt_assertions = []
             function_assertions = []
             for assertion in test_case_data.get("assertions", []):

@@ -10547,8 +10547,13 @@ class DocumentFromProjection(unittest.TestCase):
         self.assertEqual(document.name, "faq")
         self.assertEqual(document.contents, "Frequently asked questions")
 
-    def test_skips_document_without_content(self):
-        """A document missing 'content' means the user lacks read permission, so it's skipped."""
+    def test_skips_all_documents_when_any_is_unreadable(self):
+        """A document missing 'content' means the user lacks read permission.
+
+        Auth filtering is per-slice, so one unreadable document means the whole
+        slice was filtered and none of it is represented locally - a partially
+        populated context/ directory would be worse than an absent one.
+        """
         projection = {
             "documents": {
                 "documents": {
@@ -10559,8 +10564,7 @@ class DocumentFromProjection(unittest.TestCase):
                 }
             }
         }
-        documents = Document.from_projection(projection)
-        self.assertEqual(list(documents), ["DOC-2"])
+        self.assertEqual(Document.from_projection(projection), {})
 
     def test_keeps_document_with_empty_content(self):
         """An empty 'content' is a readable but empty document, not a permission failure."""

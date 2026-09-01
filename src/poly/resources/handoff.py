@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import ClassVar
@@ -23,6 +24,8 @@ from poly.resources.resource import (
     MultiResourceYamlResource,
     register_resource,
 )
+
+logger = logging.getLogger(__name__)
 
 VALID_SIP_METHODS = ("invite", "refer", "bye")
 VALID_ENCRYPTION = ("TLS/SRTP", "UDP/RTP")
@@ -107,6 +110,14 @@ class Handoff(MultiResourceYamlResource):
         """Parse handoffs from a projection dict."""
         handoffs_projection = projection.get("handoff", {}).get("handoffs", {}).get("entities", {})
         handoffs = {}
+        # Read access is checked before "active": an auth-filtered handoff has no
+        # "active" field, and must not be mistaken for a deactivated one.
+        if "handoff" not in projection or any(
+            "active" not in handoff for handoff in handoffs_projection.values()
+        ):
+            logger.debug("No read access to handoffs - they will not be pulled.")
+            return {}
+
         for handoff_id, handoff_data in handoffs_projection.items():
             if not handoff_data.get("active", False):
                 continue
