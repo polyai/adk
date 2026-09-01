@@ -730,17 +730,19 @@ def register_resource(name: str) -> callable:
 
 
 def _filter_slim_resources(all_resources: ResourceMap) -> tuple[ResourceMap, list[ResourceMapping]]:
+    # Imported here: both modules import from this one at module level.
+    from poly.resources.function import Function
+    from poly.resources.variable import Variable
+
     slim_resources: list[ResourceMapping] = []
     resources: ResourceMap = {}
 
     # Variables are slim if functions are slim
-    functions_slim = any(
-        r.slim for r in all_resources.get(RESOURCE_NAME_TO_CLASS.get("functions"), {}).values()
-    )
+    functions_slim = any(r.slim for r in all_resources.get(Function, {}).values())
 
     for resources_dict in all_resources.values():
         for resource in resources_dict.values():
-            if isinstance(resource, RESOURCE_NAME_TO_CLASS.get("variables")):
+            if isinstance(resource, Variable):
                 resource.slim = functions_slim
 
             if not resource.slim:
