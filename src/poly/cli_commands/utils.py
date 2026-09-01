@@ -9,7 +9,7 @@ from typing import Optional
 
 import argcomplete
 
-from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.base import OTHER_GROUP, BaseCommand, Parents
 from poly.project import AgentStudioProject
 
 DOCUMENT_CHOICES = AgentStudioProject.discover_docs()
@@ -19,6 +19,8 @@ class DocsCommand(BaseCommand):
     """Output documentation for a given topic."""
 
     command = "docs"
+
+    group = OTHER_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
@@ -97,6 +99,8 @@ class CompletionCommand(BaseCommand):
     """Generate shell completion scripts for poly/adk."""
 
     command = "completion"
+
+    group = OTHER_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:

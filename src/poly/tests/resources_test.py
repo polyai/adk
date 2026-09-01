@@ -3,17 +3,19 @@
 Copyright PolyAI Limited
 """
 
+import datetime
 import os
 import unittest
 
 import yaml
+from google.protobuf.json_format import MessageToDict
 from jsonschema import ValidationError
 
 import poly.resources.resource_utils as resource_utils
+from poly.handlers.protobuf.knowledge_base_pb2 import KnowledgeBase_DeleteTopic
+from poly.handlers.protobuf.variant_pb2 import Variant_UpdateVariant
 from poly.resources.agent_settings import (
-    ALLOWED_ADJECTIVES,
-    SettingsPersonality,
-    SettingsRole,
+    SettingsPersona,
     SettingsRules,
 )
 from poly.resources.api_integration import (
@@ -33,18 +35,26 @@ from poly.resources.channel_settings import (
     VoiceGreeting,
     VoiceStylePrompt,
 )
+from poly.resources.child_topic import ChildTopic
 from poly.resources.documents import Document
 from poly.resources.entities import Entity, EntityType
 from poly.resources.experimental_config import ExperimentalConfig
 from poly.resources.flows import (
     ASRBiasing,
+    ASRConfig,
+    BargeInConfig,
     Condition,
     ConditionType,
     DTMFConfig,
     FlowConfig,
+    FlowSettings,
     FlowStep,
     FunctionStep,
+    LLMConfig,
+    ReasoningEffort,
     StepType,
+    VADConfig,
+    parse_reasoning_effort,
 )
 from poly.resources.function import (
     Function,
@@ -52,7 +62,9 @@ from poly.resources.function import (
     FunctionLatencyControl,
     FunctionParameters,
     FunctionType,
+    LatencyControl,
 )
+from poly.resources.guardrails import CustomGuardrail, PlatformGuardrail
 from poly.resources.handoff import Handoff
 from poly.resources.keyphrase_boosting import KeyphraseBoosting
 from poly.resources.languages import (
@@ -75,10 +87,16 @@ from poly.resources.safety_filters import (
 )
 from poly.resources.sms import EnvPhoneNumbers, SMSTemplate
 from poly.resources.test_suite import (
+    ApiResponse,
+    ApiResponseRule,
     FunctionCallArgumentAssertion,
     FunctionCallAssertion,
     TestCase,
+    TestCaseApiMocks,
+    TestCaseApiOperationMock,
     TestCaseAssertion,
+    TestCaseIntegrationAttributes,
+    TestCaseSipHeaders,
     TestCaseTags,
 )
 from poly.resources.topic import (
@@ -503,6 +521,30 @@ def end_function(conv: Conversation, test_param: int):
         self.assertIn("silence_after_each_response=3000", raw)
         self.assertIn("('Please hold...', 5000)", raw)
         self.assertIn("('Still looking...', 8000)", raw)
+        self.assertNotIn("randomize=", raw)
+
+    def test_raw_includes_randomize_when_enabled(self):
+        """randomize=True is rendered on @func_latency_control when set."""
+        func = Function(
+            resource_id="123",
+            name="test_code",
+            description="A test function",
+            code=TEST_CODE,
+            parameters=[],
+            latency_control=FunctionLatencyControl(
+                enabled=True,
+                initial_delay=0,
+                interval=2,
+                delay_responses=[
+                    FunctionDelayResponse(message="One...", duration=3000),
+                    FunctionDelayResponse(message="Two...", duration=2000),
+                ],
+                randomize=True,
+            ),
+            function_type=FunctionType.GLOBAL,
+        )
+        raw = func.raw
+        self.assertIn("randomize=True", raw)
 
     def test_raw_omits_latency_control_when_disabled(self):
         """When latency_control.enabled is False, no decorator is rendered."""
@@ -530,11 +572,22 @@ def my_func(conv: Conversation):
         self.assertTrue(lc.enabled)
         self.assertEqual(lc.initial_delay, 5000)
         self.assertEqual(lc.interval, 3000)
+        self.assertFalse(lc.randomize)
         self.assertEqual(len(lc.delay_responses), 1)
         self.assertEqual(lc.delay_responses[0].message, "Hold on...")
         self.assertEqual(lc.delay_responses[0].duration, 5000)
         # Decorator should be stripped from code
         self.assertNotIn("func_latency_control", code)
+
+    def test_extract_latency_control_randomize(self):
+        """_extract_decorators parses randomize from @func_latency_control."""
+        code_with_decorator = """@func_latency_control(delay_before_responses_start=0, silence_after_each_response=2, delay_responses=[('Hold on...', 3000)], randomize=True)
+def my_func(conv: Conversation):
+    pass
+"""
+        _, _, _, lc = Function._extract_decorators(code_with_decorator, "my_func", [])
+        self.assertTrue(lc.enabled)
+        self.assertTrue(lc.randomize)
 
     def test_extract_preserves_known_delay_response_ids(self):
         """Existing delay-response IDs are preserved by message match."""
@@ -563,6 +616,7 @@ def my_func(conv: Conversation):
                 FunctionDelayResponse(id="DR-1", message="One moment...", duration=4000),
                 FunctionDelayResponse(id="DR-2", message="Almost there...", duration=6000),
             ],
+            randomize=True,
         )
         func = Function(
             resource_id="123",
@@ -576,6 +630,7 @@ def my_func(conv: Conversation):
             function_type=FunctionType.GLOBAL,
         )
         pretty = func.to_pretty(resource_mappings=[])
+        self.assertIn("randomize=True", pretty)
         reverted = Function.from_pretty(pretty, resource_mappings=[])
         code, params, desc, extracted_lc = Function._extract_decorators(
             reverted, "test_code", [], lc
@@ -583,12 +638,31 @@ def my_func(conv: Conversation):
         self.assertTrue(extracted_lc.enabled)
         self.assertEqual(extracted_lc.initial_delay, 4000)
         self.assertEqual(extracted_lc.interval, 2000)
+        self.assertTrue(extracted_lc.randomize)
         self.assertEqual(len(extracted_lc.delay_responses), 2)
         self.assertEqual(extracted_lc.delay_responses[0].message, "One moment...")
         self.assertEqual(extracted_lc.delay_responses[1].message, "Almost there...")
         # IDs are preserved
         self.assertEqual(extracted_lc.delay_responses[0].id, "DR-1")
         self.assertEqual(extracted_lc.delay_responses[1].id, "DR-2")
+
+    def test_latency_control_to_proto_includes_randomize(self):
+        """LatencyControl.to_proto sets randomize on the update command."""
+        sub = LatencyControl(
+            function_id="fn-1",
+            latency_control=FunctionLatencyControl(
+                enabled=True,
+                initial_delay=0,
+                interval=2,
+                delay_responses=[
+                    FunctionDelayResponse(id="DR-1", message="One...", duration=3000),
+                ],
+                randomize=True,
+            ),
+        )
+        proto = sub.to_proto()
+        self.assertTrue(proto.randomize)
+        self.assertTrue(proto.HasField("randomize"))
 
     def test_read_local_resource_with_latency_control(self):
         """read_local_resource correctly extracts latency control from file."""
@@ -889,6 +963,256 @@ def my_func(conv: Conversation, booking_ref: Optional[str]):
             Function._extract_decorators(code, "my_func", [])
         self.assertIn("booking_ref", str(ctx.exception))
         self.assertIn("unsupported type annotation", str(ctx.exception))
+
+    # -- _swap_latency_control_references tests --
+
+    def _make_variable_mapping(self, resource_id: str, resource_name: str) -> ResourceMapping:
+        """Helper to build a Variable ResourceMapping."""
+        return ResourceMapping(
+            resource_id=resource_id,
+            resource_name=resource_name,
+            resource_type=Variable,
+            file_path=f"variables/{resource_name.lower().replace(' ', '_')}.yaml",
+            resource_prefix="vrbl",
+            flow_name=None,
+        )
+
+    def _make_translation_mapping(self, resource_id: str, resource_name: str) -> ResourceMapping:
+        """Helper to build a Translation ResourceMapping."""
+        return ResourceMapping(
+            resource_id=resource_id,
+            resource_name=resource_name,
+            resource_type=Translation,
+            file_path=f"translations/{resource_name.lower().replace(' ', '_')}.yaml",
+            resource_prefix="tn",
+            flow_name=None,
+        )
+
+    def test_swap_ids_replaced_with_names_in_decorator_message(self):
+        """A variable ID reference in a delay_responses message is swapped to its name."""
+        code = (
+            "from _gen import *  # <AUTO GENERATED>\n\n"
+            "@func_latency_control(delay_responses=[('Hello {{vrbl:var-1}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertIn("{{vrbl:My Variable}}", result)
+        self.assertNotIn("{{vrbl:var-1}}", result)
+
+    def test_swap_names_replaced_with_ids_in_decorator_message(self):
+        """A variable name reference in a delay_responses message is swapped to its ID."""
+        code = (
+            "@func_latency_control(delay_responses=[('Hello {{vrbl:My Variable}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=True
+        )
+
+        self.assertIn("{{vrbl:var-1}}", result)
+        self.assertNotIn("{{vrbl:My Variable}}", result)
+
+    def test_swap_body_references_not_swapped(self):
+        """References inside the function body must NOT be touched."""
+        code = (
+            "@func_latency_control(delay_responses=[('decorator {{vrbl:var-1}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    msg = '{{vrbl:var-1}}'\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertIn("{{vrbl:My Variable}}", result)
+        body_line = [line for line in result.splitlines() if "msg = " in line][0]
+        self.assertIn("{{vrbl:var-1}}", body_line)
+
+    def test_swap_multiple_delay_responses_all_swapped(self):
+        """Every message in the delay_responses list is processed."""
+        code = (
+            "@func_latency_control(delay_responses=["
+            "('First {{vrbl:var-1}}', 3), "
+            "('Second {{tn:tn-1}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [
+            self._make_variable_mapping("var-1", "My Variable"),
+            self._make_translation_mapping("tn-1", "Greeting"),
+        ]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertIn("{{vrbl:My Variable}}", result)
+        self.assertIn("{{tn:Greeting}}", result)
+
+    def test_swap_no_decorator_returns_unchanged(self):
+        """Code without @func_latency_control is returned as-is."""
+        code = "def my_func(conv: Conversation):\n    msg = '{{vrbl:var-1}}'\n"
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertEqual(result, code)
+
+    def test_swap_decorator_without_delay_responses_returns_unchanged(self):
+        """@func_latency_control with no delay_responses keyword is returned as-is."""
+        code = (
+            "@func_latency_control(delay_before_responses_start=3)\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertEqual(result, code)
+
+    def test_swap_syntax_error_returns_unchanged(self):
+        """Unparseable code is returned as-is without raising."""
+        code = "def broken(:\n"
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertEqual(result, code)
+
+    def test_swap_no_matching_mapping_leaves_reference_unchanged(self):
+        """References with no corresponding ResourceMapping are left intact."""
+        code = (
+            "@func_latency_control(delay_responses=[('Hello {{vrbl:unknown-id}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertIn("{{vrbl:unknown-id}}", result)
+
+    def test_swap_async_function_decorator_swapped(self):
+        """References in async function decorators are also swapped."""
+        code = (
+            "@func_latency_control(delay_responses=[('Wait {{vrbl:var-1}}', 2)])\n"
+            "async def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertIn("{{vrbl:My Variable}}", result)
+        self.assertNotIn("{{vrbl:var-1}}", result)
+
+    def test_swap_empty_mappings_returns_unchanged(self):
+        """An empty mappings list means nothing can match, so code is unchanged."""
+        code = (
+            "@func_latency_control(delay_responses=[('Hello {{vrbl:var-1}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+
+        result = Function._swap_latency_control_references(
+            code, [], names_to_ids=False
+        )
+
+        self.assertEqual(result, code)
+
+    def test_swap_message_without_references_unchanged(self):
+        """A plain-text delay message with no references passes through unchanged."""
+        code = (
+            "@func_latency_control(delay_responses=[('Please hold', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        result = Function._swap_latency_control_references(
+            code, mappings, names_to_ids=False
+        )
+
+        self.assertEqual(result, code)
+
+    def test_swap_roundtrip_ids_to_names_and_back(self):
+        """Swapping IDs to names and back yields the original code."""
+        original = (
+            "@func_latency_control(delay_responses=[('Hello {{vrbl:var-1}}', 5)])\n"
+            "def my_func(conv: Conversation):\n"
+            "    pass\n"
+        )
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        pretty = Function._swap_latency_control_references(
+            original, mappings, names_to_ids=False
+        )
+        restored = Function._swap_latency_control_references(
+            pretty, mappings, names_to_ids=True
+        )
+
+        self.assertEqual(restored, original)
+
+    def test_swap_finds_definitions_nested_in_statements(self):
+        """Decorated definitions below the top level are still found.
+
+        _iter_function_defs skips expressions for speed, so every statement container that
+        can hold a definition needs covering — otherwise the swap silently misses them.
+        """
+        decorator = "@func_latency_control(delay_responses=[('Hi {{vrbl:var-1}}', 5)])\n"
+        bodies = {
+            "nested in a function": (
+                "def outer(conv: Conversation):\n"
+                f"    {decorator}"
+                "    def inner(conv: Conversation):\n"
+                "        pass\n"
+            ),
+            "method on a class": (
+                f"class Handler:\n    {decorator}    def method(self, conv: Conversation):\n"
+                "        pass\n"
+            ),
+            "guarded by if": (
+                f"if True:\n    {decorator}    def my_func(conv: Conversation):\n        pass\n"
+            ),
+            "inside try/except": (
+                f"try:\n    {decorator}    def my_func(conv: Conversation):\n        pass\n"
+                "except ValueError:\n    pass\n"
+            ),
+            "inside a with block": (
+                f"with open('f') as fh:\n    {decorator}"
+                "    def my_func(conv: Conversation):\n        pass\n"
+            ),
+        }
+        mappings = [self._make_variable_mapping("var-1", "My Variable")]
+
+        for label, code in bodies.items():
+            with self.subTest(label):
+                result = Function._swap_latency_control_references(
+                    code, mappings, names_to_ids=False
+                )
+                self.assertIn("{{vrbl:My Variable}}", result)
+                self.assertNotIn("{{vrbl:var-1}}", result)
 
     def test_equality_ignores_variable_references(self):
         """variable_references must not affect equality.
@@ -1451,6 +1775,481 @@ example_queries: []
             self.assertEqual(result.example_queries, [])
 
 
+# A child topic has its own platform ID, independent of any base topic, so resource_id is
+# just that ID. Its name is unique across the base topics and its own variant's child topics.
+TEST_CHILD_TOPIC = ChildTopic(
+    resource_id="TOPIC-es-1",
+    name="Opening Hours",
+    variant_id="VARIANT-es",
+    variant_name="Spanish",
+    actions="Responde en español",
+    content="Abrimos a las 9",
+    example_queries=["¿a qué hora abren?"],
+    enabled=True,
+)
+
+# The variants child topics can be scoped to. ChildTopic resolves the variant from the
+# file's enclosing folder, so the variant must be in the mappings.
+CHILD_TOPIC_MAPPINGS = [
+    ResourceMapping(
+        resource_id="VARIANT-es",
+        resource_name="Spanish",
+        resource_type=Variant,
+        file_path="config/variant_attributes.yaml/variants/Spanish",
+        resource_prefix="variant",
+        flow_name=None,
+    ),
+    ResourceMapping(
+        resource_id="VARIANT-fr",
+        resource_name="French",
+        resource_type=Variant,
+        file_path="config/variant_attributes.yaml/variants/French",
+        resource_prefix="variant",
+        flow_name=None,
+    ),
+]
+
+
+class ChildTopicTests(unittest.TestCase):
+    """Tests for the ChildTopic resource."""
+
+    CHILD_TOPIC_YAML = """name: Opening Hours
+enabled: true
+actions: Responde en español
+content: Abrimos a las 9
+example_queries:
+- ¿a qué hora abren?
+"""
+
+    def test_to_yaml_dict_omits_identity_fields(self):
+        """variant_id and variant_name come from the path, not the YAML body."""
+        yaml_dict = TEST_CHILD_TOPIC.to_yaml_dict()
+
+        self.assertEqual(
+            yaml_dict,
+            {
+                "name": "Opening Hours",
+                "enabled": True,
+                "actions": "Responde en español",
+                "content": "Abrimos a las 9",
+                "example_queries": ["¿a qué hora abren?"],
+            },
+        )
+
+    def test_yaml_round_trip_preserves_content_and_identity(self):
+        """to_yaml_dict -> from_yaml_dict restores the resource when identity is passed back in."""
+        yaml_dict = TEST_CHILD_TOPIC.to_yaml_dict()
+
+        restored = ChildTopic.from_yaml_dict(
+            yaml_dict,
+            resource_id="TOPIC-es-1",
+            name="Opening Hours",
+            variant_id="VARIANT-es",
+            variant_name="Spanish",
+        )
+
+        self.assertEqual(restored.to_yaml_dict(), yaml_dict)
+        self.assertEqual(restored.resource_id, "TOPIC-es-1")
+        self.assertEqual(restored.variant_id, "VARIANT-es")
+        self.assertEqual(restored.variant_name, "Spanish")
+
+    def test_from_yaml_dict_defaults_missing_fields(self):
+        """Missing optional fields fall back to empty values and enabled=True."""
+        restored = ChildTopic.from_yaml_dict(
+            {},
+            resource_id="TOPIC-es-1",
+            name="Opening Hours",
+            variant_id="VARIANT-es",
+            variant_name="Spanish",
+        )
+
+        self.assertEqual(restored.name, "Opening Hours")
+        self.assertEqual(restored.actions, "")
+        self.assertEqual(restored.content, "")
+        self.assertEqual(restored.example_queries, [])
+        self.assertTrue(restored.enabled)
+
+    def test_file_path_nests_topic_under_variant_folder(self):
+        """Child topics live at child_topics/<variant>/<topic>.yaml."""
+        self.assertEqual(
+            TEST_CHILD_TOPIC.file_path,
+            os.path.join("child_topics", "spanish", "opening_hours.yaml"),
+        )
+
+    def test_file_path_lowercases_the_variant_folder(self):
+        """The variant folder is lowercased like every other name in a topic path."""
+        child_topic = ChildTopic(
+            resource_id="TOPIC-v1-1",
+            name="Opening Hours",
+            variant_id="VARIANT-1",
+            variant_name="Variant 1",
+            actions="",
+            content="",
+            example_queries=[],
+        )
+
+        self.assertEqual(
+            child_topic.file_path,
+            os.path.join("child_topics", "variant_1", "opening_hours.yaml"),
+        )
+
+    def test_file_path_cleans_variant_and_topic_names(self):
+        """Names with spaces and punctuation are cleaned into path-safe segments."""
+        child_topic = ChildTopic(
+            resource_id="TOPIC-latam-2",
+            name="Billing & Refunds",
+            variant_id="VARIANT-2",
+            variant_name="Latin America",
+            actions="",
+            content="",
+            example_queries=[],
+        )
+
+        self.assertEqual(
+            child_topic.file_path,
+            os.path.join("child_topics", "latin_america", "billing_refunds.yaml"),
+        )
+
+
+    def test_returns_empty_when_child_topics_folder_missing(self):
+        """A project with no child_topics folder discovers nothing."""
+        self.assertEqual(ChildTopic.discover_resources("/nonexistent"), [])
+
+    def test_finds_yaml_files_in_each_variant_folder(self):
+        """Every YAML file inside a subdirectory of child_topics/ is discovered."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            spanish_dir = os.path.join(tmpdir, "child_topics", "Spanish")
+            french_dir = os.path.join(tmpdir, "child_topics", "French")
+            os.makedirs(spanish_dir)
+            os.makedirs(french_dir)
+            open(os.path.join(spanish_dir, "opening_hours.yaml"), "w").close()
+            open(os.path.join(french_dir, "billing.yml"), "w").close()
+
+            discovered = ChildTopic.discover_resources(tmpdir)
+
+            self.assertEqual(
+                sorted(discovered),
+                sorted(
+                    [
+                        os.path.join(spanish_dir, "opening_hours.yaml"),
+                        os.path.join(french_dir, "billing.yml"),
+                    ]
+                ),
+            )
+
+    def test_skips_files_sitting_directly_in_the_child_topics_folder(self):
+        """A child topic must be inside a variant folder, so loose files are ignored."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            child_topics_dir = os.path.join(tmpdir, "child_topics")
+            spanish_dir = os.path.join(child_topics_dir, "Spanish")
+            os.makedirs(spanish_dir)
+            open(os.path.join(child_topics_dir, "stray.yaml"), "w").close()
+            open(os.path.join(spanish_dir, "opening_hours.yaml"), "w").close()
+
+            discovered = ChildTopic.discover_resources(tmpdir)
+
+            self.assertEqual(discovered, [os.path.join(spanish_dir, "opening_hours.yaml")])
+
+    def test_skips_non_yaml_files_inside_variant_folders(self):
+        """Only .yaml/.yml files inside a variant folder are discovered."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            spanish_dir = os.path.join(tmpdir, "child_topics", "Spanish")
+            os.makedirs(spanish_dir)
+            open(os.path.join(spanish_dir, "opening_hours.yaml"), "w").close()
+            open(os.path.join(spanish_dir, "README.md"), "w").close()
+
+            discovered = ChildTopic.discover_resources(tmpdir)
+
+            self.assertEqual(discovered, [os.path.join(spanish_dir, "opening_hours.yaml")])
+
+
+    def test_resolves_variant_from_enclosing_folder(self):
+        """The enclosing folder gives the variant; the topic ID is the resource's own ID."""
+        with mock_read_from_file(self.CHILD_TOPIC_YAML):
+            child_topic = ChildTopic.read_local_resource(
+                file_path=os.path.join("child_topics", "Spanish", "opening_hours.yaml"),
+                resource_id="TOPIC-es-1",
+                resource_name="opening_hours",
+                resource_mappings=CHILD_TOPIC_MAPPINGS,
+            )
+
+        self.assertEqual(child_topic.resource_id, "TOPIC-es-1")
+        self.assertEqual(child_topic.name, "Opening Hours")
+        self.assertEqual(child_topic.variant_id, "VARIANT-es")
+        self.assertEqual(child_topic.variant_name, "Spanish")
+        self.assertEqual(child_topic.content, "Abrimos a las 9")
+
+    def test_unresolved_variant_is_deferred_to_validate(self):
+        """Reading with no mappings recovers the name without raising, leaving the variant unset.
+
+        Project discovery does exactly this to learn a resource's real name before the
+        full resource mapping exists, so it must not raise here.
+        """
+        with mock_read_from_file(self.CHILD_TOPIC_YAML):
+            child_topic = ChildTopic.read_local_resource(
+                file_path=os.path.join("child_topics", "Spanish", "opening_hours.yaml"),
+                resource_id="temp_id",
+                resource_name="opening_hours",
+                resource_mappings=[],
+            )
+
+        self.assertEqual(child_topic.name, "Opening Hours")
+        self.assertIsNone(child_topic.variant_id)
+        # The folder is kept as a fallback so file_path stays usable during discovery.
+        self.assertEqual(child_topic.variant_name, "Spanish")
+        self.assertEqual(
+            child_topic.file_path, os.path.join("child_topics", "spanish", "opening_hours.yaml")
+        )
+
+    def test_unknown_variant_folder_leaves_variant_unresolved(self):
+        """A folder that matches no known variant resolves to no variant ID."""
+        with mock_read_from_file(self.CHILD_TOPIC_YAML):
+            child_topic = ChildTopic.read_local_resource(
+                file_path=os.path.join("child_topics", "Klingon", "opening_hours.yaml"),
+                resource_id="TOPIC-es-1",
+                resource_name="opening_hours",
+                resource_mappings=CHILD_TOPIC_MAPPINGS,
+            )
+
+        self.assertIsNone(child_topic.variant_id)
+        self.assertEqual(child_topic.variant_name, "Klingon")
+
+        # It still fails validation, since the folder names no known variant.
+        with self.assertRaises(ValueError) as cm:
+            child_topic.validate(resource_mappings=CHILD_TOPIC_MAPPINGS)
+        self.assertIn("not inside a known variant folder", str(cm.exception))
+
+    def test_file_name_not_matching_topic_name_raises(self):
+        """The file name must match the cleaned name declared inside the YAML."""
+        with mock_read_from_file(self.CHILD_TOPIC_YAML):
+            with self.assertRaises(ValueError) as cm:
+                ChildTopic.read_local_resource(
+                    file_path=os.path.join("child_topics", "Spanish", "wrong_name.yaml"),
+                    resource_id="TOPIC-es-1",
+                    resource_name="wrong_name",
+                    resource_mappings=CHILD_TOPIC_MAPPINGS,
+                )
+
+        self.assertIn(
+            "Topic name 'Opening Hours' in file wrong_name.yaml does not match "
+            "expected filename: opening_hours.yaml",
+            str(cm.exception),
+        )
+
+
+    def test_fully_resolved_child_topic_is_valid(self):
+        """A child topic with a resolved variant passes validation."""
+        self.assertIsNone(TEST_CHILD_TOPIC.validate(resource_mappings=CHILD_TOPIC_MAPPINGS))
+
+    def test_unresolved_variant_raises(self):
+        """A child topic outside a known variant folder is a validation error."""
+        child_topic = ChildTopic(
+            resource_id="TOPIC-es-1",
+            name="Opening Hours",
+            variant_id=None,
+            variant_name=None,
+            actions="",
+            content="",
+            example_queries=[],
+        )
+
+        with self.assertRaises(ValueError) as cm:
+            child_topic.validate(resource_mappings=CHILD_TOPIC_MAPPINGS)
+
+        self.assertIn(
+            "Child topic 'Opening Hours' is not inside a known variant folder",
+            str(cm.exception),
+        )
+
+    def test_variant_id_missing_from_mappings_raises(self):
+        """A variant that was deleted from variant_attributes.yaml is not a known variant."""
+        child_topic = ChildTopic(
+            resource_id="TOPIC-de-1",
+            name="Opening Hours",
+            variant_id="VARIANT-deleted",
+            variant_name="German",
+            actions="",
+            content="",
+            example_queries=[],
+        )
+
+        with self.assertRaises(ValueError) as cm:
+            child_topic.validate(resource_mappings=CHILD_TOPIC_MAPPINGS)
+
+        self.assertIn(
+            "Child topic 'Opening Hours' is not inside a known variant folder",
+            str(cm.exception),
+        )
+
+    def test_name_matching_a_base_topic_raises(self):
+        """A child topic may not reuse the name of a base topic."""
+        mappings = CHILD_TOPIC_MAPPINGS + [
+            ResourceMapping(
+                resource_id="TOPIC-base-1",
+                resource_name="Opening Hours",
+                resource_type=Topic,
+                file_path=os.path.join("topics", "opening_hours.yaml"),
+                resource_prefix="topic",
+                flow_name=None,
+            ),
+        ]
+
+        with self.assertRaises(ValueError) as cm:
+            TEST_CHILD_TOPIC.validate(resource_mappings=mappings)
+
+        self.assertIn(
+            "Child topic 'Opening Hours' has the same name as base topic 'Opening Hours'",
+            str(cm.exception),
+        )
+
+    def test_name_matching_another_child_topic_in_same_variant_raises(self):
+        """Two child topics in the same variant folder may not share a name."""
+        mappings = CHILD_TOPIC_MAPPINGS + [
+            ResourceMapping(
+                resource_id="TOPIC-es-2",
+                resource_name="Opening Hours",
+                resource_type=ChildTopic,
+                file_path=os.path.join("child_topics", "Spanish", "opening_hours.yaml"),
+                resource_prefix="topic",
+                flow_name=None,
+            ),
+        ]
+
+        with self.assertRaises(ValueError) as cm:
+            TEST_CHILD_TOPIC.validate(resource_mappings=mappings)
+
+        self.assertIn(
+            "Child topic 'Opening Hours' has the same name as child topic 'Opening Hours' "
+            "in variant 'spanish'",
+            str(cm.exception),
+        )
+
+    def test_name_matching_a_child_topic_in_a_different_variant_raises(self):
+        """Name uniqueness spans every variant, so another variant may not reuse the name."""
+        mappings = CHILD_TOPIC_MAPPINGS + [
+            ResourceMapping(
+                resource_id="TOPIC-fr-1",
+                resource_name="Opening Hours",
+                resource_type=ChildTopic,
+                file_path=os.path.join("child_topics", "French", "opening_hours.yaml"),
+                resource_prefix="topic",
+                flow_name=None,
+            ),
+        ]
+
+        with self.assertRaises(ValueError) as cm:
+            TEST_CHILD_TOPIC.validate(resource_mappings=mappings)
+
+        self.assertIn(
+            "Child topic 'Opening Hours' has the same name as child topic 'Opening Hours' "
+            "in variant 'french'",
+            str(cm.exception),
+        )
+
+    def test_name_not_used_by_any_other_topic_is_valid(self):
+        """A name no other base or child topic uses passes validation."""
+        mappings = CHILD_TOPIC_MAPPINGS + [
+            ResourceMapping(
+                resource_id="TOPIC-fr-1",
+                resource_name="Closing Times",
+                resource_type=ChildTopic,
+                file_path=os.path.join("child_topics", "French", "closing_times.yaml"),
+                resource_prefix="topic",
+                flow_name=None,
+            ),
+        ]
+
+        self.assertIsNone(TEST_CHILD_TOPIC.validate(resource_mappings=mappings))
+
+    def test_child_topics_own_mapping_does_not_count_as_a_duplicate(self):
+        """A child topic already registered in the mappings does not collide with itself."""
+        mappings = CHILD_TOPIC_MAPPINGS + [
+            ResourceMapping(
+                resource_id=TEST_CHILD_TOPIC.resource_id,
+                resource_name=TEST_CHILD_TOPIC.name,
+                resource_type=ChildTopic,
+                file_path=TEST_CHILD_TOPIC.file_path,
+                resource_prefix="topic",
+                flow_name=None,
+            ),
+        ]
+
+        self.assertIsNone(TEST_CHILD_TOPIC.validate(resource_mappings=mappings))
+
+    def test_more_than_twenty_example_queries_raises(self):
+        """Example queries are capped at 20, matching the base Topic limit."""
+        child_topic = ChildTopic(
+            resource_id="TOPIC-es-1",
+            name="Opening Hours",
+            variant_id="VARIANT-es",
+            variant_name="Spanish",
+            actions="",
+            content="",
+            example_queries=[f"query {i}" for i in range(21)],
+        )
+
+        with self.assertRaises(ValueError) as cm:
+            child_topic.validate(resource_mappings=CHILD_TOPIC_MAPPINGS)
+
+        self.assertIn("Example queries must be less than 20", str(cm.exception))
+
+    def test_unknown_reference_raises(self):
+        """References in actions/content must resolve, as they do for a base topic."""
+        child_topic = ChildTopic(
+            resource_id="TOPIC-es-1",
+            name="Opening Hours",
+            variant_id="VARIANT-es",
+            variant_name="Spanish",
+            actions="Use {{fn:FUNCTION-missing}}",
+            content="",
+            example_queries=[],
+        )
+
+        with self.assertRaises(ValueError) as cm:
+            child_topic.validate(resource_mappings=CHILD_TOPIC_MAPPINGS)
+
+        self.assertIn("Invalid references: ['global_functions: FUNCTION-missing']", str(cm.exception))
+
+    def test_create_proto_targets_own_id_scoped_to_variant(self):
+        """The proto carries the child topic's own ID and the variant it is scoped to."""
+        proto = TEST_CHILD_TOPIC.build_create_proto()
+
+        self.assertEqual(proto.id, "TOPIC-es-1")
+        self.assertEqual(proto.variant_id, "VARIANT-es")
+        self.assertEqual(proto.name, "Opening Hours")
+        self.assertEqual(proto.content, "Abrimos a las 9")
+        self.assertEqual(list(proto.example_queries.queries), ["¿a qué hora abren?"])
+        self.assertTrue(proto.is_active)
+
+    def test_update_proto_targets_own_id_scoped_to_variant(self):
+        """The update proto is likewise keyed on the child topic's own ID."""
+        proto = TEST_CHILD_TOPIC.build_update_proto()
+
+        self.assertEqual(proto.id, "TOPIC-es-1")
+        self.assertEqual(proto.variant_id, "VARIANT-es")
+        self.assertEqual(proto.actions, "Responde en español")
+
+    def test_delete_proto_targets_own_id(self):
+        """Delete reuses Topic's proto; the child_topic command scopes it to child topics."""
+        proto = TEST_CHILD_TOPIC.build_delete_proto()
+
+        self.assertIsInstance(proto, KnowledgeBase_DeleteTopic)
+        self.assertEqual(proto.id, "TOPIC-es-1")
+
+    def test_command_type_is_child_topic(self):
+        """Child topics route to the child topic commands, not the base topic commands."""
+        self.assertEqual(TEST_CHILD_TOPIC.command_type, "child_topic")
+        self.assertEqual(TEST_CHILD_TOPIC.create_command_type, "create_child_topic")
+        self.assertEqual(TEST_CHILD_TOPIC.update_command_type, "update_child_topic")
+        self.assertEqual(TEST_CHILD_TOPIC.delete_command_type, "delete_child_topic")
+
+
 TEST_DISCLAIMER = VoiceDisclaimerMessage(
     resource_id="disclaimer_123",
     name="disclaimer_message",
@@ -1735,255 +2534,6 @@ class VoiceGreetingTests(unittest.TestCase):
             self.assertEqual(result.language_code, "en-GB")
 
 
-TEST_PERSONALITY = SettingsPersonality(
-    resource_id="personality_123",
-    name="personality",
-    adjectives={"Polite": True, "Calm": True, "Kind": False},
-    custom="",
-)
-
-PERSONALITY_RAW = """adjectives:
-  Calm: true
-  Polite: true
-custom: ''
-"""
-
-
-class SettingsPersonalityTests(unittest.TestCase):
-    def test_get_raw(self):
-        """Test that raw property returns correct YAML representation."""
-        self.assertEqual(TEST_PERSONALITY.raw, PERSONALITY_RAW)
-
-    def test_to_yaml_dict_strips_disabled_adjectives(self):
-        """Test that to_yaml_dict excludes adjectives set to False."""
-        yaml_dict = TEST_PERSONALITY.to_yaml_dict()
-        self.assertEqual(yaml_dict["adjectives"], {"Polite": True, "Calm": True})
-        self.assertNotIn("Kind", yaml_dict["adjectives"])
-
-    def test_to_yaml_dict_sorts_adjectives(self):
-        """Test that to_yaml_dict returns adjectives in sorted order."""
-        unsorted = SettingsPersonality(
-            resource_id="p1",
-            name="personality",
-            adjectives={"Polite": True, "Calm": True, "Energetic": True, "Kind": False},
-            custom="",
-        )
-        yaml_dict = unsorted.to_yaml_dict()
-        self.assertEqual(list(yaml_dict["adjectives"].keys()), ["Calm", "Energetic", "Polite"])
-
-    def test_to_yaml_dict_normalizes_empty_and_all_false(self):
-        """Test that both empty and all-false adjectives produce the same YAML dict."""
-        empty = SettingsPersonality(resource_id="p1", name="personality", adjectives={}, custom="")
-        all_false = SettingsPersonality(
-            resource_id="p2",
-            name="personality",
-            adjectives={"Polite": False, "Calm": False},
-            custom="",
-        )
-        self.assertEqual(empty.to_yaml_dict()["adjectives"], {})
-        self.assertEqual(all_false.to_yaml_dict()["adjectives"], {})
-
-    def test_to_pretty(self):
-        """Test converting personality to pretty format."""
-        pretty_content = TEST_PERSONALITY.to_pretty()
-        self.assertIn("Polite", pretty_content)
-
-    def test_convert_and_unconvert_personality(self):
-        """Test roundtrip conversion: to_pretty -> from_pretty."""
-        converted_personality = TEST_PERSONALITY.to_pretty()
-        reverted_personality = SettingsPersonality.from_pretty(converted_personality)
-        self.assertEqual(reverted_personality, TEST_PERSONALITY.raw)
-
-    def test_validate_personality_settings(self):
-        """Test validation of personality settings."""
-        self.assertIsNone(TEST_PERSONALITY.validate())
-
-        # Test with custom and other adjectives (invalid)
-        invalid_personality = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"Polite": True, "Other": True},
-            custom="Custom personality description",
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_personality.validate()
-        self.assertIn(
-            "Other adjective can only be set if no other adjectives are selected.",
-            str(cm.exception),
-        )
-
-        # Test with invalid adjectives
-        invalid_personality = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"InvalidAdjective": True},
-            custom="",
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_personality.validate()
-        self.assertIn("Enabled adjectives must be from the allowed set:", str(cm.exception))
-
-        # Test with disabled invalid adjective (valid — only enabled adjectives are checked)
-        personality_with_disabled_invalid = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"Polite": True, "InvalidAdjective": False},
-            custom="",
-        )
-        self.assertIsNone(personality_with_disabled_invalid.validate())
-
-        # Test with custom and 'Other' selected (valid case)
-        valid_personality = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"Other": True},
-            custom="Custom personality description",
-        )
-        self.assertIsNone(valid_personality.validate())
-
-        # Test with invalid function reference in custom field
-        invalid_personality = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"Other": True},
-            custom="Use {{fn:func-123}} in custom personality",
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_personality.validate()
-        self.assertIn(
-            "Invalid reference type: global_functions is not a valid reference type for this resource.",
-            str(cm.exception),
-        )
-
-    def test_build_update_proto_sends_all_allowed_adjectives(self):
-        """Test that build_update_proto sends all allowed adjectives, defaulting unset to False."""
-        personality = SettingsPersonality(
-            resource_id="personality_123",
-            name="personality",
-            adjectives={"Polite": True, "InvalidAdjective": False, "Calm": True},
-            custom="",
-        )
-        proto = personality.build_update_proto()
-        adjective_values = proto.adjectives.values
-        self.assertNotIn("InvalidAdjective", adjective_values)
-        self.assertEqual(set(adjective_values.keys()), ALLOWED_ADJECTIVES)
-        self.assertTrue(adjective_values["Polite"])
-        self.assertTrue(adjective_values["Calm"])
-        self.assertFalse(adjective_values["Kind"])
-        self.assertFalse(adjective_values["Funny"])
-
-    def test_read_local_resource(self):
-        """Test reading a personality from a YAML file."""
-        test_file_pretty_content = """adjectives:
-  Polite: true
-  Calm: true
-custom: ''
-"""
-
-        with mock_read_from_file(test_file_pretty_content):
-            result = SettingsPersonality.read_local_resource(
-                file_path="agent_settings/personality.yaml",
-                resource_id="personality_123",
-                resource_name="personality",
-            )
-
-            self.assertEqual(result.resource_id, "personality_123")
-            self.assertEqual(result.name, "personality")
-            self.assertIn("Polite", result.adjectives)
-            self.assertEqual(result.custom, "")
-
-
-TEST_ROLE = SettingsRole(
-    resource_id="role_123",
-    name="role",
-    value="Customer Service Representative",
-    additional_info="Handles customer inquiries and support requests",
-    custom="",
-)
-
-ROLE_RAW = """value: Customer Service Representative
-additional_info: Handles customer inquiries and support requests
-custom: ''
-"""
-
-
-class SettingsRoleTests(unittest.TestCase):
-    def test_get_raw(self):
-        """Test that raw property returns correct YAML representation."""
-        self.assertEqual(TEST_ROLE.raw, ROLE_RAW)
-
-    def test_to_pretty(self):
-        """Test converting role to pretty format."""
-        pretty_content = TEST_ROLE.to_pretty()
-        self.assertIn("Customer Service Representative", pretty_content)
-
-    def test_convert_and_unconvert_role(self):
-        """Test roundtrip conversion: to_pretty -> from_pretty."""
-        converted_role = TEST_ROLE.to_pretty()
-        reverted_role = SettingsRole.from_pretty(converted_role)
-        self.assertEqual(reverted_role, TEST_ROLE.raw)
-
-    def test_validate_role_settings(self):
-        """Test validation of role settings."""
-        self.assertIsNone(TEST_ROLE.validate(resource_mappings=[]))
-
-        # Test with custom and non-other role (invalid)
-        invalid_role = SettingsRole(
-            resource_id="role_123",
-            name="role",
-            value="Customer Service Representative",
-            additional_info="",
-            custom="Custom role description",
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_role.validate(resource_mappings=[])
-        self.assertIn("Custom role can only be set if role is 'other'.", str(cm.exception))
-
-        # Test with custom and 'other' role (valid case)
-        valid_role = SettingsRole(
-            resource_id="role_123",
-            name="role",
-            value="Other",
-            additional_info="",
-            custom="Custom role description",
-        )
-        self.assertIsNone(valid_role.validate(resource_mappings=[]))
-
-        # Test with invalid function reference in custom field
-        invalid_role = SettingsRole(
-            resource_id="role_123",
-            name="role",
-            value="Other",
-            additional_info="",
-            custom="Use {{fn:func-123}} in custom role",
-        )
-        with self.assertRaises(ValueError) as cm:
-            invalid_role.validate(resource_mappings=[])
-        self.assertIn(
-            "Invalid reference type: global_functions is not a valid reference type for this resource.",
-            str(cm.exception),
-        )
-
-    def test_read_local_resource(self):
-        """Test reading a role from a YAML file."""
-        test_file_pretty_content = """value: Customer Service Representative
-additional_info: Handles customer inquiries
-custom: ''
-"""
-
-        with mock_read_from_file(test_file_pretty_content):
-            result = SettingsRole.read_local_resource(
-                file_path="agent_settings/role.yaml",
-                resource_id="role_123",
-                resource_name="role",
-            )
-
-            self.assertEqual(result.resource_id, "role_123")
-            self.assertEqual(result.name, "role")
-            self.assertEqual(result.value, "Customer Service Representative")
-            self.assertEqual(result.additional_info, "Handles customer inquiries")
-
-
 TEST_RULES = SettingsRules(
     resource_id="rules_123",
     name="rules",
@@ -2168,6 +2718,167 @@ TEST_FLOW_CONFIG = FlowConfig(
     description="A test flow description",
     start_step="step-1",
 )
+
+TEST_PERSONA = SettingsPersona(
+    resource_id="persona_123",
+    name="persona",
+    content="You are a calm concierge. Greet {{vrbl:VAR-customer_name}} by name.",
+)
+
+PERSONA_VARIABLE_MAPPING = [
+    ResourceMapping(
+        resource_id="VAR-customer_name",
+        resource_name="customer_name",
+        resource_type=Variable,
+        file_path="variables/customer_name",
+        resource_prefix="vrbl",
+        flow_name=None,
+    ),
+    ResourceMapping(
+        resource_id="ATTR-brand_name",
+        resource_name="brand_name",
+        resource_type=VariantAttribute,
+        file_path="config/variant_attributes.yaml",
+        resource_prefix="attr",
+        flow_name=None,
+    ),
+]
+
+
+def _persona_projection(persona: dict | None) -> dict:
+    agent_settings = {"rules": {"behaviour": "Be polite and helpful"}}
+    if persona is not None:
+        agent_settings["persona"] = persona
+    return {"agentSettings": agent_settings}
+
+
+class SettingsPersonaTests(unittest.TestCase):
+    def test_get_raw(self):
+        """Test that raw property returns the content string."""
+        self.assertEqual(TEST_PERSONA.raw, TEST_PERSONA.content)
+
+    def test_file_path(self):
+        """Test that the persona is stored as plain text next to the other settings."""
+        self.assertEqual(TEST_PERSONA.file_path, os.path.join("agent_settings", "persona.txt"))
+
+    def test_convert_and_unconvert_persona(self):
+        """Test roundtrip conversion: to_pretty -> from_pretty."""
+        pretty_content = TEST_PERSONA.to_pretty(resource_mappings=PERSONA_VARIABLE_MAPPING)
+        self.assertIn("{{vrbl:customer_name}}", pretty_content)
+        self.assertNotIn("{{vrbl:VAR-customer_name}}", pretty_content)
+
+        reverted = SettingsPersona.from_pretty(
+            pretty_content, resource_mappings=PERSONA_VARIABLE_MAPPING
+        )
+        self.assertEqual(reverted, TEST_PERSONA.raw)
+
+    def test_validate_variable_reference(self):
+        """Test validation accepts a known variable and rejects an unknown one."""
+        self.assertIsNone(TEST_PERSONA.validate(resource_mappings=PERSONA_VARIABLE_MAPPING))
+
+        with self.assertRaises(ValueError) as cm:
+            TEST_PERSONA.validate(resource_mappings=[])
+        self.assertIn("Invalid references: ['variables: VAR-customer_name']", str(cm.exception))
+
+    def test_validate_attribute_reference(self):
+        """Test that attributes are accepted, as they were on personality and role."""
+        persona_with_attr = SettingsPersona(
+            resource_id="persona_123",
+            name="persona",
+            content="You are a concierge for {{attr:ATTR-brand_name}}.",
+        )
+        self.assertIsNone(persona_with_attr.validate(resource_mappings=PERSONA_VARIABLE_MAPPING))
+
+        with self.assertRaises(ValueError) as cm:
+            persona_with_attr.validate(resource_mappings=[])
+        self.assertIn("Invalid references: ['attributes: ATTR-brand_name']", str(cm.exception))
+
+    def test_validate_rejects_behavioural_references(self):
+        """Test that behavioural references belong in rules.txt, not the persona."""
+        persona_with_fn = SettingsPersona(
+            resource_id="persona_123",
+            name="persona",
+            content="You are a concierge. Use {{fn:book_table}}.",
+        )
+        with self.assertRaises(ValueError) as cm:
+            persona_with_fn.validate(resource_mappings=[])
+        self.assertIn("Invalid reference type: global_functions", str(cm.exception))
+
+    def test_build_update_proto_omits_attribute_references(self):
+        """Test that attribute references stay in the content, untracked.
+
+        PersonaReferences has a variables map and nothing else — the same shape
+        PersonalityReferences and RoleReferences had.
+        """
+        proto = SettingsPersona(
+            resource_id="persona_123",
+            name="persona",
+            content="You are a concierge for {{attr:ATTR-brand_name}}.",
+        ).build_update_proto()
+        self.assertIn("{{attr:ATTR-brand_name}}", proto.content)
+        self.assertEqual(dict(proto.references.variables), {})
+
+    def test_build_update_proto(self):
+        """Test building the update proto, including variable references."""
+        proto = TEST_PERSONA.build_update_proto()
+        self.assertEqual(proto.content, TEST_PERSONA.content)
+        self.assertEqual(dict(proto.references.variables), {"VAR-customer_name": True})
+
+    def test_build_update_proto_without_references(self):
+        """Test that references are always sent, even when empty."""
+        proto = SettingsPersona(
+            resource_id="persona_123",
+            name="persona",
+            content="You are a calm concierge.",
+        ).build_update_proto()
+        self.assertEqual(dict(proto.references.variables), {})
+
+    def test_command_type(self):
+        """Test that pushing a persona sends update_persona."""
+        self.assertEqual(TEST_PERSONA.command_type, "persona")
+        self.assertEqual(TEST_PERSONA.update_command_type, "update_persona")
+
+    def test_create_and_delete_not_supported(self):
+        """Test that the platform offers no create or delete for the persona."""
+        with self.assertRaises(NotImplementedError):
+            TEST_PERSONA.build_create_proto()
+        with self.assertRaises(NotImplementedError):
+            TEST_PERSONA.build_delete_proto()
+
+    def test_from_projection(self):
+        """Test that persona content becomes a SettingsPersona resource."""
+        resources = SettingsPersona.from_projection(
+            _persona_projection({"content": "You are a calm Consultant."})
+        )
+        self.assertEqual(
+            resources["persona"],
+            SettingsPersona(
+                resource_id="persona",
+                name="persona",
+                content="You are a calm Consultant.",
+            ),
+        )
+
+    def test_from_projection_without_content(self):
+        """Test a persona object that carries no content."""
+        self.assertEqual(
+            SettingsPersona.from_projection(
+                _persona_projection(
+                    {"createdAt": "", "createdBy": "", "references": {"variables": {}}}
+                )
+            ),
+            {},
+        )
+
+    def test_from_projection_without_persona(self):
+        """Test a projection with no persona key at all."""
+        self.assertEqual(SettingsPersona.from_projection(_persona_projection(None)), {})
+
+    def test_from_projection_with_empty_content(self):
+        """Test that an authored but empty persona is still a resource."""
+        resources = SettingsPersona.from_projection(_persona_projection({"content": ""}))
+        self.assertEqual(resources["persona"].content, "")
+
 
 FLOW_CONFIG_RAW = """name: Test Flow
 description: A test flow description
@@ -2435,16 +3146,20 @@ TEST_FLOW_STEP = FlowStep(
     flow_id="flow-123",
     flow_name="Test Flow",
     step_type=StepType.ADVANCED_STEP,
-    asr_biasing=ASRBiasing(
+    settings=FlowSettings(
         flow_id="flow-123",
         step_id="step-1",
-        custom_keywords=["Hello", "Help", "Support"],
-        is_enabled=True,
-    ),
-    dtmf_config=DTMFConfig(
-        flow_id="flow-123",
-        step_id="step-1",
-        is_enabled=False,
+        asr_biasing=ASRBiasing(
+            custom_keywords=["Hello", "Help", "Support"],
+            is_enabled=True,
+        ),
+        # Enabled so it survives to_yaml_dict, which omits disabled sections.
+        dtmf=DTMFConfig(
+            flow_id="flow-123",
+            step_id="step-1",
+            is_enabled=True,
+            max_digits=4,
+        ),
     ),
     conditions=[],
     prompt="Hello, how can I help you?",
@@ -2470,9 +3185,9 @@ asr_biasing:
   - Help
   - Support
 dtmf_config:
-  is_enabled: false
+  is_enabled: true
   inter_digit_timeout: 0
-  max_digits: 0
+  max_digits: 4
   end_key: '#'
   collect_while_agent_speaking: false
   is_pii: false
@@ -2524,6 +3239,25 @@ prompt: Hello, how can I help you?
 
 
 class FlowStepTests(unittest.TestCase):
+    def test_missing_flow_config_falls_back_to_the_folder_name(self):
+        """Reading with no flow mapping keeps the folder, so file_path stays usable.
+
+        Project discovery reads a step before the flow mappings exist. Leaving flow_name
+        unset made file_path raise AttributeError while diffing.
+        """
+        with mock_read_from_file(FLOW_STEP_RAW):
+            step = FlowStep.read_local_resource(
+                file_path=os.path.join("flows", "orphan_flow", "steps", "test_step.yaml"),
+                resource_id="temp_id",
+                resource_name="Test Step",
+                resource_mappings=[],
+            )
+
+        self.assertEqual(step.flow_name, "orphan_flow")
+        self.assertEqual(
+            step.file_path, os.path.join("flows", "orphan_flow", "steps", "test_step.yaml")
+        )
+
     def test_get_raw(self):
         """Test that raw property returns correct YAML representation."""
         self.assertEqual(TEST_FLOW_STEP.raw, FLOW_STEP_RAW)
@@ -2531,6 +3265,35 @@ class FlowStepTests(unittest.TestCase):
     def test_get_raw_no_code_step(self):
         """Test that raw property returns correct YAML representation for no code step."""
         self.assertEqual(TEST_NO_CODE_FLOW_STEP.raw, FLOW_NO_CODE_STEP_RAW)
+
+    def test_conditions_sorted_by_name(self):
+        """Test that conditions are serialized in alphabetical order by name."""
+        step = FlowStep(
+            resource_id="flow-123_step-1",
+            step_id="step-1",
+            name="Test Step",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.DEFAULT_STEP,
+            conditions=[
+                Condition(
+                    resource_id=f"cond-{name}",
+                    name=name,
+                    description="",
+                    condition_type=ConditionType.STEP,
+                    child_step="step-2",
+                    step_id="step-1",
+                    flow_id="flow-123",
+                )
+                for name in ["zebra", "apple", "monkey"]
+            ],
+            prompt="Hello, how can I help you?",
+            position={"x": 0.0, "y": 0.0},
+            extracted_entities=[],
+        )
+
+        condition_names = [c["name"] for c in step.to_yaml_dict()["conditions"]]
+        self.assertEqual(condition_names, ["apple", "monkey", "zebra"])
 
     def test_to_pretty(self):
         """Test converting flow step to pretty format with function name mapping."""
@@ -2617,8 +3380,8 @@ class FlowStepTests(unittest.TestCase):
             flow_name="Test Flow",
             resource_mappings=[],
         )
-        self.assertEqual(step.asr_biasing, ASRBiasing(flow_id="flow-123", step_id="step-1"))
-        self.assertEqual(step.dtmf_config, DTMFConfig(flow_id="flow-123", step_id="step-1"))
+        self.assertIsNone(step.settings.asr_biasing)
+        self.assertIsNone(step.settings.dtmf)
 
     def test_prompt_whitespace_is_stripped(self):
         """Prompts with leading/trailing whitespace are stripped on read."""
@@ -2765,8 +3528,6 @@ conditions:
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.ADVANCED_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[],
             prompt=None,
             position={"x": 0.0, "y": 0.0},
@@ -2783,8 +3544,6 @@ conditions:
             flow_id="missing-flow",
             flow_name="Test Flow",
             step_type=StepType.ADVANCED_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[],
             prompt="Test prompt",
             position={"x": 0.0, "y": 0.0},
@@ -2801,8 +3560,6 @@ conditions:
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.DEFAULT_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[],
             prompt="Use {{fn:func-123}}",
             position={"x": 0.0, "y": 0.0},
@@ -2819,8 +3576,6 @@ conditions:
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.DEFAULT_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[],
             prompt="Hello, how can I help you?",
             position={"x": 0.0, "y": 0.0},
@@ -2851,8 +3606,6 @@ conditions:
                 flow_id="flow-123",
                 flow_name="Test Flow",
                 step_type=StepType.ADVANCED_STEP,
-                asr_biasing=None,
-                dtmf_config=None,
                 conditions=[],
                 prompt="Prompt",
                 position={"x": 0.0, "y": 0.0},
@@ -2867,8 +3620,6 @@ conditions:
                 flow_id="flow-123",
                 flow_name="Test Flow",
                 step_type=StepType.ADVANCED_STEP,
-                asr_biasing=None,
-                dtmf_config=None,
                 conditions=[],
                 prompt="Prompt",
                 position={"x": 0.0, "y": 0.0},
@@ -3033,17 +3784,19 @@ conditions:
     def test_get_new_updated_deleted_subresources(self):
         """Test get_new_updated_deleted_subresources for flow step.
 
-        Advanced steps only check ASR/DTMF (updates only).
+        Advanced steps only check settings (updates only).
         Default steps only check conditions (new/updated/deleted).
         """
-        # ===== ADVANCED STEP TESTS (ASR/DTMF only, updates only) =====
+        # ===== ADVANCED STEP TESTS (settings only, updates only) =====
 
-        # Test Advanced step with no old resource
+        # Test Advanced step with no old resource: settings differ from the empty
+        # baseline, so they are pushed as a single update alongside the step create.
         new, updated, deleted = TEST_FLOW_STEP.get_new_updated_deleted_subresources(
             old_resource=None
         )
         self.assertEqual(len(new), 0)
-        self.assertEqual(len(updated), 0)  # No old_resource, so no updates
+        self.assertEqual(len(updated), 1)
+        self.assertEqual(updated[0].command_type, "flow_settings")
         self.assertEqual(len(deleted), 0)
 
         # Test Advanced step with same resource (no changes)
@@ -3051,7 +3804,26 @@ conditions:
             old_resource=TEST_FLOW_STEP
         )
         self.assertEqual(len(new), 0)
-        self.assertEqual(len(updated), 0)  # ASR/DTMF unchanged
+        self.assertEqual(len(updated), 0)  # Settings unchanged
+        self.assertEqual(len(deleted), 0)
+
+        # Test Advanced step with no settings at all: nothing to push
+        step_no_settings = FlowStep(
+            resource_id="flow-123_step-1",
+            step_id="step-1",
+            name="Test Step",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.ADVANCED_STEP,
+            conditions=[],
+            prompt="Test prompt",
+            position={"x": 0.0, "y": 0.0},
+        )
+        new, updated, deleted = step_no_settings.get_new_updated_deleted_subresources(
+            old_resource=None
+        )
+        self.assertEqual(len(new), 0)
+        self.assertEqual(len(updated), 0)
         self.assertEqual(len(deleted), 0)
 
         # Test Advanced step: ASR biasing changed (update)
@@ -3068,34 +3840,7 @@ conditions:
             address=False,
             custom_keywords=["keyword1"],
             is_enabled=True,
-            step_id="step-1",
-            flow_id="flow-123",
         )
-
-        step_with_asr = FlowStep(
-            resource_id="flow-123_step-1",
-            step_id="step-1",
-            name="Test Step",
-            flow_id="flow-123",
-            flow_name="Test Flow",
-            step_type=StepType.ADVANCED_STEP,
-            asr_biasing=new_asr,
-            dtmf_config=None,
-            conditions=[],
-            prompt="Test prompt",
-            position={"x": 0.0, "y": 0.0},
-        )
-
-        new, updated, deleted = step_with_asr.get_new_updated_deleted_subresources(
-            old_resource=TEST_FLOW_STEP
-        )
-        self.assertEqual(len(new), 0)  # Advanced steps don't have "new" ASR/DTMF
-        self.assertEqual(len(updated), 1)  # ASR changed
-        self.assertEqual(updated[0].resource_id, "flow-123.step-1")
-        self.assertEqual(updated[0].command_type, "flow_step_asr_config")
-        self.assertEqual(len(deleted), 0)  # Advanced steps don't have "deleted" ASR/DTMF
-
-        # Test Advanced step: DTMF config changed (update)
         new_dtmf = DTMFConfig(
             is_enabled=True,
             inter_digit_timeout=5,
@@ -3107,53 +3852,39 @@ conditions:
             flow_id="flow-123",
         )
 
-        step_with_dtmf = FlowStep(
-            resource_id="flow-123_step-1",
-            step_id="step-1",
-            name="Test Step",
-            flow_id="flow-123",
-            flow_name="Test Flow",
-            step_type=StepType.ADVANCED_STEP,
-            asr_biasing=None,
-            dtmf_config=new_dtmf,
-            conditions=[],
-            prompt="Test prompt",
-            position={"x": 0.0, "y": 0.0},
-        )
+        def advanced_step_with(**settings_kwargs) -> FlowStep:
+            return FlowStep(
+                resource_id="flow-123_step-1",
+                step_id="step-1",
+                name="Test Step",
+                flow_id="flow-123",
+                flow_name="Test Flow",
+                step_type=StepType.ADVANCED_STEP,
+                settings=FlowSettings(step_id="step-1", flow_id="flow-123", **settings_kwargs),
+                conditions=[],
+                prompt="Test prompt",
+                position={"x": 0.0, "y": 0.0},
+            )
 
-        new, updated, deleted = step_with_dtmf.get_new_updated_deleted_subresources(
-            old_resource=TEST_FLOW_STEP
-        )
-        self.assertEqual(len(new), 0)  # Advanced steps don't have "new" DTMF
-        self.assertEqual(len(updated), 1)  # DTMF changed
-        self.assertEqual(updated[0].resource_id, "flow-123.step-1")
-        self.assertEqual(updated[0].command_type, "flow_step_dtmf_config")
-        self.assertEqual(updated[0].max_digits, 4)
-        self.assertEqual(len(deleted), 0)  # Advanced steps don't have "deleted" DTMF
+        # Every settings change collapses into a single flow_settings update, because
+        # the platform takes the whole block in one update_step_settings command.
+        for description, step in [
+            ("ASR biasing changed", advanced_step_with(asr_biasing=new_asr)),
+            ("DTMF changed", advanced_step_with(dtmf=new_dtmf)),
+            ("both changed", advanced_step_with(asr_biasing=new_asr, dtmf=new_dtmf)),
+        ]:
+            with self.subTest(description):
+                new, updated, deleted = step.get_new_updated_deleted_subresources(
+                    old_resource=TEST_FLOW_STEP
+                )
+                self.assertEqual(len(new), 0)
+                self.assertEqual(len(updated), 1)
+                self.assertEqual(updated[0].command_type, "flow_settings")
+                self.assertEqual(updated[0].update_command_type, "update_step_settings")
+                self.assertEqual(updated[0].resource_id, "flow-123_step-1_settings")
+                self.assertEqual(len(deleted), 0)
 
-        # Test Advanced step: Both ASR and DTMF updated
-        step_with_both = FlowStep(
-            resource_id="flow-123_step-1",
-            step_id="step-1",
-            name="Test Step",
-            flow_id="flow-123",
-            flow_name="Test Flow",
-            step_type=StepType.ADVANCED_STEP,
-            asr_biasing=new_asr,
-            dtmf_config=new_dtmf,
-            conditions=[],
-            prompt="Test prompt",
-            position={"x": 0.0, "y": 0.0},
-        )
-
-        new, updated, deleted = step_with_both.get_new_updated_deleted_subresources(
-            old_resource=TEST_FLOW_STEP
-        )
-        self.assertEqual(len(new), 0)
-        self.assertEqual(len(updated), 2)  # Both ASR and DTMF updated
-        updated_types = {u.command_type for u in updated}
-        self.assertIn("flow_step_asr_config", updated_types)
-        self.assertIn("flow_step_dtmf_config", updated_types)
+        self.assertEqual(advanced_step_with(dtmf=new_dtmf).settings.dtmf.max_digits, 4)
         self.assertEqual(len(deleted), 0)
 
         # ===== DEFAULT STEP TESTS (Conditions only, new/updated/deleted) =====
@@ -3166,8 +3897,6 @@ conditions:
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.DEFAULT_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[],
             prompt="Test prompt",
             position={"x": 0.0, "y": 0.0},
@@ -3200,8 +3929,6 @@ conditions:
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.DEFAULT_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[new_condition],
             prompt="Test prompt",
             position={"x": 0.0, "y": 0.0},
@@ -3236,8 +3963,6 @@ conditions:
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.DEFAULT_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[updated_condition],
             prompt="Test prompt",
             position={"x": 0.0, "y": 0.0},
@@ -3304,8 +4029,6 @@ conditions:
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.DEFAULT_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[condition_1, condition_2, condition_3],
             prompt="Test prompt",
             position={"x": 0.0, "y": 0.0},
@@ -3342,8 +4065,6 @@ conditions:
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.DEFAULT_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[updated_condition_1, condition_2, condition_4],
             prompt="Test prompt",
             position={"x": 0.0, "y": 0.0},
@@ -3407,15 +4128,15 @@ dtmf_config:
             self.assertEqual(result.step_type, StepType.ADVANCED_STEP)
             self.assertEqual(result.prompt, "Hello, how can I help you?")
             # Verify ASR biasing
-            self.assertIsNotNone(result.asr_biasing)
-            self.assertEqual(result.asr_biasing.is_enabled, True)
-            self.assertEqual(result.asr_biasing.alphanumeric, True)
-            self.assertEqual(result.asr_biasing.custom_keywords, ["keyword1", "keyword2"])
+            self.assertIsNotNone(result.settings.asr_biasing)
+            self.assertEqual(result.settings.asr_biasing.is_enabled, True)
+            self.assertEqual(result.settings.asr_biasing.alphanumeric, True)
+            self.assertEqual(result.settings.asr_biasing.custom_keywords, ["keyword1", "keyword2"])
             # Verify DTMF config
-            self.assertIsNotNone(result.dtmf_config)
-            self.assertEqual(result.dtmf_config.is_enabled, True)
-            self.assertEqual(result.dtmf_config.max_digits, 4)
-            self.assertEqual(result.dtmf_config.end_key, "#")
+            self.assertIsNotNone(result.settings.dtmf)
+            self.assertEqual(result.settings.dtmf.is_enabled, True)
+            self.assertEqual(result.settings.dtmf.max_digits, 4)
+            self.assertEqual(result.settings.dtmf.end_key, "#")
 
     def test_read_local_resource_default_step(self):
         """Test reading a flow step with conditions."""
@@ -3667,8 +4388,6 @@ prompt: This is a default step
             flow_id="flow-123",
             flow_name="Test Flow",
             step_type=StepType.DEFAULT_STEP,
-            asr_biasing=None,
-            dtmf_config=None,
             conditions=[],
             extracted_entities=["zebra", "apple", "mango"],
             prompt="Extract some entities.",
@@ -4380,6 +5099,34 @@ class VariantTests(unittest.TestCase):
             "Multiple or zero default variants detected: []. One variant must be set as default.",
             str(cm.exception),
         )
+
+    def test_update_command_type_is_variant_update_variant(self):
+        """The update command type doubles as the Command oneof kwarg, so it must stay exact."""
+        self.assertEqual(TEST_VARIANT.update_command_type, "variant_update_variant")
+
+    def test_build_update_proto_carries_id_and_name(self):
+        """An updated variant sends its new name so renames reach the platform."""
+        renamed = Variant(resource_id="VARIANT-default", name="HME_Specialists - Inbound")
+
+        proto = renamed.build_update_proto()
+
+        self.assertIsInstance(proto, Variant_UpdateVariant)
+        self.assertEqual(proto.id, "VARIANT-default")
+        self.assertEqual(proto.name, "HME_Specialists - Inbound")
+
+    def test_build_update_proto_leaves_attribute_values_unset(self):
+        """Regression guard: setting attribute_values would wipe the variant's stored values.
+
+        The platform only rewrites a variant's attribute values when the field is present on
+        the wire, and a present map must cover every non-archived attribute or the command is
+        rejected. Variant updates must therefore never populate it.
+        """
+        variant = Variant(resource_id="VARIANT-default", name="default")
+        variant.attribute_ids = ["attr-customer-name"]
+
+        proto = variant.build_update_proto()
+
+        self.assertFalse(proto.HasField("attribute_values"))
 
 
 class VariantAttributeTests(unittest.TestCase):
@@ -5146,6 +5893,22 @@ class ApiIntegrationTest(unittest.TestCase):
         self.assertEqual(len(i2.operations), 1)
         self.assertEqual(i2.operations[0].name, "get")
         self.assertEqual(i2.operations[0].resource_id, "")
+
+    def test_api_integration_operations_sorted_by_name(self):
+        """Operations serialize in alphabetical order by name."""
+        integration = ApiIntegration(
+            resource_id="int-1",
+            name="TestAPI",
+            operations=[
+                ApiIntegrationOperation(
+                    resource_id=f"op-{name}", name=name, method="GET", resource="/x"
+                )
+                for name in ["refund", "charge", "get_customer"]
+            ],
+        )
+
+        operation_names = [op["name"] for op in integration.to_yaml_dict()["operations"]]
+        self.assertEqual(operation_names, ["charge", "get_customer", "refund"])
 
     def test_api_integration_build_protos(self):
         """ApiIntegration build_create_proto, build_update_proto, build_delete_proto set id and environments."""
@@ -7204,6 +7967,39 @@ class TestCaseTests(unittest.TestCase):
             language="en-GB",
         )
 
+    def test_assertions_sorted_by_name(self):
+        """Function call assertions and their arguments serialize in alphabetical order."""
+        assertions = TestCaseAssertion(
+            resource_id="TEST-ordering",
+            name="assertions",
+            prompts=[],
+            function_calls=[
+                FunctionCallAssertion(
+                    name=name,
+                    arguments=[
+                        FunctionCallArgumentAssertion(
+                            parameter_name=parameter_name,
+                            expected_value="value",
+                            value_type="string",
+                        )
+                        for parameter_name in ["zebra", "apple", "monkey"]
+                    ],
+                )
+                for name in ["transfer_call", "book_appointment", "lookup_order"]
+            ],
+        )
+
+        function_calls = assertions.to_yaml_dict()["function_call_assertions"]
+
+        self.assertEqual(
+            [call["name"] for call in function_calls],
+            ["book_appointment", "lookup_order", "transfer_call"],
+        )
+        self.assertEqual(
+            [arg["parameter_name"] for arg in function_calls[0]["arguments"]],
+            ["apple", "monkey", "zebra"],
+        )
+
     def test_to_yaml_dict_from_yaml_dict_roundtrip(self):
         test_case = self._sample_test_case()
         yaml_dict = test_case.to_yaml_dict()
@@ -7386,6 +8182,72 @@ class TestCaseTests(unittest.TestCase):
             ]
         )
 
+    def _test_case_asserting_function(self, function_name: str) -> TestCase:
+        resource_id = "TEST-function_assertion"
+        return TestCase(
+            resource_id=resource_id,
+            name="Function assertion",
+            scenario="Give a phone number.",
+            channel="chat.polyai",
+            language="en-GB",
+            assertions=TestCaseAssertion(
+                resource_id=resource_id,
+                name="assertions",
+                prompts=[],
+                function_calls=[
+                    FunctionCallAssertion(
+                        name=function_name,
+                        arguments=[
+                            FunctionCallArgumentAssertion(
+                                parameter_name="phone_number",
+                                expected_value="123123",
+                                value_type="string",
+                            )
+                        ],
+                    )
+                ],
+            ),
+            tags=TestCaseTags(resource_id=resource_id, name="tags", tags=[]),
+        )
+
+    def _function_mappings(self) -> list[ResourceMapping]:
+        return [
+            ResourceMapping(
+                resource_id="fn-transfer",
+                resource_name="transfer_call",
+                resource_type=Function,
+                resource_prefix="fn",
+                file_path="functions/transfer_call.py",
+                flow_name=None,
+            ),
+            ResourceMapping(
+                resource_id="ft-register",
+                resource_name="register_phone_number",
+                resource_type=Function,
+                resource_prefix="ft",
+                file_path="flows/idnv/functions/register_phone_number.py",
+                flow_name="idnv",
+            ),
+        ]
+
+    def test_validate_accepts_global_function_assertion(self):
+        self._test_case_asserting_function("transfer_call").validate(
+            resource_mappings=self._function_mappings()
+        )
+
+    def test_validate_accepts_flow_function_assertion(self):
+        """A flow function is assertable: the platform accepts it, so the ADK must too."""
+        self._test_case_asserting_function("register_phone_number").validate(
+            resource_mappings=self._function_mappings()
+        )
+
+    def test_validate_rejects_unknown_function_assertion(self):
+        with self.assertRaises(ValueError) as cm:
+            self._test_case_asserting_function("register_phone_numbr").validate(
+                resource_mappings=self._function_mappings()
+            )
+        self.assertIn("Unknown function in assertion: register_phone_numbr", str(cm.exception))
+
     def test_get_new_updated_deleted_subresources(self):
         test_case = self._sample_test_case()
         new, updated, deleted = test_case.get_new_updated_deleted_subresources()
@@ -7400,6 +8262,96 @@ class TestCaseTests(unittest.TestCase):
         self.assertEqual(updated_after_edit, [])
         self.assertEqual(deleted_after_edit, [])
 
+    def _test_case_with_simulated_at(self, simulated_at) -> TestCase:
+        resource_id = "TEST-clock"
+        return TestCase(
+            resource_id=resource_id,
+            name="Clock test",
+            scenario="Ask about opening hours.",
+            channel="chat.polyai",
+            language="en-GB",
+            assertions=TestCaseAssertion(
+                resource_id=resource_id, name="assertions", prompts=[], function_calls=[]
+            ),
+            tags=TestCaseTags(resource_id=resource_id, name="tags", tags=[]),
+            simulated_at=simulated_at,
+        )
+
+    def test_simulated_at_is_normalized_to_utc(self):
+        cases = {
+            "2026-01-15T09:30:00Z": "2026-01-15T09:30:00Z",
+            "2026-01-15T09:30:00+00:00": "2026-01-15T09:30:00Z",
+            # Offsets are converted to UTC, naive values are assumed to be UTC.
+            "2026-01-15T11:30:00+02:00": "2026-01-15T09:30:00Z",
+            "2026-01-15T09:30:00": "2026-01-15T09:30:00Z",
+            # ruamel parses an unquoted YAML timestamp into a datetime.
+            datetime.datetime(2026, 1, 15, 9, 30): "2026-01-15T09:30:00Z",
+            datetime.datetime(
+                2026, 1, 15, 9, 30, tzinfo=datetime.timezone.utc
+            ): "2026-01-15T09:30:00Z",
+        }
+        for value, expected in cases.items():
+            with self.subTest(value=value):
+                self.assertEqual(self._test_case_with_simulated_at(value).simulated_at, expected)
+
+    def test_simulated_at_yaml_roundtrip(self):
+        test_case = self._test_case_with_simulated_at("2026-01-15T09:30:00Z")
+        yaml_dict = test_case.to_yaml_dict()
+        self.assertEqual(yaml_dict["simulated_at"], "2026-01-15T09:30:00Z")
+
+        restored = TestCase.from_yaml_dict(yaml_dict, resource_id="TEST-clock", name="Clock test")
+        self.assertEqual(restored.simulated_at, test_case.simulated_at)
+
+    def test_simulated_at_omitted_when_unset(self):
+        test_case = self._test_case_with_simulated_at(None)
+        self.assertIsNone(test_case.simulated_at)
+        self.assertNotIn("simulated_at", test_case.to_yaml_dict())
+
+    def test_unset_simulated_at_sends_empty_string_to_clear(self):
+        # An omitted optional field reads as "no update" platform-side, so clearing a
+        # test clock has to send an explicit empty value — as caller_number does.
+        test_case = self._test_case_with_simulated_at(None)
+        for proto in (test_case.build_create_proto(), test_case.build_update_proto()):
+            self.assertTrue(proto.HasField("simulated_at"))
+            self.assertEqual(proto.simulated_at, "")
+
+    def test_simulated_at_invalid_value_raises(self):
+        with self.assertRaises(ValueError) as cm:
+            self._test_case_with_simulated_at("not-a-date")
+        self.assertIn("Invalid simulated_at value", str(cm.exception))
+
+    def test_simulated_at_in_protos(self):
+        test_case = self._test_case_with_simulated_at("2026-01-15T09:30:00Z")
+        for proto in (test_case.build_create_proto(), test_case.build_update_proto()):
+            self.assertTrue(proto.HasField("simulated_at"))
+            self.assertEqual(proto.simulated_at, "2026-01-15T09:30:00Z")
+
+    def test_read_simulated_at_from_projection(self):
+        projection = {
+            "testing": {
+                "testCases": {
+                    "entities": {
+                        "TEST-clock": {
+                            "name": "Clock test",
+                            "scenario": "Ask about opening hours.",
+                            "channel": "chat.polyai",
+                            "language": "en-GB",
+                            "simulatedAt": "2026-01-15T09:30:00Z",
+                        },
+                        "TEST-no-clock": {
+                            "name": "No clock test",
+                            "scenario": "Say hello.",
+                            "channel": "webchat.polyai",
+                            "language": "en-GB",
+                        },
+                    }
+                }
+            }
+        }
+        test_cases = TestCase.from_projection(projection)
+        self.assertEqual(test_cases["TEST-clock"].simulated_at, "2026-01-15T09:30:00Z")
+        self.assertIsNone(test_cases["TEST-no-clock"].simulated_at)
+
     def test_discover_resources(self):
         base_path = os.path.join(os.path.dirname(__file__), "test_projects", "test_project")
         discovered = TestCase.discover_resources(base_path)
@@ -7410,6 +8362,969 @@ class TestCaseTests(unittest.TestCase):
                 os.path.join(base_path, "test_suite", "webchat_smoke_test.yaml"),
             ],
         )
+
+
+class TestCaseMockContextTests(unittest.TestCase):
+    """Caller number, SIP headers and integration attributes on a test case."""
+
+    RESOURCE_ID = "TEST-mock_context"
+
+    def _test_case(self, **overrides) -> TestCase:
+        defaults = {
+            "resource_id": self.RESOURCE_ID,
+            "name": "Mock context test",
+            "scenario": "Caller asks about their account.",
+            "channel": "chat.polyai",
+            "language": "en-GB",
+            "assertions": TestCaseAssertion(
+                resource_id=self.RESOURCE_ID, name="assertions", prompts=[], function_calls=[]
+            ),
+            "tags": TestCaseTags(resource_id=self.RESOURCE_ID, name="tags", tags=[]),
+        }
+        defaults.update(overrides)
+        return TestCase(**defaults)
+
+    def test_yaml_roundtrip_preserves_values_and_types(self):
+        test_case = self._test_case(
+            caller_number="+447700900000",
+            sip_headers=TestCaseSipHeaders(
+                resource_id=self.RESOURCE_ID, name="sip_headers", headers={"x-dnis": "441234"}
+            ),
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID,
+                name="integration_attributes",
+                attributes={"tier": "gold", "retry_count": 2, "vip": True},
+            ),
+        )
+
+        yaml_dict = test_case.to_yaml_dict()
+        self.assertEqual(yaml_dict["caller_number"], "+447700900000")
+        self.assertEqual(yaml_dict["sip_headers"], {"x-dnis": "441234"})
+        self.assertEqual(
+            yaml_dict["integration_attributes"], {"tier": "gold", "retry_count": 2, "vip": True}
+        )
+
+        restored = TestCase.from_yaml_dict(
+            yaml_dict, resource_id=self.RESOURCE_ID, name="Mock context test"
+        )
+        self.assertEqual(restored.caller_number, "+447700900000")
+        self.assertEqual(restored.sip_headers.headers, {"x-dnis": "441234"})
+        self.assertEqual(
+            restored.integration_attributes.attributes,
+            {"tier": "gold", "retry_count": 2, "vip": True},
+        )
+        # A number must not come back as a string, or a flow branching on
+        # `retry_count > 2` breaks.
+        self.assertIsInstance(restored.integration_attributes.attributes["retry_count"], int)
+        self.assertIsInstance(restored.integration_attributes.attributes["vip"], bool)
+
+    def test_omits_empty_values_from_yaml(self):
+        yaml_dict = self._test_case().to_yaml_dict()
+
+        self.assertNotIn("caller_number", yaml_dict)
+        self.assertNotIn("sip_headers", yaml_dict)
+        self.assertNotIn("integration_attributes", yaml_dict)
+
+    def test_caller_number_on_create_and_update_protos(self):
+        test_case = self._test_case(caller_number="+447700900000")
+
+        self.assertEqual(test_case.build_create_proto().caller_number, "+447700900000")
+        self.assertEqual(test_case.build_update_proto().caller_number, "+447700900000")
+
+    def test_caller_number_absent_sends_empty_string(self):
+        # Proto3 has no null; the field must still be sent so clearing it sticks.
+        self.assertEqual(self._test_case().build_update_proto().caller_number, "")
+
+    def test_subresource_command_types(self):
+        test_case = self._test_case()
+
+        self.assertEqual(test_case.sip_headers.update_command_type, "set_test_case_sip_headers")
+        self.assertEqual(
+            test_case.integration_attributes.update_command_type,
+            "set_test_case_integration_attributes",
+        )
+
+    def test_sip_headers_proto(self):
+        headers = TestCaseSipHeaders(
+            resource_id=self.RESOURCE_ID, name="sip_headers", headers={"x-dnis": "441234"}
+        )
+
+        proto = headers.build_update_proto()
+
+        self.assertEqual(proto.id, self.RESOURCE_ID)
+        self.assertEqual(dict(proto.sip_headers), {"x-dnis": "441234"})
+
+    def test_integration_attributes_proto_keeps_json_types(self):
+        attributes = TestCaseIntegrationAttributes(
+            resource_id=self.RESOURCE_ID,
+            name="integration_attributes",
+            attributes={"tier": "gold", "retry_count": 2, "vip": True, "meta": {"a": 1}},
+        )
+
+        proto = attributes.build_update_proto()
+        struct = dict(proto.integration_attributes)
+
+        self.assertEqual(struct["tier"], "gold")
+        self.assertEqual(struct["retry_count"], 2)
+        self.assertIs(struct["vip"], True)
+        self.assertEqual(dict(struct["meta"]), {"a": 1})
+
+    def test_struct_doubles_are_written_back_as_ints(self):
+        """Struct stores every number as a double, so 2 returns as 2.0.
+
+        Left alone that produces a spurious `2 -> 2.0` diff on every pull
+        following a push.
+        """
+        attributes = TestCaseIntegrationAttributes(
+            resource_id=self.RESOURCE_ID,
+            name="integration_attributes",
+            attributes={"retry_count": 2.0, "ratio": 1.5, "nested": {"count": 3.0}},
+        )
+
+        rendered = attributes.to_yaml_dict()
+
+        self.assertEqual(rendered["retry_count"], 2)
+        self.assertIsInstance(rendered["retry_count"], int)
+        self.assertEqual(rendered["ratio"], 1.5)
+        self.assertEqual(rendered["nested"]["count"], 3)
+
+    def test_subresources_pushed_when_changed(self):
+        old = self._test_case()
+        new = self._test_case(
+            sip_headers=TestCaseSipHeaders(
+                resource_id=self.RESOURCE_ID, name="sip_headers", headers={"x-dnis": "441234"}
+            ),
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID, name="integration_attributes", attributes={"a": 1}
+            ),
+        )
+
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertIn(new.sip_headers, updated)
+        self.assertIn(new.integration_attributes, updated)
+
+    def test_clearing_subresources_still_pushes(self):
+        # The command has to be sent, or the cleared values survive on the server.
+        old = self._test_case(
+            sip_headers=TestCaseSipHeaders(
+                resource_id=self.RESOURCE_ID, name="sip_headers", headers={"x-dnis": "441234"}
+            ),
+        )
+        new = self._test_case()
+
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertIn(new.sip_headers, updated)
+
+    def test_unchanged_subresources_are_not_pushed(self):
+        old = self._test_case()
+        new = self._test_case()
+
+        _, updated, _ = new.get_new_updated_deleted_subresources(old)
+
+        self.assertNotIn(new.sip_headers, updated)
+        self.assertNotIn(new.integration_attributes, updated)
+
+    def test_from_projection_reads_camel_case_keys(self):
+        projection = {
+            "testing": {
+                "testCases": {
+                    "entities": {
+                        self.RESOURCE_ID: {
+                            "name": "Mock context test",
+                            "scenario": "Caller asks about their account.",
+                            "channel": "chat.polyai",
+                            "language": "en-GB",
+                            "callerNumber": "+447700900000",
+                            "sipHeaders": {"x-dnis": "441234"},
+                            "integrationAttributes": {"tier": "gold", "retry_count": 2},
+                        }
+                    }
+                }
+            }
+        }
+
+        test_case = TestCase.from_projection(projection)[self.RESOURCE_ID]
+
+        self.assertEqual(test_case.caller_number, "+447700900000")
+        self.assertEqual(test_case.sip_headers.headers, {"x-dnis": "441234"})
+        self.assertEqual(
+            test_case.integration_attributes.attributes, {"tier": "gold", "retry_count": 2}
+        )
+
+    def test_caller_number_is_trimmed(self):
+        """A trailing space is invisible in YAML but changes the identifier the
+        number resolves to in agent memory."""
+        test_case = self._test_case(caller_number="  +447700900000  ")
+
+        self.assertEqual(test_case.caller_number, "+447700900000")
+        self.assertEqual(test_case.build_update_proto().caller_number, "+447700900000")
+
+    def test_validate_rejects_an_unquoted_caller_number(self):
+        """YAML reads `+447700900000` as the int 447700900000, dropping the `+`.
+
+        Coercing it back to text would send a different number, so this has to
+        fail loudly rather than guess.
+        """
+        test_case = self._test_case(caller_number=447700900000)
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+
+        self.assertIn("caller_number must be text", str(ctx.exception))
+        self.assertIn("quote it", str(ctx.exception))
+
+    def test_sip_header_bools_use_wire_casing(self):
+        """YAML types `x-flag: true` as a bool; str() would send Python's "True"."""
+        headers = TestCaseSipHeaders(
+            resource_id=self.RESOURCE_ID,
+            name="sip_headers",
+            headers={"x-flag": True, "x-off": False, "x-count": 2, "x-none": None},
+        )
+
+        sent = dict(headers.build_update_proto().sip_headers)
+
+        self.assertEqual(sent["x-flag"], "true")
+        self.assertEqual(sent["x-off"], "false")
+        self.assertEqual(sent["x-count"], "2")
+        self.assertEqual(sent["x-none"], "")
+
+    def test_sip_header_dates_are_sent_as_iso_text(self):
+        headers = TestCaseSipHeaders(
+            resource_id=self.RESOURCE_ID,
+            name="sip_headers",
+            headers={"x-date": datetime.date(2026, 8, 12)},
+        )
+
+        self.assertEqual(dict(headers.build_update_proto().sip_headers)["x-date"], "2026-08-12")
+
+    def test_validate_rejects_dates_with_an_actionable_message(self):
+        """An unquoted YAML date would otherwise reach Struct.update and raise
+        `ValueError: Unexpected type`, naming neither the key nor the file."""
+        test_case = self._test_case(
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID,
+                name="integration_attributes",
+                attributes={"expiry": datetime.date(2026, 8, 12)},
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+
+        message = str(ctx.exception)
+        self.assertIn("integration_attributes.expiry", message)
+        self.assertIn("2026-08-12", message)
+
+    def test_validate_rejects_non_text_keys(self):
+        test_case = self._test_case(
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID,
+                name="integration_attributes",
+                attributes={2: "x"},
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+
+        self.assertIn("must be text", str(ctx.exception))
+
+    def test_validate_reports_the_path_of_a_nested_bad_value(self):
+        test_case = self._test_case(
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID,
+                name="integration_attributes",
+                attributes={"booking": {"slots": [{"at": datetime.date(2026, 8, 12)}]}},
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+
+        self.assertIn("integration_attributes.booking.slots[0].at", str(ctx.exception))
+
+    def test_validate_accepts_every_supported_json_type(self):
+        test_case = self._test_case(
+            integration_attributes=TestCaseIntegrationAttributes(
+                resource_id=self.RESOURCE_ID,
+                name="integration_attributes",
+                attributes={
+                    "s": "gold",
+                    "n": 2,
+                    "f": 1.5,
+                    "b": True,
+                    "nil": None,
+                    "list": [1, "two", False],
+                    "nested": {"a": {"b": 1}},
+                },
+            )
+        )
+
+        test_case.validate()
+
+    def test_from_projection_without_mock_context(self):
+        projection = {
+            "testing": {
+                "testCases": {
+                    "entities": {
+                        self.RESOURCE_ID: {
+                            "name": "Mock context test",
+                            "scenario": "Caller asks about their account.",
+                            "channel": "chat.polyai",
+                            "language": "en-GB",
+                        }
+                    }
+                }
+            }
+        }
+
+        test_case = TestCase.from_projection(projection)[self.RESOURCE_ID]
+
+        self.assertEqual(test_case.caller_number, "")
+        self.assertEqual(test_case.sip_headers.headers, {})
+        self.assertEqual(test_case.integration_attributes.attributes, {})
+        self.assertNotIn("sip_headers", test_case.to_yaml_dict())
+
+
+class TestCaseApiMocksTests(unittest.TestCase):
+    """Mocked API responses (api_mocks) on a test case, for AM-960."""
+
+    RESOURCE_ID = "TEST-api_mocks"
+
+    def _test_case(self, **overrides) -> TestCase:
+        defaults = {
+            "resource_id": self.RESOURCE_ID,
+            "name": "Api mocks test",
+            "scenario": "Caller asks about their order.",
+            "channel": "chat.polyai",
+            "language": "en-GB",
+            "assertions": TestCaseAssertion(
+                resource_id=self.RESOURCE_ID, name="assertions", prompts=[], function_calls=[]
+            ),
+            "tags": TestCaseTags(resource_id=self.RESOURCE_ID, name="tags", tags=[]),
+        }
+        defaults.update(overrides)
+        return TestCase(**defaults)
+
+    def _api_mocks(self, mocks: dict) -> TestCaseApiMocks:
+        return TestCaseApiMocks(mocks=mocks)
+
+    def _integration_mapping(self, name: str) -> ResourceMapping:
+        return ResourceMapping(
+            resource_id=f"API-{name}",
+            resource_name=name,
+            resource_type=ApiIntegration,
+            resource_prefix=None,
+            file_path=None,
+            flow_name=None,
+        )
+
+    def test_yaml_roundtrip_preserves_values_and_types(self):
+        api_mocks = self._api_mocks(
+            {
+                "crm": {
+                    "get_customer": [
+                        ApiResponseRule(
+                            respond=ApiResponse(
+                                status=200,
+                                body={"id": 1, "name": "Ada", "vip": True},
+                                headers={"x-trace-id": "abc-123"},
+                            )
+                        ),
+                        # No body, repeat set: the second rule in the sequence.
+                        ApiResponseRule(respond=ApiResponse(status=500), repeat=3),
+                    ]
+                },
+                "payments": {
+                    "charge": [
+                        # repeat unset: respond once, then advance to the next rule.
+                        ApiResponseRule(respond=ApiResponse(status=201, body={"ok": True})),
+                    ]
+                },
+            }
+        )
+        test_case = self._test_case(api_mocks=api_mocks)
+
+        yaml_dict = test_case.to_yaml_dict()
+        mocks_yaml = yaml_dict["api_mocks"]
+        self.assertEqual(
+            mocks_yaml["crm"]["get_customer"][0],
+            {
+                "respond": {
+                    "status": 200,
+                    "body": {"id": 1, "name": "Ada", "vip": True},
+                    "headers": {"x-trace-id": "abc-123"},
+                }
+            },
+        )
+        self.assertNotIn("repeat", mocks_yaml["crm"]["get_customer"][0])
+        self.assertEqual(
+            mocks_yaml["crm"]["get_customer"][1], {"respond": {"status": 500}, "repeat": 3}
+        )
+        self.assertNotIn("repeat", mocks_yaml["payments"]["charge"][0])
+
+        restored = TestCase.from_yaml_dict(
+            yaml_dict, resource_id=self.RESOURCE_ID, name="Api mocks test"
+        )
+        restored_mocks = restored.api_mocks.mocks
+        first_rule = restored_mocks["crm"]["get_customer"][0]
+        self.assertEqual(first_rule.respond.status, 200)
+        self.assertEqual(first_rule.respond.body, {"id": 1, "name": "Ada", "vip": True})
+        self.assertEqual(first_rule.respond.headers, {"x-trace-id": "abc-123"})
+        self.assertIsNone(first_rule.repeat)
+
+        second_rule = restored_mocks["crm"]["get_customer"][1]
+        self.assertIsNone(second_rule.respond.body)
+        self.assertEqual(second_rule.repeat, 3)
+
+        third_rule = restored_mocks["payments"]["charge"][0]
+        self.assertEqual(third_rule.respond.body, {"ok": True})
+        self.assertIsNone(third_rule.repeat)
+
+    def test_omits_empty_values_from_yaml(self):
+        yaml_dict = self._test_case().to_yaml_dict()
+
+        self.assertNotIn("api_mocks", yaml_dict)
+
+    def test_yaml_sorts_integration_and_operation_names(self):
+        """Integration/operation names serialize alphabetically; rule order is preserved."""
+        api_mocks = self._api_mocks(
+            {
+                "payments": {
+                    "refund": [ApiResponseRule(respond=ApiResponse(status=200))],
+                    "charge": [
+                        ApiResponseRule(respond=ApiResponse(status=500), repeat=2),
+                        ApiResponseRule(respond=ApiResponse(status=201)),
+                    ],
+                },
+                "crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]},
+            }
+        )
+
+        mocks_yaml = self._test_case(api_mocks=api_mocks).to_yaml_dict()["api_mocks"]
+
+        self.assertEqual(list(mocks_yaml), ["crm", "payments"])
+        self.assertEqual(list(mocks_yaml["payments"]), ["charge", "refund"])
+        self.assertEqual(
+            mocks_yaml["payments"]["charge"],
+            [{"respond": {"status": 500}, "repeat": 2}, {"respond": {"status": 201}}],
+        )
+
+    def _operation_mock(self, **overrides) -> TestCaseApiOperationMock:
+        defaults = {
+            "resource_id": f"{self.RESOURCE_ID}:crm:get_customer",
+            "name": "api_mocks",
+            "integration_name": "crm",
+            "operation_name": "get_customer",
+            "test_case_id": self.RESOURCE_ID,
+        }
+        defaults.update(overrides)
+        return TestCaseApiOperationMock(**defaults)
+
+    def test_update_command_type(self):
+        self.assertEqual(
+            self._operation_mock().update_command_type, "update_test_case_api_operation_mock"
+        )
+
+    def test_delete_command_type(self):
+        self.assertEqual(
+            self._operation_mock().delete_command_type, "delete_test_case_api_operation_mock"
+        )
+
+    def test_build_update_proto_targets_one_operation(self):
+        operation_mock = self._operation_mock(
+            rules=[
+                ApiResponseRule(
+                    respond=ApiResponse(
+                        status=200,
+                        body={"id": 1, "flag": True, "meta": {"a": 1}},
+                        headers={"x-trace": "abc"},
+                    )
+                ),
+                ApiResponseRule(respond=ApiResponse(status=404), repeat=5),
+            ]
+        )
+
+        proto = operation_mock.build_update_proto()
+
+        self.assertEqual(proto.id, self.RESOURCE_ID)
+        self.assertEqual(proto.integration_name, "crm")
+        self.assertEqual(proto.operation_name, "get_customer")
+        self.assertEqual(len(proto.responses), 2)
+
+        first = proto.responses[0]
+        self.assertEqual(first.respond.status, 200)
+        self.assertEqual(dict(first.respond.headers), {"x-trace": "abc"})
+        self.assertEqual(
+            MessageToDict(first.respond.body), {"id": 1, "flag": True, "meta": {"a": 1}}
+        )
+        self.assertFalse(first.HasField("repeat"))
+
+        second = proto.responses[1]
+        self.assertEqual(second.respond.status, 404)
+        self.assertFalse(second.respond.HasField("body"))
+        self.assertTrue(second.HasField("repeat"))
+        self.assertEqual(second.repeat, 5)
+
+    def test_build_delete_proto_targets_one_operation(self):
+        proto = self._operation_mock().build_delete_proto()
+
+        self.assertEqual(proto.id, self.RESOURCE_ID)
+        self.assertEqual(proto.integration_name, "crm")
+        self.assertEqual(proto.operation_name, "get_customer")
+
+    def test_build_create_proto_not_implemented(self):
+        with self.assertRaises(NotImplementedError):
+            self._operation_mock().build_create_proto()
+
+    def test_from_projection_parses_flat_api_mocks(self):
+        """The projection's apiMocks is flat — {integration: {operation: [rule,
+        ...]}} — matching the redux entity slice (test-cases.ts), not the nested
+        integrations/operations/responses shape used by the protobuf wire format
+        internal to agent-stream."""
+        projection = {
+            "testing": {
+                "testCases": {
+                    "entities": {
+                        self.RESOURCE_ID: {
+                            "name": "Api mocks test",
+                            "scenario": "Caller asks about their order.",
+                            "channel": "chat.polyai",
+                            "language": "en-GB",
+                            "apiMocks": {
+                                "crm": {
+                                    "get_customer": [
+                                        {
+                                            "respond": {
+                                                "status": 200,
+                                                "body": {"id": 1},
+                                                "headers": {"x-trace": "abc"},
+                                            }
+                                        },
+                                        {"respond": {"status": 500}, "repeat": 3},
+                                    ]
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        }
+
+        test_case = TestCase.from_projection(projection)[self.RESOURCE_ID]
+        mocks = test_case.api_mocks.mocks
+
+        self.assertCountEqual(mocks.keys(), ["crm"])
+        rules = mocks["crm"]["get_customer"]
+        self.assertEqual(rules[0].respond.status, 200)
+        self.assertEqual(rules[0].respond.body, {"id": 1})
+        self.assertEqual(rules[0].respond.headers, {"x-trace": "abc"})
+        self.assertIsNone(rules[0].repeat)
+        self.assertEqual(rules[1].respond.status, 500)
+        self.assertEqual(rules[1].repeat, 3)
+
+    def test_from_projection_without_api_mocks(self):
+        projection = {
+            "testing": {
+                "testCases": {
+                    "entities": {
+                        self.RESOURCE_ID: {
+                            "name": "Api mocks test",
+                            "scenario": "Caller asks about their order.",
+                            "channel": "chat.polyai",
+                            "language": "en-GB",
+                        }
+                    }
+                }
+            }
+        }
+
+        test_case = TestCase.from_projection(projection)[self.RESOURCE_ID]
+
+        self.assertEqual(test_case.api_mocks.mocks, {})
+        self.assertNotIn("api_mocks", test_case.to_yaml_dict())
+
+    def test_subresource_pushed_on_create_when_non_empty(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+            )
+        )
+
+        _, updated, deleted = test_case.get_new_updated_deleted_subresources()
+
+        mock_updates = [u for u in updated if isinstance(u, TestCaseApiOperationMock)]
+        self.assertEqual(len(mock_updates), 1)
+        pushed = mock_updates[0]
+        self.assertEqual(pushed.integration_name, "crm")
+        self.assertEqual(pushed.operation_name, "get_customer")
+        self.assertEqual(pushed.rules, [ApiResponseRule(respond=ApiResponse(status=200))])
+        self.assertEqual(deleted, [])
+
+    def test_subresource_omitted_on_create_when_empty(self):
+        test_case = self._test_case()
+
+        _, updated, deleted = test_case.get_new_updated_deleted_subresources()
+
+        self.assertFalse(any(isinstance(u, TestCaseApiOperationMock) for u in updated))
+        self.assertEqual(deleted, [])
+
+    def test_subresource_pushed_on_update_when_changed(self):
+        old = self._test_case()
+        new = self._test_case(
+            api_mocks=self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+            )
+        )
+
+        _, updated, deleted = new.get_new_updated_deleted_subresources(old)
+
+        mock_updates = [u for u in updated if isinstance(u, TestCaseApiOperationMock)]
+        self.assertEqual(len(mock_updates), 1)
+        self.assertEqual(mock_updates[0].integration_name, "crm")
+        self.assertEqual(mock_updates[0].operation_name, "get_customer")
+        self.assertEqual(deleted, [])
+
+    def test_subresource_omitted_on_update_when_unchanged(self):
+        mocks = {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+        old = self._test_case(api_mocks=self._api_mocks(mocks))
+        new = self._test_case(
+            api_mocks=self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+            )
+        )
+
+        _, updated, deleted = new.get_new_updated_deleted_subresources(old)
+
+        self.assertFalse(any(isinstance(u, TestCaseApiOperationMock) for u in updated))
+        self.assertEqual(deleted, [])
+
+    def test_subresource_updates_only_the_changed_operation(self):
+        """Changing one operation must not re-push a sibling operation that's untouched."""
+        old = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [ApiResponseRule(respond=ApiResponse(status=200))],
+                        "list_customers": [ApiResponseRule(respond=ApiResponse(status=200))],
+                    }
+                }
+            )
+        )
+        new = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [ApiResponseRule(respond=ApiResponse(status=503))],
+                        "list_customers": [ApiResponseRule(respond=ApiResponse(status=200))],
+                    }
+                }
+            )
+        )
+
+        _, updated, deleted = new.get_new_updated_deleted_subresources(old)
+
+        self.assertEqual(len(updated), 1)
+        self.assertEqual(updated[0].operation_name, "get_customer")
+        self.assertEqual(deleted, [])
+
+    def test_subresource_deleted_when_operation_removed(self):
+        old = self._test_case(
+            api_mocks=self._api_mocks(
+                {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+            )
+        )
+        new = self._test_case()
+
+        _, updated, deleted = new.get_new_updated_deleted_subresources(old)
+
+        self.assertEqual(updated, [])
+        self.assertEqual(len(deleted), 1)
+        deleted_mock = deleted[0]
+        self.assertIsInstance(deleted_mock, TestCaseApiOperationMock)
+        self.assertEqual(deleted_mock.integration_name, "crm")
+        self.assertEqual(deleted_mock.operation_name, "get_customer")
+
+    def test_validate_accepts_a_well_formed_mock(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [
+                            ApiResponseRule(
+                                respond=ApiResponse(status=100, body={"a": 1}, headers={"x": "y"})
+                            ),
+                            ApiResponseRule(respond=ApiResponse(status=599), repeat=1),
+                        ]
+                    }
+                }
+            )
+        )
+
+        test_case.validate(resource_mappings=[self._integration_mapping("crm")])
+        # Also valid with no resource_mappings at all (integrations unknown).
+        test_case.validate()
+
+    def test_validate_rejects_bad_status(self):
+        for bad_status in (0, 999, "200", True, False):
+            with self.subTest(status=bad_status):
+                test_case = self._test_case(
+                    api_mocks=self._api_mocks(
+                        {
+                            "crm": {
+                                "get_customer": [
+                                    ApiResponseRule(respond=ApiResponse(status=bad_status))
+                                ]
+                            }
+                        }
+                    )
+                )
+
+                with self.assertRaises(ValueError) as ctx:
+                    test_case.validate()
+                self.assertIn("must be an HTTP status code", str(ctx.exception))
+
+    def test_validate_rejects_unknown_integration(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {"unknown_integration": {"get_customer": [ApiResponseRule(respond=ApiResponse())]}}
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate(resource_mappings=[self._integration_mapping("crm")])
+        self.assertIn("Unknown API integration", str(ctx.exception))
+        self.assertIn("unknown_integration", str(ctx.exception))
+
+    def test_validate_rejects_empty_integration_name(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {"": {"get_customer": [ApiResponseRule(respond=ApiResponse())]}}
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+        self.assertIn("integration name cannot be empty", str(ctx.exception))
+
+    def test_validate_rejects_empty_operation_name(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks({"crm": {"": [ApiResponseRule(respond=ApiResponse())]}})
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+        self.assertIn("empty operation name", str(ctx.exception))
+
+    def test_validate_rejects_an_operation_with_no_response_rules(self):
+        test_case = self._test_case(api_mocks=self._api_mocks({"crm": {"get_customer": []}}))
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+        self.assertIn("must have at least one response rule", str(ctx.exception))
+
+    def test_validate_rejects_bad_header_keys(self):
+        for headers in ({"": "v"}, {2: "v"}):
+            with self.subTest(headers=headers):
+                test_case = self._test_case(
+                    api_mocks=self._api_mocks(
+                        {
+                            "crm": {
+                                "get_customer": [
+                                    ApiResponseRule(
+                                        respond=ApiResponse(status=200, headers=headers)
+                                    )
+                                ]
+                            }
+                        }
+                    )
+                )
+
+                with self.assertRaises(ValueError) as ctx:
+                    test_case.validate()
+                self.assertIn("header keys must be non-empty text", str(ctx.exception))
+
+    def test_validate_rejects_bad_repeat(self):
+        for bad_repeat in (0, -2, 1.5, True):
+            with self.subTest(repeat=bad_repeat):
+                test_case = self._test_case(
+                    api_mocks=self._api_mocks(
+                        {
+                            "crm": {
+                                "get_customer": [
+                                    ApiResponseRule(
+                                        respond=ApiResponse(status=200), repeat=bad_repeat
+                                    )
+                                ]
+                            }
+                        }
+                    )
+                )
+
+                with self.assertRaises(ValueError) as ctx:
+                    test_case.validate()
+                self.assertIn("must be a positive integer", str(ctx.exception))
+
+    def test_validate_accepts_repeat_negative_one_on_last_rule(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [
+                            ApiResponseRule(respond=ApiResponse(status=503), repeat=1),
+                            ApiResponseRule(respond=ApiResponse(status=200), repeat=-1),
+                        ]
+                    }
+                }
+            )
+        )
+
+        test_case.validate()
+
+    def test_validate_rejects_repeat_negative_one_not_on_last_rule(self):
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [
+                            ApiResponseRule(respond=ApiResponse(status=503), repeat=-1),
+                            ApiResponseRule(respond=ApiResponse(status=200)),
+                        ]
+                    }
+                }
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+        self.assertIn("only valid on the last response rule", str(ctx.exception))
+
+    def test_validate_rejects_a_date_in_the_body(self):
+        """Reuses _validate_attribute_value, same as integration_attributes."""
+        test_case = self._test_case(
+            api_mocks=self._api_mocks(
+                {
+                    "crm": {
+                        "get_customer": [
+                            ApiResponseRule(
+                                respond=ApiResponse(
+                                    status=200, body={"expiry": datetime.date(2026, 8, 12)}
+                                )
+                            )
+                        ]
+                    }
+                }
+            )
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            test_case.validate()
+
+        message = str(ctx.exception)
+        self.assertIn("body.expiry", message)
+        self.assertIn("2026-08-12", message)
+
+    def test_api_response_from_dict_defaults(self):
+        response = ApiResponse.from_dict(None)
+
+        self.assertEqual(response.status, 200)
+        self.assertIsNone(response.body)
+        self.assertEqual(response.headers, {})
+
+    def test_api_response_from_dict_keeps_ints_as_ints(self):
+        """Mirrors _normalise_attribute: a body pushed through google.protobuf.Value
+        (a double) must not read a pushed int back as a float."""
+        response = ApiResponse.from_dict({"status": 200, "body": {"count": 2}})
+
+        self.assertEqual(response.body, {"count": 2})
+        self.assertIsInstance(response.body["count"], int)
+
+    def test_api_mocks_round_trips_through_resource_to_dict(self):
+        """TestCaseApiMocks isn't a SubResource, so resource_to_dict wraps its
+        one field as {"mocks": {...}} rather than matching __init__ directly
+        (unlike sip_headers/integration_attributes). Reloading that dict through
+        TestCase(**d) — as project status-file loading does — must not treat
+        "mocks" itself as a fake integration name."""
+        mocks = {"crm": {"get_customer": [ApiResponseRule(respond=ApiResponse(status=200))]}}
+        test_case = self._test_case(api_mocks=self._api_mocks(mocks))
+
+        reloaded = TestCase(**resource_utils.resource_to_dict(test_case))
+
+        self.assertEqual(reloaded.api_mocks.mocks, mocks)
+
+    def test_api_response_from_dict_rejects_non_mapping(self):
+        """A scalar where the 'respond' mapping belongs is a clear error, not an AttributeError."""
+        with self.assertRaises(ValueError) as ctx:
+            ApiResponse.from_dict("not a dict")
+
+        message = str(ctx.exception)
+        self.assertIn("'respond' must be a mapping", message)
+        self.assertIn("str", message)
+
+    def test_api_response_rule_from_dict_rejects_non_mapping(self):
+        """A scalar where a response rule mapping belongs is a clear error."""
+        with self.assertRaises(ValueError) as ctx:
+            ApiResponseRule.from_dict("not a dict")
+
+        message = str(ctx.exception)
+        self.assertIn("Response rule must be a mapping", message)
+        self.assertIn("str", message)
+
+    def test_from_dict_rejects_non_mapping_api_mocks(self):
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict("not a dict at all")
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks must be a mapping", message)
+        self.assertIn("str", message)
+
+    def test_from_dict_rejects_non_mapping_integration(self):
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict({"crm": "not a dict"})
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks.crm", message)
+        self.assertIn("must be a mapping of operation name", message)
+        self.assertIn("str", message)
+
+    def test_from_dict_rejects_non_list_operation(self):
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict({"crm": {"get_customer": "not a list"}})
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks.crm.get_customer", message)
+        self.assertIn("must be a list", message)
+        self.assertIn("str", message)
+
+    def test_from_dict_rejects_non_mapping_rule_with_index_in_path(self):
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict({"crm": {"get_customer": ["not a dict"]}})
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks.crm.get_customer[0]", message)
+        self.assertIn("Response rule must be a mapping", message)
+
+    def test_from_dict_rejects_non_mapping_respond_with_index_in_path(self):
+        """The nested 'respond' error is re-raised with the full location prepended."""
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict({"crm": {"get_customer": [{"respond": "not a dict"}]}})
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks.crm.get_customer[0]", message)
+        self.assertIn("'respond' must be a mapping", message)
+
+    def test_from_dict_rejects_non_mapping_headers_with_index_in_path(self):
+        with self.assertRaises(ValueError) as ctx:
+            TestCaseApiMocks.from_dict(
+                {"crm": {"get_customer": [{"respond": {"headers": "not a dict"}}]}}
+            )
+
+        message = str(ctx.exception)
+        self.assertIn("api_mocks.crm.get_customer[0]", message)
+        self.assertIn("respond.headers", message)
+        self.assertIn("must be a mapping", message)
 
 
 class ParseMultiResourcePathTests(unittest.TestCase):
@@ -7953,6 +9868,773 @@ class AdditionalLanguageTests(unittest.TestCase):
         self.assertIn("Duplicate language code", str(cm.exception))
 
 
+class PlatformGuardrailTests(unittest.TestCase):
+    """Tests for the PlatformGuardrail resource (toggles for platform-provided guardrails)."""
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+
+    def test_from_projection_reads_explicit_enabled_per_entry(self):
+        """guardrails.guardrails is a map keyed by short suffix, each an explicit toggle."""
+        projection = {
+            "guardrails": {
+                "guardrails": {
+                    "JAILBREAK_DEFENCE": {"enabled": False},
+                    "HALLUCINATION_CONTROL": {"enabled": True},
+                }
+            }
+        }
+        guardrails = PlatformGuardrail.from_projection(projection)
+        self.assertFalse(guardrails["jailbreak_defence"].enabled)
+        self.assertTrue(guardrails["hallucination_control"].enabled)
+
+    def test_from_projection_matches_the_real_account_payload(self):
+        """Regression test pinned to an actual observed projection payload."""
+        projection = {
+            "guardrails": {
+                "guardrails": {
+                    "JAILBREAK_DEFENCE": {"enabled": False},
+                    "HALLUCINATION_CONTROL": {"enabled": True},
+                    "AI_IDENTITY": {"enabled": False},
+                    "EMERGENCY_ESCALATION": {"enabled": True},
+                    "TOOL_CALL_INTEGRITY": {"enabled": True},
+                }
+            }
+        }
+        guardrails = PlatformGuardrail.from_projection(projection)
+        self.assertEqual(
+            {name: g.enabled for name, g in guardrails.items()},
+            {
+                "jailbreak_defence": False,
+                "hallucination_control": True,
+                "ai_identity": False,
+                "emergency_escalation": True,
+                "tool_call_integrity": True,
+            },
+        )
+
+    def test_from_projection_emits_the_full_catalog(self):
+        """Every known guardrail gets a resource, even if absent from the map."""
+        projection = {"guardrails": {"guardrails": {"AI_IDENTITY": {"enabled": False}}}}
+        guardrails = PlatformGuardrail.from_projection(projection)
+        self.assertEqual(
+            set(guardrails),
+            {
+                "jailbreak_defence",
+                "hallucination_control",
+                "ai_identity",
+                "emergency_escalation",
+                "tool_call_integrity",
+            },
+        )
+        self.assertFalse(guardrails["ai_identity"].enabled)
+
+    def test_from_projection_defaults_missing_entries_to_enabled(self):
+        """A guardrail absent from the map defaults to enabled."""
+        projection = {"guardrails": {"guardrails": {"AI_IDENTITY": {"enabled": False}}}}
+        guardrails = PlatformGuardrail.from_projection(projection)
+        self.assertTrue(guardrails["jailbreak_defence"].enabled)
+
+    def test_from_projection_skips_non_object_entries_without_raising(self):
+        """A malformed (non-dict) map value is logged and skipped, defaulting to enabled."""
+        projection = {
+            "guardrails": {
+                "guardrails": {
+                    "JAILBREAK_DEFENCE": "unexpected-bare-string",
+                    "AI_IDENTITY": {"enabled": False},
+                }
+            }
+        }
+        with self.assertLogs("poly.resources.guardrails", level="WARNING"):
+            guardrails = PlatformGuardrail.from_projection(projection)
+        self.assertTrue(guardrails["jailbreak_defence"].enabled)
+        self.assertFalse(guardrails["ai_identity"].enabled)
+
+    def test_from_projection_no_guardrails_section_yields_nothing(self):
+        """When the projection has no guardrails section at all, no resources are emitted."""
+        self.assertEqual(PlatformGuardrail.from_projection({}), {})
+
+    def test_from_projection_empty_map_yields_all_enabled(self):
+        """An empty guardrails map still yields the full catalog, all enabled."""
+        projection = {"guardrails": {"guardrails": {}}}
+        guardrails = PlatformGuardrail.from_projection(projection)
+        self.assertEqual(len(guardrails), 5)
+        self.assertTrue(all(g.enabled for g in guardrails.values()))
+
+    def test_to_yaml_dict_from_yaml_dict_roundtrip(self):
+        """to_yaml_dict then from_yaml_dict preserves the name and toggle state."""
+        guardrail = PlatformGuardrail(
+            resource_id="hallucination_control", name="hallucination_control", enabled=False
+        )
+        yaml_dict = guardrail.to_yaml_dict()
+        self.assertEqual(yaml_dict, {"name": "hallucination_control", "enabled": False})
+
+        restored = PlatformGuardrail.from_yaml_dict(
+            yaml_dict, resource_id="hallucination_control", name="hallucination_control"
+        )
+        self.assertEqual(restored.name, guardrail.name)
+        self.assertEqual(restored.enabled, guardrail.enabled)
+
+    def test_from_yaml_dict_falls_back_to_identity_name(self):
+        """When the YAML has no name field, the identity name is used."""
+        guardrail = PlatformGuardrail.from_yaml_dict(
+            {"enabled": True}, resource_id="ai_identity", name="ai_identity"
+        )
+        self.assertEqual(guardrail.name, "ai_identity")
+
+    def test_file_path(self):
+        """All platform guardrails live in agent_settings/guardrails.yaml."""
+        guardrail = PlatformGuardrail(resource_id="jailbreak_defence", name="jailbreak_defence")
+        expected = os.path.join(
+            "agent_settings", "guardrails.yaml", "platform_guardrails", "jailbreak_defence"
+        )
+        self.assertEqual(guardrail.file_path, expected)
+
+    def test_command_type(self):
+        guardrail = PlatformGuardrail(resource_id="jailbreak_defence", name="jailbreak_defence")
+        self.assertEqual(guardrail.command_type, "guardrails")
+
+    def test_validate_passes_for_a_known_guardrail_name(self):
+        guardrail = PlatformGuardrail(
+            resource_id="emergency_escalation", name="emergency_escalation", enabled=False
+        )
+        self.assertIsNone(guardrail.validate())
+
+    def test_validate_unrecognised_name_raises_and_lists_valid_names(self):
+        """An unknown guardrail name is rejected with the list of valid options."""
+        guardrail = PlatformGuardrail(resource_id="made_up", name="made_up")
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate()
+        self.assertIn("Unrecognised platform guardrail 'made_up'", str(cm.exception))
+        self.assertIn("jailbreak_defence", str(cm.exception))
+
+    def test_validate_unspecified_sentinel_name_raises(self):
+        """The GUARDRAIL_NAME_UNSPECIFIED sentinel is not a real guardrail, so it is rejected."""
+        guardrail = PlatformGuardrail(resource_id="unspecified", name="unspecified", enabled=True)
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate()
+        self.assertIn("Unrecognised platform guardrail 'unspecified'", str(cm.exception))
+        # The sentinel is also absent from the list of valid options offered to the user.
+        valid_names = str(cm.exception).split("Must be one of: ")[1].split(", ")
+        self.assertNotIn("unspecified", valid_names)
+
+    def test_validate_empty_name_raises(self):
+        guardrail = PlatformGuardrail(resource_id="", name="")
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate()
+        self.assertIn("Name is required", str(cm.exception))
+
+    def test_validate_non_string_name_raises(self):
+        """An unquoted numeric name (e.g. `name: 123`) is rejected as a ValueError, not a crash."""
+        guardrail = PlatformGuardrail(resource_id="123", name=123, enabled=True)
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate()
+        self.assertIn("Invalid value 123 for 'name'", str(cm.exception))
+        self.assertIn("Must be a string", str(cm.exception))
+
+    def test_validate_quoted_enabled_raises(self):
+        """A YAML-quoted boolean ('true') is rejected with an actionable message."""
+        guardrail = PlatformGuardrail(resource_id="ai_identity", name="ai_identity", enabled="true")
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate()
+        self.assertIn("Must be true or false (unquoted)", str(cm.exception))
+
+    @staticmethod
+    def _catalog_names() -> set[str]:
+        """The fixed platform guardrail catalog, derived from the GuardrailName proto enum.
+
+        e.g. GUARDRAIL_NAME_JAILBREAK_DEFENCE -> "jailbreak_defence".
+        """
+        from poly.handlers.protobuf.guardrails_pb2 import GuardrailName
+
+        return {
+            value.name.removeprefix("GUARDRAIL_NAME_").lower()
+            for value in GuardrailName.DESCRIPTOR.values
+            if value.name != "GUARDRAIL_NAME_UNSPECIFIED"
+        }
+
+    @classmethod
+    def _full_collection(cls) -> dict:
+        """A complete local collection: one PlatformGuardrail per catalog entry."""
+        return {
+            name: PlatformGuardrail(resource_id=name, name=name) for name in cls._catalog_names()
+        }
+
+    def test_validate_collection_passes_when_whole_catalog_is_present(self):
+        """A collection covering every catalog guardrail is valid."""
+        self.assertIsNone(PlatformGuardrail.validate_collection(self._full_collection()))
+
+    def test_validate_collection_missing_one_guardrail_raises_naming_it(self):
+        """Deleting a single guardrail from the file is reported by name, with a fix."""
+        collection = self._full_collection()
+        self.assertIn("ai_identity", collection)
+        del collection["ai_identity"]
+
+        with self.assertRaises(ValueError) as cm:
+            PlatformGuardrail.validate_collection(collection)
+        message = str(cm.exception)
+        self.assertIn("Missing platform guardrail(s)", message)
+        self.assertIn("ai_identity", message)
+        self.assertIn("poly pull", message)
+
+    def test_validate_collection_missing_several_guardrails_names_all_of_them(self):
+        """Every missing guardrail is listed, not just the first one found."""
+        collection = self._full_collection()
+        for name in ("ai_identity", "jailbreak_defence"):
+            self.assertIn(name, collection)
+            del collection[name]
+
+        with self.assertRaises(ValueError) as cm:
+            PlatformGuardrail.validate_collection(collection)
+        message = str(cm.exception)
+        self.assertIn("ai_identity", message)
+        self.assertIn("jailbreak_defence", message)
+
+    def test_validate_collection_empty_raises_listing_the_full_catalog(self):
+        """An empty collection means the whole catalog has drifted away locally."""
+        with self.assertRaises(ValueError) as cm:
+            PlatformGuardrail.validate_collection({})
+        message = str(cm.exception)
+        for name in self._catalog_names():
+            self.assertIn(name, message)
+
+    def test_build_update_proto_maps_short_name_back_to_enum(self):
+        """The update proto carries a single Guardrail with the platform enum name."""
+        from poly.handlers.protobuf.guardrails_pb2 import GuardrailName
+
+        guardrail = PlatformGuardrail(
+            resource_id="jailbreak_defence", name="jailbreak_defence", enabled=False
+        )
+        proto = guardrail.build_update_proto()
+        self.assertEqual(len(proto.guardrails), 1)
+        self.assertEqual(proto.guardrails[0].name, GuardrailName.GUARDRAIL_NAME_JAILBREAK_DEFENCE)
+        self.assertFalse(proto.guardrails[0].enabled)
+
+    def test_build_create_proto_not_supported(self):
+        """Platform guardrails cannot be created — the catalog is fixed."""
+        guardrail = PlatformGuardrail(resource_id="ai_identity", name="ai_identity")
+        with self.assertRaises(NotImplementedError):
+            guardrail.build_create_proto()
+
+    def test_build_delete_proto_not_supported(self):
+        """Platform guardrails cannot be deleted — the catalog is fixed."""
+        guardrail = PlatformGuardrail(resource_id="ai_identity", name="ai_identity")
+        with self.assertRaises(NotImplementedError):
+            guardrail.build_delete_proto()
+
+    def test_discover_resources(self):
+        """discover_resources returns one path per entry in agent_settings/guardrails.yaml."""
+        base_path = os.path.join(os.path.dirname(__file__), "test_projects", "test_project")
+        discovered = PlatformGuardrail.discover_resources(base_path)
+        self.assertCountEqual(
+            discovered,
+            [
+                os.path.join(
+                    base_path,
+                    "agent_settings",
+                    "guardrails.yaml",
+                    "platform_guardrails",
+                    name,
+                )
+                for name in (
+                    "jailbreak_defence",
+                    "hallucination_control",
+                    "ai_identity",
+                    "emergency_escalation",
+                    "tool_call_integrity",
+                )
+            ],
+        )
+
+    def test_discover_resources_missing_file(self):
+        self.assertEqual(PlatformGuardrail.discover_resources("/nonexistent"), [])
+
+    def test_discover_resources_skips_nameless_entries(self):
+        """Entries without a name are skipped rather than producing an unnamed path."""
+        yaml_content = """platform_guardrails:
+- name: jailbreak_defence
+  enabled: true
+- enabled: false
+"""
+        base_path = "."
+        yaml_path = os.path.join(base_path, "agent_settings", "guardrails.yaml")
+
+        def exists_gr(p):
+            return yaml_path in str(p) or os.path.exists(p)
+
+        def isfile_gr(p):
+            return yaml_path in str(p) or os.path.isfile(p)
+
+        def getmtime_gr(p):
+            return 1.0 if yaml_path in str(p) else os.path.getmtime(p)
+
+        with mock_read_from_file({yaml_path: yaml_content}):
+            with (
+                unittest.mock.patch(
+                    "poly.resources.guardrails.os.path.exists", side_effect=exists_gr
+                ),
+                unittest.mock.patch(
+                    "poly.resources.resource.os.path.exists", side_effect=exists_gr
+                ),
+                unittest.mock.patch(
+                    "poly.resources.resource.os.path.isfile", side_effect=isfile_gr
+                ),
+                unittest.mock.patch(
+                    "poly.resources.resource.os.path.getmtime", side_effect=getmtime_gr
+                ),
+            ):
+                discovered = PlatformGuardrail.discover_resources(base_path)
+        self.assertEqual(len(discovered), 1)
+        self.assertIn("jailbreak_defence", discovered[0])
+
+
+class CustomGuardrailTests(unittest.TestCase):
+    """Tests for the CustomGuardrail resource.
+
+    Custom guardrails share agent_settings/guardrails.yaml with platform guardrails,
+    living under an optional ``custom_guardrails`` top-level list.
+    """
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+
+    @staticmethod
+    def _sample_guardrail() -> CustomGuardrail:
+        return CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-no_medical_advice",
+            name="No medical advice",
+            prompt="Never give medical advice. Offer to transfer the caller to a human instead.",
+            action="warn",
+        )
+
+    @staticmethod
+    def _discover_from_yaml(yaml_content: str) -> list[str]:
+        """Run discover_resources against an in-memory agent_settings/guardrails.yaml."""
+        yaml_path = os.path.join(".", "agent_settings", "guardrails.yaml")
+        with mock_read_from_file({yaml_path: yaml_content}):
+            with (
+                unittest.mock.patch("poly.resources.guardrails.os.path.exists", return_value=True),
+                unittest.mock.patch("poly.resources.resource.os.path.exists", return_value=True),
+                unittest.mock.patch("poly.resources.resource.os.path.isfile", return_value=True),
+                unittest.mock.patch("poly.resources.resource.os.path.getmtime", return_value=1.0),
+            ):
+                return CustomGuardrail.discover_resources(".")
+
+    def test_from_projection_parses_all_fields(self):
+        """Custom guardrails are keyed by their entity-map id, like topics/entities."""
+        projection = {
+            "guardrails": {
+                "customGuardrails": {
+                    "entities": {
+                        "CUSTOM_GUARDRAILS-1": {
+                            "name": "No medical advice",
+                            "prompt": "Never give medical advice.",
+                            "action": "warn",
+                            "enabled": False,
+                        }
+                    }
+                }
+            }
+        }
+        guardrails = CustomGuardrail.from_projection(projection)
+        guardrail = guardrails["CUSTOM_GUARDRAILS-1"]
+        self.assertEqual(guardrail.resource_id, "CUSTOM_GUARDRAILS-1")
+        self.assertEqual(guardrail.name, "No medical advice")
+        self.assertEqual(guardrail.prompt, "Never give medical advice.")
+        self.assertEqual(guardrail.action, "warn")
+        self.assertFalse(guardrail.enabled)
+
+    def test_from_projection_matches_the_real_account_payload(self):
+        """Regression test pinned to an actual observed customGuardrails payload.
+
+        Also includes the 'ids' sibling key the real payload carries alongside
+        'entities' — it should be ignored, not treated as an entry.
+        """
+        projection = {
+            "guardrails": {
+                "customGuardrails": {
+                    "ids": ["5ee46d81-99bc-4fc9-8046-e517948134a4"],
+                    "entities": {
+                        "5ee46d81-99bc-4fc9-8046-e517948134a4": {
+                            "id": "5ee46d81-99bc-4fc9-8046-e517948134a4",
+                            "name": "Customer Information",
+                            "prompt": (
+                                "Triggerswhenever you are about to repeat customer information"
+                            ),
+                            "action": "Call {{fn:default-function}}",
+                            "enabled": True,
+                            "references": {
+                                "sms": {},
+                                "handoff": {},
+                                "attributes": {},
+                                "globalFunctions": {"default-function": True},
+                                "variables": {},
+                                "translations": {},
+                            },
+                            "createdAt": "2026-08-18T14:54:52.431Z",
+                            "createdBy": "",
+                            "updatedAt": "2026-08-18T14:54:52.431Z",
+                            "updatedBy": "",
+                        }
+                    },
+                }
+            }
+        }
+        guardrails = CustomGuardrail.from_projection(projection)
+        self.assertEqual(list(guardrails), ["5ee46d81-99bc-4fc9-8046-e517948134a4"])
+        guardrail = guardrails["5ee46d81-99bc-4fc9-8046-e517948134a4"]
+        self.assertEqual(guardrail.name, "Customer Information")
+        self.assertEqual(guardrail.action, "Call {{fn:default-function}}")
+        self.assertTrue(guardrail.enabled)
+
+    def test_from_projection_parses_multiple_entities(self):
+        """Each key in the entities map becomes its own guardrail resource."""
+        projection = {
+            "guardrails": {
+                "customGuardrails": {
+                    "entities": {
+                        "CUSTOM_GUARDRAILS-1": {"name": "First"},
+                        "CUSTOM_GUARDRAILS-2": {"name": "Second"},
+                    }
+                }
+            }
+        }
+        guardrails = CustomGuardrail.from_projection(projection)
+        self.assertEqual(set(guardrails), {"CUSTOM_GUARDRAILS-1", "CUSTOM_GUARDRAILS-2"})
+
+    def test_from_projection_defaults_missing_fields(self):
+        """Fields absent from the projection fall back to empty strings and enabled=True."""
+        projection = {"guardrails": {"customGuardrails": {"entities": {"CUSTOM_GUARDRAILS-1": {}}}}}
+        guardrail = CustomGuardrail.from_projection(projection)["CUSTOM_GUARDRAILS-1"]
+        self.assertEqual(guardrail.name, "")
+        self.assertEqual(guardrail.prompt, "")
+        self.assertEqual(guardrail.action, "")
+        self.assertTrue(guardrail.enabled)
+
+    def test_from_projection_skips_non_object_entries_without_raising(self):
+        """A malformed (non-dict) entity value is logged and skipped, not a crash."""
+        projection = {
+            "guardrails": {
+                "customGuardrails": {
+                    "entities": {
+                        "CUSTOM_GUARDRAILS-BAD": "unexpected-bare-string",
+                        "CUSTOM_GUARDRAILS-1": {"name": "Kept"},
+                    }
+                }
+            }
+        }
+        with self.assertLogs("poly.resources.guardrails", level="WARNING"):
+            guardrails = CustomGuardrail.from_projection(projection)
+        self.assertEqual(list(guardrails), ["CUSTOM_GUARDRAILS-1"])
+
+    def test_from_projection_empty_projection_yields_no_guardrails(self):
+        self.assertEqual(CustomGuardrail.from_projection({}), {})
+
+    def test_to_yaml_dict_from_yaml_dict_roundtrip(self):
+        """to_yaml_dict then from_yaml_dict preserves every field."""
+        guardrail = self._sample_guardrail()
+        yaml_dict = guardrail.to_yaml_dict()
+        self.assertEqual(yaml_dict["name"], "No medical advice")
+        self.assertEqual(yaml_dict["action"], "warn")
+        self.assertTrue(yaml_dict["enabled"])
+
+        restored = CustomGuardrail.from_yaml_dict(
+            yaml_dict,
+            resource_id="CUSTOM_GUARDRAILS-no_medical_advice",
+            name="No medical advice",
+        )
+        self.assertEqual(restored.name, guardrail.name)
+        self.assertEqual(restored.prompt, guardrail.prompt)
+        self.assertEqual(restored.action, guardrail.action)
+        self.assertEqual(restored.enabled, guardrail.enabled)
+
+    def test_to_pretty_replaces_a_function_id_in_action_with_its_name(self):
+        """On pull, the raw ID in 'action' is swapped for the human-readable name."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="Trigger when the caller asks for a doctor.",
+            action="Call {{fn:func-123}}",
+        )
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="func-123",
+                resource_name="escalate",
+                resource_type=Function,
+                file_path="functions/escalate.py",
+                flow_name=None,
+                resource_prefix="fn",
+            )
+        ]
+        pretty_content = guardrail.to_pretty(resource_mappings=resource_mappings)
+        self.assertIn("{{fn:escalate}}", pretty_content)
+        self.assertNotIn("{{fn:func-123}}", pretty_content)
+
+    def test_to_pretty_with_no_resource_mappings_leaves_ids_unchanged(self):
+        """With nothing to map against, the action passes through verbatim."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="Trigger when the caller asks for a doctor.",
+            action="Call {{fn:func-123}}",
+        )
+        pretty_content = guardrail.to_pretty(resource_mappings=[])
+        self.assertIn("{{fn:func-123}}", pretty_content)
+
+    def test_to_pretty_leaves_the_prompt_field_untouched(self):
+        """Only 'action' carries references, so a reference-shaped token in
+        'prompt' keeps its raw ID even when that ID is mapped."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="This mentions {{fn:func-123}} but it's just prose.",
+            action="warn",
+        )
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="func-123",
+                resource_name="escalate",
+                resource_type=Function,
+                file_path="functions/escalate.py",
+                flow_name=None,
+                resource_prefix="fn",
+            )
+        ]
+        pretty_content = guardrail.to_pretty(resource_mappings=resource_mappings)
+        self.assertIn("{{fn:func-123}} but it's just prose.", pretty_content)
+
+    def test_to_pretty_from_pretty_roundtrip_restores_the_raw_yaml(self):
+        """Names written on pull are turned back into IDs on push."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="Trigger when the caller asks for a doctor.",
+            action="Call {{fn:func-123}}",
+        )
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="func-123",
+                resource_name="escalate",
+                resource_type=Function,
+                file_path="functions/escalate.py",
+                flow_name=None,
+                resource_prefix="fn",
+            )
+        ]
+        pretty_content = guardrail.to_pretty(resource_mappings=resource_mappings)
+        reverted = CustomGuardrail.from_pretty(pretty_content, resource_mappings=resource_mappings)
+        self.assertEqual(reverted, guardrail.raw)
+
+    def test_file_path_and_command_type(self):
+        """Custom guardrails address a named entry inside the shared guardrails.yaml."""
+        guardrail = self._sample_guardrail()
+        expected = os.path.join(
+            "agent_settings", "guardrails.yaml", "custom_guardrails", "No_medical_advice"
+        )
+        self.assertEqual(guardrail.file_path, expected)
+        self.assertEqual(guardrail.command_type, "custom_guardrail")
+
+    def test_validate_passes_with_no_references(self):
+        self.assertIsNone(self._sample_guardrail().validate(resource_mappings=[]))
+
+    def test_validate_missing_name_raises(self):
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1", name="", prompt="A prompt", action="warn"
+        )
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate(resource_mappings=[])
+        self.assertIn("Name is required", str(cm.exception))
+
+    def test_validate_missing_prompt_raises(self):
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1", name="No medical advice", prompt="", action="warn"
+        )
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate(resource_mappings=[])
+        self.assertIn("Prompt is required", str(cm.exception))
+
+    def test_validate_missing_action_raises(self):
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="No medical advice",
+            prompt="A prompt",
+            action="",
+        )
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate(resource_mappings=[])
+        self.assertIn("Action is required", str(cm.exception))
+
+    def test_validate_passes_with_a_known_function_reference(self):
+        """References only ever live in 'action', never 'prompt'."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="Trigger when the caller asks for a doctor.",
+            action="Call {{fn:func-123}}",
+        )
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="func-123",
+                resource_name="escalate",
+                resource_type=Function,
+                file_path="functions/escalate.py",
+                flow_name=None,
+                resource_prefix="fn",
+            )
+        ]
+        self.assertIsNone(guardrail.validate(resource_mappings=resource_mappings))
+
+    def test_validate_unknown_function_reference_raises(self):
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="Trigger when the caller asks for a doctor.",
+            action="Call {{fn:func-missing}}",
+        )
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate(resource_mappings=[])
+        self.assertIn("Invalid references: ['global_functions: func-missing']", str(cm.exception))
+
+    def test_validate_transition_function_reference_type_raises(self):
+        """Flow transition functions ({{ft:...}}) are not valid in a guardrail action."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="Trigger when the caller asks for a doctor.",
+            action="Go to {{ft:step-1}}",
+        )
+        with self.assertRaises(ValueError) as cm:
+            guardrail.validate(resource_mappings=[])
+        self.assertIn("Invalid reference type: transition_functions", str(cm.exception))
+
+    def test_validate_ignores_reference_syntax_in_the_prompt_field(self):
+        """A reference-shaped token in 'prompt' is never scanned — only 'action' is.
+
+        The prompt below embeds a reference to a function that ISN'T in
+        resource_mappings; if prompt were scanned this would raise. It doesn't,
+        because only 'action' (whose own reference IS mapped) is scanned.
+        """
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Escalate",
+            prompt="This mentions {{fn:not-a-real-function}} but it's just prose.",
+            action="Call {{fn:func-123}}",
+        )
+        resource_mappings = [
+            ResourceMapping(
+                resource_id="func-123",
+                resource_name="escalate",
+                resource_type=Function,
+                file_path="functions/escalate.py",
+                flow_name=None,
+                resource_prefix="fn",
+            )
+        ]
+        self.assertIsNone(guardrail.validate(resource_mappings=resource_mappings))
+
+    def test_build_create_proto_includes_fields_and_references(self):
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="No medical advice",
+            prompt="Never give medical advice.",
+            action="Call {{fn:func-123}} instead of giving advice.",
+            enabled=False,
+        )
+        proto = guardrail.build_create_proto()
+        self.assertEqual(proto.id, "CUSTOM_GUARDRAILS-1")
+        self.assertEqual(proto.name, "No medical advice")
+        self.assertEqual(proto.prompt, "Never give medical advice.")
+        self.assertEqual(proto.action, "Call {{fn:func-123}} instead of giving advice.")
+        self.assertFalse(proto.enabled)
+        self.assertTrue(proto.references.global_functions["func-123"])
+
+    def test_build_update_proto_includes_fields_and_references(self):
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="No medical advice",
+            prompt="Apologise first.",
+            action="Use {{tn:TN-greeting}} to apologise first.",
+        )
+        proto = guardrail.build_update_proto()
+        self.assertEqual(proto.id, "CUSTOM_GUARDRAILS-1")
+        self.assertEqual(proto.action, "Use {{tn:TN-greeting}} to apologise first.")
+        self.assertTrue(proto.enabled)
+        self.assertTrue(proto.references.translations["TN-greeting"])
+
+    def test_build_create_proto_includes_a_reference_from_the_action_field(self):
+        """Regression test: a reference living only in 'action' is still sent."""
+        guardrail = CustomGuardrail(
+            resource_id="CUSTOM_GUARDRAILS-1",
+            name="Customer Information",
+            prompt="Triggers whenever you are about to repeat customer information",
+            action="Call {{fn:default-function}}",
+        )
+        proto = guardrail.build_create_proto()
+        self.assertTrue(proto.references.global_functions["default-function"])
+
+    def test_build_delete_proto_only_sets_the_id(self):
+        proto = self._sample_guardrail().build_delete_proto()
+        self.assertEqual(proto.id, "CUSTOM_GUARDRAILS-no_medical_advice")
+
+    def test_read_local_resource_reads_the_named_entry_from_the_shared_file(self):
+        """Reading picks the custom_guardrails entry whose name matches the path segment."""
+        base_path = os.path.join(os.path.dirname(__file__), "test_projects", "test_project")
+        file_path = os.path.join(
+            base_path, "agent_settings", "guardrails.yaml", "custom_guardrails", "No_medical_advice"
+        )
+        guardrail = CustomGuardrail.read_local_resource(
+            file_path=file_path,
+            resource_id="CUSTOM_GUARDRAILS-no_medical_advice",
+            resource_name="No medical advice",
+        )
+        self.assertEqual(guardrail.name, "No medical advice")
+        self.assertEqual(guardrail.action, "warn")
+        self.assertTrue(guardrail.enabled)
+        self.assertIn("Never give medical advice", guardrail.prompt)
+
+    def test_discover_resources(self):
+        """discover_resources returns one path per custom_guardrails entry in the shared file."""
+        base_path = os.path.join(os.path.dirname(__file__), "test_projects", "test_project")
+        discovered = CustomGuardrail.discover_resources(base_path)
+        self.assertEqual(
+            discovered,
+            [
+                os.path.join(
+                    base_path,
+                    "agent_settings",
+                    "guardrails.yaml",
+                    "custom_guardrails",
+                    "No_medical_advice",
+                )
+            ],
+        )
+
+    def test_discover_resources_missing_file(self):
+        self.assertEqual(CustomGuardrail.discover_resources("/nonexistent"), [])
+
+    def test_discover_resources_file_without_custom_guardrails_section(self):
+        """A guardrails.yaml holding only platform guardrails yields no custom guardrails."""
+        yaml_content = """platform_guardrails:
+- name: jailbreak_defence
+  enabled: true
+"""
+        self.assertEqual(self._discover_from_yaml(yaml_content), [])
+
+    def test_discover_resources_skips_nameless_entries(self):
+        """Entries without a name are skipped rather than producing an unnamed path."""
+        yaml_content = """custom_guardrails:
+- name: No medical advice
+  enabled: true
+  action: warn
+  prompt: Never give medical advice.
+- action: warn
+  prompt: A guardrail someone forgot to name.
+"""
+        discovered = self._discover_from_yaml(yaml_content)
+        self.assertEqual(len(discovered), 1)
+        self.assertIn("No_medical_advice", discovered[0])
+
+
 class ValidateWebchatSiblingsTests(unittest.TestCase):
     """Tests for validate_webchat_siblings in resource_utils."""
 
@@ -8176,27 +10858,25 @@ class CheckYamlFieldTypesTest(unittest.TestCase):
         self.assertIn("bool", str(ctx.exception))
 
     def test_dict_value_wrong_type_raises(self):
-        """A dict[str, bool] field with a str value instead of bool should raise."""
-        personality = SettingsPersonality(
-            resource_id="P-1",
-            name="personality",
-            custom="fine",
-            adjectives={"Polite": "sure"},
+        """A dict[str, str] field with an int value instead of str should raise."""
+        translation = Translation(
+            resource_id="TN-1",
+            name="greeting",
+            translations={"en-GB": 1},
         )
         with self.assertRaises(ValueError) as ctx:
-            resource_utils.check_yaml_field_types(personality)
-        self.assertIn("adjectives", str(ctx.exception))
-        self.assertIn("should be bool but got str", str(ctx.exception))
+            resource_utils.check_yaml_field_types(translation)
+        self.assertIn("translations", str(ctx.exception))
+        self.assertIn("should be str but got int", str(ctx.exception))
 
     def test_dict_valid_types_passes(self):
-        """A dict[str, bool] field with correct types should not raise."""
-        personality = SettingsPersonality(
-            resource_id="P-1",
-            name="personality",
-            custom="fine",
-            adjectives={"Polite": True, "Calm": False},
+        """A dict[str, str] field with correct types should not raise."""
+        translation = Translation(
+            resource_id="TN-1",
+            name="greeting",
+            translations={"en-GB": "Hello", "fr-FR": "Bonjour"},
         )
-        resource_utils.check_yaml_field_types(personality)
+        resource_utils.check_yaml_field_types(translation)
 
     def test_int_accepted_for_float_field(self):
         """int values should be accepted where float is expected (YAML parses 500 as int)."""
@@ -8235,7 +10915,7 @@ class DocumentTests(unittest.TestCase):
 
     def test_file_path(self):
         doc = Document(resource_id="test.md", name="test", path="test.md", contents="hello")
-        self.assertEqual(doc.file_path, os.path.join("context", "TEST.MD"))
+        self.assertEqual(doc.file_path, os.path.join("context", "test.md"))
 
     def test_raw(self):
         doc = Document(resource_id="test.md", name="test", path="test.md", contents="some content")
@@ -8263,7 +10943,7 @@ class DocumentTests(unittest.TestCase):
             )
             self.assertEqual(doc.resource_id, "doc.md")
             self.assertEqual(doc.name, "doc")
-            self.assertEqual(doc.path, "DOC.MD")
+            self.assertEqual(doc.path, "doc.md")
             self.assertEqual(doc.contents, "file contents\n")
 
     def test_save_and_read_round_trip(self):
@@ -8278,12 +10958,12 @@ class DocumentTests(unittest.TestCase):
             )
             doc.save(tmpdir)
 
-            file_path = os.path.join(tmpdir, "context", "ROUND_TRIP.MD")
+            file_path = os.path.join(tmpdir, "context", "round_trip.md")
             self.assertTrue(os.path.exists(file_path))
 
             restored = Document.read_local_resource(
                 file_path=file_path,
-                resource_id="ROUND_TRIP.MD",
+                resource_id="round_trip.md",
                 resource_name="round_trip",
             )
             self.assertEqual(restored.contents, doc.contents)
@@ -8306,8 +10986,8 @@ class DocumentTests(unittest.TestCase):
             self.assertCountEqual(
                 discovered,
                 [
-                    os.path.join(context_dir, "DOC1.MD"),
-                    os.path.join(context_dir, "DOC2.MD"),
+                    os.path.join(context_dir, "doc1.md"),
+                    os.path.join(context_dir, "doc2.md"),
                 ],
             )
 
@@ -8318,16 +10998,82 @@ class DocumentTests(unittest.TestCase):
             discovered = Document.discover_resources(tmpdir)
             self.assertEqual(discovered, [])
 
-    def test_path_normalized_to_uppercase(self):
-        """Documents with different-case paths produce the same normalized path."""
+    def test_path_case_preserved(self):
+        """Document paths are stored as given, not forced to a fixed case."""
         doc_lower = Document(resource_id="ctx.md", name="ctx", path="context.md", contents="hello")
-        doc_upper = Document(resource_id="ctx.md", name="ctx", path="CONTEXT.MD", contents="hello")
         doc_mixed = Document(resource_id="ctx.md", name="ctx", path="Context.Md", contents="hello")
-        self.assertEqual(doc_lower.path, "CONTEXT.MD")
-        self.assertEqual(doc_upper.path, "CONTEXT.MD")
-        self.assertEqual(doc_mixed.path, "CONTEXT.MD")
-        self.assertEqual(doc_lower.file_path, doc_upper.file_path)
-        self.assertEqual(doc_lower.file_path, doc_mixed.file_path)
+        self.assertEqual(doc_lower.path, "context.md")
+        self.assertEqual(doc_mixed.path, "Context.Md")
+
+    def test_validate_allows_non_context_paths_in_any_case(self):
+        doc = Document(resource_id="notes.md", name="notes", path="Notes.Md", contents="hello")
+        doc.validate()
+
+    def test_validate_allows_exact_case_platform_context_file(self):
+        doc = Document(resource_id="ctx.md", name="ctx", path="CONTEXT.MD", contents="hello")
+        doc.validate()
+
+    def test_validate_rejects_wrong_case_platform_context_file(self):
+        doc = Document(resource_id="ctx.md", name="ctx", path="context.md", contents="hello")
+        with self.assertRaises(ValueError):
+            doc.validate()
+
+
+class DocumentFromProjection(unittest.TestCase):
+    """Tests for Document.from_projection."""
+
+    def test_parses_document_fields(self):
+        """Verify document name, path, and contents are parsed correctly."""
+        projection = {
+            "documents": {
+                "documents": {
+                    "entities": {
+                        "DOC-1": {
+                            "path": "faq.md",
+                            "content": "Frequently asked questions",
+                        }
+                    }
+                }
+            }
+        }
+        documents = Document.from_projection(projection)
+        self.assertEqual(list(documents), ["DOC-1"])
+        document = documents["DOC-1"]
+        self.assertIsInstance(document, Document)
+        self.assertEqual(document.name, "faq")
+        self.assertEqual(document.contents, "Frequently asked questions")
+
+    def test_skips_all_documents_when_any_is_unreadable(self):
+        """A document missing 'content' means the user lacks read permission.
+
+        Auth filtering is per-slice, so one unreadable document means the whole
+        slice was filtered and none of it is represented locally - a partially
+        populated context/ directory would be worse than an absent one.
+        """
+        projection = {
+            "documents": {
+                "documents": {
+                    "entities": {
+                        "DOC-1": {"path": "unreadable.md"},
+                        "DOC-2": {"path": "readable.md", "content": "visible"},
+                    }
+                }
+            }
+        }
+        self.assertEqual(Document.from_projection(projection), {})
+
+    def test_keeps_document_with_empty_content(self):
+        """An empty 'content' is a readable but empty document, not a permission failure."""
+        projection = {
+            "documents": {"documents": {"entities": {"DOC-1": {"path": "empty.md", "content": ""}}}}
+        }
+        documents = Document.from_projection(projection)
+        self.assertEqual(list(documents), ["DOC-1"])
+        self.assertEqual(documents["DOC-1"].contents, "")
+
+    def test_empty_projection_yields_no_documents(self):
+        """An empty projection should return an empty dict."""
+        self.assertEqual(Document.from_projection({}), {})
 
 
 class TopicFromProjection(unittest.TestCase):
@@ -8364,6 +11110,96 @@ class TopicFromProjection(unittest.TestCase):
     def test_empty_projection_yields_no_topics(self):
         """An empty projection should return an empty dict."""
         self.assertEqual(Topic.from_projection({}), {})
+
+
+class ChildTopicFromProjection(unittest.TestCase):
+    """Tests for ChildTopic.from_projection."""
+
+    def test_parses_child_topic_and_resolves_variant_name(self):
+        """A child topic is keyed by its own topic ID and carries the variant's real name."""
+        projection = {
+            "variantManagement": {
+                "variants": {"entities": {"VARIANT-es": {"name": "Spanish"}}},
+            },
+            "childOverwrites": {
+                "knowledgeBase": {
+                    "topics": {
+                        "entities": {
+                            "TOPIC-es-1": {
+                                "name": "Opening Hours",
+                                "variantId": "VARIANT-es",
+                                "actions": "Responde en español",
+                                "content": "Abrimos a las 9",
+                                "exampleQueries": [
+                                    {"query": "¿a qué hora abren?"},
+                                    {"noquery": "ignored"},
+                                ],
+                                "isActive": True,
+                            }
+                        }
+                    }
+                }
+            },
+        }
+
+        child_topics = ChildTopic.from_projection(projection)
+
+        self.assertEqual(list(child_topics), ["TOPIC-es-1"])
+        child_topic = child_topics["TOPIC-es-1"]
+        self.assertEqual(child_topic.resource_id, "TOPIC-es-1")
+        self.assertEqual(child_topic.name, "Opening Hours")
+        self.assertEqual(child_topic.variant_id, "VARIANT-es")
+        self.assertEqual(child_topic.variant_name, "Spanish")
+        self.assertEqual(child_topic.content, "Abrimos a las 9")
+        self.assertEqual(child_topic.example_queries, ["¿a qué hora abren?"])
+        self.assertTrue(child_topic.enabled)
+
+    def test_skips_child_topic_with_unknown_variant(self):
+        """A child topic pointing at a variant that no longer exists is skipped."""
+        projection = {
+            "variantManagement": {
+                "variants": {"entities": {"VARIANT-es": {"name": "Spanish"}}},
+            },
+            "childOverwrites": {
+                "knowledgeBase": {
+                    "topics": {
+                        "entities": {
+                            "TOPIC-es-1": {
+                                "name": "Opening Hours",
+                                "variantId": "VARIANT-deleted",
+                                "actions": "",
+                                "content": "",
+                            }
+                        }
+                    }
+                }
+            },
+        }
+
+        self.assertEqual(ChildTopic.from_projection(projection), {})
+
+    def test_skips_child_topic_with_missing_variant_id(self):
+        """A child topic with no variantId cannot be placed in a variant folder, so is skipped."""
+        projection = {
+            "variantManagement": {
+                "variants": {"entities": {"VARIANT-es": {"name": "Spanish"}}},
+            },
+            "childOverwrites": {
+                "knowledgeBase": {
+                    "topics": {
+                        "entities": {
+                            "TOPIC-es-1": {"name": "Opening Hours", "actions": "", "content": ""}
+                        }
+                    }
+                }
+            },
+        }
+
+        self.assertEqual(ChildTopic.from_projection(projection), {})
+
+    def test_empty_projection_yields_no_child_topics(self):
+        """An empty projection should return an empty dict."""
+        self.assertEqual(ChildTopic.from_projection({}), {})
 
 
 class FunctionFromProjection(unittest.TestCase):
@@ -8563,6 +11399,347 @@ class FlowStepFromProjection(unittest.TestCase):
         self.assertEqual(FlowStep.from_projection({}), {})
 
 
+class FlowSettingsFromProjectionTest(unittest.TestCase):
+    """Tests for FlowSettings.from_projection.
+
+    Projections are camelCase and the nested settings block is authoritative.
+    """
+
+    STEP_ID = "STEP-A"
+    FLOW_ID = "FLOW-1"
+
+    def _parse(self, step: dict) -> FlowSettings:
+        return FlowSettings.from_projection(step, step_id=self.STEP_ID, flow_id=self.FLOW_ID)
+
+    def test_parses_camel_case_sections(self):
+        settings = self._parse(
+            {
+                "settings": {
+                    "asrBiasing": {
+                        "isEnabled": True,
+                        "nameSpelling": True,
+                        "partySize": True,
+                        "customKeywords": ["acme"],
+                    },
+                    "dtmf": {"isEnabled": True, "maxDigits": 4, "endKey": "#"},
+                    "bargeIn": {"isEnabled": True},
+                }
+            }
+        )
+
+        self.assertTrue(settings.asr_biasing.is_enabled)
+        self.assertTrue(settings.asr_biasing.name_spelling)
+        self.assertTrue(settings.asr_biasing.party_size)
+        self.assertEqual(settings.asr_biasing.custom_keywords, ["acme"])
+        self.assertEqual(settings.dtmf.max_digits, 4)
+        self.assertTrue(settings.barge_in.is_enabled)
+
+    def test_parses_asr_vad_and_llm_sections(self):
+        settings = self._parse(
+            {
+                "settings": {
+                    "asr": {"provider": "prov", "model": "mod"},
+                    "vad": {
+                        "provider": "prov",
+                        "vadStart": 1.5,
+                        "vadEnd": 2.5,
+                        "speechThreshold": 0.3,
+                        "silenceThreshold": 0.7,
+                    },
+                    "llm": {"providerModelId": "polywhirl-3-5", "reasoningEffort": 3},
+                }
+            }
+        )
+
+        self.assertEqual(settings.asr.model, "mod")
+        self.assertEqual(settings.vad.vad_start, 1.5)
+        self.assertEqual(settings.vad.silence_threshold, 0.7)
+        self.assertEqual(settings.llm.provider_model_id, "polywhirl-3-5")
+
+    def test_reasoning_effort_int_maps_to_enum(self):
+        """The projection sends the proto enum's ordinal, not its string value."""
+        for ordinal, expected in [
+            (0, ReasoningEffort.UNSPECIFIED),
+            (1, ReasoningEffort.MINIMAL),
+            (2, ReasoningEffort.LOW),
+            (3, ReasoningEffort.MEDIUM),
+            (4, ReasoningEffort.HIGH),
+            (5, ReasoningEffort.AUTO),
+        ]:
+            with self.subTest(ordinal):
+                settings = self._parse(
+                    {"settings": {"llm": {"providerModelId": "m", "reasoningEffort": ordinal}}}
+                )
+                self.assertEqual(settings.llm.reasoning_effort, expected)
+
+    def test_legacy_top_level_config_is_ignored(self):
+        """The backend keeps emitting asrBiasing/dtmfConfig even once settings are cleared.
+
+        Reading them back would resurrect config the user removed, so a cleared
+        section must stay cleared.
+        """
+        settings = self._parse(
+            {
+                "asrBiasing": {"isEnabled": True, "alphanumeric": True},
+                "dtmfConfig": {"isEnabled": True, "maxDigits": 9},
+                "settings": {"llm": {"providerModelId": "m", "reasoningEffort": 1}},
+            }
+        )
+
+        self.assertIsNone(settings.asr_biasing)
+        self.assertIsNone(settings.dtmf)
+        self.assertEqual(settings.llm.provider_model_id, "m")
+
+    def test_legacy_top_level_config_is_read_when_there_is_no_settings_block(self):
+        """A step untouched since before per-step settings shipped has config only
+        at the top level, and must still be migrated."""
+        settings = self._parse(
+            {
+                "asrBiasing": {"isEnabled": True, "alphanumeric": True},
+                "dtmfConfig": {"isEnabled": True, "maxDigits": 9},
+            }
+        )
+
+        self.assertTrue(settings.asr_biasing.is_enabled)
+        self.assertTrue(settings.asr_biasing.alphanumeric)
+        self.assertEqual(settings.dtmf.max_digits, 9)
+
+    def test_missing_settings_yields_empty_settings_not_none(self):
+        """FlowStep.settings is never None, so diffing never has to special-case it."""
+        settings = self._parse({})
+
+        self.assertIsInstance(settings, FlowSettings)
+        self.assertEqual(settings.to_yaml_dict(), {})
+        self.assertEqual(settings.step_id, self.STEP_ID)
+        self.assertEqual(settings.flow_id, self.FLOW_ID)
+
+
+class FlowSettingsSerializationTest(unittest.TestCase):
+    """Tests for FlowSettings YAML round-tripping and proto building."""
+
+    STEP_ID = "step-1"
+    FLOW_ID = "FLOW-abc"
+
+    def _settings(self, **kwargs) -> FlowSettings:
+        return FlowSettings(step_id=self.STEP_ID, flow_id=self.FLOW_ID, **kwargs)
+
+    def test_round_trips_every_section(self):
+        settings = self._settings(
+            asr_biasing=ASRBiasing(is_enabled=True, custom_keywords=["acme"], numeric=True),
+            dtmf=DTMFConfig(self.STEP_ID, self.FLOW_ID, is_enabled=True, max_digits=4),
+            asr=ASRConfig(provider="prov", model="mod"),
+            vad=VADConfig(
+                provider="prov",
+                vad_start=1.5,
+                vad_end=2.5,
+                speech_threshold=0.3,
+                silence_threshold=0.7,
+            ),
+            barge_in=BargeInConfig(is_enabled=True),
+            llm=LLMConfig(provider_model_id="mod-1", reasoning_effort=ReasoningEffort.HIGH),
+        )
+
+        restored = FlowSettings.from_yaml_dict(
+            settings.to_yaml_dict(), step_id=self.STEP_ID, flow_id=self.FLOW_ID
+        )
+
+        self.assertEqual(restored.to_yaml_dict(), settings.to_yaml_dict())
+        self.assertEqual(restored.asr_biasing.custom_keywords, ["acme"])
+        self.assertEqual(restored.dtmf.max_digits, 4)
+        self.assertEqual(restored.asr.model, "mod")
+        self.assertEqual(restored.vad.vad_end, 2.5)
+        self.assertTrue(restored.barge_in.is_enabled)
+        self.assertEqual(restored.llm.reasoning_effort, ReasoningEffort.HIGH)
+
+    def test_dtmf_uses_legacy_yaml_key(self):
+        """The YAML key stays dtmf_config so existing step files keep working."""
+        settings = self._settings(
+            dtmf=DTMFConfig(self.STEP_ID, self.FLOW_ID, is_enabled=True, max_digits=2)
+        )
+
+        yaml_dict = settings.to_yaml_dict()
+        self.assertIn("dtmf_config", yaml_dict)
+        self.assertNotIn("dtmf", yaml_dict)
+        self.assertEqual(
+            FlowSettings.from_yaml_dict(
+                yaml_dict, step_id=self.STEP_ID, flow_id=self.FLOW_ID
+            ).dtmf.max_digits,
+            2,
+        )
+
+    def test_disabled_asr_biasing_and_dtmf_are_omitted(self):
+        """Disabled is represented as absent for the sections that deep-merge."""
+        settings = self._settings(
+            asr_biasing=ASRBiasing(is_enabled=False, custom_keywords=["acme"]),
+            dtmf=DTMFConfig(self.STEP_ID, self.FLOW_ID, is_enabled=False),
+        )
+
+        self.assertEqual(settings.to_yaml_dict(), {})
+
+    def test_disabled_barge_in_is_kept(self):
+        """barge_in is clearable, so an explicit disable must be distinguishable
+        from no override at all."""
+        settings = self._settings(barge_in=BargeInConfig(is_enabled=False))
+
+        self.assertEqual(settings.to_yaml_dict(), {"barge_in": {"is_enabled": False}})
+
+    def test_build_update_proto_only_sets_present_sections(self):
+        settings = self._settings(
+            barge_in=BargeInConfig(is_enabled=True),
+            llm=LLMConfig(provider_model_id="mod-1", reasoning_effort=ReasoningEffort.LOW),
+        )
+
+        proto = settings.build_update_proto()
+
+        self.assertEqual(proto.flow_id, self.FLOW_ID)
+        self.assertEqual(proto.step_id, self.STEP_ID)
+        self.assertTrue(proto.settings.HasField("barge_in"))
+        self.assertTrue(proto.settings.HasField("llm"))
+        self.assertEqual(proto.settings.llm.provider_model_id, "mod-1")
+        for absent in ("asr_biasing", "dtmf", "asr", "vad"):
+            self.assertFalse(proto.settings.HasField(absent), absent)
+
+    def test_command_type_is_the_combined_settings_command(self):
+        settings = self._settings(barge_in=BargeInConfig(is_enabled=True))
+
+        self.assertEqual(settings.command_type, "flow_settings")
+        self.assertEqual(settings.update_command_type, "update_step_settings")
+
+    def test_partially_specified_sections_are_accepted(self):
+        """Every field in the asr/vad/llm sections is an optional override, so a
+        step may set only some of them."""
+        for block, expected in [
+            ({"asr": {"provider": "p"}}, {"asr": {"provider": "p"}}),
+            ({"vad": {"provider": "p"}}, {"vad": {"provider": "p"}}),
+            ({"vad": {"vadStart": 1.5}}, {"vad": {"vad_start": 1.5}}),
+            (
+                {"llm": {"reasoningEffort": 3}},
+                {"llm": {"reasoning_effort": "medium"}},
+            ),
+        ]:
+            with self.subTest(block):
+                settings = FlowSettings.from_projection(
+                    {"settings": block}, step_id=self.STEP_ID, flow_id=self.FLOW_ID
+                )
+                self.assertEqual(settings.to_yaml_dict(), expected)
+
+    def test_unset_overrides_are_not_written_as_nulls(self):
+        settings = self._settings(asr=ASRConfig(provider="p"))
+
+        self.assertEqual(settings.to_yaml_dict(), {"asr": {"provider": "p"}})
+        self.assertFalse(settings.build_update_proto().settings.asr.model)
+
+
+class ReasoningEffortParsingTest(unittest.TestCase):
+    """Tests for parse_reasoning_effort."""
+
+    def test_parses_ordinals_strings_and_enum_members(self):
+        self.assertEqual(parse_reasoning_effort(3), ReasoningEffort.MEDIUM)
+        self.assertEqual(parse_reasoning_effort("medium"), ReasoningEffort.MEDIUM)
+        self.assertEqual(parse_reasoning_effort(ReasoningEffort.MEDIUM), ReasoningEffort.MEDIUM)
+
+    def test_unknown_ordinal_suggests_upgrading(self):
+        """A newer backend enum value must not crash the pull with a raw KeyError."""
+        with self.assertRaises(ValueError) as ctx:
+            parse_reasoning_effort(6)
+
+        self.assertIn("Unknown reasoning effort '6'", str(ctx.exception))
+        self.assertIn("upgrading", str(ctx.exception))
+
+    def test_invalid_string_lists_the_valid_values(self):
+        with self.assertRaises(ValueError) as ctx:
+            parse_reasoning_effort("turbo")
+
+        self.assertIn("turbo", str(ctx.exception))
+        self.assertIn("unspecified, minimal, low, medium, high, auto", str(ctx.exception))
+
+
+class FlowSettingsValidationTest(unittest.TestCase):
+    """Tests for the value ranges the backend enforces on settings."""
+
+    def _step(self, **settings_kwargs) -> FlowStep:
+        return FlowStep(
+            resource_id="flow-123_step-1",
+            step_id="step-1",
+            name="Test Step",
+            flow_id="flow-123",
+            flow_name="Test Flow",
+            step_type=StepType.ADVANCED_STEP,
+            prompt="Hello",
+            settings=FlowSettings(step_id="step-1", flow_id="flow-123", **settings_kwargs),
+        )
+
+    def _mappings(self) -> list[ResourceMapping]:
+        return [
+            ResourceMapping(
+                resource_id="flow-123",
+                resource_name="Test Flow",
+                resource_type=FlowConfig,
+                file_path="flows/test_flow/flow_config.yaml",
+                resource_prefix=None,
+                flow_name="Test Flow",
+                flow_id="flow-123",
+            )
+        ]
+
+    def test_negative_dtmf_values_are_rejected(self):
+        for kwargs, expected in [
+            ({"max_digits": -1}, "max_digits"),
+            ({"inter_digit_timeout": -1}, "inter_digit_timeout"),
+        ]:
+            with self.subTest(expected):
+                settings = FlowSettings(
+                    step_id="step-1",
+                    flow_id="flow-123",
+                    dtmf=DTMFConfig("step-1", "flow-123", **kwargs),
+                )
+                with self.assertRaises(ValueError) as ctx:
+                    settings.validate()
+                self.assertIn(expected, str(ctx.exception))
+
+    def test_negative_and_non_finite_vad_values_are_rejected(self):
+        for kwargs, expected in [
+            ({"vad_start": -1.0}, "cannot be negative"),
+            ({"vad_end": -1.0}, "cannot be negative"),
+            ({"vad_start": float("inf")}, "must be a finite number"),
+            ({"vad_end": float("nan")}, "must be a finite number"),
+        ]:
+            with self.subTest(kwargs):
+                settings = FlowSettings(
+                    step_id="step-1", flow_id="flow-123", vad=VADConfig(**kwargs)
+                )
+                with self.assertRaises(ValueError) as ctx:
+                    settings.validate()
+                self.assertIn(expected, str(ctx.exception))
+
+    def test_thresholds_are_unbounded(self):
+        """The backend puts no bounds on these, so neither do we."""
+        settings = FlowSettings(
+            step_id="step-1",
+            flow_id="flow-123",
+            vad=VADConfig(speech_threshold=-5.0, silence_threshold=99.0),
+        )
+
+        self.assertIsNone(settings.validate())
+
+    def test_flow_step_validate_checks_its_settings(self):
+        """Settings are a sub-resource, so nothing else validates them."""
+        step = self._step(dtmf=DTMFConfig("step-1", "flow-123", max_digits=-1))
+
+        with self.assertRaises(ValueError) as ctx:
+            step.validate(resource_mappings=self._mappings())
+
+        self.assertIn("max_digits", str(ctx.exception))
+
+    def test_valid_settings_pass_flow_step_validation(self):
+        step = self._step(
+            dtmf=DTMFConfig("step-1", "flow-123", max_digits=4, inter_digit_timeout=0),
+            vad=VADConfig(vad_start=0.0, vad_end=2.5),
+        )
+
+        self.assertIsNone(step.validate(resource_mappings=self._mappings()))
+
+
 class FunctionStepFromProjection(unittest.TestCase):
     """Tests for FunctionStep.from_projection."""
 
@@ -8634,50 +11811,7 @@ class FunctionStepFromProjection(unittest.TestCase):
 
 
 class AgentSettingsFromProjection(unittest.TestCase):
-    """Tests for SettingsPersonality, SettingsRole, and SettingsRules from_projection."""
-
-    def test_personality_from_projection(self):
-        """Verify personality adjectives and custom text are parsed."""
-        projection = {
-            "agentSettings": {
-                "personality": {
-                    "adjectives": {"Friendly": True, "Professional": True},
-                    "custom": "Always be cheerful",
-                }
-            }
-        }
-        result = SettingsPersonality.from_projection(projection)
-        self.assertEqual(list(result), ["personality"])
-        personality = result["personality"]
-        self.assertIsInstance(personality, SettingsPersonality)
-        self.assertEqual(personality.adjectives, {"Friendly": True, "Professional": True})
-        self.assertEqual(personality.custom, "Always be cheerful")
-
-    def test_personality_empty_projection(self):
-        """An empty projection should return an empty dict."""
-        self.assertEqual(SettingsPersonality.from_projection({}), {})
-
-    def test_role_from_projection(self):
-        """Verify role value, additional_info, and custom are parsed."""
-        projection = {
-            "agentSettings": {
-                "role": {
-                    "value": "receptionist",
-                    "additionalInfo": "front desk",
-                    "custom": "",
-                }
-            }
-        }
-        result = SettingsRole.from_projection(projection)
-        self.assertEqual(list(result), ["role"])
-        role = result["role"]
-        self.assertIsInstance(role, SettingsRole)
-        self.assertEqual(role.value, "receptionist")
-        self.assertEqual(role.additional_info, "front desk")
-
-    def test_role_empty_projection(self):
-        """An empty projection should return an empty dict."""
-        self.assertEqual(SettingsRole.from_projection({}), {})
+    """Tests for SettingsRules from_projection."""
 
     def test_rules_from_projection(self):
         """Verify rules behaviour is parsed."""

@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import io
 import json
 import logging
+import os
 import typing as ty
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -19,6 +20,7 @@ from poly.utils import any_credentials_exist, retrieve_api_key
 logger = logging.getLogger(__name__)
 ACCOUNTS_URL = "/adk/v1/accounts"
 PROJECTS_URL = "/adk/v1/accounts/{account_id}/projects"
+PROJECT_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}"
 DEPLOYMENTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/deployments"
 ACTIVE_DEPLOYMENTS_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/deployments/active"
 CHAT_URL = "/adk/v1/accounts/{account_id}/projects/{project_id}/chat"
@@ -64,6 +66,11 @@ RTC_CONFIGS_URL = "/v1/agents/{project_id}/real-time-configs"
 RTC_CONFIG_URL = "/v1/agents/{project_id}/real-time-configs/{client_env}"
 RTC_SCHEMA_URL = "/v1/agents/{project_id}/real-time-configs/{client_env}/schema"
 RTC_VARIABLES_URL = "/v1/agents/{project_id}/real-time-configs/{client_env}/variables"
+FUNCTIONS_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions"
+FUNCTION_EXECUTE_URL = (
+    "/v1/agents/{project_id}/branches/{branch_id}/functions/{function_id}/execute"
+)
+FUNCTIONS_VALIDATE_URL = "/v1/agents/{project_id}/branches/{branch_id}/functions/validate"
 
 
 class PlatformAPIHandler:
@@ -147,6 +154,9 @@ class PlatformAPIHandler:
             }
             if not files:
                 headers["Content-Type"] = "application/json"
+
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
 
         logger.info(f"Making {method} request to {url}")
 
@@ -256,6 +266,21 @@ class PlatformAPIHandler:
                 accounts[account.get("id")] = account.get("name")
 
         return accounts
+
+    @staticmethod
+    def get_project(region: str, account_id: str, project_id: str) -> dict:
+        """Get a specific project for a given account.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+            project_id (str): The project ID
+
+        Returns:
+            dict: The project details
+        """
+        endpoint = PROJECT_URL.format(account_id=account_id, project_id=project_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")
 
     @staticmethod
     def get_projects(region: str, account_id: str) -> dict[str, str]:
@@ -971,6 +996,8 @@ class PlatformAPIHandler:
             "X-PolyAI-Correlation-Id": correlation_id,
             "X-Poly-Source": "adk",
         }
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
         params = {"direction": direction, "redacted": str(redacted).lower()}
 
         logger.info(f"Making GET request to {url}")
@@ -1037,6 +1064,8 @@ class PlatformAPIHandler:
             "X-PolyAI-Correlation-Id": correlation_id,
             "X-Poly-Source": "adk",
         }
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
 
         logger.info(f"Making GET request to {url}")
         response = requests.get(url, headers=headers, allow_redirects=False)
@@ -1082,6 +1111,8 @@ class PlatformAPIHandler:
             "X-Poly-Source": "adk",
             "Content-Type": "audio/wav",
         }
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
         if filename:
             headers["X-Filename"] = filename
 
@@ -1130,6 +1161,8 @@ class PlatformAPIHandler:
             "X-PolyAI-Correlation-Id": correlation_id,
             "X-Poly-Source": "adk",
         }
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
 
         logger.info(f"Making PUT request to {url}")
         response = requests.request(
@@ -1215,6 +1248,8 @@ class PlatformAPIHandler:
             "X-Poly-Source": "adk",
             "Content-Type": "application/json",
         }
+        if email := os.environ.get("ADK_COMMAND_USER_OVERRIDE"):
+            headers["X-PolyAI-Email"] = email
         body: dict = {"text": text, "config": config}
         if language:
             body["language"] = language
@@ -1554,3 +1589,61 @@ class PlatformAPIHandler:
         endpoint = RTC_VARIABLES_URL.format(project_id=project_id, client_env=client_env)
         data = {"variables": variables}
         return PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=data)
+
+    @staticmethod
+    def list_functions(region: str, project_id: str, branch_id: str) -> list[dict]:
+        """List a branch's active functions.
+
+        Not exposed as its own CLI command — used internally to resolve a
+        function name to its ID (e.g. for ``poly functions execute``).
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            list[dict]: The branch's active functions, each with "id" and "name".
+        """
+        endpoint = FUNCTIONS_URL.format(project_id=project_id, branch_id=branch_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "GET")
+
+    @staticmethod
+    def execute_function(
+        region: str,
+        project_id: str,
+        branch_id: str,
+        function_id: str,
+        args: dict,
+    ) -> dict:
+        """Execute a function with the given arguments.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID.
+            args: The arguments to pass to the function.
+
+        Returns:
+            dict: {"body": ..., "logs": [...], "runtime": ...}.
+        """
+        endpoint = FUNCTION_EXECUTE_URL.format(
+            project_id=project_id, branch_id=branch_id, function_id=function_id
+        )
+        return PlatformAPIHandler.make_request(region, endpoint, "POST", data={"args": args})
+
+    @staticmethod
+    def validate_functions(region: str, project_id: str, branch_id: str) -> dict:
+        """Validate all functions on a branch for orphaned refs and syntax errors.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            dict: {"valid": bool, "issues": [...]}.
+        """
+        endpoint = FUNCTIONS_VALIDATE_URL.format(project_id=project_id, branch_id=branch_id)
+        return PlatformAPIHandler.make_request(region, endpoint, "POST")

@@ -9,7 +9,7 @@ import sys
 from argparse import SUPPRESS, ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from contextlib import nullcontext
 
-from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project, parse_from_projection_json
 from poly.handlers.interface import REGIONS, AgentStudioInterface
 from poly.output.json_output import json_print
@@ -20,6 +20,8 @@ class ProjectCommand(BaseCommand):
     """Manage Agent Studio projects (list, create, delete, duplicate)."""
 
     command = "project"
+
+    group = GETTING_STARTED_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
@@ -391,6 +393,15 @@ class ProjectCommand(BaseCommand):
             project_id=project_id,
             output_json=output_json,
         )
+
+        if not output_json and sys.stdin.isatty():
+            try:
+                from poly.cli_commands.template import TemplateCommand
+
+                project_path = os.path.join(base_path, account_id, project_id)
+                TemplateCommand.offer_template_on_create(project_path, region)
+            except Exception:
+                pass
 
     @classmethod
     def list_projects(
@@ -826,6 +837,8 @@ class InitCommand(BaseCommand):
 
     command = "init"
 
+    group = GETTING_STARTED_GROUP
+
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
         """Register the ``init`` subcommand."""
@@ -1096,6 +1109,8 @@ class StudioCommand(BaseCommand):
 
     command = "studio"
 
+    group = GETTING_STARTED_GROUP
+
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
         """Register the ``studio`` subcommand."""
@@ -1128,7 +1143,7 @@ class StudioCommand(BaseCommand):
         from poly.output.console import info
 
         project = load_project(base_path or os.getcwd(), output_json=output_json)
-        url = project.studio_base_url
+        url = f"{project.studio_base_url}/home?branchId={project.branch_id}"
         if output_json:
             json_print({"url": url})
         else:

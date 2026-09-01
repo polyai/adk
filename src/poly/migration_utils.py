@@ -4,11 +4,14 @@ Tools to help with migrating from older versions of the Agent Development Kit to
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from copy import deepcopy
 from enum import Enum
 
 from poly.resources import resource_utils
+
+logger = logging.getLogger(__name__)
 
 
 class MigrationFlag(Enum):
@@ -19,6 +22,8 @@ class MigrationFlag(Enum):
 
     MIGRATED_LEGACY_TOPIC_FILES = "migrated_legacy_topic_files"
     MIGRATED_FLOW_STEP_RESOURCE_IDS = "migrated_flow_step_resource_ids"
+    MIGRATED_FLOW_STEP_SETTINGS = "migrated_flow_step_settings"
+    REMOVED_PERSONALITY_AND_ROLE_FILES = "removed_personality_and_role_files"
 
 
 def load_migration_flags(flags: list[str]) -> set[MigrationFlag]:
@@ -73,7 +78,74 @@ def run_migrations(
         migrate_flow_step_resource_ids(status_dict)
         new_flags.add(MigrationFlag.MIGRATED_FLOW_STEP_RESOURCE_IDS)
 
+    if (
+        MigrationFlag.MIGRATED_FLOW_STEP_SETTINGS not in applied_migrations
+        and status_dict is not None
+    ):
+        migrate_flow_step_settings(status_dict)
+        new_flags.add(MigrationFlag.MIGRATED_FLOW_STEP_SETTINGS)
+
+    if MigrationFlag.REMOVED_PERSONALITY_AND_ROLE_FILES not in applied_migrations:
+        remove_personality_and_role_files(root_path)
+        new_flags.add(MigrationFlag.REMOVED_PERSONALITY_AND_ROLE_FILES)
+
     return new_flags
+
+
+def remove_personality_and_role_files(root_path: str) -> None:
+    """Delete the personality and role files, which are superseded by the persona.
+
+    Agent Studio replaced both settings with a single free-text persona, so the
+    files no longer describe anything the agent uses. They are removed rather
+    than left in place so a stale copy can't be edited and pushed.
+    """
+    removed = []
+    for file_name in ("personality.yaml", "role.yaml"):
+        file_path = os.path.join(root_path, "agent_settings", file_name)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            removed.append(os.path.join("agent_settings", file_name))
+
+    if removed:
+        logger.warning(
+            f"Removed {', '.join(removed)}: personality and role have been replaced by "
+            "agent_settings/persona.txt. Run 'poly pull' to fetch it."
+        )
+
+
+# Sub-config keys set internally by the config classes rather than accepted as __init__ args.
+_LEGACY_SETTING_INTERNALS = ("resource_id", "name", "step_id", "flow_id")
+# Legacy top-level key on a serialized flow step -> its key within FlowSettings.
+_LEGACY_SETTING_KEYS = {"asr_biasing": "asr_biasing", "dtmf_config": "dtmf"}
+
+
+def migrate_flow_step_settings(status_dict: dict) -> None:
+    """Fold legacy top-level asr_biasing/dtmf_config on flow steps into ``settings``.
+
+    Flow step config used to be serialized as separate top-level keys. It now lives in a
+    single nested ``settings`` object, so a status dict written by an older version would
+    otherwise load with empty settings and report every advanced step as modified.
+
+    The legacy keys are left in place rather than removed: resource loading ignores keys
+    that aren't init fields, and the next save drops them anyway.
+    """
+    for resource_dict in status_dict.get("resources", {}).get("flow_steps", {}).values():
+        legacy = {
+            settings_key: resource_dict[legacy_key]
+            for legacy_key, settings_key in _LEGACY_SETTING_KEYS.items()
+            if isinstance(resource_dict.get(legacy_key), dict)
+        }
+        if not legacy:
+            continue
+
+        settings = resource_dict.setdefault("settings", {})
+        for settings_key, config in legacy.items():
+            # Only carry over sections the newer format doesn't already define.
+            if settings_key in settings:
+                continue
+            settings[settings_key] = {
+                key: value for key, value in config.items() if key not in _LEGACY_SETTING_INTERNALS
+            }
 
 
 def migrate_flow_step_resource_ids(status_dict: dict) -> None:

@@ -104,6 +104,61 @@ class FetchProjection(unittest.TestCase):
             sdk.fetch_projection()
 
 
+class CreateBranch(unittest.TestCase):
+    """Tests for the payload SourcererSDK.create_branch posts."""
+
+    def setUp(self):
+        self.sdk = build_sdk()
+        self.session = MagicMock()
+        self.session.post.return_value = make_mock_response(
+            200, json_body={"branchId": "new-branch-id"}
+        )
+        self.sdk._session = self.session
+
+    def _posted_payload(self):
+        """The JSON body sent to the branches endpoint."""
+        return self.session.post.call_args.kwargs["json"]
+
+    def test_returns_new_branch_id_from_response(self):
+        """The branchId from the API response is returned."""
+        branch_id = self.sdk.create_branch(branch_name="my-feature")
+
+        self.assertEqual(branch_id, "new-branch-id")
+
+    def test_payload_carries_branch_name_and_expected_sequence(self):
+        """The branch name and expected sequence number are always sent."""
+        self.sdk.create_branch(expected_main_last_known_sequence=12, branch_name="my-feature")
+
+        payload = self._posted_payload()
+        self.assertEqual(payload["branchName"], "my-feature")
+        self.assertEqual(payload["expectedMainLastKnownSequence"], 12)
+
+    def test_non_main_source_branch_is_sent(self):
+        """A source branch other than main is sent as sourceBranchId."""
+        self.sdk.create_branch(branch_name="my-feature", source_branch_id="branch-parent")
+
+        self.assertEqual(self._posted_payload()["sourceBranchId"], "branch-parent")
+
+    def test_source_branch_omitted_when_not_specified(self):
+        """With no source branch the payload has no sourceBranchId key at all."""
+        self.sdk.create_branch(branch_name="my-feature")
+
+        self.assertNotIn("sourceBranchId", self._posted_payload())
+
+    def test_source_branch_omitted_when_source_is_main(self):
+        """Main is the server-side default, so it is not sent explicitly."""
+        self.sdk.create_branch(branch_name="my-feature", source_branch_id="main")
+
+        self.assertNotIn("sourceBranchId", self._posted_payload())
+
+    def test_request_failure_raises_sourcerer_error(self):
+        """A failing create request raises SourcererAPIError."""
+        self.session.post.return_value = make_mock_response(409, json_body={"error": "conflict"})
+
+        with self.assertRaises(SourcererAPIError):
+            self.sdk.create_branch(branch_name="my-feature")
+
+
 class SendCommandBatch(unittest.TestCase):
     """Tests for SourcererSDK.send_command_batch serialization and lifecycle."""
 
@@ -174,6 +229,61 @@ class SendCommandBatch(unittest.TestCase):
 
         with self.assertRaises(SourcererAPIError):
             sdk.send_command_batch()
+
+
+class MergeBranch(unittest.TestCase):
+    """Tests for SourcererSDK.merge_branch sequence handling."""
+
+    def _sdk_with_sequence(self, server_sequence: int):
+        sdk = build_sdk()
+        session = MagicMock()
+        session.get.return_value = make_mock_response(
+            200, json_body={"lastKnownSequence": str(server_sequence)}
+        )
+        session.post.return_value = make_mock_response(
+            200, json_body={"sequence": str(server_sequence + 1), "message": "ok"}
+        )
+        sdk._session = session
+        return sdk, session
+
+    def test_merge_fetches_fresh_sequence_over_stale_cache(self):
+        """The merge payload carries the server's sequence, not the cached one."""
+        sdk, session = self._sdk_with_sequence(server_sequence=1751)
+        # Stale cache, e.g. from a projection read that lagged the event store.
+        sdk._last_known_sequence = 1750
+
+        sdk.merge_branch(deployment_message="msg")
+
+        session.get.assert_called_once_with(
+            "https://sourcerer.test/accounts/acc-1/projects/proj-1/branches/branch-1/sequence"
+        )
+        payload = session.post.call_args.kwargs["json"]
+        self.assertEqual(payload["expectedBranchLastKnownSequence"], 1751)
+        self.assertEqual(sdk._last_known_sequence, 1751)
+
+    def test_sync_fetches_fresh_sequence_over_stale_cache(self):
+        """sync_branch refreshes the sequence the same way."""
+        sdk, session = self._sdk_with_sequence(server_sequence=1751)
+        sdk._last_known_sequence = 1750
+
+        sdk.sync_branch()
+
+        payload = session.post.call_args.kwargs["json"]
+        self.assertEqual(payload["expectedBranchSequence"], 1751)
+
+    def test_sequence_mismatch_error_raises_sourcerer_error(self):
+        """A non-conflict 400 (e.g. SEQUENCE_MISMATCH) raises SourcererAPIError."""
+        sdk, session = self._sdk_with_sequence(server_sequence=1750)
+        session.post.return_value = make_mock_response(
+            400,
+            json_body={
+                "error": "sequence mismatch, received 1750 but expected 1751",
+                "error_code": "SEQUENCE_MISMATCH",
+            },
+        )
+
+        with self.assertRaises(SourcererAPIError):
+            sdk.merge_branch(deployment_message="msg")
 
 
 if __name__ == "__main__":

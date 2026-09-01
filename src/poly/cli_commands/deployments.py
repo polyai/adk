@@ -8,7 +8,7 @@ import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from typing import Any, Optional
 
-from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project
 from poly.output.json_output import json_print
 from poly.project import AgentStudioProject
@@ -20,6 +20,8 @@ class DeploymentsCommand(BaseCommand):
     """Manage deployments and A/B tests for the project."""
 
     command = "deployments"
+
+    group = BUILDER_API_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
@@ -55,15 +57,18 @@ class DeploymentsCommand(BaseCommand):
             "--env",
             "-e",
             type=str,
-            default="sandbox",
+            default=None,
             choices=["sandbox", "pre-release", "live"],
-            help="Environment to list deployments for. Defaults to sandbox.",
+            help=(
+                "Environment to list deployments for. Defaults to live for projects using"
+                " simplified deployments, otherwise sandbox."
+            ),
         )
         deployment_list_parser.add_argument(
             "--limit",
             type=int,
-            default=10,
-            help="Number of versions to show. Defaults to 10.",
+            default=None,
+            help="Maximum number of versions to show. Shows all by default.",
         )
         deployment_list_parser.add_argument(
             "--offset",
@@ -104,9 +109,12 @@ class DeploymentsCommand(BaseCommand):
             "--env",
             "-e",
             type=str,
-            default="sandbox",
+            default=None,
             choices=["sandbox", "pre-release", "live"],
-            help="Environment to query. Defaults to sandbox.",
+            help=(
+                "Environment to query. Defaults to live for projects using simplified"
+                " deployments, otherwise sandbox."
+            ),
         )
 
         deployment_promote_parser = deployments_subparsers.add_parser(
@@ -154,9 +162,11 @@ class DeploymentsCommand(BaseCommand):
         deployment_rollback_parser = deployments_subparsers.add_parser(
             "rollback",
             parents=[parents.path, parents.json, parents.verbose, parents.debug],
-            help="Rollback sandbox/main to a previous version.",
+            help="Rollback main to a previous version.",
             description=(
-                "Rollback a deployment to a previous version.\n\nExamples:\n  poly deployments rollback --to <deployment_id>\n"
+                "Rollback a deployment to a previous version.\n\n"
+                "Targets live for projects using simplified deployments, otherwise"
+                " sandbox.\n\nExamples:\n  poly deployments rollback --to <deployment_id>\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -478,8 +488,8 @@ class DeploymentsCommand(BaseCommand):
     def deployments_list(
         cls,
         base_path: str,
-        environment: str = "sandbox",
-        limit: int = 10,
+        environment: Optional[str] = None,
+        limit: Optional[int] = None,
         offset: int = 0,
         version_hash: str = None,
         output_json: bool = False,
@@ -487,22 +497,25 @@ class DeploymentsCommand(BaseCommand):
     ) -> None:
         """List deployment history for the project.
 
-        By default shows the 10 most recent deployments for the sandbox environment.
-        Pass version_hash to start the listing from a specific version. Use details for
-        full per-deployment metadata.
+        By default shows all deployments for live on projects using simplified
+        deployments, and for sandbox otherwise. Pass version_hash to start the listing
+        from a specific version. Use details for full per-deployment metadata.
 
         Args:
             base_path: Base path for the project.
-            environment: Environment to query — sandbox, pre-release, or live.
-            limit: Maximum number of versions to show.
+            environment: Environment to query — sandbox, pre-release, or live. Defaults
+                to the environment holding the project's deployments.
+            limit: Maximum number of versions to show. Shows all by default.
             offset: Number of versions to skip before showing results.
             version_hash: Start listing from this version hash (overrides offset).
             output_json: If True, print result as JSON instead of rich text.
             details: If True, print full metadata for each deployment.
         """
-        from poly.output.console import error, print_deployments
+        from poly.output.console import error, paged_output, print_deployments
 
-        project = load_project(base_path)
+        project = load_project(base_path, output_json=output_json)
+        if environment is None:
+            environment = "live" if project.using_simplified_deployments else "sandbox"
         versions, active_deployment_hashes = project.get_deployments(client_env=environment)
 
         if not versions:
@@ -524,7 +537,8 @@ class DeploymentsCommand(BaseCommand):
                 return
             offset = version_idx
 
-        versions = versions[offset : offset + limit]
+        end = offset + limit if limit is not None else None
+        versions = versions[offset:end]
         if output_json:
             json_output = {
                 "versions": versions,
@@ -532,32 +546,38 @@ class DeploymentsCommand(BaseCommand):
             }
             json_print(json_output)
         else:
-            print_deployments(versions, active_deployment_hashes, details=details)
+            with paged_output():
+                print_deployments(versions, active_deployment_hashes, details=details)
 
     @classmethod
     def deployments_show(
         cls,
         base_path: str,
         version_hash: str,
-        environment: str = "sandbox",
+        environment: Optional[str] = None,
         output_json: bool = False,
     ) -> None:
         """Show detailed metadata and included deployments for a single deployment.
 
-        Displays the deployment record and the sandbox deployments included since
-        the previous version in the given environment. Sandbox is always the source
-        of truth for the linear version history — pre-release/live only contain
-        promotions that reference the same version hashes.
+        Displays the deployment record and the sandbox deployments included since the
+        previous version in the given environment. Sandbox remains the source of truth
+        for the linear version history — pre-release/live promotions carry the same
+        version hashes forward. Deployments made under simplified deployments never
+        reached sandbox, so nothing is bundled into them and the included list is empty;
+        a project's older pre-migration promotions still resolve normally.
 
         Args:
             base_path: Base path for the project.
             version_hash: Full or prefix hash of the target deployment.
-            environment: Environment to query (sandbox, pre-release, live).
+            environment: Environment to query (sandbox, pre-release, live). Defaults to
+                the environment holding the project's deployments.
             output_json: If True, emit machine-readable JSON.
         """
         from poly.output.console import error, print_deployment_show
 
         project = load_project(base_path, output_json=output_json)
+        if environment is None:
+            environment = "live" if project.using_simplified_deployments else "sandbox"
         env_versions, active_deployment_hashes = project.get_deployments(client_env=environment)
 
         if not env_versions:
@@ -585,14 +605,14 @@ class DeploymentsCommand(BaseCommand):
         if version_idx < len(env_versions) - 1:
             predecessor_full_hash = env_versions[version_idx + 1].get("version_hash", "")
 
-        # Resolve included deployments from sandbox (the linear history)
+        # Resolve included deployments from the environment holding the linear history
         if environment == "sandbox":
-            sandbox_versions = env_versions
+            history_versions = env_versions
         else:
-            sandbox_versions, _ = project.get_deployments(client_env="sandbox")
+            history_versions, _ = project.get_deployments(client_env="sandbox")
 
         included, is_rollback = cls._resolve_included_deployments(
-            sandbox_versions, target_full_hash, predecessor_full_hash
+            history_versions, target_full_hash, predecessor_full_hash
         )
 
         if output_json:
@@ -639,6 +659,21 @@ class DeploymentsCommand(BaseCommand):
 
         result: dict = {"success": False, "to_env": to_env}
         deployment_hash = None
+
+        # Under simplified deployments the sandbox -> pre-release -> live ladder no
+        # longer exists: merging to main deploys straight to live, and sandbox is
+        # frozen at its pre-migration state. The platform does not reject promotions,
+        # so without this guard promoting would republish stale content to production.
+        if project.using_simplified_deployments:
+            msg = (
+                "'poly deployments promote' is not available for projects using simplified"
+                " deployments. Merging to main deploys directly to live."
+            )
+            if output_json:
+                json_print({**result, "error": msg})
+            else:
+                error(msg)
+            sys.exit(1)
 
         if to_env not in ["pre-release", "live"]:
             msg = f"Invalid target environment '{to_env}'. Must be 'pre-release' or 'live'."
@@ -747,14 +782,19 @@ class DeploymentsCommand(BaseCommand):
         output_json: bool = False,
         dry_run: bool = False,
     ) -> None:
-        """Rollback sandbox/main to a previous deployment."""
+        """Rollback main to a previous deployment.
+
+        Targets live for projects using simplified deployments — where main tracks live
+        and the platform only accepts live rollback targets — and sandbox otherwise.
+        """
         import questionary
 
         from poly.output.console import error, plain, print_deployments, success, warning
 
         project = load_project(base_path, output_json=output_json)
 
-        versions, active_deployment_hashes = project.get_deployments("sandbox")
+        environment = "live" if project.using_simplified_deployments else "sandbox"
+        versions, active_deployment_hashes = project.get_deployments(environment)
 
         # Resolve deployment to full version hash
         if deployment in active_deployment_hashes:
@@ -768,7 +808,7 @@ class DeploymentsCommand(BaseCommand):
         )
 
         if not deployment_version:
-            msg = f"Deployment '{deployment}' not found in sandbox."
+            msg = f"Deployment '{deployment}' not found in {environment}."
             if output_json:
                 json_print({"success": False, "error": msg})
             else:
@@ -778,12 +818,10 @@ class DeploymentsCommand(BaseCommand):
         deployment_metadata = deployment_version.get("deployment_metadata", {})
         deployment_message = deployment_metadata.get("deployment_message")
 
-        # Resolve reverted deployments (current sandbox -> target)
+        # Resolve reverted deployments (current deployment -> target)
         target_full_hash = deployment_version.get("version_hash", "")
-        current_sandbox_hash = active_deployment_hashes.get("sandbox")
-        reverted, _ = cls._resolve_included_deployments(
-            versions, current_sandbox_hash, target_full_hash
-        )
+        current_hash = active_deployment_hashes.get(environment)
+        reverted, _ = cls._resolve_included_deployments(versions, current_hash, target_full_hash)
 
         result = {
             "success": False,
@@ -794,7 +832,7 @@ class DeploymentsCommand(BaseCommand):
 
         if not output_json:
             plain(
-                f"Rolling back sandbox to deployment "
+                f"Rolling back {environment} to deployment "
                 f"'[bold]{target_full_hash[:9]}[/bold]: {deployment_message or '-'}'"
             )
             if reverted:
@@ -820,7 +858,7 @@ class DeploymentsCommand(BaseCommand):
             if output_json:
                 json_print({**result, "success": True})
             else:
-                success(f"Sandbox rolled back to deployment {deployment}.")
+                success(f"{environment.capitalize()} rolled back to deployment {deployment}.")
         except Exception as e:
             if output_json:
                 json_print({**result, "error": str(e)})
@@ -972,7 +1010,7 @@ class DeploymentsCommand(BaseCommand):
         output_json: bool = False,
     ) -> None:
         """List A/B tests for the project."""
-        from poly.output.console import print_ab_tests
+        from poly.output.console import paged_output, print_ab_tests
 
         project = load_project(base_path, output_json=output_json)
         ab_tests = project.list_ab_tests(limit=limit)
@@ -980,7 +1018,8 @@ class DeploymentsCommand(BaseCommand):
             json_print({"success": True, "ab_tests": ab_tests})
         else:
             dep_map = cls._fetch_deployment_map(project) if ab_tests else {}
-            print_ab_tests(ab_tests, deployments=dep_map)
+            with paged_output():
+                print_ab_tests(ab_tests, deployments=dep_map)
 
     @classmethod
     def ab_test_active(

@@ -10,8 +10,8 @@ import requests
 from google.protobuf.message import Message
 
 from poly.handlers.platform_api import PlatformAPIHandler
+from poly.handlers.posthog import PosthogHandler
 from poly.handlers.protobuf.commands_pb2 import Command
-from poly.handlers.protobuf.handoff_pb2 import Handoff_SetDefault
 from poly.handlers.sdk import SourcererAPIError
 from poly.handlers.sync_client import SyncClientHandler
 from poly.resources import (
@@ -24,7 +24,8 @@ from poly.resources import (
     Function,
     FunctionStep,
     Handoff,
-    Resource,
+    ResourceMap,
+    ResourceMapping,
     SMSTemplate,
     Variable,
     Variant,
@@ -137,6 +138,20 @@ class AgentStudioInterface:
         return PlatformAPIHandler.get_accounts(region)
 
     @staticmethod
+    def get_project(region: str, account_id: str, project_id: str) -> dict[str, Any]:
+        """Get the details of a specific project.
+
+        Args:
+            region (str): The region name
+            account_id (str): The account ID
+            project_id (str): The project ID
+
+        Returns:
+            dict[str, Any]: A dictionary containing the project's details
+        """
+        return PlatformAPIHandler.get_project(region, account_id, project_id)
+
+    @staticmethod
     def get_projects(region: str, account_id: str) -> dict[str, str]:
         """Get the projects for a given account.
 
@@ -233,6 +248,40 @@ class AgentStudioInterface:
         return PlatformAPIHandler.duplicate_project(region, project_id, new_name, new_id)
 
     @staticmethod
+    def list_template_projects(region: str) -> list[dict[str, Any]]:
+        """List available template projects.
+
+        Args:
+            region: The region to query.
+
+        Returns:
+            list[dict[str, Any]]: A list of template project summaries.
+        """
+        return SyncClientHandler(region=region).list_template_projects()
+
+    @staticmethod
+    def get_template_resources(
+        template_id: str, region: str
+    ) -> tuple[ResourceMap, list[ResourceMapping]]:
+        """Fetch a template and return its resources.
+
+        Combines projection fetching and resource conversion in one call.
+
+        Args:
+            template_id: The template project ID.
+            region: The region to query.
+
+        Returns:
+            tuple[ResourceMap, list[ResourceMapping]]: A tuple containing:
+                1. A dictionary mapping resource types to their resources.
+                2. A list of slim resources.
+        """
+        from poly.resources.resource import load_resources_from_projection
+
+        projection = SyncClientHandler(region=region).get_template_project_projection(template_id)
+        return load_resources_from_projection(projection)
+
+    @staticmethod
     def get_deployments(
         region: str, account_id: str, project_id: str, client_env: str = "sandbox"
     ) -> list[dict[str, Any]]:
@@ -266,15 +315,17 @@ class AgentStudioInterface:
 
     def pull_deployment_resources(
         self, deployment_id: str
-    ) -> dict[type[Resource], dict[str, Resource]]:
+    ) -> tuple[ResourceMap, list[ResourceMapping]]:
         """Fetch all resources for a specific deployment of a project.
 
         Args:
             deployment_id (str): The deployment ID
 
         Returns:
-            dict[type[Resource], dict[str, Resource]]: A dictionary mapping resource types to
-                their resources
+            tuple[ResourceMap, list[ResourceMapping]]: A tuple containing:
+                1. A dictionary mapping resource types to their resources.
+                2. A list of slim resources.
+
         """
         from poly.resources.resource import load_resources_from_projection
 
@@ -286,7 +337,7 @@ class AgentStudioInterface:
 
     def pull_resources(
         self, projection_json: Optional[dict[str, Any]] = None
-    ) -> tuple[dict[type[Resource], dict[str, Resource]], dict[str, Any]]:
+    ) -> tuple[ResourceMap, list[ResourceMapping], dict[str, Any]]:
         """Fetch all resources for the specific project.
 
         Args:
@@ -294,17 +345,20 @@ class AgentStudioInterface:
                 If provided, the projection will be used instead of fetching it from the API.
 
         Returns:
-            dict[type[Resource], dict[str, Resource]]: A dictionary mapping resource types to
-                their resources
-            dict[str, Any]: The projection data
+            tuple[ResourceMap, list[ResourceMapping], dict[str, Any]]: A tuple containing:
+                1. A dictionary mapping resource types to their resources.
+                2. A list of slim resources.
+                3. The projection JSON.
         """
         from poly.resources.resource import load_resources_from_projection
 
         if projection_json is not None:
-            return load_resources_from_projection(projection_json), projection_json
+            resources, slim_resources = load_resources_from_projection(projection_json)
+            return resources, slim_resources, projection_json
         try:
             projection = self.sync_client.pull_projection()
-            return load_resources_from_projection(projection), projection
+            resources, slim_resources = load_resources_from_projection(projection)
+            return resources, slim_resources, projection
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
@@ -439,19 +493,6 @@ class AgentStudioInterface:
                         )
                     )
 
-            # is_default is not part of create/update protos; it requires a separate command
-            for resource_dict in [new_resources, updated_resources]:
-                for resource in resource_dict.get(Handoff, {}).values():
-                    if isinstance(resource, Handoff) and resource.is_default:
-                        commands.append(
-                            Command(
-                                type="handoff_set_default",
-                                command_id=str(uuid.uuid4()),
-                                metadata=metadata,
-                                handoff_set_default=Handoff_SetDefault(id=resource.resource_id),
-                            )
-                        )
-
             for command in commands:
                 self.sync_client.sdk.add_command_to_queue(command)
 
@@ -512,17 +553,20 @@ class AgentStudioInterface:
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
-    def create_branch(self, branch_name: Optional[str] = None) -> str:
+    def create_branch(
+        self, branch_name: Optional[str] = None, source_branch_id: Optional[str] = None
+    ) -> str:
         """Create a new branch in the project.
 
         Args:
             branch_name (str): The name of the new branch
+            source_branch_id (str): The ID of the source branch to create the new branch from. Defaults to 'main' if not provided.
 
         Returns:
             str: The ID of the newly created branch
         """
         try:
-            return self.sync_client.create_branch(branch_name)
+            return self.sync_client.create_branch(branch_name, source_branch_id=source_branch_id)
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
@@ -541,13 +585,13 @@ class AgentStudioInterface:
             self._handle_api_error(e)
 
     def merge_branch(
-        self, message: str, conflict_resolutions: Optional[list[dict[str, Any]]] = None
+        self, message: Optional[str], conflict_resolutions: Optional[list[dict[str, Any]]] = None
     ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
         """Merge the current branch into main.
 
         Args:
-            message (str): The merge commit message
-            conflict_resolutions (list[dict[str, Any]]): A list of conflict resolutions. Each resolution should have:
+            message (Optional[str]): The merge commit message
+            conflict_resolutions (Optional[list[dict[str, Any]]]): A list of conflict resolutions. Each resolution should have:
                 - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
                 - strategy: Resolution strategy - "ours", "theirs", or "base"
                 - value: Optional custom value (only used with custom strategy)
@@ -559,6 +603,27 @@ class AgentStudioInterface:
         """
         try:
             return self.sync_client.merge_branch(message, conflict_resolutions)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def sync_branch(
+        self, conflict_resolutions: Optional[list[dict[str, Any]]] = None
+    ) -> tuple[bool, list[dict[str, str]], list[dict[str, str]]]:
+        """Sync the current branch with it's parent.
+
+        Args:
+            conflict_resolutions (list[dict[str, Any]]): A list of conflict resolutions. Each resolution should have:
+                - path: List of strings representing the path to the conflicted field (e.g., ["users", "1", "name"])
+                - strategy: Resolution strategy - "ours", "theirs", or "base"
+                - value: Optional custom value (only used with custom strategy)
+
+        Returns:
+            success (bool): True if the sync was successful, False otherwise
+            list[dict[str, str]]: A list of conflict information if the merge failed, empty list if successful
+            list[dict[str, str]]: A list of error information if the merge failed, empty list if successful
+        """
+        try:
+            return self.sync_client.sync_branch(conflict_resolutions)
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
@@ -578,7 +643,7 @@ class AgentStudioInterface:
 
     def pull_branch_resources(
         self, branch_id: str, at_sequence: Optional[int] = None
-    ) -> dict[type, dict[str, Any]]:
+    ) -> tuple[ResourceMap, list[ResourceMapping]]:
         """Fetch resources for a branch, optionally at a historical sequence.
 
         Args:
@@ -586,7 +651,9 @@ class AgentStudioInterface:
             at_sequence: When provided, fetches the projection at this sequence number.
 
         Returns:
-            A ResourceMap of the branch's resources.
+            tuple[ResourceMap, list[ResourceMapping]]: A tuple containing:
+                1. A dictionary mapping resource types to their resources.
+                2. A list of slim resources.
         """
         from poly.resources.resource import load_resources_from_projection
 
@@ -1551,3 +1618,165 @@ class AgentStudioInterface:
             dict: The updated RTC config.
         """
         return PlatformAPIHandler.patch_rtc_variables(region, project_id, client_env, variables)
+
+    # -- Functions API ------------------------------------------------------
+    # Public REST API for managing/executing user-defined Functions. Distinct
+    # from the local-file/decorator Functions synced via push/pull.
+
+    @staticmethod
+    def list_functions(region: str, project_id: str, branch_id: str) -> list[dict]:
+        """List a branch's active functions.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            list[dict]: The branch's active functions, each with "id" and "name".
+        """
+        return PlatformAPIHandler.list_functions(region, project_id, branch_id)
+
+    @staticmethod
+    def execute_function(
+        region: str,
+        project_id: str,
+        branch_id: str,
+        function_id: str,
+        args: dict,
+    ) -> dict:
+        """Execute a function with the given arguments.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID.
+            args: The arguments to pass to the function.
+
+        Returns:
+            dict: {"body": ..., "logs": [...], "runtime": ...}.
+        """
+        return PlatformAPIHandler.execute_function(region, project_id, branch_id, function_id, args)
+
+    @staticmethod
+    def validate_functions(region: str, project_id: str, branch_id: str) -> dict:
+        """Validate all functions on a branch.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            dict: {"valid": bool, "issues": [...]}.
+        """
+        return PlatformAPIHandler.validate_functions(region, project_id, branch_id)
+
+    def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
+        """Get the history of a specific branch.
+
+        Args:
+            branch_id (str): The ID of the branch
+
+        Returns:
+            list[dict[str, Any]]: A list of commit history entries for the branch
+        """
+        try:
+            return self.sync_client.get_branch_history(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def rename_branch(self, new_branch_name: str) -> bool:
+        """Rename the current branch to a new name.
+
+        Args:
+            new_branch_name (str): The new name for the current branch
+
+        Returns:
+            bool: True if the branch was renamed successfully, False otherwise
+        """
+        try:
+            return self.sync_client.rename_branch(new_branch_name)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def list_archived_branches(self) -> list[dict[str, Any]]:
+        """List soft-deleted (archived) branches for the project.
+
+        Returns:
+            list[dict[str, Any]]: A list of archived branch entries.
+        """
+        try:
+            return self.sync_client.list_archived_branches()
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def restore_branch(self, branch_id: str) -> bool:
+        """Restore a soft-deleted branch from the archive.
+
+        Args:
+            branch_id (str): The ID of the branch to restore.
+
+        Returns:
+            bool: True if the branch was restored successfully, False otherwise.
+        """
+        try:
+            return self.sync_client.restore_branch(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def tag_branch(self, branch_id: str) -> bool:
+        """Tag the current branch with a specific tag name.
+
+        Args:
+            branch_id (str): The ID of the branch to tag.
+
+        Returns:
+            bool: True if the branch was tagged successfully, False otherwise.
+        """
+        try:
+            return self.sync_client.tag_branch(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def untag_branch(self, branch_id: str) -> bool:
+        """Remove a specific tag from the current branch.
+
+        Args:
+            branch_id (str): The ID of the branch to untag.
+
+        Returns:
+            bool: True if the branch was untagged successfully, False otherwise.
+        """
+        try:
+            return self.sync_client.untag_branch(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
+    def feature_flag_enabled(
+        self,
+        key: str,
+        identity: Optional[str] = None,
+        region: Optional[str] = None,
+        project_id: Optional[str] = None,
+        default: bool = False,
+    ) -> bool:
+        """Check if a feature flag is enabled for a given identity.
+
+        Args:
+            key (str): The feature flag key to check.
+            identity (Optional[str]): The unique identifier for the user or entity.
+            region (Optional[str]): The region name for grouping.
+            project_id (Optional[str]): The project ID for grouping.
+            default (bool): The default value to return if the flag cannot be evaluated.
+
+        Returns:
+            bool: True if the feature flag is enabled, False otherwise.
+        """
+        return PosthogHandler.is_feature_enabled(
+            region=region,
+            key=key,
+            default=default,
+            project_id=project_id,
+        )

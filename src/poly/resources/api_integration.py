@@ -283,6 +283,10 @@ class ApiIntegration(MultiResourceYamlResource):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "ApiIntegration"]:
         """Parse API integrations from a projection dict."""
+        if "apiIntegrations" not in projection:
+            logger.debug("No read access to API integrations - it will not be pulled.")
+            return {}
+
         api_integrations = {}
         for integration_id, integration_data in (
             projection.get("apiIntegrations", {})
@@ -338,7 +342,9 @@ class ApiIntegration(MultiResourceYamlResource):
             "name": self.name,
             "description": self.description,
             "environments": self.environments.to_yaml_dict(),
-            "operations": [op.to_yaml_dict() for op in self.operations],
+            "operations": [
+                op.to_yaml_dict() for op in sorted(self.operations, key=lambda op: op.name)
+            ],
         }
 
     @classmethod

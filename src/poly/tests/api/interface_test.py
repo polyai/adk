@@ -125,12 +125,15 @@ class PullResourcesWithProjection(unittest.TestCase):
         """Passing projection_json bypasses the sync client and loads locally."""
         interface = AgentStudioInterface()
         interface.sync_client = MagicMock()
-        mock_loader.return_value = {"loaded": "resources"}
+        mock_loader.return_value = ({"loaded": "resources"}, ["slim"])
         projection = {"knowledgeBase": {}}
 
-        resources, returned_projection = interface.pull_resources(projection_json=projection)
+        resources, slim_resources, returned_projection = interface.pull_resources(
+            projection_json=projection
+        )
 
         self.assertEqual(resources, {"loaded": "resources"})
+        self.assertEqual(slim_resources, ["slim"])
         self.assertIs(returned_projection, projection)
         mock_loader.assert_called_once_with(projection)
         interface.sync_client.pull_projection.assert_not_called()
@@ -199,6 +202,140 @@ class QueueResources(unittest.TestCase):
 
         types = [c.type for c in commands]
         self.assertLess(types.index("variable_delete"), types.index("delete_topic"))
+
+
+class GetBranchHistoryInterface(unittest.TestCase):
+    """Tests for AgentStudioInterface.get_branch_history."""
+
+    def setUp(self):
+        self.interface = AgentStudioInterface()
+        self.interface.sync_client = MagicMock()
+
+    def test_returns_history_from_sync_client(self):
+        """The interface delegates to sync_client and returns the result."""
+        expected = [{"commit_id": "c1", "message": "first commit"}]
+        self.interface.sync_client.get_branch_history.return_value = expected
+
+        result = self.interface.get_branch_history("branch-1")
+
+        self.assertEqual(result, expected)
+        self.interface.sync_client.get_branch_history.assert_called_once_with("branch-1")
+
+    def test_translates_http_error(self):
+        """An HTTPError from the sync client is translated into a ValueError."""
+        self.interface.sync_client.get_branch_history.side_effect = requests.HTTPError("boom")
+
+        with self.assertRaises(ValueError):
+            self.interface.get_branch_history("branch-1")
+
+    def test_translates_sourcerer_api_error(self):
+        """A SourcererAPIError from the sync client is translated into a ValueError."""
+        self.interface.sync_client.get_branch_history.side_effect = SourcererAPIError("boom")
+
+        with self.assertRaises(ValueError):
+            self.interface.get_branch_history("branch-1")
+
+
+class RenameBranchInterface(unittest.TestCase):
+    """Tests for AgentStudioInterface.rename_branch."""
+
+    def setUp(self):
+        self.interface = AgentStudioInterface()
+        self.interface.sync_client = MagicMock()
+
+    def test_returns_result_from_sync_client(self):
+        """The interface delegates to sync_client and returns True on success."""
+        self.interface.sync_client.rename_branch.return_value = True
+
+        result = self.interface.rename_branch("new-name")
+
+        self.assertTrue(result)
+        self.interface.sync_client.rename_branch.assert_called_once_with("new-name")
+
+    def test_translates_http_error(self):
+        """An HTTPError from the sync client is translated into a ValueError."""
+        self.interface.sync_client.rename_branch.side_effect = requests.HTTPError("boom")
+
+        with self.assertRaises(ValueError):
+            self.interface.rename_branch("new-name")
+
+    def test_translates_sourcerer_api_error(self):
+        """A SourcererAPIError from the sync client is translated into a ValueError."""
+        self.interface.sync_client.rename_branch.side_effect = SourcererAPIError("boom")
+
+        with self.assertRaises(ValueError):
+            self.interface.rename_branch("new-name")
+
+
+class ListArchivedBranchesInterface(unittest.TestCase):
+    """Tests for AgentStudioInterface.list_archived_branches."""
+
+    def setUp(self):
+        self.interface = AgentStudioInterface()
+        self.interface.sync_client = MagicMock()
+
+    def test_returns_result_from_sync_client(self):
+        """The interface delegates to sync_client and returns the result."""
+        expected = [{"branchId": "b-1", "name": "old", "archivedAt": "2026-07-01"}]
+        self.interface.sync_client.list_archived_branches.return_value = expected
+
+        result = self.interface.list_archived_branches()
+
+        self.assertEqual(result, expected)
+        self.interface.sync_client.list_archived_branches.assert_called_once()
+
+    def test_translates_http_error(self):
+        """An HTTPError from the sync client is translated into a ValueError."""
+        self.interface.sync_client.list_archived_branches.side_effect = requests.HTTPError("boom")
+
+        with self.assertRaises(ValueError):
+            self.interface.list_archived_branches()
+
+    def test_translates_sourcerer_api_error(self):
+        """A SourcererAPIError is translated into a ValueError."""
+        self.interface.sync_client.list_archived_branches.side_effect = SourcererAPIError("boom")
+
+        with self.assertRaises(ValueError):
+            self.interface.list_archived_branches()
+
+
+class RestoreBranchInterface(unittest.TestCase):
+    """Tests for AgentStudioInterface.restore_branch."""
+
+    def setUp(self):
+        self.interface = AgentStudioInterface()
+        self.interface.sync_client = MagicMock()
+
+    def test_returns_result_from_sync_client(self):
+        """The interface delegates to sync_client and returns True on success."""
+        self.interface.sync_client.restore_branch.return_value = True
+
+        result = self.interface.restore_branch("branch-1")
+
+        self.assertTrue(result)
+        self.interface.sync_client.restore_branch.assert_called_once_with("branch-1")
+
+    def test_returns_false_from_sync_client(self):
+        """The interface returns False when sync_client returns False."""
+        self.interface.sync_client.restore_branch.return_value = False
+
+        result = self.interface.restore_branch("branch-1")
+
+        self.assertFalse(result)
+
+    def test_translates_http_error(self):
+        """An HTTPError from the sync client is translated into a ValueError."""
+        self.interface.sync_client.restore_branch.side_effect = requests.HTTPError("boom")
+
+        with self.assertRaises(ValueError):
+            self.interface.restore_branch("branch-1")
+
+    def test_translates_sourcerer_api_error(self):
+        """A SourcererAPIError is translated into a ValueError."""
+        self.interface.sync_client.restore_branch.side_effect = SourcererAPIError("boom")
+
+        with self.assertRaises(ValueError):
+            self.interface.restore_branch("branch-1")
 
 
 if __name__ == "__main__":
