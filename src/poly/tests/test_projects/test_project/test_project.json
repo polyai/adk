@@ -77,6 +77,11 @@
         "resource_id": "VARIANT-default",
         "name": "default",
         "is_default": true
+      },
+      "VARIANT-spanish": {
+        "resource_id": "VARIANT-spanish",
+        "name": "spanish",
+        "is_default": false
       }
     },
     "variant_attributes": {
@@ -84,28 +89,32 @@
         "resource_id": "customer-name",
         "name": "customer-name",
         "mappings": {
-          "VARIANT-default": "value-1"
+          "VARIANT-default": "value-1",
+          "VARIANT-spanish": "valor-1"
         }
       },
       "email-address": {
         "resource_id": "email-address",
         "name": "email-address",
         "mappings": {
-          "VARIANT-default": "value-2"
+          "VARIANT-default": "value-2",
+          "VARIANT-spanish": "valor-2"
         }
       },
       "member-status": {
         "resource_id": "member-status",
         "name": "member-status",
         "mappings": {
-          "VARIANT-default": "value-3"
+          "VARIANT-default": "value-3",
+          "VARIANT-spanish": "valor-3"
         }
       },
       "booking-status": {
         "resource_id": "booking-status",
         "name": "booking-status",
         "mappings": {
-          "VARIANT-default": "value-4"
+          "VARIANT-default": "value-4",
+          "VARIANT-spanish": "valor-4"
         }
       }
     },
@@ -384,6 +393,21 @@
         "enabled": true
       }
     },
+    "child_topics": {
+      "TOPIC-Spanish Only Topic": {
+        "resource_id": "TOPIC-Spanish Only Topic",
+        "name": "Spanish Only Topic",
+        "variant_id": "VARIANT-spanish",
+        "variant_name": "spanish",
+        "actions": "Handle this request in Spanish using {{fn:FUNCTION-test_function}} and {{attr:customer-name}}.",
+        "content": "This topic only applies when the Spanish variant is active.",
+        "example_queries": [
+          "How can I help you?",
+          "What services do you offer?"
+        ],
+        "enabled": true
+      }
+    },
     "voice_greeting": {
       "voice_greeting": {
         "resource_id": "voice_greeting",
@@ -414,25 +438,11 @@
         "prompt": "You are a helpful and professional web chat assistant."
       }
     },
-    "personality": {
-      "PERSONALITY-personality": {
-        "resource_id": "PERSONALITY-personality",
-        "name": "personality",
-        "adjectives": {
-          "Polite": true,
-          "Calm": true,
-          "Kind": true
-        },
-        "custom": ""
-      }
-    },
-    "role": {
-      "ROLE-role": {
-        "resource_id": "ROLE-role",
-        "name": "role",
-        "value": "Customer Service Representative",
-        "additional_info": "Handles customer inquiries and bookings",
-        "custom": ""
+    "persona": {
+      "PERSONA-persona": {
+        "resource_id": "PERSONA-persona",
+        "name": "persona",
+        "content": "You are a calm and polite concierge.\nGreet the caller by name using {{vrbl:VAR-customer_name}}.\n"
       }
     },
     "rules": {
@@ -1242,7 +1252,23 @@
           ]
         },
         "variant": null,
-        "language": "en-GB"
+        "language": "en-GB",
+        "api_mocks": {
+          "mocks": {
+            "customer_api": {
+              "get_confirmation_status": [
+                {
+                  "respond": {
+                    "status": 200,
+                    "body": {
+                      "confirmed": true
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
       },
       "TEST-webchat_smoke": {
         "resource_id": "TEST-webchat_smoke",
@@ -1304,6 +1330,48 @@
         "name": "test_document",
         "path": "test_document.md",
         "contents": "This is a test document.\nIt has multiple lines.\n"
+      },
+      "CONTEXT.MD": {
+        "resource_id": "CONTEXT.MD",
+        "name": "CONTEXT",
+        "path": "CONTEXT.MD",
+        "contents": "This is platform context file.\n"
+      }
+    },
+    "platform_guardrails": {
+      "jailbreak_defence": {
+        "resource_id": "jailbreak_defence",
+        "name": "jailbreak_defence",
+        "enabled": true
+      },
+      "hallucination_control": {
+        "resource_id": "hallucination_control",
+        "name": "hallucination_control",
+        "enabled": false
+      },
+      "ai_identity": {
+        "resource_id": "ai_identity",
+        "name": "ai_identity",
+        "enabled": true
+      },
+      "emergency_escalation": {
+        "resource_id": "emergency_escalation",
+        "name": "emergency_escalation",
+        "enabled": true
+      },
+      "tool_call_integrity": {
+        "resource_id": "tool_call_integrity",
+        "name": "tool_call_integrity",
+        "enabled": false
+      }
+    },
+    "custom_guardrails": {
+      "CUSTOM_GUARDRAILS-no_medical_advice": {
+        "resource_id": "CUSTOM_GUARDRAILS-no_medical_advice",
+        "name": "No medical advice",
+        "prompt": "Never give medical advice. Offer to transfer the caller to a human instead.",
+        "action": "warn",
+        "enabled": true
       }
     }
   },

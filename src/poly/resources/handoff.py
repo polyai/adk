@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import ClassVar
@@ -23,6 +24,8 @@ from poly.resources.resource import (
     MultiResourceYamlResource,
     register_resource,
 )
+
+logger = logging.getLogger(__name__)
 
 VALID_SIP_METHODS = ("invite", "refer", "bye")
 VALID_ENCRYPTION = ("TLS/SRTP", "UDP/RTP")
@@ -83,11 +86,13 @@ class Handoff(MultiResourceYamlResource):
         is_default: bool = False,
         sip_config: HandoffSipConfig | dict | None = None,
         sip_headers: list | None = None,
+        slim: bool = False,
     ):
         self.resource_id = resource_id
         self.name = name
         self.description = description
         self.is_default = is_default
+        self.slim = slim
 
         if sip_config is None:
             sip_config = {}
@@ -107,6 +112,25 @@ class Handoff(MultiResourceYamlResource):
         """Parse handoffs from a projection dict."""
         handoffs_projection = projection.get("handoff", {}).get("handoffs", {}).get("entities", {})
         handoffs = {}
+        if "handoff" not in projection:
+            logger.debug("No read access to handoffs - they will not be pulled.")
+            return {}
+
+        # Read access is checked before "active": an auth-filtered handoff has no
+        # "active" field, and must not be mistaken for a deactivated one. Inactive
+        # handoffs are stubbed too, since we can't tell them apart here - harmless,
+        # as an inactive handoff's id is never referenced.
+        if any("active" not in handoff for handoff in handoffs_projection.values()):
+            logger.debug("No read access to handoffs - keeping names for references only.")
+            return {
+                handoff_id: cls(
+                    resource_id=handoff_id,
+                    name=handoff_data.get("name", ""),
+                    slim=True,
+                )
+                for handoff_id, handoff_data in handoffs_projection.items()
+            }
+
         for handoff_id, handoff_data in handoffs_projection.items():
             if not handoff_data.get("active", False):
                 continue
@@ -136,13 +160,15 @@ class Handoff(MultiResourceYamlResource):
         return handoffs
 
     def to_yaml_dict(self) -> dict:
-        return {
+        result = {
             "name": self.name,
             "description": self.description,
             "is_default": self.is_default,
             "sip_config": self.sip_config.to_yaml_dict(),
-            "sip_headers": self.sip_headers,
         }
+        if self.sip_headers:
+            result["sip_headers"] = self.sip_headers
+        return result
 
     @property
     def file_path(self) -> str:

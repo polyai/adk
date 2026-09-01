@@ -340,15 +340,6 @@ def default_new_variant_attributes(
         variant.attribute_ids = attribute_ids
 
 
-def filter_nondefault_variant_updates(updated_resources: ResourceMap) -> None:
-    """Drop updates for non-default variants (only the default variant is pushed)."""
-    # Only update the default variant if it's being enabled
-    updated_variants: list[Variant] = list(updated_resources.get(Variant, {}).values())
-    for variant in updated_variants:
-        if not variant.is_default:
-            updated_resources[Variant].pop(variant.resource_id, None)
-
-
 def fix_conditions_for_deleted_steps(
     new_resources: ResourceMap,
     updated_resources: ResourceMap,

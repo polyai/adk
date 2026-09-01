@@ -15,6 +15,8 @@ from copy import deepcopy
 from unittest.mock import MagicMock, patch
 
 import poly.resources.resource_utils as resource_utils
+from poly.handlers.interface import AgentStudioInterface
+from poly.handlers.protobuf.commands_pb2 import Command
 from poly.project import AgentStudioProject, DeploymentMode
 from poly.resources import (
     AsrSettings,
@@ -28,12 +30,12 @@ from poly.resources import (
     FlowStep,
     Function,
     FunctionStep,
+    Handoff,
     KeyphraseBoosting,
     Pronunciation,
     Resource,
     ResourceMapping,
-    SettingsPersonality,
-    SettingsRole,
+    SettingsPersona,
     SettingsRules,
     SMSTemplate,
     TestCase,
@@ -64,10 +66,10 @@ DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_PROJECT_DIR = os.path.join(DIR, "test_projects")
 TEST_DIR = os.path.join(TEST_PROJECT_DIR, "test_project")
 PROJECT_DATA_LOC = os.path.join(TEST_DIR, "test_project.json")
-PROJECT_DATA = json.loads(open(PROJECT_DATA_LOC).read())
+PROJECT_DATA = json.loads(open(PROJECT_DATA_LOC, encoding="utf-8").read())
 EMPTY_PROJECT_DIR = os.path.join(TEST_PROJECT_DIR, "test_empty_project")
 EMPTY_PROJECT_DATA_LOC = os.path.join(EMPTY_PROJECT_DIR, "empty_project.json")
-EMPTY_PROJECT_DATA = json.loads(open(EMPTY_PROJECT_DATA_LOC).read())
+EMPTY_PROJECT_DATA = json.loads(open(EMPTY_PROJECT_DATA_LOC, encoding="utf-8").read())
 
 
 class InitTest(unittest.TestCase):
@@ -103,6 +105,7 @@ class InitProjectOnSaveTest(unittest.TestCase):
         """on_save should be called once per resource with (current, total)"""
         self.mock_api_handler.pull_resources.return_value = (
             AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR).resources,
+            [],
             {},
         )
         on_save = MagicMock()
@@ -124,6 +127,7 @@ class InitProjectOnSaveTest(unittest.TestCase):
         """init_project without on_save should work without errors"""
         self.mock_api_handler.pull_resources.return_value = (
             AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR).resources,
+            [],
             {},
         )
 
@@ -208,9 +212,8 @@ class SerializationRoundTripTest(unittest.TestCase):
         restored = Document(**serialized)
         self.assertEqual(restored.resource_id, "test.md")
         self.assertEqual(restored.name, "test")
-        self.assertEqual(restored.path, "TEST.MD")
-        self.assertEqual(restored.contents, "hello world\n")
-        self.assertEqual(restored.file_path, os.path.join("context", "TEST.MD"))
+        self.assertEqual(restored.path, "test.md")
+        self.assertEqual(restored.file_path, os.path.join("context", "test.md"))
         self.assertEqual(restored.compute_hash(), doc.compute_hash())
 
     def test_flow_step_round_trip_excludes_sub_resource_internals(self):
@@ -301,16 +304,12 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
             [os.path.join(TEST_DIR, "chat", "configuration.yaml", "style_prompt")],
         )
         self.assertEqual(
-            local_resources[SettingsPersonality],
-            [os.path.join(TEST_DIR, "agent_settings", "personality.yaml")],
-        )
-        self.assertEqual(
-            local_resources[SettingsRole],
-            [os.path.join(TEST_DIR, "agent_settings", "role.yaml")],
-        )
-        self.assertEqual(
             local_resources[SettingsRules],
             [os.path.join(TEST_DIR, "agent_settings", "rules.txt")],
+        )
+        self.assertEqual(
+            local_resources[SettingsPersona],
+            [os.path.join(TEST_DIR, "agent_settings", "persona.txt")],
         )
 
         # Finds all Functions and Flow Steps
@@ -429,11 +428,12 @@ class DiscoverLocalResourcesTest(unittest.TestCase):
         )
 
         # Find Documents
-        self.assertEqual(len(local_resources[Document]), 1)
+        self.assertEqual(len(local_resources[Document]), 2)
         self.assertCountEqual(
             local_resources[Document],
             [
-                os.path.join(TEST_DIR, "context", "TEST_DOCUMENT.MD"),
+                os.path.join(TEST_DIR, "context", "test_document.md"),
+                os.path.join(TEST_DIR, "context", "CONTEXT.MD"),
             ],
         )
 
@@ -2044,6 +2044,24 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
 
         self.assertEqual(new_variant.attribute_ids, ["VARIANT_ATTRIBUTES-keep"])
 
+    def test_non_default_variant_update_is_kept(self):
+        """A renamed non-default variant must still be pushed as an update."""
+        renamed_variant = Variant(
+            resource_id="VARIANTS-production",
+            name="HME_Specialists - Inbound Call Campaign",
+            is_default=False,
+        )
+        updated_resources = {Variant: {"VARIANTS-production": renamed_variant}}
+
+        push_changes = self.project._clean_resources_before_push(
+            {},
+            {},
+            updated_resources,
+            {},
+        )
+
+        self.assertEqual(push_changes.main.updated[Variant], {"VARIANTS-production": renamed_variant})
+
 
 class PushProjectTest(unittest.TestCase):
     """Tests for the push_project method"""
@@ -2481,6 +2499,143 @@ class PushProjectTest(unittest.TestCase):
         self.mock_api_handler.clear_command_queue.assert_called_once()
 
 
+class StageSetDefaultCommandsTest(unittest.TestCase):
+    """Tests for the set-default commands _stage_commands emits for handoffs and variants."""
+
+    def setUp(self):
+        """Give the project an api_handler whose only mocked part is the network."""
+        # The real interface still builds real Command protos out of the staged resources,
+        # so the assertions below reflect what the platform would actually be sent.
+        self.api_handler = AgentStudioInterface()
+        self.api_handler.sync_client = MagicMock()
+        self.api_handler.sync_client.get_queued_commands.return_value = []
+        self.api_handler.sync_client.sdk.create_metadata.return_value = Command().metadata
+        # queue_command is what puts a standalone command in the real send queue
+        self.queued_commands = []
+        self.api_handler.sync_client.queue_command.side_effect = self.queued_commands.append
+
+        # Reading the api_handler property saves the project config as a side effect,
+        # which would write _gen/.agent_studio_config into the fixture project
+        patch.object(AgentStudioProject, "save_config").start()
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.project._api_handler = self.api_handler
+        # Start from empty current state so the fixture project's own resources don't add
+        # unrelated commands (e.g. prepush's orphaned-variable reference updates)
+        self.project.resources = {}
+
+    def tearDown(self):
+        patch.stopall()
+
+    def stage(self, new_resources=None, updated_resources=None) -> list:
+        """Stage commands for the given new and updated resources."""
+        return self.project._stage_commands(
+            {},
+            new_resources or {},
+            updated_resources or {},
+            {},
+        )
+
+    def test_new_default_variant_is_created_and_then_set_as_default(self):
+        """A brand new default variant is created first, then explicitly made default."""
+        new_default = Variant(resource_id="VARIANT-new", name="production", is_default=True)
+
+        commands = self.stage(new_resources={Variant: {"VARIANT-new": new_default}})
+
+        types = [command.type for command in commands]
+        self.assertEqual(types, ["variant_create_variant", "variant_set_default_variant"])
+        self.assertEqual(commands[-1].variant_set_default_variant.id, "VARIANT-new")
+
+    def test_switching_default_variant_sets_only_the_new_default(self):
+        """Renaming both variants updates both, but only the new default is set as default."""
+        old_default = Variant(resource_id="VARIANT-a", name="variant a", is_default=False)
+        new_default = Variant(resource_id="VARIANT-b", name="variant b", is_default=True)
+
+        commands = self.stage(
+            updated_resources={Variant: {"VARIANT-a": old_default, "VARIANT-b": new_default}}
+        )
+
+        types = [command.type for command in commands]
+        self.assertEqual(types.count("variant_update_variant"), 2)
+        set_defaults = [c for c in commands if c.type == "variant_set_default_variant"]
+        self.assertEqual([c.variant_set_default_variant.id for c in set_defaults], ["VARIANT-b"])
+
+    def test_non_default_variant_update_produces_no_set_default(self):
+        """Updating a non-default variant never promotes it to default."""
+        renamed = Variant(resource_id="VARIANT-a", name="variant a renamed", is_default=False)
+
+        commands = self.stage(updated_resources={Variant: {"VARIANT-a": renamed}})
+
+        types = [command.type for command in commands]
+        self.assertEqual(types, ["variant_update_variant"])
+        self.assertEqual(commands[0].variant_update_variant.name, "variant a renamed")
+
+    def test_new_default_handoff_is_created_and_then_set_as_default(self):
+        """A brand new default handoff is created first, then explicitly made default."""
+        new_default = Handoff(resource_id="HANDOFF-new", name="escalate", is_default=True)
+
+        commands = self.stage(new_resources={Handoff: {"HANDOFF-new": new_default}})
+
+        types = [command.type for command in commands]
+        self.assertEqual(types, ["handoff_create", "handoff_set_default"])
+        self.assertEqual(commands[-1].handoff_set_default.id, "HANDOFF-new")
+
+    def test_switching_default_handoff_sets_only_the_new_default(self):
+        """Updating both handoffs updates both, but only the new default is set as default."""
+        old_default = Handoff(resource_id="HANDOFF-a", name="escalate", is_default=False)
+        new_default = Handoff(resource_id="HANDOFF-b", name="voicemail", is_default=True)
+
+        commands = self.stage(
+            updated_resources={Handoff: {"HANDOFF-a": old_default, "HANDOFF-b": new_default}}
+        )
+
+        types = [command.type for command in commands]
+        self.assertEqual(types.count("handoff_update"), 2)
+        set_defaults = [c for c in commands if c.type == "handoff_set_default"]
+        self.assertEqual([c.handoff_set_default.id for c in set_defaults], ["HANDOFF-b"])
+
+    def test_non_default_handoff_update_produces_no_set_default(self):
+        """Updating a non-default handoff never promotes it to default."""
+        renamed = Handoff(resource_id="HANDOFF-a", name="escalate to agent", is_default=False)
+
+        commands = self.stage(updated_resources={Handoff: {"HANDOFF-a": renamed}})
+
+        types = [command.type for command in commands]
+        self.assertEqual(types, ["handoff_update"])
+        self.assertEqual(commands[0].handoff_update.name, "escalate to agent")
+
+    def test_set_default_is_staged_after_every_create_and_update_command(self):
+        """Set-default comes last: the platform rejects it for a resource that does not exist yet."""
+        new_variant = Variant(resource_id="VARIANT-new", name="production", is_default=True)
+        new_handoff = Handoff(resource_id="HANDOFF-new", name="escalate", is_default=True)
+        updated_entity = Entity(resource_id="ENTITY-a", name="postcode", entity_type="free_text")
+
+        commands = self.stage(
+            new_resources={
+                Variant: {"VARIANT-new": new_variant},
+                Handoff: {"HANDOFF-new": new_handoff},
+            },
+            updated_resources={Entity: {"ENTITY-a": updated_entity}},
+        )
+
+        types = [command.type for command in commands]
+        first_set_default = min(
+            types.index("handoff_set_default"), types.index("variant_set_default_variant")
+        )
+        self.assertEqual(len(types) - 2, first_set_default)
+        self.assertLess(types.index("handoff_create"), first_set_default)
+        self.assertLess(types.index("variant_create_variant"), first_set_default)
+        self.assertLess(types.index("entity_update"), first_set_default)
+
+    def test_set_default_command_is_handed_to_the_send_queue(self):
+        """The set-default command is queued, not just returned, so it is actually sent."""
+        new_default = Variant(resource_id="VARIANT-new", name="production", is_default=True)
+
+        self.stage(new_resources={Variant: {"VARIANT-new": new_default}})
+
+        self.assertEqual([c.type for c in self.queued_commands], ["variant_set_default_variant"])
+        self.assertEqual(self.queued_commands[0].variant_set_default_variant.id, "VARIANT-new")
+
+
 class ValidateProjectTest(unittest.TestCase):
     """Tests for the validate_project method"""
 
@@ -2552,7 +2707,7 @@ class PullProjectTest(unittest.TestCase):
         # Incoming resources are the same as project.resources
         # Use the actual resources from the project to ensure they match
         original_resources = deepcopy(project.resources)
-        self.mock_api_handler.pull_resources.return_value = (original_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (original_resources, [], {})
 
         files_with_conflicts, _ = project.pull_project(force=False)
         self.assertEqual(files_with_conflicts, [])
@@ -2579,7 +2734,7 @@ class PullProjectTest(unittest.TestCase):
         # Simulate pull: incoming has variant_attributes from remote
         full_project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         incoming_resources = full_project.resources
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         with mock_read_from_file(
             {os.path.join(TEST_DIR, "config", "variant_attributes.yaml"): "{}\n"}
@@ -2609,7 +2764,7 @@ class PullProjectTest(unittest.TestCase):
             example_queries=["New query"],
         )
         incoming_resources.setdefault(Topic, {})["TOPIC-new_topic"] = new_topic
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         files_with_conflicts, _ = project.pull_project(force=False)
         self.assertEqual(files_with_conflicts, [])
@@ -2625,7 +2780,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources = deepcopy(project.resources)
         if Topic in incoming_resources and "TOPIC-Topic 1" in incoming_resources[Topic]:
             del incoming_resources[Topic]["TOPIC-Topic 1"]
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         files_with_conflicts, _ = project.pull_project(force=False)
 
@@ -2644,7 +2799,7 @@ class PullProjectTest(unittest.TestCase):
         modified_func = deepcopy(incoming_resources[Function][func_id])
         modified_func.code = 'def test_function(conv: Conversation):\n    """Modified remotely."""\n    return "Modified"\n'
         incoming_resources[Function][func_id] = modified_func
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         files_with_conflicts, _ = project.pull_project(force=False)
         self.assertEqual(files_with_conflicts, [])
@@ -2662,7 +2817,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources[Function][
             "FUNCTION-test_function"
         ].code = 'def test_function(conv: Conversation):\n    """Modified remotely."""\n    return "Remote change"\n'
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         with mock_read_from_file(
             {
@@ -2702,7 +2857,7 @@ class PullProjectTest(unittest.TestCase):
         modified_flow_config = deepcopy(incoming_resources[FlowConfig][flow_config_id])
         modified_flow_config.description = "Modified remotely - new description"
         incoming_resources[FlowConfig][flow_config_id] = modified_flow_config
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         # Mock local file with different changes
         flow_config_path = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
@@ -2753,7 +2908,7 @@ class PullProjectTest(unittest.TestCase):
         modified_flow_config = deepcopy(incoming_resources[FlowConfig][flow_config_id])
         modified_flow_config.description = "Modified remotely"
         incoming_resources[FlowConfig][flow_config_id] = modified_flow_config
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         flow_config_path = os.path.join(TEST_DIR, "flows", "test_flow", "flow_config.yaml")
         # Local file: same semantic content as original but with trailing whitespace
@@ -2786,7 +2941,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources[Function][
             "FUNCTION-test_function"
         ].code = 'def test_function(conv: Conversation):\n    """Modified remotely."""\n    return "Remote change"\n'
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         with mock_read_from_file(
             {
@@ -2823,7 +2978,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources[Function][
             "FUNCTION-test_function"
         ].code = 'def test_function(conv: Conversation):\n    """Modified remotely."""\n    return "Remote change"\n'
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         with mock_read_from_file(
             {
@@ -2848,7 +3003,7 @@ class PullProjectTest(unittest.TestCase):
         full_project_resources = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR).resources
         incoming_resources = deepcopy(full_project_resources)
 
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
         files_with_conflicts, _ = project.pull_project(force=False, format=True)
         self.assertEqual(files_with_conflicts, [])
         # Verify resource is updated in project resources
@@ -2875,7 +3030,7 @@ class PullProjectTest(unittest.TestCase):
             "FUNCTION-test_function_with_parameters"
         ].code = 'def test_function_with_parameters(conv: Conversation):\n    """Test function with parameters."""\n    return "Test function with parameters"\n'
 
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
         files_with_conflicts, _ = project.pull_project(force=False)
         self.assertEqual(len(files_with_conflicts), 1)
 
@@ -2893,7 +3048,7 @@ class PullProjectTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(project_data, TEST_DIR)
         incoming_resources = deepcopy(project.resources)
 
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
         files_with_conflicts, _ = project.pull_project(force=False)
         self.assertEqual(files_with_conflicts, [])
 
@@ -2921,7 +3076,7 @@ class PullProjectTest(unittest.TestCase):
         # Rename the topic (this changes the file path)
         renamed_topic.name = "renamed_topic"
 
-        self.mock_api_handler.pull_resources.return_value = (original_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (original_resources, [], {})
 
         files_with_conflicts, _ = project.pull_project(force=False)
 
@@ -2938,7 +3093,7 @@ class PullProjectTest(unittest.TestCase):
         """Test that empty flow folders are deleted after pull"""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         original_resources = deepcopy(project.resources)
-        self.mock_api_handler.pull_resources.return_value = (original_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (original_resources, [], {})
 
         # Mock os.listdir and os.rmdir to verify empty folder deletion
         empty_flow_path = os.path.join(TEST_DIR, "flows", "test_flow")
@@ -2990,7 +3145,7 @@ class PullProjectTest(unittest.TestCase):
                 if kp_call_count[0] <= 2:
                     return original_kp_content
                 return local_kp_content
-            with open(str(path)) as f:
+            with open(str(path), encoding="utf-8") as f:
                 return f.read()
 
         return side_effect
@@ -3004,7 +3159,7 @@ class PullProjectTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         incoming_resources = deepcopy(project.resources)
         incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         kp_path = os.path.join(TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml")
         # dump_yaml format produced by MultiResourceYamlResource.save(save_to_cache=True)
@@ -3049,7 +3204,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources = deepcopy(project.resources)
         # Remote: PolyAI level maximum → boosted
         incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         kp_path = os.path.join(TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml")
         original_kp_content = (
@@ -3106,7 +3261,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources = deepcopy(project.resources)
         # Remote: PolyAI level maximum → boosted
         incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         kp_path = os.path.join(TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml")
         original_kp_content = (
@@ -3159,7 +3314,7 @@ class PullProjectTest(unittest.TestCase):
         incoming_resources = deepcopy(project.resources)
         # Remote: PolyAI level maximum → boosted
         incoming_resources[KeyphraseBoosting]["KEYPHRASE_BOOSTING-polyai"].level = "boosted"
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         kp_path = os.path.join(TEST_DIR, "voice", "speech_recognition", "keyphrase_boosting.yaml")
 
@@ -3185,7 +3340,7 @@ class PullProjectTest(unittest.TestCase):
         """on_save should be called during pull with correct final progress"""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         incoming_resources = deepcopy(project.resources)
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         on_save = MagicMock()
         files_with_conflicts, _ = project.pull_project(on_save=on_save)
@@ -3200,7 +3355,7 @@ class PullProjectTest(unittest.TestCase):
         """pull_project without on_save should work without errors"""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         incoming_resources = deepcopy(project.resources)
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         files_with_conflicts, _ = project.pull_project()
         self.assertEqual(files_with_conflicts, [])
@@ -3217,7 +3372,7 @@ class PullProjectTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
         incoming_resources = deepcopy(project.resources)
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         # Local file has mixed-case level values (not yet normalised)
         local_keyphrases_yaml = (
@@ -3269,7 +3424,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
 
     def test_raises_when_no_active_deployment(self):
         """Empty resource map (e.g. live not yet deployed) raises with a clear message."""
-        self.mock_get_remote.return_value = {}
+        self.mock_get_remote.return_value = ({}, [])
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
         with self.assertRaises(ValueError) as ctx:
@@ -3281,7 +3436,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
 
     def test_raises_for_pre_release_when_not_deployed(self):
         """Same guard applies for pre-release, not just live."""
-        self.mock_get_remote.return_value = {}
+        self.mock_get_remote.return_value = ({}, [])
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
         with self.assertRaises(ValueError) as ctx:
@@ -3296,7 +3451,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
     def test_calls_get_remote_with_correct_env(self):
         """get_remote_resources_by_name is invoked with the exact env string passed in."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
-        self.mock_get_remote.return_value = deepcopy(project.resources)
+        self.mock_get_remote.return_value = (deepcopy(project.resources), [])
 
         project.pull_project_from_env(env="pre-release")
 
@@ -3311,7 +3466,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         original_resources = deepcopy(project.resources)
         incoming_resources = deepcopy(project.resources)
-        self.mock_get_remote.return_value = incoming_resources
+        self.mock_get_remote.return_value = (incoming_resources, [])
 
         files_with_conflicts = project.pull_project_from_env(env="live")
 
@@ -3329,7 +3484,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
         modified_func = deepcopy(incoming_resources[Function][func_id])
         modified_func.code = 'def test_function(conv: Conversation):\n    """Modified in live."""\n    return "Live"\n'
         incoming_resources[Function][func_id] = modified_func
-        self.mock_get_remote.return_value = incoming_resources
+        self.mock_get_remote.return_value = (incoming_resources, [])
 
         files_with_conflicts = project.pull_project_from_env(env="live")
 
@@ -3350,7 +3505,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
             example_queries=["live query"],
         )
         incoming_resources.setdefault(Topic, {})["TOPIC-live_only_topic"] = new_topic
-        self.mock_get_remote.return_value = incoming_resources
+        self.mock_get_remote.return_value = (incoming_resources, [])
 
         files_with_conflicts = project.pull_project_from_env(env="live")
 
@@ -3372,7 +3527,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
         incoming_resources[Function][
             func_id
         ].code = 'def test_function(conv: Conversation):\n    return "From live"\n'
-        self.mock_get_remote.return_value = incoming_resources
+        self.mock_get_remote.return_value = (incoming_resources, [])
 
         files_with_conflicts = project.pull_project_from_env(env="pre-release")
 
@@ -3387,7 +3542,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
         incoming_resources = deepcopy(project.resources)
         if Topic in incoming_resources and "TOPIC-Topic 1" in incoming_resources[Topic]:
             del incoming_resources[Topic]["TOPIC-Topic 1"]
-        self.mock_get_remote.return_value = incoming_resources
+        self.mock_get_remote.return_value = (incoming_resources, [])
 
         files_with_conflicts = project.pull_project_from_env(env="live")
 
@@ -3403,7 +3558,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
     def test_save_config_not_called_and_imports_saved_on_success(self):
         """save_config must NOT be called (env changes are local); save_imports is called."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
-        self.mock_get_remote.return_value = deepcopy(project.resources)
+        self.mock_get_remote.return_value = (deepcopy(project.resources), [])
 
         project.pull_project_from_env(env="live")
 
@@ -3412,7 +3567,7 @@ class PullProjectFromEnvTest(unittest.TestCase):
 
     def test_save_config_not_called_when_no_deployment(self):
         """save_config must not be called if the deployment lookup fails."""
-        self.mock_get_remote.return_value = {}
+        self.mock_get_remote.return_value = ({}, [])
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
         with self.assertRaises(ValueError):
@@ -3535,18 +3690,41 @@ class GetRemoteResourcesByNameLocalTest(unittest.TestCase):
         """'local' should resolve to the current local filesystem state."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
-        result = project.get_remote_resources_by_name("local")
+        result, slim_resources = project.get_remote_resources_by_name("local")
 
         self.assertIsInstance(result, dict)
         self.assertGreater(len(result), 0)
+        self.assertEqual(slim_resources, project.slim_resources)
 
     def test_local_resources_match_project_resources(self):
         """Resources returned for 'local' should have the same resource types as project.resources."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
 
-        result = project.get_remote_resources_by_name("local")
+        result, _ = project.get_remote_resources_by_name("local")
 
         self.assertEqual(set(result.keys()), set(project.resources.keys()))
+
+    def test_every_resolution_mode_returns_a_resources_and_slim_pair(self):
+        """The return shape has to be the same whichever name resolves.
+
+        Callers unpack two values, so a branch of this method that returns a bare
+        resource map raises far from the cause - and the branch path is the one that
+        no other test exercises.
+        """
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        self.mock_api_handler.get_branches.return_value = {"dev": {"branchId": "BRANCH-1"}}
+        self.mock_api_handler.pull_deployment_resources.return_value = ({}, [])
+        self.mock_api_handler.get_active_deployments.return_value = {
+            "sandbox": {"deployment_id": "dep-1"}
+        }
+
+        with patch("poly.project.AgentStudioInterface") as mock_interface:
+            mock_interface.return_value.pull_resources.return_value = ({}, [], {})
+            for name in ("sandbox", "dev", "abc123456", "local", "nothing-matches-this"):
+                with self.subTest(name=name):
+                    resources, slim_resources = project.get_remote_resources_by_name(name)
+                    self.assertIsInstance(resources, dict)
+                    self.assertIsInstance(slim_resources, list)
 
     def test_hash_lookup_tolerates_none_version_hash(self):
         """A deployment record with version_hash=None should not raise TypeError during hash lookup."""
@@ -3681,6 +3859,7 @@ class FetchProjectTest(unittest.TestCase):
         expected_projection = {"some": "projection"}
         self.mock_api_handler.pull_resources.return_value = (
             expected_resources,
+            [],
             expected_projection,
         )
         self.mock_api_handler.branch_id = "remote-branch-id"
@@ -3697,6 +3876,7 @@ class FetchProjectTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         self.mock_api_handler.pull_resources.return_value = (
             deepcopy(project.resources),
+            [],
             {},
         )
         self.mock_api_handler.branch_id = "api-branch-42"
@@ -3714,6 +3894,7 @@ class FetchProjectTest(unittest.TestCase):
         }
         self.mock_api_handler.pull_resources.return_value = (
             deepcopy(project.resources),
+            [],
             {},
         )
         self.mock_api_handler.branch_id = "branch-2"
@@ -3740,6 +3921,7 @@ class FetchProjectTest(unittest.TestCase):
         original_branch_id = project.branch_id
         self.mock_api_handler.pull_resources.return_value = (
             deepcopy(project.resources),
+            [],
             {"cached": True},
         )
         self.mock_api_handler.branch_id = "should-not-be-used"
@@ -3756,6 +3938,7 @@ class FetchProjectTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         self.mock_api_handler.pull_resources.return_value = (
             deepcopy(project.resources),
+            [],
             {},
         )
         self.mock_api_handler.branch_id = "b"
@@ -3772,6 +3955,7 @@ class FetchProjectTest(unittest.TestCase):
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         self.mock_api_handler.pull_resources.return_value = (
             deepcopy(project.resources),
+            [],
             {},
         )
         self.mock_api_handler.branch_id = "b"
@@ -3785,7 +3969,7 @@ class FetchProjectTest(unittest.TestCase):
         """fetch_project should recompute file_structure_info from the new resources."""
         project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
         new_resources = deepcopy(project.resources)
-        self.mock_api_handler.pull_resources.return_value = (new_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (new_resources, [], {})
         self.mock_api_handler.branch_id = "b"
 
         project.fetch_project()
@@ -3799,6 +3983,7 @@ class FetchProjectTest(unittest.TestCase):
         self.mock_api_handler.get_branches.return_value = {"staging": {"branchId": "staging-id"}}
         self.mock_api_handler.pull_resources.return_value = (
             deepcopy(project.resources),
+            [],
             {},
         )
         # After pull, the api_handler.branch_id may differ from the branch dict value
@@ -3840,7 +4025,7 @@ class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
 
         # Remove Topics entirely from incoming — simulates remote having deleted all topics
         del incoming_resources[Topic]
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         files_with_conflicts, _ = project.pull_project(force=False)
 
@@ -3867,7 +4052,7 @@ class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
 
         # Remove Entities entirely from incoming — simulates remote having deleted all entities
         del incoming_resources[Entity]
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         MultiResourceYamlResource._file_cache.clear()
         with patch.object(Entity, "delete_resource") as mock_delete:
@@ -3882,6 +4067,40 @@ class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
             entity_paths,
             "delete_resource should be called for every entity when Entity type is absent",
         )
+
+    def test_absent_multi_resource_type_deletion_reaches_disk(self):
+        """The deletions are batched into the file cache, so they have to be flushed.
+
+        Asserting only that delete_resource was called says nothing about whether the
+        pruned file was ever written - the cache is discarded when the pull returns and
+        the entities stay on disk, needing a second pull to clear.
+        """
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+        entity_names = {res.name for res in incoming_resources[Entity].values()}
+        self.assertGreater(len(entity_names), 0)
+
+        del incoming_resources[Entity]
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
+
+        MultiResourceYamlResource._file_cache.clear()
+        project.pull_project(force=False)
+        cache_after_pull = dict(MultiResourceYamlResource._file_cache)
+        MultiResourceYamlResource._file_cache.clear()
+
+        entities_file = os.path.join(TEST_DIR, "config", "entities.yaml")
+        written = [
+            call[0][0]
+            for call in self.mock_save_to_file.call_args_list
+            if call[0][1] == entities_file
+        ]
+        self.assertTrue(written, "the pruned entities file should have been written to disk")
+        for name in entity_names:
+            self.assertNotIn(name, written[-1])
+
+        # A cached entry carries the pre-write mtime, so anything left behind makes later
+        # reads in this process see a file state that is not on disk.
+        self.assertEqual(cache_after_pull, {})
 
     def test_not_loaded_resource_type_not_deleted_on_pull(self):
         """When a resource type is in _not_loaded_resources, it should NOT be deleted
@@ -3899,7 +4118,7 @@ class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
         # Incoming also doesn't have VariantAttribute — but since it's "not loaded",
         # we should NOT delete local files for it
         incoming_resources = deepcopy(project.resources)
-        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, [], {})
 
         files_with_conflicts, _ = project.pull_project(force=False)
 
@@ -4090,6 +4309,7 @@ class MigrateFlowStepSettingsTest(unittest.TestCase):
         migrate_flow_step_settings(status_dict)
 
         self.assertNotIn("settings", status_dict["resources"]["flow_steps"]["FLOW-abc_step-1"])
+
 
 class SyncBranchProject(unittest.TestCase):
     """Tests for AgentStudioProject.sync_branch."""
@@ -4442,8 +4662,8 @@ class DiffBranchTest(unittest.TestCase):
         branch_resources = {Topic: {"TOPIC-1": branch_topic}}
 
         self.mock_api.pull_branch_resources.side_effect = [
-            parent_resources,
-            branch_resources,
+            (parent_resources, []),
+            (branch_resources, []),
         ]
 
         diffs = self.project.diff_branch(branch_name="feature-x")
@@ -4477,8 +4697,8 @@ class DiffBranchTest(unittest.TestCase):
         identical_resources = {Topic: {"TOPIC-1": topic}}
 
         self.mock_api.pull_branch_resources.side_effect = [
-            identical_resources,
-            deepcopy(identical_resources),
+            (identical_resources, []),
+            (deepcopy(identical_resources), []),
         ]
 
         result = self.project.diff_branch(branch_name="feature-y")
@@ -4499,8 +4719,8 @@ class DiffBranchTest(unittest.TestCase):
 
         topic = self._make_topic("TOPIC-1", "Hours", "9am-5pm")
         self.mock_api.pull_branch_resources.side_effect = [
-            {Topic: {"TOPIC-1": topic}},
-            {Topic: {"TOPIC-1": deepcopy(topic)}},
+            ({Topic: {"TOPIC-1": topic}}, []),
+            ({Topic: {"TOPIC-1": deepcopy(topic)}}, []),
         ]
 
         self.project.diff_branch(branch_name="feature-z")
@@ -4536,8 +4756,8 @@ class DiffBranchTest(unittest.TestCase):
         }
 
         self.mock_api.pull_branch_resources.side_effect = [
-            parent_resources,
-            branch_resources,
+            (parent_resources, []),
+            (branch_resources, []),
         ]
 
         topic_a_path = os.path.join("topics", "topic_a.yaml")
@@ -4565,8 +4785,8 @@ class DiffBranchTest(unittest.TestCase):
         topic_new = self._make_topic("TOPIC-1", "Hours", "new")
 
         self.mock_api.pull_branch_resources.side_effect = [
-            {Topic: {"TOPIC-1": topic}},
-            {Topic: {"TOPIC-1": topic_new}},
+            ({Topic: {"TOPIC-1": topic}}, []),
+            ({Topic: {"TOPIC-1": topic_new}}, []),
         ]
 
         result = self.project.diff_branch(
@@ -4592,8 +4812,8 @@ class DiffBranchTest(unittest.TestCase):
 
         topic = self._make_topic("TOPIC-1", "FAQ", "same")
         self.mock_api.pull_branch_resources.side_effect = [
-            {Topic: {"TOPIC-1": topic}},
-            {Topic: {"TOPIC-1": deepcopy(topic)}},
+            ({Topic: {"TOPIC-1": topic}}, []),
+            ({Topic: {"TOPIC-1": deepcopy(topic)}}, []),
         ]
 
         result = self.project.diff_branch()
@@ -5463,7 +5683,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
         sandbox_resources = self._sandbox_resources_with_reassigned_flow_id()
 
         with patch.object(
-            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+            AgentStudioProject, "get_remote_resources_by_name", return_value=(sandbox_resources, [])
         ):
             self.assertTrue(self.project.sync_ids_with_sandbox())
 
@@ -5477,12 +5697,10 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
         flow_id is translated the prefix and flow_id disagree and the flow id stays welded
         onto start_step exactly as it did in the unfixed case.
         """
-        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id(
-            without_start_step=True
-        )
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id(without_start_step=True)
 
         with patch.object(
-            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+            AgentStudioProject, "get_remote_resources_by_name", return_value=(sandbox_resources, [])
         ):
             self.assertTrue(self.project.sync_ids_with_sandbox())
 
@@ -5491,12 +5709,10 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
 
     def test_branch_only_step_is_rekeyed_onto_the_sandbox_flow_id(self):
         """A step added on the branch adopts the sandbox flow id in its composite id."""
-        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id(
-            without_start_step=True
-        )
+        sandbox_resources = self._sandbox_resources_with_reassigned_flow_id(without_start_step=True)
 
         with patch.object(
-            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+            AgentStudioProject, "get_remote_resources_by_name", return_value=(sandbox_resources, [])
         ):
             self.project.sync_ids_with_sandbox()
 
@@ -5543,7 +5759,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
             sandbox[resource_type] = rekeyed
 
         with patch.object(
-            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox
+            AgentStudioProject, "get_remote_resources_by_name", return_value=(sandbox, [])
         ):
             self.assertTrue(self.project.sync_ids_with_sandbox())
 
@@ -5577,7 +5793,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
         self.assertTrue(flow_scoped_function_ids, "fixture must have flow-scoped functions")
 
         with patch.object(
-            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+            AgentStudioProject, "get_remote_resources_by_name", return_value=(sandbox_resources, [])
         ):
             self.project.sync_ids_with_sandbox()
 
@@ -5593,7 +5809,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
         sandbox_resources = self._sandbox_resources_with_reassigned_flow_id()
 
         with patch.object(
-            AgentStudioProject, "get_remote_resources_by_name", return_value=sandbox_resources
+            AgentStudioProject, "get_remote_resources_by_name", return_value=(sandbox_resources, [])
         ):
             self.project.sync_ids_with_sandbox()
 
@@ -5608,7 +5824,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
         with patch.object(
             AgentStudioProject,
             "get_remote_resources_by_name",
-            return_value=deepcopy(self.project.resources),
+            return_value=(deepcopy(self.project.resources), []),
         ):
             self.assertTrue(self.project.sync_ids_with_sandbox())
 
@@ -5626,7 +5842,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
         with patch.object(
             AgentStudioProject,
             "get_remote_resources_by_name",
-            return_value=deepcopy(self.project.resources),
+            return_value=(deepcopy(self.project.resources), []),
         ):
             self.assertTrue(self.project.sync_ids_with_sandbox())
 
@@ -5647,7 +5863,7 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
             patch.object(
                 AgentStudioProject,
                 "get_remote_resources_by_name",
-                return_value=deepcopy(self.project.resources),
+                return_value=(deepcopy(self.project.resources), []),
             ),
             patch.object(
                 AgentStudioProject,

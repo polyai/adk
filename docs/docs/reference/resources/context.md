@@ -18,14 +18,14 @@ Documents live in `context/`, at the top level of the project. Only `.md` files 
 ~~~text
 <account>/<project>/
 └── context/
-    ├── CONTEXT.md
+    ├── CONTEXT.MD
     ├── FUNCTION_GUIDELINES.md
     └── SUCCESS_CRITERIA.md
 ~~~
 
-!!! warning "Filenames are uppercased"
+!!! warning "`CONTEXT.MD` must use exact uppercase"
 
-    The platform stores document paths in uppercase, and the ADK normalizes to match. A file written as `context/my_notes.md` is tracked as `MY_NOTES.MD`. Expect `poly pull` to produce uppercase filenames, and do not rely on two documents whose names differ only by case — they collide.
+    The platform treats `CONTEXT.MD` as a special file and requires that exact casing. A file whose name matches `context.md` case-insensitively but is not exactly `CONTEXT.MD` will fail validation. All other document filenames preserve whatever case you give them.
 
 ## Contents
 

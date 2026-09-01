@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import math
 import os
 import re
@@ -60,6 +61,9 @@ from poly.resources.resource import (
     register_resource,
 )
 
+logger = logging.getLogger(__name__)
+
+
 FUNCTION_REGEX = re.compile(r"{{f[nt]:([\w-]+)}}")
 # Flow step names: alphanumeric, extended Latin (C0–024F, 1E00–1EFF), and _ &,/.-
 FLOW_STEP_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9\u00C0-\u024F\u1E00-\u1EFF_ &,/.\-]+$")
@@ -109,6 +113,10 @@ class FlowConfig(YamlResource):
         """Parse flow configs from a projection dict."""
         configs = {}
         flows = projection.get("flows", {}).get("flows", {}).get("entities", {})
+        if "flows" not in projection or any("startStepId" not in flow for flow in flows.values()):
+            logger.debug("No read access to flows - they will not be pulled.")
+            return {}
+
         for flow_id, flow_data in flows.items():
             configs[flow_id] = cls(
                 resource_id=flow_id,
@@ -368,6 +376,14 @@ class FlowStep(BaseFlowStep, YamlResource):
         """Parse flow steps (non-function) from a projection dict."""
         steps = {}
         flows = projection.get("flows", {}).get("flows", {}).get("entities", {})
+        if "flows" not in projection or any(
+            "type" not in step
+            for flow_data in flows.values()
+            for step in flow_data.get("steps", {}).get("entities", {}).values()
+        ):
+            logger.debug("No read access to flow steps - they will not be pulled.")
+            return {}
+
         for flow_id, flow_data in flows.items():
             for step_id, step in flow_data.get("steps", {}).get("entities", {}).items():
                 if step.get("type") == "function_step":
@@ -430,7 +446,10 @@ class FlowStep(BaseFlowStep, YamlResource):
             output.update(flow_settings_dict)
 
         if self.step_type == StepType.DEFAULT_STEP:
-            output["conditions"] = [condition.to_yaml_dict() for condition in self.conditions]
+            output["conditions"] = [
+                condition.to_yaml_dict()
+                for condition in sorted(self.conditions, key=lambda condition: condition.name)
+            ]
             output["extracted_entities"] = sorted(self.extracted_entities)
 
         output["prompt"] = self.prompt
@@ -680,6 +699,11 @@ class FlowStep(BaseFlowStep, YamlResource):
 
         # Extract flow_id from resource mappings
         flow_id, flow_name = utils.get_flow_id_from_flow_name(flow_folder_name, resource_mappings)
+
+        # A step whose flow config is missing or unreadable resolves to no flow. Fall back
+        # to the folder as read from disk so file_path stays usable -- discovery reads a
+        # step before the flow mappings exist, and validate() reports the missing flow.
+        flow_name = flow_name or flow_folder_name
 
         contents = cls.read_from_file(file_path)
         try:
@@ -1729,6 +1753,14 @@ class FunctionStep(Function, BaseFlowStep):
         """Parse function steps from a projection dict."""
         func_steps = {}
         flows = projection.get("flows", {}).get("flows", {}).get("entities", {})
+        if "flows" not in projection or any(
+            "type" not in step
+            for flow_data in flows.values()
+            for step in flow_data.get("steps", {}).get("entities", {}).values()
+        ):
+            logger.debug("No read access to flow steps - they will not be pulled.")
+            return {}
+
         for flow_id, flow_data in flows.items():
             for step_id, step in flow_data.get("steps", {}).get("entities", {}).items():
                 if step.get("type") != "function_step":
@@ -1810,6 +1842,10 @@ class FunctionStep(Function, BaseFlowStep):
             flow_id, flow_name = utils.get_flow_id_from_flow_name(
                 flow_folder_name, resource_mappings
             )
+
+        # See FlowStep.read_local_resource: keep the folder as a fallback so file_path
+        # stays usable when the flow config is missing.
+        flow_name = flow_name or flow_folder_name
 
         step_id = resource_id.removeprefix(f"{flow_id}_")
 

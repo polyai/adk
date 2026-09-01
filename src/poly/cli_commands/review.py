@@ -299,6 +299,15 @@ class ReviewCommand(BaseCommand):
         choices = [format_gist_choice(g) for g in gists]
         description_to_id = {format_gist_choice(g): g["id"] for g in gists}
 
+        if output_json:
+            json_print(
+                {
+                    "success": False,
+                    "error": "Please provide a gist ID to delete when using JSON output.",
+                }
+            )
+            return
+
         selected = questionary.checkbox("Select gists to delete", choices=choices).ask()
         if not selected:
             warning("No gists selected. Exiting.")

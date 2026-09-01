@@ -51,6 +51,10 @@ class Variable(Resource):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "Variable"]:
         """Parse variables from a projection dict."""
+        if "variables" not in projection:
+            logger.debug("No read access to variables - it will not be pulled.")
+            return {}
+
         variables = {}
         variables_data = projection.get("variables", {}).get("variables", {}).get("entities", {})
         for var_id, var_data in variables_data.items():

@@ -117,12 +117,17 @@ Adding this decorator to a function enables latency control for it. It accepts:
 | `delay_before_responses_start` | `int` (0–10) | How long to wait before playing the first delay message |
 | `silence_after_each_response` | `int` (0–10) | Minimum gap to leave between delay messages |
 | `delay_responses` | `list[tuple[str, int]]` | `(message, duration)` pairs to play while the function runs |
+| `randomize` | `bool` | When `True`, shuffle delay response order on each function invocation (timing slots are preserved). Default `False` |
 
 ~~~python
 @func_latency_control(
     delay_before_responses_start=2,
     silence_after_each_response=3,
-    delay_responses=[("Let me check that for you.", 3)],
+    delay_responses=[
+        ("Let me check that for you.", 3),
+        ("Still working on it.", 2),
+    ],
+    randomize=True,
 )
 ~~~
 

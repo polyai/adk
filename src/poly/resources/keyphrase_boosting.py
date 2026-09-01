@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import ClassVar, Optional
@@ -14,6 +15,8 @@ from poly.handlers.protobuf.keyphrase_boosting_pb2 import (
     KeyphraseBoosting_UpdateKeyphrase,
 )
 from poly.resources.resource import MultiResourceYamlResource, register_resource
+
+logger = logging.getLogger(__name__)
 
 VALID_LEVELS = ("default", "boosted", "maximum")
 
@@ -45,12 +48,16 @@ class KeyphraseBoosting(MultiResourceYamlResource):
     def from_projection(cls, projection: dict) -> dict[str, "KeyphraseBoosting"]:
         """Parse keyphrase boosting entries from a projection dict."""
         keyphrases = {}
-        for kp_id, kp_data in (
-            projection.get("keyphraseBoosting", {})
-            .get("keyphraseBoosting", {})
-            .get("entities", {})
-            .items()
+        keyphrases_projection = (
+            projection.get("keyphraseBoosting", {}).get("keyphraseBoosting", {}).get("entities", {})
+        )
+        if "keyphraseBoosting" not in projection or any(
+            "keyphrase" not in kp for kp in keyphrases_projection.values()
         ):
+            logger.debug("No read access to keyphrase boosting - it will not be pulled.")
+            return {}
+
+        for kp_id, kp_data in keyphrases_projection.items():
             keyphrases[kp_id] = cls(
                 resource_id=kp_id,
                 name=kp_data.get("keyphrase", ""),
