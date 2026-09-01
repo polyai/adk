@@ -12,6 +12,7 @@ from google.protobuf.json_format import MessageToDict
 from jsonschema import ValidationError
 
 import poly.resources.resource_utils as resource_utils
+from poly.handlers.protobuf.variant_pb2 import Variant_UpdateVariant
 from poly.resources.agent_settings import (
     SettingsPersona,
     SettingsRules,
@@ -4602,6 +4603,34 @@ class VariantTests(unittest.TestCase):
             "Multiple or zero default variants detected: []. One variant must be set as default.",
             str(cm.exception),
         )
+
+    def test_update_command_type_is_variant_update_variant(self):
+        """The update command type doubles as the Command oneof kwarg, so it must stay exact."""
+        self.assertEqual(TEST_VARIANT.update_command_type, "variant_update_variant")
+
+    def test_build_update_proto_carries_id_and_name(self):
+        """An updated variant sends its new name so renames reach the platform."""
+        renamed = Variant(resource_id="VARIANT-default", name="HME_Specialists - Inbound")
+
+        proto = renamed.build_update_proto()
+
+        self.assertIsInstance(proto, Variant_UpdateVariant)
+        self.assertEqual(proto.id, "VARIANT-default")
+        self.assertEqual(proto.name, "HME_Specialists - Inbound")
+
+    def test_build_update_proto_leaves_attribute_values_unset(self):
+        """Regression guard: setting attribute_values would wipe the variant's stored values.
+
+        The platform only rewrites a variant's attribute values when the field is present on
+        the wire, and a present map must cover every non-archived attribute or the command is
+        rejected. Variant updates must therefore never populate it.
+        """
+        variant = Variant(resource_id="VARIANT-default", name="default")
+        variant.attribute_ids = ["attr-customer-name"]
+
+        proto = variant.build_update_proto()
+
+        self.assertFalse(proto.HasField("attribute_values"))
 
 
 class VariantAttributeTests(unittest.TestCase):

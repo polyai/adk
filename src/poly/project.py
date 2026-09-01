@@ -51,6 +51,7 @@ from poly.resources.resource import (
     load_resources_from_projection,
 )
 from poly.utils import prepush
+from poly.utils.commands import queue_set_default_commands
 
 logger = logging.getLogger(__name__)
 
@@ -1172,6 +1173,13 @@ class AgentStudioProject:
                 )
             )
 
+        queue_set_default_commands(
+            new_resources,
+            updated_resources,
+            commands,
+            queue_command=lambda command: self.api_handler.queue_command(command),
+        )
+
         return commands
 
     def push_project(
@@ -1466,8 +1474,6 @@ class AgentStudioProject:
             post push: delete dummy
         )
 
-        Only update the default variant if it's being enabled.
-
         If a function is new or updated and it references a variable, update the variable references.
 
         Args:
@@ -1519,7 +1525,6 @@ class AgentStudioProject:
         prepush.default_new_variant_attributes(
             new_resources, deleted_resources, current_resources=self.resources
         )
-        prepush.filter_nondefault_variant_updates(updated_resources)
         prepush.fix_conditions_for_deleted_steps(
             new_resources,
             updated_resources,
