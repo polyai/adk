@@ -14,8 +14,8 @@ from poly.handlers.protobuf.variant_pb2 import (
     Variant_CreateVariant,
     Variant_DeleteAttribute,
     Variant_DeleteVariant,
-    Variant_SetDefaultVariant,
     Variant_UpdateAttribute,
+    Variant_UpdateVariant,
     VariantValues,
 )
 from poly.resources.resource import MultiResourceYamlResource, ResourceMapping, register_resource
@@ -93,11 +93,12 @@ class Variant(MultiResourceYamlResource):
 
     @property
     def update_command_type(self) -> str:
-        return "variant_set_default_variant"
+        return "variant_update_variant"
 
-    def build_update_proto(self):
-        return Variant_SetDefaultVariant(
+    def build_update_proto(self) -> Variant_UpdateVariant:
+        return Variant_UpdateVariant(
             id=self.resource_id,
+            name=self.name,
         )
 
     def build_delete_proto(self) -> Variant_DeleteVariant:

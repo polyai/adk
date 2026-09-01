@@ -24,6 +24,7 @@ from poly.cli_commands.review import ReviewCommand
 from poly.cli_commands.rtc import RTCCommand
 from poly.cli_commands.sync import (
     DiffCommand,
+    FetchCommand,
     FormatCommand,
     PullCommand,
     PushCommand,
@@ -45,6 +46,7 @@ COMMANDS = [
     StudioCommand,
     ProjectCommand,
     TemplateCommand,
+    FetchCommand,
     PullCommand,
     PushCommand,
     StatusCommand,

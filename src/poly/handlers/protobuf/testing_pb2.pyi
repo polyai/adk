@@ -228,13 +228,27 @@ class SetTestCaseSeverity(_message.Message):
     severity: str
     def __init__(self, id: _Optional[str] = ..., severity: _Optional[str] = ...) -> None: ...
 
-class SetTestCaseApiMocks(_message.Message):
-    __slots__ = ("id", "api_mocks")
+class UpdateTestCaseApiOperationMock(_message.Message):
+    __slots__ = ("id", "integration_name", "operation_name", "responses")
     ID_FIELD_NUMBER: _ClassVar[int]
-    API_MOCKS_FIELD_NUMBER: _ClassVar[int]
+    INTEGRATION_NAME_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_NAME_FIELD_NUMBER: _ClassVar[int]
+    RESPONSES_FIELD_NUMBER: _ClassVar[int]
     id: str
-    api_mocks: ApiOverride
-    def __init__(self, id: _Optional[str] = ..., api_mocks: _Optional[_Union[ApiOverride, _Mapping]] = ...) -> None: ...
+    integration_name: str
+    operation_name: str
+    responses: _containers.RepeatedCompositeFieldContainer[ApiResponseRule]
+    def __init__(self, id: _Optional[str] = ..., integration_name: _Optional[str] = ..., operation_name: _Optional[str] = ..., responses: _Optional[_Iterable[_Union[ApiResponseRule, _Mapping]]] = ...) -> None: ...
+
+class DeleteTestCaseApiOperationMock(_message.Message):
+    __slots__ = ("id", "integration_name", "operation_name")
+    ID_FIELD_NUMBER: _ClassVar[int]
+    INTEGRATION_NAME_FIELD_NUMBER: _ClassVar[int]
+    OPERATION_NAME_FIELD_NUMBER: _ClassVar[int]
+    id: str
+    integration_name: str
+    operation_name: str
+    def __init__(self, id: _Optional[str] = ..., integration_name: _Optional[str] = ..., operation_name: _Optional[str] = ...) -> None: ...
 
 class SetTestCaseSipHeaders(_message.Message):
     __slots__ = ("id", "sip_headers")

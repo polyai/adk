@@ -215,5 +215,41 @@ class UntagBranch(unittest.TestCase):
         self.assertFalse(result)
 
 
+class MergeBranch(unittest.TestCase):
+    """Tests for SyncClientHandler.merge_branch / sync_branch error reporting."""
+
+    def _handler_on_branch(self):
+        handler = build_handler()
+        handler._sdk.branch_id = "branch-1"
+        handler._sdk.fetch_branches.return_value = {"branches": [{"branchId": "branch-1"}]}
+        return handler
+
+    def test_merge_api_error_is_returned_in_errors(self):
+        """A SourcererAPIError (e.g. SEQUENCE_MISMATCH) is surfaced to the caller."""
+        handler = self._handler_on_branch()
+        handler._sdk.merge_branch.side_effect = SourcererAPIError(
+            "API Error 400: sequence mismatch, received 1750 but expected 1751"
+        )
+
+        success, conflicts, errors = handler.merge_branch(message="msg")
+
+        self.assertFalse(success)
+        self.assertEqual(conflicts, [])
+        self.assertEqual(len(errors), 1)
+        self.assertEqual(errors[0]["path"], [])
+        self.assertIn("sequence mismatch", errors[0]["message"])
+
+    def test_sync_api_error_is_returned_in_errors(self):
+        """sync_branch reports API errors the same way as merge_branch."""
+        handler = self._handler_on_branch()
+        handler._sdk.sync_branch.side_effect = SourcererAPIError("API Error 400: boom")
+
+        success, conflicts, errors = handler.sync_branch()
+
+        self.assertFalse(success)
+        self.assertEqual(conflicts, [])
+        self.assertEqual(errors, [{"path": [], "message": "API Error 400: boom"}])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -52,6 +52,7 @@ from poly.resources.resource import (
     load_resources_from_projection,
 )
 from poly.utils import prepush
+from poly.utils.commands import queue_set_default_commands
 
 logger = logging.getLogger(__name__)
 
@@ -923,6 +924,12 @@ class AgentStudioProject:
             for file_path in self._sort_paths_for_reverse_deletion(deleted_paths, resource_type):
                 resource_type.delete_resource(file_path, save_to_cache=True)
 
+        # The deletions above only reached the cache. Flush them, then clear: a cached
+        # entry carries the pre-write mtime, so anything left behind makes every later
+        # read in this process see a file state that is not on disk.
+        MultiResourceYamlResource.write_cache_to_file()
+        MultiResourceYamlResource._file_cache.clear()
+
         return files_with_conflicts, progress_offset
 
     def _update_pulled_resources(
@@ -1172,6 +1179,13 @@ class AgentStudioProject:
                     updated_resources=post_changes.updated,
                 )
             )
+
+        queue_set_default_commands(
+            new_resources,
+            updated_resources,
+            commands,
+            queue_command=lambda command: self.api_handler.queue_command(command),
+        )
 
         return commands
 
@@ -1467,8 +1481,6 @@ class AgentStudioProject:
             post push: delete dummy
         )
 
-        Only update the default variant if it's being enabled.
-
         If a function is new or updated and it references a variable, update the variable references.
 
         Args:
@@ -1520,7 +1532,6 @@ class AgentStudioProject:
         prepush.default_new_variant_attributes(
             new_resources, deleted_resources, current_resources=self.resources
         )
-        prepush.filter_nondefault_variant_updates(updated_resources)
         prepush.fix_conditions_for_deleted_steps(
             new_resources,
             updated_resources,

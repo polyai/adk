@@ -24,6 +24,7 @@ Each test case has these fields:
 - **caller_number** (string, optional): The number the simulated call arrives from.
 - **sip_headers** (map, optional): SIP headers a carrier would send with an inbound call.
 - **integration_attributes** (map, optional): Attributes a channel or connector passes in.
+- **api_mocks** (map, optional): Mock responses for API integration operations, so the simulation runner returns these instead of calling the real API.
 - **prompt_assertions** (list, optional): Expected behaviours in the agent's response.
 - **function_call_assertions** (list, optional): Expected function calls and argument values.
 
@@ -125,6 +126,44 @@ Types come from YAML, which means quoting matters:
 
 Dates must be quoted. An unquoted `expiry: 2026-08-12` is a YAML date, which the agent cannot receive, and `push` rejects it rather than guessing what you meant.
 
+## API mocks
+
+A flow that branches on an API integration's response — a booking that's available vs. full, a lookup that succeeds vs. errors — needs that response to be deterministic to test reliably. `api_mocks` intercepts calls to a named integration operation during simulation and returns the mocked response instead of calling the real API.
+
+Mocks are keyed by integration name, then operation name, then a list of response rules tried in order:
+
+```yaml
+name: Slot negotiation retries once then succeeds
+scenario: Book a table for 4 at 7pm.
+channel: voice
+language: en-GB
+api_mocks:
+  reservations_api:
+    check_availability:
+    - respond:
+        status: 503
+      repeat: 1
+    - respond:
+        status: 200
+        body:
+          available: true
+          table_id: 42
+        headers:
+          content-type: application/json
+prompt_assertions:
+- The agent retries and confirms the booking
+```
+
+Each rule has:
+
+- **respond**: The response to return.
+  - **status**: HTTP status code (100–599).
+  - **body** (optional): Response body. Keeps its type through to the flow, same rules as `integration_attributes` — quote dates, and only text, numbers, `true`/`false`, `null`, lists and nested maps are supported.
+  - **headers** (optional): Response headers, always sent as text.
+- **repeat** (optional): How many times to return this response before moving to the next rule in the list. Omit it to respond once. Set it to `-1` to respond with this rule forever — only valid on the last rule in a list. `0` and other negative values are rejected. Once a list's rules are exhausted (no trailing `-1` rule), further calls to that operation fall through to the real API.
+
+The integration name must match an existing `api_integration` resource in the project; `push` rejects an unknown one. Operation names aren't cross-checked against the integration's configured operations at push time — instead, renaming or deleting the underlying operation automatically cascades to any mocks that reference it, the same way the platform handles the rest of the integration/operations relationship.
+
 ## Prompt assertions
 
 Prompt assertions are natural-language descriptions of what the agent should do or say in response to the scenario. They are evaluated by the test runner against the simulated conversation.
@@ -166,6 +205,7 @@ On `push`, each test case is validated:
 - **variant**, if specified, must match an existing variant in the project.
 - **function_call_assertions**: each function name must match a global function (`functions/`) or a flow function (`flows/<flow>/functions/`) in the project, and each argument's `value_type` must be one of `string`, `integer`, `number`, or `boolean`.
 - **integration_attributes**: values must be text, numbers, `true`/`false`, `null`, lists or nested maps. An unquoted date is rejected with the quoted form to use instead, and keys must be text.
+- **api_mocks**: the integration name must match an existing `api_integration` resource; each operation must have at least one response rule; each rule's `status` must be a valid HTTP status code (100–599); `body`, if set, follows the same type rules as `integration_attributes`; `repeat`, if set, must be a positive integer or `-1` (respond forever), and `-1` is only allowed on the last rule for an operation.
 
 ## Best practices
 

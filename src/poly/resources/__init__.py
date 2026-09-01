@@ -1,7 +1,6 @@
 # Copyright PolyAI Limited
 from poly.resources.agent_settings import (
-    SettingsPersonality,
-    SettingsRole,
+    SettingsPersona,
     SettingsRules,
 )
 from poly.resources.api_integration import (
@@ -42,6 +41,7 @@ from poly.resources.function import (
     FunctionParameters,
     FunctionType,
 )
+from poly.resources.guardrails import CustomGuardrail, PlatformGuardrail
 from poly.resources.handoff import (
     Handoff,
     HandoffSipConfig,

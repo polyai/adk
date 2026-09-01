@@ -4,11 +4,14 @@ Tools to help with migrating from older versions of the Agent Development Kit to
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from copy import deepcopy
 from enum import Enum
 
 from poly.resources import resource_utils
+
+logger = logging.getLogger(__name__)
 
 
 class MigrationFlag(Enum):
@@ -20,6 +23,7 @@ class MigrationFlag(Enum):
     MIGRATED_LEGACY_TOPIC_FILES = "migrated_legacy_topic_files"
     MIGRATED_FLOW_STEP_RESOURCE_IDS = "migrated_flow_step_resource_ids"
     MIGRATED_FLOW_STEP_SETTINGS = "migrated_flow_step_settings"
+    REMOVED_PERSONALITY_AND_ROLE_FILES = "removed_personality_and_role_files"
 
 
 def load_migration_flags(flags: list[str]) -> set[MigrationFlag]:
@@ -81,7 +85,32 @@ def run_migrations(
         migrate_flow_step_settings(status_dict)
         new_flags.add(MigrationFlag.MIGRATED_FLOW_STEP_SETTINGS)
 
+    if MigrationFlag.REMOVED_PERSONALITY_AND_ROLE_FILES not in applied_migrations:
+        remove_personality_and_role_files(root_path)
+        new_flags.add(MigrationFlag.REMOVED_PERSONALITY_AND_ROLE_FILES)
+
     return new_flags
+
+
+def remove_personality_and_role_files(root_path: str) -> None:
+    """Delete the personality and role files, which are superseded by the persona.
+
+    Agent Studio replaced both settings with a single free-text persona, so the
+    files no longer describe anything the agent uses. They are removed rather
+    than left in place so a stale copy can't be edited and pushed.
+    """
+    removed = []
+    for file_name in ("personality.yaml", "role.yaml"):
+        file_path = os.path.join(root_path, "agent_settings", file_name)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+            removed.append(os.path.join("agent_settings", file_name))
+
+    if removed:
+        logger.warning(
+            f"Removed {', '.join(removed)}: personality and role have been replaced by "
+            "agent_settings/persona.txt. Run 'poly pull' to fetch it."
+        )
 
 
 # Sub-config keys set internally by the config classes rather than accepted as __init__ args.
