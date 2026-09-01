@@ -14,16 +14,25 @@ import argcomplete
 
 from poly.cli_commands.audio_cache import AudioCacheCommand
 from poly.cli_commands.auth import LoginCommand, StartCommand
-from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.base import (
+    COMMAND_GROUP_ORDER,
+    BaseCommand,
+    GroupedHelpFormatter,
+    Parents,
+    add_grouped_subparsers,
+    group_subcommands,
+)
 from poly.cli_commands.branch import BranchCommand
 from poly.cli_commands.chat import ChatCommand
 from poly.cli_commands.conversations import ConversationsCommand
 from poly.cli_commands.deployments import DeploymentsCommand
+from poly.cli_commands.functions import FunctionsCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand, StudioCommand
 from poly.cli_commands.review import ReviewCommand
 from poly.cli_commands.rtc import RTCCommand
 from poly.cli_commands.sync import (
     DiffCommand,
+    FetchCommand,
     FormatCommand,
     PullCommand,
     PushCommand,
@@ -34,6 +43,7 @@ from poly.cli_commands.sync import (
 from poly.cli_commands.template import TemplateCommand
 from poly.cli_commands.testing import TestingCommand
 from poly.cli_commands.utils import CompletionCommand, DocsCommand
+from poly.handlers.interface import REGIONS
 from poly.output.json_output import json_print
 
 logger = logging.getLogger(__name__)
@@ -45,6 +55,7 @@ COMMANDS = [
     StudioCommand,
     ProjectCommand,
     TemplateCommand,
+    FetchCommand,
     PullCommand,
     PushCommand,
     StatusCommand,
@@ -57,6 +68,7 @@ COMMANDS = [
     DeploymentsCommand,
     ConversationsCommand,
     AudioCacheCommand,
+    FunctionsCommand,
     TestingCommand,
     RTCCommand,
     ChatCommand,
@@ -79,7 +91,7 @@ class AgentStudioCLI:
             _version = get_package_version("polyai-adk")
         except Exception:
             _version = "unknown"
-        parser = ArgumentParser()
+        parser = ArgumentParser(formatter_class=GroupedHelpFormatter)
         parser.add_argument(
             "-v",
             "--version",
@@ -119,14 +131,49 @@ class AgentStudioCLI:
             help="Base path to the project. Defaults to current working directory.",
         )
 
-        parents = Parents(
-            verbose=verbose_parent, json=json_parent, debug=debug_parent, path=path_parent
+        scope_parent = ArgumentParser(add_help=False)
+        scope_parent.add_argument(
+            "--region",
+            type=str,
+            choices=REGIONS,
+            default=None,
+            help="Region, for headless use without a local project. Requires "
+            "--project_id and --branch_id.",
+        )
+        scope_parent.add_argument(
+            "--project_id",
+            type=str,
+            default=None,
+            help="Project ID (agent ID), for headless use without a local project. "
+            "Requires --region and --branch_id.",
+        )
+        scope_parent.add_argument(
+            "--branch_id",
+            type=str,
+            default=None,
+            help="Branch ID, for headless use without a local project. Requires "
+            "--region and --project_id.",
         )
 
-        subparsers = parser.add_subparsers(dest="command", required=True)
+        parents = Parents(
+            verbose=verbose_parent,
+            json=json_parent,
+            debug=debug_parent,
+            path=path_parent,
+            scope=scope_parent,
+        )
+
+        subparsers = add_grouped_subparsers(parser, dest="command", metavar="<command>")
 
         for command in self.commands:
             command.add_arguments(subparsers, parents=parents)
+
+        # Split the (long) flat command list into titled sections for --help.
+        group_subcommands(
+            subparsers,
+            {command.command: command.group for command in self.commands},
+            COMMAND_GROUP_ORDER,
+        )
 
         return parser
 

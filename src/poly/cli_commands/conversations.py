@@ -6,7 +6,7 @@ Copyright PolyAI Limited
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from typing import Optional
 
-from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project
 from poly.handlers.interface import AgentStudioInterface
 from poly.output.json_output import json_print
@@ -16,6 +16,8 @@ class ConversationsCommand(BaseCommand):
     """List and inspect conversations for the project."""
 
     command = "conversations"
+
+    group = BUILDER_API_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:

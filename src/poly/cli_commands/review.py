@@ -7,7 +7,7 @@ import os
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 from typing import Optional
 
-from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.base import PROJECT_SYNC_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import compute_diff, format_gist_choice
 from poly.handlers.github_api_handler import GitHubAPIHandler
 from poly.output.json_output import json_print
@@ -17,6 +17,8 @@ class ReviewCommand(BaseCommand):
     """Create a GitHub Gist of Agent Studio project changes to share for review."""
 
     command = "review"
+
+    group = PROJECT_SYNC_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
@@ -296,6 +298,15 @@ class ReviewCommand(BaseCommand):
 
         choices = [format_gist_choice(g) for g in gists]
         description_to_id = {format_gist_choice(g): g["id"] for g in gists}
+
+        if output_json:
+            json_print(
+                {
+                    "success": False,
+                    "error": "Please provide a gist ID to delete when using JSON output.",
+                }
+            )
+            return
 
         selected = questionary.checkbox("Select gists to delete", choices=choices).ask()
         if not selected:

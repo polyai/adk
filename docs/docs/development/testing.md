@@ -46,6 +46,8 @@ For the test-case format, the available assertions, and worked examples, see the
 
     Interactive chat is good at the common path and bad at the awkward ones — an unavailable API, a caller who changes their mind, a variant that only applies to one site. Those are worth encoding as test cases precisely because reaching them manually is tedious.
 
+    For the "unavailable API" case specifically, `api_mocks` lets a test case force a named [API integration](../reference/resources/api_integrations.md) operation to return a given response, so a flow that branches on it runs deterministically instead of depending on a real (and possibly flaky) external call. See [API mocks](../reference/resources/tests.md#api-mocks).
+
 
 ## How this fits the workflow
 

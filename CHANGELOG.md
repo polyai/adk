@@ -1,6 +1,900 @@
 # CHANGELOG
 
 
+## v0.52.0 (2026-09-01)
+
+### Features
+
+- Add poly functions commands and grouped CLI help ([#245](https://github.com/polyai/adk/pull/245),
+  [`a018728`](https://github.com/polyai/adk/commit/a018728630b968c0ecc7d7a41c7d3b13bfec605d))
+
+## Summary
+
+Adds a `poly functions` command group that wraps the newly published public Functions REST API and
+  covers new functionality not previously represented in the ADK.
+
+- `execute` — run a function by name (or ID) with given arguments, returning its output, logs, and
+  runtime. - `validate` — check every function on the branch for syntax errors and orphaned
+  flow-step references.
+
+The push/pull Functions workflow already present in the ADK has not been affected and works the same
+  as prior to this PR.
+
+## Motivation
+
+- [DEVP-541: Integrate Functions API into
+  ADK](https://linear.app/poly-ai/issue/DEVP-541/integrate-functions-api-into-adk) - [DEVP-543:
+  Support grouped section headers in poly CLI --help
+  output](https://linear.app/poly-ai/issue/DEVP-543/support-grouped-section-headers-in-poly-cli-help-output)
+
+DEVP-543 is bundled in at reviewer request. The two changes are independent and are separate
+  commits.
+
+## Changes
+
+- `poly functions execute <function_name>` — run a function, print its return value, logs, and
+  runtime. Accepts `--args` and `--region`/`--project_id`/`--branch_id` for headless use. - `poly
+  functions validate` — validate all functions on the current branch. - Grouped `--help` section
+  headers for `poly`, `poly functions`, and `poly branch`. - Docs: dedicated
+  `docs/docs/reference/cli/functions.md` page; removed duplicate legacy inline command docs from
+  `cli.md`.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1342 passed) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`poly functions --help`:
+
+``` usage: poly functions [-h] [--verbose] <subcommand> ...
+
+Manage Functions via the public Functions REST API, scoped to the project's current branch.
+  Creating, editing and deleting functions is still done via the local-file/decorator workflow (poly
+  push/poly pull); this covers what that workflow can't: running and validating functions.
+
+Examples: poly functions execute <function_name> --args '{"x": 1}' poly functions validate
+
+Run and inspect: execute Execute a function with the given arguments. validate Validate all
+  functions on the current branch.
+
+options: -h, --help show this help message and exit --verbose Show full error tracebacks for
+  debugging. ```
+
+---------
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
+## v0.51.0 (2026-09-01)
+
+### Features
+
+- Add KB child topics resource ([#285](https://github.com/polyai/adk/pull/285),
+  [`a190aeb`](https://github.com/polyai/adk/commit/a190aeb9d8a5dca595b9c159022f3d5eb7d1b9bd))
+
+## Summary
+
+Adds a `ChildTopic` resource for variant-scoped knowledge base topics, stored at
+  `child_topics/<variant_name>/<topic_name>.yaml`. It subclasses `Topic` to reuse serialisation and
+  reference validation, overriding only the parts that genuinely differ. Also fixes a pre-existing
+  crash in flow steps that was uncovered while building it.
+
+This behaviour is for template projects only. So it is not being advertised as a normal feature in
+  the docs
+
+## Motivation
+
+Child topics (the platform's `childOverwrites.knowledgeBase` collection) had no representation in
+  the ADK, so variant-scoped topics could not be pulled, diffed or pushed from a local project.
+
+Despite the platform naming, these are **not** overrides of a base topic. Confirmed against the
+  platform backend: a child topic is assigned its own unique ID independent of any base topic, and
+  there is no ID-based link field between the two. They are modelled here as what they are:
+  independent, variant-scoped topics.
+
+## Changes
+
+### Child topics
+
+- Add `ChildTopic` in `src/poly/resources/child_topic.py`, registered as `child_topics`, subclassing
+  `Topic` - Store them under their own `child_topics/<variant>/` tree, kept separate from the base
+  topics in `topics/` so discovery of the two can never overlap - Parse from the
+  `childOverwrites.knowledgeBase` projection, resolving variant names from `variantManagement` -
+  Infer the owning variant from the enclosing folder rather than storing it in YAML, mirroring how
+  `FlowStep` resolves its parent flow - Route commands via `command_type = "child_topic"` so
+  create/update/delete act on the child overwrites collection instead of the base topics - Validate
+  that the variant exists, and that a name is unique across **all** topics and child topics in
+  **every** variant
+
+The uniqueness rule matches the server rather than being stricter or looser than it:
+  `getAllActiveTopics` concatenates `knowledgeBase.topics` with
+  `childOverwrites.knowledgeBase.topics` across all variants, and `CreateChildTopicHandler` inherits
+  that check from `CreateTopicHandler`. Enforcing it locally turns what would be a push-time
+  rejection into a message naming the clashing file.
+
+### Flow steps — pre-existing crash
+
+`FlowStep` and `FunctionStep` resolve their flow via `get_flow_id_from_flow_name`, which returns
+  nothing when a step's flow config is missing, renamed or unparseable. `file_path` then
+  dereferenced the unset flow name, so any orphaned step crashed `poly diff`/`status` with
+  `AttributeError: 'NoneType' object has no attribute 'lower'`.
+
+Both now fall back to the folder as read from disk, so the path stays usable and the real problem is
+  reported by validation instead of a stack trace. This bug predates the branch; `ChildTopic`
+  initially inherited it by copying the `FlowStep` pattern.
+
+### Test fixtures
+
+- Read the fixture JSON as UTF-8. It was decoded with the platform default encoding, which corrupted
+  non-ASCII content on Windows and made the resource look modified on every run.
+
+### Docs
+
+- Correct the `resource-scaffolder` agent guide, which documented a registration flow
+  (`_read_<type>_from_projection` on `SyncClientHandler`, hand-editing `RESOURCE_NAME_TO_CLASS`)
+  that no longer exists — registration is now the `@register_resource` decorator plus a
+  `from_projection` classmethod on the resource
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
+## v0.50.0 (2026-09-01)
+
+### Features
+
+- Keep withheld resources as slim reference mappings
+  ([#300](https://github.com/polyai/adk/pull/300),
+  [`d8772cb`](https://github.com/polyai/adk/commit/d8772cb096d1abab1aa74e11f6c6e5869b50aefc))
+
+## Summary
+
+Withheld resources whose ids appear inside resources gated on a *different* permission are kept as
+  identity-only mappings rather than dropped, so `{{entity:...}}`-style references to them still
+  resolve to a name. They live in `slim_resources`, a list of `ResourceMapping` that resolves
+  references but is never iterated for a file, saved, or pushed.
+
+## Motivation
+
+With #299 alone, a restricted reader's pull succeeds but every reference to a withheld resource
+  renders as a raw id — and because the id round-trips differently than the name, the file looks
+  locally modified on every command. The mapping also has to survive in the status file: every
+  command other than pull rehydrates from it, so a slim resource not written there is gone by the
+  next command.
+
+## Changes
+
+- `from_projection` for entities, functions, handoffs, SMS templates, translations, variants and
+  variant attributes returns identity-only stubs (`slim=True`) for auth-filtered slices;
+  `load_resources_from_projection` separates them out of the resource map into a list of
+  `ResourceMapping`. - Variables are treated as slim when functions are slim: `variableUpdate` is
+  gated on a different permission than functions, so the API would accept a reference graph rebuilt
+  from functions the user cannot see. - `ResourceMapping` gained `to_dict`/`from_dict`, storing
+  `resource_type` by its registered name so slim mappings persist in the status file. An
+  unregistered type is dropped on read rather than raising. - Slim resources are excluded from
+  `file_structure_info` — they have no file on disk, so a baseline entry would make
+  `find_new_kept_deleted` report them deleted on every run. - `pull_resources`,
+  `pull_deployment_resources`, `pull_branch_resources`, `get_template_resources`,
+  `get_remote_resources_by_name` and `_resolve_branch_fork_point` all return their slim mappings
+  alongside the resource map, and every caller (pull, push, status, diff, branch diff, validate,
+  sync-ids) was updated to resolve references against them. - Tests covering status-file
+  round-trips, force-pull removal of a type that became withheld, and cache/disk agreement after a
+  pull.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1453 passed, 165
+  subtests) - [x] No breaking changes to the `poly` CLI interface (or migration path documented) -
+  [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
+## v0.49.2 (2026-09-01)
+
+### Bug Fixes
+
+- Tolerate auth-filtered projections instead of crashing on pull
+  ([#299](https://github.com/polyai/adk/pull/299),
+  [`37f9d39`](https://github.com/polyai/adk/commit/37f9d39118a735dc10deb9d60418bedb9b508af4))
+
+## Summary
+
+The API filters projections per permission slice: a user without read access to a slice gets a
+  skeleton carrying only identity fields, with the substantive fields stripped. Every
+  `from_projection` now detects an auth-filtered or absent slice and drops that resource type for
+  the pull instead of crashing or building resources from the skeleton.
+
+First of two PRs replacing #288 (stacked on #298; the follow-up adds slim reference mappings so
+  references to withheld resources still resolve to names).
+
+## Motivation
+
+Pulling as a restricted reader fails today. All 162 `pull failed` errors on adk-service in the last
+  30 days trace to auth-filtered slices:
+
+- 116 × `KeyError` on `name` / `actions` / `description` — unguarded field access on skeleton
+  entities. - 46 × `Duplicate resource file path found` / `File not found for resource` — filtered
+  keyphrase-boosting and phrase-filter slices parsed with empty names, collapsing every entry onto
+  one file path.
+
+## Changes
+
+- Every `from_projection` guards its slice: an absent slice or one where any entity is missing a
+  field the API always sends for readable data is treated as withheld, logged at debug level, and
+  yields no resources. - Guards test field presence, never truthiness, so falsy-but-readable values
+  (empty `content`, `active=False`) are not mistaken for filtered ones. Sentinel fields are chosen
+  per slice where the obvious field is optional in the API schema (e.g. variant attributes guard on
+  `type`, not `archived`; variants on `isDefault`, not `name`). - Functions check their three slices
+  independently ("functions" gates special and global functions, "jupiter_flows" gates transition
+  functions) — losing one permission must not hide the others. - New `slim_projection_test.py` with
+  a skeleton-projection fixture built from the fields each slice always sends, asserting no
+  registered resource type raises and nothing half-built survives.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1443 passed, 153
+  subtests) - [x] No breaking changes to the `poly` CLI interface (or migration path documented) -
+  [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
+## v0.49.1 (2026-09-01)
+
+### Bug Fixes
+
+- Flush whole-type multi-resource YAML deletions to disk on pull
+  ([#298](https://github.com/polyai/adk/pull/298),
+  [`898f7cb`](https://github.com/polyai/adk/commit/898f7cb98d14e7d172f4573c8719522da34b189d))
+
+## Summary
+
+When an entire multi-resource YAML type is absent from the incoming projection, its per-resource
+  deletions were batched into the file cache and then discarded when the pull returned — the pruned
+  file never reached disk. Flush the cache after the whole-type deletion pass, then clear it.
+
+## Motivation
+
+The leftover cache entry was stamped with the file's pre-write mtime, so the staleness check treated
+  it as fresh and every later read in the same process saw a file state that was not on disk. The
+  visible symptom was a pull that had to be run twice before `poly diff` came back clean. Split out
+  of #288, but the bug is independent of auth filtering — any pull that deletes an entire
+  multi-resource type hits it.
+
+## Changes
+
+- Flush and clear the multi-resource YAML file cache after the whole-type deletion pass in
+  `_update_multi_resource_yaml_resources`, so deletions reach disk and no stale cache entry survives
+  the pull. - Regression test asserting the pruned file is written to disk and the cache is empty
+  after the pull.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1434 passed, 117
+  subtests) - [x] No breaking changes to the `poly` CLI interface (or migration path documented) -
+  [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+- Push variant renames and default switches to the platform
+  ([#297](https://github.com/polyai/adk/pull/297),
+  [`770440b`](https://github.com/polyai/adk/commit/770440b623999daa84032939ff7dd8e979f1c691))
+
+## Summary
+
+Renaming a variant to a name with the same "clean name" (e.g. only the punctuation changes) was
+  silently dropped on push, and a new variant marked `is_default` never actually became the default.
+  Both are fixed, and set-default command emission moves out of `queue_resources` into
+  `_stage_commands`.
+
+## Motivation
+
+`Variant.file_path` is derived from `clean_name()`, which maps punctuation and whitespace to `_`. So
+  renaming a variant from `My Variant - Prod` to `My_Variant - Prod` keeps the same path: the
+  variant is treated as *kept* rather than delete+create, and its changed hash puts it in
+  `updated_resources`. But `Variant.build_update_proto` returned `Variant_SetDefaultVariant`, which
+  has no `name` field, so the rename never reached the platform — while local state and
+  `file_structure_info` were rewritten as if the push had succeeded, leaving local and remote
+  permanently out of sync with no error.
+
+Separately, `Variant_CreateVariant` has no `is_default` field, and the only thing emitting a
+  set-default command was the update path, which new resources never reach. A variant created with
+  `is_default: true` therefore never became the default.
+
+`prepush.filter_nondefault_variant_updates` dropped every update for a non-default variant. That was
+  only safe because "update" literally meant "set default"; once updates carry a name it would
+  suppress legitimate renames, so it is removed.
+
+## Changes
+
+- `Variant.update_command_type` is now `variant_update_variant`, and `build_update_proto` returns
+  `Variant_UpdateVariant(id, name)`, so renames reach the platform. - `attribute_values` on that
+  proto is deliberately left unset. The platform only rewrites a variant's attribute values when the
+  field is present, and a present map must cover every non-archived attribute or the command is
+  rejected — sending it would risk wiping values. There is a regression test guarding this. -
+  Set-default emission moves out of `AgentStudioInterface.queue_resources` into
+  `queue_set_default_commands` in `poly/utils/commands.py`, called at the end of
+  `AgentStudioProject._stage_commands`, for both handoffs and variants. It has to run after the
+  creates and updates, because the platform rejects a set-default for a resource that does not exist
+  yet. This is what fixes the new-default-variant case. - `queue_resources` goes back to being
+  purely generic (deletes → creates → updates, duck-typed on `*_command_type` / `build_*_proto`)
+  with no per-resource-type knowledge. - `prepush.filter_nondefault_variant_updates` removed, along
+  with its call site and a stale docstring line. - New `create_command_handoff_set_default` /
+  `create_command_variant_set_default` builders alongside the existing standalone command builders.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+``` ruff check . All checks passed! ruff format --check . 95 files already formatted pytest 1445
+  passed, 117 subtests passed ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
+## v0.49.0 (2026-08-28)
+
+### Features
+
+- Add support for guardrails ([#277](https://github.com/polyai/adk/pull/277),
+  [`93cf5a5`](https://github.com/polyai/adk/commit/93cf5a512dfecf1e0d4b22b55cf44fd83496c4b3))
+
+## Summary
+
+Adds a new `guardrails` resource type to ADK, supporting both platform (toggle-only) and custom
+  (prompt/action-defined) guardrails, synced through `agent_settings/guardrails.yaml`.
+
+## Motivation
+
+Agent Studio now supports guardrails (platform-provided and custom) that were not yet representable
+  in local ADK projects. This adds first-class support so they can be pulled, edited, and pushed
+  like other resources.
+
+## Changes
+
+- Added `PlatformGuardrail` and `CustomGuardrail` resource classes in
+  `src/poly/resources/guardrails.py`, both stored in `agent_settings/guardrails.yaml` -
+  `PlatformGuardrail` supports only the `enabled` toggle against the platform's fixed guardrail
+  catalog (`GuardrailName` proto enum), with YAML-friendly short names (e.g. `jailbreak_defence`) -
+  `CustomGuardrail` supports full create/update/delete with `name`, `prompt`, `action`, and
+  `enabled` fields, plus reference validation against other resource types (`global_functions`,
+  `sms`, `handoff`, `attributes`, `variables`, `translations`) - Registered both resource classes
+  via `register_resource` and exported them from `src/poly/resources/__init__.py` - Added
+  `discover_resources`/`from_projection`/`to_yaml_dict`/`from_yaml_dict`/`validate` implementations
+  for both resource types - Added guardrails fixture (`agent_settings/guardrails.yaml`) and updated
+  `test_project.json` in the test fixture project - Added extensive unit tests in
+  `src/poly/tests/resources_test.py`
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
+## v0.48.0 (2026-08-28)
+
+### Features
+
+- Add persona to agent settings (DEVP-624) ([#294](https://github.com/polyai/adk/pull/294),
+  [`ecc7d9d`](https://github.com/polyai/adk/commit/ecc7d9dbe7d8db9a68602f5938fb0132b4de5b66))
+
+## Summary
+
+Replaces the separate Personality and Role settings in ADK with the single free-text `persona`
+  resource that superseded them in Agent Studio. `agent_settings/persona.txt` now pulls, pushes and
+  diffs; `personality.yaml` and `role.yaml` are gone, and a migration deletes them from existing
+  project directories.
+
+## Motivation
+
+[DEVP-624](https://linear.app/poly-ai/issue/DEVP-624/add-persona-to-agent-settings-adk-is-blind-to-the-new-merged-role)
+
+On the wire the merged Role field is a new `persona` component on `agentSettings`. ADK had no
+  persona resource at all, so `pull` dropped the field builders actually author, `push` could only
+  write the dead settings, and `diff` across environments silently ignored the primary identity
+  field.
+
+## Changes
+
+- `SettingsPersona` in `resources/agent_settings.py` — plain-text `agent_settings/persona.txt`,
+  modelled on `SettingsRules`, registered via `@register_resource("persona")` - References validated
+  against `{{attr:}}` and `{{vrbl:}}` — the same two the personality and role `custom` fields
+  accepted. Attribute references travel in the content and are not tracked on the resource, since
+  `PersonaReferences` is variables-only; so were `PersonalityReferences` and `RoleReferences`, so
+  this is not new - `update_persona` always carries a `variables` map (possibly empty) — the backend
+  schema requires the key whenever `references` is sent - `from_projection` reads `persona.content`,
+  not the `persona` object — the projection always carries the object, so absent content just means
+  there is nothing to write to disk. An authored empty string is a real persona and is kept -
+  **`SettingsPersonality` and `SettingsRole` deleted.** They still exist on the wire but nothing
+  surfaces them, so keeping them registered only leaves two files that pull, push and validate while
+  affecting nothing - **Migration `removed_personality_and_role_files`** deletes
+  `agent_settings/personality.yaml` and `role.yaml` the first time a project is loaded, logging what
+  it removed and telling the builder to pull to get `persona.txt`. `file_structure_info` is
+  recomputed from the loaded resources on every load, so the stale status entries drop out on their
+  own - Docs: the packaged `docs/agent_settings.md` + `docs/docs.md`, and the mkdocs site — the
+  resource reference, architecture guide, working-locally tree, tooling/CLI tables and the
+  restaurant tutorial all walked builders through `personality.yaml` and `role.yaml`
+
+### On the compiled backfill
+
+For a project that has never authored a persona, the content the projection returns is derived
+  server-side from the old `personality` + `role` and stored nowhere. This is deliberately left
+  as-is rather than detected and skipped: `push_project` only sends resources whose on-disk hash
+  differs from the pulled snapshot, so an untouched `persona.txt` is never pushed back, and editing
+  the file authors a real persona — which is the intent. Documented in `docs/agent_settings.md`.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly docs agent_settings`) - [ ] Tested
+  against a live Agent Studio project
+
+New coverage: `SettingsPersonaTests` (15 cases — raw/pretty roundtrip, attribute and variable
+  validation, `{{fn:}}` rejection, update proto with and without references, `from_projection` for
+  present / absent-content / absent-object / empty-string) and `TestRemovePersonalityAndRoleFiles`
+  for the migration (no-op without `agent_settings/`, both files removed with the warning logged,
+  other settings files untouched).
+
+Also verified offline that a `Command(type="update_persona", ...)` builds, serialises and
+  round-trips with `references.variables` populated.
+
+Not yet run against a live project — `poly pull` / `poly push` on a real project is still
+  outstanding.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1352 passed, 112
+  subtests) - [x] No breaking changes to the `poly` CLI interface - [x] Commit messages follow
+  conventional commits
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Opus 5 <noreply@anthropic.com>
+
+
+## v0.47.1 (2026-08-28)
+
+### Bug Fixes
+
+- Sort resource collections in YAML and register fetch command
+  ([#291](https://github.com/polyai/adk/pull/291),
+  [`ae1c29d`](https://github.com/polyai/adk/commit/ae1c29d4daf07e595eb755a330f7c064c9be69c8))
+
+## Summary
+
+Sorts collections alphabetically during YAML serialization so pulls produce stable, diff-friendly
+  output. Also registers `FetchCommand` in the CLI command list — it was implemented but never wired
+  up, so `poly fetch` was unavailable.
+
+## Motivation
+
+Several collections are built by iterating a map in the platform projection — flow step conditions,
+  API integration operations, test case function call assertions and their arguments, and the
+  integration/operation keys of test case API mocks. Their serialized order followed whatever the
+  map iteration gave, so unrelated pulls could reorder blocks in a resource's YAML and create noisy
+  diffs.
+
+Separately, the `fetch` command existed in `cli_commands/sync.py` but was missing from `COMMANDS`,
+  so it never appeared in the CLI.
+
+## Changes
+
+- `FlowStep.to_yaml_dict` sorts conditions by `name` (matches the existing
+  `sorted(self.extracted_entities)` behaviour) - `ApiIntegration.to_yaml_dict` sorts operations by
+  `name` - `FunctionCallAssertion.to_yaml_dict` sorts arguments by `parameter_name`, and
+  `TestCaseAssertion.to_yaml_dict` sorts function call assertions by `name` -
+  `TestCaseApiMocks.to_yaml_dict` sorts integration and operation names; the rules within an
+  operation keep their order, since they are a sequence and `repeat` depends on it - Add
+  `FetchCommand` to the `COMMANDS` list in `cli.py` so `poly fetch` is registered - Add unit tests
+  covering each ordering, including one asserting mock rule order is preserved - `uv.lock` version
+  bump picked up from the 0.44.4 release
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly --help` now lists `fetch`) - [ ]
+  Tested against a live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1356 passed) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+``` $ uv run poly --help | grep fetch fetch Fetch the latest project state from Agent Studio ```
+
+---------
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
+## v0.47.0 (2026-08-28)
+
+### Features
+
+- Allow variable and translation id<->name swap for delay control utterances
+  ([#186](https://github.com/polyai/adk/pull/186),
+  [`0d320db`](https://github.com/polyai/adk/commit/0d320db919c55906c03fbb88d9214bedf94a7d6c))
+
+## Summary
+
+Scopes the `{{prefix:value}}` reference swap in `Function.make_pretty`/`from_pretty` to only delay
+  control utterance messages, using AST to precisely locate the string literals within
+  `@func_latency_control` decorators.
+
+## Motivation
+
+- `make_pretty` had a bug: `replace_resource_ids_with_names` return value was silently discarded -
+  `from_pretty` applied `replace_resource_names_with_ids` to the entire function code instead of
+  only delay control messages - `validate()` had a bug where `resource_mappings` parameter was
+  overwritten by `kwargs.get("resource_mappings")` (always `None` after the signature change)
+
+## Changes
+
+- Add `_swap_latency_control_references` static method that uses AST to find `@func_latency_control`
+  decorator message strings and applies swap via positional replacement - Fix `make_pretty` to use
+  targeted swap (previously no-op due to unused return value) - Scope `from_pretty` swap to delay
+  control utterances only - Fix `validate()` parameter shadowing bug - Add
+  `DELAY_CONTROL_REFERENCES` constant and delay response reference validation in `validate()` - Add
+  `resource_utils.build_reference_swapper` so the name↔id lookup can be built once and reused across
+  many strings; `replace_resource_ids_with_names` / `replace_resource_names_with_ids` are now thin
+  wrappers over it - Add tests for `_swap_latency_control_references` covering both directions, body
+  isolation, definitions nested in statements, edge cases, and roundtrip
+
+## Performance
+
+The swap runs once per function per command, so it is scoped to stay cheap: it returns immediately
+  unless `func_latency_control` appears in the source (only 11.7% of functions use it), builds the
+  reference lookup once per call rather than once per message, and walks statements only.
+
+Measured against local checkouts of 45 real projects (4,619 function files), versus `main`:
+
+| Measurement | `main` | This PR | Noise floor | |---|---|---|---| | Full local resource read, 16
+  projects | 3520 ms | 3682 ms (+4.6%) | ±1.6% | | `poly status`, 9 projects | 12698 ms | 12441 ms
+  (−2.0%) | ±6% |
+
+`poly status` is a null result — the difference is smaller than the command's own run-to-run
+  variance.
+
+The statement-only traversal was checked against the whole corpus: identical function-definition
+  sets to `ast.walk` on all 4,619 files, and byte-identical swap output across 9,238 comparisons.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
+## v0.46.0 (2026-08-28)
+
+### Features
+
+- Add randomize to @func_latency_control ([#265](https://github.com/polyai/adk/pull/265),
+  [`f9d3884`](https://github.com/polyai/adk/commit/f9d3884ee50794029081160c3b3895c2932cae96))
+
+## Summary
+
+Adds `randomize` to `@func_latency_control` so ADK projects can opt into shuffling delay responses
+  per call.
+
+## Changes
+
+- `@func_latency_control(..., randomize: bool = False)` - Parse/render/to_proto/create wiring on
+  `FunctionLatencyControl` - Updated `functions_pb2` bindings - Docs + unit tests
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (latency/randomize
+  cases) - [x] No breaking changes to the `poly` CLI interface (or migration path documented) - [x]
+  Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Example
+
+```python @func_latency_control( delay_before_responses_start=0, silence_after_each_response=2,
+  delay_responses=[("$delay_1", 3), ("$delay_2", 2)], randomize=True, ) ```
+
+---------
+
+Co-authored-by: Cursor <cursoragent@cursor.com>
+
+
+## v0.45.1 (2026-08-28)
+
+### Bug Fixes
+
+- Surface merge API errors and use a fresh sequence for merge/sync
+  ([#295](https://github.com/polyai/adk/pull/295),
+  [`8be3f53`](https://github.com/polyai/adk/commit/8be3f539a3638a30aabe4901b1d98de9c69ba553))
+
+## Summary
+
+Make `merge_branch`/`sync_branch` send a freshly fetched branch sequence instead of the
+  projection-cached one, and return the Sourcerer API error to callers instead of swallowing it.
+  `poly branch merge`/`sync` print a retry hint on a sequence mismatch.
+
+## Motivation
+
+A draft deployment finishing mid-merge appends a `deploymentCompleted` event to the branch, so
+  Sourcerer rejects the merge with `SEQUENCE_MISMATCH`. Today that surfaces as a blank `Merge
+  failed:` and a retry resends the same stale sequence.
+
+## Changes
+
+- `sdk.merge_branch` / `sdk.sync_branch`: fetch the sequence via
+  `fetch_last_known_sequence_number()` before the call (as `delete_branch` already does) -
+  `sync_client.merge_branch` / `sync_branch`: return the `SourcererAPIError` message in `errors`
+  (`{"path": [], "message": ...}`) instead of `(False, [], [])` - `poly branch merge` / `poly branch
+  sync`: print "The branch changed while merging… Re-run the merge." when an error is a sequence
+  mismatch
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
+## v0.45.0 (2026-08-28)
+
+### Bug Fixes
+
+- Accept none reasoning effort in experimental config
+  ([#292](https://github.com/polyai/adk/pull/292),
+  [`e8333c3`](https://github.com/polyai/adk/commit/e8333c33f5b2e87449e90b94dc7b1d9886ae3884))
+
+## Summary
+
+Adds `none` to the `reasoning_effort` enum in the bundled experimental config schema, and documents
+  which models take it.
+
+## Motivation
+
+The platform now accepts `reasoning_effort: none` — it is the supported low-latency value for OpenAI
+  GPT-5.6 models, which do not accept the older GPT-5 `minimal`. The bundled schema is what `poly
+  validate` / CI check an `experimental_config` against, so without this a project that legitimately
+  sets `none` validates in Agent Studio but fails validation here, and the usual "remove it to pass
+  CI" workaround silently reverts the setting on merge.
+
+## Changes
+
+- `src/poly/resources/experimental_config_schema.yaml`: add `none` to the `reasoning_effort` enum
+  and a description line for the GPT-5.6 supported set (`none`, `low`, `medium`, `high`), keeping
+  the existing per-model lines unchanged.
+
+Out of scope: the flow-step `ReasoningEffort` enum in `resources/flows.py` is bound to proto
+  ordinals, so a `none` member there needs the proto enum to carry one first. This PR only widens
+  the experimental config schema.
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+Schema-only change; `pytest src/poly/tests/project_test.py` (the experimental config validation
+  tests) passes — 233 passed.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass (no Python changed) - [x] `pytest` passes -
+  [x] No breaking changes to the `poly` CLI interface — this only widens what validates - [x] Commit
+  messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+- Align handoff/review behavior with refreshed docs ([#279](https://github.com/polyai/adk/pull/279),
+  [`3940c12`](https://github.com/polyai/adk/commit/3940c12cbb3af0d88793a0b8fbb93ee2e719e430))
+
+## Summary
+
+Two small code fixes discovered while writing the resource and CLI reference docs, so behavior
+  matches what's now documented. Stacked on #278 — this PR's diff is just the files below once that
+  one merges.
+
+## Motivation
+
+Auditing `handoffs.md` and `reference/cli/review.md` against source surfaced two spots where actual
+  behavior didn't match what a reasonable reading of the docs (or the `--json` contract documented
+  elsewhere in the CLI reference) would expect.
+
+## Changes
+
+- `src/poly/resources/handoff.py`: omit `sip_headers` from the serialized YAML when empty instead of
+  always writing it out, matching its documented optional status -
+  `src/poly/cli_commands/review.py`: `poly review delete --json` now returns a JSON error instead of
+  falling through to an interactive checkbox prompt when no gist ID is given, consistent with the
+  "`--json` requires explicit flags" pattern documented for other commands -
+  `src/poly/tests/github_api_test.py`: updated the one test that encoded the old
+  (interactive-fallback) behavior to assert the new error-and-return behavior instead; the existing
+  "gist ID + `--json`" success-path test was unaffected
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+- Stop forcing document paths to uppercase, guard platform context file case
+  ([#281](https://github.com/polyai/adk/pull/281),
+  [`8be0deb`](https://github.com/polyai/adk/commit/8be0deb7f2fb701de7be103bf645dae3861cb553))
+
+## Summary
+
+Stops forcing every Document's path to uppercase on construction, and instead only enforces
+  exact-case for the platform's special `CONTEXT.MD` context file.
+
+## Motivation
+
+#231 normalized all document paths to uppercase to fix a case-sensitivity conflict, but that
+  force-uppercased every document rather than just the one path (`CONTEXT.MD`) the platform treats
+  specially, causing unwanted renames for ordinary documents. `discover_resources()` also still
+  forced the discovered path to uppercase, which could construct a file path that doesn't exist on
+  case-sensitive filesystems.
+
+## Changes
+
+- Removed `Document.__post_init__` uppercase normalization; paths now preserve their original case -
+  `validate()` now only errors when a path case-insensitively matches `CONTEXT.MD` but isn't the
+  exact-case `CONTEXT.MD` - `discover_resources()` no longer force-uppercases discovered file names
+  - `from_projection()` strips both `.md` and `.MD` suffixes when deriving `name` - Updated existing
+  tests for preserved-case behavior; added tests for the `CONTEXT.MD` validation and a `CONTEXT.MD`
+  fixture
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+### Documentation
+
+- Auto-update from 8be0deb ([#287](https://github.com/polyai/adk/pull/287),
+  [`038eed6`](https://github.com/polyai/adk/commit/038eed616fe4c948888c8b20a1d6d83e557bfc74))
+
+Update docs for context
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+### Features
+
+- Support API integration mocks on test cases ([#284](https://github.com/polyai/adk/pull/284),
+  [`42a5616`](https://github.com/polyai/adk/commit/42a56165945d70f0d5b4a729d058c3a4576d29f4))
+
+## Summary
+
+Adds `api_mocks` support to test cases — mock an API integration operation's response
+  (status/body/headers, with a `repeat` sequence) so flows that branch on API responses can be
+  tested deterministically during simulation.
+
+## Motivation
+
+Closes AM-960
+
+## Changes
+
+- New `ApiResponse`, `ApiResponseRule`, `TestCaseApiMocks` dataclasses in `test_suite.py`, wired
+  into `TestCase` YAML load/dump, `from_projection`, and `push` diffing, following the existing
+  `SubResource` pattern (`TestCaseIntegrationAttributes`, `TestCaseSipHeaders`). - Push-time
+  validation: integration name must match a known `api_integration` resource, `status` must be
+  100–599, `body` follows the same type rules as `integration_attributes`, each operation needs at
+  least one response rule, and `repeat` must be a positive integer or `-1` (respond forever) — `-1`
+  only valid on the last rule in an operation's list. - Cross-checked `repeat`/`-1` semantics and
+  rename/delete cascading behavior against the platform runtime (`genai_lambda_runtime`) and the web
+  app (`platform_ui/apps/agent-stream` + `jupiter`) to make sure the CLI's validation and docs match
+  actual platform behavior. - Docs: new "API mocks" section in `tests.md` with a YAML example,
+  cross-linked from `api_integrations.md`.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1332 passed) - [x] No
+  breaking changes to the `poly` CLI interface - [x] Commit messages follow conventional commits
+
+## Screenshots / Logs
+
+N/A
+
+---------
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+
 ## v0.44.4 (2026-08-25)
 
 ### Bug Fixes

@@ -12,6 +12,8 @@ They can be called by the model, used as flow steps, or run automatically at cal
 
 Functions are how the ADK handles behavior that should not be left to prompt interpretation alone.
 
+Creating, editing and deleting functions is always done here, via local files synced by `poly push`/`poly pull`. To run or validate a function headlessly (e.g. from CI) once it exists, see [`poly functions`](../cli/functions.md).
+
 ## Where functions live
 
 ~~~text
@@ -115,12 +117,17 @@ Adding this decorator to a function enables latency control for it. It accepts:
 | `delay_before_responses_start` | `int` (0–10) | How long to wait before playing the first delay message |
 | `silence_after_each_response` | `int` (0–10) | Minimum gap to leave between delay messages |
 | `delay_responses` | `list[tuple[str, int]]` | `(message, duration)` pairs to play while the function runs |
+| `randomize` | `bool` | When `True`, shuffle delay response order on each function invocation (timing slots are preserved). Default `False` |
 
 ~~~python
 @func_latency_control(
     delay_before_responses_start=2,
     silence_after_each_response=3,
-    delay_responses=[("Let me check that for you.", 3)],
+    delay_responses=[
+        ("Let me check that for you.", 3),
+        ("Still working on it.", 2),
+    ],
+    randomize=True,
 )
 ~~~
 

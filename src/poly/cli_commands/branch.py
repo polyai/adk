@@ -7,12 +7,19 @@ import json
 import os
 import subprocess
 import sys
-from argparse import SUPPRESS, ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
+from argparse import SUPPRESS, ArgumentParser, Namespace, _SubParsersAction
 from collections import Counter
 from contextlib import nullcontext
 from typing import Any, Optional
 
-from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.base import (
+    PROJECT_SYNC_GROUP,
+    BaseCommand,
+    GroupedRawTextHelpFormatter,
+    Parents,
+    add_grouped_subparsers,
+    group_subcommands,
+)
 from poly.cli_commands.shared import load_project, parse_from_projection_json, read_project_config
 from poly.output.json_output import json_print
 from poly.project import DeploymentMode
@@ -21,6 +28,36 @@ from poly.utils import merge_strings
 
 # Single-line values longer than this are treated like multiline (no terminal dump; editor for edit).
 _BRANCH_MERGE_LONG_LINE_THRESHOLD = 800
+
+# Section headers for `poly branch --help`: commands that move a branch through
+# its lifecycle, then the read-only ones that report on it.
+BRANCH_LIFECYCLE_GROUP = "Branch lifecycle"
+BRANCH_INSPECT_GROUP = "Inspect"
+
+BRANCH_SUBCOMMAND_GROUP_ORDER = [BRANCH_LIFECYCLE_GROUP, BRANCH_INSPECT_GROUP]
+
+BRANCH_SUBCOMMAND_GROUPS = {
+    "list": BRANCH_LIFECYCLE_GROUP,
+    "create": BRANCH_LIFECYCLE_GROUP,
+    "switch": BRANCH_LIFECYCLE_GROUP,
+    "current": BRANCH_LIFECYCLE_GROUP,
+    "rename": BRANCH_LIFECYCLE_GROUP,
+    "delete": BRANCH_LIFECYCLE_GROUP,
+    "restore": BRANCH_LIFECYCLE_GROUP,
+    "merge": BRANCH_LIFECYCLE_GROUP,
+    "sync": BRANCH_LIFECYCLE_GROUP,
+    "tag": BRANCH_LIFECYCLE_GROUP,
+    "untag": BRANCH_LIFECYCLE_GROUP,
+    "diff": BRANCH_INSPECT_GROUP,
+    "review": BRANCH_INSPECT_GROUP,
+    "status": BRANCH_INSPECT_GROUP,
+    "history": BRANCH_INSPECT_GROUP,
+}
+
+
+def _is_sequence_mismatch(errors: list[dict[str, Any]]) -> bool:
+    messages = (str(err.get("message", "")).lower() for err in errors)
+    return any("sequence mismatch" in m or "sequence_mismatch" in m for m in messages)
 
 
 def _branch_merge_conflict_file_key(path: list[str]) -> str:
@@ -109,6 +146,8 @@ class BranchCommand(BaseCommand):
 
     command = "branch"
 
+    group = PROJECT_SYNC_GROUP
+
     @classmethod
     def _branch_name_completer(
         cls,
@@ -154,9 +193,11 @@ class BranchCommand(BaseCommand):
                 "  poly branch tag\n"
                 "  poly branch untag\n"
             ),
-            formatter_class=RawTextHelpFormatter,
+            formatter_class=GroupedRawTextHelpFormatter,
         )
-        branch_subparsers = branches_parser.add_subparsers(dest="branch_subcommand", required=True)
+        branch_subparsers = add_grouped_subparsers(
+            branches_parser, dest="branch_subcommand", metavar="<subcommand>"
+        )
 
         # -- list --
         branch_list_parser = branch_subparsers.add_parser(
@@ -448,6 +489,10 @@ class BranchCommand(BaseCommand):
             help="Maximum number of history entries to show. Shows all by default.",
         )
         branch_history_parser.set_defaults(branch_subcommand="history")
+
+        group_subcommands(
+            branch_subparsers, BRANCH_SUBCOMMAND_GROUPS, BRANCH_SUBCOMMAND_GROUP_ORDER
+        )
 
     @classmethod
     def run(cls, args: Namespace) -> None:
@@ -1182,6 +1227,11 @@ class BranchCommand(BaseCommand):
             plain("\n[red]Errors:[/red]")
             for err in errors:
                 error(f"- {err['path']}: {err['message']}")
+            if _is_sequence_mismatch(errors):
+                warning(
+                    "The branch changed while merging (e.g. a draft deployment finished). "
+                    "Re-run the merge."
+                )
 
         enriched = enrich_branch_merge_conflicts(conflicts) if conflicts else []
         display_conflict = [
@@ -1503,6 +1553,11 @@ class BranchCommand(BaseCommand):
             plain("\n[red]Errors:[/red]")
             for err in errors:
                 error(f"- {err['path']}: {err['message']}")
+            if _is_sequence_mismatch(errors):
+                warning(
+                    "The branch changed while syncing (e.g. a draft deployment finished). "
+                    "Re-run the sync."
+                )
 
         enriched = enrich_branch_merge_conflicts(conflicts) if conflicts else []
         display_conflict = [

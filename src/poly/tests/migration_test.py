@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 
-from poly.migration_utils import migrate_legacy_topic_files
+from poly.migration_utils import migrate_legacy_topic_files, remove_personality_and_role_files
 from poly.resources import resource_utils
 
 
@@ -130,3 +130,44 @@ class TestMigrateLegacyTopicFiles(unittest.TestCase):
                 data = resource_utils.load_yaml(f.read())
             self.assertEqual(data["name"], "Billing/Refunds")
             self.assertTrue(data["enabled"])
+
+
+class TestRemovePersonalityAndRoleFiles(unittest.TestCase):
+    """Tests for remove_personality_and_role_files."""
+
+    def _write_settings(self, root: str, *filenames: str) -> None:
+        settings_dir = os.path.join(root, "agent_settings")
+        os.makedirs(settings_dir, exist_ok=True)
+        for filename in filenames:
+            with open(os.path.join(settings_dir, filename), "w", encoding="utf-8") as f:
+                f.write("custom: ''\n")
+
+    def test_no_agent_settings_dir(self):
+        """Should be a no-op when agent_settings/ doesn't exist."""
+        with tempfile.TemporaryDirectory() as tmp:
+            remove_personality_and_role_files(tmp)
+            self.assertFalse(os.path.isdir(os.path.join(tmp, "agent_settings")))
+
+    def test_removes_both_files(self):
+        """Both superseded files should be deleted and the removal logged."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_settings(tmp, "personality.yaml", "role.yaml")
+
+            with self.assertLogs("poly.migration_utils", level="WARNING") as logs:
+                remove_personality_and_role_files(tmp)
+
+            self.assertFalse(os.path.exists(os.path.join(tmp, "agent_settings", "personality.yaml")))
+            self.assertFalse(os.path.exists(os.path.join(tmp, "agent_settings", "role.yaml")))
+            self.assertIn("persona.txt", logs.output[0])
+            self.assertIn("poly pull", logs.output[0])
+
+    def test_leaves_other_settings_alone(self):
+        """Only personality and role are removed."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._write_settings(tmp, "role.yaml", "rules.txt", "persona.txt")
+
+            remove_personality_and_role_files(tmp)
+
+            self.assertFalse(os.path.exists(os.path.join(tmp, "agent_settings", "role.yaml")))
+            self.assertTrue(os.path.exists(os.path.join(tmp, "agent_settings", "rules.txt")))
+            self.assertTrue(os.path.exists(os.path.join(tmp, "agent_settings", "persona.txt")))

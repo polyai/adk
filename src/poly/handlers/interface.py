@@ -12,7 +12,6 @@ from google.protobuf.message import Message
 from poly.handlers.platform_api import PlatformAPIHandler
 from poly.handlers.posthog import PosthogHandler
 from poly.handlers.protobuf.commands_pb2 import Command
-from poly.handlers.protobuf.handoff_pb2 import Handoff_SetDefault
 from poly.handlers.sdk import SourcererAPIError
 from poly.handlers.sync_client import SyncClientHandler
 from poly.resources import (
@@ -25,7 +24,8 @@ from poly.resources import (
     Function,
     FunctionStep,
     Handoff,
-    Resource,
+    ResourceMap,
+    ResourceMapping,
     SMSTemplate,
     Variable,
     Variant,
@@ -262,7 +262,7 @@ class AgentStudioInterface:
     @staticmethod
     def get_template_resources(
         template_id: str, region: str
-    ) -> dict[type[Resource], dict[str, Resource]]:
+    ) -> tuple[ResourceMap, list[ResourceMapping]]:
         """Fetch a template and return its resources.
 
         Combines projection fetching and resource conversion in one call.
@@ -272,7 +272,9 @@ class AgentStudioInterface:
             region: The region to query.
 
         Returns:
-            dict mapping resource types to their resources.
+            tuple[ResourceMap, list[ResourceMapping]]: A tuple containing:
+                1. A dictionary mapping resource types to their resources.
+                2. A list of slim resources.
         """
         from poly.resources.resource import load_resources_from_projection
 
@@ -313,15 +315,17 @@ class AgentStudioInterface:
 
     def pull_deployment_resources(
         self, deployment_id: str
-    ) -> dict[type[Resource], dict[str, Resource]]:
+    ) -> tuple[ResourceMap, list[ResourceMapping]]:
         """Fetch all resources for a specific deployment of a project.
 
         Args:
             deployment_id (str): The deployment ID
 
         Returns:
-            dict[type[Resource], dict[str, Resource]]: A dictionary mapping resource types to
-                their resources
+            tuple[ResourceMap, list[ResourceMapping]]: A tuple containing:
+                1. A dictionary mapping resource types to their resources.
+                2. A list of slim resources.
+
         """
         from poly.resources.resource import load_resources_from_projection
 
@@ -333,7 +337,7 @@ class AgentStudioInterface:
 
     def pull_resources(
         self, projection_json: Optional[dict[str, Any]] = None
-    ) -> tuple[dict[type[Resource], dict[str, Resource]], dict[str, Any]]:
+    ) -> tuple[ResourceMap, list[ResourceMapping], dict[str, Any]]:
         """Fetch all resources for the specific project.
 
         Args:
@@ -341,17 +345,20 @@ class AgentStudioInterface:
                 If provided, the projection will be used instead of fetching it from the API.
 
         Returns:
-            dict[type[Resource], dict[str, Resource]]: A dictionary mapping resource types to
-                their resources
-            dict[str, Any]: The projection data
+            tuple[ResourceMap, list[ResourceMapping], dict[str, Any]]: A tuple containing:
+                1. A dictionary mapping resource types to their resources.
+                2. A list of slim resources.
+                3. The projection JSON.
         """
         from poly.resources.resource import load_resources_from_projection
 
         if projection_json is not None:
-            return load_resources_from_projection(projection_json), projection_json
+            resources, slim_resources = load_resources_from_projection(projection_json)
+            return resources, slim_resources, projection_json
         try:
             projection = self.sync_client.pull_projection()
-            return load_resources_from_projection(projection), projection
+            resources, slim_resources = load_resources_from_projection(projection)
+            return resources, slim_resources, projection
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
@@ -485,19 +492,6 @@ class AgentStudioInterface:
                             **{update_type: resource.build_update_proto()},
                         )
                     )
-
-            # is_default is not part of create/update protos; it requires a separate command
-            for resource_dict in [new_resources, updated_resources]:
-                for resource in resource_dict.get(Handoff, {}).values():
-                    if isinstance(resource, Handoff) and resource.is_default:
-                        commands.append(
-                            Command(
-                                type="handoff_set_default",
-                                command_id=str(uuid.uuid4()),
-                                metadata=metadata,
-                                handoff_set_default=Handoff_SetDefault(id=resource.resource_id),
-                            )
-                        )
 
             for command in commands:
                 self.sync_client.sdk.add_command_to_queue(command)
@@ -649,7 +643,7 @@ class AgentStudioInterface:
 
     def pull_branch_resources(
         self, branch_id: str, at_sequence: Optional[int] = None
-    ) -> dict[type, dict[str, Any]]:
+    ) -> tuple[ResourceMap, list[ResourceMapping]]:
         """Fetch resources for a branch, optionally at a historical sequence.
 
         Args:
@@ -657,7 +651,9 @@ class AgentStudioInterface:
             at_sequence: When provided, fetches the projection at this sequence number.
 
         Returns:
-            A ResourceMap of the branch's resources.
+            tuple[ResourceMap, list[ResourceMapping]]: A tuple containing:
+                1. A dictionary mapping resource types to their resources.
+                2. A list of slim resources.
         """
         from poly.resources.resource import load_resources_from_projection
 
@@ -1401,6 +1397,60 @@ class AgentStudioInterface:
             dict: The updated RTC config.
         """
         return PlatformAPIHandler.patch_rtc_variables(region, project_id, client_env, variables)
+
+    # -- Functions API ------------------------------------------------------
+    # Public REST API for managing/executing user-defined Functions. Distinct
+    # from the local-file/decorator Functions synced via push/pull.
+
+    @staticmethod
+    def list_functions(region: str, project_id: str, branch_id: str) -> list[dict]:
+        """List a branch's active functions.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            list[dict]: The branch's active functions, each with "id" and "name".
+        """
+        return PlatformAPIHandler.list_functions(region, project_id, branch_id)
+
+    @staticmethod
+    def execute_function(
+        region: str,
+        project_id: str,
+        branch_id: str,
+        function_id: str,
+        args: dict,
+    ) -> dict:
+        """Execute a function with the given arguments.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID.
+            args: The arguments to pass to the function.
+
+        Returns:
+            dict: {"body": ..., "logs": [...], "runtime": ...}.
+        """
+        return PlatformAPIHandler.execute_function(region, project_id, branch_id, function_id, args)
+
+    @staticmethod
+    def validate_functions(region: str, project_id: str, branch_id: str) -> dict:
+        """Validate all functions on a branch.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            dict: {"valid": bool, "issues": [...]}.
+        """
+        return PlatformAPIHandler.validate_functions(region, project_id, branch_id)
 
     def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
         """Get the history of a specific branch.

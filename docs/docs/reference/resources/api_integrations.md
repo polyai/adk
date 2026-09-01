@@ -149,4 +149,11 @@ response = conv.api.salesforce.update_contact(
     Call API integrations from advanced-step and transition-function prompts.
     [Open flows](./flows.md)
 
+-   **Tests**
+
+    ---
+
+    Mock an operation's response with `api_mocks` so a conversation that branches on it can be tested deterministically.
+    [Open tests](./tests.md)
+
 </div>

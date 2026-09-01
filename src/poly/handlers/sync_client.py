@@ -347,7 +347,7 @@ class SyncClientHandler:
             logger.error(
                 f"Failed to merge branch '{self.sdk.branch_id}' into its parent branch: {e}"
             )
-            return False, [], []
+            return False, [], [{"path": [], "message": str(e)}]
 
         if result.get("hasConflicts", False) or result.get("errors", []):
             logger.info(
@@ -390,7 +390,7 @@ class SyncClientHandler:
             )
         except SourcererAPIError as e:
             logger.error(f"Failed to sync branch '{self.sdk.branch_id}': {e}")
-            return False, [], []
+            return False, [], [{"path": [], "message": str(e)}]
 
         if result.get("hasConflicts", False) or result.get("errors", []):
             logger.info(

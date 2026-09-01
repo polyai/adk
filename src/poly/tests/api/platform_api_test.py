@@ -10,7 +10,10 @@ from unittest.mock import patch
 
 import requests
 
-from poly.handlers.platform_api import ACCOUNTS_URL, PlatformAPIHandler
+from poly.handlers.platform_api import (
+    ACCOUNTS_URL,
+    PlatformAPIHandler,
+)
 from poly.tests.testing_utils import make_mock_response
 
 
@@ -454,6 +457,59 @@ class SynthesizeAudioCache(unittest.TestCase):
 
         with self.assertRaises(requests.HTTPError):
             PlatformAPIHandler.synthesize_audio_cache("studio", "agent-1", "entry-1", "hi", {})
+
+
+class ListFunctions(unittest.TestCase):
+    """Tests for PlatformAPIHandler.list_functions."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_returns_the_raw_function_list(self, mock_request, _mock_key):
+        """The endpoint returns a bare array, not a {"functions": [...]} wrapper."""
+        payload = [{"id": "fn-1", "name": "my_func"}]
+        mock_request.return_value = make_mock_response(200, json_body=payload)
+
+        result = PlatformAPIHandler.list_functions("studio", "agent-1", "branch-1")
+
+        self.assertEqual(result, payload)
+        self.assertEqual(mock_request.call_args.kwargs["method"], "GET")
+        url = mock_request.call_args.kwargs["url"]
+        self.assertIn("/agents/agent-1/branches/branch-1/functions", url)
+
+
+class ExecuteFunction(unittest.TestCase):
+    """Tests for PlatformAPIHandler.execute_function."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_wraps_args_in_body_and_returns_result(self, mock_request, _mock_key):
+        """Arguments are wrapped in an "args" object and the result is returned."""
+        payload = {"body": {"ok": True}, "logs": ["line"], "runtime": 12}
+        mock_request.return_value = make_mock_response(200, json_body=payload)
+
+        result = PlatformAPIHandler.execute_function(
+            "studio", "agent-1", "branch-1", "fn-1", {"x": 1}
+        )
+
+        self.assertEqual(result, payload)
+        self.assertEqual(json.loads(mock_request.call_args.kwargs["data"]), {"args": {"x": 1}})
+        self.assertIn("/functions/fn-1/execute", mock_request.call_args.kwargs["url"])
+
+
+class ValidateFunctions(unittest.TestCase):
+    """Tests for the functions validate endpoint."""
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_validate_returns_valid_and_issues(self, mock_request, _mock_key):
+        """Validate returns the raw {"valid": ..., "issues": [...]} payload."""
+        payload = {"valid": False, "issues": [{"type": "syntax_error", "function_id": "fn-1"}]}
+        mock_request.return_value = make_mock_response(200, json_body=payload)
+
+        result = PlatformAPIHandler.validate_functions("studio", "agent-1", "branch-1")
+
+        self.assertEqual(result, payload)
+        self.assertIn("/functions/validate", mock_request.call_args.kwargs["url"])
 
 
 def _make_request_headers() -> dict:

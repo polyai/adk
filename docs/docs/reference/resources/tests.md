@@ -67,6 +67,7 @@ The directory is optional. Create it only when you have test cases to define.
 | `caller_number` | No | The number the simulated call arrives from. See [mock call context](#mock-call-context). |
 | `sip_headers` | No | SIP headers a carrier would send with an inbound call. |
 | `integration_attributes` | No | Attributes a channel or connector passes in. |
+| `api_mocks` | No | Mocked responses for [API integration](./api_integrations.md) operations. See [API mocks](#api-mocks). |
 | `prompt_assertions` | No | List of natural-language statements that must hold about the agent's behavior. Each is evaluated by an LLM judge. |
 | `function_call_assertions` | No | List of expected function calls and their argument values. |
 
@@ -149,6 +150,49 @@ Types come from YAML, which means quoting matters:
 | `expiry: "2026-08-12"` | text |
 
 Dates must be quoted. An unquoted `expiry: 2026-08-12` is a YAML date, which the agent cannot receive, and `poly push` rejects it rather than guessing what you meant.
+
+## API mocks
+
+A flow that branches on an [API integration](./api_integrations.md)'s response — a booking that's available vs. full, a lookup that succeeds vs. errors — needs that response to be deterministic to test reliably. `api_mocks` intercepts calls to a named integration operation during simulation and returns the mocked response instead of calling the real API.
+
+Mocks are keyed by integration name, then operation name, then a list of response rules tried in order:
+
+~~~yaml
+name: Slot negotiation retries once then succeeds
+scenario: Book a table for 4 at 7pm.
+channel: voice
+language: en-GB
+api_mocks:
+  reservations_api:
+    check_availability:
+      - respond:
+          status: 503
+        repeat: 1
+      - respond:
+          status: 200
+          body:
+            available: true
+            table_id: 42
+          headers:
+            content-type: application/json
+prompt_assertions:
+  - The agent retries and confirms the booking
+~~~
+
+Each rule has:
+
+| Field | Description |
+|---|---|
+| `respond.status` | HTTP status code (100–599). |
+| `respond.body` | Optional response body. Keeps its type through to the flow, same rules as `integration_attributes` above — quote dates, and only text, numbers, `true`/`false`, `null`, lists, and nested maps are supported. |
+| `respond.headers` | Optional response headers, always sent as text. |
+| `repeat` | Optional. How many times to return this response before moving to the next rule in the list. Omit it to respond once. Set it to `-1` to respond with this rule forever — only valid on the last rule in a list. `0` and other negative values are rejected. |
+
+Once a list's rules are exhausted (no trailing `-1` rule), further calls to that operation fall through to the real API.
+
+!!! info "Operation names aren't cross-checked at push time"
+
+    The integration name must match an existing `api_integration` resource; `poly push` rejects an unknown one. Operation names are not validated against the integration's configured operations — instead, renaming or deleting the underlying operation automatically cascades to any mocks that reference it, the same way the platform handles the rest of the integration/operations relationship.
 
 ## Prompt assertions
 
@@ -235,6 +279,7 @@ prompt_assertions:
 - `simulated_at`, if set, must be a valid ISO 8601 datetime
 - `caller_number`, if set, must be text — an unquoted number is rejected rather than converted
 - `integration_attributes` values must be text, numbers, `true`/`false`, `null`, lists, or nested maps; an unquoted date is rejected with the quoted form to use instead; keys must be text
+- `api_mocks`: the integration name must match an existing `api_integration` resource; each operation must have at least one response rule; each rule's `respond.status` must be a valid HTTP status code (100–599); `respond.body`, if set, follows the same type rules as `integration_attributes`; `repeat`, if set, must be a positive integer or `-1` (respond forever), and `-1` is only allowed on the last rule for an operation
 - each `function_call_assertions[*].name` must match a global function under `functions/` or a flow function under `flows/<flow>/functions/`
 - each argument's `value_type` must be one of `string`, `integer`, `number`, `boolean`
 - the filename must match the normalized `name`
@@ -294,6 +339,13 @@ Good coverage of a project usually includes:
 
     Reference for the functions named in function call assertions.
     [Open functions](./functions.md)
+
+-   **API integrations**
+
+    ---
+
+    Define the integrations and operations that `api_mocks` intercepts.
+    [Open API integrations](./api_integrations.md)
 
 -   **Variants**
 
