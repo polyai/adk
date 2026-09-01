@@ -6595,6 +6595,68 @@ class KeyphraseBoostingTests(unittest.TestCase):
         )
         k.validate()
 
+    @staticmethod
+    def _collection(*keyphrases: str) -> dict[str, KeyphraseBoosting]:
+        return {
+            f"kp-{i}": KeyphraseBoosting(
+                resource_id=f"kp-{i}",
+                name=keyphrase,
+                keyphrase=keyphrase,
+                level="default",
+            )
+            for i, keyphrase in enumerate(keyphrases)
+        }
+
+    def test_validate_collection_passes_for_distinct_keyphrases(self):
+        """Phrases that only share a prefix or a stem are not duplicates."""
+        KeyphraseBoosting.validate_collection(
+            self._collection("sensor", "sensors", "Pap", "C Pap", "Acme Health")
+        )
+
+    def test_validate_collection_rejects_case_only_duplicates(self):
+        """Agent Studio matches case-insensitively, so these collide."""
+        with self.assertRaises(ValueError) as cm:
+            KeyphraseBoosting.validate_collection(
+                self._collection("Infusion Sets", "infusion sets")
+            )
+        message = str(cm.exception)
+        self.assertIn("Duplicate keyphrases", message)
+        self.assertIn("'Infusion Sets'", message)
+        self.assertIn("'infusion sets'", message)
+
+    def test_validate_collection_rejects_whitespace_only_duplicates(self):
+        """Agent Studio trims before comparing, so surrounding space is not a difference."""
+        with self.assertRaises(ValueError) as cm:
+            KeyphraseBoosting.validate_collection(self._collection("Acme", " Acme "))
+        self.assertIn("Duplicate keyphrases", str(cm.exception))
+
+    def test_validate_collection_reports_every_colliding_group(self):
+        """All colliding groups are named, not just the first."""
+        with self.assertRaises(ValueError) as cm:
+            KeyphraseBoosting.validate_collection(
+                self._collection("Acme", "acme", "Infusion Sets", "infusion sets")
+            )
+        message = str(cm.exception)
+        self.assertIn("'Acme'", message)
+        self.assertIn("'Infusion Sets'", message)
+
+    def test_from_projection_warns_on_pre_existing_duplicates(self):
+        """Pulling a project that predates the uniqueness rule warns instead of failing."""
+        projection = {
+            "keyphraseBoosting": {
+                "keyphraseBoosting": {
+                    "entities": {
+                        "KEYPHRASE-1": {"keyphrase": "Acme", "level": "default"},
+                        "KEYPHRASE-2": {"keyphrase": "acme", "level": "default"},
+                    }
+                }
+            }
+        }
+        with self.assertLogs("poly.resources.keyphrase_boosting", level="WARNING") as logs:
+            keyphrases = KeyphraseBoosting.from_projection(projection)
+        self.assertEqual(len(keyphrases), 2)
+        self.assertIn("differ only by case", "".join(logs.output))
+
     def test_read_local_resource(self):
         """read_local_resource correctly parses a keyphrase from the multi-resource YAML."""
         yaml_content = """keyphrases:
