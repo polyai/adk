@@ -1,6 +1,63 @@
 # CHANGELOG
 
 
+## v0.49.2 (2026-09-01)
+
+### Bug Fixes
+
+- Tolerate auth-filtered projections instead of crashing on pull
+  ([#299](https://github.com/polyai/adk/pull/299),
+  [`37f9d39`](https://github.com/polyai/adk/commit/37f9d39118a735dc10deb9d60418bedb9b508af4))
+
+## Summary
+
+The API filters projections per permission slice: a user without read access to a slice gets a
+  skeleton carrying only identity fields, with the substantive fields stripped. Every
+  `from_projection` now detects an auth-filtered or absent slice and drops that resource type for
+  the pull instead of crashing or building resources from the skeleton.
+
+First of two PRs replacing #288 (stacked on #298; the follow-up adds slim reference mappings so
+  references to withheld resources still resolve to names).
+
+## Motivation
+
+Pulling as a restricted reader fails today. All 162 `pull failed` errors on adk-service in the last
+  30 days trace to auth-filtered slices:
+
+- 116 × `KeyError` on `name` / `actions` / `description` — unguarded field access on skeleton
+  entities. - 46 × `Duplicate resource file path found` / `File not found for resource` — filtered
+  keyphrase-boosting and phrase-filter slices parsed with empty names, collapsing every entry onto
+  one file path.
+
+## Changes
+
+- Every `from_projection` guards its slice: an absent slice or one where any entity is missing a
+  field the API always sends for readable data is treated as withheld, logged at debug level, and
+  yields no resources. - Guards test field presence, never truthiness, so falsy-but-readable values
+  (empty `content`, `active=False`) are not mistaken for filtered ones. Sentinel fields are chosen
+  per slice where the obvious field is optional in the API schema (e.g. variant attributes guard on
+  `type`, not `archived`; variants on `isDefault`, not `name`). - Functions check their three slices
+  independently ("functions" gates special and global functions, "jupiter_flows" gates transition
+  functions) — losing one permission must not hide the others. - New `slim_projection_test.py` with
+  a skeleton-projection fixture built from the fields each slice always sends, asserting no
+  registered resource type raises and nothing half-built survives.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1443 passed, 153
+  subtests) - [x] No breaking changes to the `poly` CLI interface (or migration path documented) -
+  [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.49.1 (2026-09-01)
 
 ### Bug Fixes
