@@ -1048,6 +1048,27 @@ def print_audio_cache_entries(entries: list[dict[str, Any]]) -> None:
     console.print(table)
 
 
+def print_function_validation_issues(valid: bool, issues: list[dict[str, Any]]) -> None:
+    """Print the result of validating a branch's functions.
+
+    Args:
+        valid: Whether the branch's functions passed validation.
+        issues: The reported issue dicts, if any.
+    """
+    if valid:
+        success("Functions are valid.")
+        return
+
+    error("Functions failed validation.")
+    for issue in issues:
+        name = issue.get("function_name")
+        location = f" ({name})" if name else ""
+        detail = {
+            k: v for k, v in issue.items() if k not in ("type", "function_id", "function_name")
+        }
+        console.print(f"  [error]-[/error] {issue.get('type', 'unknown')}{location}: {detail}")
+
+
 def print_conversation_detail(conversation: dict[str, Any], studio_url: str | None = None) -> None:
     """Print detailed conversation information including turns.
 

@@ -1398,6 +1398,60 @@ class AgentStudioInterface:
         """
         return PlatformAPIHandler.patch_rtc_variables(region, project_id, client_env, variables)
 
+    # -- Functions API ------------------------------------------------------
+    # Public REST API for managing/executing user-defined Functions. Distinct
+    # from the local-file/decorator Functions synced via push/pull.
+
+    @staticmethod
+    def list_functions(region: str, project_id: str, branch_id: str) -> list[dict]:
+        """List a branch's active functions.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            list[dict]: The branch's active functions, each with "id" and "name".
+        """
+        return PlatformAPIHandler.list_functions(region, project_id, branch_id)
+
+    @staticmethod
+    def execute_function(
+        region: str,
+        project_id: str,
+        branch_id: str,
+        function_id: str,
+        args: dict,
+    ) -> dict:
+        """Execute a function with the given arguments.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+            function_id: The function ID.
+            args: The arguments to pass to the function.
+
+        Returns:
+            dict: {"body": ..., "logs": [...], "runtime": ...}.
+        """
+        return PlatformAPIHandler.execute_function(region, project_id, branch_id, function_id, args)
+
+    @staticmethod
+    def validate_functions(region: str, project_id: str, branch_id: str) -> dict:
+        """Validate all functions on a branch.
+
+        Args:
+            region: The region name.
+            project_id: The project ID (agent ID).
+            branch_id: The branch ID.
+
+        Returns:
+            dict: {"valid": bool, "issues": [...]}.
+        """
+        return PlatformAPIHandler.validate_functions(region, project_id, branch_id)
+
     def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
         """Get the history of a specific branch.
 
