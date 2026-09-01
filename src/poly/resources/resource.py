@@ -737,7 +737,10 @@ def _filter_slim_resources(all_resources: ResourceMap) -> tuple[ResourceMap, lis
     slim_resources: list[ResourceMapping] = []
     resources: ResourceMap = {}
 
-    # Variables are slim if functions are slim
+    # Variables are slim whenever functions are. Variables have no file of their
+    # own - they exist as a reference graph derived from function code - and
+    # variableUpdate is gated on jupiter_flows rather than functions, so the API
+    # would accept a graph rebuilt from functions the user cannot read.
     functions_slim = any(r.slim for r in all_resources.get(Function, {}).values())
 
     for resources_dict in all_resources.values():
