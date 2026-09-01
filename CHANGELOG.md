@@ -1,6 +1,88 @@
 # CHANGELOG
 
 
+## v0.51.0 (2026-09-01)
+
+### Features
+
+- Add KB child topics resource ([#285](https://github.com/polyai/adk/pull/285),
+  [`a190aeb`](https://github.com/polyai/adk/commit/a190aeb9d8a5dca595b9c159022f3d5eb7d1b9bd))
+
+## Summary
+
+Adds a `ChildTopic` resource for variant-scoped knowledge base topics, stored at
+  `child_topics/<variant_name>/<topic_name>.yaml`. It subclasses `Topic` to reuse serialisation and
+  reference validation, overriding only the parts that genuinely differ. Also fixes a pre-existing
+  crash in flow steps that was uncovered while building it.
+
+This behaviour is for template projects only. So it is not being advertised as a normal feature in
+  the docs
+
+## Motivation
+
+Child topics (the platform's `childOverwrites.knowledgeBase` collection) had no representation in
+  the ADK, so variant-scoped topics could not be pulled, diffed or pushed from a local project.
+
+Despite the platform naming, these are **not** overrides of a base topic. Confirmed against the
+  platform backend: a child topic is assigned its own unique ID independent of any base topic, and
+  there is no ID-based link field between the two. They are modelled here as what they are:
+  independent, variant-scoped topics.
+
+## Changes
+
+### Child topics
+
+- Add `ChildTopic` in `src/poly/resources/child_topic.py`, registered as `child_topics`, subclassing
+  `Topic` - Store them under their own `child_topics/<variant>/` tree, kept separate from the base
+  topics in `topics/` so discovery of the two can never overlap - Parse from the
+  `childOverwrites.knowledgeBase` projection, resolving variant names from `variantManagement` -
+  Infer the owning variant from the enclosing folder rather than storing it in YAML, mirroring how
+  `FlowStep` resolves its parent flow - Route commands via `command_type = "child_topic"` so
+  create/update/delete act on the child overwrites collection instead of the base topics - Validate
+  that the variant exists, and that a name is unique across **all** topics and child topics in
+  **every** variant
+
+The uniqueness rule matches the server rather than being stricter or looser than it:
+  `getAllActiveTopics` concatenates `knowledgeBase.topics` with
+  `childOverwrites.knowledgeBase.topics` across all variants, and `CreateChildTopicHandler` inherits
+  that check from `CreateTopicHandler`. Enforcing it locally turns what would be a push-time
+  rejection into a message naming the clashing file.
+
+### Flow steps — pre-existing crash
+
+`FlowStep` and `FunctionStep` resolve their flow via `get_flow_id_from_flow_name`, which returns
+  nothing when a step's flow config is missing, renamed or unparseable. `file_path` then
+  dereferenced the unset flow name, so any orphaned step crashed `poly diff`/`status` with
+  `AttributeError: 'NoneType' object has no attribute 'lower'`.
+
+Both now fall back to the folder as read from disk, so the path stays usable and the real problem is
+  reported by validation instead of a stack trace. This bug predates the branch; `ChildTopic`
+  initially inherited it by copying the `FlowStep` pattern.
+
+### Test fixtures
+
+- Read the fixture JSON as UTF-8. It was decoded with the platform default encoding, which corrupted
+  non-ASCII content on Windows and made the resource look modified on every run.
+
+### Docs
+
+- Correct the `resource-scaffolder` agent guide, which documented a registration flow
+  (`_read_<type>_from_projection` on `SyncClientHandler`, hand-editing `RESOURCE_NAME_TO_CLASS`)
+  that no longer exists — registration is now the `@register_resource` decorator plus a
+  `from_projection` classmethod on the resource
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.50.0 (2026-09-01)
 
 ### Features
