@@ -1,6 +1,78 @@
 # CHANGELOG
 
 
+## v0.52.0 (2026-09-01)
+
+### Features
+
+- Add poly functions commands and grouped CLI help ([#245](https://github.com/polyai/adk/pull/245),
+  [`a018728`](https://github.com/polyai/adk/commit/a018728630b968c0ecc7d7a41c7d3b13bfec605d))
+
+## Summary
+
+Adds a `poly functions` command group that wraps the newly published public Functions REST API and
+  covers new functionality not previously represented in the ADK.
+
+- `execute` — run a function by name (or ID) with given arguments, returning its output, logs, and
+  runtime. - `validate` — check every function on the branch for syntax errors and orphaned
+  flow-step references.
+
+The push/pull Functions workflow already present in the ADK has not been affected and works the same
+  as prior to this PR.
+
+## Motivation
+
+- [DEVP-541: Integrate Functions API into
+  ADK](https://linear.app/poly-ai/issue/DEVP-541/integrate-functions-api-into-adk) - [DEVP-543:
+  Support grouped section headers in poly CLI --help
+  output](https://linear.app/poly-ai/issue/DEVP-543/support-grouped-section-headers-in-poly-cli-help-output)
+
+DEVP-543 is bundled in at reviewer request. The two changes are independent and are separate
+  commits.
+
+## Changes
+
+- `poly functions execute <function_name>` — run a function, print its return value, logs, and
+  runtime. Accepts `--args` and `--region`/`--project_id`/`--branch_id` for headless use. - `poly
+  functions validate` — validate all functions on the current branch. - Grouped `--help` section
+  headers for `poly`, `poly functions`, and `poly branch`. - Docs: dedicated
+  `docs/docs/reference/cli/functions.md` page; removed duplicate legacy inline command docs from
+  `cli.md`.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1342 passed) - [x] No
+  breaking changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages
+  follow [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+`poly functions --help`:
+
+``` usage: poly functions [-h] [--verbose] <subcommand> ...
+
+Manage Functions via the public Functions REST API, scoped to the project's current branch.
+  Creating, editing and deleting functions is still done via the local-file/decorator workflow (poly
+  push/poly pull); this covers what that workflow can't: running and validating functions.
+
+Examples: poly functions execute <function_name> --args '{"x": 1}' poly functions validate
+
+Run and inspect: execute Execute a function with the given arguments. validate Validate all
+  functions on the current branch.
+
+options: -h, --help show this help message and exit --verbose Show full error tracebacks for
+  debugging. ```
+
+---------
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.51.0 (2026-09-01)
 
 ### Features
