@@ -4036,6 +4036,40 @@ class UpdatePulledResourcesDeleteAbsentTypesTest(unittest.TestCase):
             "delete_resource should be called for every entity when Entity type is absent",
         )
 
+    def test_absent_multi_resource_type_deletion_reaches_disk(self):
+        """The deletions are batched into the file cache, so they have to be flushed.
+
+        Asserting only that delete_resource was called says nothing about whether the
+        pruned file was ever written - the cache is discarded when the pull returns and
+        the entities stay on disk, needing a second pull to clear.
+        """
+        project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+        incoming_resources = deepcopy(project.resources)
+        entity_names = {res.name for res in incoming_resources[Entity].values()}
+        self.assertGreater(len(entity_names), 0)
+
+        del incoming_resources[Entity]
+        self.mock_api_handler.pull_resources.return_value = (incoming_resources, {})
+
+        MultiResourceYamlResource._file_cache.clear()
+        project.pull_project(force=False)
+        cache_after_pull = dict(MultiResourceYamlResource._file_cache)
+        MultiResourceYamlResource._file_cache.clear()
+
+        entities_file = os.path.join(TEST_DIR, "config", "entities.yaml")
+        written = [
+            call[0][0]
+            for call in self.mock_save_to_file.call_args_list
+            if call[0][1] == entities_file
+        ]
+        self.assertTrue(written, "the pruned entities file should have been written to disk")
+        for name in entity_names:
+            self.assertNotIn(name, written[-1])
+
+        # A cached entry carries the pre-write mtime, so anything left behind makes later
+        # reads in this process see a file state that is not on disk.
+        self.assertEqual(cache_after_pull, {})
+
     def test_not_loaded_resource_type_not_deleted_on_pull(self):
         """When a resource type is in _not_loaded_resources, it should NOT be deleted
         even if absent from incoming_resources. This prevents spurious deletions of

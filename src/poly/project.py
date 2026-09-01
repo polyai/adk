@@ -923,6 +923,12 @@ class AgentStudioProject:
             for file_path in self._sort_paths_for_reverse_deletion(deleted_paths, resource_type):
                 resource_type.delete_resource(file_path, save_to_cache=True)
 
+        # The deletions above only reached the cache. Flush them, then clear: a cached
+        # entry carries the pre-write mtime, so anything left behind makes every later
+        # read in this process see a file state that is not on disk.
+        MultiResourceYamlResource.write_cache_to_file()
+        MultiResourceYamlResource._file_cache.clear()
+
         return files_with_conflicts, progress_offset
 
     def _update_pulled_resources(
