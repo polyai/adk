@@ -1,6 +1,64 @@
 # CHANGELOG
 
 
+## v0.50.0 (2026-09-01)
+
+### Features
+
+- Keep withheld resources as slim reference mappings
+  ([#300](https://github.com/polyai/adk/pull/300),
+  [`d8772cb`](https://github.com/polyai/adk/commit/d8772cb096d1abab1aa74e11f6c6e5869b50aefc))
+
+## Summary
+
+Withheld resources whose ids appear inside resources gated on a *different* permission are kept as
+  identity-only mappings rather than dropped, so `{{entity:...}}`-style references to them still
+  resolve to a name. They live in `slim_resources`, a list of `ResourceMapping` that resolves
+  references but is never iterated for a file, saved, or pushed.
+
+## Motivation
+
+With #299 alone, a restricted reader's pull succeeds but every reference to a withheld resource
+  renders as a raw id — and because the id round-trips differently than the name, the file looks
+  locally modified on every command. The mapping also has to survive in the status file: every
+  command other than pull rehydrates from it, so a slim resource not written there is gone by the
+  next command.
+
+## Changes
+
+- `from_projection` for entities, functions, handoffs, SMS templates, translations, variants and
+  variant attributes returns identity-only stubs (`slim=True`) for auth-filtered slices;
+  `load_resources_from_projection` separates them out of the resource map into a list of
+  `ResourceMapping`. - Variables are treated as slim when functions are slim: `variableUpdate` is
+  gated on a different permission than functions, so the API would accept a reference graph rebuilt
+  from functions the user cannot see. - `ResourceMapping` gained `to_dict`/`from_dict`, storing
+  `resource_type` by its registered name so slim mappings persist in the status file. An
+  unregistered type is dropped on read rather than raising. - Slim resources are excluded from
+  `file_structure_info` — they have no file on disk, so a baseline entry would make
+  `find_new_kept_deleted` report them deleted on every run. - `pull_resources`,
+  `pull_deployment_resources`, `pull_branch_resources`, `get_template_resources`,
+  `get_remote_resources_by_name` and `_resolve_branch_fork_point` all return their slim mappings
+  alongside the resource map, and every caller (pull, push, status, diff, branch diff, validate,
+  sync-ids) was updated to resolve references against them. - Tests covering status-file
+  round-trips, force-pull removal of a type that became withheld, and cache/disk agreement after a
+  pull.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1453 passed, 165
+  subtests) - [x] No breaking changes to the `poly` CLI interface (or migration path documented) -
+  [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.49.2 (2026-09-01)
 
 ### Bug Fixes
