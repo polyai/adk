@@ -9,13 +9,28 @@ delete, which is honest, since from that user's vantage point it does not exist.
 Copyright PolyAI Limited
 """
 
+import os
+import tempfile
 import unittest
+from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 import poly.resources  # noqa: F401  - triggers resource registration
+import poly.resources.resource_utils as resource_utils
+from poly.project import AgentStudioProject
+from poly.resources.entities import Entity
 from poly.resources.function import Function
-from poly.resources.resource import PROJECTION_REGISTRY, RESOURCE_CLASS_TO_NAME
+from poly.resources.resource import (
+    PROJECTION_REGISTRY,
+    RESOURCE_CLASS_TO_NAME,
+    MultiResourceYamlResource,
+    ResourceMapping,
+    load_resources_from_projection,
+)
 from poly.resources.sms import SMSTemplate
 from poly.resources.topic import Topic
+from poly.resources.variable import Variable
+from poly.utils.prepush import fix_orphaned_variables
 
 # A projection where every slice came back auth-filtered, built from the fields
 # each slice declares in its alwaysPresentJsonPaths allow-list. Slices whose
@@ -132,31 +147,50 @@ SKELETON_PROJECTION = {
 
 # Variables and their names are the whole of the Variable resource, and the
 # variables slice keeps both, so a filtered slice is indistinguishable from - and
-# just as usable as - a full one. Nothing else should survive.
+# just as usable as - a full one.
 TYPES_READABLE_FROM_SKELETON = {"variables"}
+
+# Types whose ids appear inside a resource gated on a *different* permission.
+# These are kept as identity-only stubs so those references still resolve to a
+# name; everything else withheld is dropped entirely.
+TYPES_KEPT_AS_SLIM = {
+    "entities",
+    "functions",
+    "handoffs",
+    "sms_templates",
+    "translations",
+    "variant_attributes",
+    "variants",
+}
 
 
 class SkeletonProjectionParsing(unittest.TestCase):
     """Every registered resource must tolerate an auth-filtered projection."""
+
+    @staticmethod
+    def _parse(resource_cls):
+        return resource_cls.from_projection(SKELETON_PROJECTION)
 
     def test_no_resource_type_raises(self):
         """A slim projection must never abort the pull."""
         for resource_cls in PROJECTION_REGISTRY:
             name = RESOURCE_CLASS_TO_NAME[resource_cls]
             with self.subTest(resource=name):
-                resource_cls.from_projection(SKELETON_PROJECTION)
+                self._parse(resource_cls)
 
-    def test_only_fully_readable_types_are_represented(self):
-        """Anything the user cannot read is hidden rather than partly built."""
-        represented = {
-            RESOURCE_CLASS_TO_NAME[cls]
-            for cls in PROJECTION_REGISTRY
-            if cls.from_projection(SKELETON_PROJECTION)
-        }
-        self.assertEqual(represented, TYPES_READABLE_FROM_SKELETON)
+    def test_only_referenced_types_survive_as_slim(self):
+        """Withheld resources are dropped unless something else points at them."""
+        real, slim = set(), set()
+        for resource_cls in PROJECTION_REGISTRY:
+            name = RESOURCE_CLASS_TO_NAME[resource_cls]
+            for resource in self._parse(resource_cls).values():
+                (slim if resource.slim else real).add(name)
 
-    def test_represented_resources_survive_downstream_operations(self):
-        """Whatever is kept must be usable, not a half-built object.
+        self.assertEqual(real, TYPES_READABLE_FROM_SKELETON)
+        self.assertEqual(slim, TYPES_KEPT_AS_SLIM)
+
+    def test_readable_resources_survive_downstream_operations(self):
+        """Whatever is kept in full must be usable, not a half-built object.
 
         compute_hash and file_path run on every pull and push, so a resource
         that parses but blows up here fails far from the cause - which is how
@@ -164,10 +198,30 @@ class SkeletonProjectionParsing(unittest.TestCase):
         """
         for resource_cls in PROJECTION_REGISTRY:
             name = RESOURCE_CLASS_TO_NAME[resource_cls]
-            for resource in resource_cls.from_projection(SKELETON_PROJECTION).values():
+            for resource in self._parse(resource_cls).values():
+                if resource.slim:
+                    continue
                 with self.subTest(resource=name):
                     resource.compute_hash()
                     resource.validate()
+
+    def test_slim_resources_can_be_turned_into_mappings(self):
+        """A stub's only job is to feed the id<->name lookup.
+
+        file_path and get_resource_prefix are what _make_resource_mapping needs,
+        and both are derived from fields the skeleton actually provides. Nothing
+        else is required of a stub - notably not compute_hash or validate, which
+        would be operating on absent data.
+        """
+        for resource_cls in PROJECTION_REGISTRY:
+            name = RESOURCE_CLASS_TO_NAME[resource_cls]
+            for resource in self._parse(resource_cls).values():
+                if not resource.slim:
+                    continue
+                with self.subTest(resource=name):
+                    self.assertTrue(resource.resource_id)
+                    self.assertTrue(resource.name)
+                    resource.get_resource_prefix(file_path=resource.file_path)
 
 
 class FalsyGuardValuesAreReadable(unittest.TestCase):
@@ -250,7 +304,12 @@ class FunctionSliceIndependence(unittest.TestCase):
             },
         }
         functions = Function.from_projection(projection)
-        self.assertEqual(list(functions), ["TF-1"])
+        # The global function is referenced by topics and phrase filters, so it
+        # is kept as a stub rather than dropped - but only the readable one is
+        # a real, file-backed resource.
+        self.assertEqual(
+            {f_id: f.slim for f_id, f in functions.items()}, {"TF-1": False, "FN-1": True}
+        )
 
 
 class WithheldSlicesAreReported(unittest.TestCase):
@@ -265,6 +324,286 @@ class WithheldSlicesAreReported(unittest.TestCase):
         projection = {"knowledgeBase": {"topics": {"entities": {}}}}
         with self.assertNoLogs("poly.resources.topic", level="DEBUG"):
             self.assertEqual(Topic.from_projection(projection), {})
+
+
+class PrepushDerivationsAreInertWhenHidden(unittest.TestCase):
+    """Why the prepush derivations need no read-access handling of their own.
+
+    They compare the baseline against local files, and a slim pull empties both
+    together - it rewrites the manifest and deletes the files in one go. So a
+    hidden resource is absent from both sides and no derivation can see a delta.
+    fix_orphaned_variables is the one that would corrupt server state if it did:
+    variableUpdate is gated on jupiter_flows, not functions, so the API would
+    accept a reference graph rebuilt from functions the user cannot see.
+    """
+
+    def test_no_variable_commands_when_functions_are_hidden(self):
+        variable = Variable(resource_id="VAR-1", name="order_id")
+        visible = {Variable: {"VAR-1": variable}, Function: {}}
+        new, updated, deleted = {}, {}, {}
+
+        fix_orphaned_variables(visible, new, updated, deleted, visible, lambda _: [])
+
+        self.assertEqual((new, updated, deleted), ({}, {}, {}))
+
+
+class SlimResourcesSurviveTheStatusFile(unittest.TestCase):
+    """Slim resources have to outlive the process that pulled them.
+
+    Every command other than pull rehydrates from _gen/.agent_studio_config, so
+    a slim resource that is not written there is gone by the next command - and
+    with it the id<->name mapping, which makes every reference to a withheld
+    resource read back as a raw id and the file look locally modified.
+    """
+
+    def _project(self) -> AgentStudioProject:
+        resources, slim_resources = load_resources_from_projection(SKELETON_PROJECTION)
+        project = AgentStudioProject(
+            region="local",
+            account_id="ACCOUNT-1",
+            project_id="PROJECT-1",
+            root_path="/tmp/does-not-need-to-exist",
+            resources=resources,
+            slim_resources=slim_resources,
+            last_updated=datetime(2026, 1, 1),
+        )
+        project.file_structure_info = project.compute_file_structure_info(project.resources)
+        return project
+
+    @staticmethod
+    def _slim_ids(project: AgentStudioProject) -> set[tuple[str, str]]:
+        return {
+            (RESOURCE_CLASS_TO_NAME[mapping.resource_type], mapping.resource_id)
+            for mapping in project.slim_resources
+        }
+
+    def test_slim_resources_round_trip_through_to_dict(self):
+        project = self._project()
+        self.assertTrue(self._slim_ids(project), "fixture should produce slim resources")
+
+        reloaded = AgentStudioProject.from_dict(project.to_dict(), project.root_path)
+
+        self.assertEqual(self._slim_ids(reloaded), self._slim_ids(project))
+
+    def test_slim_resources_keep_their_names_when_reloaded(self):
+        """The name is the whole point - an id alone resolves nothing."""
+        project = self._project()
+        names = {m.resource_id: m.resource_name for m in project.slim_resources}
+        self.assertTrue(names, "fixture should produce slim resources")
+
+        reloaded = AgentStudioProject.from_dict(project.to_dict(), project.root_path)
+        reloaded_names = {m.resource_id: m.resource_name for m in reloaded.slim_resources}
+
+        self.assertEqual(reloaded_names, names)
+
+    def test_from_dict_ignores_keys_from_a_newer_adk(self):
+        """The status file outlives any one ADK version.
+
+        A field added by a newer version (or a hand edit) must not turn every
+        later command into a TypeError.
+        """
+        mapping = next(iter(self._project().slim_resources))
+        data = {**mapping.to_dict(), "added_in_a_newer_version": True}
+
+        self.assertEqual(ResourceMapping.from_dict(data), mapping)
+
+    def test_from_dict_drops_a_mapping_missing_required_fields(self):
+        """A truncated entry loses that one mapping, not the whole command."""
+        self.assertIsNone(ResourceMapping.from_dict({"resource_type": "entities"}))
+
+    def test_slim_resources_are_absent_from_file_structure_info(self):
+        """No file on disk means no baseline entry.
+
+        Otherwise find_new_kept_deleted sees a known file that discovery can
+        never turn up, and reports it deleted on every run.
+        """
+        project = self._project()
+        slim_paths = {m.file_path for m in project.slim_resources}
+        self.assertTrue(slim_paths)
+
+        self.assertEqual(slim_paths & set(project.file_structure_info), set())
+
+    def test_slim_resources_are_absent_from_the_resource_map(self):
+        """Slim resources are mappings, not resources.
+
+        Leaving them in resources means push tries to serialize a resource
+        whose substantive fields were never sent, and save writes a file for
+        something the user cannot read.
+        """
+        project = self._project()
+        self.assertTrue(project.slim_resources, "fixture should produce slim resources")
+
+        self.assertEqual(
+            [r for resources in project.resources.values() for r in resources.values() if r.slim],
+            [],
+        )
+
+    def test_slim_resources_are_carried_past_a_rebuild_from_disk(self):
+        """A push replaces resources with state re-read from local files.
+
+        Slim resources have no file, so they cannot be in that state - they
+        have to survive on slim_resources or they are lost from the status
+        file on every push.
+        """
+        project = self._project()
+        expected = self._slim_ids(project)
+        self.assertTrue(expected, "fixture should produce slim resources")
+
+        # What push does: swap in state rebuilt from the local files.
+        project.resources = {
+            resource_type: dict(resources) for resource_type, resources in project.resources.items()
+        }
+
+        reloaded = AgentStudioProject.from_dict(project.to_dict(), project.root_path)
+        self.assertEqual(self._slim_ids(reloaded), expected)
+
+
+class PullBaselineKeepsOriginalSlimMappings(unittest.TestCase):
+    """The merge baseline must use the slim mappings recorded with it.
+
+    pull_project swaps self.slim_resources for the incoming list before the
+    merge runs. If the baseline then resolves references against the incoming
+    mappings, a withheld resource renamed remotely renders the baseline with the
+    new name while the disk file still carries the old one - a phantom local
+    change, surfacing exactly when merge output matters most.
+    """
+
+    @staticmethod
+    def _mapping(name: str) -> ResourceMapping:
+        return ResourceMapping(
+            resource_id="ENTITY-1",
+            resource_type=Entity,
+            resource_name=name,
+            file_path=os.path.join("config", "entities.yaml", "entities", name),
+            flow_name=None,
+            resource_prefix="entity",
+            flow_id=None,
+        )
+
+    def test_pull_passes_original_and_incoming_slim_lists_separately(self):
+        original = [self._mapping("old_name")]
+        incoming = [self._mapping("new_name")]
+
+        project = AgentStudioProject(
+            region="local",
+            account_id="ACCOUNT-1",
+            project_id="PROJECT-1",
+            root_path=tempfile.mkdtemp(),
+            resources={},
+            slim_resources=original,
+            last_updated=datetime(2026, 1, 1),
+        )
+
+        self.addCleanup(patch.stopall)
+        mock_api = patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock).start()
+        mock_api.pull_resources.return_value = ({}, incoming, {})
+        patch.object(AgentStudioProject, "save_config").start()
+        mock_update = patch.object(
+            AgentStudioProject, "_update_pulled_resources", return_value=[]
+        ).start()
+
+        project.pull_project(force=False)
+
+        kwargs = mock_update.call_args.kwargs
+        self.assertEqual(kwargs["original_slim_resources"], original)
+        self.assertEqual(kwargs["incoming_slim_resources"], incoming)
+        self.assertEqual(project.slim_resources, incoming)
+
+
+class WithheldTypeIsRemovedFromDisk(unittest.TestCase):
+    """A type readable on one pull and withheld on the next must leave no file behind.
+
+    Withheld types are absent from incoming_resources entirely, so the local file is
+    only removed by the "entire type absent from incoming" pass. That pass batches its
+    deletions into the file cache, and a cached entry carries the pre-write mtime - so
+    if the cache is not flushed, the deletions never reach disk *and* every later read
+    in the same process sees a file state that is not on disk. The visible symptom is
+    a force pull that needs running twice before `poly diff` comes back clean.
+    """
+
+    READABLE_ENTITIES = {
+        "entities": {
+            "entities": {
+                "ids": ["ENTITY-1"],
+                "entities": {
+                    "ENTITY-1": {
+                        "id": "ENTITY-1",
+                        "name": "account_number",
+                        "description": "The caller's account number.",
+                        "type": "alphanumeric",
+                        "config": {"value": {}},
+                    }
+                },
+            }
+        }
+    }
+
+    def setUp(self):
+        self.root_path = tempfile.mkdtemp()
+        self.addCleanup(patch.stopall)
+        MultiResourceYamlResource._file_cache.clear()
+        self.addCleanup(MultiResourceYamlResource._file_cache.clear)
+
+    def _project_with_readable_entities(self) -> AgentStudioProject:
+        resources, slim_resources = load_resources_from_projection(self.READABLE_ENTITIES)
+        project = AgentStudioProject(
+            region="us-1",
+            account_id="ACCOUNT-1",
+            project_id="PROJECT-1",
+            root_path=self.root_path,
+            resources=resources,
+            slim_resources=slim_resources,
+            last_updated=datetime(2026, 1, 1),
+        )
+        for entity in resources[Entity].values():
+            entity.save(self.root_path, resource_name=entity.name, resource_mappings=[])
+        project.file_structure_info = project.compute_file_structure_info(project.resources)
+        MultiResourceYamlResource._file_cache.clear()
+        return project
+
+    @property
+    def _entities_file(self) -> str:
+        return os.path.join(self.root_path, "config", "entities.yaml")
+
+    def test_one_force_pull_clears_a_type_that_became_withheld(self):
+        project = self._project_with_readable_entities()
+        self.assertIn("account_number", open(self._entities_file).read())
+
+        withheld, slim_resources = load_resources_from_projection(SKELETON_PROJECTION)
+        mock_api = patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock).start()
+        mock_api.pull_resources.return_value = (withheld, slim_resources, {})
+        patch.object(AgentStudioProject, "save_config").start()
+
+        project.pull_project(force=True)
+
+        self.assertNotIn(
+            "account_number",
+            open(self._entities_file).read(),
+            "one force pull should remove the withheld entity from disk",
+        )
+
+    def test_the_file_cache_never_disagrees_with_disk(self):
+        """A cache entry that was never flushed hides the real file from everything after it.
+
+        The entry is stamped with the file's pre-write mtime, so the mtime check that is
+        supposed to catch staleness reads it as fresh and hands back content that is not
+        on disk - which is how discovery came to miss files that were still there.
+        """
+        project = self._project_with_readable_entities()
+
+        withheld, slim_resources = load_resources_from_projection(SKELETON_PROJECTION)
+        mock_api = patch.object(AgentStudioProject, "api_handler", new_callable=MagicMock).start()
+        mock_api.pull_resources.return_value = (withheld, slim_resources, {})
+        patch.object(AgentStudioProject, "save_config").start()
+
+        project.pull_project(force=True)
+
+        for file_path, (_, cached_dict) in MultiResourceYamlResource._file_cache.items():
+            self.assertEqual(
+                resource_utils.load_yaml(open(file_path).read()) or {},
+                cached_dict,
+                f"cached content for {file_path} does not match what is on disk",
+            )
 
 
 if __name__ == "__main__":

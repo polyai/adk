@@ -93,9 +93,10 @@ class Entity(MultiResourceYamlResource):
         *,
         resource_id: str,
         name: str,
-        entity_type: str | EntityType,
+        entity_type: str | EntityType | None = None,
         description: str = "",
         config: dict | None = None,
+        slim: bool = False,
     ):
         self.resource_id = resource_id
         self.name = name
@@ -106,17 +107,29 @@ class Entity(MultiResourceYamlResource):
             else entity_type
         )
         self.config = utils.convert_keys_to_snake_case(config or {})
+        self.slim = slim
 
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "Entity"]:
         """Parse entities from a projection dict."""
         entities = {}
         entities_projection = projection.get("entities", {}).get("entities", {}).get("entities", {})
-        if "entities" not in projection or any(
-            "type" not in entity for entity in entities_projection.values()
-        ):
+        if "entities" not in projection:
             logger.debug("No read access to entities - they will not be pulled.")
             return {}
+
+        # Auth-filtered: keep id and name only, so {{entity:<id>}} in a readable
+        # topic or flow step still renders as a name rather than a raw id.
+        if any("type" not in entity for entity in entities_projection.values()):
+            logger.debug("No read access to entities - keeping names for references only.")
+            return {
+                entity_id: cls(
+                    resource_id=entity_id,
+                    name=entity_data.get("name", ""),
+                    slim=True,
+                )
+                for entity_id, entity_data in entities_projection.items()
+            }
 
         for entity_id, entity_data in entities_projection.items():
             entities[entity_id] = cls(
