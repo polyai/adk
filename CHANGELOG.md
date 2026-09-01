@@ -1,6 +1,115 @@
 # CHANGELOG
 
 
+## v0.49.1 (2026-09-01)
+
+### Bug Fixes
+
+- Flush whole-type multi-resource YAML deletions to disk on pull
+  ([#298](https://github.com/polyai/adk/pull/298),
+  [`898f7cb`](https://github.com/polyai/adk/commit/898f7cb98d14e7d172f4573c8719522da34b189d))
+
+## Summary
+
+When an entire multi-resource YAML type is absent from the incoming projection, its per-resource
+  deletions were batched into the file cache and then discarded when the pull returned — the pruned
+  file never reached disk. Flush the cache after the whole-type deletion pass, then clear it.
+
+## Motivation
+
+The leftover cache entry was stamped with the file's pre-write mtime, so the staleness check treated
+  it as fresh and every later read in the same process saw a file state that was not on disk. The
+  visible symptom was a pull that had to be run twice before `poly diff` came back clean. Split out
+  of #288, but the bug is independent of auth filtering — any pull that deletes an entire
+  multi-resource type hits it.
+
+## Changes
+
+- Flush and clear the multi-resource YAML file cache after the whole-type deletion pass in
+  `_update_multi_resource_yaml_resources`, so deletions reach disk and no stale cache entry survives
+  the pull. - Regression test asserting the pruned file is written to disk and the cache is empty
+  after the pull.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes (1434 passed, 117
+  subtests) - [x] No breaking changes to the `poly` CLI interface (or migration path documented) -
+  [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+- Push variant renames and default switches to the platform
+  ([#297](https://github.com/polyai/adk/pull/297),
+  [`770440b`](https://github.com/polyai/adk/commit/770440b623999daa84032939ff7dd8e979f1c691))
+
+## Summary
+
+Renaming a variant to a name with the same "clean name" (e.g. only the punctuation changes) was
+  silently dropped on push, and a new variant marked `is_default` never actually became the default.
+  Both are fixed, and set-default command emission moves out of `queue_resources` into
+  `_stage_commands`.
+
+## Motivation
+
+`Variant.file_path` is derived from `clean_name()`, which maps punctuation and whitespace to `_`. So
+  renaming a variant from `My Variant - Prod` to `My_Variant - Prod` keeps the same path: the
+  variant is treated as *kept* rather than delete+create, and its changed hash puts it in
+  `updated_resources`. But `Variant.build_update_proto` returned `Variant_SetDefaultVariant`, which
+  has no `name` field, so the rename never reached the platform — while local state and
+  `file_structure_info` were rewritten as if the push had succeeded, leaving local and remote
+  permanently out of sync with no error.
+
+Separately, `Variant_CreateVariant` has no `is_default` field, and the only thing emitting a
+  set-default command was the update path, which new resources never reach. A variant created with
+  `is_default: true` therefore never became the default.
+
+`prepush.filter_nondefault_variant_updates` dropped every update for a non-default variant. That was
+  only safe because "update" literally meant "set default"; once updates carry a name it would
+  suppress legitimate renames, so it is removed.
+
+## Changes
+
+- `Variant.update_command_type` is now `variant_update_variant`, and `build_update_proto` returns
+  `Variant_UpdateVariant(id, name)`, so renames reach the platform. - `attribute_values` on that
+  proto is deliberately left unset. The platform only rewrites a variant's attribute values when the
+  field is present, and a present map must cover every non-archived attribute or the command is
+  rejected — sending it would risk wiping values. There is a regression test guarding this. -
+  Set-default emission moves out of `AgentStudioInterface.queue_resources` into
+  `queue_set_default_commands` in `poly/utils/commands.py`, called at the end of
+  `AgentStudioProject._stage_commands`, for both handoffs and variants. It has to run after the
+  creates and updates, because the platform rejects a set-default for a resource that does not exist
+  yet. This is what fixes the new-default-variant case. - `queue_resources` goes back to being
+  purely generic (deletes → creates → updates, duck-typed on `*_command_type` / `build_*_proto`)
+  with no per-resource-type knowledge. - `prepush.filter_nondefault_variant_updates` removed, along
+  with its call site and a stale docstring line. - New `create_command_handoff_set_default` /
+  `create_command_variant_set_default` builders alongside the existing standalone command builders.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+``` ruff check . All checks passed! ruff format --check . 95 files already formatted pytest 1445
+  passed, 117 subtests passed ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.49.0 (2026-08-28)
 
 ### Features
