@@ -5,7 +5,7 @@ Copyright PolyAI Limited
 
 import os
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import ClassVar, Optional, TypeAlias
 
 from google.protobuf.message import Message
@@ -49,16 +49,24 @@ class ResourceMapping:
             data: A dictionary as produced by to_dict().
 
         Returns:
-            The mapping, or None if the resource type is no longer registered.
+            The mapping, or None if the resource type is no longer registered or
+            the data does not fit the mapping shape. The status file outlives any
+            one ADK version, so unknown data is dropped rather than raised on.
         """
-        mapping_data = dict(data)
+        field_names = {f.name for f in fields(cls)}
+        # Ignore keys a newer ADK (or a hand edit) may have added.
+        mapping_data = {key: value for key, value in data.items() if key in field_names}
         resource_type = mapping_data.get("resource_type")
         if isinstance(resource_type, str):
             resource_type = RESOURCE_NAME_TO_CLASS.get(resource_type)
         if resource_type is None:
             return None
         mapping_data["resource_type"] = resource_type
-        return cls(**mapping_data)
+        try:
+            return cls(**mapping_data)
+        except TypeError:
+            # Missing required fields - drop the one mapping, not the command.
+            return None
 
 
 @dataclass

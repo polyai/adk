@@ -396,6 +396,21 @@ class SlimResourcesSurviveTheStatusFile(unittest.TestCase):
 
         self.assertEqual(reloaded_names, names)
 
+    def test_from_dict_ignores_keys_from_a_newer_adk(self):
+        """The status file outlives any one ADK version.
+
+        A field added by a newer version (or a hand edit) must not turn every
+        later command into a TypeError.
+        """
+        mapping = next(iter(self._project().slim_resources))
+        data = {**mapping.to_dict(), "added_in_a_newer_version": True}
+
+        self.assertEqual(ResourceMapping.from_dict(data), mapping)
+
+    def test_from_dict_drops_a_mapping_missing_required_fields(self):
+        """A truncated entry loses that one mapping, not the whole command."""
+        self.assertIsNone(ResourceMapping.from_dict({"resource_type": "entities"}))
+
     def test_slim_resources_are_absent_from_file_structure_info(self):
         """No file on disk means no baseline entry.
 
