@@ -35,6 +35,7 @@ from poly.cli_commands.sync import (
 from poly.cli_commands.template import TemplateCommand
 from poly.cli_commands.testing import TestingCommand
 from poly.cli_commands.utils import CompletionCommand, DocsCommand
+from poly.cli_commands.wren import WrenCommand
 from poly.output.json_output import json_print
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ COMMANDS = [
     AudioCacheCommand,
     TestingCommand,
     RTCCommand,
+    WrenCommand,
     ChatCommand,
     DocsCommand,
     CompletionCommand,
