@@ -60,7 +60,7 @@ class FunctionsCommand(BaseCommand):
                 "this covers what that workflow can't: running and validating\n"
                 "functions.\n\n"
                 "Examples:\n"
-                "  poly functions execute <function_name_or_id> --args '{\"x\": 1}'\n"
+                "  poly functions execute <function_name> --args '{\"x\": 1}'\n"
                 "  poly functions validate\n"
             ),
             formatter_class=GroupedRawTextHelpFormatter,
@@ -77,8 +77,8 @@ class FunctionsCommand(BaseCommand):
             description=(
                 "Execute a Function and print its return value, logs and runtime.\n\n"
                 "Examples:\n"
-                "  poly functions execute <function_name_or_id>\n"
-                "  poly functions execute <function_name_or_id> --args '{\"x\": 1}'\n"
+                "  poly functions execute <function_name>\n"
+                "  poly functions execute <function_name> --args '{\"x\": 1}'\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )

@@ -25,7 +25,7 @@ Commands are listed under section headers so related ones stay together:
 | Getting started | `init`, `start`, `login`, `studio`, `project` |
 | Project sync | `pull`, `push`, `status`, `revert`, `format`, `validate`, `diff`, `review`, `branch`, `test`, `rtc`, `chat` |
 | Builder API | `deployments`, `conversations`, `audio-cache`, `functions` |
-| Other | `docs`, `completion` |
+| Other | `template`, `docs`, `completion` |
 
 Each command also supports its own help output. For example:
 
@@ -139,7 +139,7 @@ poly audio-cache update-file <entry_id> --file replacement.wav --json
 poly audio-cache delete <entry_id> --json
 poly audio-cache bulk-delete --ids id1,id2 --json
 poly audio-cache synthesize <entry_id> --text "Hello" --json
-poly functions execute <function_name_or_id> --args '{"x": 1}' --json
+poly functions execute <function_name> --args '{"x": 1}' --json
 poly functions validate --json
 ~~~
 
