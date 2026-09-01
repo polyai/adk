@@ -9,7 +9,7 @@ An ADK project is a set of **resources** — the YAML, text, and Python files th
 
 For how the resource types relate to each other and which one to reach for, see [resource architecture](../development/resource-architecture.md). For the `{{prefix:name}}` syntax used to reference one resource from another, see [resource references](../development/resource-architecture.md#resource-references).
 
-Every resource here follows the same sync process, including [permission-gated visibility](../development/resource-architecture.md#syncing-and-permissions) — a resource you can't view in Agent Studio won't appear in your local project.
+Every resource here follows the same sync process, including [permission-gated visibility](../development/resource-architecture.md#syncing-and-permissions). A resource you can't fully read in Agent Studio won't appear as a file in your local project, but if other readable resources reference it, the ADK retains enough information about it to resolve those references to meaningful names rather than raw IDs.
 
 ## Agent behavior
 

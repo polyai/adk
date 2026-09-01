@@ -319,7 +319,12 @@ You write references by **name**; Agent Studio stores them by **resource ID**. T
 
 ## Syncing and permissions
 
-Agent Studio permissions carry over to the ADK: a resource you don't have read access to in Agent Studio won't appear in your local project. `poly pull` omits it silently rather than failing, so a project can look smaller locally than it is on the platform.
+Agent Studio permissions carry over to the ADK: resources you don't have full read access to in Agent Studio are handled differently depending on whether they are referenced by other resources you *can* read.
+
+- **Completely withheld resources** (not referenced by anything you can read) are omitted silently from your local project. The project can look smaller locally than it is on the platform, and `poly pull` does not fail.
+- **Partially withheld resources** (withheld, but their IDs appear inside resources you *can* read — for example, a `{{fn:...}}` reference in a topic you can see) are kept as identity-only stubs. They have no file on disk, but the ADK retains enough information to resolve the reference to a name rather than a raw ID. This prevents `{{entity:...}}`-style references from rendering as raw IDs, and stops your local files from appearing permanently modified.
+
+In both cases, withheld resources cannot be pushed, edited, or iterated over — they exist only so that references to them continue to display meaningful names.
 
 ## Platform references
 
