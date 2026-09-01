@@ -77,6 +77,11 @@
         "resource_id": "VARIANT-default",
         "name": "default",
         "is_default": true
+      },
+      "VARIANT-spanish": {
+        "resource_id": "VARIANT-spanish",
+        "name": "spanish",
+        "is_default": false
       }
     },
     "variant_attributes": {
@@ -84,28 +89,32 @@
         "resource_id": "customer-name",
         "name": "customer-name",
         "mappings": {
-          "VARIANT-default": "value-1"
+          "VARIANT-default": "value-1",
+          "VARIANT-spanish": "valor-1"
         }
       },
       "email-address": {
         "resource_id": "email-address",
         "name": "email-address",
         "mappings": {
-          "VARIANT-default": "value-2"
+          "VARIANT-default": "value-2",
+          "VARIANT-spanish": "valor-2"
         }
       },
       "member-status": {
         "resource_id": "member-status",
         "name": "member-status",
         "mappings": {
-          "VARIANT-default": "value-3"
+          "VARIANT-default": "value-3",
+          "VARIANT-spanish": "valor-3"
         }
       },
       "booking-status": {
         "resource_id": "booking-status",
         "name": "booking-status",
         "mappings": {
-          "VARIANT-default": "value-4"
+          "VARIANT-default": "value-4",
+          "VARIANT-spanish": "valor-4"
         }
       }
     },
@@ -380,6 +389,21 @@
           "I need to verify my email",
           "Check my email address",
           "Email validation request"
+        ],
+        "enabled": true
+      }
+    },
+    "child_topics": {
+      "TOPIC-Spanish Only Topic": {
+        "resource_id": "TOPIC-Spanish Only Topic",
+        "name": "Spanish Only Topic",
+        "variant_id": "VARIANT-spanish",
+        "variant_name": "spanish",
+        "actions": "Handle this request in Spanish using {{fn:FUNCTION-test_function}} and {{attr:customer-name}}.",
+        "content": "This topic only applies when the Spanish variant is active.",
+        "example_queries": [
+          "How can I help you?",
+          "What services do you offer?"
         ],
         "enabled": true
       }

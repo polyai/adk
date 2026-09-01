@@ -700,6 +700,11 @@ class FlowStep(BaseFlowStep, YamlResource):
         # Extract flow_id from resource mappings
         flow_id, flow_name = utils.get_flow_id_from_flow_name(flow_folder_name, resource_mappings)
 
+        # A step whose flow config is missing or unreadable resolves to no flow. Fall back
+        # to the folder as read from disk so file_path stays usable -- discovery reads a
+        # step before the flow mappings exist, and validate() reports the missing flow.
+        flow_name = flow_name or flow_folder_name
+
         contents = cls.read_from_file(file_path)
         try:
             yaml_dict = utils.load_yaml(contents) or {}
@@ -1837,6 +1842,10 @@ class FunctionStep(Function, BaseFlowStep):
             flow_id, flow_name = utils.get_flow_id_from_flow_name(
                 flow_folder_name, resource_mappings
             )
+
+        # See FlowStep.read_local_resource: keep the folder as a fallback so file_path
+        # stays usable when the flow config is missing.
+        flow_name = flow_name or flow_folder_name
 
         step_id = resource_id.removeprefix(f"{flow_id}_")
 

@@ -31,6 +31,7 @@ from poly.migration_utils import (
 )
 from poly.resources import (
     BaseFlowStep,
+    ChildTopic,
     Document,
     FlowConfig,
     FlowStep,
@@ -2306,7 +2307,11 @@ class AgentStudioProject:
                     resource_name = flow_name
 
                 # Resource name in file path is cleaned, so we need to get the original name
-                if issubclass(resource_type, MultiResourceYamlResource) or resource_type == Topic:
+                if (
+                    issubclass(resource_type, MultiResourceYamlResource)
+                    or resource_type == Topic
+                    or resource_type == ChildTopic
+                ):
                     resource = self.read_local_resource(
                         ResourceMapping(
                             resource_id="temp_id",

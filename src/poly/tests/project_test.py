@@ -66,10 +66,10 @@ DIR = os.path.dirname(os.path.abspath(__file__))
 TEST_PROJECT_DIR = os.path.join(DIR, "test_projects")
 TEST_DIR = os.path.join(TEST_PROJECT_DIR, "test_project")
 PROJECT_DATA_LOC = os.path.join(TEST_DIR, "test_project.json")
-PROJECT_DATA = json.loads(open(PROJECT_DATA_LOC).read())
+PROJECT_DATA = json.loads(open(PROJECT_DATA_LOC, encoding="utf-8").read())
 EMPTY_PROJECT_DIR = os.path.join(TEST_PROJECT_DIR, "test_empty_project")
 EMPTY_PROJECT_DATA_LOC = os.path.join(EMPTY_PROJECT_DIR, "empty_project.json")
-EMPTY_PROJECT_DATA = json.loads(open(EMPTY_PROJECT_DATA_LOC).read())
+EMPTY_PROJECT_DATA = json.loads(open(EMPTY_PROJECT_DATA_LOC, encoding="utf-8").read())
 
 
 class InitTest(unittest.TestCase):
@@ -3145,7 +3145,7 @@ class PullProjectTest(unittest.TestCase):
                 if kp_call_count[0] <= 2:
                     return original_kp_content
                 return local_kp_content
-            with open(str(path)) as f:
+            with open(str(path), encoding="utf-8") as f:
                 return f.read()
 
         return side_effect
