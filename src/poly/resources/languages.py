@@ -242,6 +242,9 @@ class AdditionalLanguage(MultiResourceYamlResource):
         self, base_path: str, format: bool = False, save_to_cache: bool = False, **kwargs
     ) -> None:
         """Save this language into the additional_languages list."""
+        # No-op for slim resources, which are not saved to disk.
+        if self.slim:
+            return
         true_file_path = os.path.join(base_path, LANGUAGES_FILE)
         _ensure_languages_file(type(self), true_file_path, save_to_cache)
         top_level = self._get_top_level_data(true_file_path)

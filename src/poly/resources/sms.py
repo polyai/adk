@@ -50,12 +50,14 @@ class SMSTemplate(MultiResourceYamlResource):
         *,
         resource_id: str,
         name: str,
-        text: str,
+        text: str = "",
         env_phone_numbers: EnvPhoneNumbers | dict | None = None,
+        slim: bool = False,
     ):
         self.resource_id = resource_id
         self.name = name
         self.text = text
+        self.slim = slim
         if env_phone_numbers is None:
             self.env_phone_numbers = None
         elif isinstance(env_phone_numbers, EnvPhoneNumbers):
@@ -75,13 +77,24 @@ class SMSTemplate(MultiResourceYamlResource):
             projection.get("sms", {}).get("templates", {}).get("entities", {})
         )
         sms_templates = {}
-        # Read access is checked before "active": an auth-filtered template has no
-        # "active" field, and must not be mistaken for a deactivated one.
-        if "sms" not in projection or any(
-            "active" not in template for template in sms_templates_projection.values()
-        ):
+        if "sms" not in projection:
             logger.debug("No read access to SMS templates - they will not be pulled.")
             return {}
+
+        # Read access is checked before "active": an auth-filtered template has no
+        # "active" field, and must not be mistaken for a deactivated one. Inactive
+        # templates are stubbed too, since we can't tell them apart here - harmless,
+        # as an inactive template's id is never referenced.
+        if any("active" not in template for template in sms_templates_projection.values()):
+            logger.debug("No read access to SMS templates - keeping names for references only.")
+            return {
+                template_id: cls(
+                    resource_id=template_id,
+                    name=template_data.get("name", ""),
+                    slim=True,
+                )
+                for template_id, template_data in sms_templates_projection.items()
+            }
 
         for sms_template_id, sms_template_data in sms_templates_projection.items():
             if not sms_template_data.get("active", False):
