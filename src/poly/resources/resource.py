@@ -754,17 +754,9 @@ def _filter_slim_resources(all_resources: ResourceMap) -> tuple[ResourceMap, lis
                     resource_type=type(resource),
                     resource_name=resource.name,
                     file_path=resource.file_path,
-                    flow_name=(
-                        resource.name
-                        if type(resource).__name__ == "FlowConfig"
-                        else getattr(resource, "flow_name", None)
-                    ),
+                    flow_name=getattr(resource, "flow_name", None),
                     resource_prefix=resource.get_resource_prefix(file_path=resource.file_path),
-                    flow_id=(
-                        resource.resource_id
-                        if type(resource).__name__ == "FlowConfig"
-                        else getattr(resource, "flow_id", None)
-                    ),
+                    flow_id=getattr(resource, "flow_id", None),
                 )
             )
     return resources, slim_resources
