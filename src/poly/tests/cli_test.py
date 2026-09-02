@@ -5223,6 +5223,7 @@ class UpdateControlFlowTest(unittest.TestCase):
         self.check_for_updates = self._patch_command("check_for_updates", (True, "0.54.0"))
         self.check_version_exists = self._patch_command("check_version_exists", True)
         self.perform_update = self._patch_command("perform_update", True)
+        self.update_skills_step = self._patch_command("update_skills_step", True)
         for console_function in ("info", "success"):
             patcher = patch(f"poly.output.console.{console_function}")
             patcher.start()
@@ -5286,6 +5287,69 @@ class UpdateControlFlowTest(unittest.TestCase):
         UpdateCommand.update(check=False, output_json=False)
 
         self.perform_update.assert_called_once_with(False, None)
+
+    def test_default_update_also_updates_the_skills(self):
+        """A plain 'poly update' refreshes the AI agent skills after the CLI."""
+        UpdateCommand.update(check=False, output_json=False)
+
+        self.perform_update.assert_called_once()
+        self.update_skills_step.assert_called_once_with(False, required=False)
+
+    def test_cli_only_skips_the_skills(self):
+        """'poly update --cli-only' updates the CLI without touching the skills."""
+        UpdateCommand.update(check=False, output_json=False, cli_only=True)
+
+        self.perform_update.assert_called_once()
+        self.update_skills_step.assert_not_called()
+
+    def test_check_does_not_touch_the_skills(self):
+        """'--check' is a CLI version check; the skills are left alone."""
+        UpdateCommand.update(check=True, output_json=False)
+
+        self.update_skills_step.assert_not_called()
+
+    def test_up_to_date_cli_still_updates_the_skills(self):
+        """Being on the latest CLI version still refreshes the skills."""
+        self.check_for_updates.return_value = (False, "0.53.0")
+
+        UpdateCommand.update(check=False, output_json=False)
+
+        self.perform_update.assert_not_called()
+        self.update_skills_step.assert_called_once_with(False, required=False)
+
+    def test_skills_only_updates_skills_and_nothing_else(self):
+        """'--skills-only' skips the CLI paths entirely, including the upgradable gate."""
+        UpdateCommand.update(check=False, output_json=False, skills_only=True)
+
+        self.refuse_if_not_upgradable.assert_not_called()
+        self.check_for_updates.assert_not_called()
+        self.perform_update.assert_not_called()
+        self.update_skills_step.assert_called_once_with(False, required=True)
+
+    def test_skills_only_failure_exits_non_zero(self):
+        """A failed '--skills-only' run is the whole command failing."""
+        self.update_skills_step.return_value = False
+
+        with self.assertRaises(SystemExit) as raised:
+            UpdateCommand.update(check=False, output_json=False, skills_only=True)
+
+        self.assertEqual(raised.exception.code, 1)
+
+    def test_skills_failure_does_not_fail_a_combined_update(self):
+        """In a default update the skills half is best-effort — no exit, CLI result stands."""
+        self.update_skills_step.return_value = False
+
+        UpdateCommand.update(check=False, output_json=False)
+
+        self.perform_update.assert_called_once()
+
+    def test_cli_only_and_skills_only_are_mutually_exclusive(self):
+        """The parser rejects '--cli-only --skills-only' as contradictory."""
+        cli = AgentStudioCLI()
+        cli.register_commands()
+
+        with self.assertRaises(SystemExit):
+            cli._create_parser().parse_args(["update", "--cli-only", "--skills-only"])
 
     def test_not_upgradable_install_is_refused_before_any_lookup(self):
         """An editable or ephemeral install refuses without consulting PyPI first."""
@@ -5379,6 +5443,49 @@ class _FakeStdout:
     def isatty(self) -> bool:
         """Report whether output is going to a terminal."""
         return self.is_a_tty
+
+
+class UpdateSkillsStepTest(unittest.TestCase):
+    """Tests for UpdateCommand.update_skills_step, the npx-backed skills half."""
+
+    def setUp(self):
+        """Stub the Node gate and the npx runner, and silence console output."""
+        self.node_gate = patch("poly.cli_commands.update.node_gate_reason", return_value=None)
+        self.mock_gate = self.node_gate.start()
+        self.addCleanup(self.node_gate.stop)
+        self.skills_update = patch("poly.cli_commands.update.update_skills", return_value=True)
+        self.mock_update = self.skills_update.start()
+        self.addCleanup(self.skills_update.stop)
+        for console_function in ("info", "error", "warning"):
+            patcher = patch(f"poly.output.console.{console_function}")
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_missing_node_skips_without_running_npx(self):
+        """A gated environment reports failure without attempting the update."""
+        self.mock_gate.return_value = "Node.js (with npx) was not found on your PATH"
+
+        self.assertFalse(UpdateCommand.update_skills_step(output_json=False, required=False))
+        self.mock_update.assert_not_called()
+
+    def test_json_mode_runs_npx_quietly(self):
+        """--json output stays a single object: npx output is captured, not streamed."""
+        updated = UpdateCommand.update_skills_step(output_json=True, required=False)
+
+        self.assertTrue(updated)
+        self.mock_update.assert_called_once_with(quiet=True)
+
+    def test_interactive_mode_streams_npx_output(self):
+        """Without --json the npx output is streamed for the user to follow."""
+        UpdateCommand.update_skills_step(output_json=False, required=False)
+
+        self.mock_update.assert_called_once_with(quiet=False)
+
+    def test_failure_returns_false_without_exiting(self):
+        """The step never exits — the caller owns the exit code."""
+        self.mock_update.return_value = False
+
+        self.assertFalse(UpdateCommand.update_skills_step(output_json=False, required=True))
 
 
 class StartupUpdateMessageTest(unittest.TestCase):

@@ -23,6 +23,7 @@ from poly.cli_commands.shared import (
     get_package_version,
     is_newer_version,
 )
+from poly.cli_commands.skills import node_gate_reason, update_skills
 from poly.constants import POLY_HOME_DIR
 from poly.output.json_output import json_print
 
@@ -68,13 +69,15 @@ class UpdateCommand(BaseCommand):
             "update",
             parents=[parents.verbose, parents.debug, parents.json],
             formatter_class=RawTextHelpFormatter,
-            help="Update the Poly CLI to the latest version.",
+            help="Update the Poly CLI and its AI agent skills to the latest version.",
             description=(
-                "Update the Poly CLI to the latest version.\n\n"
+                "Update the Poly CLI and its AI agent skills to the latest version.\n\n"
                 "Examples:\n"
                 "  poly update\n"
                 "  poly update --check\n"
                 "  poly update --to 0.52.0\n"
+                "  poly update --cli-only\n"
+                "  poly update --skills-only\n"
                 "\n"
                 "The CLI also notices new releases on its own, at most once every 12\n"
                 "hours. Set POLY_NO_UPDATE_CHECK=1 to silence that; it is already\n"
@@ -96,15 +99,57 @@ class UpdateCommand(BaseCommand):
             help="Install a specific version instead of the latest, e.g. --to 0.52.0.",
         )
 
+        scope_group = update_parser.add_mutually_exclusive_group()
+        scope_group.add_argument(
+            "--cli-only",
+            action="store_true",
+            help="Update the CLI only, skipping the AI agent skills.",
+        )
+        scope_group.add_argument(
+            "--skills-only",
+            action="store_true",
+            help="Update the AI agent skills only, skipping the CLI.",
+        )
+
     @classmethod
     def run(cls, args: Namespace) -> None:
         """Run the update command."""
-        cls.update(args.check, args.json, args.to)
+        cls.update(
+            args.check,
+            args.json,
+            args.to,
+            cli_only=args.cli_only,
+            skills_only=args.skills_only,
+        )
 
     @classmethod
-    def update(cls, check: bool, output_json: bool, target_version: str | None = None) -> None:
-        """Update the Poly CLI to the latest version, or to ``target_version`` if given."""
+    def update(
+        cls,
+        check: bool,
+        output_json: bool,
+        target_version: str | None = None,
+        cli_only: bool = False,
+        skills_only: bool = False,
+    ) -> None:
+        """Update the Poly CLI (and its AI agent skills) to the latest version.
+
+        With ``target_version``, install that CLI version instead of the latest.
+        ``cli_only`` and ``skills_only`` narrow the update to one half; the
+        skills half never applies to ``--check``, which is a CLI version check.
+        """
         from poly.output.console import info, success
+
+        if skills_only:
+            # Deliberately not gated on refuse_if_not_upgradable: an editable/dev
+            # install cannot upgrade the CLI in place, but its skills still can be.
+            updated = cls.update_skills_step(output_json, required=True)
+            if output_json:
+                json_print({"success": updated, "skills_updated": updated})
+            elif updated:
+                success("AI agent skills updated.")
+            if not updated:
+                sys.exit(1)
+            return
 
         # Refuse before hitting the network or announcing anything, so an install we
         # cannot upgrade is not told that an update is on the way.
@@ -122,8 +167,16 @@ class UpdateCommand(BaseCommand):
         else:
             update_available, target = cls.check_for_updates()
             if not update_available:
+                # The CLI is current, but the skills may not be — the default
+                # update still refreshes them.
+                skills_updated = None
+                if not check and not cli_only:
+                    skills_updated = cls.update_skills_step(output_json, required=False)
                 if output_json:
-                    json_print({"update_available": False, "latest_version": target})
+                    result = {"update_available": False, "latest_version": target}
+                    if skills_updated is not None:
+                        result["skills_updated"] = skills_updated
+                    json_print(result)
                 else:
                     info("Poly CLI is already up to date, no update needed.")
                     info(f"Current version: {get_package_version()}")
@@ -140,10 +193,55 @@ class UpdateCommand(BaseCommand):
             info(f"Updating Poly CLI to version {target}...")
         if not cls.perform_update(output_json, target_version):
             return
+        skills_updated = None
+        if not cli_only:
+            skills_updated = cls.update_skills_step(output_json, required=False)
         if output_json:
-            json_print({"success": True, "latest_version": target})
+            result = {"success": True, "latest_version": target}
+            if skills_updated is not None:
+                result["skills_updated"] = skills_updated
+            json_print(result)
         else:
             success(f"Poly CLI updated to version {target}.")
+
+    @classmethod
+    def update_skills_step(cls, output_json: bool, required: bool) -> bool:
+        """Update installed AI agent skills via the pinned ``npx skills`` package.
+
+        Args:
+            output_json: Keep stdout machine-readable — npx output is captured
+                and no console messages are printed.
+            required: The skills are the whole point of the invocation
+                (``--skills-only``): report failure as an error instead of a
+                warning. Never exits — the caller owns the exit code.
+
+        Returns:
+            True if the skills were updated.
+        """
+        from poly.output.console import error, info, warning
+
+        gate_reason = node_gate_reason()
+        if gate_reason:
+            message = f"Cannot update AI agent skills: {gate_reason}."
+            if output_json:
+                # The caller folds the failure into its own JSON output.
+                logger.debug(message)
+            elif required:
+                error(message)
+            else:
+                warning(f"{message} Skipping.")
+            return False
+
+        if not output_json:
+            info("Updating AI agent skills...")
+        updated = update_skills(quiet=output_json)
+        if not updated and not output_json:
+            message = "AI agent skill update failed."
+            if required:
+                error(message)
+            else:
+                warning(f"{message} Run 'poly update --skills-only' to retry.")
+        return updated
 
     @staticmethod
     def check_for_updates() -> tuple[bool, str]:
