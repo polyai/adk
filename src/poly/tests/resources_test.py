@@ -6595,6 +6595,96 @@ class KeyphraseBoostingTests(unittest.TestCase):
         )
         k.validate()
 
+    @staticmethod
+    def _collection(*keyphrases: str) -> dict[str, KeyphraseBoosting]:
+        return {
+            f"kp-{i}": KeyphraseBoosting(
+                resource_id=f"kp-{i}",
+                name=keyphrase,
+                keyphrase=keyphrase,
+                level="default",
+            )
+            for i, keyphrase in enumerate(keyphrases)
+        }
+
+    def test_validate_collection_passes_for_distinct_keyphrases(self):
+        """Phrases that only share a prefix or a stem are not duplicates."""
+        KeyphraseBoosting.validate_collection(
+            self._collection("sensor", "sensors", "Pap", "C Pap", "Acme Health")
+        )
+
+    def test_validate_collection_rejects_case_only_duplicates(self):
+        """Agent Studio matches case-insensitively, so these collide."""
+        with self.assertRaises(ValueError) as cm:
+            KeyphraseBoosting.validate_collection(
+                self._collection("Infusion Sets", "infusion sets")
+            )
+        message = str(cm.exception)
+        self.assertIn("Duplicate keyphrases", message)
+        self.assertIn("'Infusion Sets'", message)
+        self.assertIn("'infusion sets'", message)
+
+    def test_validate_collection_rejects_whitespace_only_duplicates(self):
+        """Agent Studio trims before comparing, so surrounding space is not a difference."""
+        with self.assertRaises(ValueError) as cm:
+            KeyphraseBoosting.validate_collection(self._collection("Acme", " Acme "))
+        self.assertIn("Duplicate keyphrases", str(cm.exception))
+
+    def test_validate_collection_reports_every_colliding_group(self):
+        """All colliding groups are named, not just the first."""
+        with self.assertRaises(ValueError) as cm:
+            KeyphraseBoosting.validate_collection(
+                self._collection("Acme", "acme", "Infusion Sets", "infusion sets")
+            )
+        message = str(cm.exception)
+        self.assertIn("'Acme'", message)
+        self.assertIn("'Infusion Sets'", message)
+
+    def test_from_projection_warns_on_pre_existing_duplicates(self):
+        """Pulling a project that predates the uniqueness rule warns instead of failing."""
+        projection = {
+            "keyphraseBoosting": {
+                "keyphraseBoosting": {
+                    "entities": {
+                        "KEYPHRASE-1": {"keyphrase": "Acme", "level": "default"},
+                        "KEYPHRASE-2": {"keyphrase": "acme", "level": "default"},
+                    }
+                }
+            }
+        }
+        with self.assertLogs("poly.resources.keyphrase_boosting", level="WARNING") as logs:
+            keyphrases = KeyphraseBoosting.from_projection(projection)
+        self.assertEqual(len(keyphrases), 2)
+        self.assertIn("differ only by case", "".join(logs.output))
+
+    def test_yaml_resolved_scalars_are_read_as_text(self):
+        """A bare `true` or `2024` in YAML resolves to a bool/int, not a string."""
+        for raw, expected in ((True, "true"), (False, "false"), (2024, "2024"), (None, "")):
+            with self.subTest(raw=raw):
+                k = KeyphraseBoosting.from_yaml_dict(
+                    {"keyphrase": raw, "level": "boosted"}, "kp-1", "kp-1"
+                )
+                self.assertEqual(k.keyphrase, expected)
+                self.assertEqual(k.name, expected)
+
+    def test_validate_collection_handles_resolved_scalars(self):
+        """A bare `true` and a quoted 'true' are the same phrase to Agent Studio."""
+        collection = {
+            "kp-0": KeyphraseBoosting(resource_id="kp-0", name="x", keyphrase=True),
+            "kp-1": KeyphraseBoosting(resource_id="kp-1", name="y", keyphrase="True"),
+        }
+        with self.assertRaises(ValueError) as cm:
+            KeyphraseBoosting.validate_collection(collection)
+        self.assertIn("Duplicate keyphrases", str(cm.exception))
+
+    def test_numeric_keyphrase_validates(self):
+        """Boosting a bare number is legitimate and must not fail validation."""
+        k = KeyphraseBoosting.from_yaml_dict(
+            {"keyphrase": 2024, "level": "maximum"}, "kp-1", "kp-1"
+        )
+        k.validate()
+        self.assertEqual(k.to_yaml_dict(), {"keyphrase": "2024", "level": "maximum"})
+
     def test_read_local_resource(self):
         """read_local_resource correctly parses a keyphrase from the multi-resource YAML."""
         yaml_content = """keyphrases:
