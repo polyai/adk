@@ -355,8 +355,14 @@ class SetupCompletionInstallTest(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.home, True)
 
     def _install_with_shell(self, shell_path: str) -> None:
-        """Run the completion step as if the user's shell were shell_path."""
-        with patch.dict(os.environ, {"HOME": self.home, "SHELL": shell_path}):
+        """Run the completion step as if the user's shell were shell_path.
+
+        Sets both HOME and USERPROFILE: ``Path.expanduser`` resolves ``~`` from
+        HOME on POSIX but from USERPROFILE on Windows, and the throwaway home
+        must win on either platform.
+        """
+        env = {"HOME": self.home, "USERPROFILE": self.home, "SHELL": shell_path}
+        with patch.dict(os.environ, env):
             SetupCommand._install_completion()
 
     def test_bash_rc_gets_the_completion_eval_appended(self):
