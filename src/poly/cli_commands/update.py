@@ -4,11 +4,16 @@ Copyright PolyAI Limited
 """
 
 import json
+import logging
+import math
+import os
 import re
 import shutil
 import subprocess
 import sys
+import time
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
+from pathlib import Path
 
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import (
@@ -18,7 +23,16 @@ from poly.cli_commands.shared import (
     get_package_version,
     is_newer_version,
 )
+from poly.constants import POLY_HOME_DIR
 from poly.output.json_output import json_print
+
+logger = logging.getLogger(__name__)
+
+UPDATE_CHECK_INTERVAL_SECONDS = 12 * 60 * 60
+UPDATE_CHECK_STAMP_FILE = Path(POLY_HOME_DIR) / ".update_check"
+# Every command pays this, so it must be short enough to go unnoticed on a bad
+# connection. The 'poly update' command itself uses the far more generous default.
+UPDATE_CHECK_TIMEOUT_SECONDS = 2
 
 
 class UpdateCommand(BaseCommand):
@@ -166,6 +180,25 @@ class UpdateCommand(BaseCommand):
             return False
         return bool(direct_url.get("dir_info", {}).get("editable", False))
 
+    @staticmethod
+    def tool_install_method() -> str | None:
+        """Detect a standalone tool install (``uv tool`` / ``pipx``) from ``sys.prefix``.
+
+        Deliberately cheap — string comparisons only, no metadata lookups or PATH
+        scans — because the startup update check calls this on every command.
+
+        Returns:
+            "uv-tool" or "pipx" if the CLI is installed as a standalone tool, else
+            None. None covers project installs, where the version is the project's
+            business rather than something the user should be nagged about.
+        """
+        prefix = sys.prefix.replace("\\", "/")
+        if "/uv/tools/" in prefix:
+            return "uv-tool"
+        if "/pipx/venvs/" in prefix:
+            return "pipx"
+        return None
+
     @classmethod
     def _detect_install_method(cls) -> str:
         """Detect how the Poly CLI was installed, based on the active interpreter's prefix.
@@ -181,10 +214,9 @@ class UpdateCommand(BaseCommand):
         # bumped by uv over time, so match the shape rather than exact names.
         if re.search(r"/(archive|builds|environments)-v\d+/", prefix):
             return "ephemeral"
-        if "/uv/tools/" in prefix:
-            return "uv-tool"
-        if "/pipx/venvs/" in prefix:
-            return "pipx"
+        tool_method = cls.tool_install_method()
+        if tool_method:
+            return tool_method
         if shutil.which("uv"):
             return "uv-pip"
         return "pip"
@@ -259,3 +291,71 @@ class UpdateCommand(BaseCommand):
                 error(message)
             sys.exit(1)
         return True
+
+
+def _update_check_is_due() -> bool:
+    """Check whether enough time has passed since the last startup update check."""
+    try:
+        last_checked = float(UPDATE_CHECK_STAMP_FILE.read_text().strip())
+    except (OSError, ValueError):
+        return True
+    if not math.isfinite(last_checked):
+        # float() accepts "inf" and "nan", either of which would make the comparison
+        # below permanently False and silence the check for good. A stamp we cannot
+        # trust should mean "check now", the same as a missing or unreadable one.
+        return True
+    return (time.time() - last_checked) > UPDATE_CHECK_INTERVAL_SECONDS
+
+
+def _record_update_check() -> None:
+    """Stamp the current time so the next check is deferred."""
+    try:
+        UPDATE_CHECK_STAMP_FILE.parent.mkdir(parents=True, exist_ok=True)
+        UPDATE_CHECK_STAMP_FILE.write_text(str(time.time()))
+    except OSError:
+        pass
+
+
+def display_update_message(output_json: bool = False) -> None:
+    """Tell the user about a newer release, at most once per check interval.
+
+    Only standalone tool installs are notified. A project install's version is
+    pinned by that project's manifest, so telling the user to upgrade it would be
+    advice that the next dependency sync silently undoes.
+
+    Never raises: a failure here must not break the command the user actually ran.
+
+    Args:
+        output_json: True if the command is producing machine-readable output.
+    """
+    try:
+        # Cheapest checks first, so the common case costs almost nothing: no output
+        # to corrupt, then a string comparison, then a small file read, and only
+        # then the network.
+        if output_json or not sys.stdout.isatty():
+            return
+        if os.environ.get("POLY_NO_UPDATE_CHECK"):
+            return
+        method = UpdateCommand.tool_install_method()
+        if method is None:
+            return
+        if not _update_check_is_due():
+            return
+
+        latest_version = get_latest_version(timeout=UPDATE_CHECK_TIMEOUT_SECONDS)
+        if latest_version == "unknown":
+            # PyPI did not answer. Leave the stamp alone so the next run retries,
+            # rather than letting a blip buy hours of silence.
+            return
+        _record_update_check()
+
+        current_version = get_package_version()
+        if not is_newer_version(latest_version, current_version):
+            return
+
+        from poly.output.console import plain
+
+        plain(f"\n[warning]Update available: {current_version} -> {latest_version}[/warning]")
+        plain("[muted]Run 'poly update' to install it.[/muted]\n")
+    except Exception as e:
+        logger.debug(f"Update check failed: {e}")

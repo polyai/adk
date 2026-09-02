@@ -43,7 +43,7 @@ from poly.cli_commands.sync import (
 )
 from poly.cli_commands.template import TemplateCommand
 from poly.cli_commands.testing import TestingCommand
-from poly.cli_commands.update import UpdateCommand
+from poly.cli_commands.update import UpdateCommand, display_update_message
 from poly.cli_commands.utils import CompletionCommand, DocsCommand
 from poly.handlers.interface import REGIONS
 from poly.output.json_output import json_print
@@ -216,6 +216,9 @@ class AgentStudioCLI:
             from poly.output.console import set_verbose
 
             set_verbose(getattr(args, "verbose", False))
+            # 'poly update' does its own, more thorough check, so skip the passive one.
+            if args.command != UpdateCommand.command:
+                display_update_message(output_json=getattr(args, "json", False))
             self._run_command(args)
         except SystemExit:
             raise

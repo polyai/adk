@@ -3,6 +3,12 @@
 Copyright PolyAI Limited
 """
 
+import os
+
+# User-level state lives here: stored credentials, the update-check stamp, and
+# anything else that belongs to the user rather than to a single project.
+POLY_HOME_DIR = os.path.expanduser("~/.poly")
+
 DEFAULT_VOICE_IDS: dict[str, str] = {
     "us-1": "VOICE-6fad73f6",  # Anne
     "euw-1": "VOICE-8b814724",  # Ben

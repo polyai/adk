@@ -6,10 +6,13 @@ Copyright PolyAI Limited
 import json
 import os
 import sys
+import tempfile
+import time
 import unittest
 from argparse import ArgumentParser, _SubParsersAction
 from importlib.metadata import PackageNotFoundError
 from io import StringIO
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import requests
@@ -47,7 +50,12 @@ from poly.cli_commands.shared import (
     resolve_project_scope,
 )
 from poly.cli_commands.sync import FormatCommand, RevertCommand
-from poly.cli_commands.update import UpdateCommand
+from poly.cli_commands.update import (
+    UpdateCommand,
+    _record_update_check,
+    _update_check_is_due,
+    display_update_message,
+)
 from poly.cli_commands.utils import CompletionCommand
 from poly.project import DeploymentMode
 from poly.tests.project_test import TEST_DIR
@@ -5276,3 +5284,293 @@ class UpdateControlFlowTest(unittest.TestCase):
         UpdateCommand.update(check=False, output_json=False)
 
         self.perform_update.assert_called_once_with(False, None)
+
+
+# Real sys.prefix shapes, used by the startup update check tests below.
+UV_TOOL_PREFIX = "/Users/x/.local/share/uv/tools/polyai-adk"
+PIPX_PREFIX = "/Users/x/.local/pipx/venvs/polyai-adk"
+PROJECT_VENV_PREFIX = "/Users/x/adk/.venv"
+UVX_CACHE_PREFIX = "/Users/x/.cache/uv/archive-v0/QkiymbOgtpuIQfwx"
+
+
+class ToolInstallMethodTest(unittest.TestCase):
+    """Tests for UpdateCommand.tool_install_method, the startup check's install-type gate."""
+
+    def _method_for_prefix(self, prefix: str) -> str | None:
+        """Detect the tool install method for a given sys.prefix."""
+        with patch("sys.prefix", prefix):
+            return UpdateCommand.tool_install_method()
+
+    def test_uv_tool_prefix_is_uv_tool(self):
+        """'uv tool install polyai-adk' places the venv under uv/tools."""
+        self.assertEqual(self._method_for_prefix(UV_TOOL_PREFIX), "uv-tool")
+
+    def test_pipx_prefix_is_pipx(self):
+        """'pipx install polyai-adk' places the venv under pipx/venvs."""
+        self.assertEqual(self._method_for_prefix(PIPX_PREFIX), "pipx")
+
+    def test_windows_uv_tool_prefix_is_uv_tool(self):
+        """Backslash-separated Windows prefixes are normalised before matching."""
+        prefix = "C:\\Users\\x\\AppData\\Roaming\\uv\\tools\\polyai-adk"
+
+        self.assertEqual(self._method_for_prefix(prefix), "uv-tool")
+
+    def test_windows_pipx_prefix_is_pipx(self):
+        """The same normalisation applies to a Windows pipx install."""
+        prefix = "C:\\Users\\x\\.local\\pipx\\venvs\\polyai-adk"
+
+        self.assertEqual(self._method_for_prefix(prefix), "pipx")
+
+    def test_project_venv_is_not_a_tool_install(self):
+        """A project venv's version is the project's business, so it reports no tool method."""
+        self.assertIsNone(self._method_for_prefix(PROJECT_VENV_PREFIX))
+
+    def test_conda_environment_is_not_a_tool_install(self):
+        """A conda environment is a project-style install too."""
+        prefix = "/opt/homebrew/Caskroom/miniconda/base/envs/foo"
+
+        self.assertIsNone(self._method_for_prefix(prefix))
+
+    def test_uvx_cache_is_not_a_tool_install(self):
+        """'uvx polyai-adk' runs from a throwaway cache directory, not a managed tool venv."""
+        self.assertIsNone(self._method_for_prefix(UVX_CACHE_PREFIX))
+
+    def test_detection_reads_no_package_metadata_and_scans_no_path(self):
+        """Every command pays for this check, so it must stay pure string work.
+
+        Package metadata reads and PATH scans are booby-trapped here: if the
+        implementation ever reaches for either, the test fails rather than
+        silently making CLI startup slower.
+        """
+        with (
+            patch("sys.prefix", UV_TOOL_PREFIX),
+            patch("importlib.metadata.distribution", side_effect=AssertionError("read metadata")),
+            patch("shutil.which", side_effect=AssertionError("scanned PATH")),
+        ):
+            self.assertEqual(UpdateCommand.tool_install_method(), "uv-tool")
+
+
+class _FakeStdout:
+    """Stand-in for sys.stdout whose isatty() answer the test controls."""
+
+    def __init__(self, is_a_tty: bool):
+        self.is_a_tty = is_a_tty
+
+    def isatty(self) -> bool:
+        """Report whether output is going to a terminal."""
+        return self.is_a_tty
+
+
+class StartupUpdateMessageTest(unittest.TestCase):
+    """Tests for display_update_message, the passive check run at the start of every command."""
+
+    def setUp(self):
+        """Open every gate so the message would be shown; each test closes one of them."""
+        self.get_latest_version = self._patch(
+            "poly.cli_commands.update.get_latest_version", return_value="0.54.0"
+        )
+        self.get_package_version = self._patch(
+            "poly.cli_commands.update.get_package_version", return_value="0.53.0"
+        )
+        self.update_check_is_due = self._patch(
+            "poly.cli_commands.update._update_check_is_due", return_value=True
+        )
+        # Stubbed so no test can ever write to the real ~/.poly.
+        self.record_update_check = self._patch("poly.cli_commands.update._record_update_check")
+        # display_update_message imports plain() lazily, so the console module is the seam.
+        self.plain = self._patch("poly.output.console.plain")
+        self._set_prefix(UV_TOOL_PREFIX)
+        self._set_tty(True)
+        self._set_environ({})
+
+    def _patch(self, target: str, **kwargs) -> MagicMock:
+        """Replace a module-level name for the duration of the test."""
+        patcher = patch(target, **kwargs)
+        mock = patcher.start()
+        self.addCleanup(patcher.stop)
+        return mock
+
+    def _set_prefix(self, prefix: str) -> None:
+        """Pretend the CLI is running from the given sys.prefix."""
+        patcher = patch("sys.prefix", prefix)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _set_tty(self, is_a_tty: bool) -> None:
+        """Pretend stdout is (or is not) attached to a terminal."""
+        patcher = patch("sys.stdout", _FakeStdout(is_a_tty))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _set_environ(self, environ: dict[str, str]) -> None:
+        """Run with exactly the given environment, so the developer's own env cannot leak in."""
+        patcher = patch.dict(os.environ, environ, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _assert_stayed_silent_without_calling_pypi(self) -> None:
+        """Assert nothing was printed and, crucially, that no network call was made."""
+        self.plain.assert_not_called()
+        self.get_latest_version.assert_not_called()
+
+    # -- The message is shown for standalone tool installs --
+
+    def test_uv_tool_install_is_told_about_a_newer_release(self):
+        """A uv tool install can be upgraded in place, so it gets the notice."""
+        display_update_message()
+
+        message = " ".join(call.args[0] for call in self.plain.call_args_list)
+        self.assertIn("0.53.0", message)
+        self.assertIn("0.54.0", message)
+        self.assertIn("poly update", message)
+
+    def test_pipx_install_is_told_about_a_newer_release(self):
+        """A pipx install can be upgraded in place too."""
+        self._set_prefix(PIPX_PREFIX)
+
+        display_update_message()
+
+        message = " ".join(call.args[0] for call in self.plain.call_args_list)
+        self.assertIn("0.53.0", message)
+        self.assertIn("0.54.0", message)
+
+    # -- Every gate stays silent and skips the network --
+
+    def test_project_venv_install_is_not_nagged(self):
+        """A project pins its own version, so upgrade advice there would be undone next sync."""
+        self._set_prefix(PROJECT_VENV_PREFIX)
+
+        display_update_message()
+
+        self._assert_stayed_silent_without_calling_pypi()
+
+    def test_ephemeral_uvx_run_is_not_nagged(self):
+        """There is nothing to upgrade in a throwaway uvx environment."""
+        self._set_prefix(UVX_CACHE_PREFIX)
+
+        display_update_message()
+
+        self._assert_stayed_silent_without_calling_pypi()
+
+    def test_json_output_is_not_polluted_with_a_notice(self):
+        """Machine-readable output must stay parseable."""
+        display_update_message(output_json=True)
+
+        self._assert_stayed_silent_without_calling_pypi()
+
+    def test_non_tty_output_is_not_polluted_with_a_notice(self):
+        """Piped or redirected output is being consumed by something, not read by a human."""
+        self._set_tty(False)
+
+        display_update_message()
+
+        self._assert_stayed_silent_without_calling_pypi()
+
+    def test_poly_no_update_check_opts_out_entirely(self):
+        """POLY_NO_UPDATE_CHECK is the escape hatch for CI and scripted use."""
+        self._set_environ({"POLY_NO_UPDATE_CHECK": "1"})
+
+        display_update_message()
+
+        self._assert_stayed_silent_without_calling_pypi()
+
+    def test_recent_check_defers_to_the_stamp_file(self):
+        """Within the check interval the whole thing is skipped, network included."""
+        self.update_check_is_due.return_value = False
+
+        display_update_message()
+
+        self._assert_stayed_silent_without_calling_pypi()
+
+    # -- When the check does run --
+
+    def test_unreachable_pypi_does_not_record_a_check(self):
+        """A transient failure must not buy hours of silence, so the stamp is left alone."""
+        self.get_latest_version.return_value = "unknown"
+
+        display_update_message()
+
+        self.record_update_check.assert_not_called()
+        self.plain.assert_not_called()
+
+    def test_being_up_to_date_still_records_the_check(self):
+        """A successful check counts, even with nothing to report, so it is not repeated."""
+        self.get_latest_version.return_value = "0.53.0"
+
+        display_update_message()
+
+        self.record_update_check.assert_called_once()
+        self.plain.assert_not_called()
+
+    def test_a_failing_check_never_breaks_the_command_being_run(self):
+        """Whatever the user actually ran must survive an update check that blows up."""
+        self.get_latest_version.side_effect = RuntimeError("PyPI lookup exploded")
+
+        display_update_message()
+
+        self.plain.assert_not_called()
+
+
+class UpdateCheckStampTest(unittest.TestCase):
+    """Tests for the stamp file that throttles the startup update check to once per interval."""
+
+    THIRTEEN_HOURS_SECONDS = 13 * 60 * 60
+
+    def setUp(self):
+        """Point the stamp at a throwaway directory, never the real ~/.poly."""
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        self.stamp_file = Path(temp_dir.name) / ".poly" / ".update_check"
+        patcher = patch("poly.cli_commands.update.UPDATE_CHECK_STAMP_FILE", self.stamp_file)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _write_stamp(self, contents: str) -> None:
+        """Put the given raw contents in the stamp file."""
+        self.stamp_file.parent.mkdir(parents=True, exist_ok=True)
+        self.stamp_file.write_text(contents)
+
+    def test_missing_stamp_means_a_check_is_due(self):
+        """On a first ever run there is no stamp, so the check runs."""
+        self.assertTrue(_update_check_is_due())
+
+    def test_fresh_stamp_defers_the_check(self):
+        """A check that just happened is not repeated."""
+        self._write_stamp(str(time.time()))
+
+        self.assertFalse(_update_check_is_due())
+
+    def test_stamp_older_than_the_interval_means_a_check_is_due(self):
+        """Thirteen hours is past the twelve-hour interval, so the check runs again."""
+        self._write_stamp(str(time.time() - self.THIRTEEN_HOURS_SECONDS))
+
+        self.assertTrue(_update_check_is_due())
+
+    def test_unparseable_stamp_means_a_check_is_due(self):
+        """A corrupt stamp is treated as no stamp rather than crashing startup."""
+        self._write_stamp("not-a-timestamp")
+
+        self.assertTrue(_update_check_is_due())
+
+    def test_recording_creates_the_directory_and_writes_a_timestamp(self):
+        """The first recorded check creates ~/.poly if it does not exist yet."""
+        self.assertFalse(self.stamp_file.parent.exists())
+
+        _record_update_check()
+
+        self.assertAlmostEqual(float(self.stamp_file.read_text()), time.time(), delta=10)
+
+    def test_recording_a_check_defers_the_next_one(self):
+        """Round trip: what _record_update_check writes is what _update_check_is_due reads."""
+        _record_update_check()
+
+        self.assertFalse(_update_check_is_due())
+
+    def test_a_stamp_that_cannot_be_written_is_ignored(self):
+        """An unwritable home must not break the command the user actually ran."""
+        # A regular file where the .poly directory should be, so mkdir fails with an OSError.
+        self.stamp_file.parent.write_text("not a directory")
+
+        _record_update_check()
+
+        self.assertFalse(self.stamp_file.exists())

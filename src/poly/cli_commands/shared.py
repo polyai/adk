@@ -335,8 +335,12 @@ def get_package_version() -> str:
     return _version
 
 
-def get_latest_version() -> str:
+def get_latest_version(timeout: float = PYPI_TIMEOUT_SECONDS) -> str:
     """Get the latest version of the polyai-adk package from PyPI.
+
+    Args:
+        timeout: Seconds to wait for PyPI. Callers on the CLI's startup path should
+            pass something far shorter than the default, which every command pays.
 
     Returns:
         The latest version string of the package, or "unknown" if PyPI is unreachable.
@@ -344,7 +348,7 @@ def get_latest_version() -> str:
     import requests
 
     try:
-        response = requests.get(PYPI_JSON_URL, timeout=PYPI_TIMEOUT_SECONDS)
+        response = requests.get(PYPI_JSON_URL, timeout=timeout)
         response.raise_for_status()
         data = response.json()
         return data["info"]["version"]
