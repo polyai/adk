@@ -24,24 +24,45 @@ Examples:
 ~~~bash
 poly conversations list
 poly conversations list --limit 20 --offset 10
+poly conversations list --cursor <cursor>
+poly conversations list --channel voice --channel chat
+poly conversations list --in-progress
 poly conversations list --json
 ~~~
 
-The default table view shows conversation ID (rendered as a clickable Agent Studio link), start time, duration, caller number, channel, variant (when present), handoff status, and a short summary heading.
+The default table view shows conversation ID (rendered as a clickable Agent Studio link), start time, duration, caller number, channel, variant (when present), and handoff status.
+
+In `us-1`, `uk-1`, and `euw-1`, this command uses the v3 conversations API, which doesn't return a
+summary, tags, PolyScore, note, deployment ID, direction, or language for list results — fetch
+those per-conversation with [`poly conversations get`](#poly-conversations-get) instead. Other
+regions (`dev`, `staging`, `studio`) still use the deprecated v1 endpoint until it's rolled out
+there, so their list output currently retains those fields.
 
 | Flag | Description |
 |---|---|
 | `--limit` | Max number of conversations to return. Defaults to `50`. |
-| `--offset` | Number of conversations to skip. Defaults to `0`. |
+| `--offset` | Number of conversations to skip. Defaults to `0`. Prefer `--cursor` where available. |
+| `--cursor` | Pagination cursor from a previous response's `cursor` field. `us-1`/`uk-1`/`euw-1` only. |
+| `--channel` | Filter by channel (e.g. `voice`, `chat`). Repeatable. `us-1`/`uk-1`/`euw-1` only. |
+| `--in-progress` / `--no-in-progress` | Filter to only in-progress, or only finished, conversations. `us-1`/`uk-1`/`euw-1` only. |
 
-`--json` output shape:
+`--json` passes through the raw API response, so its shape follows the same regional split as the
+table above. In `us-1`/`uk-1`/`euw-1` (v3):
 
 ~~~json
 {
-  "conversations": [{ "id": "...", "startedAt": "...", "...": "..." }],
-  "count": 0,
-  "limit": 50,
-  "offset": 0
+  "conversations": [{ "id": "...", "started_at": "...", "...": "..." }],
+  "next_offset": null,
+  "cursor": null
+}
+~~~
+
+In `dev`/`staging`/`studio` (v1, unchanged from before this migration):
+
+~~~json
+{
+  "conversations": [{ "conversationId": "...", "startedAt": "...", "...": "..." }],
+  "next_offset": null
 }
 ~~~
 

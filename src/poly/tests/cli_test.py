@@ -3458,21 +3458,21 @@ class DuplicateProjectTest(unittest.TestCase):
 class ConversationsCommandTest(unittest.TestCase):
     """Tests for the conversations list/get/get-audio CLI commands."""
 
+    # v3 shape (returned in us-1/uk-1/euw-1) - snake_case, no shortSummary/tags/
+    # polyScore/note/deploymentId/direction/language. See DEVP-664.
     SAMPLE_CONVERSATIONS = {
         "conversations": [
             {
-                "conversationId": "KA-123",
-                "startedAt": "2026-05-26T10:00:00+00:00",
-                "duration": 90,
+                "id": "KA-123",
+                "started_at": "2026-05-26T10:00:00+00:00",
+                "total_duration": 90,
                 "channel": "VOICE-SIP",
-                "variantId": "Voice",
+                "variant_id": "Voice",
                 "handoff": False,
-                "shortSummary": '{"heading": "Test call", "content": "Details here"}',
             }
         ],
-        "count": 1,
-        "limit": 50,
-        "offset": 0,
+        "next_offset": None,
+        "cursor": None,
     }
 
     SAMPLE_DETAIL = {
@@ -3491,6 +3491,7 @@ class ConversationsCommandTest(unittest.TestCase):
         self.mock_load = self.mock_load_patcher.start()
         self.proj = MagicMock()
         self.proj.region = "us-1"
+        self.proj.account_id = "test-account"
         self.proj.project_id = "test-project"
         self.proj.get_conversation_url.return_value = "https://studio.us.poly.ai/conv"
         self.mock_load.return_value = self.proj
@@ -3501,15 +3502,43 @@ class ConversationsCommandTest(unittest.TestCase):
     @patch("poly.cli_commands.conversations.AgentStudioInterface.list_conversations")
     @patch("poly.output.console.print_conversations")
     def test_list_calls_api_with_params(self, mock_print, mock_api):
-        """conversations list passes limit/offset to the API."""
+        """conversations list passes account_id/limit/offset to the API."""
         mock_api.return_value = self.SAMPLE_CONVERSATIONS
 
         ConversationsCommand.conversations_list(TEST_DIR, limit=20, offset=5)
 
         mock_api.assert_called_once_with(
-            region="us-1", project_id="test-project", limit=20, offset=5
+            region="us-1",
+            account_id="test-account",
+            project_id="test-project",
+            limit=20,
+            offset=5,
+            cursor=None,
+            channel=None,
+            in_progress=None,
         )
         mock_print.assert_called_once()
+
+    @patch("poly.cli_commands.conversations.AgentStudioInterface.list_conversations")
+    @patch("poly.output.console.print_conversations")
+    def test_list_passes_cursor_channel_in_progress(self, mock_print, mock_api):
+        """conversations list passes --cursor/--channel/--in-progress through to the API."""
+        mock_api.return_value = self.SAMPLE_CONVERSATIONS
+
+        ConversationsCommand.conversations_list(
+            TEST_DIR, cursor="abc", channel=["voice"], in_progress=True
+        )
+
+        mock_api.assert_called_once_with(
+            region="us-1",
+            account_id="test-account",
+            project_id="test-project",
+            limit=50,
+            offset=0,
+            cursor="abc",
+            channel=["voice"],
+            in_progress=True,
+        )
 
     @patch("poly.cli_commands.conversations.AgentStudioInterface.list_conversations")
     @patch("poly.cli_commands.conversations.json_print")
@@ -3525,7 +3554,7 @@ class ConversationsCommandTest(unittest.TestCase):
     @patch("poly.output.console.info")
     def test_list_empty_shows_info(self, mock_info, mock_api):
         """conversations list with no results shows info message."""
-        mock_api.return_value = {"conversations": [], "count": 0, "limit": 50, "offset": 0}
+        mock_api.return_value = {"conversations": [], "next_offset": None, "cursor": None}
 
         ConversationsCommand.conversations_list(TEST_DIR)
 
@@ -3623,6 +3652,7 @@ class StudioCommandTest(unittest.TestCase):
             "https://studio.us.poly.ai/test_account/test_project/home?branchId=main",
         )
         self.assertTrue(url.endswith("/home?branchId=main"))
+
 
 class BranchHistoryTest(unittest.TestCase):
     """Tests for BranchCommand.branch_history CLI handler."""
