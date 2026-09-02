@@ -48,26 +48,41 @@ class UpdateCommand(BaseCommand):
     @classmethod
     def update(cls, check: bool, output_json: bool) -> None:
         """Update the Poly CLI to the latest version."""
-        available = cls.check_for_updates(output_json)
-        if check or not available:
+        from poly.output.console import info, success
+
+        update_available, latest_version = cls.check_for_updates(output_json)
+        if check:
+            if output_json:
+                json_print({"update_available": update_available, "latest_version": latest_version})
+            else:
+                info(f"Update available: {'Yes' if update_available else 'No'}")
+                info(f"Latest version: {latest_version}")
+        if not update_available:
+            if not output_json:
+                info("Poly CLI is already up to date, no update needed.")
+                info(f"Current version: {get_package_version()}")
+            else:
+                json_print({"success": True, "latest_version": latest_version})
             return
 
-        cls.perform_update(output_json)
+        if not output_json:
+            info(f"Updating Poly CLI to version {latest_version}...")
+        updated = cls.perform_update(output_json)
+        if not updated:
+            return
+        if not output_json:
+            success(f"Poly CLI updated to version {latest_version}.")
+        else:
+            json_print({"success": True, "latest_version": latest_version})
 
     @staticmethod
-    def check_for_updates(output_json: bool) -> bool:
+    def check_for_updates(output_json: bool) -> tuple[bool, str]:
         """Check if an update is available for the Poly CLI."""
         current_version = get_package_version()
         latest_version = get_latest_version()
         update_available = latest_version != "unknown" and latest_version != current_version
 
-        if output_json:
-            json_print({"update_available": update_available, "latest_version": latest_version})
-        else:
-            print("Checking for updates...")
-            print(f"Update available: {'Yes' if update_available else 'No'}")
-            print(f"Latest version: {latest_version}")
-        return update_available
+        return update_available, latest_version
 
     @staticmethod
     def _is_editable_install() -> bool:
@@ -111,9 +126,9 @@ class UpdateCommand(BaseCommand):
         return "pip"
 
     @classmethod
-    def perform_update(cls, output_json: bool) -> None:
+    def perform_update(cls, output_json: bool) -> bool:
         """Perform the update to the latest version."""
-        from poly.output.console import error, success, warning
+        from poly.output.console import error, warning
 
         # Installs that 'poly update' must not touch: upgrading in place would either
         # clobber a dev checkout or write to an environment that is about to be discarded.
@@ -136,7 +151,7 @@ class UpdateCommand(BaseCommand):
                 json_print({"success": False, "error": message})
             else:
                 warning(message)
-            return
+            return False
 
         commands = {
             "uv-tool": ["uv", "tool", "upgrade", "polyai-adk"],
@@ -155,9 +170,4 @@ class UpdateCommand(BaseCommand):
             else:
                 error(message)
             sys.exit(1)
-
-        new_version = get_package_version()
-        if output_json:
-            json_print({"success": True, "latest_version": new_version})
-        else:
-            success(f"Updated to version {new_version}.")
+        return True
