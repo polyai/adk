@@ -5218,6 +5218,7 @@ class UpdateControlFlowTest(unittest.TestCase):
 
     def setUp(self):
         """Stub the network-backed lookups and the installer, and silence console output."""
+        self.refuse_if_not_upgradable = self._patch_command("refuse_if_not_upgradable", False)
         self.check_for_updates = self._patch_command("check_for_updates", (True, "0.54.0"))
         self.check_version_exists = self._patch_command("check_version_exists", True)
         self.perform_update = self._patch_command("perform_update", True)
@@ -5284,6 +5285,24 @@ class UpdateControlFlowTest(unittest.TestCase):
         UpdateCommand.update(check=False, output_json=False)
 
         self.perform_update.assert_called_once_with(False, None)
+
+    def test_not_upgradable_install_is_refused_before_any_lookup(self):
+        """An editable or ephemeral install refuses without consulting PyPI first."""
+        self.refuse_if_not_upgradable.return_value = True
+
+        UpdateCommand.update(check=False, output_json=False)
+
+        self.check_for_updates.assert_not_called()
+        self.perform_update.assert_not_called()
+
+    def test_not_upgradable_install_is_refused_before_validating_target(self):
+        """A refused install does not validate --to against PyPI, nor claim to be updating."""
+        self.refuse_if_not_upgradable.return_value = True
+
+        UpdateCommand.update(check=False, output_json=False, target_version="0.52.0")
+
+        self.check_version_exists.assert_not_called()
+        self.perform_update.assert_not_called()
 
 
 # Real sys.prefix shapes, used by the startup update check tests below.

@@ -34,6 +34,20 @@ UPDATE_CHECK_STAMP_FILE = Path(POLY_HOME_DIR) / ".update_check"
 # connection. The 'poly update' command itself uses the far more generous default.
 UPDATE_CHECK_TIMEOUT_SECONDS = 2
 
+# Installs that 'poly update' must not touch: upgrading in place would either clobber
+# a dev checkout or write to an environment that is discarded when the command exits.
+NOT_UPGRADABLE_REASONS = {
+    "editable": (
+        f"{PACKAGE_NAME} is installed in editable/dev mode; run 'git pull' in "
+        "your checkout instead of 'poly update'."
+    ),
+    "ephemeral": (
+        f"{PACKAGE_NAME} is running from a temporary environment (uvx or uv run); "
+        f"there is nothing to update. Run 'uvx {PACKAGE_NAME}@latest' to use the "
+        "newest version."
+    ),
+}
+
 
 class UpdateCommand(BaseCommand):
     """Update the Poly CLI to the latest version."""
@@ -82,6 +96,11 @@ class UpdateCommand(BaseCommand):
     def update(cls, check: bool, output_json: bool, target_version: str | None = None) -> None:
         """Update the Poly CLI to the latest version, or to ``target_version`` if given."""
         from poly.output.console import info, success
+
+        # Refuse before hitting the network or announcing anything, so an install we
+        # cannot upgrade is not told that an update is on the way.
+        if cls.refuse_if_not_upgradable(output_json):
+            return
 
         if target_version:
             # An explicit target skips the "is anything newer" gate below, so that
@@ -252,34 +271,40 @@ class UpdateCommand(BaseCommand):
         }[method]
 
     @classmethod
+    def refuse_if_not_upgradable(cls, output_json: bool) -> bool:
+        """Report and refuse installs that must not be upgraded in place.
+
+        Called before anything is fetched or announced, so a refused install never
+        sees a PyPI round trip or an "Updating..." message it will not honour.
+
+        Args:
+            output_json: If True, report as JSON instead of a warning.
+
+        Returns:
+            True if the install was refused and the caller should stop.
+        """
+        from poly.output.console import warning
+
+        message = NOT_UPGRADABLE_REASONS.get(cls._detect_install_method())
+        if message is None:
+            return False
+        if output_json:
+            json_print({"success": False, "error": message})
+        else:
+            warning(message)
+        return True
+
+    @classmethod
     def perform_update(cls, output_json: bool, target_version: str | None = None) -> bool:
         """Perform the update, to ``target_version`` if given, otherwise to the latest."""
-        from poly.output.console import error, warning
+        from poly.output.console import error
 
-        # Installs that 'poly update' must not touch: upgrading in place would either
-        # clobber a dev checkout or write to an environment that is about to be discarded.
-        not_upgradable = {
-            "editable": (
-                f"{PACKAGE_NAME} is installed in editable/dev mode; run 'git pull' in "
-                "your checkout instead of 'poly update'."
-            ),
-            "ephemeral": (
-                f"{PACKAGE_NAME} is running from a temporary environment (uvx or uv "
-                f"run); there is nothing to update. Run 'uvx {PACKAGE_NAME}@latest' to "
-                "use the newest version."
-            ),
-        }
-
-        method = cls._detect_install_method()
-        if method in not_upgradable:
-            message = not_upgradable[method]
-            if output_json:
-                json_print({"success": False, "error": message})
-            else:
-                warning(message)
+        # Defence in depth: update() refuses these up front, but perform_update must
+        # stay safe if it is ever called directly.
+        if cls.refuse_if_not_upgradable(output_json):
             return False
 
-        command = cls._upgrade_command(method, target_version)
+        command = cls._upgrade_command(cls._detect_install_method(), target_version)
 
         try:
             subprocess.run(command, check=True)
