@@ -3,9 +3,11 @@
 Copyright PolyAI Limited
 """
 
+import json
 import os
 import unittest
 from argparse import ArgumentParser, _SubParsersAction
+from importlib.metadata import PackageNotFoundError
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
@@ -40,6 +42,7 @@ from poly.cli_commands.shared import (
     resolve_project_scope,
 )
 from poly.cli_commands.sync import FormatCommand, RevertCommand
+from poly.cli_commands.update import UpdateCommand
 from poly.cli_commands.utils import CompletionCommand
 from poly.project import DeploymentMode
 from poly.tests.project_test import TEST_DIR
@@ -3624,6 +3627,7 @@ class StudioCommandTest(unittest.TestCase):
         )
         self.assertTrue(url.endswith("/home?branchId=main"))
 
+
 class BranchHistoryTest(unittest.TestCase):
     """Tests for BranchCommand.branch_history CLI handler."""
 
@@ -4860,3 +4864,143 @@ class DeploymentsSimplifiedModeTest(unittest.TestCase):
         self.assertEqual(self._client_envs_queried(), ["live"])
         self.proj.rollback_deployment.assert_called_once_with("dep-1", message="initial release")
         self.assertIn("Live", mock_success.call_args[0][0])
+
+
+class _FakeDistribution:
+    """Stand-in for importlib.metadata.Distribution that serves one metadata file."""
+
+    def __init__(self, direct_url_text: str | None):
+        self.direct_url_text = direct_url_text
+
+    def read_text(self, filename: str) -> str | None:
+        """Return the file's contents, or None when the distribution does not ship it."""
+        return self.direct_url_text if filename == "direct_url.json" else None
+
+
+class EditableInstallDetectionTest(unittest.TestCase):
+    """Tests for UpdateCommand._is_editable_install (PEP 610 direct_url.json marker)."""
+
+    def _is_editable_with_direct_url(self, direct_url_text: str | None) -> bool:
+        """Run the editable check against a distribution shipping the given direct_url.json."""
+        with patch(
+            "importlib.metadata.distribution",
+            return_value=_FakeDistribution(direct_url_text),
+        ):
+            return UpdateCommand._is_editable_install()
+
+    def test_editable_flag_true_is_editable(self):
+        """A 'pip install -e .' checkout records dir_info.editable = true."""
+        direct_url = json.dumps(
+            {"url": "file:///Users/x/adk", "dir_info": {"editable": True}},
+        )
+
+        self.assertTrue(self._is_editable_with_direct_url(direct_url))
+
+    def test_editable_flag_false_is_not_editable(self):
+        """Installing from a local directory without -e records editable = false."""
+        direct_url = json.dumps(
+            {"url": "file:///Users/x/adk", "dir_info": {"editable": False}},
+        )
+
+        self.assertFalse(self._is_editable_with_direct_url(direct_url))
+
+    def test_missing_dir_info_is_not_editable(self):
+        """A VCS install has no dir_info block at all, so it is not editable."""
+        direct_url = json.dumps(
+            {
+                "url": "https://github.com/PolyAI-LDN/adk",
+                "vcs_info": {"vcs": "git", "commit_id": "abc123"},
+            },
+        )
+
+        self.assertFalse(self._is_editable_with_direct_url(direct_url))
+
+    def test_no_direct_url_file_is_not_editable(self):
+        """A wheel from PyPI ships no direct_url.json, so read_text returns None."""
+        self.assertFalse(self._is_editable_with_direct_url(None))
+
+    def test_package_not_found_is_not_editable(self):
+        """When polyai-adk has no installed distribution the check falls back to False."""
+        with patch("importlib.metadata.distribution", side_effect=PackageNotFoundError):
+            self.assertFalse(UpdateCommand._is_editable_install())
+
+
+class InstallMethodDetectionTest(unittest.TestCase):
+    """Tests for UpdateCommand._detect_install_method across real-world sys.prefix values."""
+
+    def _detect(self, prefix: str, uv_on_path: bool = True) -> str:
+        """Detect the install method for a sys.prefix, with the editable check ruled out."""
+        with (
+            patch.object(UpdateCommand, "_is_editable_install", return_value=False),
+            patch("sys.prefix", prefix),
+            patch("shutil.which", return_value="/usr/local/bin/uv" if uv_on_path else None),
+        ):
+            return UpdateCommand._detect_install_method()
+
+    def test_editable_checkout_wins_over_prefix(self):
+        """An editable install is reported as such even from a uv cache prefix."""
+        with (
+            patch.object(UpdateCommand, "_is_editable_install", return_value=True),
+            patch("sys.prefix", "/Users/x/.cache/uv/archive-v0/QkiymbOgtpuIQfwx"),
+        ):
+            self.assertEqual(UpdateCommand._detect_install_method(), "editable")
+
+    def test_uvx_archive_cache_is_ephemeral(self):
+        """'uvx polyai-adk' runs from the versioned archive cache."""
+        prefix = "/Users/x/.cache/uv/archive-v0/QkiymbOgtpuIQfwx"
+
+        self.assertEqual(self._detect(prefix), "ephemeral")
+
+    def test_uv_build_temp_dir_is_ephemeral(self):
+        """uv's temporary build environments live under builds-v0."""
+        prefix = "/Users/x/.cache/uv/builds-v0/.tmpPAhuix"
+
+        self.assertEqual(self._detect(prefix), "ephemeral")
+
+    def test_uv_run_with_environment_is_ephemeral(self):
+        """'uv run --with polyai-adk' creates a throwaway environment under environments-v2."""
+        prefix = "/Users/x/.cache/uv/environments-v2/abc"
+
+        self.assertEqual(self._detect(prefix), "ephemeral")
+
+    def test_uv_tool_install_is_uv_tool(self):
+        """'uv tool install polyai-adk' places the venv under uv/tools."""
+        prefix = "/Users/x/.local/share/uv/tools/polyai-adk"
+
+        self.assertEqual(self._detect(prefix), "uv-tool")
+
+    def test_pipx_install_is_pipx(self):
+        """'pipx install polyai-adk' places the venv under pipx/venvs."""
+        prefix = "/Users/x/.local/pipx/venvs/polyai-adk"
+
+        self.assertEqual(self._detect(prefix), "pipx")
+
+    def test_windows_pipx_prefix_is_pipx(self):
+        """Backslash-separated Windows prefixes are normalised before matching."""
+        prefix = "C:\\Users\\x\\.local\\pipx\\venvs\\polyai-adk"
+
+        self.assertEqual(self._detect(prefix), "pipx")
+
+    def test_project_venv_with_uv_available_is_uv_pip(self):
+        """A plain project venv is upgraded with uv when uv is on PATH."""
+        prefix = "/Users/x/adk/.venv"
+
+        self.assertEqual(self._detect(prefix, uv_on_path=True), "uv-pip")
+
+    def test_project_venv_without_uv_is_pip(self):
+        """The same venv falls back to pip when uv is not installed."""
+        prefix = "/Users/x/adk/.venv"
+
+        self.assertEqual(self._detect(prefix, uv_on_path=False), "pip")
+
+    def test_conda_environment_with_uv_available_is_uv_pip(self):
+        """A conda environment is not special-cased, so it follows the uv-on-PATH rule."""
+        prefix = "/opt/homebrew/Caskroom/miniconda/base/envs/foo"
+
+        self.assertEqual(self._detect(prefix, uv_on_path=True), "uv-pip")
+
+    def test_conda_environment_without_uv_is_pip(self):
+        """Without uv on PATH a conda environment is upgraded with pip."""
+        prefix = "/opt/homebrew/Caskroom/miniconda/base/envs/foo"
+
+        self.assertEqual(self._detect(prefix, uv_on_path=False), "pip")

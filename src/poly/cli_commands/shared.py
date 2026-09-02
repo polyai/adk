@@ -311,3 +311,35 @@ def require_deployment_simplification(
         else:
             error("Command is only available for projects using simplified deployments.")
         sys.exit(1)
+
+
+def get_package_version() -> str:
+    """Get the version of the polyai-adk package installed in the current environment.
+
+    Returns:
+        The version string of the package.
+    """
+    from importlib.metadata import version
+
+    try:
+        _version = version("polyai-adk")
+    except Exception:
+        _version = "unknown"
+    return _version
+
+
+def get_latest_version() -> str:
+    """Get the latest version of the polyai-adk package from PyPI.
+
+    Returns:
+        The latest version string of the package.
+    """
+    import requests
+
+    try:
+        response = requests.get("https://pypi.org/pypi/polyai-adk/json")
+        response.raise_for_status()
+        data = response.json()
+        return data["info"]["version"]
+    except Exception:
+        return "unknown"

@@ -8,7 +8,6 @@ import os
 import sys
 import traceback
 from argparse import ArgumentParser
-from importlib.metadata import version as get_package_version
 
 import argcomplete
 
@@ -31,6 +30,7 @@ from poly.cli_commands.project import InitCommand, ProjectCommand, StudioCommand
 from poly.cli_commands.review import ReviewCommand
 from poly.cli_commands.rtc import RTCCommand
 from poly.cli_commands.setup import SetupCommand
+from poly.cli_commands.shared import get_package_version
 from poly.cli_commands.sync import (
     DiffCommand,
     FetchCommand,
@@ -43,6 +43,7 @@ from poly.cli_commands.sync import (
 )
 from poly.cli_commands.template import TemplateCommand
 from poly.cli_commands.testing import TestingCommand
+from poly.cli_commands.update import UpdateCommand
 from poly.cli_commands.utils import CompletionCommand, DocsCommand
 from poly.handlers.interface import REGIONS
 from poly.output.json_output import json_print
@@ -75,6 +76,7 @@ COMMANDS = [
     ChatCommand,
     DocsCommand,
     CompletionCommand,
+    UpdateCommand,
 ]
 
 
@@ -89,7 +91,7 @@ class AgentStudioCLI:
 
     def _create_parser(self):
         try:
-            _version = get_package_version("polyai-adk")
+            _version = get_package_version()
         except Exception:
             _version = "unknown"
         parser = ArgumentParser(formatter_class=GroupedHelpFormatter)
