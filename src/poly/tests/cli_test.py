@@ -3,11 +3,19 @@
 Copyright PolyAI Limited
 """
 
+import json
 import os
+import sys
+import tempfile
+import time
 import unittest
 from argparse import ArgumentParser, _SubParsersAction
+from importlib.metadata import PackageNotFoundError
 from io import StringIO
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+import requests
 
 from poly.cli import AgentStudioCLI
 from poly.cli_commands.audio_cache import AudioCacheCommand
@@ -36,10 +44,19 @@ from poly.cli_commands.functions import (
 from poly.cli_commands.project import InitCommand, ProjectCommand
 from poly.cli_commands.shared import (
     compute_diff,
+    get_available_versions,
+    is_newer_version,
     require_deployment_simplification,
     resolve_project_scope,
 )
 from poly.cli_commands.sync import FormatCommand, RevertCommand
+from poly.cli_commands.update import (
+    UpdateCommand,
+    _record_update_check,
+    _update_check_is_due,
+    _update_check_suppressed,
+    display_update_message,
+)
 from poly.cli_commands.utils import CompletionCommand
 from poly.project import DeploymentMode
 from poly.tests.project_test import TEST_DIR
@@ -3624,6 +3641,7 @@ class StudioCommandTest(unittest.TestCase):
         )
         self.assertTrue(url.endswith("/home?branchId=main"))
 
+
 class BranchHistoryTest(unittest.TestCase):
     """Tests for BranchCommand.branch_history CLI handler."""
 
@@ -4860,3 +4878,895 @@ class DeploymentsSimplifiedModeTest(unittest.TestCase):
         self.assertEqual(self._client_envs_queried(), ["live"])
         self.proj.rollback_deployment.assert_called_once_with("dep-1", message="initial release")
         self.assertIn("Live", mock_success.call_args[0][0])
+
+
+class _FakeDistribution:
+    """Stand-in for importlib.metadata.Distribution that serves one metadata file."""
+
+    def __init__(self, direct_url_text: str | None):
+        self.direct_url_text = direct_url_text
+
+    def read_text(self, filename: str) -> str | None:
+        """Return the file's contents, or None when the distribution does not ship it."""
+        return self.direct_url_text if filename == "direct_url.json" else None
+
+
+class EditableInstallDetectionTest(unittest.TestCase):
+    """Tests for UpdateCommand._is_editable_install (PEP 610 direct_url.json marker)."""
+
+    def _is_editable_with_direct_url(self, direct_url_text: str | None) -> bool:
+        """Run the editable check against a distribution shipping the given direct_url.json."""
+        with patch(
+            "importlib.metadata.distribution",
+            return_value=_FakeDistribution(direct_url_text),
+        ):
+            return UpdateCommand._is_editable_install()
+
+    def test_editable_flag_true_is_editable(self):
+        """A 'pip install -e .' checkout records dir_info.editable = true."""
+        direct_url = json.dumps(
+            {"url": "file:///Users/x/adk", "dir_info": {"editable": True}},
+        )
+
+        self.assertTrue(self._is_editable_with_direct_url(direct_url))
+
+    def test_editable_flag_false_is_not_editable(self):
+        """Installing from a local directory without -e records editable = false."""
+        direct_url = json.dumps(
+            {"url": "file:///Users/x/adk", "dir_info": {"editable": False}},
+        )
+
+        self.assertFalse(self._is_editable_with_direct_url(direct_url))
+
+    def test_missing_dir_info_is_not_editable(self):
+        """A VCS install has no dir_info block at all, so it is not editable."""
+        direct_url = json.dumps(
+            {
+                "url": "https://github.com/PolyAI-LDN/adk",
+                "vcs_info": {"vcs": "git", "commit_id": "abc123"},
+            },
+        )
+
+        self.assertFalse(self._is_editable_with_direct_url(direct_url))
+
+    def test_no_direct_url_file_is_not_editable(self):
+        """A wheel from PyPI ships no direct_url.json, so read_text returns None."""
+        self.assertFalse(self._is_editable_with_direct_url(None))
+
+    def test_package_not_found_is_not_editable(self):
+        """When polyai-adk has no installed distribution the check falls back to False."""
+        with patch("importlib.metadata.distribution", side_effect=PackageNotFoundError):
+            self.assertFalse(UpdateCommand._is_editable_install())
+
+
+class InstallMethodDetectionTest(unittest.TestCase):
+    """Tests for UpdateCommand._detect_install_method across real-world sys.prefix values."""
+
+    def _detect(self, prefix: str, uv_on_path: bool = True) -> str:
+        """Detect the install method for a sys.prefix, with the editable check ruled out."""
+        with (
+            patch.object(UpdateCommand, "_is_editable_install", return_value=False),
+            patch("sys.prefix", prefix),
+            patch("shutil.which", return_value="/usr/local/bin/uv" if uv_on_path else None),
+        ):
+            return UpdateCommand._detect_install_method()
+
+    def test_editable_checkout_wins_over_prefix(self):
+        """An editable install is reported as such even from a uv cache prefix."""
+        with (
+            patch.object(UpdateCommand, "_is_editable_install", return_value=True),
+            patch("sys.prefix", "/Users/x/.cache/uv/archive-v0/QkiymbOgtpuIQfwx"),
+        ):
+            self.assertEqual(UpdateCommand._detect_install_method(), "editable")
+
+    def test_uvx_archive_cache_is_ephemeral(self):
+        """'uvx polyai-adk' runs from the versioned archive cache."""
+        prefix = "/Users/x/.cache/uv/archive-v0/QkiymbOgtpuIQfwx"
+
+        self.assertEqual(self._detect(prefix), "ephemeral")
+
+    def test_uv_build_temp_dir_is_ephemeral(self):
+        """uv's temporary build environments live under builds-v0."""
+        prefix = "/Users/x/.cache/uv/builds-v0/.tmpPAhuix"
+
+        self.assertEqual(self._detect(prefix), "ephemeral")
+
+    def test_uv_run_with_environment_is_ephemeral(self):
+        """'uv run --with polyai-adk' creates a throwaway environment under environments-v2."""
+        prefix = "/Users/x/.cache/uv/environments-v2/abc"
+
+        self.assertEqual(self._detect(prefix), "ephemeral")
+
+    def test_uv_tool_install_is_uv_tool(self):
+        """'uv tool install polyai-adk' places the venv under uv/tools."""
+        prefix = "/Users/x/.local/share/uv/tools/polyai-adk"
+
+        self.assertEqual(self._detect(prefix), "uv-tool")
+
+    def test_pipx_install_is_pipx(self):
+        """'pipx install polyai-adk' places the venv under pipx/venvs."""
+        prefix = "/Users/x/.local/pipx/venvs/polyai-adk"
+
+        self.assertEqual(self._detect(prefix), "pipx")
+
+    def test_windows_pipx_prefix_is_pipx(self):
+        """Backslash-separated Windows prefixes are normalised before matching."""
+        prefix = "C:\\Users\\x\\.local\\pipx\\venvs\\polyai-adk"
+
+        self.assertEqual(self._detect(prefix), "pipx")
+
+    def test_project_venv_with_uv_available_is_uv_pip(self):
+        """A plain project venv is upgraded with uv when uv is on PATH."""
+        prefix = "/Users/x/adk/.venv"
+
+        self.assertEqual(self._detect(prefix, uv_on_path=True), "uv-pip")
+
+    def test_project_venv_without_uv_is_pip(self):
+        """The same venv falls back to pip when uv is not installed."""
+        prefix = "/Users/x/adk/.venv"
+
+        self.assertEqual(self._detect(prefix, uv_on_path=False), "pip")
+
+    def test_conda_environment_with_uv_available_is_uv_pip(self):
+        """A conda environment is not special-cased, so it follows the uv-on-PATH rule."""
+        prefix = "/opt/homebrew/Caskroom/miniconda/base/envs/foo"
+
+        self.assertEqual(self._detect(prefix, uv_on_path=True), "uv-pip")
+
+    def test_conda_environment_without_uv_is_pip(self):
+        """Without uv on PATH a conda environment is upgraded with pip."""
+        prefix = "/opt/homebrew/Caskroom/miniconda/base/envs/foo"
+
+        self.assertEqual(self._detect(prefix, uv_on_path=False), "pip")
+
+
+class IsNewerVersionTest(unittest.TestCase):
+    """Tests for shared.is_newer_version, which gates the 'update available' message."""
+
+    def test_higher_version_is_newer(self):
+        """A released version above the installed one is an update."""
+        self.assertTrue(is_newer_version("0.54.0", "0.53.0"))
+
+    def test_lower_version_is_not_newer(self):
+        """A version below the installed one is not an update."""
+        self.assertFalse(is_newer_version("0.52.0", "0.53.0"))
+
+    def test_equal_versions_are_not_newer(self):
+        """Being on the latest release means there is nothing to install."""
+        self.assertFalse(is_newer_version("0.53.0", "0.53.0"))
+
+    def test_unknown_candidate_is_not_newer(self):
+        """PyPI being unreachable yields 'unknown', which must not offer an update."""
+        self.assertFalse(is_newer_version("unknown", "0.53.0"))
+
+    def test_unknown_current_is_not_newer(self):
+        """An uninstallable local build reports 'unknown', which must not offer an update."""
+        self.assertFalse(is_newer_version("0.53.0", "unknown"))
+
+    def test_release_candidate_above_current_is_newer(self):
+        """A pre-release still sorts above an older stable release."""
+        self.assertTrue(is_newer_version("0.54.0rc1", "0.53.0"))
+
+    def test_extra_segment_is_newer_than_base_version(self):
+        """A post-style '0.53.0.1' build sorts above plain '0.53.0'."""
+        self.assertTrue(is_newer_version("0.53.0.1", "0.53.0"))
+
+    def test_local_dev_build_does_not_report_an_update(self):
+        """A local '+g<sha>' build of the latest release is not behind it.
+
+        A plain '!=' comparison used to report an update on every run for these.
+        """
+        self.assertFalse(is_newer_version("0.53.0", "0.53.0+g7ccb68e"))
+
+    def test_dev_build_ahead_of_latest_release_does_not_report_an_update(self):
+        """A '0.53.1.dev1' checkout is already ahead of the released 0.53.0."""
+        self.assertFalse(is_newer_version("0.53.0", "0.53.1.dev1"))
+
+
+class _FakePyPIResponse:
+    """Stand-in for a requests Response serving the PyPI JSON API."""
+
+    def __init__(self, payload: dict, status_code: int = 200):
+        self.payload = payload
+        self.status_code = status_code
+
+    def raise_for_status(self) -> None:
+        """Raise like requests does when the response is an error status."""
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} Client Error")
+
+    def json(self) -> dict:
+        """Return the decoded response body."""
+        return self.payload
+
+
+class GetAvailableVersionsTest(unittest.TestCase):
+    """Tests for shared.get_available_versions, which lists releases for '--to'."""
+
+    def _versions_for_response(self, response: _FakePyPIResponse) -> list[str]:
+        """Run the lookup against a stubbed PyPI response."""
+        with patch("requests.get", return_value=response):
+            return get_available_versions()
+
+    def test_versions_are_sorted_oldest_first_by_version_order(self):
+        """Sorting is by real version ordering, so 0.9.0 comes before 0.10.0."""
+        response = _FakePyPIResponse({"releases": {"0.10.0": [], "0.9.0": [], "0.53.0": []}})
+
+        self.assertEqual(self._versions_for_response(response), ["0.9.0", "0.10.0", "0.53.0"])
+
+    def test_unparseable_versions_are_skipped(self):
+        """A malformed release key is dropped instead of failing the whole lookup."""
+        response = _FakePyPIResponse(
+            {"releases": {"0.52.0": [], "not-a-version": [], "0.53.0": []}}
+        )
+
+        self.assertEqual(self._versions_for_response(response), ["0.52.0", "0.53.0"])
+
+    def test_missing_releases_key_returns_empty_list(self):
+        """A response without a releases block yields no versions."""
+        response = _FakePyPIResponse({"info": {"version": "0.53.0"}})
+
+        self.assertEqual(self._versions_for_response(response), [])
+
+    def test_network_error_returns_empty_list(self):
+        """An unreachable PyPI is reported as 'no versions known', not an exception."""
+        with patch("requests.get", side_effect=requests.ConnectionError("no network")):
+            self.assertEqual(get_available_versions(), [])
+
+    def test_error_status_returns_empty_list(self):
+        """A non-200 response is treated the same as being offline."""
+        response = _FakePyPIResponse({"releases": {"0.53.0": []}}, status_code=404)
+
+        self.assertEqual(self._versions_for_response(response), [])
+
+
+class UpgradeCommandTest(unittest.TestCase):
+    """Tests for UpdateCommand._upgrade_command across install methods."""
+
+    def test_uv_tool_latest_upgrades_in_place(self):
+        """Without a target version, a uv tool install is upgraded to the latest."""
+        command = UpdateCommand._upgrade_command("uv-tool", None)
+
+        self.assertEqual(command, ["uv", "tool", "upgrade", "polyai-adk"])
+
+    def test_uv_tool_pinned_reinstalls_with_force(self):
+        """'uv tool upgrade' never moves backwards, so a pinned spec reinstalls instead."""
+        command = UpdateCommand._upgrade_command("uv-tool", "0.52.0")
+
+        self.assertEqual(command, ["uv", "tool", "install", "--force", "polyai-adk==0.52.0"])
+
+    def test_pipx_latest_upgrades_in_place(self):
+        """Without a target version, a pipx install is upgraded to the latest."""
+        command = UpdateCommand._upgrade_command("pipx", None)
+
+        self.assertEqual(command, ["pipx", "upgrade", "polyai-adk"])
+
+    def test_pipx_pinned_reinstalls_with_force(self):
+        """'pipx upgrade' never moves backwards, so a pinned spec reinstalls instead."""
+        command = UpdateCommand._upgrade_command("pipx", "0.52.0")
+
+        self.assertEqual(command, ["pipx", "install", "--force", "polyai-adk==0.52.0"])
+
+    def test_uv_pip_latest_passes_upgrade_flag(self):
+        """A uv-managed venv upgrades with 'uv pip install --upgrade'."""
+        command = UpdateCommand._upgrade_command("uv-pip", None)
+
+        self.assertEqual(command, ["uv", "pip", "install", "--upgrade", "polyai-adk"])
+
+    def test_uv_pip_pinned_drops_upgrade_flag(self):
+        """A pinned spec installs exactly that version, so --upgrade is dropped."""
+        command = UpdateCommand._upgrade_command("uv-pip", "0.52.0")
+
+        self.assertEqual(command, ["uv", "pip", "install", "polyai-adk==0.52.0"])
+
+    def test_pip_latest_passes_upgrade_flag(self):
+        """A plain venv upgrades via the running interpreter's pip."""
+        command = UpdateCommand._upgrade_command("pip", None)
+
+        self.assertEqual(
+            command, [sys.executable, "-m", "pip", "install", "--upgrade", "polyai-adk"]
+        )
+
+    def test_pip_pinned_drops_upgrade_flag(self):
+        """A pinned spec installs exactly that version, so --upgrade is dropped."""
+        command = UpdateCommand._upgrade_command("pip", "0.52.0")
+
+        self.assertEqual(command, [sys.executable, "-m", "pip", "install", "polyai-adk==0.52.0"])
+
+    def test_no_pinned_command_carries_upgrade_flag(self):
+        """--upgrade alongside a pinned spec would block downgrades, so it is never used."""
+        for method in ("uv-tool", "pipx", "uv-pip", "pip"):
+            with self.subTest(method=method):
+                self.assertNotIn("--upgrade", UpdateCommand._upgrade_command(method, "0.52.0"))
+
+
+class CheckVersionExistsTest(unittest.TestCase):
+    """Tests for UpdateCommand.check_version_exists, which validates '--to VERSION'."""
+
+    def _check(self, target_version: str, available: list[str]) -> bool:
+        """Validate a target version against a stubbed set of PyPI releases."""
+        with patch("poly.cli_commands.update.get_available_versions", return_value=available):
+            return UpdateCommand.check_version_exists(target_version, output_json=False)
+
+    def test_released_version_exists(self):
+        """A version PyPI knows about can be installed."""
+        self.assertTrue(self._check("0.52.0", ["0.51.0", "0.52.0", "0.53.0"]))
+
+    def test_unreleased_version_does_not_exist(self):
+        """A version PyPI does not list cannot be installed."""
+        self.assertFalse(self._check("9.9.9", ["0.51.0", "0.52.0", "0.53.0"]))
+
+    @patch("poly.output.console.error")
+    def test_unreleased_version_error_names_recent_versions(self, mock_error):
+        """The error suggests the newest releases, newest first, to guide a retry."""
+        available = ["0.48.0", "0.49.0", "0.50.0", "0.51.0", "0.52.0", "0.53.0"]
+
+        with patch("poly.cli_commands.update.get_available_versions", return_value=available):
+            UpdateCommand.check_version_exists("9.9.9", output_json=False)
+
+        message = mock_error.call_args[0][0]
+        self.assertIn("'9.9.9' not found on PyPI", message)
+        self.assertIn("0.53.0, 0.52.0, 0.51.0, 0.50.0, 0.49.0", message)
+        self.assertNotIn("0.48.0", message)
+
+    def test_unreachable_pypi_accepts_any_version(self):
+        """With no version list to check against, the installer decides instead."""
+        self.assertTrue(self._check("0.52.0", []))
+
+
+class UpdateControlFlowTest(unittest.TestCase):
+    """Tests for what UpdateCommand.update installs, checks, or skips."""
+
+    def setUp(self):
+        """Stub the network-backed lookups and the installer, and silence console output."""
+        self.refuse_if_not_upgradable = self._patch_command("refuse_if_not_upgradable", False)
+        self.check_for_updates = self._patch_command("check_for_updates", (True, "0.54.0"))
+        self.check_version_exists = self._patch_command("check_version_exists", True)
+        self.perform_update = self._patch_command("perform_update", True)
+        self.update_skills_step = self._patch_command("update_skills_step", True)
+        for console_function in ("info", "success"):
+            patcher = patch(f"poly.output.console.{console_function}")
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _patch_command(self, name: str, return_value) -> MagicMock:
+        """Replace an UpdateCommand method for the duration of the test."""
+        patcher = patch.object(UpdateCommand, name, return_value=return_value)
+        mock = patcher.start()
+        self.addCleanup(patcher.stop)
+        return mock
+
+    def test_check_only_does_not_install_latest(self):
+        """'poly update --check' reports the available version without installing it."""
+        UpdateCommand.update(check=True, output_json=False)
+
+        self.perform_update.assert_not_called()
+
+    def test_check_only_does_not_install_target_version(self):
+        """'poly update --check --to 0.52.0' validates the version without installing it."""
+        UpdateCommand.update(check=True, output_json=False, target_version="0.52.0")
+
+        self.check_version_exists.assert_called_once_with("0.52.0", False)
+        self.perform_update.assert_not_called()
+
+    def test_target_version_skips_the_update_available_check(self):
+        """An explicit target bypasses the 'is anything newer' gate entirely."""
+        UpdateCommand.update(check=False, output_json=False, target_version="0.52.0")
+
+        self.check_for_updates.assert_not_called()
+        self.perform_update.assert_called_once_with(False, "0.52.0")
+
+    def test_older_target_version_is_installed(self):
+        """Downgrading works: an older target is installed rather than reported as up to date."""
+        self.check_for_updates.return_value = (False, "0.53.0")
+
+        UpdateCommand.update(check=False, output_json=False, target_version="0.40.0")
+
+        self.perform_update.assert_called_once_with(False, "0.40.0")
+
+    def test_unknown_target_version_exits_with_error(self):
+        """Asking for a version that does not exist is a usage error, not a no-op."""
+        self.check_version_exists.return_value = False
+
+        with self.assertRaises(SystemExit) as raised:
+            UpdateCommand.update(check=False, output_json=False, target_version="9.9.9")
+
+        self.assertEqual(raised.exception.code, 1)
+        self.perform_update.assert_not_called()
+
+    def test_no_update_available_does_not_install(self):
+        """Being on the latest version with no target given installs nothing."""
+        self.check_for_updates.return_value = (False, "0.53.0")
+
+        UpdateCommand.update(check=False, output_json=False)
+
+        self.perform_update.assert_not_called()
+
+    def test_update_available_installs_latest_with_no_pinned_version(self):
+        """The latest path passes target_version=None, selecting the upgrade command form."""
+        UpdateCommand.update(check=False, output_json=False)
+
+        self.perform_update.assert_called_once_with(False, None)
+
+    def test_default_update_also_updates_the_skills(self):
+        """A plain 'poly update' refreshes the AI agent skills after the CLI."""
+        UpdateCommand.update(check=False, output_json=False)
+
+        self.perform_update.assert_called_once()
+        self.update_skills_step.assert_called_once_with(False, required=False)
+
+    def test_cli_only_skips_the_skills(self):
+        """'poly update --cli-only' updates the CLI without touching the skills."""
+        UpdateCommand.update(check=False, output_json=False, cli_only=True)
+
+        self.perform_update.assert_called_once()
+        self.update_skills_step.assert_not_called()
+
+    def test_check_does_not_touch_the_skills(self):
+        """'--check' is a CLI version check; the skills are left alone."""
+        UpdateCommand.update(check=True, output_json=False)
+
+        self.update_skills_step.assert_not_called()
+
+    def test_up_to_date_cli_still_updates_the_skills(self):
+        """Being on the latest CLI version still refreshes the skills."""
+        self.check_for_updates.return_value = (False, "0.53.0")
+
+        UpdateCommand.update(check=False, output_json=False)
+
+        self.perform_update.assert_not_called()
+        self.update_skills_step.assert_called_once_with(False, required=False)
+
+    def test_skills_only_updates_skills_and_nothing_else(self):
+        """'--skills-only' skips the CLI paths entirely, including the upgradable gate."""
+        UpdateCommand.update(check=False, output_json=False, skills_only=True)
+
+        self.refuse_if_not_upgradable.assert_not_called()
+        self.check_for_updates.assert_not_called()
+        self.perform_update.assert_not_called()
+        self.update_skills_step.assert_called_once_with(False, required=True)
+
+    def test_skills_only_failure_exits_non_zero(self):
+        """A failed '--skills-only' run is the whole command failing."""
+        self.update_skills_step.return_value = False
+
+        with self.assertRaises(SystemExit) as raised:
+            UpdateCommand.update(check=False, output_json=False, skills_only=True)
+
+        self.assertEqual(raised.exception.code, 1)
+
+    def test_skills_failure_does_not_fail_a_combined_update(self):
+        """In a default update the skills half is best-effort — no exit, CLI result stands."""
+        self.update_skills_step.return_value = False
+
+        UpdateCommand.update(check=False, output_json=False)
+
+        self.perform_update.assert_called_once()
+
+    def test_cli_only_and_skills_only_are_mutually_exclusive(self):
+        """The parser rejects '--cli-only --skills-only' as contradictory."""
+        cli = AgentStudioCLI()
+        cli.register_commands()
+
+        with self.assertRaises(SystemExit):
+            cli._create_parser().parse_args(["update", "--cli-only", "--skills-only"])
+
+    def test_not_upgradable_install_is_refused_before_any_lookup(self):
+        """An editable or ephemeral install refuses without consulting PyPI first."""
+        self.refuse_if_not_upgradable.return_value = True
+
+        UpdateCommand.update(check=False, output_json=False)
+
+        self.check_for_updates.assert_not_called()
+        self.perform_update.assert_not_called()
+
+    def test_not_upgradable_install_is_refused_before_validating_target(self):
+        """A refused install does not validate --to against PyPI, nor claim to be updating."""
+        self.refuse_if_not_upgradable.return_value = True
+
+        UpdateCommand.update(check=False, output_json=False, target_version="0.52.0")
+
+        self.check_version_exists.assert_not_called()
+        self.perform_update.assert_not_called()
+
+
+# Real sys.prefix shapes, used by the startup update check tests below.
+UV_TOOL_PREFIX = "/Users/x/.local/share/uv/tools/polyai-adk"
+PIPX_PREFIX = "/Users/x/.local/pipx/venvs/polyai-adk"
+PROJECT_VENV_PREFIX = "/Users/x/adk/.venv"
+UVX_CACHE_PREFIX = "/Users/x/.cache/uv/archive-v0/QkiymbOgtpuIQfwx"
+
+
+class ToolInstallMethodTest(unittest.TestCase):
+    """Tests for UpdateCommand.tool_install_method, the startup check's install-type gate."""
+
+    def _method_for_prefix(self, prefix: str) -> str | None:
+        """Detect the tool install method for a given sys.prefix."""
+        with patch("sys.prefix", prefix):
+            return UpdateCommand.tool_install_method()
+
+    def test_uv_tool_prefix_is_uv_tool(self):
+        """'uv tool install polyai-adk' places the venv under uv/tools."""
+        self.assertEqual(self._method_for_prefix(UV_TOOL_PREFIX), "uv-tool")
+
+    def test_pipx_prefix_is_pipx(self):
+        """'pipx install polyai-adk' places the venv under pipx/venvs."""
+        self.assertEqual(self._method_for_prefix(PIPX_PREFIX), "pipx")
+
+    def test_windows_uv_tool_prefix_is_uv_tool(self):
+        """Backslash-separated Windows prefixes are normalised before matching."""
+        prefix = "C:\\Users\\x\\AppData\\Roaming\\uv\\tools\\polyai-adk"
+
+        self.assertEqual(self._method_for_prefix(prefix), "uv-tool")
+
+    def test_windows_pipx_prefix_is_pipx(self):
+        """The same normalisation applies to a Windows pipx install."""
+        prefix = "C:\\Users\\x\\.local\\pipx\\venvs\\polyai-adk"
+
+        self.assertEqual(self._method_for_prefix(prefix), "pipx")
+
+    def test_project_venv_is_not_a_tool_install(self):
+        """A project venv's version is the project's business, so it reports no tool method."""
+        self.assertIsNone(self._method_for_prefix(PROJECT_VENV_PREFIX))
+
+    def test_conda_environment_is_not_a_tool_install(self):
+        """A conda environment is a project-style install too."""
+        prefix = "/opt/homebrew/Caskroom/miniconda/base/envs/foo"
+
+        self.assertIsNone(self._method_for_prefix(prefix))
+
+    def test_uvx_cache_is_not_a_tool_install(self):
+        """'uvx polyai-adk' runs from a throwaway cache directory, not a managed tool venv."""
+        self.assertIsNone(self._method_for_prefix(UVX_CACHE_PREFIX))
+
+    def test_detection_reads_no_package_metadata_and_scans_no_path(self):
+        """Every command pays for this check, so it must stay pure string work.
+
+        Package metadata reads and PATH scans are booby-trapped here: if the
+        implementation ever reaches for either, the test fails rather than
+        silently making CLI startup slower.
+        """
+        with (
+            patch("sys.prefix", UV_TOOL_PREFIX),
+            patch("importlib.metadata.distribution", side_effect=AssertionError("read metadata")),
+            patch("shutil.which", side_effect=AssertionError("scanned PATH")),
+        ):
+            self.assertEqual(UpdateCommand.tool_install_method(), "uv-tool")
+
+
+class _FakeStdout:
+    """Stand-in for sys.stdout whose isatty() answer the test controls."""
+
+    def __init__(self, is_a_tty: bool):
+        self.is_a_tty = is_a_tty
+
+    def isatty(self) -> bool:
+        """Report whether output is going to a terminal."""
+        return self.is_a_tty
+
+
+class UpdateSkillsStepTest(unittest.TestCase):
+    """Tests for UpdateCommand.update_skills_step, the npx-backed skills half."""
+
+    def setUp(self):
+        """Stub the Node gate and the npx runner, and silence console output."""
+        self.node_gate = patch("poly.cli_commands.update.node_gate_reason", return_value=None)
+        self.mock_gate = self.node_gate.start()
+        self.addCleanup(self.node_gate.stop)
+        self.skills_update = patch("poly.cli_commands.update.update_skills", return_value=True)
+        self.mock_update = self.skills_update.start()
+        self.addCleanup(self.skills_update.stop)
+        for console_function in ("info", "error", "warning"):
+            patcher = patch(f"poly.output.console.{console_function}")
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_missing_node_skips_without_running_npx(self):
+        """A gated environment reports failure without attempting the update."""
+        self.mock_gate.return_value = "Node.js (with npx) was not found on your PATH"
+
+        self.assertFalse(UpdateCommand.update_skills_step(output_json=False, required=False))
+        self.mock_update.assert_not_called()
+
+    def test_json_mode_runs_npx_quietly(self):
+        """--json output stays a single object: npx output is captured, not streamed."""
+        updated = UpdateCommand.update_skills_step(output_json=True, required=False)
+
+        self.assertTrue(updated)
+        self.mock_update.assert_called_once_with(quiet=True)
+
+    def test_interactive_mode_streams_npx_output(self):
+        """Without --json the npx output is streamed for the user to follow."""
+        UpdateCommand.update_skills_step(output_json=False, required=False)
+
+        self.mock_update.assert_called_once_with(quiet=False)
+
+    def test_failure_returns_false_without_exiting(self):
+        """The step never exits — the caller owns the exit code."""
+        self.mock_update.return_value = False
+
+        self.assertFalse(UpdateCommand.update_skills_step(output_json=False, required=True))
+
+
+class StartupUpdateMessageTest(unittest.TestCase):
+    """Tests for display_update_message, the passive check run at the start of every command."""
+
+    def setUp(self):
+        """Open every gate so the message would be shown; each test closes one of them."""
+        self.get_latest_version = self._patch(
+            "poly.cli_commands.update.get_latest_version", return_value="0.54.0"
+        )
+        self.get_package_version = self._patch(
+            "poly.cli_commands.update.get_package_version", return_value="0.53.0"
+        )
+        self.update_check_is_due = self._patch(
+            "poly.cli_commands.update._update_check_is_due", return_value=True
+        )
+        # Stubbed so no test can ever write to the real ~/.poly.
+        self.record_update_check = self._patch("poly.cli_commands.update._record_update_check")
+        # display_update_message imports plain() lazily, so the console module is the seam.
+        self.plain = self._patch("poly.output.console.plain")
+        self._set_prefix(UV_TOOL_PREFIX)
+        self._set_tty(True)
+        self._set_environ({})
+
+    def _patch(self, target: str, **kwargs) -> MagicMock:
+        """Replace a module-level name for the duration of the test."""
+        patcher = patch(target, **kwargs)
+        mock = patcher.start()
+        self.addCleanup(patcher.stop)
+        return mock
+
+    def _set_prefix(self, prefix: str) -> None:
+        """Pretend the CLI is running from the given sys.prefix."""
+        patcher = patch("sys.prefix", prefix)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _set_tty(self, is_a_tty: bool) -> None:
+        """Pretend stdout is (or is not) attached to a terminal."""
+        patcher = patch("sys.stdout", _FakeStdout(is_a_tty))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _set_environ(self, environ: dict[str, str]) -> None:
+        """Run with exactly the given environment, so the developer's own env cannot leak in."""
+        patcher = patch.dict(os.environ, environ, clear=True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _assert_stayed_silent_without_calling_pypi(self) -> None:
+        """Assert nothing was printed and, crucially, that no network call was made."""
+        self.plain.assert_not_called()
+        self.get_latest_version.assert_not_called()
+
+    # -- The message is shown for standalone tool installs --
+
+    def test_uv_tool_install_is_told_about_a_newer_release(self):
+        """A uv tool install can be upgraded in place, so it gets the notice."""
+        display_update_message()
+
+        message = " ".join(call.args[0] for call in self.plain.call_args_list)
+        self.assertIn("0.53.0", message)
+        self.assertIn("0.54.0", message)
+        self.assertIn("poly update", message)
+
+    def test_pipx_install_is_told_about_a_newer_release(self):
+        """A pipx install can be upgraded in place too."""
+        self._set_prefix(PIPX_PREFIX)
+
+        display_update_message()
+
+        message = " ".join(call.args[0] for call in self.plain.call_args_list)
+        self.assertIn("0.53.0", message)
+        self.assertIn("0.54.0", message)
+
+    # -- Every gate stays silent and skips the network --
+
+    def test_project_venv_install_is_not_nagged(self):
+        """A project pins its own version, so upgrade advice there would be undone next sync."""
+        self._set_prefix(PROJECT_VENV_PREFIX)
+
+        display_update_message()
+
+        self._assert_stayed_silent_without_calling_pypi()
+
+    def test_ephemeral_uvx_run_is_not_nagged(self):
+        """There is nothing to upgrade in a throwaway uvx environment."""
+        self._set_prefix(UVX_CACHE_PREFIX)
+
+        display_update_message()
+
+        self._assert_stayed_silent_without_calling_pypi()
+
+    def test_json_output_is_not_polluted_with_a_notice(self):
+        """Machine-readable output must stay parseable."""
+        display_update_message(output_json=True)
+
+        self._assert_stayed_silent_without_calling_pypi()
+
+    def test_non_tty_output_is_not_polluted_with_a_notice(self):
+        """Piped or redirected output is being consumed by something, not read by a human."""
+        self._set_tty(False)
+
+        display_update_message()
+
+        self._assert_stayed_silent_without_calling_pypi()
+
+    def test_poly_no_update_check_opts_out_entirely(self):
+        """POLY_NO_UPDATE_CHECK is the escape hatch for CI and scripted use."""
+        self._set_environ({"POLY_NO_UPDATE_CHECK": "1"})
+
+        display_update_message()
+
+        self._assert_stayed_silent_without_calling_pypi()
+
+    def test_ci_environment_is_not_nagged(self):
+        """A CI runner with a terminal still gets no notice, and costs no PyPI round trip."""
+        self._set_environ({"CI": "true"})
+
+        display_update_message()
+
+        self._assert_stayed_silent_without_calling_pypi()
+
+    def test_recent_check_defers_to_the_stamp_file(self):
+        """Within the check interval the whole thing is skipped, network included."""
+        self.update_check_is_due.return_value = False
+
+        display_update_message()
+
+        self._assert_stayed_silent_without_calling_pypi()
+
+    # -- When the check does run --
+
+    def test_unreachable_pypi_does_not_record_a_check(self):
+        """A transient failure must not buy hours of silence, so the stamp is left alone."""
+        self.get_latest_version.return_value = "unknown"
+
+        display_update_message()
+
+        self.record_update_check.assert_not_called()
+        self.plain.assert_not_called()
+
+    def test_being_up_to_date_still_records_the_check(self):
+        """A successful check counts, even with nothing to report, so it is not repeated."""
+        self.get_latest_version.return_value = "0.53.0"
+
+        display_update_message()
+
+        self.record_update_check.assert_called_once()
+        self.plain.assert_not_called()
+
+    def test_a_failing_check_never_breaks_the_command_being_run(self):
+        """Whatever the user actually ran must survive an update check that blows up."""
+        self.get_latest_version.side_effect = RuntimeError("PyPI lookup exploded")
+
+        display_update_message()
+
+        self.plain.assert_not_called()
+
+
+class UpdateCheckSuppressionTest(unittest.TestCase):
+    """Tests for _update_check_suppressed, the gate that keeps the startup notice quiet."""
+
+    def _suppressed(
+        self,
+        output_json: bool = False,
+        is_a_tty: bool = True,
+        environ: dict[str, str] | None = None,
+    ) -> bool:
+        """Ask the gate its answer for a given output mode, terminal and environment.
+
+        The environment is always replaced wholesale, so CI variables that happen to
+        be set on the machine running the tests cannot change the answer.
+        """
+        with (
+            patch("sys.stdout", _FakeStdout(is_a_tty)),
+            patch.dict(os.environ, environ or {}, clear=True),
+        ):
+            return _update_check_suppressed(output_json)
+
+    def test_interactive_terminal_with_a_clean_environment_is_not_suppressed(self):
+        """A human at a terminal is exactly who the notice is for."""
+        self.assertFalse(self._suppressed())
+
+    def test_json_output_is_suppressed(self):
+        """A notice printed alongside JSON would make the output unparseable."""
+        self.assertTrue(self._suppressed(output_json=True))
+
+    def test_non_tty_output_is_suppressed(self):
+        """Piped or redirected output is being consumed by something, not read by a human."""
+        self.assertTrue(self._suppressed(is_a_tty=False))
+
+    def test_opt_out_env_var_is_suppressed(self):
+        """POLY_NO_UPDATE_CHECK is the user's explicit escape hatch."""
+        self.assertTrue(self._suppressed(environ={"POLY_NO_UPDATE_CHECK": "1"}))
+
+    def test_ci_env_var_is_suppressed(self):
+        """CI=true is set by most providers, and nobody reads a CI log for upgrade prompts."""
+        self.assertTrue(self._suppressed(environ={"CI": "true"}))
+
+    def test_jenkins_is_suppressed(self):
+        """Jenkins sets JENKINS_URL but notably does not set CI."""
+        self.assertTrue(self._suppressed(environ={"JENKINS_URL": "https://jenkins.example.com/"}))
+
+    def test_azure_pipelines_is_suppressed(self):
+        """Azure Pipelines identifies itself with TF_BUILD."""
+        self.assertTrue(self._suppressed(environ={"TF_BUILD": "True"}))
+
+    def test_teamcity_is_suppressed(self):
+        """TeamCity identifies itself with TEAMCITY_VERSION."""
+        self.assertTrue(self._suppressed(environ={"TEAMCITY_VERSION": "2024.03"}))
+
+    def test_ci_set_to_the_empty_string_is_not_suppressed(self):
+        """Shells export empty variables; an empty CI must not be read as 'in CI'."""
+        self.assertFalse(self._suppressed(environ={"CI": ""}))
+
+    def test_opt_out_set_to_the_empty_string_is_not_suppressed(self):
+        """An empty POLY_NO_UPDATE_CHECK is not an opt-out either."""
+        self.assertFalse(self._suppressed(environ={"POLY_NO_UPDATE_CHECK": ""}))
+
+
+class UpdateCheckStampTest(unittest.TestCase):
+    """Tests for the stamp file that throttles the startup update check to once per interval."""
+
+    THIRTEEN_HOURS_SECONDS = 13 * 60 * 60
+
+    def setUp(self):
+        """Point the stamp at a throwaway directory, never the real ~/.poly."""
+        temp_dir = tempfile.TemporaryDirectory()
+        self.addCleanup(temp_dir.cleanup)
+        self.stamp_file = Path(temp_dir.name) / ".poly" / ".update_check"
+        patcher = patch("poly.cli_commands.update.UPDATE_CHECK_STAMP_FILE", self.stamp_file)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _write_stamp(self, contents: str) -> None:
+        """Put the given raw contents in the stamp file."""
+        self.stamp_file.parent.mkdir(parents=True, exist_ok=True)
+        self.stamp_file.write_text(contents)
+
+    def test_missing_stamp_means_a_check_is_due(self):
+        """On a first ever run there is no stamp, so the check runs."""
+        self.assertTrue(_update_check_is_due())
+
+    def test_fresh_stamp_defers_the_check(self):
+        """A check that just happened is not repeated."""
+        self._write_stamp(str(time.time()))
+
+        self.assertFalse(_update_check_is_due())
+
+    def test_stamp_older_than_the_interval_means_a_check_is_due(self):
+        """Thirteen hours is past the twelve-hour interval, so the check runs again."""
+        self._write_stamp(str(time.time() - self.THIRTEEN_HOURS_SECONDS))
+
+        self.assertTrue(_update_check_is_due())
+
+    def test_unparseable_stamp_means_a_check_is_due(self):
+        """A corrupt stamp is treated as no stamp rather than crashing startup."""
+        self._write_stamp("not-a-timestamp")
+
+        self.assertTrue(_update_check_is_due())
+
+    def test_recording_creates_the_directory_and_writes_a_timestamp(self):
+        """The first recorded check creates ~/.poly if it does not exist yet."""
+        self.assertFalse(self.stamp_file.parent.exists())
+
+        _record_update_check()
+
+        self.assertAlmostEqual(float(self.stamp_file.read_text()), time.time(), delta=10)
+
+    def test_recording_a_check_defers_the_next_one(self):
+        """Round trip: what _record_update_check writes is what _update_check_is_due reads."""
+        _record_update_check()
+
+        self.assertFalse(_update_check_is_due())
+
+    def test_a_stamp_that_cannot_be_written_is_ignored(self):
+        """An unwritable home must not break the command the user actually ran."""
+        # A regular file where the .poly directory should be, so mkdir fails with an OSError.
+        self.stamp_file.parent.write_text("not a directory")
+
+        _record_update_check()
+
+        self.assertFalse(self.stamp_file.exists())

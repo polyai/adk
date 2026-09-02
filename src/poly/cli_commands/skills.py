@@ -53,8 +53,13 @@ def node_gate_reason() -> str | None:
     return None
 
 
-def _run_npx_skills(args: list[str]) -> bool:
+def _run_npx_skills(args: list[str], quiet: bool = False) -> bool:
     """Run ``npx -y skills@<pin> <args>``, streaming output to the terminal.
+
+    Args:
+        args: Arguments for the skills CLI, e.g. ``["update", "-y"]``.
+        quiet: Capture output instead of streaming it — for callers whose own
+            stdout must stay machine-readable (``--json``).
 
     Returns:
         True if the command exited 0. Never raises — failures here must not
@@ -63,7 +68,7 @@ def _run_npx_skills(args: list[str]) -> bool:
     command = ["npx", "-y", SKILLS_NPX_PACKAGE, *args]
     logger.debug("Running: %s", " ".join(command))
     try:
-        result = subprocess.run(command, timeout=NPX_TIMEOUT_SECONDS)
+        result = subprocess.run(command, timeout=NPX_TIMEOUT_SECONDS, capture_output=quiet)
     except Exception as e:
         logger.debug("npx skills invocation failed: %s", e)
         return False
@@ -94,8 +99,12 @@ def install_skills(
     return _run_npx_skills(args)
 
 
-def update_skills(global_only: bool = False) -> bool:
+def update_skills(global_only: bool = False, quiet: bool = False) -> bool:
     """Update previously installed skills to their latest versions.
+
+    Args:
+        global_only: Update only user-level skills, not the current project's.
+        quiet: Capture npx output instead of streaming it (for ``--json``).
 
     Returns:
         True on success, False otherwise (never raises).
@@ -103,4 +112,4 @@ def update_skills(global_only: bool = False) -> bool:
     args = ["update", "-y"]
     if global_only:
         args.append("--global")
-    return _run_npx_skills(args)
+    return _run_npx_skills(args, quiet=quiet)

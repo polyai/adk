@@ -15,6 +15,13 @@ from typing import Any, Optional
 from poly.output.json_output import json_print
 from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE, AgentStudioProject
 
+PACKAGE_NAME = "polyai-adk"
+PYPI_JSON_URL = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
+# Deliberately generous: this only runs when the user explicitly asks for an update,
+# so waiting is expected. A check on the CLI's startup path would need to be far
+# shorter, since every command would pay it.
+PYPI_TIMEOUT_SECONDS = 10
+
 
 def read_project_config(base_path: str) -> AgentStudioProject | None:
     """Read the project configuration from base_path, recursing into parents.
@@ -311,3 +318,86 @@ def require_deployment_simplification(
         else:
             error("Command is only available for projects using simplified deployments.")
         sys.exit(1)
+
+
+def get_package_version() -> str:
+    """Get the version of the polyai-adk package installed in the current environment.
+
+    Returns:
+        The version string of the package.
+    """
+    from importlib.metadata import version
+
+    try:
+        _version = version(PACKAGE_NAME)
+    except Exception:
+        _version = "unknown"
+    return _version
+
+
+def get_latest_version(timeout: float = PYPI_TIMEOUT_SECONDS) -> str:
+    """Get the latest version of the polyai-adk package from PyPI.
+
+    Args:
+        timeout: Seconds to wait for PyPI. Callers on the CLI's startup path should
+            pass something far shorter than the default, which every command pays.
+
+    Returns:
+        The latest version string of the package, or "unknown" if PyPI is unreachable.
+    """
+    import requests
+
+    try:
+        response = requests.get(PYPI_JSON_URL, timeout=timeout)
+        response.raise_for_status()
+        data = response.json()
+        return data["info"]["version"]
+    except Exception:
+        return "unknown"
+
+
+def get_available_versions() -> list[str]:
+    """Get every released version of polyai-adk from PyPI, oldest first.
+
+    Returns:
+        The released versions, or an empty list if PyPI is unreachable. Versions
+        PyPI reports but ``packaging`` cannot parse are skipped rather than
+        failing the whole lookup.
+    """
+    import requests
+    from packaging.version import InvalidVersion, Version
+
+    try:
+        response = requests.get(PYPI_JSON_URL, timeout=PYPI_TIMEOUT_SECONDS)
+        response.raise_for_status()
+        releases = response.json().get("releases", {})
+    except Exception:
+        return []
+
+    parsed: list[tuple[Version, str]] = []
+    for release in releases:
+        try:
+            parsed.append((Version(release), release))
+        except InvalidVersion:
+            continue
+    return [release for _, release in sorted(parsed)]
+
+
+def is_newer_version(candidate: str, current: str) -> bool:
+    """Check whether ``candidate`` is a strictly newer release than ``current``.
+
+    Args:
+        candidate: The version to compare, e.g. one from ``get_latest_version``.
+        current: The currently installed version.
+
+    Returns:
+        True if candidate is newer. Unparseable versions (including "unknown")
+        compare as not newer, so a local dev build does not report an update
+        available on every run.
+    """
+    from packaging.version import InvalidVersion, Version
+
+    try:
+        return Version(candidate) > Version(current)
+    except InvalidVersion:
+        return False
