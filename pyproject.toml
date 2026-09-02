@@ -178,7 +178,8 @@ dependencies = [
     "ty",
     "argcomplete>=3.0.0",
     "langcodes==3.5.1",
-    "posthog==7.35.4"
+    "posthog==7.35.4",
+    "packaging>=24.0"
 ]
 
 [project.license]

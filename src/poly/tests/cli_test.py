@@ -5,11 +5,14 @@ Copyright PolyAI Limited
 
 import json
 import os
+import sys
 import unittest
 from argparse import ArgumentParser, _SubParsersAction
 from importlib.metadata import PackageNotFoundError
 from io import StringIO
 from unittest.mock import MagicMock, patch
+
+import requests
 
 from poly.cli import AgentStudioCLI
 from poly.cli_commands.audio_cache import AudioCacheCommand
@@ -38,6 +41,8 @@ from poly.cli_commands.functions import (
 from poly.cli_commands.project import InitCommand, ProjectCommand
 from poly.cli_commands.shared import (
     compute_diff,
+    get_available_versions,
+    is_newer_version,
     require_deployment_simplification,
     resolve_project_scope,
 )
@@ -5004,3 +5009,270 @@ class InstallMethodDetectionTest(unittest.TestCase):
         prefix = "/opt/homebrew/Caskroom/miniconda/base/envs/foo"
 
         self.assertEqual(self._detect(prefix, uv_on_path=False), "pip")
+
+
+class IsNewerVersionTest(unittest.TestCase):
+    """Tests for shared.is_newer_version, which gates the 'update available' message."""
+
+    def test_higher_version_is_newer(self):
+        """A released version above the installed one is an update."""
+        self.assertTrue(is_newer_version("0.54.0", "0.53.0"))
+
+    def test_lower_version_is_not_newer(self):
+        """A version below the installed one is not an update."""
+        self.assertFalse(is_newer_version("0.52.0", "0.53.0"))
+
+    def test_equal_versions_are_not_newer(self):
+        """Being on the latest release means there is nothing to install."""
+        self.assertFalse(is_newer_version("0.53.0", "0.53.0"))
+
+    def test_unknown_candidate_is_not_newer(self):
+        """PyPI being unreachable yields 'unknown', which must not offer an update."""
+        self.assertFalse(is_newer_version("unknown", "0.53.0"))
+
+    def test_unknown_current_is_not_newer(self):
+        """An uninstallable local build reports 'unknown', which must not offer an update."""
+        self.assertFalse(is_newer_version("0.53.0", "unknown"))
+
+    def test_release_candidate_above_current_is_newer(self):
+        """A pre-release still sorts above an older stable release."""
+        self.assertTrue(is_newer_version("0.54.0rc1", "0.53.0"))
+
+    def test_extra_segment_is_newer_than_base_version(self):
+        """A post-style '0.53.0.1' build sorts above plain '0.53.0'."""
+        self.assertTrue(is_newer_version("0.53.0.1", "0.53.0"))
+
+    def test_local_dev_build_does_not_report_an_update(self):
+        """A local '+g<sha>' build of the latest release is not behind it.
+
+        A plain '!=' comparison used to report an update on every run for these.
+        """
+        self.assertFalse(is_newer_version("0.53.0", "0.53.0+g7ccb68e"))
+
+    def test_dev_build_ahead_of_latest_release_does_not_report_an_update(self):
+        """A '0.53.1.dev1' checkout is already ahead of the released 0.53.0."""
+        self.assertFalse(is_newer_version("0.53.0", "0.53.1.dev1"))
+
+
+class _FakePyPIResponse:
+    """Stand-in for a requests Response serving the PyPI JSON API."""
+
+    def __init__(self, payload: dict, status_code: int = 200):
+        self.payload = payload
+        self.status_code = status_code
+
+    def raise_for_status(self) -> None:
+        """Raise like requests does when the response is an error status."""
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"{self.status_code} Client Error")
+
+    def json(self) -> dict:
+        """Return the decoded response body."""
+        return self.payload
+
+
+class GetAvailableVersionsTest(unittest.TestCase):
+    """Tests for shared.get_available_versions, which lists releases for '--to'."""
+
+    def _versions_for_response(self, response: _FakePyPIResponse) -> list[str]:
+        """Run the lookup against a stubbed PyPI response."""
+        with patch("requests.get", return_value=response):
+            return get_available_versions()
+
+    def test_versions_are_sorted_oldest_first_by_version_order(self):
+        """Sorting is by real version ordering, so 0.9.0 comes before 0.10.0."""
+        response = _FakePyPIResponse({"releases": {"0.10.0": [], "0.9.0": [], "0.53.0": []}})
+
+        self.assertEqual(self._versions_for_response(response), ["0.9.0", "0.10.0", "0.53.0"])
+
+    def test_unparseable_versions_are_skipped(self):
+        """A malformed release key is dropped instead of failing the whole lookup."""
+        response = _FakePyPIResponse(
+            {"releases": {"0.52.0": [], "not-a-version": [], "0.53.0": []}}
+        )
+
+        self.assertEqual(self._versions_for_response(response), ["0.52.0", "0.53.0"])
+
+    def test_missing_releases_key_returns_empty_list(self):
+        """A response without a releases block yields no versions."""
+        response = _FakePyPIResponse({"info": {"version": "0.53.0"}})
+
+        self.assertEqual(self._versions_for_response(response), [])
+
+    def test_network_error_returns_empty_list(self):
+        """An unreachable PyPI is reported as 'no versions known', not an exception."""
+        with patch("requests.get", side_effect=requests.ConnectionError("no network")):
+            self.assertEqual(get_available_versions(), [])
+
+    def test_error_status_returns_empty_list(self):
+        """A non-200 response is treated the same as being offline."""
+        response = _FakePyPIResponse({"releases": {"0.53.0": []}}, status_code=404)
+
+        self.assertEqual(self._versions_for_response(response), [])
+
+
+class UpgradeCommandTest(unittest.TestCase):
+    """Tests for UpdateCommand._upgrade_command across install methods."""
+
+    def test_uv_tool_latest_upgrades_in_place(self):
+        """Without a target version, a uv tool install is upgraded to the latest."""
+        command = UpdateCommand._upgrade_command("uv-tool", None)
+
+        self.assertEqual(command, ["uv", "tool", "upgrade", "polyai-adk"])
+
+    def test_uv_tool_pinned_reinstalls_with_force(self):
+        """'uv tool upgrade' never moves backwards, so a pinned spec reinstalls instead."""
+        command = UpdateCommand._upgrade_command("uv-tool", "0.52.0")
+
+        self.assertEqual(command, ["uv", "tool", "install", "--force", "polyai-adk==0.52.0"])
+
+    def test_pipx_latest_upgrades_in_place(self):
+        """Without a target version, a pipx install is upgraded to the latest."""
+        command = UpdateCommand._upgrade_command("pipx", None)
+
+        self.assertEqual(command, ["pipx", "upgrade", "polyai-adk"])
+
+    def test_pipx_pinned_reinstalls_with_force(self):
+        """'pipx upgrade' never moves backwards, so a pinned spec reinstalls instead."""
+        command = UpdateCommand._upgrade_command("pipx", "0.52.0")
+
+        self.assertEqual(command, ["pipx", "install", "--force", "polyai-adk==0.52.0"])
+
+    def test_uv_pip_latest_passes_upgrade_flag(self):
+        """A uv-managed venv upgrades with 'uv pip install --upgrade'."""
+        command = UpdateCommand._upgrade_command("uv-pip", None)
+
+        self.assertEqual(command, ["uv", "pip", "install", "--upgrade", "polyai-adk"])
+
+    def test_uv_pip_pinned_drops_upgrade_flag(self):
+        """A pinned spec installs exactly that version, so --upgrade is dropped."""
+        command = UpdateCommand._upgrade_command("uv-pip", "0.52.0")
+
+        self.assertEqual(command, ["uv", "pip", "install", "polyai-adk==0.52.0"])
+
+    def test_pip_latest_passes_upgrade_flag(self):
+        """A plain venv upgrades via the running interpreter's pip."""
+        command = UpdateCommand._upgrade_command("pip", None)
+
+        self.assertEqual(
+            command, [sys.executable, "-m", "pip", "install", "--upgrade", "polyai-adk"]
+        )
+
+    def test_pip_pinned_drops_upgrade_flag(self):
+        """A pinned spec installs exactly that version, so --upgrade is dropped."""
+        command = UpdateCommand._upgrade_command("pip", "0.52.0")
+
+        self.assertEqual(command, [sys.executable, "-m", "pip", "install", "polyai-adk==0.52.0"])
+
+    def test_no_pinned_command_carries_upgrade_flag(self):
+        """--upgrade alongside a pinned spec would block downgrades, so it is never used."""
+        for method in ("uv-tool", "pipx", "uv-pip", "pip"):
+            with self.subTest(method=method):
+                self.assertNotIn("--upgrade", UpdateCommand._upgrade_command(method, "0.52.0"))
+
+
+class CheckVersionExistsTest(unittest.TestCase):
+    """Tests for UpdateCommand.check_version_exists, which validates '--to VERSION'."""
+
+    def _check(self, target_version: str, available: list[str]) -> bool:
+        """Validate a target version against a stubbed set of PyPI releases."""
+        with patch("poly.cli_commands.update.get_available_versions", return_value=available):
+            return UpdateCommand.check_version_exists(target_version, output_json=False)
+
+    def test_released_version_exists(self):
+        """A version PyPI knows about can be installed."""
+        self.assertTrue(self._check("0.52.0", ["0.51.0", "0.52.0", "0.53.0"]))
+
+    def test_unreleased_version_does_not_exist(self):
+        """A version PyPI does not list cannot be installed."""
+        self.assertFalse(self._check("9.9.9", ["0.51.0", "0.52.0", "0.53.0"]))
+
+    @patch("poly.output.console.error")
+    def test_unreleased_version_error_names_recent_versions(self, mock_error):
+        """The error suggests the newest releases, newest first, to guide a retry."""
+        available = ["0.48.0", "0.49.0", "0.50.0", "0.51.0", "0.52.0", "0.53.0"]
+
+        with patch("poly.cli_commands.update.get_available_versions", return_value=available):
+            UpdateCommand.check_version_exists("9.9.9", output_json=False)
+
+        message = mock_error.call_args[0][0]
+        self.assertIn("'9.9.9' not found on PyPI", message)
+        self.assertIn("0.53.0, 0.52.0, 0.51.0, 0.50.0, 0.49.0", message)
+        self.assertNotIn("0.48.0", message)
+
+    def test_unreachable_pypi_accepts_any_version(self):
+        """With no version list to check against, the installer decides instead."""
+        self.assertTrue(self._check("0.52.0", []))
+
+
+class UpdateControlFlowTest(unittest.TestCase):
+    """Tests for what UpdateCommand.update installs, checks, or skips."""
+
+    def setUp(self):
+        """Stub the network-backed lookups and the installer, and silence console output."""
+        self.check_for_updates = self._patch_command("check_for_updates", (True, "0.54.0"))
+        self.check_version_exists = self._patch_command("check_version_exists", True)
+        self.perform_update = self._patch_command("perform_update", True)
+        for console_function in ("info", "success"):
+            patcher = patch(f"poly.output.console.{console_function}")
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _patch_command(self, name: str, return_value) -> MagicMock:
+        """Replace an UpdateCommand method for the duration of the test."""
+        patcher = patch.object(UpdateCommand, name, return_value=return_value)
+        mock = patcher.start()
+        self.addCleanup(patcher.stop)
+        return mock
+
+    def test_check_only_does_not_install_latest(self):
+        """'poly update --check' reports the available version without installing it."""
+        UpdateCommand.update(check=True, output_json=False)
+
+        self.perform_update.assert_not_called()
+
+    def test_check_only_does_not_install_target_version(self):
+        """'poly update --check --to 0.52.0' validates the version without installing it."""
+        UpdateCommand.update(check=True, output_json=False, target_version="0.52.0")
+
+        self.check_version_exists.assert_called_once_with("0.52.0", False)
+        self.perform_update.assert_not_called()
+
+    def test_target_version_skips_the_update_available_check(self):
+        """An explicit target bypasses the 'is anything newer' gate entirely."""
+        UpdateCommand.update(check=False, output_json=False, target_version="0.52.0")
+
+        self.check_for_updates.assert_not_called()
+        self.perform_update.assert_called_once_with(False, "0.52.0")
+
+    def test_older_target_version_is_installed(self):
+        """Downgrading works: an older target is installed rather than reported as up to date."""
+        self.check_for_updates.return_value = (False, "0.53.0")
+
+        UpdateCommand.update(check=False, output_json=False, target_version="0.40.0")
+
+        self.perform_update.assert_called_once_with(False, "0.40.0")
+
+    def test_unknown_target_version_exits_with_error(self):
+        """Asking for a version that does not exist is a usage error, not a no-op."""
+        self.check_version_exists.return_value = False
+
+        with self.assertRaises(SystemExit) as raised:
+            UpdateCommand.update(check=False, output_json=False, target_version="9.9.9")
+
+        self.assertEqual(raised.exception.code, 1)
+        self.perform_update.assert_not_called()
+
+    def test_no_update_available_does_not_install(self):
+        """Being on the latest version with no target given installs nothing."""
+        self.check_for_updates.return_value = (False, "0.53.0")
+
+        UpdateCommand.update(check=False, output_json=False)
+
+        self.perform_update.assert_not_called()
+
+    def test_update_available_installs_latest_with_no_pinned_version(self):
+        """The latest path passes target_version=None, selecting the upgrade command form."""
+        UpdateCommand.update(check=False, output_json=False)
+
+        self.perform_update.assert_called_once_with(False, None)
