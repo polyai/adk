@@ -1,6 +1,66 @@
 # CHANGELOG
 
 
+## v0.53.1 (2026-09-02)
+
+### Bug Fixes
+
+- Catch duplicate keyphrases before pushing ([#302](https://github.com/polyai/adk/pull/302),
+  [`21692da`](https://github.com/polyai/adk/commit/21692da20d331e93f50f14695d927127f429d2f8))
+
+## Summary
+
+Agent Studio normalizes keyphrases (trim + lowercase) and enforces uniqueness server-side. When two
+  entries collide it rejects the whole command batch with an opaque entity id. This validates the
+  same rule locally so the offending phrase is named up front.
+
+## Motivation
+
+A push containing two keyphrases that differ only by case or surrounding whitespace fails on the
+  platform with an error that points at an entity id rather than the phrase, leaving no clear way to
+  find which entry to fix. The ADK can apply the same normalization and fail early with the actual
+  spellings.
+
+## Changes
+
+- Add `normalize_keyphrase` mirroring Agent Studio's `normalizeKeyphrase` (trim + lowercase) - Add
+  `KeyphraseBoosting.validate_collection`, rejecting keyphrases that normalize to the same value and
+  naming every colliding group with its original spellings - Warn (rather than fail) on pull when a
+  projection already contains colliding entries, so existing projects that predate the uniqueness
+  rule can still be pulled
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Unit tests cover distinct phrases that merely share a prefix or stem, case-only collisions,
+  whitespace-only collisions, multiple colliding groups in one collection, and the pull-path
+  warning.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Validation error raised on push:
+
+``` Validation error: Duplicate keyphrases (compared case-insensitively, ignoring surrounding
+  whitespace): 'Infusion Sets' / 'infusion sets'. Keep one entry per phrase. ```
+
+Warning emitted on pull:
+
+``` Keyphrases 'Acme' / 'acme' differ only by case or surrounding whitespace. Agent Studio treats
+  them as one phrase and will reject a push that keeps both - remove the duplicates. ```
+
+---------
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.53.0 (2026-09-01)
 
 ### Documentation
