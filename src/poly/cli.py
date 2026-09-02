@@ -13,7 +13,7 @@ from importlib.metadata import version as get_package_version
 import argcomplete
 
 from poly.cli_commands.audio_cache import AudioCacheCommand
-from poly.cli_commands.auth import LoginCommand, StartCommand
+from poly.cli_commands.auth import LoginCommand
 from poly.cli_commands.base import (
     COMMAND_GROUP_ORDER,
     BaseCommand,
@@ -30,6 +30,7 @@ from poly.cli_commands.functions import FunctionsCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand, StudioCommand
 from poly.cli_commands.review import ReviewCommand
 from poly.cli_commands.rtc import RTCCommand
+from poly.cli_commands.setup import SetupCommand
 from poly.cli_commands.sync import (
     DiffCommand,
     FetchCommand,
@@ -50,7 +51,7 @@ logger = logging.getLogger(__name__)
 
 COMMANDS = [
     InitCommand,
-    StartCommand,
+    SetupCommand,
     LoginCommand,
     StudioCommand,
     ProjectCommand,

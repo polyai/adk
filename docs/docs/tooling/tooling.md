@@ -49,9 +49,18 @@ Claude Code is particularly useful for:
 - applying patterns reused across previous projects
 - speeding up repetitive implementation work
 
-#### Loading ADK rules into Claude Code
+#### Installing the ADK skills
 
-Before starting a session with Claude Code or another external coding tool, generate a documentation file and pass it as context:
+[`poly setup`](../reference/cli/setup.md) installs the ADK's agent skills into coding agents detected on your machine — Claude Code, Cursor, Codex, and others:
+
+~~~bash
+poly setup            # full onboarding
+poly setup --skip-auth   # just add the skills on an already-configured machine
+~~~
+
+The skills teach the agent the `poly` workflow — project structure, branching, testing, conversation review, and real-time configuration — and load on demand as you work.
+
+For a coding tool without skill support, generate a documentation file and pass it as context instead:
 
 ~~~bash
 poly docs --all --output rules.md
