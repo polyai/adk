@@ -34,6 +34,11 @@ UPDATE_CHECK_STAMP_FILE = Path(POLY_HOME_DIR) / ".update_check"
 # connection. The 'poly update' command itself uses the far more generous default.
 UPDATE_CHECK_TIMEOUT_SECONDS = 2
 
+UPDATE_CHECK_OPT_OUT_ENV_VAR = "POLY_NO_UPDATE_CHECK"
+# Most providers set CI=true (GitHub Actions, GitLab, CircleCI, Travis, Buildkite,
+# Vercel, Netlify). These three are the common stragglers that set nothing else.
+CI_ENV_VARS = ("CI", "JENKINS_URL", "TF_BUILD", "TEAMCITY_VERSION")
+
 # Installs that 'poly update' must not touch: upgrading in place would either clobber
 # a dev checkout or write to an environment that is discarded when the command exits.
 NOT_UPGRADABLE_REASONS = {
@@ -70,6 +75,10 @@ class UpdateCommand(BaseCommand):
                 "  poly update\n"
                 "  poly update --check\n"
                 "  poly update --to 0.52.0\n"
+                "\n"
+                "The CLI also notices new releases on its own, at most once every 12\n"
+                "hours. Set POLY_NO_UPDATE_CHECK=1 to silence that; it is already\n"
+                "suppressed in CI, for --json, and when output is not a terminal.\n"
             ),
         )
 
@@ -341,6 +350,27 @@ def _record_update_check() -> None:
         pass
 
 
+def _update_check_suppressed(output_json: bool) -> bool:
+    """Check whether the startup notice should stay quiet for this invocation.
+
+    Covers the cases where a notice is either unwanted or actively harmful: it must
+    never land in machine-readable or redirected output, and nobody is watching a CI
+    log for an upgrade prompt. Non-TTY already catches most CI runners; the explicit
+    markers keep that true for any that allocate a terminal.
+
+    Args:
+        output_json: True if the command is producing machine-readable output.
+
+    Returns:
+        True if no notice should be shown.
+    """
+    if output_json or not sys.stdout.isatty():
+        return True
+    if os.environ.get(UPDATE_CHECK_OPT_OUT_ENV_VAR):
+        return True
+    return any(os.environ.get(env_var) for env_var in CI_ENV_VARS)
+
+
 def display_update_message(output_json: bool = False) -> None:
     """Tell the user about a newer release, at most once per check interval.
 
@@ -357,9 +387,7 @@ def display_update_message(output_json: bool = False) -> None:
         # Cheapest checks first, so the common case costs almost nothing: no output
         # to corrupt, then a string comparison, then a small file read, and only
         # then the network.
-        if output_json or not sys.stdout.isatty():
-            return
-        if os.environ.get("POLY_NO_UPDATE_CHECK"):
+        if _update_check_suppressed(output_json):
             return
         method = UpdateCommand.tool_install_method()
         if method is None:

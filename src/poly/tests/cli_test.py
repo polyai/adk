@@ -54,6 +54,7 @@ from poly.cli_commands.update import (
     UpdateCommand,
     _record_update_check,
     _update_check_is_due,
+    _update_check_suppressed,
     display_update_message,
 )
 from poly.cli_commands.utils import CompletionCommand
@@ -5493,6 +5494,14 @@ class StartupUpdateMessageTest(unittest.TestCase):
 
         self._assert_stayed_silent_without_calling_pypi()
 
+    def test_ci_environment_is_not_nagged(self):
+        """A CI runner with a terminal still gets no notice, and costs no PyPI round trip."""
+        self._set_environ({"CI": "true"})
+
+        display_update_message()
+
+        self._assert_stayed_silent_without_calling_pypi()
+
     def test_recent_check_defers_to_the_stamp_file(self):
         """Within the check interval the whole thing is skipped, network included."""
         self.update_check_is_due.return_value = False
@@ -5528,6 +5537,67 @@ class StartupUpdateMessageTest(unittest.TestCase):
         display_update_message()
 
         self.plain.assert_not_called()
+
+
+class UpdateCheckSuppressionTest(unittest.TestCase):
+    """Tests for _update_check_suppressed, the gate that keeps the startup notice quiet."""
+
+    def _suppressed(
+        self,
+        output_json: bool = False,
+        is_a_tty: bool = True,
+        environ: dict[str, str] | None = None,
+    ) -> bool:
+        """Ask the gate its answer for a given output mode, terminal and environment.
+
+        The environment is always replaced wholesale, so CI variables that happen to
+        be set on the machine running the tests cannot change the answer.
+        """
+        with (
+            patch("sys.stdout", _FakeStdout(is_a_tty)),
+            patch.dict(os.environ, environ or {}, clear=True),
+        ):
+            return _update_check_suppressed(output_json)
+
+    def test_interactive_terminal_with_a_clean_environment_is_not_suppressed(self):
+        """A human at a terminal is exactly who the notice is for."""
+        self.assertFalse(self._suppressed())
+
+    def test_json_output_is_suppressed(self):
+        """A notice printed alongside JSON would make the output unparseable."""
+        self.assertTrue(self._suppressed(output_json=True))
+
+    def test_non_tty_output_is_suppressed(self):
+        """Piped or redirected output is being consumed by something, not read by a human."""
+        self.assertTrue(self._suppressed(is_a_tty=False))
+
+    def test_opt_out_env_var_is_suppressed(self):
+        """POLY_NO_UPDATE_CHECK is the user's explicit escape hatch."""
+        self.assertTrue(self._suppressed(environ={"POLY_NO_UPDATE_CHECK": "1"}))
+
+    def test_ci_env_var_is_suppressed(self):
+        """CI=true is set by most providers, and nobody reads a CI log for upgrade prompts."""
+        self.assertTrue(self._suppressed(environ={"CI": "true"}))
+
+    def test_jenkins_is_suppressed(self):
+        """Jenkins sets JENKINS_URL but notably does not set CI."""
+        self.assertTrue(self._suppressed(environ={"JENKINS_URL": "https://jenkins.example.com/"}))
+
+    def test_azure_pipelines_is_suppressed(self):
+        """Azure Pipelines identifies itself with TF_BUILD."""
+        self.assertTrue(self._suppressed(environ={"TF_BUILD": "True"}))
+
+    def test_teamcity_is_suppressed(self):
+        """TeamCity identifies itself with TEAMCITY_VERSION."""
+        self.assertTrue(self._suppressed(environ={"TEAMCITY_VERSION": "2024.03"}))
+
+    def test_ci_set_to_the_empty_string_is_not_suppressed(self):
+        """Shells export empty variables; an empty CI must not be read as 'in CI'."""
+        self.assertFalse(self._suppressed(environ={"CI": ""}))
+
+    def test_opt_out_set_to_the_empty_string_is_not_suppressed(self):
+        """An empty POLY_NO_UPDATE_CHECK is not an opt-out either."""
+        self.assertFalse(self._suppressed(environ={"POLY_NO_UPDATE_CHECK": ""}))
 
 
 class UpdateCheckStampTest(unittest.TestCase):
