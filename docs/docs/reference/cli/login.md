@@ -7,7 +7,7 @@ description: Reference for the `poly login` command.
 
 Sign in to an existing Agent Studio account and save API key credentials for the CLI. Works against any region.
 
-The alternate command [`poly start`](./start.md) command is for self-serve customers only (the `studio` region) and will also prompt the user to create a new project.
+For first-time onboarding, [`poly setup`](./setup.md) runs this same sign-in flow plus shell completion, AI agent skills, and project setup in one command.
 
 `poly login`:
 
