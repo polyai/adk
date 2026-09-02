@@ -359,12 +359,13 @@ wheels = [
 
 [[package]]
 name = "polyai-adk"
-version = "0.51.0"
+version = "0.53.0"
 source = { editable = "." }
 dependencies = [
     { name = "argcomplete" },
     { name = "jsonschema" },
     { name = "langcodes" },
+    { name = "packaging" },
     { name = "posthog" },
     { name = "protobuf" },
     { name = "python-dateutil" },
@@ -394,6 +395,7 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.20.0" },
     { name = "langcodes", specifier = "==3.5.1" },
     { name = "licensecheck", marker = "extra == 'dev'", specifier = ">=2024.3" },
+    { name = "packaging", specifier = ">=24.0" },
     { name = "pip-licenses", marker = "extra == 'dev'", specifier = ">=5.5.1" },
     { name = "posthog", specifier = "==7.35.4" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.0.0" },
