@@ -21,6 +21,20 @@ logger = logging.getLogger(__name__)
 VALID_LEVELS = ("default", "boosted", "maximum")
 
 
+def _as_text(value: object) -> str:
+    """Coerce a resolved YAML scalar back to the text the author wrote.
+
+    The loader follows YAML 1.2, so a bare `true`/`false` resolves to a bool and
+    a bare `2024` to an int. Boosting digits or years is a reasonable thing to
+    want, and either type breaks the string handling below.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return value if isinstance(value, str) else str(value)
+
+
 def normalize_keyphrase(keyphrase: str) -> str:
     """Normalize a keyphrase for uniqueness comparison.
 
@@ -63,8 +77,8 @@ class KeyphraseBoosting(MultiResourceYamlResource):
         level: str = "default",
     ):
         self.resource_id = resource_id
-        self.name = name
-        self.keyphrase = keyphrase
+        self.name = _as_text(name)
+        self.keyphrase = _as_text(keyphrase)
         self.level = level.lower()
 
     @classmethod
@@ -215,7 +229,7 @@ class KeyphraseBoosting(MultiResourceYamlResource):
         keyphrases: list[dict] = yaml_dict.get("keyphrases", []) if yaml_dict else []
 
         for kp in keyphrases:
-            name = kp.get(KeyphraseBoosting.resource_key)
+            name = _as_text(kp.get(KeyphraseBoosting.resource_key))
             if not name:
                 continue
             path_safe_name = utils.clean_name(name, lowercase=False)

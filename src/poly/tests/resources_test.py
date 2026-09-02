@@ -6657,6 +6657,34 @@ class KeyphraseBoostingTests(unittest.TestCase):
         self.assertEqual(len(keyphrases), 2)
         self.assertIn("differ only by case", "".join(logs.output))
 
+    def test_yaml_resolved_scalars_are_read_as_text(self):
+        """A bare `true` or `2024` in YAML resolves to a bool/int, not a string."""
+        for raw, expected in ((True, "true"), (False, "false"), (2024, "2024"), (None, "")):
+            with self.subTest(raw=raw):
+                k = KeyphraseBoosting.from_yaml_dict(
+                    {"keyphrase": raw, "level": "boosted"}, "kp-1", "kp-1"
+                )
+                self.assertEqual(k.keyphrase, expected)
+                self.assertEqual(k.name, expected)
+
+    def test_validate_collection_handles_resolved_scalars(self):
+        """A bare `true` and a quoted 'true' are the same phrase to Agent Studio."""
+        collection = {
+            "kp-0": KeyphraseBoosting(resource_id="kp-0", name="x", keyphrase=True),
+            "kp-1": KeyphraseBoosting(resource_id="kp-1", name="y", keyphrase="True"),
+        }
+        with self.assertRaises(ValueError) as cm:
+            KeyphraseBoosting.validate_collection(collection)
+        self.assertIn("Duplicate keyphrases", str(cm.exception))
+
+    def test_numeric_keyphrase_validates(self):
+        """Boosting a bare number is legitimate and must not fail validation."""
+        k = KeyphraseBoosting.from_yaml_dict(
+            {"keyphrase": 2024, "level": "maximum"}, "kp-1", "kp-1"
+        )
+        k.validate()
+        self.assertEqual(k.to_yaml_dict(), {"keyphrase": "2024", "level": "maximum"})
+
     def test_read_local_resource(self):
         """read_local_resource correctly parses a keyphrase from the multi-resource YAML."""
         yaml_content = """keyphrases:
