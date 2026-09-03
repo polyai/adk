@@ -20,6 +20,7 @@ from poly.handlers.protobuf.commands_pb2 import Command
 from poly.project import AgentStudioProject, DeploymentMode
 from poly.resources import (
     AsrSettings,
+    AttributeKind,
     ChatGreeting,
     ChatSafetyFilters,
     ChatStylePrompt,
@@ -2042,7 +2043,54 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             deleted_resources,
         )
 
-        self.assertEqual(new_variant.attribute_ids, ["VARIANT_ATTRIBUTES-keep"])
+        self.assertEqual(new_variant.attribute_values, {"VARIANT_ATTRIBUTES-keep": ""})
+
+    def test_new_variant_seeds_typed_attributes_with_null(self):
+        """A typed attribute cannot hold "", so a new variant seeds it as null instead."""
+        string_attr = VariantAttribute(
+            resource_id="VARIANT_ATTRIBUTES-greeting",
+            name="greeting_name",
+            mappings={"v1": "Hello"},
+        )
+        number_attr = VariantAttribute(
+            resource_id="VARIANT_ATTRIBUTES-retries",
+            name="max_retries",
+            mappings={"v1": 3},
+            kind=AttributeKind.NUMBER,
+        )
+        self.project.resources[VariantAttribute] = {
+            "VARIANT_ATTRIBUTES-greeting": string_attr,
+            "VARIANT_ATTRIBUTES-retries": number_attr,
+        }
+
+        new_variant = Variant(
+            resource_id="VARIANTS-new",
+            name="New Variant",
+            is_default=False,
+        )
+
+        self.project._clean_resources_before_push(
+            {},
+            {Variant: {"VARIANTS-new": new_variant}},
+            {},
+            {},
+        )
+
+        self.assertEqual(
+            new_variant.attribute_values,
+            {"VARIANT_ATTRIBUTES-greeting": "", "VARIANT_ATTRIBUTES-retries": None},
+        )
+
+        # Both seeds reach the wire: "" in the legacy string map for every attribute,
+        # and a native null in typed_values for the typed one.
+        proto = new_variant.build_create_proto()
+        self.assertEqual(
+            dict(proto.attribute_values.values),
+            {"VARIANT_ATTRIBUTES-greeting": "", "VARIANT_ATTRIBUTES-retries": ""},
+        )
+        self.assertEqual(
+            dict(proto.attribute_values.typed_values), {"VARIANT_ATTRIBUTES-retries": None}
+        )
 
     def test_non_default_variant_update_is_kept(self):
         """A renamed non-default variant must still be pushed as an update."""
