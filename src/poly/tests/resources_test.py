@@ -3155,8 +3155,6 @@ TEST_FLOW_STEP = FlowStep(
         ),
         # Enabled so it survives to_yaml_dict, which omits disabled sections.
         dtmf=DTMFConfig(
-            flow_id="flow-123",
-            step_id="step-1",
             is_enabled=True,
             max_digits=4,
         ),
@@ -3380,8 +3378,10 @@ class FlowStepTests(unittest.TestCase):
             flow_name="Test Flow",
             resource_mappings=[],
         )
-        self.assertIsNone(step.settings.asr_biasing)
-        self.assertIsNone(step.settings.dtmf)
+        # Absent sections read as disabled — they can't be cleared on the backend,
+        # so absence and disabled are the same state.
+        self.assertFalse(step.settings.asr_biasing.is_enabled)
+        self.assertFalse(step.settings.dtmf.is_enabled)
 
     def test_prompt_whitespace_is_stripped(self):
         """Prompts with leading/trailing whitespace are stripped on read."""
@@ -3848,8 +3848,6 @@ conditions:
             end_key="#",
             collect_while_agent_speaking=False,
             is_pii=False,
-            step_id="step-1",
-            flow_id="flow-123",
         )
 
         def advanced_step_with(**settings_kwargs) -> FlowStep:
@@ -3872,6 +3870,9 @@ conditions:
             ("ASR biasing changed", advanced_step_with(asr_biasing=new_asr)),
             ("DTMF changed", advanced_step_with(dtmf=new_dtmf)),
             ("both changed", advanced_step_with(asr_biasing=new_asr, dtmf=new_dtmf)),
+            # Deleting the blocks reads as disabled, which still differs from the
+            # enabled originals and must go out as a settings update.
+            ("both deleted", advanced_step_with()),
         ]:
             with self.subTest(description):
                 new, updated, deleted = step.get_new_updated_deleted_subresources(
@@ -11576,8 +11577,8 @@ class FlowSettingsFromProjectionTest(unittest.TestCase):
             }
         )
 
-        self.assertIsNone(settings.asr_biasing)
-        self.assertIsNone(settings.dtmf)
+        self.assertFalse(settings.asr_biasing.is_enabled)
+        self.assertFalse(settings.dtmf.is_enabled)
         self.assertEqual(settings.llm.provider_model_id, "m")
 
     def test_legacy_top_level_config_is_read_when_there_is_no_settings_block(self):
@@ -11616,7 +11617,7 @@ class FlowSettingsSerializationTest(unittest.TestCase):
     def test_round_trips_every_section(self):
         settings = self._settings(
             asr_biasing=ASRBiasing(is_enabled=True, custom_keywords=["acme"], numeric=True),
-            dtmf=DTMFConfig(self.STEP_ID, self.FLOW_ID, is_enabled=True, max_digits=4),
+            dtmf=DTMFConfig(is_enabled=True, max_digits=4),
             asr=ASRConfig(provider="prov", model="mod"),
             vad=VADConfig(
                 provider="prov",
@@ -11644,7 +11645,7 @@ class FlowSettingsSerializationTest(unittest.TestCase):
     def test_dtmf_uses_legacy_yaml_key(self):
         """The YAML key stays dtmf_config so existing step files keep working."""
         settings = self._settings(
-            dtmf=DTMFConfig(self.STEP_ID, self.FLOW_ID, is_enabled=True, max_digits=2)
+            dtmf=DTMFConfig(is_enabled=True, max_digits=2)
         )
 
         yaml_dict = settings.to_yaml_dict()
@@ -11661,7 +11662,7 @@ class FlowSettingsSerializationTest(unittest.TestCase):
         """Disabled is represented as absent for the sections that deep-merge."""
         settings = self._settings(
             asr_biasing=ASRBiasing(is_enabled=False, custom_keywords=["acme"]),
-            dtmf=DTMFConfig(self.STEP_ID, self.FLOW_ID, is_enabled=False),
+            dtmf=DTMFConfig(is_enabled=False),
         )
 
         self.assertEqual(settings.to_yaml_dict(), {})
@@ -11686,8 +11687,58 @@ class FlowSettingsSerializationTest(unittest.TestCase):
         self.assertTrue(proto.settings.HasField("barge_in"))
         self.assertTrue(proto.settings.HasField("llm"))
         self.assertEqual(proto.settings.llm.provider_model_id, "mod-1")
-        for absent in ("asr_biasing", "dtmf", "asr", "vad"):
+        # asr and vad are clearable, so absence means "no override" and they must
+        # stay unset. asr_biasing and dtmf can't be cleared on the backend — absence
+        # means disabled, and the disable only lands if the section is sent.
+        for absent in ("asr", "vad"):
             self.assertFalse(proto.settings.HasField(absent), absent)
+        for disabled in ("asr_biasing", "dtmf"):
+            self.assertTrue(proto.settings.HasField(disabled), disabled)
+            self.assertFalse(proto.settings.asr_biasing.is_enabled)
+            self.assertFalse(proto.settings.dtmf.is_enabled)
+
+    def test_absent_asr_biasing_and_dtmf_read_as_disabled(self):
+        """Absence and disabled are the same state for the unclearable sections,
+        regardless of how the settings were constructed."""
+        from_yaml = FlowSettings.from_yaml_dict({}, step_id=self.STEP_ID, flow_id=self.FLOW_ID)
+        from_projection = FlowSettings.from_projection(
+            {"settings": {}}, step_id=self.STEP_ID, flow_id=self.FLOW_ID
+        )
+        bare = self._settings()
+
+        for name, settings in [
+            ("from_yaml_dict", from_yaml),
+            ("from_projection", from_projection),
+            ("defaults", bare),
+        ]:
+            with self.subTest(name):
+                self.assertFalse(settings.asr_biasing.is_enabled)
+                self.assertFalse(settings.dtmf.is_enabled)
+        # All construction paths must compare equal, or unchanged steps would queue
+        # spurious settings updates on push.
+        self.assertEqual(from_yaml, from_projection)
+        self.assertEqual(from_yaml, bare)
+
+    def test_deleting_asr_biasing_pushes_it_as_disabled(self):
+        """asr_biasing/dtmf can't go through clear_step_settings, so deleting the
+        YAML block must push the section explicitly disabled — omitting it would be
+        read by the backend as "not updated" and the deletion would silently no-op."""
+        original = self._settings(
+            asr_biasing=ASRBiasing(is_enabled=True, name_spelling=True, yes_no=True),
+            dtmf=DTMFConfig(is_enabled=True, max_digits=4),
+        )
+        # Deleting both blocks from the step YAML reads back as disabled sections.
+        updated = FlowSettings.from_yaml_dict(
+            {}, step_id=self.STEP_ID, flow_id=self.FLOW_ID
+        )
+
+        self.assertNotEqual(updated, original)
+
+        proto = updated.build_update_proto()
+        self.assertTrue(proto.settings.HasField("asr_biasing"))
+        self.assertFalse(proto.settings.asr_biasing.is_enabled)
+        self.assertTrue(proto.settings.HasField("dtmf"))
+        self.assertFalse(proto.settings.dtmf.is_enabled)
 
     def test_command_type_is_the_combined_settings_command(self):
         settings = self._settings(barge_in=BargeInConfig(is_enabled=True))
@@ -11781,7 +11832,7 @@ class FlowSettingsValidationTest(unittest.TestCase):
                 settings = FlowSettings(
                     step_id="step-1",
                     flow_id="flow-123",
-                    dtmf=DTMFConfig("step-1", "flow-123", **kwargs),
+                    dtmf=DTMFConfig(**kwargs),
                 )
                 with self.assertRaises(ValueError) as ctx:
                     settings.validate()
@@ -11814,7 +11865,7 @@ class FlowSettingsValidationTest(unittest.TestCase):
 
     def test_flow_step_validate_checks_its_settings(self):
         """Settings are a sub-resource, so nothing else validates them."""
-        step = self._step(dtmf=DTMFConfig("step-1", "flow-123", max_digits=-1))
+        step = self._step(dtmf=DTMFConfig(max_digits=-1))
 
         with self.assertRaises(ValueError) as ctx:
             step.validate(resource_mappings=self._mappings())
@@ -11823,7 +11874,7 @@ class FlowSettingsValidationTest(unittest.TestCase):
 
     def test_valid_settings_pass_flow_step_validation(self):
         step = self._step(
-            dtmf=DTMFConfig("step-1", "flow-123", max_digits=4, inter_digit_timeout=0),
+            dtmf=DTMFConfig(max_digits=4, inter_digit_timeout=0),
             vad=VADConfig(vad_start=0.0, vad_end=2.5),
         )
 
