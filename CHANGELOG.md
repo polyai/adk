@@ -1,6 +1,53 @@
 # CHANGELOG
 
 
+## v0.53.2 (2026-09-03)
+
+### Bug Fixes
+
+- Push deleted asr_biasing/dtmf_config sections as disabled
+  ([#308](https://github.com/polyai/adk/pull/308),
+  [`548f063`](https://github.com/polyai/adk/commit/548f063850ed334fff896e98cbaff3ae77ba04e6))
+
+## Summary
+
+Deleting an `asr_biasing` or `dtmf_config` block from a step's YAML was silently dropped on push, so
+  the deletion never reached Agent Studio and `poly diff` kept showing it as pending forever. Absent
+  sections now read as disabled and are pushed explicitly with `is_enabled: false`.
+
+## Motivation
+
+The backend's `clear_step_settings` command rejects the `asrBiasing`/`dtmf` sections (they
+  deep-merge into legacy top-level mirrors), so these two sections can't go through the clear path
+  like `asr`/`vad`/`barge_in`/`llm` do. Meanwhile the update proto omitted the section entirely when
+  the block was deleted, which the backend reads as "not updated". Since disabling is the only way
+  to express removal for these sections — and `to_yaml_dict` already omits disabled sections —
+  absence and disabled are treated as the same state, and the round trip (push → fetch → diff)
+  converges cleanly.
+
+## Changes
+
+- `FlowSettings` normalises absent `asr_biasing`/`dtmf` to disabled instances in `__init__`, so
+  every construction path (YAML read, projection read, bare defaults) compares equal and a deleted
+  block is detected as a settings update - `build_update_proto` always sends the `asr_biasing` and
+  `dtmf` sections (enabled or disabled) instead of omitting them when unset; the clearable sections
+  (`asr`, `vad`, `barge_in`, `llm`) are still omitted when absent - `DTMFConfig` drops its unused
+  `step_id`/`flow_id`/`resource_id` - Added regression tests: deleted blocks push as disabled, all
+  construction paths agree on the disabled state, and sub-resource diffing flags deleted sections as
+  an update
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.53.1 (2026-09-02)
 
 ### Bug Fixes
