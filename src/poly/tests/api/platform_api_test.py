@@ -46,6 +46,22 @@ class GetBaseUrl(unittest.TestCase):
         for region, url in expected.items():
             self.assertEqual(PlatformAPIHandler.get_base_url(region, use_jupiter_api=True), url)
 
+    def test_platform_regions_map_to_expected_urls(self):
+        """Regions with a live v3 conversations host resolve to it."""
+        expected = {
+            "euw-1": "https://api.euw-1.platform.polyai.app",
+            "uk-1": "https://api.uk-1.platform.polyai.app",
+            "us-1": "https://api.us-1.platform.polyai.app",
+        }
+        for region, url in expected.items():
+            self.assertEqual(PlatformAPIHandler.get_base_url(region, use_platform_api=True), url)
+
+    def test_regions_without_a_v3_host_raise_value_error(self):
+        """dev/staging/studio have no v3 conversations host yet (DEVP-664)."""
+        for region in ("dev", "staging", "studio"):
+            with self.assertRaises(ValueError):
+                PlatformAPIHandler.get_base_url(region, use_platform_api=True)
+
     def test_unknown_region_raises_value_error(self):
         """An unrecognised region raises ValueError."""
         with self.assertRaises(ValueError):
@@ -231,6 +247,64 @@ class GetProjects(unittest.TestCase):
         projects = PlatformAPIHandler.get_projects("studio", "acc-1")
 
         self.assertEqual(projects, {"p1": "Project One", "p2": "Project Two"})
+
+
+class ListConversations(unittest.TestCase):
+    """Tests for PlatformAPIHandler.list_conversations (DEVP-664)."""
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_v3_region_hits_v3_url_with_account_id(self, mock_make_request):
+        """A region with a live v3 host calls the v3 URL with account_id."""
+        mock_make_request.return_value = {"conversations": [], "cursor": None}
+
+        PlatformAPIHandler.list_conversations("us-1", "acc-1", "proj-1", limit=20, offset=5)
+
+        mock_make_request.assert_called_once_with(
+            "us-1",
+            "/v3/acc-1/proj-1/conversations",
+            "GET",
+            params={"limit": 20, "offset": 5},
+            use_platform_api=True,
+        )
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_v3_region_passes_through_cursor_channel_in_progress(self, mock_make_request):
+        """Optional v3-only filters are only added to params when provided."""
+        mock_make_request.return_value = {"conversations": [], "cursor": None}
+
+        PlatformAPIHandler.list_conversations(
+            "us-1",
+            "acc-1",
+            "proj-1",
+            cursor="abc",
+            channel=["voice", "chat"],
+            in_progress=False,
+        )
+
+        mock_make_request.assert_called_once_with(
+            "us-1",
+            "/v3/acc-1/proj-1/conversations",
+            "GET",
+            params={
+                "limit": 50,
+                "offset": 0,
+                "cursor": "abc",
+                "channel": ["voice", "chat"],
+                "in_progress": False,
+            },
+            use_platform_api=True,
+        )
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_region_without_v3_falls_back_to_v1_url(self, mock_make_request):
+        """dev/staging/studio (no v3 host yet) still call the deprecated v1 URL."""
+        mock_make_request.return_value = {"conversations": [], "next_offset": None}
+
+        PlatformAPIHandler.list_conversations("dev", "acc-1", "proj-1", limit=20, offset=5)
+
+        mock_make_request.assert_called_once_with(
+            "dev", "/v1/agents/proj-1/conversations", "GET", params={"limit": 20, "offset": 5}
+        )
 
 
 class GetConversationAudio(unittest.TestCase):
