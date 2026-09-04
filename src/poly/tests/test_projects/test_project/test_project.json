@@ -85,37 +85,93 @@
       }
     },
     "variant_attributes": {
-      "customer-name": {
-        "resource_id": "customer-name",
-        "name": "customer-name",
+      "customer_name": {
+        "resource_id": "customer_name",
+        "name": "customer_name",
         "mappings": {
           "VARIANT-default": "value-1",
           "VARIANT-spanish": "valor-1"
         }
       },
-      "email-address": {
-        "resource_id": "email-address",
-        "name": "email-address",
+      "email_address": {
+        "resource_id": "email_address",
+        "name": "email_address",
         "mappings": {
           "VARIANT-default": "value-2",
           "VARIANT-spanish": "valor-2"
         }
       },
-      "member-status": {
-        "resource_id": "member-status",
-        "name": "member-status",
+      "member_status": {
+        "resource_id": "member_status",
+        "name": "member_status",
         "mappings": {
           "VARIANT-default": "value-3",
           "VARIANT-spanish": "valor-3"
         }
       },
-      "booking-status": {
-        "resource_id": "booking-status",
-        "name": "booking-status",
+      "booking_status": {
+        "resource_id": "booking_status",
+        "name": "booking_status",
         "mappings": {
           "VARIANT-default": "value-4",
           "VARIANT-spanish": "valor-4"
         }
+      },
+      "max_retries": {
+        "resource_id": "max_retries",
+        "name": "max_retries",
+        "mappings": {
+          "VARIANT-default": 3,
+          "VARIANT-spanish": 5
+        },
+        "kind": "number",
+        "config": {}
+      },
+      "serves_alcohol": {
+        "resource_id": "serves_alcohol",
+        "name": "serves_alcohol",
+        "mappings": {
+          "VARIANT-default": true,
+          "VARIANT-spanish": false
+        },
+        "kind": "boolean",
+        "config": {}
+      },
+      "tier": {
+        "resource_id": "tier",
+        "name": "tier",
+        "mappings": {
+          "VARIANT-default": "premium",
+          "VARIANT-spanish": "basic"
+        },
+        "kind": "enum",
+        "config": {
+          "values": [
+            "basic",
+            "premium"
+          ]
+        }
+      },
+      "menu_config": {
+        "resource_id": "menu_config",
+        "name": "menu_config",
+        "mappings": {
+          "VARIANT-default": {
+            "categories": [
+              "pizza",
+              "pasta"
+            ],
+            "currency": "USD"
+          },
+          "VARIANT-spanish": {
+            "categories": [
+              "paella"
+            ],
+            "currency": "EUR"
+          }
+        },
+        "kind": "object",
+        "config": {}
       }
     },
     "variables": {
@@ -371,7 +427,7 @@
       "TOPIC-Topic 1": {
         "resource_id": "TOPIC-Topic 1",
         "name": "Topic 1",
-        "actions": "Use {{fn:FUNCTION-test_function}} to handle this request and {{fn:FUNCTION-format_date}} for dates. Access customer info via {{attr:customer-name}} and handoff with {{ho:handoff-1}} if needed. Send notifications using {{twilio_sms:SMS_TEMPLATE-123}}.",
+        "actions": "Use {{fn:FUNCTION-test_function}} to handle this request and {{fn:FUNCTION-format_date}} for dates. Access customer info via {{attr:customer_name}} and handoff with {{ho:handoff-1}} if needed. Send notifications using {{twilio_sms:SMS_TEMPLATE-123}}.",
         "content": "This topic covers general inquiries and uses global functions.",
         "example_queries": [
           "How can I help?",
@@ -383,7 +439,7 @@
       "TOPIC-Topic 2": {
         "resource_id": "TOPIC-Topic 2",
         "name": "Topic 2",
-        "actions": "Validate using {{fn:FUNCTION-validate_email}} and process with {{fn:FUNCTION-shared_helper}}. Check {{attr:email-address}} attribute and use {{ho:handoff-2}} for escalation. Send email verification via {{twilio_sms:SMS_TEMPLATE-456}}.",
+        "actions": "Validate using {{fn:FUNCTION-validate_email}} and process with {{fn:FUNCTION-shared_helper}}. Check {{attr:email_address}} attribute and use {{ho:handoff-2}} for escalation. Send email verification via {{twilio_sms:SMS_TEMPLATE-456}}.",
         "content": "This topic handles email validation and processing.",
         "example_queries": [
           "I need to verify my email",
@@ -399,7 +455,7 @@
         "name": "Spanish Only Topic",
         "variant_id": "VARIANT-spanish",
         "variant_name": "spanish",
-        "actions": "Handle this request in Spanish using {{fn:FUNCTION-test_function}} and {{attr:customer-name}}.",
+        "actions": "Handle this request in Spanish using {{fn:FUNCTION-test_function}} and {{attr:customer_name}}.",
         "content": "This topic only applies when the Spanish variant is active.",
         "example_queries": [
           "How can I help you?",
@@ -412,7 +468,7 @@
       "voice_greeting": {
         "resource_id": "voice_greeting",
         "name": "voice_greeting",
-        "welcome_message": "Hello! Welcome to our service. Your account shows {{attr:member-status}}. How can I assist you today?",
+        "welcome_message": "Hello! Welcome to our service. Your account shows {{attr:member_status}}. How can I assist you today?",
         "language_code": "en-GB"
       }
     },
@@ -427,7 +483,7 @@
       "chat_greeting": {
         "resource_id": "chat_greeting",
         "name": "chat_greeting",
-        "welcome_message": "Hello! Welcome to our web chat. Your account shows {{attr:member-status}}. How can I assist you today?",
+        "welcome_message": "Hello! Welcome to our web chat. Your account shows {{attr:member_status}}. How can I assist you today?",
         "language_code": "en-GB"
       }
     },
@@ -449,7 +505,7 @@
       "RULES-rules": {
         "resource_id": "RULES-rules",
         "name": "rules",
-        "behaviour": "Be helpful and professional at all times.\nUse {{fn:FUNCTION-test_function}} when appropriate.\nAlways validate inputs using {{fn:FUNCTION-validate_email}} when dealing with email addresses.\nAccess customer information from {{attr:customer-name}} and {{attr:email-address}}.\nFor complex issues, use {{ho:handoff-1}} to transfer to a specialist.\nSend important notifications via {{twilio_sms:SMS_TEMPLATE-123}} or {{twilio_sms:SMS_TEMPLATE-456}} as appropriate.\nFollow the guidelines provided.\nUse variable {{vrbl:VAR-customer_name}}\n"
+        "behaviour": "Be helpful and professional at all times.\nUse {{fn:FUNCTION-test_function}} when appropriate.\nAlways validate inputs using {{fn:FUNCTION-validate_email}} when dealing with email addresses.\nAccess customer information from {{attr:customer_name}} and {{attr:email_address}}.\nFor complex issues, use {{ho:handoff-1}} to transfer to a specialist.\nSend important notifications via {{twilio_sms:SMS_TEMPLATE-123}} or {{twilio_sms:SMS_TEMPLATE-456}} as appropriate.\nFollow the guidelines provided.\nUse variable {{vrbl:VAR-customer_name}}\n"
       }
     },
     "voice_disclaimer": {
@@ -571,7 +627,7 @@
         "flow_id": "FLOW_CONFIG-test_flow",
         "flow_name": "test_flow",
         "step_type": "advanced_step",
-        "prompt": "Let me confirm your details using {{fn:FUNCTION-format_date}} and {{ft:FUNCTION-process_data}}. Your name is {{attr:customer-name}}. Is this correct?",
+        "prompt": "Let me confirm your details using {{fn:FUNCTION-format_date}} and {{ft:FUNCTION-process_data}}. Your name is {{attr:customer_name}}. Is this correct?",
         "settings": {
           "asr_biasing": {
             "alphanumeric": false,
@@ -810,7 +866,7 @@
         "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
         "flow_name": "test_flow_with_punctuation!",
         "step_type": "advanced_step",
-        "prompt": "Please provide your email. I'll validate it using {{fn:FUNCTION-validate_email}} and process with {{ft:FUNCTION-calculate_total}}. Your current status is {{attr:booking-status}}. I can send updates via {{twilio_sms:SMS_TEMPLATE-456}}.",
+        "prompt": "Please provide your email. I'll validate it using {{fn:FUNCTION-validate_email}} and process with {{ft:FUNCTION-calculate_total}}. Your current status is {{attr:booking_status}}. I can send updates via {{twilio_sms:SMS_TEMPLATE-456}}.",
         "settings": {
           "asr_biasing": {
             "alphanumeric": true,

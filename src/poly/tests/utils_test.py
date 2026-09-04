@@ -675,10 +675,10 @@ class ResourceMappingTests(unittest.TestCase):
             resource_prefix="ft",
         ),
         ResourceMapping(
-            resource_id="attr-customer-name",
-            resource_name="customer-name",
+            resource_id="attr-customer_name",
+            resource_name="customer_name",
             resource_type=VariantAttribute,
-            file_path="config/variant_attributes.yaml/variant_attributes/customer-name",
+            file_path="config/variant_attributes.yaml/variant_attributes/customer_name",
             flow_name=None,
             resource_prefix="attr",
         ),
@@ -834,14 +834,14 @@ class ResourceMappingTests(unittest.TestCase):
     def test_replace_resource_ids_with_names_attributes_handoff_sms_entities(self):
         """Test IDs->names swap for attr, ho, twilio_sms, entity references."""
         prompt = (
-            "Use {{attr:attr-customer-name}}, {{ho:handoff-1}}, "
+            "Use {{attr:attr-customer_name}}, {{ho:handoff-1}}, "
             "{{twilio_sms:SMS_TEMPLATE-123}} and {{entity:ENTITY-customer_name}}."
         )
         updated = resource_utils.replace_resource_ids_with_names(
             prompt, self.TEST_RESOURCE_MAPPINGS
         )
         expected = (
-            "Use {{attr:customer-name}}, {{ho:default}}, "
+            "Use {{attr:customer_name}}, {{ho:default}}, "
             "{{twilio_sms:test_template}} and {{entity:customer_name}}."
         )
         self.assertEqual(updated, expected)
@@ -849,14 +849,14 @@ class ResourceMappingTests(unittest.TestCase):
     def test_replace_resource_names_with_ids_attributes_handoff_sms_entities(self):
         """Test names->IDs swap for attr, ho, twilio_sms, entity references."""
         prompt = (
-            "Use {{attr:customer-name}}, {{ho:default}}, "
+            "Use {{attr:customer_name}}, {{ho:default}}, "
             "{{twilio_sms:test_template}} and {{entity:customer_name}}."
         )
         updated = resource_utils.replace_resource_names_with_ids(
             prompt, self.TEST_RESOURCE_MAPPINGS
         )
         expected = (
-            "Use {{attr:attr-customer-name}}, {{ho:handoff-1}}, "
+            "Use {{attr:attr-customer_name}}, {{ho:handoff-1}}, "
             "{{twilio_sms:SMS_TEMPLATE-123}} and {{entity:ENTITY-customer_name}}."
         )
         self.assertEqual(updated, expected)
@@ -908,7 +908,7 @@ class ReplaceResourceNamesWithIdsInDataTests(unittest.TestCase):
                     },
                 },
             ],
-            "closing": "Finally {{attr:customer-name}}.",
+            "closing": "Finally {{attr:customer_name}}.",
         }
 
     def test_equivalence_with_string_path_over_serialized_yaml(self):
@@ -950,7 +950,7 @@ class ReplaceResourceNamesWithIdsInDataTests(unittest.TestCase):
             result["steps"][2]["nested"]["deep"],
             "Send {{twilio_sms:SMS_TEMPLATE-123}} now.",
         )
-        self.assertEqual(result["closing"], "Finally {{attr:attr-customer-name}}.")
+        self.assertEqual(result["closing"], "Finally {{attr:attr-customer_name}}.")
 
     def test_reference_shaped_keys_are_not_rewritten(self):
         """Only scalar string values are rewritten; dict keys are left untouched."""

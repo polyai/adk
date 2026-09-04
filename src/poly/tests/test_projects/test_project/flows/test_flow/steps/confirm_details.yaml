@@ -1,6 +1,6 @@
 step_type: advanced_step
 name: confirm_details
-prompt: Let me confirm your details using {{fn:format_date}} and {{ft:process_data}}. Your name is {{attr:customer-name}}. Is this correct?
+prompt: Let me confirm your details using {{fn:format_date}} and {{ft:process_data}}. Your name is {{attr:customer_name}}. Is this correct?
 asr_biasing:
   is_enabled: true
   numeric: true

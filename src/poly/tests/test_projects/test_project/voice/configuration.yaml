@@ -1,5 +1,5 @@
 greeting:
-  welcome_message: Hello! Welcome to our service. Your account shows {{attr:member-status}}. How can
+  welcome_message: Hello! Welcome to our service. Your account shows {{attr:member_status}}. How can
     I assist you today?
   language_code: en-GB
 style_prompt:

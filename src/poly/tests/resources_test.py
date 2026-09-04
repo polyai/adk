@@ -106,7 +106,12 @@ from poly.resources.topic import (
 from poly.resources.transcript_correction import RegularExpressionRule, TranscriptCorrection
 from poly.resources.translations import Translation
 from poly.resources.variable import Variable
-from poly.resources.variant_attributes import Variant, VariantAttribute
+from poly.resources.variant_attributes import (
+    AttributeKind,
+    Variant,
+    VariantAttribute,
+    _read_attribute_type,
+)
 from poly.tests.testing_utils import mock_read_from_file, mock_variant_attributes_file
 
 TEST_CODE = """import random
@@ -1475,20 +1480,20 @@ class TopicTests(unittest.TestCase):
         topic_with_attr = Topic(
             resource_id="789",
             name="topic_with_attr",
-            actions="Check {{attr:attr-customer-name}} status",
+            actions="Check {{attr:attr-customer_name}} status",
             content="Attribute reference",
             example_queries=["Test query"],
         )
         with self.assertRaises(ValueError) as cm:
             topic_with_attr.validate(resource_mappings=[])
-        self.assertIn("Invalid references: ['attributes: attr-customer-name']", str(cm.exception))
+        self.assertIn("Invalid references: ['attributes: attr-customer_name']", str(cm.exception))
 
         valid_mapping = [
             ResourceMapping(
-                resource_id="attr-customer-name",
-                resource_name="customer-name",
+                resource_id="attr-customer_name",
+                resource_name="customer_name",
                 resource_type=VariantAttribute,
-                file_path="config/variant_attributes.yaml/variant_attributes/customer-name",
+                file_path="config/variant_attributes.yaml/variant_attributes/customer_name",
                 flow_name=None,
                 resource_prefix="attr",
             )
@@ -2336,10 +2341,10 @@ class VoiceDisclaimerMessageTests(unittest.TestCase):
         # Valid attr reference
         valid_attr_mapping = [
             ResourceMapping(
-                resource_id="attr-customer-name",
-                resource_name="customer-name",
+                resource_id="attr-customer_name",
+                resource_name="customer_name",
                 resource_type=VariantAttribute,
-                file_path="config/variant_attributes.yaml/variant_attributes/customer-name",
+                file_path="config/variant_attributes.yaml/variant_attributes/customer_name",
                 flow_name=None,
                 resource_prefix="attr",
             )
@@ -2347,7 +2352,7 @@ class VoiceDisclaimerMessageTests(unittest.TestCase):
         valid_attr_disclaimer = VoiceDisclaimerMessage(
             resource_id="disclaimer_123",
             name="disclaimer_message",
-            message="Your status is {{attr:attr-customer-name}}.",
+            message="Your status is {{attr:attr-customer_name}}.",
             enabled=True,
             language_code="en-GB",
         )
@@ -4970,8 +4975,8 @@ class SMSTemplateTests(unittest.TestCase):
 TEST_VARIANT = Variant(resource_id="VARIANT-default", name="default")
 TEST_VARIANT_DEFAULT = Variant(resource_id="VARIANT-default", name="default", is_default=True)
 TEST_VARIANT_ATTRIBUTE = VariantAttribute(
-    resource_id="attr-customer-name",
-    name="customer-name",
+    resource_id="attr-customer_name",
+    name="customer_name",
     mappings={"VARIANT-default": "value"},
 )
 
@@ -5123,7 +5128,7 @@ class VariantTests(unittest.TestCase):
         rejected. Variant updates must therefore never populate it.
         """
         variant = Variant(resource_id="VARIANT-default", name="default")
-        variant.attribute_ids = ["attr-customer-name"]
+        variant.attribute_ids = ["attr-customer_name"]
 
         proto = variant.build_update_proto()
 
@@ -5139,18 +5144,18 @@ class VariantAttributeTests(unittest.TestCase):
     def test_to_yaml_dict(self):
         """Test converting variant attribute to YAML dictionary."""
         yaml_dict = TEST_VARIANT_ATTRIBUTE.to_yaml_dict()
-        self.assertEqual(yaml_dict["name"], "customer-name")
+        self.assertEqual(yaml_dict["name"], "customer_name")
         self.assertEqual(yaml_dict["values"], {"VARIANT-default": "value"})
 
     def test_from_yaml(self):
         """Test creating variant attribute from YAML dictionary."""
         yaml_dict = {
-            "name": "email-address",
+            "name": "email_address",
             "values": {"VARIANT-default": "user@example.com"},
         }
-        attr = VariantAttribute.from_yaml_dict(yaml_dict, "attr-email-address")
-        self.assertEqual(attr.resource_id, "attr-email-address")
-        self.assertEqual(attr.name, "email-address")
+        attr = VariantAttribute.from_yaml_dict(yaml_dict, "attr-email_address")
+        self.assertEqual(attr.resource_id, "attr-email_address")
+        self.assertEqual(attr.name, "email_address")
         self.assertEqual(attr.mappings, {"VARIANT-default": "user@example.com"})
 
     def test_file_path(self):
@@ -5165,10 +5170,10 @@ class VariantAttributeTests(unittest.TestCase):
         test_file_content = """variants:
   - default
 attributes:
-  - name: customer-name
+  - name: customer_name
     values:
       VARIANT-default: ""
-  - name: email-address
+  - name: email_address
     values:
       VARIANT-default: ""
 """
@@ -5190,10 +5195,10 @@ attributes:
         test_file_content = """variants:
   - default
 attributes:
-  - name: customer-name
+  - name: customer_name
     values:
       VARIANT-default: "test value"
-  - name: email-address
+  - name: email_address
     values:
       VARIANT-default: ""
 """
@@ -5209,13 +5214,13 @@ attributes:
         with mock_variant_attributes_file(test_file_content):
             result = VariantAttribute.read_local_resource(
                 file_path="config/variant_attributes.yaml/attributes/customer_name",
-                resource_id="attr-customer-name",
-                resource_name="customer-name",
+                resource_id="attr-customer_name",
+                resource_name="customer_name",
                 resource_mappings=[variant_mapping],
             )
 
-        self.assertEqual(result.resource_id, "attr-customer-name")
-        self.assertEqual(result.name, "customer-name")
+        self.assertEqual(result.resource_id, "attr-customer_name")
+        self.assertEqual(result.name, "customer_name")
         self.assertEqual(result.mappings, {"VARIANT-default": "test value"})
 
     def test_validate_empty_name(self):
@@ -5233,7 +5238,7 @@ attributes:
         """Test validation fails when mappings are empty."""
         attr = VariantAttribute(
             resource_id="attr-test",
-            name="test-attr",
+            name="test_attr",
             mappings={},
         )
         variant_mapping = ResourceMapping(
@@ -5252,7 +5257,7 @@ attributes:
         """Test validation fails when attribute is missing values for some variants."""
         attr = VariantAttribute(
             resource_id="attr-test",
-            name="test-attr",
+            name="test_attr",
             mappings={"VARIANT-default": ""},
         )
         variant_mappings = [
@@ -5281,7 +5286,7 @@ attributes:
         """Test validation fails when attribute has values for unknown variants."""
         attr = VariantAttribute(
             resource_id="attr-test",
-            name="test-attr",
+            name="test_attr",
             mappings={"VARIANT-default": "", "VARIANT-unknown": ""},
         )
         variant_mapping = ResourceMapping(
@@ -5310,7 +5315,7 @@ attributes:
 
     def test_make_pretty_replaces_variant_ids_with_names(self):
         """Test make_pretty replaces variant IDs with names in values."""
-        raw_content = "name: customer-name\nvalues:\n  VARIANT-default: hello\n"
+        raw_content = "name: customer_name\nvalues:\n  VARIANT-default: hello\n"
         variant_mapping = ResourceMapping(
             resource_id="VARIANT-default",
             resource_type=Variant,
@@ -5328,7 +5333,7 @@ attributes:
 
     def test_from_pretty_replaces_variant_names_with_ids(self):
         """Test from_pretty replaces variant names with IDs in values."""
-        pretty_content = "name: customer-name\nvalues:\n  default: hello\n"
+        pretty_content = "name: customer_name\nvalues:\n  default: hello\n"
         variant_mapping = ResourceMapping(
             resource_id="VARIANT-default",
             resource_type=Variant,
@@ -5344,6 +5349,681 @@ attributes:
         self.assertIn("VARIANT-default:", raw)
         # Values dict should use variant ID as key, not name
         self.assertIn("VARIANT-default: hello", raw)
+
+
+class TypedVariantAttributeTests(unittest.TestCase):
+    """Tests for typed variant attributes (kind + config)."""
+
+    def setUp(self):
+        MultiResourceYamlResource._file_cache.clear()
+        self.variant_mapping = ResourceMapping(
+            resource_id="VARIANT-default",
+            resource_type=Variant,
+            resource_name="default",
+            file_path="",
+            flow_name=None,
+            resource_prefix=None,
+        )
+
+    @staticmethod
+    def _attribute(kind, value, config=None, name="test_attr"):
+        return VariantAttribute(
+            resource_id="attr-test",
+            name=name,
+            mappings={"VARIANT-default": value},
+            kind=kind,
+            config=config,
+        )
+
+    def test_defaults_to_string_kind(self):
+        """An attribute with no declared kind is a string attribute."""
+        attr = VariantAttribute.from_yaml_dict(
+            {"name": "greeting", "values": {"VARIANT-default": "hello"}}, "attr-greeting"
+        )
+        self.assertEqual(attr.kind, AttributeKind.STRING)
+        self.assertEqual(attr.config, {})
+
+    def test_string_attribute_omits_kind_from_yaml(self):
+        """A string attribute serializes exactly as it did before types existed."""
+        attr = self._attribute(AttributeKind.STRING, "hello")
+        self.assertEqual(
+            attr.to_yaml_dict(), {"name": "test_attr", "values": {"VARIANT-default": "hello"}}
+        )
+
+    def test_yaml_round_trip_preserves_kind_and_native_values(self):
+        """Each kind survives to_yaml_dict -> from_yaml_dict with its value's type intact."""
+        cases = [
+            (AttributeKind.NUMBER, 3, None),
+            (AttributeKind.NUMBER, 2.5, None),
+            (AttributeKind.BOOLEAN, True, None),
+            (AttributeKind.BOOLEAN, False, None),
+            (AttributeKind.ENUM, "premium", {"values": ["basic", "premium"]}),
+            (AttributeKind.OBJECT, {"currency": "USD"}, None),
+        ]
+        for kind, value, config in cases:
+            with self.subTest(kind=kind, value=value):
+                attr = self._attribute(kind, value, config)
+                yaml_dict = attr.to_yaml_dict()
+                self.assertEqual(yaml_dict["kind"], kind.value)
+
+                round_tripped = VariantAttribute.from_yaml_dict(yaml_dict, "attr-test")
+                self.assertEqual(round_tripped.kind, kind)
+                self.assertEqual(round_tripped.config, attr.config)
+                self.assertEqual(round_tripped.mappings["VARIANT-default"], value)
+
+    def test_unknown_kind_is_rejected(self):
+        """A kind that isn't one of the five is a validation error, not a silent string."""
+        with self.assertRaises(ValueError) as cm:
+            VariantAttribute.from_yaml_dict(
+                {"name": "x", "kind": "integer", "values": {}}, "attr-x"
+            )
+        self.assertIn("Unknown attribute kind 'integer'", str(cm.exception))
+
+    def test_whole_floats_collapse_to_int(self):
+        """3.0 off the wire matches 3 in YAML, so a typed number doesn't diff every push."""
+        attr = self._attribute(AttributeKind.NUMBER, 3.0)
+        self.assertEqual(attr.mappings["VARIANT-default"], 3)
+        self.assertNotIsInstance(attr.mappings["VARIANT-default"], float)
+        self.assertEqual(self._attribute(AttributeKind.NUMBER, 2.5).mappings["VARIANT-default"], 2.5)
+
+    def test_validate_accepts_matching_values(self):
+        """A value of the declared type passes validation."""
+        cases = [
+            (AttributeKind.STRING, "hello", None),
+            (AttributeKind.NUMBER, 3, None),
+            (AttributeKind.NUMBER, 2.5, None),
+            (AttributeKind.BOOLEAN, False, None),
+            (AttributeKind.ENUM, "basic", {"values": ["basic", "premium"]}),
+            (AttributeKind.OBJECT, {"a": 1}, None),
+            (AttributeKind.OBJECT, [1, 2], None),
+        ]
+        for kind, value, config in cases:
+            with self.subTest(kind=kind, value=value):
+                attr = self._attribute(kind, value, config)
+                self.assertIsNone(attr.validate(resource_mappings=[self.variant_mapping]))
+
+    def test_validate_rejects_mismatched_values(self):
+        """A value of the wrong type fails validation, naming the variant it came from."""
+        cases = [
+            (AttributeKind.NUMBER, "banana", None),
+            # bool is an int subclass in Python, but is not a number here.
+            (AttributeKind.NUMBER, True, None),
+            (AttributeKind.BOOLEAN, "yes", None),
+            (AttributeKind.BOOLEAN, 1, None),
+            (AttributeKind.ENUM, "gold", {"values": ["basic", "premium"]}),
+            (AttributeKind.OBJECT, "not an object", None),
+            # The platform checks Number.isFinite, and neither survives JSON.
+            (AttributeKind.NUMBER, float("inf"), None),
+            (AttributeKind.NUMBER, float("nan"), None),
+        ]
+        for kind, value, config in cases:
+            with self.subTest(kind=kind, value=value):
+                attr = self._attribute(kind, value, config)
+                with self.assertRaises(ValueError) as cm:
+                    attr.validate(resource_mappings=[self.variant_mapping])
+                self.assertIn("does not match the declared type", str(cm.exception))
+                self.assertIn("default", str(cm.exception))
+
+    def test_validate_accepts_unset_value_for_every_kind(self):
+        """A blank value means "not set yet" and is valid for every kind."""
+        for kind in AttributeKind:
+            for unset in (None, ""):
+                with self.subTest(kind=kind, unset=unset):
+                    config = {"values": ["basic"]} if kind == AttributeKind.ENUM else None
+                    attr = self._attribute(kind, unset, config)
+                    self.assertIsNone(attr.validate(resource_mappings=[self.variant_mapping]))
+
+    def test_validate_rejects_malformed_enum_config(self):
+        """An enum needs a non-empty list of unique string values."""
+        cases = [
+            (None, "non-empty 'config.values' list"),
+            ({"values": []}, "non-empty 'config.values' list"),
+            ({"values": "basic"}, "non-empty 'config.values' list"),
+            ({"values": [1, 2]}, "Enum values must be strings"),
+            ({"values": ["a", "a"]}, "Duplicate enum values"),
+        ]
+        for config, message in cases:
+            with self.subTest(config=config):
+                attr = self._attribute(AttributeKind.ENUM, None, config)
+                with self.assertRaises(ValueError) as cm:
+                    attr.validate(resource_mappings=[self.variant_mapping])
+                self.assertIn(message, str(cm.exception))
+
+    def test_string_values_that_look_like_scalars_stay_strings(self):
+        """A string attribute holding "3" or "true" must not be re-read as a number or bool.
+
+        Otherwise every project with a numeric-looking ID or phone number would start
+        failing type validation the first time it round-tripped through YAML.
+        """
+        values = {
+            "VARIANT-default": "3",
+            "VARIANT-b": "true",
+            "VARIANT-c": "+12125551234",
+            "VARIANT-d": "0123",
+            "VARIANT-e": "1.0",
+        }
+        attr = VariantAttribute(resource_id="attr-test", name="test_attr", mappings=values)
+
+        read_back = VariantAttribute.from_yaml_dict(
+            resource_utils.load_yaml(resource_utils.dump_yaml(attr.to_yaml_dict())), "attr-test"
+        )
+
+        self.assertEqual(read_back.mappings, values)
+        for value in read_back.mappings.values():
+            self.assertIsInstance(value, str)
+
+    def test_empty_values_key_reaches_validation(self):
+        """`values:` with nothing under it parses as None, and must not crash the pretty path."""
+        self.assertEqual(
+            VariantAttribute.make_pretty("name: x\nvalues:\n", resource_mappings=[]).strip(),
+            "name: x\nvalues: {}",
+        )
+        attr = VariantAttribute.from_yaml_dict({"name": "x", "values": None}, "attr-x")
+        with self.assertRaises(ValueError) as cm:
+            attr.validate(resource_mappings=[self.variant_mapping])
+        self.assertIn("Mappings are required", str(cm.exception))
+
+    def test_validate_rejects_a_name_the_platform_would_reject(self):
+        """Attribute names are read as `conv.variant.<name>`, so they must be identifiers.
+
+        The platform rejects these with a ZodValidationError on push; catching it here
+        names the attribute and the rule instead.
+        """
+        for name, expected in [
+            ("customer-name", "valid Python identifier"),
+            ("1st_choice", "valid Python identifier"),
+            ("has space", "valid Python identifier"),
+            ("café", "valid Python identifier"),
+            ("class", "reserved word"),
+            ("lambda", "reserved word"),
+        ]:
+            with self.subTest(name=name):
+                attr = self._attribute(AttributeKind.STRING, "x", name=name)
+                with self.assertRaises(ValueError) as cm:
+                    attr.validate(resource_mappings=[self.variant_mapping])
+                self.assertIn(expected, str(cm.exception))
+
+    def test_validate_accepts_identifier_names(self):
+        """Anything Python would accept as a plain ASCII identifier is fine."""
+        for name in ("customer_name", "_private", "x1", "lambda_ok", "CamelCase"):
+            with self.subTest(name=name):
+                attr = self._attribute(AttributeKind.STRING, "x", name=name)
+                self.assertIsNone(attr.validate(resource_mappings=[self.variant_mapping]))
+
+    def test_validate_rejects_config_on_a_kind_that_takes_none(self):
+        """Only enum takes a config; a config anywhere else is a mistake worth surfacing."""
+        attr = self._attribute(AttributeKind.NUMBER, 3, {"values": ["a"]})
+        with self.assertRaises(ValueError) as cm:
+            attr.validate(resource_mappings=[self.variant_mapping])
+        self.assertIn("does not take a config", str(cm.exception))
+
+    def test_build_create_proto_dual_writes_values(self):
+        """A typed attribute writes both the stringified legacy map and the native one."""
+        attr = self._attribute(AttributeKind.NUMBER, 3)
+        proto = attr.build_create_proto()
+
+        self.assertEqual(proto.type.kind, 1)
+        self.assertEqual(dict(proto.variant_values.values), {"VARIANT-default": "3"})
+        self.assertEqual(dict(proto.variant_values.typed_values), {"VARIANT-default": 3})
+
+    def test_build_proto_stringifies_each_kind_for_legacy_readers(self):
+        """The legacy string map mirrors the platform's stringifyValue."""
+        cases = [
+            (AttributeKind.BOOLEAN, True, None, "true"),
+            (AttributeKind.BOOLEAN, False, None, "false"),
+            (AttributeKind.NUMBER, 2.5, None, "2.5"),
+            (AttributeKind.ENUM, "basic", {"values": ["basic"]}, "basic"),
+            (AttributeKind.OBJECT, {"a": 1}, None, '{"a":1}'),
+            (AttributeKind.NUMBER, None, None, ""),
+        ]
+        for kind, value, config, expected in cases:
+            with self.subTest(kind=kind, value=value):
+                proto = self._attribute(kind, value, config).build_create_proto()
+                self.assertEqual(dict(proto.variant_values.values), {"VARIANT-default": expected})
+
+    def test_build_create_proto_carries_enum_config(self):
+        """An enum's allowed values reach the wire so the backend can validate against them."""
+        attr = self._attribute(AttributeKind.ENUM, "premium", {"values": ["basic", "premium"]})
+        proto = attr.build_create_proto()
+
+        self.assertEqual(proto.type.kind, 3)
+        self.assertEqual(list(proto.type.enum_config.values), ["basic", "premium"])
+
+    def test_string_attribute_writes_no_typed_values(self):
+        """A string attribute sends exactly what it always sent."""
+        proto = self._attribute(AttributeKind.STRING, "hello").build_create_proto()
+
+        self.assertEqual(proto.type.kind, 0)
+        self.assertEqual(dict(proto.variant_values.values), {"VARIANT-default": "hello"})
+        self.assertFalse(proto.variant_values.HasField("typed_values"))
+
+    def test_update_proto_carries_type_and_values(self):
+        """An update pushes the declared type alongside the values."""
+        attr = self._attribute(AttributeKind.BOOLEAN, True)
+        proto = attr.build_update_proto()
+
+        self.assertEqual(proto.type.kind, 2)
+        self.assertEqual(dict(proto.variant_values.values), {"VARIANT-default": "true"})
+        self.assertEqual(dict(proto.variant_values.typed_values), {"VARIANT-default": True})
+
+
+class TypedVariantAttributeYamlTests(unittest.TestCase):
+    """Tests for how typed values are written to and read back from YAML."""
+
+    ALL_KINDS = [
+        (AttributeKind.STRING, "hello", None),
+        (AttributeKind.NUMBER, 3, None),
+        (AttributeKind.NUMBER, 2.5, None),
+        (AttributeKind.BOOLEAN, True, None),
+        (AttributeKind.BOOLEAN, False, None),
+        (AttributeKind.ENUM, "premium", {"values": ["basic", "premium"]}),
+        (AttributeKind.OBJECT, {"a": [1, 2]}, None),
+        (AttributeKind.NUMBER, None, None),
+    ]
+
+    @staticmethod
+    def _attribute(kind, value, config):
+        return VariantAttribute(
+            resource_id="attr-test",
+            name="test_attr",
+            mappings={"VARIANT-default": value},
+            kind=kind,
+            config=config,
+        )
+
+    def test_values_are_written_in_their_declared_type(self):
+        """A number is written as a number, not as text."""
+        for kind, value, config in self.ALL_KINDS:
+            with self.subTest(kind=kind, value=value):
+                written = self._attribute(kind, value, config).to_yaml_dict()["values"]
+                self.assertEqual(written["VARIANT-default"], value)
+
+    def test_round_trip_through_yaml_preserves_every_kind(self):
+        """Dump then load gives back the same native value and the same hash."""
+        for kind, value, config in self.ALL_KINDS:
+            with self.subTest(kind=kind, value=value):
+                attribute = self._attribute(kind, value, config)
+                read_back = VariantAttribute.from_yaml_dict(
+                    resource_utils.load_yaml(
+                        resource_utils.dump_yaml(attribute.to_yaml_dict())
+                    ),
+                    "attr-test",
+                )
+                self.assertEqual(read_back.mappings, attribute.mappings)
+                self.assertEqual(read_back.kind, attribute.kind)
+                self.assertEqual(read_back.compute_hash(), attribute.compute_hash())
+
+    def test_quoted_values_are_still_accepted(self):
+        """A hand-written or legacy quoted value reads as its declared type."""
+        cases = [
+            (AttributeKind.NUMBER, "3", None, 3),
+            (AttributeKind.NUMBER, 3, None, 3),
+            (AttributeKind.BOOLEAN, "true", None, True),
+            (AttributeKind.BOOLEAN, True, None, True),
+            (AttributeKind.OBJECT, '{"a":1}', None, {"a": 1}),
+            (AttributeKind.OBJECT, {"a": 1}, None, {"a": 1}),
+            # An unquoted scalar under a string attribute reads as its text rather
+            # than failing validation for being a number.
+            (AttributeKind.STRING, 8080, None, "8080"),
+        ]
+        for kind, written, config, expected in cases:
+            with self.subTest(kind=kind, written=written):
+                attribute = VariantAttribute.from_yaml_dict(
+                    {
+                        "name": "x",
+                        "kind": kind.value,
+                        "config": config,
+                        "values": {"VARIANT-default": written},
+                    },
+                    "attr-x",
+                )
+                self.assertEqual(attribute.mappings["VARIANT-default"], expected)
+
+    def test_both_spellings_hash_the_same(self):
+        """`3` and `"3"` are the same attribute, so neither shows as a diff."""
+        native = VariantAttribute.from_yaml_dict(
+            {"name": "x", "kind": "number", "values": {"v": 3}}, "attr-x"
+        )
+        quoted = VariantAttribute.from_yaml_dict(
+            {"name": "x", "kind": "number", "values": {"v": "3"}}, "attr-x"
+        )
+        self.assertEqual(native.compute_hash(), quoted.compute_hash())
+
+    def test_string_values_that_look_like_scalars_stay_strings(self):
+        """A string attribute holding "3" or "true" must not be re-read as a number or bool.
+
+        Otherwise every project with a numeric-looking ID or phone number would start
+        failing type validation the first time it round-tripped through YAML.
+        """
+        values = {
+            "VARIANT-default": "3",
+            "VARIANT-b": "true",
+            "VARIANT-c": "+12125551234",
+            "VARIANT-d": "0123",
+            "VARIANT-e": "1.0",
+        }
+        attribute = VariantAttribute(
+            resource_id="attr-test", name="test_attr", mappings=values
+        )
+
+        read_back = VariantAttribute.from_yaml_dict(
+            resource_utils.load_yaml(resource_utils.dump_yaml(attribute.to_yaml_dict())),
+            "attr-test",
+        )
+
+        self.assertEqual(read_back.mappings, values)
+        for value in read_back.mappings.values():
+            self.assertIsInstance(value, str)
+
+    def test_an_untyped_attribute_is_written_exactly_as_before(self):
+        """A project that never adopts a type sees no change to its file at all."""
+        attribute = VariantAttribute(
+            resource_id="attr-test",
+            name="office_phone",
+            mappings={"VARIANT-default": "+12125551234", "VARIANT-b": ""},
+        )
+        self.assertEqual(
+            attribute.to_yaml_dict(),
+            {
+                "name": "office_phone",
+                "values": {"VARIANT-default": "+12125551234", "VARIANT-b": ""},
+            },
+        )
+
+
+class TypedVariantAttributeProjectionTests(unittest.TestCase):
+    """Tests for reading typed variant attributes out of a projection."""
+
+    variant_mapping = ResourceMapping(
+        resource_id="VARIANT-default",
+        resource_type=Variant,
+        resource_name="default",
+        file_path="",
+        flow_name=None,
+        resource_prefix=None,
+    )
+
+    @staticmethod
+    def _projection(attribute_type, values, typed_values=None):
+        variant_values = {"id": "VARIANT-default", "values": values}
+        if typed_values is not None:
+            variant_values["typedValues"] = typed_values
+        attribute = {"name": "test_attr", "archived": False}
+        if attribute_type is not None:
+            attribute["type"] = attribute_type
+        return {
+            "variantManagement": {
+                "attributes": {"entities": {"attr-test": attribute}},
+                "variantAttributeValues": {"entities": {"VARIANT-default": variant_values}},
+            }
+        }
+
+    def test_untyped_attribute_reads_as_string(self):
+        """An attribute that predates types carries the schema's default and reads as STRING.
+
+        `type` is never actually absent from a projection — the API schema defaults it to
+        `{kind: STRING}`, which is also why `from_projection` can use a missing `type` as
+        its auth-filtered sentinel. So a pre-types attribute arrives as kind 0, not as no
+        type at all.
+        """
+        attributes = VariantAttribute.from_projection(
+            self._projection({"kind": 0}, {"attr-test": "hello"})
+        )
+        attribute = attributes["attr-test"]
+        self.assertEqual(attribute.kind, AttributeKind.STRING)
+        self.assertEqual(attribute.mappings, {"VARIANT-default": "hello"})
+
+    def test_attribute_with_no_type_is_withheld_not_untyped(self):
+        """A missing `type` means auth-filtered, so the attribute is stubbed for references.
+
+        Pins the boundary between this change and the auth-filtering in #299/#300: a
+        missing `type` must not be read as "untyped", or a withheld attribute would come
+        back as an empty STRING one and get pushed as a real edit.
+        """
+        attributes = VariantAttribute.from_projection(
+            self._projection(None, {"attr-test": "hello"})
+        )
+        attribute = attributes["attr-test"]
+        self.assertTrue(attribute.slim)
+        self.assertEqual(attribute.mappings, {})
+
+    def test_read_attribute_type_defaults_to_string(self):
+        """The parser itself still tolerates a missing or malformed type."""
+        for type_data in (None, {}, "nonsense"):
+            with self.subTest(type_data=type_data):
+                self.assertEqual(
+                    _read_attribute_type(type_data), (AttributeKind.STRING, {})
+                )
+
+    def test_stale_enum_config_is_dropped_when_the_kind_is_not_enum(self):
+        """Changing an attribute away from enum leaves its old config on the platform.
+
+        The kind is what the attribute is; a config that no longer belongs to it is
+        stale data. Reading it back would write a config the kind can't have into the
+        YAML, and the next push would fail its own validation.
+        """
+        for kind in (0, 1, 2, 4):
+            with self.subTest(kind=kind):
+                attributes = VariantAttribute.from_projection(
+                    self._projection(
+                        {
+                            "kind": kind,
+                            "config": {
+                                "$case": "enumConfig",
+                                "value": {"values": ["basic", "premium"]},
+                            },
+                        },
+                        {"attr-test": ""},
+                    )
+                )
+                attribute = attributes["attr-test"]
+                self.assertEqual(attribute.config, {})
+                self.assertNotIn("config", attribute.to_yaml_dict())
+                self.assertIsNone(attribute.validate(resource_mappings=[self.variant_mapping]))
+
+    def test_enum_config_is_still_read_for_an_enum(self):
+        """The drop above must not take the config an enum actually needs with it."""
+        attributes = VariantAttribute.from_projection(
+            self._projection(
+                {
+                    "kind": 3,
+                    "config": {"$case": "enumConfig", "value": {"values": ["basic"]}},
+                },
+                {"attr-test": "basic"},
+            )
+        )
+        self.assertEqual(attributes["attr-test"].config, {"values": ["basic"]})
+        self.assertEqual(attributes["attr-test"].enum_values, ["basic"])
+
+    def test_kind_is_read_from_either_spelling(self):
+        """`kind` is numeric on the wire, but a written-out token is accepted too."""
+        for raw_kind in (3, "enum", "ENUM", "ATTRIBUTE_KIND_ENUM"):
+            with self.subTest(raw_kind=raw_kind):
+                kind, _ = _read_attribute_type({"kind": raw_kind})
+                self.assertEqual(kind, AttributeKind.ENUM)
+
+    def test_unknown_kind_falls_back_instead_of_failing_the_pull(self):
+        """An unrecognised kind reads as string, whichever way it is spelled.
+
+        Both spellings have to degrade the same way: a pull covers every attribute in
+        the project, so raising here would fail the whole pull over one odd value —
+        the crash-on-odd-projection-data that #299 removed from this read path.
+        """
+        for raw_kind in (99, -1, "garbage", "ATTRIBUTE_KIND_NONSENSE", ""):
+            with self.subTest(raw_kind=raw_kind):
+                self.assertEqual(
+                    _read_attribute_type({"kind": raw_kind}), (AttributeKind.STRING, {})
+                )
+
+    def test_typed_values_win_over_the_legacy_string_map(self):
+        """The native value is the source of truth when the two disagree."""
+        attributes = VariantAttribute.from_projection(
+            self._projection({"kind": 1}, {"attr-test": "3"}, {"attr-test": 7})
+        )
+        attribute = attributes["attr-test"]
+        self.assertEqual(attribute.kind, AttributeKind.NUMBER)
+        self.assertEqual(attribute.mappings, {"VARIANT-default": 7})
+
+    def test_falls_back_to_the_string_map_when_typed_values_are_malformed(self):
+        """A typedValues that isn't a mapping is discarded rather than merged.
+
+        The fallback still reads as its declared kind — the legacy string map is the
+        only place a pre-types project ever stored a value.
+        """
+        attributes = VariantAttribute.from_projection(
+            self._projection({"kind": 1}, {"attr-test": "3"}, ["not", "a", "mapping"])
+        )
+        self.assertEqual(attributes["attr-test"].mappings, {"VARIANT-default": 3})
+
+    def test_legacy_values_parse_against_the_declared_kind(self):
+        """An attribute typed in the UI but never re-saved has values only in the string map."""
+        cases = [
+            ({"kind": 1}, "3", 3),
+            ({"kind": 1}, "2.5", 2.5),
+            ({"kind": 2}, "true", True),
+            ({"kind": 2}, "false", False),
+            ({"kind": 4}, '{"a":1}', {"a": 1}),
+        ]
+        for attribute_type, stored, expected in cases:
+            with self.subTest(stored=stored):
+                attributes = VariantAttribute.from_projection(
+                    self._projection(attribute_type, {"attr-test": stored})
+                )
+                self.assertEqual(attributes["attr-test"].mappings["VARIANT-default"], expected)
+
+    def test_reads_every_kind(self):
+        """Each proto ordinal maps to its kind."""
+        for ordinal, kind in enumerate(
+            [
+                AttributeKind.STRING,
+                AttributeKind.NUMBER,
+                AttributeKind.BOOLEAN,
+                AttributeKind.ENUM,
+                AttributeKind.OBJECT,
+            ]
+        ):
+            with self.subTest(kind=kind):
+                attributes = VariantAttribute.from_projection(
+                    self._projection({"kind": ordinal}, {"attr-test": ""})
+                )
+                self.assertEqual(attributes["attr-test"].kind, kind)
+
+    def test_reads_enum_config_from_the_oneof_wrapper(self):
+        """Projections wrap the config oneof the way ts-proto does; it is flattened here."""
+        attributes = VariantAttribute.from_projection(
+            self._projection(
+                {"kind": 3, "config": {"$case": "enumConfig", "value": {"values": ["a", "b"]}}},
+                {"attr-test": "a"},
+            )
+        )
+        attribute = attributes["attr-test"]
+        self.assertEqual(attribute.kind, AttributeKind.ENUM)
+        self.assertEqual(attribute.config, {"values": ["a", "b"]})
+        self.assertEqual(attribute.enum_values, ["a", "b"])
+
+    def test_reads_a_kind_given_as_a_token(self):
+        """A token kind is accepted rather than silently read as STRING."""
+        for token in ("ENUM", "enum", "ATTRIBUTE_KIND_ENUM"):
+            with self.subTest(token=token):
+                attributes = VariantAttribute.from_projection(
+                    self._projection(
+                        {"kind": token, "enumConfig": {"values": ["a"]}}, {"attr-test": "a"}
+                    )
+                )
+                self.assertEqual(attributes["attr-test"].kind, AttributeKind.ENUM)
+
+    def test_reads_enum_config_set_directly(self):
+        """An older payload that sets the oneof member directly is still understood."""
+        attributes = VariantAttribute.from_projection(
+            self._projection({"kind": 3, "enumConfig": {"values": ["a"]}}, {"attr-test": "a"})
+        )
+        self.assertEqual(attributes["attr-test"].config, {"values": ["a"]})
+
+    def test_whole_numbers_off_the_wire_stay_ints(self):
+        """A Struct holds every number as a double; 3.0 must read back as 3."""
+        attributes = VariantAttribute.from_projection(
+            self._projection({"kind": 1}, {"attr-test": "3"}, {"attr-test": 3.0})
+        )
+        self.assertEqual(attributes["attr-test"].mappings["VARIANT-default"], 3)
+
+    def test_save_and_read_round_trips_every_kind_through_a_real_file(self):
+        """Every kind survives save -> disk -> read_local_resource with its type intact."""
+        import tempfile
+
+        mapping = ResourceMapping(
+            resource_id="VARIANT-default",
+            resource_type=Variant,
+            resource_name="default",
+            file_path="",
+            flow_name=None,
+            resource_prefix=None,
+        )
+        attributes = [
+            VariantAttribute(
+                resource_id="attr-retries",
+                name="max_retries",
+                mappings={"VARIANT-default": 3},
+                kind=AttributeKind.NUMBER,
+            ),
+            VariantAttribute(
+                resource_id="attr-alcohol",
+                name="serves_alcohol",
+                mappings={"VARIANT-default": True},
+                kind=AttributeKind.BOOLEAN,
+            ),
+            VariantAttribute(
+                resource_id="attr-tier",
+                name="tier",
+                mappings={"VARIANT-default": "premium"},
+                kind=AttributeKind.ENUM,
+                config={"values": ["basic", "premium"]},
+            ),
+            VariantAttribute(
+                resource_id="attr-menu",
+                name="menu",
+                mappings={"VARIANT-default": {"categories": ["pizza"], "currency": "USD"}},
+                kind=AttributeKind.OBJECT,
+            ),
+            VariantAttribute(
+                resource_id="attr-greeting",
+                name="greeting",
+                mappings={"VARIANT-default": "hello"},
+            ),
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            MultiResourceYamlResource._file_cache.clear()
+            for attribute in attributes:
+                attribute.save(tmpdir, resource_mappings=[mapping])
+
+            MultiResourceYamlResource._file_cache.clear()
+            for attribute in attributes:
+                with self.subTest(kind=attribute.kind):
+                    read_back = VariantAttribute.read_local_resource(
+                        file_path=os.path.join(tmpdir, attribute.file_path),
+                        resource_id=attribute.resource_id,
+                        resource_name=attribute.name,
+                        resource_mappings=[mapping],
+                    )
+                    self.assertEqual(read_back.kind, attribute.kind)
+                    self.assertEqual(read_back.mappings, attribute.mappings)
+                    self.assertEqual(read_back.config, attribute.config)
+                    # Equal hashes mean a pulled project shows no phantom diff on status.
+                    self.assertEqual(read_back.compute_hash(), attribute.compute_hash())
+                    read_back.validate(resource_mappings=[mapping])
+
+    def test_projection_round_trips_through_yaml_without_diffing(self):
+        """A typed attribute pulled and re-read produces the same hash, so status stays clean."""
+        attributes = VariantAttribute.from_projection(
+            self._projection(
+                {"kind": 3, "config": {"$case": "enumConfig", "value": {"values": ["a", "b"]}}},
+                {"attr-test": "a"},
+                {"attr-test": "a"},
+            )
+        )
+        pulled = attributes["attr-test"]
+        reloaded = VariantAttribute.from_yaml_dict(pulled.to_yaml_dict(), "attr-test")
+        self.assertEqual(pulled.compute_hash(), reloaded.compute_hash())
 
 
 class MultiResourceYamlResourceCacheTests(unittest.TestCase):
