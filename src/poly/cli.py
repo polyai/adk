@@ -30,6 +30,7 @@ from poly.cli_commands.functions import FunctionsCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand, StudioCommand
 from poly.cli_commands.review import ReviewCommand
 from poly.cli_commands.rtc import RTCCommand
+from poly.cli_commands.sip_trunks import SIPTrunksCommand
 from poly.cli_commands.sync import (
     DiffCommand,
     FetchCommand,
@@ -71,6 +72,7 @@ COMMANDS = [
     FunctionsCommand,
     TestingCommand,
     RTCCommand,
+    SIPTrunksCommand,
     ChatCommand,
     DocsCommand,
     CompletionCommand,
