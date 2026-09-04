@@ -4,9 +4,11 @@ Copyright PolyAI Limited
 """
 
 import json
+import keyword
 import logging
 import math
 import os
+import re
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, ClassVar
@@ -41,8 +43,6 @@ class AttributeKind(str, Enum):
     OBJECT = "object"
 
 
-# Ordinal mapping for the proto AttributeKind enum, which projections send as a raw int
-# rather than the string values used in YAML.
 ATTRIBUTE_KIND_FROM_PROTO_INT: dict[int, AttributeKind] = {
     0: AttributeKind.STRING,
     1: AttributeKind.NUMBER,
@@ -57,27 +57,17 @@ ATTRIBUTE_KIND_TO_PROTO_INT: dict[AttributeKind, int] = {
 
 
 def _normalise_number(value: Any) -> Any:
-    """Collapse whole floats to int so YAML and the platform agree on `3` vs `3.0`.
-
-    Values cross the wire in a protobuf Struct, which holds every number as a double.
-    Without this, an attribute written as `3` locally would read back as `3.0` and show
-    up as a phantom diff on every status/push.
-    """
+    """Collapse whole floats to int, so a Struct's `3.0` doesn't diff against `3`."""
     if isinstance(value, float) and value.is_integer():
         return int(value)
     return value
 
 
 def parse_attribute_value(value: Any, kind: "AttributeKind", enum_values: list[str]) -> Any:
-    """Coerce a value read from YAML or a projection into its declared native type.
+    """Coerce a value into its declared native type, mirroring `parseValueForKind`.
 
-    Mirrors the platform's `parseValueForKind`. Values are stored as strings on disk
-    (see `to_yaml_dict`), so this is the inverse of `stringify_attribute_value` — but a
-    value that is already native is passed straight through, so a hand-written `3` or
-    `true` works as naturally as the quoted form ADK writes.
-
-    A value that cannot be read as its kind is returned untouched rather than raising,
-    so `validate` can report it against its variant instead of blowing up mid-parse.
+    A value that can't be read as its kind is returned untouched, so `validate` reports
+    it against its variant rather than this raising mid-parse.
     """
     if isinstance(value, str):
         value = value.strip()
@@ -94,7 +84,6 @@ def parse_attribute_value(value: Any, kind: "AttributeKind", enum_values: list[s
                 parsed = float(value)
             except (TypeError, ValueError):
                 return value
-            # Reject nan/inf: their JSON form is null, so they would not round-trip.
             return _normalise_number(parsed) if math.isfinite(parsed) else value
         case AttributeKind.BOOLEAN:
             if isinstance(value, bool):
@@ -111,29 +100,21 @@ def parse_attribute_value(value: Any, kind: "AttributeKind", enum_values: list[s
                 return value
             return parsed if isinstance(parsed, (dict, list)) else value
         case _:
-            # STRING and ENUM are both stored as-is; an unquoted scalar becomes its
-            # text so an older or hand-written file reads without complaint.
             if isinstance(value, bool) or isinstance(value, (int, float)):
                 return stringify_attribute_value(value)
             return value
 
 
 def is_unset_attribute_value(value: Any) -> bool:
-    """Whether a stored attribute value means "unset".
+    """Whether a value means "unset", mirroring `isUnsetVariantValue`.
 
-    Mirrors the platform's `isUnsetVariantValue`: `''` is the legacy marker written into
-    the string `values` map, `None` the one written into `typed_values` for a typed
-    attribute. Both mean the author has not given this variant a value.
+    `''` is the marker in the string map, `None` the one in `typed_values`.
     """
     return value is None or value == ""
 
 
 def stringify_attribute_value(value: Any) -> str:
-    """Stringify a native value for the legacy `values` map.
-
-    Mirrors the platform's `stringifyValue`: objects and lists are JSON, everything
-    else is `str(value)`, and unset is the empty string.
-    """
+    """Stringify a native value for the legacy `values` map, mirroring `stringifyValue`."""
     if value is None:
         return ""
     if isinstance(value, bool):
@@ -141,6 +122,24 @@ def stringify_attribute_value(value: Any) -> str:
     if isinstance(value, (dict, list)):
         return json.dumps(value, separators=(",", ":"))
     return str(value)
+
+
+# Not str.isidentifier(): that accepts non-ASCII names the platform's regex rejects.
+_PYTHONIC_NAME = re.compile(r"[a-zA-Z_][a-zA-Z0-9_]*")
+
+
+def _validate_attribute_name(name: str) -> None:
+    """Reject a name the platform would reject on push.
+
+    Names are read as `conv.variant.<name>`, so they must be Python identifiers.
+    """
+    if not _PYTHONIC_NAME.fullmatch(name):
+        raise ValueError(
+            f"Attribute name '{name}' must be a valid Python identifier: a letter or "
+            "underscore followed by letters, digits or underscores"
+        )
+    if keyword.iskeyword(name):
+        raise ValueError(f"Attribute name '{name}' is a reserved word in Python")
 
 
 def _build_struct(values: dict[str, Any]) -> Struct:
@@ -151,10 +150,9 @@ def _build_struct(values: dict[str, Any]) -> Struct:
 
 
 def _merge_variant_values(variant_attribute_values: dict) -> dict[str, Any]:
-    """Merge one variant's legacy string values with its native `typedValues`.
+    """Merge a variant's string values with its `typedValues`, per `safeMergeVariantValues`.
 
-    Mirrors the platform's `safeMergeVariantValues`: the native value wins per key, but
-    a `typedValues` that is not a mapping (corrupted or pre-typed data) is discarded
+    The native value wins per key. A `typedValues` that isn't a mapping is discarded
     rather than merged, since spreading it would silently produce a partial result.
     """
     values = variant_attribute_values.get("values") or {}
@@ -167,21 +165,15 @@ def _merge_variant_values(variant_attribute_values: dict) -> dict[str, Any]:
 def _read_attribute_type(type_data: dict | None) -> tuple[AttributeKind, dict]:
     """Parse an attribute's declared type out of a projection.
 
-    Returns the kind and its flattened config. Projections carry `kind` as the proto
-    ordinal and wrap the `config` oneof the way ts-proto does — `{"$case": "enumConfig",
-    "value": {...}}` — which is flattened here to the plain config dict used in YAML.
-    Data written before typed attributes existed has no `type` at all and reads as STRING.
+    ts-proto wraps the `config` oneof as `{"$case": ..., "value": {...}}`; this returns
+    the flattened config used in YAML. A missing `type` reads as STRING.
     """
     if not isinstance(type_data, dict):
         return AttributeKind.STRING, {}
 
     raw_kind = type_data.get("kind", 0)
     if isinstance(raw_kind, str):
-        # The platform keeps `kind` numeric end to end; a token is only ever seen from
-        # a hand-written or legacy payload. Accept it rather than silently reading an
-        # ENUM as a STRING, which would drop the type on the next push. An unrecognised
-        # token falls back like an unrecognised ordinal does — one odd attribute must
-        # not fail the whole pull, which is the tolerance #299 established here.
+        # A token only turns up in hand-written data; an unknown one must not fail the pull.
         try:
             kind = AttributeKind(raw_kind.removeprefix("ATTRIBUTE_KIND_").strip().lower())
         except ValueError:
@@ -190,9 +182,13 @@ def _read_attribute_type(type_data: dict | None) -> tuple[AttributeKind, dict]:
     else:
         kind = ATTRIBUTE_KIND_FROM_PROTO_INT.get(raw_kind, AttributeKind.STRING)
 
+    # Changing an attribute away from enum leaves its enum_config on the platform.
+    # Reading that back would give a kind a config it can't have, failing the next push.
+    if kind != AttributeKind.ENUM:
+        return kind, {}
+
     config = type_data.get("config")
     if isinstance(config, dict):
-        # ts-proto oneof wrapper; older payloads set the member directly.
         config = config.get("value", config)
     if not isinstance(config, dict):
         config = type_data.get("enum_config") or type_data.get("enumConfig") or {}
@@ -207,9 +203,7 @@ class Variant(MultiResourceYamlResource):
 
     is_default: bool = False
     top_level_name: ClassVar[str] = "variants"
-    # Seed values for the attributes a newly created variant must carry, as
-    # {attribute_id: unset marker}. Filled in at push time by
-    # prepush.default_new_variant_attributes; never read from or written to YAML.
+    # Push-time only, set by prepush.default_new_variant_attributes. Never in YAML.
     attribute_values: dict[str, Any] = field(default_factory=dict, repr=False, init=False)
 
     def __init__(
@@ -310,10 +304,7 @@ class Variant(MultiResourceYamlResource):
         )
 
     def build_create_proto(self) -> Variant_CreateVariant:
-        # A new variant must carry an entry for every attribute, but has no values of
-        # its own yet — the real values arrive with the attribute updates that follow.
-        # A typed attribute cannot hold "", so its seed is a native null in
-        # typed_values; the string map keeps "" so legacy readers see what they always did.
+        # Every attribute needs an entry; a typed one can't hold "", so it seeds null.
         typed_seeds = {
             attribute_id: value
             for attribute_id, value in self.attribute_values.items()
@@ -417,22 +408,11 @@ class VariantAttribute(MultiResourceYamlResource):
 
     def to_yaml_dict(self) -> dict:
         yaml_dict: dict[str, Any] = {"name": self.name}
-        # An untyped attribute is a string one, so a STRING attribute is left
-        # un-annotated: `kind: string` carries no information, and writing it would
-        # rewrite the file for every project that has never used a type.
         if self.kind != AttributeKind.STRING:
             yaml_dict["kind"] = self.kind.value
         if self.config:
             yaml_dict["config"] = dict(self.config)
-        # Values are written as strings — the same strings the platform keeps in its
-        # legacy `values` map, with `kind` saying how to read them. Writing them
-        # natively would be prettier, but an ADK released before typed attributes
-        # calls .strip() on every value and would die on an int, bool or nested map
-        # the moment it read a file a newer ADK had written.
-        yaml_dict["values"] = {
-            variant_id: stringify_attribute_value(value)
-            for variant_id, value in self.mappings.items()
-        }
+        yaml_dict["values"] = dict(self.mappings)
         return yaml_dict
 
     @property
@@ -521,8 +501,6 @@ class VariantAttribute(MultiResourceYamlResource):
             ).items():
                 if attribute_id in variant_attributes:
                     attribute = variant_attributes[attribute_id]
-                    # A legacy value arrives only in the string map; parsing it against
-                    # the declared kind gives the same native value a typed one has.
                     attribute.mappings[variant_id] = parse_attribute_value(
                         attribute_value, attribute.kind, attribute.enum_values
                     )
@@ -542,9 +520,8 @@ class VariantAttribute(MultiResourceYamlResource):
             for resource in resource_mappings or []
             if resource.resource_type == Variant
         }
-        # `values:` with nothing under it parses as None, not {}. Tolerate it here so
-        # the empty attribute reaches validate() and fails with "Mappings are required"
-        # rather than an AttributeError from the pretty path.
+        # `values:` with nothing under it parses as None, not {}. Let it reach
+        # validate() rather than raising AttributeError from the pretty path.
         new_mapping = {
             variant_ids_to_names.get(variant_id, variant_id): variant_value
             for variant_id, variant_value in (d.get("values") or {}).items()
@@ -599,10 +576,9 @@ class VariantAttribute(MultiResourceYamlResource):
         return AttributeType(kind=ATTRIBUTE_KIND_TO_PROTO_INT[self.kind])
 
     def build_variant_values_proto(self) -> VariantValues:
-        """Dual-write the per-variant values: stringified for legacy readers, native for typed ones.
+        """Dual-write the values: stringified for legacy readers, native for typed ones.
 
-        A STRING attribute writes only the string map — it is what it has always
-        written, and `typed_values` would add nothing.
+        STRING writes only the string map; `typed_values` would add nothing.
         """
         values = {
             variant_id: stringify_attribute_value(value)
@@ -637,6 +613,7 @@ class VariantAttribute(MultiResourceYamlResource):
     def validate(self, resource_mappings: list[ResourceMapping], **kwargs):
         if not self.name:
             raise ValueError("Name is required")
+        _validate_attribute_name(self.name)
         if not self.mappings:
             raise ValueError("Mappings are required")
 
@@ -690,18 +667,13 @@ class VariantAttribute(MultiResourceYamlResource):
     def _value_matches_kind(self, value: Any) -> bool:
         """Whether one value is valid for the declared type.
 
-        Mirrors the platform's `validateValueMatchesType`, including its treatment of
-        unset: a blank value is valid for every kind, so an attribute can be added
-        before every variant has been given a value.
+        Mirrors `validateValueMatchesType`: unset is valid for every kind.
         """
         if is_unset_attribute_value(value):
             return True
         match self.kind:
             case AttributeKind.NUMBER:
-                # bool is an int subclass in Python, but is not a number here.
-                # The platform checks Number.isFinite, so a YAML `.inf` or `.nan`
-                # has to fail here rather than at push time — neither survives the
-                # JSON round trip through typed_values anyway.
+                # bool is an int subclass; the platform also rejects non-finite.
                 return (
                     isinstance(value, (int, float))
                     and not isinstance(value, bool)

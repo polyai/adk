@@ -45,7 +45,7 @@ Each attribute includes:
 
 | Field | Description |
 |---|---|
-| `name` | Attribute identifier, ideally in snake_case |
+| `name` | Attribute identifier. Must be a valid Python identifier, since it is read in code as `conv.variant.<name>` |
 | `kind` | Optional. The attribute's type: `string` (default), `number`, `boolean`, `enum`, or `object` |
 | `config` | Optional. Type-specific configuration. Only `enum` takes one: `config.values` lists the allowed values |
 | `values` | Map from variant name to value |
@@ -61,18 +61,18 @@ Declaring a `kind` does two things: values are checked against it when you push,
 | `kind` | Written in `values` as | Example |
 |---|---|---|
 | `string` | Text | `London Office` |
-| `number` | A number | `"3"`, `"2.5"` |
-| `boolean` | `"true"` or `"false"` | `"true"` |
+| `number` | A number | `3`, `2.5` |
+| `boolean` | `true` or `false` | `true` |
 | `enum` | One of `config.values` | `premium` |
-| `object` | A JSON object or array | `'{"currency":"USD"}'` |
+| `object` | A map or list | `{currency: USD}` |
+
+Values are written in their declared type. A quoted value is still read correctly — `max_retries: 3` and `max_retries: "3"` are the same attribute, and neither shows as a change against the other — but `poly pull` writes the native form.
 
 A blank value is allowed for every kind and means the attribute is not set for that variant yet.
 
-!!! note "Values are stored as text"
+!!! info "`config` is per-kind"
 
-    `values` always holds strings on disk, and `kind` says how to read them. That keeps the file readable by an ADK released before typed attributes, which would otherwise fail on a bare `3` or `true`.
-
-    You can still write values naturally by hand — `max_retries: 3` and `max_retries: "3"` are the same attribute, and neither shows as a change against the other. `poly pull` rewrites them in the quoted form.
+    Only `enum` takes a `config` today. It is nested rather than a top-level `enum_values` so a future kind can carry its own settings without every other kind growing a field it ignores — and because `values` at the top level is already the per-variant value map.
 
 Changing an attribute's `kind` does not convert its existing values. Update the values in the same change, or the push is rejected with the variants whose values no longer fit.
 
@@ -137,16 +137,16 @@ attributes:
   - name: max_retries
     kind: number
     values:
-      new_york: "3"
-      london: "5"
-      tokyo: "3"
+      new_york: 3
+      london: 5
+      tokyo: 3
 
   - name: serves_alcohol
     kind: boolean
     values:
-      new_york: "true"
-      london: "true"
-      tokyo: "false"
+      new_york: true
+      london: true
+      tokyo: false
 
   - name: tier
     kind: enum
@@ -246,6 +246,7 @@ Common uses include:
 
 - Exactly one variant must have `is_default: true` — validation fails if zero or more than one variant is marked default.
 - Every variant must have a value in every attribute's `values` map — a missing variant fails validation.
+- Every attribute name must be a valid Python identifier — a letter or underscore followed by letters, digits or underscores — and not a Python reserved word. `customer-name` and `class` both fail.
 - Every value must match its attribute's declared `kind` — a value of the wrong type fails validation, naming the variant it came from.
 - An `enum` attribute must declare a non-empty `config.values` list, with no duplicates.
 

@@ -1,492 +1,441 @@
 {
-  "region": "us-1",
   "account_id": "test_account",
-  "project_id": "test_project",
   "branch_id": "main",
+  "file_structure_info": {},
   "last_updated": "2024-01-01T00:00:00",
+  "migration_flags": [
+    "migrated_legacy_topic_files"
+  ],
+  "project_id": "test_project",
+  "region": "us-1",
   "resources": {
+    "additional_languages": {
+      "fr-FR": {
+        "name": "fr-FR",
+        "resource_id": "fr-FR"
+      }
+    },
+    "api_integration": {
+      "int-customer_api": {
+        "description": "test",
+        "environments": {
+          "live": {
+            "auth_type": "apiKey",
+            "base_url": "https://customer.com"
+          },
+          "pre_release": {
+            "auth_type": "basic",
+            "base_url": "https://dev-customer.com"
+          },
+          "sandbox": {
+            "auth_type": "basic",
+            "base_url": "https://dev-customer.com"
+          }
+        },
+        "name": "customer_api",
+        "operations": [
+          {
+            "method": "GET",
+            "name": "get_confirmation_status",
+            "resource": "/bookings/{booking_id}/confirmation-status",
+            "resource_id": ""
+          }
+        ],
+        "resource_id": "int-customer_api"
+      }
+    },
+    "asr_settings": {
+      "asr_settings": {
+        "barge_in": false,
+        "interaction_style": "balanced",
+        "name": "asr_settings",
+        "resource_id": "asr_settings"
+      }
+    },
+    "chat_greeting": {
+      "chat_greeting": {
+        "language_code": "en-GB",
+        "name": "chat_greeting",
+        "resource_id": "chat_greeting",
+        "welcome_message": "Hello! Welcome to our web chat. Your account shows {{attr:member_status}}. How can I assist you today?"
+      }
+    },
+    "chat_safety_filters": {
+      "chat_safety_filters": {
+        "categories": {
+          "hate": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "self_harm": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "sexual": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "violence": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          }
+        },
+        "enabled": true,
+        "filter_type": "azure",
+        "name": "chat_safety_filters",
+        "resource_id": "chat_safety_filters"
+      }
+    },
+    "chat_style_prompt": {
+      "chat_style_prompt": {
+        "name": "chat_style_prompt",
+        "prompt": "You are a helpful and professional web chat assistant.",
+        "resource_id": "chat_style_prompt"
+      }
+    },
+    "child_topics": {
+      "TOPIC-Spanish Only Topic": {
+        "actions": "Handle this request in Spanish using {{fn:FUNCTION-test_function}} and {{attr:customer_name}}.",
+        "content": "This topic only applies when the Spanish variant is active.",
+        "enabled": true,
+        "example_queries": [
+          "How can I help you?",
+          "What services do you offer?"
+        ],
+        "name": "Spanish Only Topic",
+        "resource_id": "TOPIC-Spanish Only Topic",
+        "variant_id": "VARIANT-spanish",
+        "variant_name": "spanish"
+      }
+    },
+    "custom_guardrails": {
+      "CUSTOM_GUARDRAILS-no_medical_advice": {
+        "action": "warn",
+        "enabled": true,
+        "name": "No medical advice",
+        "prompt": "Never give medical advice. Offer to transfer the caller to a human instead.",
+        "resource_id": "CUSTOM_GUARDRAILS-no_medical_advice"
+      }
+    },
+    "default_language": {
+      "en-GB": {
+        "name": "en-GB",
+        "resource_id": "en-GB"
+      }
+    },
+    "documents": {
+      "CONTEXT.MD": {
+        "contents": "This is platform context file.\n",
+        "name": "CONTEXT",
+        "path": "CONTEXT.MD",
+        "resource_id": "CONTEXT.MD"
+      },
+      "test_document.md": {
+        "contents": "This is a test document.\nIt has multiple lines.\n",
+        "name": "test_document",
+        "path": "test_document.md",
+        "resource_id": "test_document.md"
+      }
+    },
     "entities": {
-      "ENTITY-customer_name": {
-        "resource_id": "ENTITY-customer_name",
-        "name": "customer_name",
-        "description": "Customer name entity for collecting names",
-        "entity_type": "name_config",
-        "config": {}
-      },
-      "ENTITY-phone_number": {
-        "resource_id": "ENTITY-phone_number",
-        "name": "phone_number",
-        "description": "Phone number entity with country codes",
-        "entity_type": "phone_number",
-        "config": {
-          "enabled": true,
-          "country_codes": [
-            "US",
-            "UK"
-          ]
-        }
-      },
-      "ENTITY-date": {
-        "resource_id": "ENTITY-date",
-        "name": "date",
-        "description": "Date entity for appointment scheduling",
-        "entity_type": "date",
-        "config": {
-          "relative_date": true
-        }
-      },
-      "ENTITY-party_size": {
-        "resource_id": "ENTITY-party_size",
-        "name": "party_size",
-        "description": "Number of people in party",
-        "entity_type": "numeric",
-        "config": {
-          "has_decimal": false,
-          "has_range": true,
-          "min": 1,
-          "max": 20
-        }
-      },
       "ENTITY-confirmation_status": {
-        "resource_id": "ENTITY-confirmation_status",
-        "name": "confirmation_status",
-        "description": "Confirmation status options",
-        "entity_type": "enum",
         "config": {
           "options": [
             "confirmed",
             "pending",
             "cancelled"
           ]
-        }
+        },
+        "description": "Confirmation status options",
+        "entity_type": "enum",
+        "name": "confirmation_status",
+        "resource_id": "ENTITY-confirmation_status"
+      },
+      "ENTITY-customer_name": {
+        "config": {},
+        "description": "Customer name entity for collecting names",
+        "entity_type": "name_config",
+        "name": "customer_name",
+        "resource_id": "ENTITY-customer_name"
+      },
+      "ENTITY-date": {
+        "config": {
+          "relative_date": true
+        },
+        "description": "Date entity for appointment scheduling",
+        "entity_type": "date",
+        "name": "date",
+        "resource_id": "ENTITY-date"
       },
       "ENTITY-email": {
-        "resource_id": "ENTITY-email",
-        "name": "email",
-        "description": "Email address validation",
-        "entity_type": "alphanumeric",
         "config": {
           "enabled": true,
-          "validation_type": "email",
-          "regular_expression": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
-        }
+          "regular_expression": "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+          "validation_type": "email"
+        },
+        "description": "Email address validation",
+        "entity_type": "alphanumeric",
+        "name": "email",
+        "resource_id": "ENTITY-email"
+      },
+      "ENTITY-party_size": {
+        "config": {
+          "has_decimal": false,
+          "has_range": true,
+          "max": 20,
+          "min": 1
+        },
+        "description": "Number of people in party",
+        "entity_type": "numeric",
+        "name": "party_size",
+        "resource_id": "ENTITY-party_size"
+      },
+      "ENTITY-phone_number": {
+        "config": {
+          "country_codes": [
+            "US",
+            "UK"
+          ],
+          "enabled": true
+        },
+        "description": "Phone number entity with country codes",
+        "entity_type": "phone_number",
+        "name": "phone_number",
+        "resource_id": "ENTITY-phone_number"
       }
     },
-    "variants": {
-      "VARIANT-default": {
-        "resource_id": "VARIANT-default",
-        "name": "default",
-        "is_default": true
-      },
-      "VARIANT-spanish": {
-        "resource_id": "VARIANT-spanish",
-        "name": "spanish",
-        "is_default": false
-      }
-    },
-    "variant_attributes": {
-      "customer-name": {
-        "resource_id": "customer-name",
-        "name": "customer-name",
-        "mappings": {
-          "VARIANT-default": "value-1",
-          "VARIANT-spanish": "valor-1"
-        }
-      },
-      "email-address": {
-        "resource_id": "email-address",
-        "name": "email-address",
-        "mappings": {
-          "VARIANT-default": "value-2",
-          "VARIANT-spanish": "valor-2"
-        }
-      },
-      "member-status": {
-        "resource_id": "member-status",
-        "name": "member-status",
-        "mappings": {
-          "VARIANT-default": "value-3",
-          "VARIANT-spanish": "valor-3"
-        }
-      },
-      "booking-status": {
-        "resource_id": "booking-status",
-        "name": "booking-status",
-        "mappings": {
-          "VARIANT-default": "value-4",
-          "VARIANT-spanish": "valor-4"
-        }
-      }
-    },
-    "variables": {
-      "VAR-customer_name": {
-        "resource_id": "VAR-customer_name",
-        "name": "customer_name"
-      },
-      "VAR-payment_success": {
-        "resource_id": "VAR-payment_success",
-        "name": "payment_success"
-      },
-      "VAR-data_processed": {
-        "resource_id": "VAR-data_processed",
-        "name": "data_processed"
-      }
-    },
-    "functions": {
-      "FUNCTION-validate_email": {
-        "resource_id": "FUNCTION-validate_email",
-        "name": "validate_email",
-        "description": "Validate email format.",
-        "code": "def validate_email(conv: Conversation, email: str):\n    \"\"\"Validate email format.\"\"\"\n    return \"@\" in email and \".\" in email.split(\"@\")[1]\n",
-        "parameters": [
-          {
-            "name": "email",
-            "type": "string",
-            "description": "The email address to validate",
-            "id": "PARAMETER-email-1"
-          }
-        ],
-        "latency_control": {},
-        "flow_id": null,
-        "flow_name": null,
-        "function_type": "global"
-      },
-      "FUNCTION-format_date": {
-        "resource_id": "FUNCTION-format_date",
-        "name": "format_date",
-        "description": "Format date for display.",
-        "code": "def format_date(conv: Conversation, date: str):\n    \"\"\"Format date for display.\"\"\"\n    return date.upper()\n",
-        "parameters": [
-          {
-            "name": "date",
-            "type": "string",
-            "description": "The date string to format",
-            "id": "PARAMETER-date-1"
-          }
-        ],
-        "latency_control": {},
-        "flow_id": null,
-        "flow_name": null,
-        "function_type": "global"
-      },
-      "FUNCTION-shared_helper": {
-        "resource_id": "FUNCTION-shared_helper",
-        "name": "shared_helper",
-        "description": "A shared helper function that can be used by multiple flows.",
-        "code": "def shared_helper(conv: Conversation, value: str):\n    \"\"\"A shared helper function that can be used by multiple flows.\"\"\"\n    return f\"Processed: {value}\"\n",
-        "parameters": [
-          {
-            "name": "value",
-            "type": "string",
-            "description": "The value to process",
-            "id": "PARAMETER-value-1"
-          }
-        ],
-        "latency_control": {},
-        "flow_id": null,
-        "flow_name": null,
-        "function_type": "global"
-      },
-      "FUNCTION-test_function": {
-        "resource_id": "FUNCTION-test_function",
-        "name": "test_function",
-        "description": "A test function for global use.",
-        "code": "def test_function(conv: Conversation):\n    \"\"\"A test function for global use.\"\"\"\n    return \"Hello from global function\"\n",
-        "parameters": [],
-        "latency_control": {},
-        "flow_id": null,
-        "flow_name": null,
-        "function_type": "global"
-      },
-      "FUNCTION-test_function_with_parameters": {
-        "resource_id": "FUNCTION-test_function_with_parameters",
-        "name": "test_function_with_parameters",
-        "description": "Test function with parameters.",
-        "code": "def test_function_with_parameters(conv: Conversation, param1: str, param2: int):\n    \"\"\"Test function with parameters.\"\"\"\n    return f\"Result: {param1} - {param2}\"\n",
-        "parameters": [
-          {
-            "name": "param1",
-            "type": "string",
-            "description": "First parameter as string",
-            "id": "PARAMETER-param1-1"
+    "experimental_config": {
+      "default": {
+        "config": {
+          "asr": {
+            "language": "en-GB",
+            "model": "poly-latency",
+            "provider": "riva"
           },
-          {
-            "name": "param2",
-            "type": "integer",
-            "description": "Second parameter as integer",
-            "id": "PARAMETER-param2-1"
+          "eot": {
+            "provider": "smart_turn",
+            "threshold": 0.5
+          },
+          "smart_vad": {
+            "is_enabled": true
+          },
+          "vad": {
+            "vad_end": 600
           }
-        ],
-        "latency_control": {},
-        "flow_id": null,
-        "flow_name": null,
-        "function_type": "global"
-      },
-      "FUNCTION-start_function": {
-        "resource_id": "FUNCTION-start_function",
-        "name": "start_function",
-        "description": "",
-        "code": "def start_function(conv: Conversation):\n    \"\"\"Start function for the agent.\"\"\"\n    conv.state.customer_name = \"John Doe\"\n    pass\n",
-        "parameters": [],
-        "latency_control": {
-          "enabled": false,
-          "initial_delay": 0,
-          "interval": 0,
-          "delay_responses": []
         },
-        "flow_id": null,
-        "flow_name": null,
-        "function_type": "start",
-        "variable_references": {
-          "VAR-customer_name": true
-        }
-      },
-      "FUNCTION-end_function": {
-        "resource_id": "FUNCTION-end_function",
-        "name": "end_function",
-        "description": "",
-        "code": "def end_function(conv: Conversation):\n    \"\"\"End function for the agent.\"\"\"\n    pass\n",
-        "parameters": [],
-        "latency_control": {
-          "enabled": false,
-          "initial_delay": 0,
-          "interval": 0,
-          "delay_responses": []
-        },
-        "flow_id": null,
-        "flow_name": null,
-        "function_type": "end",
-        "variable_references": {}
-      },
-      "FUNCTION-process_data": {
-        "resource_id": "FUNCTION-process_data",
-        "name": "process_data",
-        "description": "Process data in flow context.",
-        "code": "def process_data(conv: Conversation, flow: Flow, data: str):\n    \"\"\"Process data in flow context.\"\"\"\n    conv.state.data_processed = True\n    return f\"Processed in flow: {data}\"\n",
-        "parameters": [
-          {
-            "name": "data",
-            "type": "string",
-            "description": "The data string to process",
-            "id": "PARAMETER-data-1"
-          }
-        ],
-        "latency_control": {},
-        "flow_id": "FLOW_CONFIG-test_flow",
-        "flow_name": "test_flow",
-        "function_type": "transition"
-      },
-      "FUNCTION-shared_helper_flow1": {
-        "resource_id": "FUNCTION-shared_helper_flow1",
-        "name": "shared_helper",
-        "description": "A shared helper function with same name as global function.",
-        "code": "def shared_helper(conv: Conversation, flow: Flow, value: str):\n    \"\"\"A shared helper function with same name as global function.\"\"\"\n    return f\"Flow-specific helper: {value}\"\n",
-        "parameters": [
-          {
-            "name": "value",
-            "type": "string",
-            "description": "The value to process",
-            "id": "PARAMETER-value-2"
-          }
-        ],
-        "latency_control": {},
-        "flow_id": "FLOW_CONFIG-test_flow",
-        "flow_name": "test_flow",
-        "function_type": "transition"
-      },
-      "FUNCTION-validate_input_flow1": {
-        "resource_id": "FUNCTION-validate_input_flow1",
-        "name": "validate_input",
-        "description": "Validate input in flow.",
-        "code": "def validate_input(conv: Conversation, flow: Flow, input_value: str):\n    \"\"\"Validate input in flow.\"\"\"\n    return len(input_value) > 0\n",
-        "parameters": [
-          {
-            "name": "input_value",
-            "type": "string",
-            "description": "The input value to validate",
-            "id": "PARAMETER-input_value-1"
-          }
-        ],
-        "latency_control": {},
-        "flow_id": "FLOW_CONFIG-test_flow",
-        "flow_name": "test_flow",
-        "function_type": "transition"
-      },
-      "FUNCTION-shared_helper_flow2": {
-        "resource_id": "FUNCTION-shared_helper_flow2",
-        "name": "shared_helper",
-        "description": "Another shared helper with same name as global and other flow.",
-        "code": "def shared_helper(conv: Conversation, flow: Flow, value: str):\n    \"\"\"Another shared helper with same name as global and other flow.\"\"\"\n    return f\"Punctuation flow helper: {value}\"\n",
-        "parameters": [
-          {
-            "name": "value",
-            "type": "string",
-            "description": "The value to process",
-            "id": "PARAMETER-value-3"
-          }
-        ],
-        "latency_control": {},
-        "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
-        "flow_name": "test_flow_with_punctuation!",
-        "function_type": "transition"
-      },
-      "FUNCTION-calculate_total": {
-        "resource_id": "FUNCTION-calculate_total",
-        "name": "calculate_total",
-        "description": "Calculate total amount.",
-        "code": "def calculate_total(conv: Conversation, flow: Flow, amount: float):\n    \"\"\"Calculate total amount.\"\"\"\n    return amount * 1.1\n",
-        "parameters": [
-          {
-            "name": "amount",
-            "type": "number",
-            "description": "The base amount to calculate from",
-            "id": "PARAMETER-amount-1"
-          }
-        ],
-        "latency_control": {},
-        "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
-        "flow_name": "test_flow_with_punctuation!",
-        "function_type": "transition"
-      },
-      "FUNCTION-validate_input_flow2": {
-        "resource_id": "FUNCTION-validate_input_flow2",
-        "name": "validate_input",
-        "description": "Another validate_input with same name as other flow.",
-        "code": "def validate_input(conv: Conversation, flow: Flow, input_value: str):\n    \"\"\"Another validate_input with same name as other flow.\"\"\"\n    return input_value.isdigit()\n",
-        "parameters": [
-          {
-            "name": "input_value",
-            "type": "string",
-            "description": "The input value to validate",
-            "id": "PARAMETER-input_value-2"
-          }
-        ],
-        "latency_control": {},
-        "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
-        "flow_name": "test_flow_with_punctuation!",
-        "function_type": "transition"
-      }
-    },
-    "topics": {
-      "TOPIC-Topic 1": {
-        "resource_id": "TOPIC-Topic 1",
-        "name": "Topic 1",
-        "actions": "Use {{fn:FUNCTION-test_function}} to handle this request and {{fn:FUNCTION-format_date}} for dates. Access customer info via {{attr:customer-name}} and handoff with {{ho:handoff-1}} if needed. Send notifications using {{twilio_sms:SMS_TEMPLATE-123}}.",
-        "content": "This topic covers general inquiries and uses global functions.",
-        "example_queries": [
-          "How can I help?",
-          "What services do you offer?",
-          "General information request"
-        ],
-        "enabled": true
-      },
-      "TOPIC-Topic 2": {
-        "resource_id": "TOPIC-Topic 2",
-        "name": "Topic 2",
-        "actions": "Validate using {{fn:FUNCTION-validate_email}} and process with {{fn:FUNCTION-shared_helper}}. Check {{attr:email-address}} attribute and use {{ho:handoff-2}} for escalation. Send email verification via {{twilio_sms:SMS_TEMPLATE-456}}.",
-        "content": "This topic handles email validation and processing.",
-        "example_queries": [
-          "I need to verify my email",
-          "Check my email address",
-          "Email validation request"
-        ],
-        "enabled": true
-      }
-    },
-    "child_topics": {
-      "TOPIC-Spanish Only Topic": {
-        "resource_id": "TOPIC-Spanish Only Topic",
-        "name": "Spanish Only Topic",
-        "variant_id": "VARIANT-spanish",
-        "variant_name": "spanish",
-        "actions": "Handle this request in Spanish using {{fn:FUNCTION-test_function}} and {{attr:customer-name}}.",
-        "content": "This topic only applies when the Spanish variant is active.",
-        "example_queries": [
-          "How can I help you?",
-          "What services do you offer?"
-        ],
-        "enabled": true
-      }
-    },
-    "voice_greeting": {
-      "voice_greeting": {
-        "resource_id": "voice_greeting",
-        "name": "voice_greeting",
-        "welcome_message": "Hello! Welcome to our service. Your account shows {{attr:member-status}}. How can I assist you today?",
-        "language_code": "en-GB"
-      }
-    },
-    "voice_style_prompt": {
-      "voice_style_prompt": {
-        "resource_id": "voice_style_prompt",
-        "name": "voice_style_prompt",
-        "prompt": "You are a helpful and professional customer service assistant."
-      }
-    },
-    "chat_greeting": {
-      "chat_greeting": {
-        "resource_id": "chat_greeting",
-        "name": "chat_greeting",
-        "welcome_message": "Hello! Welcome to our web chat. Your account shows {{attr:member-status}}. How can I assist you today?",
-        "language_code": "en-GB"
-      }
-    },
-    "chat_style_prompt": {
-      "chat_style_prompt": {
-        "resource_id": "chat_style_prompt",
-        "name": "chat_style_prompt",
-        "prompt": "You are a helpful and professional web chat assistant."
-      }
-    },
-    "persona": {
-      "PERSONA-persona": {
-        "resource_id": "PERSONA-persona",
-        "name": "persona",
-        "content": "You are a calm and polite concierge.\nGreet the caller by name using {{vrbl:VAR-customer_name}}.\n"
-      }
-    },
-    "rules": {
-      "RULES-rules": {
-        "resource_id": "RULES-rules",
-        "name": "rules",
-        "behaviour": "Be helpful and professional at all times.\nUse {{fn:FUNCTION-test_function}} when appropriate.\nAlways validate inputs using {{fn:FUNCTION-validate_email}} when dealing with email addresses.\nAccess customer information from {{attr:customer-name}} and {{attr:email-address}}.\nFor complex issues, use {{ho:handoff-1}} to transfer to a specialist.\nSend important notifications via {{twilio_sms:SMS_TEMPLATE-123}} or {{twilio_sms:SMS_TEMPLATE-456}} as appropriate.\nFollow the guidelines provided.\nUse variable {{vrbl:VAR-customer_name}}\n"
-      }
-    },
-    "voice_disclaimer": {
-      "voice_disclaimer": {
-        "resource_id": "voice_disclaimer",
-        "name": "voice_disclaimer",
-        "message": "This conversation may be recorded for quality assurance.",
-        "enabled": true,
-        "language_code": "en-GB"
+        "name": "experimental_config",
+        "resource_id": "default"
       }
     },
     "flow_config": {
       "FLOW_CONFIG-test_flow": {
-        "resource_id": "FLOW_CONFIG-test_flow",
-        "name": "test_flow",
         "description": "Test flow with advanced step as start",
+        "name": "test_flow",
+        "resource_id": "FLOW_CONFIG-test_flow",
         "start_step": "start_step"
       },
       "FLOW_CONFIG-test_flow_with_punctuation": {
-        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation",
-        "name": "test_flow_with_punctuation!",
         "description": "Test flow with punctuation in name and default step as start",
+        "name": "test_flow_with_punctuation!",
+        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation",
         "start_step": "welcome_step"
       }
     },
     "flow_steps": {
-      "FLOW_CONFIG-test_flow_start_step": {
-        "resource_id": "FLOW_CONFIG-test_flow_start_step",
-        "step_id": "start_step",
-        "name": "start_step",
+      "FLOW_CONFIG-test_flow_collect_name": {
+        "conditions": [
+          {
+            "child_step": "confirm_details",
+            "condition_type": "step_condition",
+            "description": "User provided name",
+            "exit_flow_position": {},
+            "flow_id": "FLOW_CONFIG-test_flow",
+            "ingress": "top",
+            "name": "has_name",
+            "position": {},
+            "required_entities": [
+              "ENTITY-customer_name"
+            ],
+            "resource_id": "CONDITION-has_name-1",
+            "step_id": "collect_name"
+          },
+          {
+            "child_step": "",
+            "condition_type": "exit_flow_condition",
+            "description": "Exit flow",
+            "exit_flow_position": {},
+            "flow_id": "FLOW_CONFIG-test_flow",
+            "ingress": "top",
+            "name": "exit_flow",
+            "position": {},
+            "required_entities": [],
+            "resource_id": "CONDITION-exit_flow-1",
+            "step_id": "collect_name"
+          }
+        ],
+        "extracted_entities": [
+          "ENTITY-customer_name"
+        ],
         "flow_id": "FLOW_CONFIG-test_flow",
         "flow_name": "test_flow",
-        "step_type": "advanced_step",
-        "prompt": "Welcome! I'll help you today. Let me use {{fn:FUNCTION-test_function}} to get started. If needed, we can handoff using {{ho:handoff-1}} or send SMS via {{twilio_sms:SMS_TEMPLATE-123}}.",
+        "name": "collect_name",
+        "position": {
+          "x": 600.0,
+          "y": 500.0
+        },
+        "prompt": "What is your name? {{entity:ENTITY-customer_name}}",
+        "resource_id": "FLOW_CONFIG-test_flow_collect_name",
+        "settings": {},
+        "step_id": "collect_name",
+        "step_type": "default_step"
+      },
+      "FLOW_CONFIG-test_flow_collect_phone": {
+        "conditions": [
+          {
+            "child_step": "final_step",
+            "condition_type": "step_condition",
+            "description": "User provided phone",
+            "exit_flow_position": {},
+            "flow_id": "FLOW_CONFIG-test_flow",
+            "ingress": "top",
+            "name": "has_phone",
+            "position": {},
+            "required_entities": [
+              "ENTITY-phone_number"
+            ],
+            "resource_id": "CONDITION-has_phone-1",
+            "step_id": "collect_phone"
+          },
+          {
+            "child_step": "final_step",
+            "condition_type": "step_condition",
+            "description": "User declined to provide phone",
+            "exit_flow_position": {},
+            "flow_id": "FLOW_CONFIG-test_flow",
+            "ingress": "top",
+            "name": "no_phone",
+            "position": {},
+            "required_entities": [],
+            "resource_id": "CONDITION-no_phone-1",
+            "step_id": "collect_phone"
+          }
+        ],
+        "extracted_entities": [
+          "ENTITY-phone_number"
+        ],
+        "flow_id": "FLOW_CONFIG-test_flow",
+        "flow_name": "test_flow",
+        "name": "collect_phone",
+        "position": {
+          "x": 1200.0,
+          "y": 500.0
+        },
+        "prompt": "What is your phone number?",
+        "resource_id": "FLOW_CONFIG-test_flow_collect_phone",
+        "settings": {},
+        "step_id": "collect_phone",
+        "step_type": "default_step"
+      },
+      "FLOW_CONFIG-test_flow_confirm_details": {
+        "conditions": [],
+        "extracted_entities": [],
+        "flow_id": "FLOW_CONFIG-test_flow",
+        "flow_name": "test_flow",
+        "name": "confirm_details",
+        "position": {
+          "x": 600.0,
+          "y": 500.0
+        },
+        "prompt": "Let me confirm your details using {{fn:FUNCTION-format_date}} and {{ft:FUNCTION-process_data}}. Your name is {{attr:customer_name}}. Is this correct?",
+        "resource_id": "FLOW_CONFIG-test_flow_confirm_details",
         "settings": {
           "asr_biasing": {
+            "address": false,
+            "alphanumeric": false,
+            "custom_keywords": [],
+            "is_enabled": true,
+            "name_spelling": false,
+            "numeric": true,
+            "party_size": false,
+            "precise_date": false,
+            "relative_date": false,
+            "single_number": false,
+            "time": false,
+            "yes_no": false
+          },
+          "dtmf": {
+            "collect_while_agent_speaking": false,
+            "end_key": "#",
+            "inter_digit_timeout": 0,
+            "is_enabled": true,
+            "is_pii": false,
+            "max_digits": 1
+          },
+          "flow_id": "FLOW_CONFIG-test_flow",
+          "step_id": "confirm_details"
+        },
+        "step_id": "confirm_details",
+        "step_type": "advanced_step"
+      },
+      "FLOW_CONFIG-test_flow_final_step": {
+        "conditions": [],
+        "extracted_entities": [],
+        "flow_id": "FLOW_CONFIG-test_flow",
+        "flow_name": "test_flow",
+        "name": "final_step",
+        "position": {
+          "x": 1200.0,
+          "y": 1000.0
+        },
+        "prompt": "Thank you! Using {{fn:FUNCTION-shared_helper}} and {{ft:FUNCTION-shared_helper_flow1}} to complete. If you need human assistance, use {{ho:handoff-2}}. I'll send a confirmation via {{twilio_sms:SMS_TEMPLATE-456}}.",
+        "resource_id": "FLOW_CONFIG-test_flow_final_step",
+        "settings": {
+          "asr_biasing": {
+            "address": false,
+            "alphanumeric": false,
+            "custom_keywords": [],
+            "is_enabled": false,
+            "name_spelling": false,
+            "numeric": false,
+            "party_size": false,
+            "precise_date": false,
+            "relative_date": false,
+            "single_number": false,
+            "time": false,
+            "yes_no": false
+          },
+          "dtmf": {
+            "collect_while_agent_speaking": false,
+            "end_key": "#",
+            "inter_digit_timeout": 0,
+            "is_enabled": false,
+            "is_pii": false,
+            "max_digits": 0
+          },
+          "flow_id": "FLOW_CONFIG-test_flow",
+          "step_id": "final_step"
+        },
+        "step_id": "final_step",
+        "step_type": "advanced_step"
+      },
+      "FLOW_CONFIG-test_flow_start_step": {
+        "conditions": [],
+        "extracted_entities": [],
+        "flow_id": "FLOW_CONFIG-test_flow",
+        "flow_name": "test_flow",
+        "name": "start_step",
+        "position": {
+          "x": 0.0,
+          "y": 0.0
+        },
+        "prompt": "Welcome! I'll help you today. Let me use {{fn:FUNCTION-test_function}} to get started. If needed, we can handoff using {{ho:handoff-1}} or send SMS via {{twilio_sms:SMS_TEMPLATE-123}}.",
+        "resource_id": "FLOW_CONFIG-test_flow_start_step",
+        "settings": {
+          "asr_biasing": {
+            "address": false,
             "alphanumeric": true,
+            "custom_keywords": [],
+            "is_enabled": true,
             "name_spelling": true,
             "numeric": true,
             "party_size": false,
@@ -494,175 +443,40 @@
             "relative_date": false,
             "single_number": false,
             "time": false,
-            "yes_no": false,
-            "address": false,
-            "custom_keywords": [],
-            "is_enabled": true
+            "yes_no": false
           },
           "dtmf": {
+            "collect_while_agent_speaking": false,
+            "end_key": "#",
+            "inter_digit_timeout": 0,
             "is_enabled": false,
-            "inter_digit_timeout": 0,
-            "max_digits": 0,
-            "end_key": "#",
-            "collect_while_agent_speaking": false,
-            "is_pii": false
+            "is_pii": false,
+            "max_digits": 0
           },
-          "step_id": "start_step",
-          "flow_id": "FLOW_CONFIG-test_flow"
+          "flow_id": "FLOW_CONFIG-test_flow",
+          "step_id": "start_step"
         },
+        "step_id": "start_step",
+        "step_type": "advanced_step"
+      },
+      "FLOW_CONFIG-test_flow_with_punctuation_collect_email": {
         "conditions": [],
         "extracted_entities": [],
-        "position": {
-          "x": 0.0,
-          "y": 0.0
-        }
-      },
-      "FLOW_CONFIG-test_flow_collect_name": {
-        "resource_id": "FLOW_CONFIG-test_flow_collect_name",
-        "name": "collect_name",
-        "step_id": "collect_name",
-        "flow_id": "FLOW_CONFIG-test_flow",
-        "flow_name": "test_flow",
-        "step_type": "default_step",
+        "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
+        "flow_name": "test_flow_with_punctuation!",
+        "name": "collect_email",
         "position": {
           "x": 600.0,
           "y": 500.0
         },
-        "settings": {},
-        "conditions": [
-          {
-            "resource_id": "CONDITION-has_name-1",
-            "name": "has_name",
-            "description": "User provided name",
-            "required_entities": [
-              "ENTITY-customer_name"
-            ],
-            "condition_type": "step_condition",
-            "child_step": "confirm_details",
-            "position": {},
-            "exit_flow_position": {},
-            "ingress": "top",
-            "step_id": "collect_name",
-            "flow_id": "FLOW_CONFIG-test_flow"
-          },
-          {
-            "resource_id": "CONDITION-exit_flow-1",
-            "name": "exit_flow",
-            "description": "Exit flow",
-            "required_entities": [],
-            "condition_type": "exit_flow_condition",
-            "child_step": "",
-            "position": {},
-            "exit_flow_position": {},
-            "ingress": "top",
-            "step_id": "collect_name",
-            "flow_id": "FLOW_CONFIG-test_flow"
-          }
-        ],
-        "extracted_entities": [
-          "ENTITY-customer_name"
-        ],
-        "prompt": "What is your name? {{entity:ENTITY-customer_name}}"
-      },
-      "FLOW_CONFIG-test_flow_confirm_details": {
-        "resource_id": "FLOW_CONFIG-test_flow_confirm_details",
-        "step_id": "confirm_details",
-        "name": "confirm_details",
-        "flow_id": "FLOW_CONFIG-test_flow",
-        "flow_name": "test_flow",
-        "step_type": "advanced_step",
-        "prompt": "Let me confirm your details using {{fn:FUNCTION-format_date}} and {{ft:FUNCTION-process_data}}. Your name is {{attr:customer-name}}. Is this correct?",
+        "prompt": "Please provide your email. I'll validate it using {{fn:FUNCTION-validate_email}} and process with {{ft:FUNCTION-calculate_total}}. Your current status is {{attr:booking_status}}. I can send updates via {{twilio_sms:SMS_TEMPLATE-456}}.",
+        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation_collect_email",
         "settings": {
           "asr_biasing": {
-            "alphanumeric": false,
-            "name_spelling": false,
-            "numeric": true,
-            "party_size": false,
-            "precise_date": false,
-            "relative_date": false,
-            "single_number": false,
-            "time": false,
-            "yes_no": false,
             "address": false,
+            "alphanumeric": true,
             "custom_keywords": [],
-            "is_enabled": true
-          },
-          "dtmf": {
             "is_enabled": true,
-            "inter_digit_timeout": 0,
-            "max_digits": 1,
-            "end_key": "#",
-            "collect_while_agent_speaking": false,
-            "is_pii": false
-          },
-          "step_id": "confirm_details",
-          "flow_id": "FLOW_CONFIG-test_flow"
-        },
-        "conditions": [],
-        "extracted_entities": [],
-        "position": {
-          "x": 600.0,
-          "y": 500.0
-        }
-      },
-      "FLOW_CONFIG-test_flow_collect_phone": {
-        "resource_id": "FLOW_CONFIG-test_flow_collect_phone",
-        "name": "collect_phone",
-        "step_id": "collect_phone",
-        "flow_id": "FLOW_CONFIG-test_flow",
-        "flow_name": "test_flow",
-        "step_type": "default_step",
-        "position": {
-          "x": 1200.0,
-          "y": 500.0
-        },
-        "settings": {},
-        "conditions": [
-          {
-            "resource_id": "CONDITION-has_phone-1",
-            "name": "has_phone",
-            "description": "User provided phone",
-            "required_entities": [
-              "ENTITY-phone_number"
-            ],
-            "condition_type": "step_condition",
-            "child_step": "final_step",
-            "position": {},
-            "exit_flow_position": {},
-            "ingress": "top",
-            "step_id": "collect_phone",
-            "flow_id": "FLOW_CONFIG-test_flow"
-          },
-          {
-            "resource_id": "CONDITION-no_phone-1",
-            "name": "no_phone",
-            "description": "User declined to provide phone",
-            "required_entities": [],
-            "condition_type": "step_condition",
-            "child_step": "final_step",
-            "position": {},
-            "exit_flow_position": {},
-            "ingress": "top",
-            "step_id": "collect_phone",
-            "flow_id": "FLOW_CONFIG-test_flow"
-          }
-        ],
-        "extracted_entities": [
-          "ENTITY-phone_number"
-        ],
-        "prompt": "What is your phone number?"
-      },
-      "FLOW_CONFIG-test_flow_final_step": {
-        "resource_id": "FLOW_CONFIG-test_flow_final_step",
-        "step_id": "final_step",
-        "name": "final_step",
-        "flow_id": "FLOW_CONFIG-test_flow",
-        "flow_name": "test_flow",
-        "step_type": "advanced_step",
-        "prompt": "Thank you! Using {{fn:FUNCTION-shared_helper}} and {{ft:FUNCTION-shared_helper_flow1}} to complete. If you need human assistance, use {{ho:handoff-2}}. I'll send a confirmation via {{twilio_sms:SMS_TEMPLATE-456}}.",
-        "settings": {
-          "asr_biasing": {
-            "alphanumeric": false,
             "name_spelling": false,
             "numeric": false,
             "party_size": false,
@@ -670,289 +484,453 @@
             "relative_date": false,
             "single_number": false,
             "time": false,
-            "yes_no": false,
-            "address": false,
-            "custom_keywords": [],
-            "is_enabled": false
+            "yes_no": false
           },
           "dtmf": {
-            "is_enabled": false,
-            "inter_digit_timeout": 0,
-            "max_digits": 0,
-            "end_key": "#",
             "collect_while_agent_speaking": false,
-            "is_pii": false
+            "end_key": "#",
+            "inter_digit_timeout": 0,
+            "is_enabled": false,
+            "is_pii": false,
+            "max_digits": 0
           },
-          "step_id": "final_step",
-          "flow_id": "FLOW_CONFIG-test_flow"
+          "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
+          "step_id": "collect_email"
         },
-        "conditions": [],
-        "extracted_entities": [],
-        "position": {
-          "x": 1200.0,
-          "y": 1000.0
-        }
+        "step_id": "collect_email",
+        "step_type": "advanced_step"
       },
-      "FLOW_CONFIG-test_flow_with_punctuation_welcome_step": {
-        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation_welcome_step",
-        "name": "welcome_step",
-        "step_id": "welcome_step",
-        "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
-        "flow_name": "test_flow_with_punctuation!",
-        "step_type": "default_step",
-        "position": {
-          "x": 0.0,
-          "y": 0.0
-        },
-        "settings": {},
+      "FLOW_CONFIG-test_flow_with_punctuation_collect_party_size": {
         "conditions": [
           {
-            "resource_id": "CONDITION-book_appointment-1",
-            "name": "book_appointment",
+            "child_step": "collect_email",
+            "condition_type": "step_condition",
+            "description": "User provided party size",
+            "exit_flow_position": {},
+            "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
+            "ingress": "top",
+            "name": "has_party_size",
+            "position": {},
+            "required_entities": [
+              "ENTITY-party_size"
+            ],
+            "resource_id": "CONDITION-has_party_size-1",
+            "step_id": "collect_party_size"
+          },
+          {
+            "child_step": "",
+            "condition_type": "exit_flow_condition",
+            "description": "Exit flow",
+            "exit_flow_position": {},
+            "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
+            "ingress": "top",
+            "name": "exit_flow",
+            "position": {},
+            "required_entities": [],
+            "resource_id": "CONDITION-exit_flow-2",
+            "step_id": "collect_party_size"
+          }
+        ],
+        "extracted_entities": [
+          "ENTITY-party_size"
+        ],
+        "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
+        "flow_name": "test_flow_with_punctuation!",
+        "name": "collect_party_size",
+        "position": {
+          "x": 600.0,
+          "y": 500.0
+        },
+        "prompt": "How many people will be in your party?",
+        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation_collect_party_size",
+        "settings": {},
+        "step_id": "collect_party_size",
+        "step_type": "default_step"
+      },
+      "FLOW_CONFIG-test_flow_with_punctuation_status_result": {
+        "conditions": [],
+        "extracted_entities": [],
+        "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
+        "flow_name": "test_flow_with_punctuation!",
+        "name": "status_result",
+        "position": {
+          "x": 600.0,
+          "y": 500.0
+        },
+        "prompt": "Checking your status using {{fn:FUNCTION-test_function}} and {{ft:FUNCTION-shared_helper_flow2}}. For urgent matters, use {{ho:handoff-3}}. Status updates can be sent via {{twilio_sms:SMS_TEMPLATE-123}}.",
+        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation_status_result",
+        "settings": {
+          "asr_biasing": {
+            "address": false,
+            "alphanumeric": false,
+            "custom_keywords": [],
+            "is_enabled": false,
+            "name_spelling": false,
+            "numeric": false,
+            "party_size": false,
+            "precise_date": false,
+            "relative_date": false,
+            "single_number": false,
+            "time": false,
+            "yes_no": false
+          },
+          "dtmf": {
+            "collect_while_agent_speaking": false,
+            "end_key": "#",
+            "inter_digit_timeout": 5,
+            "is_enabled": true,
+            "is_pii": false,
+            "max_digits": 2
+          },
+          "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
+          "step_id": "status_result"
+        },
+        "step_id": "status_result",
+        "step_type": "advanced_step"
+      },
+      "FLOW_CONFIG-test_flow_with_punctuation_welcome_step": {
+        "conditions": [
+          {
+            "child_step": "collect_party_size",
+            "condition_type": "no_code_step_condition",
             "description": "User wants to book appointment",
+            "exit_flow_position": {},
+            "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
+            "ingress": "top",
+            "name": "book_appointment",
+            "position": {},
             "required_entities": [
               "ENTITY-date"
             ],
-            "condition_type": "no_code_step_condition",
-            "child_step": "collect_party_size",
-            "position": {},
-            "exit_flow_position": {},
-            "ingress": "top",
-            "step_id": "welcome_step",
-            "flow_id": "FLOW_CONFIG-test_flow_with_punctuation"
+            "resource_id": "CONDITION-book_appointment-1",
+            "step_id": "welcome_step"
           },
           {
-            "resource_id": "CONDITION-check_status-1",
-            "name": "check_status",
+            "child_step": "status_result",
+            "condition_type": "step_condition",
             "description": "User wants to check status",
+            "exit_flow_position": {},
+            "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
+            "ingress": "top",
+            "name": "check_status",
+            "position": {},
             "required_entities": [
               "ENTITY-confirmation_status"
             ],
-            "condition_type": "step_condition",
-            "child_step": "status_result",
-            "position": {},
-            "exit_flow_position": {},
-            "ingress": "top",
-            "step_id": "welcome_step",
-            "flow_id": "FLOW_CONFIG-test_flow_with_punctuation"
+            "resource_id": "CONDITION-check_status-1",
+            "step_id": "welcome_step"
           },
           {
-            "resource_id": "CONDITION-exit-1",
-            "name": "exit",
-            "description": "User wants to exit",
-            "required_entities": [],
-            "condition_type": "exit_flow_condition",
             "child_step": "",
-            "position": {},
+            "condition_type": "exit_flow_condition",
+            "description": "User wants to exit",
             "exit_flow_position": {},
+            "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
             "ingress": "top",
-            "step_id": "welcome_step",
-            "flow_id": "FLOW_CONFIG-test_flow_with_punctuation"
+            "name": "exit",
+            "position": {},
+            "required_entities": [],
+            "resource_id": "CONDITION-exit-1",
+            "step_id": "welcome_step"
           }
         ],
         "extracted_entities": [
           "ENTITY-date",
           "ENTITY-confirmation_status"
         ],
-        "prompt": "Welcome! How can I help you today?"
-      },
-      "FLOW_CONFIG-test_flow_with_punctuation_collect_party_size": {
-        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation_collect_party_size",
-        "name": "collect_party_size",
-        "step_id": "collect_party_size",
         "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
         "flow_name": "test_flow_with_punctuation!",
-        "step_type": "default_step",
+        "name": "welcome_step",
         "position": {
-          "x": 600.0,
-          "y": 500.0
+          "x": 0.0,
+          "y": 0.0
         },
+        "prompt": "Welcome! How can I help you today?",
+        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation_welcome_step",
         "settings": {},
-        "conditions": [
-          {
-            "resource_id": "CONDITION-has_party_size-1",
-            "name": "has_party_size",
-            "description": "User provided party size",
-            "required_entities": [
-              "ENTITY-party_size"
-            ],
-            "condition_type": "step_condition",
-            "child_step": "collect_email",
-            "position": {},
-            "exit_flow_position": {},
-            "ingress": "top",
-            "step_id": "collect_party_size",
-            "flow_id": "FLOW_CONFIG-test_flow_with_punctuation"
-          },
-          {
-            "resource_id": "CONDITION-exit_flow-2",
-            "name": "exit_flow",
-            "description": "Exit flow",
-            "required_entities": [],
-            "condition_type": "exit_flow_condition",
-            "child_step": "",
-            "position": {},
-            "exit_flow_position": {},
-            "ingress": "top",
-            "step_id": "collect_party_size",
-            "flow_id": "FLOW_CONFIG-test_flow_with_punctuation"
-          }
-        ],
-        "extracted_entities": [
-          "ENTITY-party_size"
-        ],
-        "prompt": "How many people will be in your party?"
-      },
-      "FLOW_CONFIG-test_flow_with_punctuation_collect_email": {
-        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation_collect_email",
-        "step_id": "collect_email",
-        "name": "collect_email",
-        "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
-        "flow_name": "test_flow_with_punctuation!",
-        "step_type": "advanced_step",
-        "prompt": "Please provide your email. I'll validate it using {{fn:FUNCTION-validate_email}} and process with {{ft:FUNCTION-calculate_total}}. Your current status is {{attr:booking-status}}. I can send updates via {{twilio_sms:SMS_TEMPLATE-456}}.",
-        "settings": {
-          "asr_biasing": {
-            "alphanumeric": true,
-            "name_spelling": false,
-            "numeric": false,
-            "party_size": false,
-            "precise_date": false,
-            "relative_date": false,
-            "single_number": false,
-            "time": false,
-            "yes_no": false,
-            "address": false,
-            "custom_keywords": [],
-            "is_enabled": true
-          },
-          "dtmf": {
-            "is_enabled": false,
-            "inter_digit_timeout": 0,
-            "max_digits": 0,
-            "end_key": "#",
-            "collect_while_agent_speaking": false,
-            "is_pii": false
-          },
-          "step_id": "collect_email",
-          "flow_id": "FLOW_CONFIG-test_flow_with_punctuation"
-        },
-        "conditions": [],
-        "extracted_entities": [],
-        "position": {
-          "x": 600.0,
-          "y": 500.0
-        }
-      },
-      "FLOW_CONFIG-test_flow_with_punctuation_status_result": {
-        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation_status_result",
-        "step_id": "status_result",
-        "name": "status_result",
-        "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
-        "flow_name": "test_flow_with_punctuation!",
-        "step_type": "advanced_step",
-        "prompt": "Checking your status using {{fn:FUNCTION-test_function}} and {{ft:FUNCTION-shared_helper_flow2}}. For urgent matters, use {{ho:handoff-3}}. Status updates can be sent via {{twilio_sms:SMS_TEMPLATE-123}}.",
-        "settings": {
-          "asr_biasing": {
-            "alphanumeric": false,
-            "name_spelling": false,
-            "numeric": false,
-            "party_size": false,
-            "precise_date": false,
-            "relative_date": false,
-            "single_number": false,
-            "time": false,
-            "yes_no": false,
-            "address": false,
-            "custom_keywords": [],
-            "is_enabled": false
-          },
-          "dtmf": {
-            "is_enabled": true,
-            "inter_digit_timeout": 5,
-            "max_digits": 2,
-            "end_key": "#",
-            "collect_while_agent_speaking": false,
-            "is_pii": false
-          },
-          "step_id": "status_result",
-          "flow_id": "FLOW_CONFIG-test_flow_with_punctuation"
-        },
-        "conditions": [],
-        "extracted_entities": [],
-        "position": {
-          "x": 600.0,
-          "y": 500.0
-        }
-      }
-    },
-    "experimental_config": {
-      "default": {
-        "resource_id": "default",
-        "name": "experimental_config",
-        "config": {
-          "asr": {
-            "provider": "riva",
-            "model": "poly-latency",
-            "language": "en-GB"
-          },
-          "vad": {
-            "vad_end": 600
-          },
-          "smart_vad": {
-            "is_enabled": true
-          },
-          "eot": {
-            "provider": "smart_turn",
-            "threshold": 0.5
-          }
-        }
+        "step_id": "welcome_step",
+        "step_type": "default_step"
       }
     },
     "function_steps": {
       "FLOW_CONFIG-test_flow_process_payment": {
-        "resource_id": "FLOW_CONFIG-test_flow_process_payment",
-        "step_id": "process_payment",
+        "code": "def process_payment(conv: Conversation, flow: Flow):\n    \"\"\"Process payment for the customer.\"\"\"\n    # Process payment logic here\n    conv.state.customer_name = \"John Doe\"\n    conv.state.payment_success = True\n    return \"Payment processed\"\n",
+        "description": "",
         "flow_id": "FLOW_CONFIG-test_flow",
         "flow_name": "test_flow",
-        "name": "process_payment",
-        "step_type": "function_step",
-        "description": "",
-        "code": "def process_payment(conv: Conversation, flow: Flow):\n    \"\"\"Process payment for the customer.\"\"\"\n    # Process payment logic here\n    conv.state.customer_name = \"John Doe\"\n    conv.state.payment_success = True\n    return \"Payment processed\"\n",
-        "parameters": [],
-        "latency_control": {},
-        "function_type": "function_step",
         "function_id": "FUNCTION-process_payment",
+        "function_type": "function_step",
+        "latency_control": {},
+        "name": "process_payment",
+        "parameters": [],
         "position": {
           "x": 0.0,
           "y": 0.0
-        }
+        },
+        "resource_id": "FLOW_CONFIG-test_flow_process_payment",
+        "step_id": "process_payment",
+        "step_type": "function_step"
       },
       "FLOW_CONFIG-test_flow_with_punctuation_calculate_discount": {
-        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation_calculate_discount",
-        "step_id": "calculate_discount",
+        "code": "def calculate_discount(conv: Conversation, flow: Flow):\n    \"\"\"Calculate discount for the order.\"\"\"\n    # Calculate discount logic here\n    return \"Discount calculated\"\n",
+        "description": "",
         "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
         "flow_name": "test_flow_with_punctuation!",
-        "name": "calculate_discount",
-        "step_type": "function_step",
-        "description": "",
-        "code": "def calculate_discount(conv: Conversation, flow: Flow):\n    \"\"\"Calculate discount for the order.\"\"\"\n    # Calculate discount logic here\n    return \"Discount calculated\"\n",
-        "parameters": [],
-        "latency_control": {},
-        "function_type": "function_step",
         "function_id": "FUNCTION-process_payment",
+        "function_type": "function_step",
+        "latency_control": {},
+        "name": "calculate_discount",
+        "parameters": [],
         "position": {
           "x": 0.0,
           "y": 0.0
+        },
+        "resource_id": "FLOW_CONFIG-test_flow_with_punctuation_calculate_discount",
+        "step_id": "calculate_discount",
+        "step_type": "function_step"
+      }
+    },
+    "functions": {
+      "FUNCTION-calculate_total": {
+        "code": "def calculate_total(conv: Conversation, flow: Flow, amount: float):\n    \"\"\"Calculate total amount.\"\"\"\n    return amount * 1.1\n",
+        "description": "Calculate total amount.",
+        "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
+        "flow_name": "test_flow_with_punctuation!",
+        "function_type": "transition",
+        "latency_control": {},
+        "name": "calculate_total",
+        "parameters": [
+          {
+            "description": "The base amount to calculate from",
+            "id": "PARAMETER-amount-1",
+            "name": "amount",
+            "type": "number"
+          }
+        ],
+        "resource_id": "FUNCTION-calculate_total"
+      },
+      "FUNCTION-end_function": {
+        "code": "def end_function(conv: Conversation):\n    \"\"\"End function for the agent.\"\"\"\n    pass\n",
+        "description": "",
+        "flow_id": null,
+        "flow_name": null,
+        "function_type": "end",
+        "latency_control": {
+          "delay_responses": [],
+          "enabled": false,
+          "initial_delay": 0,
+          "interval": 0
+        },
+        "name": "end_function",
+        "parameters": [],
+        "resource_id": "FUNCTION-end_function",
+        "variable_references": {}
+      },
+      "FUNCTION-format_date": {
+        "code": "def format_date(conv: Conversation, date: str):\n    \"\"\"Format date for display.\"\"\"\n    return date.upper()\n",
+        "description": "Format date for display.",
+        "flow_id": null,
+        "flow_name": null,
+        "function_type": "global",
+        "latency_control": {},
+        "name": "format_date",
+        "parameters": [
+          {
+            "description": "The date string to format",
+            "id": "PARAMETER-date-1",
+            "name": "date",
+            "type": "string"
+          }
+        ],
+        "resource_id": "FUNCTION-format_date"
+      },
+      "FUNCTION-process_data": {
+        "code": "def process_data(conv: Conversation, flow: Flow, data: str):\n    \"\"\"Process data in flow context.\"\"\"\n    conv.state.data_processed = True\n    return f\"Processed in flow: {data}\"\n",
+        "description": "Process data in flow context.",
+        "flow_id": "FLOW_CONFIG-test_flow",
+        "flow_name": "test_flow",
+        "function_type": "transition",
+        "latency_control": {},
+        "name": "process_data",
+        "parameters": [
+          {
+            "description": "The data string to process",
+            "id": "PARAMETER-data-1",
+            "name": "data",
+            "type": "string"
+          }
+        ],
+        "resource_id": "FUNCTION-process_data"
+      },
+      "FUNCTION-shared_helper": {
+        "code": "def shared_helper(conv: Conversation, value: str):\n    \"\"\"A shared helper function that can be used by multiple flows.\"\"\"\n    return f\"Processed: {value}\"\n",
+        "description": "A shared helper function that can be used by multiple flows.",
+        "flow_id": null,
+        "flow_name": null,
+        "function_type": "global",
+        "latency_control": {},
+        "name": "shared_helper",
+        "parameters": [
+          {
+            "description": "The value to process",
+            "id": "PARAMETER-value-1",
+            "name": "value",
+            "type": "string"
+          }
+        ],
+        "resource_id": "FUNCTION-shared_helper"
+      },
+      "FUNCTION-shared_helper_flow1": {
+        "code": "def shared_helper(conv: Conversation, flow: Flow, value: str):\n    \"\"\"A shared helper function with same name as global function.\"\"\"\n    return f\"Flow-specific helper: {value}\"\n",
+        "description": "A shared helper function with same name as global function.",
+        "flow_id": "FLOW_CONFIG-test_flow",
+        "flow_name": "test_flow",
+        "function_type": "transition",
+        "latency_control": {},
+        "name": "shared_helper",
+        "parameters": [
+          {
+            "description": "The value to process",
+            "id": "PARAMETER-value-2",
+            "name": "value",
+            "type": "string"
+          }
+        ],
+        "resource_id": "FUNCTION-shared_helper_flow1"
+      },
+      "FUNCTION-shared_helper_flow2": {
+        "code": "def shared_helper(conv: Conversation, flow: Flow, value: str):\n    \"\"\"Another shared helper with same name as global and other flow.\"\"\"\n    return f\"Punctuation flow helper: {value}\"\n",
+        "description": "Another shared helper with same name as global and other flow.",
+        "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
+        "flow_name": "test_flow_with_punctuation!",
+        "function_type": "transition",
+        "latency_control": {},
+        "name": "shared_helper",
+        "parameters": [
+          {
+            "description": "The value to process",
+            "id": "PARAMETER-value-3",
+            "name": "value",
+            "type": "string"
+          }
+        ],
+        "resource_id": "FUNCTION-shared_helper_flow2"
+      },
+      "FUNCTION-start_function": {
+        "code": "def start_function(conv: Conversation):\n    \"\"\"Start function for the agent.\"\"\"\n    conv.state.customer_name = \"John Doe\"\n    pass\n",
+        "description": "",
+        "flow_id": null,
+        "flow_name": null,
+        "function_type": "start",
+        "latency_control": {
+          "delay_responses": [],
+          "enabled": false,
+          "initial_delay": 0,
+          "interval": 0
+        },
+        "name": "start_function",
+        "parameters": [],
+        "resource_id": "FUNCTION-start_function",
+        "variable_references": {
+          "VAR-customer_name": true
         }
+      },
+      "FUNCTION-test_function": {
+        "code": "def test_function(conv: Conversation):\n    \"\"\"A test function for global use.\"\"\"\n    return \"Hello from global function\"\n",
+        "description": "A test function for global use.",
+        "flow_id": null,
+        "flow_name": null,
+        "function_type": "global",
+        "latency_control": {},
+        "name": "test_function",
+        "parameters": [],
+        "resource_id": "FUNCTION-test_function"
+      },
+      "FUNCTION-test_function_with_parameters": {
+        "code": "def test_function_with_parameters(conv: Conversation, param1: str, param2: int):\n    \"\"\"Test function with parameters.\"\"\"\n    return f\"Result: {param1} - {param2}\"\n",
+        "description": "Test function with parameters.",
+        "flow_id": null,
+        "flow_name": null,
+        "function_type": "global",
+        "latency_control": {},
+        "name": "test_function_with_parameters",
+        "parameters": [
+          {
+            "description": "First parameter as string",
+            "id": "PARAMETER-param1-1",
+            "name": "param1",
+            "type": "string"
+          },
+          {
+            "description": "Second parameter as integer",
+            "id": "PARAMETER-param2-1",
+            "name": "param2",
+            "type": "integer"
+          }
+        ],
+        "resource_id": "FUNCTION-test_function_with_parameters"
+      },
+      "FUNCTION-validate_email": {
+        "code": "def validate_email(conv: Conversation, email: str):\n    \"\"\"Validate email format.\"\"\"\n    return \"@\" in email and \".\" in email.split(\"@\")[1]\n",
+        "description": "Validate email format.",
+        "flow_id": null,
+        "flow_name": null,
+        "function_type": "global",
+        "latency_control": {},
+        "name": "validate_email",
+        "parameters": [
+          {
+            "description": "The email address to validate",
+            "id": "PARAMETER-email-1",
+            "name": "email",
+            "type": "string"
+          }
+        ],
+        "resource_id": "FUNCTION-validate_email"
+      },
+      "FUNCTION-validate_input_flow1": {
+        "code": "def validate_input(conv: Conversation, flow: Flow, input_value: str):\n    \"\"\"Validate input in flow.\"\"\"\n    return len(input_value) > 0\n",
+        "description": "Validate input in flow.",
+        "flow_id": "FLOW_CONFIG-test_flow",
+        "flow_name": "test_flow",
+        "function_type": "transition",
+        "latency_control": {},
+        "name": "validate_input",
+        "parameters": [
+          {
+            "description": "The input value to validate",
+            "id": "PARAMETER-input_value-1",
+            "name": "input_value",
+            "type": "string"
+          }
+        ],
+        "resource_id": "FUNCTION-validate_input_flow1"
+      },
+      "FUNCTION-validate_input_flow2": {
+        "code": "def validate_input(conv: Conversation, flow: Flow, input_value: str):\n    \"\"\"Another validate_input with same name as other flow.\"\"\"\n    return input_value.isdigit()\n",
+        "description": "Another validate_input with same name as other flow.",
+        "flow_id": "FLOW_CONFIG-test_flow_with_punctuation",
+        "flow_name": "test_flow_with_punctuation!",
+        "function_type": "transition",
+        "latency_control": {},
+        "name": "validate_input",
+        "parameters": [
+          {
+            "description": "The input value to validate",
+            "id": "PARAMETER-input_value-2",
+            "name": "input_value",
+            "type": "string"
+          }
+        ],
+        "resource_id": "FUNCTION-validate_input_flow2"
       }
     },
     "handoffs": {
       "handoff-1": {
-        "resource_id": "handoff-1",
-        "name": "default",
         "description": "default handoff",
         "is_default": true,
+        "name": "default",
+        "resource_id": "handoff-1",
         "sip_config": {
           "method": "refer",
           "phone_number": "+1234567890"
@@ -969,10 +947,10 @@
         ]
       },
       "handoff-2": {
-        "resource_id": "handoff-2",
-        "name": "front desk",
         "description": "Speak to front desk",
         "is_default": false,
+        "name": "front desk",
+        "resource_id": "handoff-2",
         "sip_config": {
           "method": "refer",
           "phone_number": "front desk"
@@ -980,10 +958,10 @@
         "sip_headers": []
       },
       "handoff-3": {
-        "resource_id": "handoff-3",
-        "name": "urgent support",
         "description": "Transfer for urgent matters",
         "is_default": false,
+        "name": "urgent support",
+        "resource_id": "handoff-3",
         "sip_config": {
           "method": "refer",
           "phone_number": "+1987654321"
@@ -991,91 +969,260 @@
         "sip_headers": []
       }
     },
+    "keyphrase_boosting": {
+      "KEYPHRASE_BOOSTING-checkin": {
+        "keyphrase": "check-in",
+        "level": "default",
+        "name": "check-in",
+        "resource_id": "KEYPHRASE_BOOSTING-checkin"
+      },
+      "KEYPHRASE_BOOSTING-polyai": {
+        "keyphrase": "PolyAI",
+        "level": "maximum",
+        "name": "PolyAI",
+        "resource_id": "KEYPHRASE_BOOSTING-polyai"
+      },
+      "KEYPHRASE_BOOSTING-reservation": {
+        "keyphrase": "reservation",
+        "level": "boosted",
+        "name": "reservation",
+        "resource_id": "KEYPHRASE_BOOSTING-reservation"
+      }
+    },
+    "persona": {
+      "PERSONA-persona": {
+        "content": "You are a calm and polite concierge.\nGreet the caller by name using {{vrbl:VAR-customer_name}}.\n",
+        "name": "persona",
+        "resource_id": "PERSONA-persona"
+      }
+    },
     "phrase_filtering": {
+      "STOP_KEYWORD-block_competitor_names": {
+        "description": "Prevents mentioning competitor names",
+        "name": "Block Competitor Names",
+        "regular_expressions": [
+          "\\bcompetitor\\b"
+        ],
+        "resource_id": "STOP_KEYWORD-block_competitor_names",
+        "say_phrase": true
+      },
       "STOP_KEYWORD-block_profanity": {
-        "resource_id": "STOP_KEYWORD-block_profanity",
-        "name": "Block Profanity",
         "description": "Blocks profane words from being spoken",
+        "function": "FUNCTION-validate_email",
+        "name": "Block Profanity",
         "regular_expressions": [
           "\\bbadword\\b",
           "\\boffensive\\b"
         ],
-        "say_phrase": false,
-        "function": "FUNCTION-validate_email"
+        "resource_id": "STOP_KEYWORD-block_profanity",
+        "say_phrase": false
+      }
+    },
+    "platform_guardrails": {
+      "ai_identity": {
+        "enabled": true,
+        "name": "ai_identity",
+        "resource_id": "ai_identity"
       },
-      "STOP_KEYWORD-block_competitor_names": {
-        "resource_id": "STOP_KEYWORD-block_competitor_names",
-        "name": "Block Competitor Names",
-        "description": "Prevents mentioning competitor names",
-        "regular_expressions": [
-          "\\bcompetitor\\b"
-        ],
-        "say_phrase": true
+      "emergency_escalation": {
+        "enabled": true,
+        "name": "emergency_escalation",
+        "resource_id": "emergency_escalation"
+      },
+      "hallucination_control": {
+        "enabled": false,
+        "name": "hallucination_control",
+        "resource_id": "hallucination_control"
+      },
+      "jailbreak_defence": {
+        "enabled": true,
+        "name": "jailbreak_defence",
+        "resource_id": "jailbreak_defence"
+      },
+      "tool_call_integrity": {
+        "enabled": false,
+        "name": "tool_call_integrity",
+        "resource_id": "tool_call_integrity"
       }
     },
     "pronunciations": {
       "PRONUNCIATION-dr_abbreviation": {
-        "resource_id": "PRONUNCIATION-dr_abbreviation",
+        "case_sensitive": true,
+        "position": 0,
         "regex": "\\bDr\\.",
         "replacement": "Doctor",
-        "case_sensitive": true,
-        "position": 0
+        "resource_id": "PRONUNCIATION-dr_abbreviation"
       },
       "PRONUNCIATION-mr_abbreviation": {
-        "resource_id": "PRONUNCIATION-mr_abbreviation",
+        "case_sensitive": true,
+        "position": 1,
         "regex": "\\bMr\\.",
         "replacement": "Mister",
-        "case_sensitive": true,
-        "position": 1
+        "resource_id": "PRONUNCIATION-mr_abbreviation"
+      }
+    },
+    "rules": {
+      "RULES-rules": {
+        "behaviour": "Be helpful and professional at all times.\nUse {{fn:FUNCTION-test_function}} when appropriate.\nAlways validate inputs using {{fn:FUNCTION-validate_email}} when dealing with email addresses.\nAccess customer information from {{attr:customer_name}} and {{attr:email_address}}.\nFor complex issues, use {{ho:handoff-1}} to transfer to a specialist.\nSend important notifications via {{twilio_sms:SMS_TEMPLATE-123}} or {{twilio_sms:SMS_TEMPLATE-456}} as appropriate.\nFollow the guidelines provided.\nUse variable {{vrbl:VAR-customer_name}}\n",
+        "name": "rules",
+        "resource_id": "RULES-rules"
+      }
+    },
+    "safety_filters": {
+      "safety_filters": {
+        "categories": {
+          "hate": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "self_harm": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "sexual": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "violence": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          }
+        },
+        "enabled": true,
+        "filter_type": "azure",
+        "name": "safety_filters",
+        "resource_id": "safety_filters"
       }
     },
     "sms_templates": {
       "SMS_TEMPLATE-123": {
-        "resource_id": "SMS_TEMPLATE-123",
-        "name": "test_template_1",
-        "text": "This is a test template",
         "env_phone_numbers": {
-          "sandbox": "",
+          "live": "+447700102347",
           "pre_release": "",
-          "live": "+447700102347"
-        }
+          "sandbox": ""
+        },
+        "name": "test_template_1",
+        "resource_id": "SMS_TEMPLATE-123",
+        "text": "This is a test template"
       },
       "SMS_TEMPLATE-456": {
-        "resource_id": "SMS_TEMPLATE-456",
-        "name": "test_template_2",
-        "text": "This is a second test template",
         "env_phone_numbers": {
-          "sandbox": "",
+          "live": "+447700102347",
           "pre_release": "",
-          "live": "+447700102347"
-        }
+          "sandbox": ""
+        },
+        "name": "test_template_2",
+        "resource_id": "SMS_TEMPLATE-456",
+        "text": "This is a second test template"
       }
     },
-    "keyphrase_boosting": {
-      "KEYPHRASE_BOOSTING-polyai": {
-        "resource_id": "KEYPHRASE_BOOSTING-polyai",
-        "name": "PolyAI",
-        "keyphrase": "PolyAI",
-        "level": "maximum"
+    "test_cases": {
+      "TEST-greeting_flow": {
+        "api_mocks": {
+          "mocks": {
+            "customer_api": {
+              "get_confirmation_status": [
+                {
+                  "respond": {
+                    "body": {
+                      "confirmed": true
+                    },
+                    "status": 200
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "assertions": {
+          "function_calls": [
+            {
+              "arguments": [
+                {
+                  "assertion_type": "equals",
+                  "expected_value": "hello",
+                  "parameter_name": "param1",
+                  "value_type": "string"
+                }
+              ],
+              "name": "test_function"
+            }
+          ],
+          "name": "assertions",
+          "prompts": [
+            "The agent offers to help with booking"
+          ],
+          "resource_id": "TEST-greeting_flow"
+        },
+        "channel": "chat.polyai",
+        "language": "en-GB",
+        "name": "Greeting flow test",
+        "resource_id": "TEST-greeting_flow",
+        "scenario": "Ask for help with booking.",
+        "tags": {
+          "name": "tags",
+          "resource_id": "TEST-greeting_flow",
+          "tags": [
+            "booking",
+            "smoke"
+          ]
+        },
+        "variant": null
       },
-      "KEYPHRASE_BOOSTING-reservation": {
-        "resource_id": "KEYPHRASE_BOOSTING-reservation",
-        "name": "reservation",
-        "keyphrase": "reservation",
-        "level": "boosted"
+      "TEST-webchat_smoke": {
+        "assertions": {
+          "function_calls": [],
+          "name": "assertions",
+          "prompts": [
+            "The agent greets the user"
+          ],
+          "resource_id": "TEST-webchat_smoke"
+        },
+        "channel": "webchat.polyai",
+        "language": "en-GB",
+        "name": "Webchat smoke test",
+        "resource_id": "TEST-webchat_smoke",
+        "scenario": "Say hello on webchat.",
+        "tags": {
+          "name": "tags",
+          "resource_id": "TEST-webchat_smoke",
+          "tags": [
+            "smoke"
+          ]
+        },
+        "variant": null
+      }
+    },
+    "topics": {
+      "TOPIC-Topic 1": {
+        "actions": "Use {{fn:FUNCTION-test_function}} to handle this request and {{fn:FUNCTION-format_date}} for dates. Access customer info via {{attr:customer_name}} and handoff with {{ho:handoff-1}} if needed. Send notifications using {{twilio_sms:SMS_TEMPLATE-123}}.",
+        "content": "This topic covers general inquiries and uses global functions.",
+        "enabled": true,
+        "example_queries": [
+          "How can I help?",
+          "What services do you offer?",
+          "General information request"
+        ],
+        "name": "Topic 1",
+        "resource_id": "TOPIC-Topic 1"
       },
-      "KEYPHRASE_BOOSTING-checkin": {
-        "resource_id": "KEYPHRASE_BOOSTING-checkin",
-        "name": "check-in",
-        "keyphrase": "check-in",
-        "level": "default"
+      "TOPIC-Topic 2": {
+        "actions": "Validate using {{fn:FUNCTION-validate_email}} and process with {{fn:FUNCTION-shared_helper}}. Check {{attr:email_address}} attribute and use {{ho:handoff-2}} for escalation. Send email verification via {{twilio_sms:SMS_TEMPLATE-456}}.",
+        "content": "This topic handles email validation and processing.",
+        "enabled": true,
+        "example_queries": [
+          "I need to verify my email",
+          "Check my email address",
+          "Email validation request"
+        ],
+        "name": "Topic 2",
+        "resource_id": "TOPIC-Topic 2"
       }
     },
     "transcript_corrections": {
       "TRANSCRIPT_CORRECTIONS-email_domain": {
-        "resource_id": "TRANSCRIPT_CORRECTIONS-email_domain",
-        "name": "Email domain fix",
         "description": "Correct common email domain misrecognitions",
+        "name": "Email domain fix",
         "regular_expressions": [
           {
             "regular_expression": "at gmail dot com",
@@ -1087,296 +1234,205 @@
             "replacement": "@hotmail.com",
             "replacement_type": "full"
           }
-        ]
+        ],
+        "resource_id": "TRANSCRIPT_CORRECTIONS-email_domain"
       },
       "TRANSCRIPT_CORRECTIONS-number_norm": {
-        "resource_id": "TRANSCRIPT_CORRECTIONS-number_norm",
-        "name": "Number normalization",
         "description": "Normalize spoken numbers to digits",
+        "name": "Number normalization",
         "regular_expressions": [
           {
             "regular_expression": "\\bdouble (\\d)\\b",
             "replacement": "\\1\\1",
             "replacement_type": "partial"
           }
-        ]
-      }
-    },
-    "api_integration": {
-      "int-customer_api": {
-        "resource_id": "int-customer_api",
-        "name": "customer_api",
-        "description": "test",
-        "environments": {
-          "sandbox": {
-            "base_url": "https://dev-customer.com",
-            "auth_type": "basic"
-          },
-          "pre_release": {
-            "base_url": "https://dev-customer.com",
-            "auth_type": "basic"
-          },
-          "live": {
-            "base_url": "https://customer.com",
-            "auth_type": "apiKey"
-          }
-        },
-        "operations": [
-          {
-            "resource_id": "",
-            "name": "get_confirmation_status",
-            "method": "GET",
-            "resource": "/bookings/{booking_id}/confirmation-status"
-          }
-        ]
-      }
-    },
-    "asr_settings": {
-      "asr_settings": {
-        "resource_id": "asr_settings",
-        "name": "asr_settings",
-        "barge_in": false,
-        "interaction_style": "balanced"
-      }
-    },
-    "safety_filters": {
-      "safety_filters": {
-        "resource_id": "safety_filters",
-        "name": "safety_filters",
-        "enabled": true,
-        "filter_type": "azure",
-        "categories": {
-          "violence": {
-            "enabled": true,
-            "precision": "MEDIUM"
-          },
-          "hate": {
-            "enabled": true,
-            "precision": "MEDIUM"
-          },
-          "sexual": {
-            "enabled": true,
-            "precision": "MEDIUM"
-          },
-          "self_harm": {
-            "enabled": true,
-            "precision": "MEDIUM"
-          }
-        }
-      }
-    },
-    "voice_safety_filters": {
-      "voice_safety_filters": {
-        "resource_id": "voice_safety_filters",
-        "name": "voice_safety_filters",
-        "enabled": true,
-        "filter_type": "azure",
-        "categories": {
-          "violence": {
-            "enabled": true,
-            "precision": "MEDIUM"
-          },
-          "hate": {
-            "enabled": true,
-            "precision": "MEDIUM"
-          },
-          "sexual": {
-            "enabled": true,
-            "precision": "MEDIUM"
-          },
-          "self_harm": {
-            "enabled": true,
-            "precision": "MEDIUM"
-          }
-        }
-      }
-    },
-    "chat_safety_filters": {
-      "chat_safety_filters": {
-        "resource_id": "chat_safety_filters",
-        "name": "chat_safety_filters",
-        "enabled": true,
-        "filter_type": "azure",
-        "categories": {
-          "violence": {
-            "enabled": true,
-            "precision": "MEDIUM"
-          },
-          "hate": {
-            "enabled": true,
-            "precision": "MEDIUM"
-          },
-          "sexual": {
-            "enabled": true,
-            "precision": "MEDIUM"
-          },
-          "self_harm": {
-            "enabled": true,
-            "precision": "MEDIUM"
-          }
-        }
-      }
-    },
-    "test_cases": {
-      "TEST-greeting_flow": {
-        "resource_id": "TEST-greeting_flow",
-        "name": "Greeting flow test",
-        "scenario": "Ask for help with booking.",
-        "channel": "chat.polyai",
-        "assertions": {
-          "resource_id": "TEST-greeting_flow",
-          "name": "assertions",
-          "prompts": [
-            "The agent offers to help with booking"
-          ],
-          "function_calls": [
-            {
-              "name": "test_function",
-              "arguments": [
-                {
-                  "parameter_name": "param1",
-                  "expected_value": "hello",
-                  "value_type": "string",
-                  "assertion_type": "equals"
-                }
-              ]
-            }
-          ]
-        },
-        "tags": {
-          "resource_id": "TEST-greeting_flow",
-          "name": "tags",
-          "tags": [
-            "booking",
-            "smoke"
-          ]
-        },
-        "variant": null,
-        "language": "en-GB",
-        "api_mocks": {
-          "mocks": {
-            "customer_api": {
-              "get_confirmation_status": [
-                {
-                  "respond": {
-                    "status": 200,
-                    "body": {
-                      "confirmed": true
-                    }
-                  }
-                }
-              ]
-            }
-          }
-        }
-      },
-      "TEST-webchat_smoke": {
-        "resource_id": "TEST-webchat_smoke",
-        "name": "Webchat smoke test",
-        "scenario": "Say hello on webchat.",
-        "channel": "webchat.polyai",
-        "assertions": {
-          "resource_id": "TEST-webchat_smoke",
-          "name": "assertions",
-          "prompts": [
-            "The agent greets the user"
-          ],
-          "function_calls": []
-        },
-        "tags": {
-          "resource_id": "TEST-webchat_smoke",
-          "name": "tags",
-          "tags": [
-            "smoke"
-          ]
-        },
-        "variant": null,
-        "language": "en-GB"
+        ],
+        "resource_id": "TRANSCRIPT_CORRECTIONS-number_norm"
       }
     },
     "translations": {
-      "TN-greeting": {
-        "resource_id": "TN-greeting",
-        "name": "greeting",
-        "translations": {
-          "en-GB": "Hello, how can I help you?",
-          "fr-FR": "Bonjour, comment puis-je vous aider?"
-        }
-      },
       "TN-farewell": {
-        "resource_id": "TN-farewell",
         "name": "farewell",
+        "resource_id": "TN-farewell",
         "translations": {
           "en-GB": "Goodbye",
           "fr-FR": "Au revoir"
         }
+      },
+      "TN-greeting": {
+        "name": "greeting",
+        "resource_id": "TN-greeting",
+        "translations": {
+          "en-GB": "Hello, how can I help you?",
+          "fr-FR": "Bonjour, comment puis-je vous aider?"
+        }
       }
     },
-    "default_language": {
-      "en-GB": {
-        "resource_id": "en-GB",
-        "name": "en-GB"
+    "variables": {
+      "VAR-customer_name": {
+        "name": "customer_name",
+        "resource_id": "VAR-customer_name"
+      },
+      "VAR-data_processed": {
+        "name": "data_processed",
+        "resource_id": "VAR-data_processed"
+      },
+      "VAR-payment_success": {
+        "name": "payment_success",
+        "resource_id": "VAR-payment_success"
       }
     },
-    "additional_languages": {
-      "fr-FR": {
-        "resource_id": "fr-FR",
-        "name": "fr-FR"
+    "variant_attributes": {
+      "booking_status": {
+        "mappings": {
+          "VARIANT-default": "value-4",
+          "VARIANT-spanish": "valor-4"
+        },
+        "name": "booking_status",
+        "resource_id": "booking_status"
+      },
+      "customer_name": {
+        "mappings": {
+          "VARIANT-default": "value-1",
+          "VARIANT-spanish": "valor-1"
+        },
+        "name": "customer_name",
+        "resource_id": "customer_name"
+      },
+      "email_address": {
+        "mappings": {
+          "VARIANT-default": "value-2",
+          "VARIANT-spanish": "valor-2"
+        },
+        "name": "email_address",
+        "resource_id": "email_address"
+      },
+      "max_retries": {
+        "config": {},
+        "kind": "number",
+        "mappings": {
+          "VARIANT-default": 3,
+          "VARIANT-spanish": 5
+        },
+        "name": "max_retries",
+        "resource_id": "max_retries"
+      },
+      "member_status": {
+        "mappings": {
+          "VARIANT-default": "value-3",
+          "VARIANT-spanish": "valor-3"
+        },
+        "name": "member_status",
+        "resource_id": "member_status"
+      },
+      "menu_config": {
+        "config": {},
+        "kind": "object",
+        "mappings": {
+          "VARIANT-default": {
+            "categories": [
+              "pizza",
+              "pasta"
+            ],
+            "currency": "USD"
+          },
+          "VARIANT-spanish": {
+            "categories": [
+              "paella"
+            ],
+            "currency": "EUR"
+          }
+        },
+        "name": "menu_config",
+        "resource_id": "menu_config"
+      },
+      "serves_alcohol": {
+        "config": {},
+        "kind": "boolean",
+        "mappings": {
+          "VARIANT-default": true,
+          "VARIANT-spanish": false
+        },
+        "name": "serves_alcohol",
+        "resource_id": "serves_alcohol"
+      },
+      "tier": {
+        "config": {
+          "values": [
+            "basic",
+            "premium"
+          ]
+        },
+        "kind": "enum",
+        "mappings": {
+          "VARIANT-default": "premium",
+          "VARIANT-spanish": "basic"
+        },
+        "name": "tier",
+        "resource_id": "tier"
       }
     },
-    "documents": {
-      "test_document.md": {
-        "resource_id": "test_document.md",
-        "name": "test_document",
-        "path": "test_document.md",
-        "contents": "This is a test document.\nIt has multiple lines.\n"
+    "variants": {
+      "VARIANT-default": {
+        "is_default": true,
+        "name": "default",
+        "resource_id": "VARIANT-default"
       },
-      "CONTEXT.MD": {
-        "resource_id": "CONTEXT.MD",
-        "name": "CONTEXT",
-        "path": "CONTEXT.MD",
-        "contents": "This is platform context file.\n"
+      "VARIANT-spanish": {
+        "is_default": false,
+        "name": "spanish",
+        "resource_id": "VARIANT-spanish"
       }
     },
-    "platform_guardrails": {
-      "jailbreak_defence": {
-        "resource_id": "jailbreak_defence",
-        "name": "jailbreak_defence",
-        "enabled": true
-      },
-      "hallucination_control": {
-        "resource_id": "hallucination_control",
-        "name": "hallucination_control",
-        "enabled": false
-      },
-      "ai_identity": {
-        "resource_id": "ai_identity",
-        "name": "ai_identity",
-        "enabled": true
-      },
-      "emergency_escalation": {
-        "resource_id": "emergency_escalation",
-        "name": "emergency_escalation",
-        "enabled": true
-      },
-      "tool_call_integrity": {
-        "resource_id": "tool_call_integrity",
-        "name": "tool_call_integrity",
-        "enabled": false
+    "voice_disclaimer": {
+      "voice_disclaimer": {
+        "enabled": true,
+        "language_code": "en-GB",
+        "message": "This conversation may be recorded for quality assurance.",
+        "name": "voice_disclaimer",
+        "resource_id": "voice_disclaimer"
       }
     },
-    "custom_guardrails": {
-      "CUSTOM_GUARDRAILS-no_medical_advice": {
-        "resource_id": "CUSTOM_GUARDRAILS-no_medical_advice",
-        "name": "No medical advice",
-        "prompt": "Never give medical advice. Offer to transfer the caller to a human instead.",
-        "action": "warn",
-        "enabled": true
+    "voice_greeting": {
+      "voice_greeting": {
+        "language_code": "en-GB",
+        "name": "voice_greeting",
+        "resource_id": "voice_greeting",
+        "welcome_message": "Hello! Welcome to our service. Your account shows {{attr:member_status}}. How can I assist you today?"
+      }
+    },
+    "voice_safety_filters": {
+      "voice_safety_filters": {
+        "categories": {
+          "hate": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "self_harm": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "sexual": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          },
+          "violence": {
+            "enabled": true,
+            "precision": "MEDIUM"
+          }
+        },
+        "enabled": true,
+        "filter_type": "azure",
+        "name": "voice_safety_filters",
+        "resource_id": "voice_safety_filters"
+      }
+    },
+    "voice_style_prompt": {
+      "voice_style_prompt": {
+        "name": "voice_style_prompt",
+        "prompt": "You are a helpful and professional customer service assistant.",
+        "resource_id": "voice_style_prompt"
       }
     }
-  },
-  "file_structure_info": {},
-  "migration_flags": [
-    "migrated_legacy_topic_files"
-  ]
+  }
 }
