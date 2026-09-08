@@ -337,9 +337,7 @@ class MetricsCommand(BaseCommand):
             data["expected_values"] = expected_values
 
         try:
-            result = AgentStudioInterface.create_custom_metric(
-                project.region, project.account_id, project.project_id, data
-            )
+            result = project.create_custom_metric(data)
         except ValueError as e:
             if output_json:
                 json_print({"success": False, "error": str(e)})

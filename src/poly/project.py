@@ -3789,6 +3789,37 @@ class AgentStudioProject:
         except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
             return [f"Invalid schema: {e}"]
 
+    def create_custom_metric(self, data: dict) -> dict:
+        """Validate and create a new custom metric.
+
+        Validates that ``expected_values`` is only set for string-type metrics,
+        then creates the metric. Works around a server bug where the ``api``
+        flag is ignored on create by issuing a follow-up update when ``api``
+        is ``True``.
+
+        Args:
+            data: Metric payload — name, type, description, expected_values, api.
+
+        Returns:
+            dict: The created metric record.
+
+        Raises:
+            ValueError: If expected_values is set for a non-string metric.
+        """
+        if data.get("expected_values") and data.get("type") != "string":
+            raise ValueError("--expected-values is only valid for string metrics.")
+
+        result = AgentStudioInterface.create_custom_metric(
+            self.region, self.account_id, self.project_id, data
+        )
+
+        if data.get("api"):
+            result = AgentStudioInterface.set_custom_metric_api_flag(
+                self.region, self.account_id, self.project_id, data["name"], True
+            )
+
+        return result
+
     def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
         """Get the history of a branch.
 

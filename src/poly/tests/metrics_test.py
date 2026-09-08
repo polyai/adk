@@ -3,11 +3,22 @@
 Copyright PolyAI Limited
 """
 
+import json
+import os
+import shutil
+import tempfile
 import unittest
+from copy import deepcopy
 from unittest.mock import MagicMock, patch
 
 from poly.cli_commands.metrics import VALID_METRIC_TYPES, MetricsCommand, _parse_bool_flag
 from poly.handlers.interface import AgentStudioInterface
+from poly.project import AgentStudioProject
+
+DIR = os.path.dirname(os.path.abspath(__file__))
+EMPTY_PROJECT_DIR = os.path.join(DIR, "test_projects", "test_empty_project")
+EMPTY_PROJECT_DATA_LOC = os.path.join(EMPTY_PROJECT_DIR, "empty_project.json")
+EMPTY_PROJECT_DATA = json.loads(open(EMPTY_PROJECT_DATA_LOC, encoding="utf-8").read())
 
 
 class ParseBoolFlagTest(unittest.TestCase):
@@ -143,13 +154,12 @@ class MetricsAddTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_add."""
 
     @patch("poly.cli_commands.metrics.success")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.create_custom_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_add_with_all_args(self, mock_load, mock_create, mock_success):
-        """Non-interactive add passes all fields to create_custom_metric."""
+    def test_add_with_all_args(self, mock_load, mock_success):
+        """Non-interactive add passes all fields to project.create_custom_metric."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        mock_create.return_value = {"name": "SCORE", "type": "int", "api": True}
+        project.create_custom_metric.return_value = {"name": "SCORE", "type": "int", "api": True}
 
         MetricsCommand.metrics_add(
             "/tmp/test",
@@ -161,22 +171,18 @@ class MetricsAddTest(unittest.TestCase):
             output_json=False,
         )
 
-        mock_create.assert_called_once_with(
-            "us",
-            "acc1",
-            "proj1",
+        project.create_custom_metric.assert_called_once_with(
             {"name": "SCORE", "type": "int", "description": "CSAT Score", "api": True},
         )
         mock_success.assert_called_once()
 
     @patch("poly.cli_commands.metrics.json_print")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.create_custom_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_add_without_api(self, mock_load, mock_create, mock_json):
+    def test_add_without_api(self, mock_load, mock_json):
         """When api=False, create is called without the api flag."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        mock_create.return_value = {"name": "SCORE", "type": "int"}
+        project.create_custom_metric.return_value = {"name": "SCORE", "type": "int"}
 
         MetricsCommand.metrics_add(
             "/tmp/test",
@@ -186,18 +192,17 @@ class MetricsAddTest(unittest.TestCase):
             output_json=True,
         )
 
-        mock_create.assert_called_once()
-        data = mock_create.call_args[0][3]
+        project.create_custom_metric.assert_called_once()
+        data = project.create_custom_metric.call_args[0][0]
         self.assertNotIn("api", data)
 
     @patch("poly.cli_commands.metrics.json_print")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.create_custom_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_add_passes_expected_values(self, mock_load, mock_create, mock_json):
+    def test_add_passes_expected_values(self, mock_load, mock_json):
         """Expected values are included in the data dict when provided."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        mock_create.return_value = {}
+        project.create_custom_metric.return_value = {}
 
         MetricsCommand.metrics_add(
             "/tmp/test",
@@ -209,7 +214,7 @@ class MetricsAddTest(unittest.TestCase):
             output_json=True,
         )
 
-        data = mock_create.call_args[0][3]
+        data = project.create_custom_metric.call_args[0][0]
         self.assertEqual(data["expected_values"], ["open", "closed"])
 
     @patch("poly.cli_commands.metrics.json_print")
@@ -253,13 +258,14 @@ class MetricsAddTest(unittest.TestCase):
         self.assertIn("--type", printed["error"])
 
     @patch("poly.cli_commands.metrics.error")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.create_custom_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_add_expected_values_rejected_for_non_string(self, mock_load, mock_create, mock_error):
+    def test_add_expected_values_rejected_for_non_string(self, mock_load, mock_error):
         """Expected values are rejected for non-string metric types."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        mock_create.side_effect = ValueError("--expected-values is only valid for string metrics.")
+        project.create_custom_metric.side_effect = ValueError(
+            "--expected-values is only valid for string metrics."
+        )
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_add(
@@ -277,13 +283,14 @@ class MetricsAddTest(unittest.TestCase):
         self.assertIn("only valid for string", mock_error.call_args[0][0])
 
     @patch("poly.cli_commands.metrics.json_print")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.create_custom_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_add_expected_values_rejected_json(self, mock_load, mock_create, mock_json):
+    def test_add_expected_values_rejected_json(self, mock_load, mock_json):
         """In JSON mode, expected values are rejected for non-string types."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        mock_create.side_effect = ValueError("--expected-values is only valid for string metrics.")
+        project.create_custom_metric.side_effect = ValueError(
+            "--expected-values is only valid for string metrics."
+        )
 
         with self.assertRaises(SystemExit):
             MetricsCommand.metrics_add(
@@ -299,14 +306,13 @@ class MetricsAddTest(unittest.TestCase):
         self.assertIn("only valid for string", printed["error"])
 
     @patch("poly.cli_commands.metrics.json_print")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.create_custom_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_add_json_output_on_success(self, mock_load, mock_create, mock_json):
+    def test_add_json_output_on_success(self, mock_load, mock_json):
         """In JSON mode, successful add prints success with the metric."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
         result = {"name": "SCORE", "type": "int"}
-        mock_create.return_value = result
+        project.create_custom_metric.return_value = result
 
         MetricsCommand.metrics_add(
             "/tmp/test",
@@ -318,14 +324,15 @@ class MetricsAddTest(unittest.TestCase):
         mock_json.assert_called_once_with({"success": True, "metric": result})
 
     @patch("poly.cli_commands.metrics.error")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.create_custom_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_add_duplicate_metric_friendly_error(self, mock_load, mock_create, mock_error):
+    def test_add_duplicate_metric_friendly_error(self, mock_load, mock_error):
         """409 from the server shows 'already exists' instead of raw HTTP error."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
         response = MagicMock(status_code=409, text="conflict")
-        mock_create.side_effect = __import__("requests").HTTPError(response=response)
+        project.create_custom_metric.side_effect = __import__("requests").HTTPError(
+            response=response
+        )
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_add(
@@ -341,14 +348,15 @@ class MetricsAddTest(unittest.TestCase):
         self.assertIn("already exists", mock_error.call_args[0][0])
 
     @patch("poly.cli_commands.metrics.json_print")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.create_custom_metric")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_add_duplicate_metric_json(self, mock_load, mock_create, mock_json):
+    def test_add_duplicate_metric_json(self, mock_load, mock_json):
         """409 in JSON mode prints structured error with 'already exists'."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
         response = MagicMock(status_code=409, text="conflict")
-        mock_create.side_effect = __import__("requests").HTTPError(response=response)
+        project.create_custom_metric.side_effect = __import__("requests").HTTPError(
+            response=response
+        )
 
         with self.assertRaises(SystemExit):
             MetricsCommand.metrics_add(
@@ -809,58 +817,57 @@ class PrintMetricsTest(unittest.TestCase):
         self.assertIn("1 inactive", summary)
 
 
-class CreateCustomMetricInterfaceTest(unittest.TestCase):
-    """Tests for AgentStudioInterface.create_custom_metric business logic."""
+class ProjectCreateCustomMetricTest(unittest.TestCase):
+    """Tests for AgentStudioProject.create_custom_metric validation and orchestration."""
 
-    @patch("poly.handlers.interface.PlatformAPIHandler.update_custom_metric")
-    @patch("poly.handlers.interface.PlatformAPIHandler.create_custom_metric")
-    def test_api_flag_triggers_follow_up_patch(self, mock_create, mock_update):
-        """When api=True, a follow-up PATCH sets the api flag after create."""
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project = AgentStudioProject.from_dict(deepcopy(EMPTY_PROJECT_DATA), self.temp_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @patch("poly.project.AgentStudioInterface.set_custom_metric_api_flag")
+    @patch("poly.project.AgentStudioInterface.create_custom_metric")
+    def test_api_flag_triggers_follow_up_update(self, mock_create, mock_set_api):
+        """When api=True, a follow-up call sets the api flag after create."""
         mock_create.return_value = {"name": "SCORE", "type": "int"}
-        mock_update.return_value = {"name": "SCORE", "type": "int", "api": True}
+        mock_set_api.return_value = {"name": "SCORE", "type": "int", "api": True}
 
-        result = AgentStudioInterface.create_custom_metric(
-            "us", "acc1", "proj1", {"name": "SCORE", "type": "int", "api": True}
-        )
+        result = self.project.create_custom_metric({"name": "SCORE", "type": "int", "api": True})
 
         mock_create.assert_called_once()
-        mock_update.assert_called_once_with("us", "acc1", "proj1", "SCORE", {"api": True})
+        mock_set_api.assert_called_once_with(
+            self.project.region, self.project.account_id, self.project.project_id, "SCORE", True
+        )
         self.assertTrue(result["api"])
 
-    @patch("poly.handlers.interface.PlatformAPIHandler.update_custom_metric")
-    @patch("poly.handlers.interface.PlatformAPIHandler.create_custom_metric")
-    def test_no_api_flag_skips_patch(self, mock_create, mock_update):
-        """When api is not set, no follow-up PATCH is issued."""
+    @patch("poly.project.AgentStudioInterface.set_custom_metric_api_flag")
+    @patch("poly.project.AgentStudioInterface.create_custom_metric")
+    def test_no_api_flag_skips_follow_up(self, mock_create, mock_set_api):
+        """When api is not set, no follow-up call is issued."""
         mock_create.return_value = {"name": "SCORE", "type": "int"}
 
-        AgentStudioInterface.create_custom_metric(
-            "us", "acc1", "proj1", {"name": "SCORE", "type": "int"}
-        )
+        self.project.create_custom_metric({"name": "SCORE", "type": "int"})
 
         mock_create.assert_called_once()
-        mock_update.assert_not_called()
+        mock_set_api.assert_not_called()
 
     def test_expected_values_rejected_for_non_string(self):
         """Raises ValueError when expected_values is set on a non-string metric."""
         with self.assertRaises(ValueError) as ctx:
-            AgentStudioInterface.create_custom_metric(
-                "us",
-                "acc1",
-                "proj1",
+            self.project.create_custom_metric(
                 {"name": "SCORE", "type": "int", "expected_values": ["a", "b"]},
             )
 
         self.assertIn("only valid for string", str(ctx.exception))
 
-    @patch("poly.handlers.interface.PlatformAPIHandler.create_custom_metric")
+    @patch("poly.project.AgentStudioInterface.create_custom_metric")
     def test_expected_values_allowed_for_string(self, mock_create):
         """Does not raise when expected_values is set on a string metric."""
         mock_create.return_value = {"name": "STATUS", "type": "string"}
 
-        AgentStudioInterface.create_custom_metric(
-            "us",
-            "acc1",
-            "proj1",
+        self.project.create_custom_metric(
             {"name": "STATUS", "type": "string", "expected_values": ["open", "closed"]},
         )
 

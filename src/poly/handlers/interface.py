@@ -1351,10 +1351,6 @@ class AgentStudioInterface:
     ) -> dict:
         """Create a new custom metric.
 
-        Validates that ``expected_values`` is only set for string-type metrics.
-        Works around a server bug where the ``api`` flag is ignored on create
-        by issuing a follow-up PATCH when ``api`` is ``True``.
-
         Args:
             region: The region name.
             account_id: The account ID.
@@ -1363,22 +1359,35 @@ class AgentStudioInterface:
 
         Returns:
             dict: The created metric record.
-
-        Raises:
-            ValueError: If expected_values is set for a non-string metric.
         """
-        if data.get("expected_values") and data.get("type") != "string":
-            raise ValueError("--expected-values is only valid for string metrics.")
+        return PlatformAPIHandler.create_custom_metric(region, account_id, project_id, data)
 
-        result = PlatformAPIHandler.create_custom_metric(region, account_id, project_id, data)
+    @staticmethod
+    def set_custom_metric_api_flag(
+        region: str,
+        account_id: str,
+        project_id: str,
+        metric_name: str,
+        api: bool,
+    ) -> dict:
+        """Set the ``api`` flag on an existing custom metric.
 
-        # The server ignores the api flag on create, so follow up with an edit
-        if data.get("api"):
-            result = PlatformAPIHandler.update_custom_metric(
-                region, account_id, project_id, data["name"], {"api": True}
-            )
+        The server ignores the ``api`` flag when passed to create, so callers
+        creating an API metric must follow up with this call.
 
-        return result
+        Args:
+            region: The region name.
+            account_id: The account ID.
+            project_id: The project ID.
+            metric_name: Name of the metric to update.
+            api: The desired value of the api flag.
+
+        Returns:
+            dict: The updated metric record.
+        """
+        return PlatformAPIHandler.update_custom_metric(
+            region, account_id, project_id, metric_name, {"api": api}
+        )
 
     @staticmethod
     def update_custom_metric(
@@ -1407,11 +1416,14 @@ class AgentStudioInterface:
         Raises:
             ValueError: If expected_values is set for a non-string metric.
         """
-        if data.get("expected_values") is not None:
-            metrics = PlatformAPIHandler.get_custom_metrics(region, account_id, project_id)
-            metric = next((m for m in metrics if m.get("name") == metric_name), None)
-            if metric and metric.get("type") != "string":
-                raise ValueError("--expected-values is only valid for string metrics.")
+
+        # TODO: Update to perform the read plus validation in project.py
+
+        # if data.get("expected_values") is not None:
+        #     metrics = PlatformAPIHandler.get_custom_metrics(region, account_id, project_id)
+        #     metric = next((m for m in metrics if m.get("name") == metric_name), None)
+        #     if metric and metric.get("type") != "string":
+        #         raise ValueError("--expected-values is only valid for string metrics.")
 
         return PlatformAPIHandler.update_custom_metric(
             region, account_id, project_id, metric_name, data
@@ -1515,6 +1527,7 @@ class AgentStudioInterface:
         if not os.path.exists(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
+        # TODO: file reading should be handled at project.py level.
         with open(file_path) as f:
             yaml_content = f.read()
 
@@ -1526,6 +1539,7 @@ class AgentStudioInterface:
 
         local_names = set(local_metrics.keys())
 
+        # TODO: make dry run be handled at the API level.
         if dry_run:
             return {
                 "dry_run": True,
