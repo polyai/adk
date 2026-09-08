@@ -3934,7 +3934,11 @@ class AgentStudioProject:
 
     @cached_property
     def using_simplified_deployments(self) -> bool:
-        """Check if the project is using simplified deployments."""
+        """Check if the project is using simplified deployments.
+
+        Two conditions, both required: the project has been rolled out to, and it
+        has *converged* — main and live already hold the same version.
+        """
         flag_enabled = self.api_handler.feature_flag_enabled(
             key="deployment-simplification",
             region=self.region,
@@ -3944,26 +3948,62 @@ class AgentStudioProject:
         if not flag_enabled:
             return False
 
-        # A project is converged if the main == live
-        # Once a project is converged, all deployments will go to live
-        # To check, look at most recent deployment in sandbox and live. If it is the same as live, then the project is converged
-        live_deployments = self.api_handler.get_deployments(
-            self.region, self.account_id, self.project_id, client_env="live"
+        return self._has_converged()
+
+    def _has_converged(self) -> bool:
+        """Whether main and live hold the same version.
+
+        Main's latest deployment is the newest of its live deployments and its
+        *untagged* sandbox deployments — the two environments main owns. A
+        sandbox deployment carrying a tag was made by a branch holding that tag,
+        not by main, so counting it would make a branch's work look like main
+        had moved.
+
+        Convergence compares the two versions, not their timestamps. Under
+        simplified deployments a publish to live is followed by a sandbox
+        deployment mirroring it, so sandbox is routinely the newer row while
+        holding identical content — a timestamp comparison reports a difference
+        that does not exist.
+        """
+        live_deployments = self._live_deployments("live")
+        sandbox_deployments = self._live_deployments("sandbox")
+
+        live_head = self._newest(live_deployments)
+        main_head = self._newest(
+            live_deployments + [d for d in sandbox_deployments if not self._tag_of(d)]
         )
-        sandbox_deployments = self.api_handler.get_deployments(
-            self.region, self.account_id, self.project_id, client_env="sandbox"
-        )
 
-        live_head = next((d for d in live_deployments if not d.get("deleted", False)), None)
-        sandbox_head = next((d for d in sandbox_deployments if not d.get("deleted", False)), None)
-
-        def _parse_created_at(deployment: dict) -> datetime:
-            return datetime.strptime(deployment["created_at"], "%a, %d %b %Y %H:%M:%S %Z")
-
-        if live_head is None and sandbox_head is None:
-            # No deployments in either environment, consider converged
+        if live_head is None and main_head is None:
+            # Nothing deployed anywhere, so there is no version for the two to
+            # disagree on.
             return True
 
-        return live_head is not None and (
-            sandbox_head is None or _parse_created_at(live_head) >= _parse_created_at(sandbox_head)
+        if live_head is None or main_head is None:
+            return False
+
+        return live_head.get("version_hash") == main_head.get("version_hash")
+
+    def _live_deployments(self, client_env: str) -> list[dict[str, Any]]:
+        """Deployments for an environment, excluding deleted ones."""
+        deployments = self.api_handler.get_deployments(
+            self.region, self.account_id, self.project_id, client_env=client_env
         )
+        return [d for d in (deployments or []) if not d.get("deleted", False)]
+
+    @staticmethod
+    def _tag_of(deployment: dict[str, Any]) -> Optional[str]:
+        """The tag a deployment was made under, if any."""
+        return (deployment.get("deployment_metadata") or {}).get("tag")
+
+    @staticmethod
+    def _newest(deployments: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+        """The most recently created deployment, or None when there are none.
+
+        Sorted rather than assuming the API returns newest first, so the answer
+        does not depend on response ordering.
+        """
+
+        def created_at(deployment: dict[str, Any]) -> datetime:
+            return datetime.strptime(deployment["created_at"], "%a, %d %b %Y %H:%M:%S %Z")
+
+        return max(deployments, key=created_at, default=None)
