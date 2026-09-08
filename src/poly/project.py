@@ -3959,11 +3959,7 @@ class AgentStudioProject:
         sandbox_deployments = self._live_deployments("sandbox")
 
         live_head = self._newest(live_deployments)
-        # Main owns live plus its untagged sandbox deployments; a tagged one was
-        # deployed by the branch holding that tag.
-        main_head = self._newest(
-            live_deployments + [d for d in sandbox_deployments if not self._tag_of(d)]
-        )
+        main_head = self._newest(live_deployments + sandbox_deployments)
 
         # Nothing deployed at all: no live content to regress.
         if live_head is None and main_head is None:
@@ -3988,11 +3984,6 @@ class AgentStudioProject:
             self.region, self.account_id, self.project_id, client_env=client_env
         )
         return [d for d in (deployments or []) if not d.get("deleted", False)]
-
-    @staticmethod
-    def _tag_of(deployment: dict[str, Any]) -> Optional[str]:
-        """The tag a deployment was made under, if any."""
-        return (deployment.get("deployment_metadata") or {}).get("tag")
 
     @staticmethod
     def _newest(deployments: list[dict[str, Any]]) -> Optional[dict[str, Any]]:

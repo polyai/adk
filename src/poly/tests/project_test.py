@@ -12,7 +12,6 @@ import shutil
 import tempfile
 import unittest
 from copy import deepcopy
-from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import poly.resources.resource_utils as resource_utils
@@ -5044,22 +5043,13 @@ class UsingSimplifiedDeploymentsTest(unittest.TestCase):
         self.assertFalse(project.using_simplified_deployments)
         project.api_handler.get_deployments.assert_not_called()
 
-    def _deployment(
-        self,
-        created_at: str,
-        version_hash: str = "v1",
-        deleted: bool = False,
-        tag: Optional[str] = None,
-    ) -> dict:
+    def _deployment(self, created_at: str, version_hash: str = "v1", deleted: bool = False) -> dict:
         """Build a minimal deployment dict for convergence checks."""
-        deployment = {
+        return {
             "created_at": created_at,
             "version_hash": version_hash,
             "deleted": deleted,
         }
-        if tag is not None:
-            deployment["deployment_metadata"] = {"tag": tag}
-        return deployment
 
     def _set_deployments(self, api: MagicMock, live: list, sandbox: list) -> None:
         """Stub get_deployments to return a different list per client_env."""
@@ -5100,35 +5090,6 @@ class UsingSimplifiedDeploymentsTest(unittest.TestCase):
             live=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
             sandbox=[self._deployment("Mon, 01 Jan 2026 10:00:00 GMT", version_hash="old")],
             expected=True,
-        )
-
-    def test_a_tagged_sandbox_deployment_belongs_to_a_branch_not_main(self):
-        """A branch holding a tag deploys to sandbox without moving main."""
-        self._assert_converged(
-            live=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
-            sandbox=[
-                self._deployment(
-                    "Mon, 01 Jan 2026 13:00:00 GMT", version_hash="branch", tag="internal"
-                )
-            ],
-            expected=True,
-        )
-
-    def test_an_untagged_sandbox_deployment_still_counts_behind_a_tagged_one(self):
-        """Filtering tagged deployments must not hide main's own sandbox deploys.
-
-        The newest sandbox deployment belongs to a branch, but main deployed the
-        one behind it and live has not caught up.
-        """
-        self._assert_converged(
-            live=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
-            sandbox=[
-                self._deployment(
-                    "Wed, 03 Jan 2026 12:00:00 GMT", version_hash="branch", tag="internal"
-                ),
-                self._deployment("Tue, 02 Jan 2026 12:00:00 GMT", version_hash="def"),
-            ],
-            expected=False,
         )
 
     def test_converges_when_no_deployments_exist_in_either_environment(self):
