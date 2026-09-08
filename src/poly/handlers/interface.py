@@ -1483,47 +1483,25 @@ class AgentStudioInterface:
         region: str,
         account_id: str,
         project_id: str,
-        file_path: str,
+        yaml_content: str,
+        local_names: set[str],
         dry_run: bool = False,
     ) -> dict:
-        """Read a YAML file and import its metrics, or preview the import.
+        """Import metrics from already-loaded YAML content, or preview the import.
 
         Args:
             region: The region name.
             account_id: The account ID.
             project_id: The project ID.
-            file_path: Path to the YAML file with metric definitions.
+            yaml_content: Raw YAML string with metric definitions.
+            local_names: Set of metric names parsed from ``yaml_content``.
             dry_run: If True, return a preview without applying changes.
 
         Returns:
             dict: In dry-run mode, a preview dict with ``would_create``,
             ``would_skip``, and ``remote_only``. Otherwise, the import result
             with ``metadata.created`` and ``metadata.ignored``.
-
-        Raises:
-            FileNotFoundError: If the file does not exist.
-            ValueError: If the file contains invalid YAML.
         """
-        import os
-
-        from ruamel.yaml import YAML, YAMLError
-
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
-
-        # TODO: file reading should be handled at project.py level.
-        with open(file_path) as f:
-            yaml_content = f.read()
-
-        try:
-            ry = YAML()
-            local_metrics = ry.load(yaml_content) or {}
-        except YAMLError as e:
-            raise ValueError(f"Invalid YAML: {e}") from e
-
-        local_names = set(local_metrics.keys())
-
-        # TODO: make dry run be handled at the API level.
         if dry_run:
             return {
                 "dry_run": True,

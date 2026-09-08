@@ -3848,6 +3848,42 @@ class AgentStudioProject:
             self.region, self.account_id, self.project_id, metric_name, data
         )
 
+    def import_metrics_from_file(self, file_path: str, dry_run: bool = False) -> dict:
+        """Read a YAML file and import its metrics, or preview the import.
+
+        Args:
+            file_path: Path to the YAML file with metric definitions.
+            dry_run: If True, return a preview without applying changes.
+
+        Returns:
+            dict: In dry-run mode, a preview dict with ``would_create``,
+            ``would_skip``, and ``remote_only``. Otherwise, the import result
+            with ``metadata.created`` and ``metadata.ignored``.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            ValueError: If the file contains invalid YAML.
+        """
+        from ruamel.yaml import YAML, YAMLError
+
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        with open(file_path) as f:
+            yaml_content = f.read()
+
+        try:
+            ry = YAML()
+            local_metrics = ry.load(yaml_content) or {}
+        except YAMLError as e:
+            raise ValueError(f"Invalid YAML: {e}") from e
+
+        local_names = set(local_metrics.keys())
+
+        return AgentStudioInterface.import_metrics_from_file(
+            self.region, self.account_id, self.project_id, yaml_content, local_names, dry_run
+        )
+
     def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
         """Get the history of a branch.
 

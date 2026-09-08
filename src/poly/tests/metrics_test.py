@@ -644,13 +644,14 @@ class MetricsImportTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_import."""
 
     @patch("poly.cli_commands.metrics.error")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.import_metrics_from_file")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_import_file_not_found(self, mock_load, mock_import, mock_error):
+    def test_import_file_not_found(self, mock_load, mock_error):
         """Exits with error when the import file does not exist."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        mock_import.side_effect = FileNotFoundError("File not found: /nonexistent/metrics.yaml")
+        project.import_metrics_from_file.side_effect = FileNotFoundError(
+            "File not found: /nonexistent/metrics.yaml"
+        )
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_import(
@@ -662,13 +663,14 @@ class MetricsImportTest(unittest.TestCase):
         self.assertIn("File not found", mock_error.call_args[0][0])
 
     @patch("poly.cli_commands.metrics.json_print")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.import_metrics_from_file")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_import_file_not_found_json(self, mock_load, mock_import, mock_json):
+    def test_import_file_not_found_json(self, mock_load, mock_json):
         """In JSON mode, missing file prints error JSON and exits."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        mock_import.side_effect = FileNotFoundError("File not found: /nonexistent/metrics.yaml")
+        project.import_metrics_from_file.side_effect = FileNotFoundError(
+            "File not found: /nonexistent/metrics.yaml"
+        )
 
         with self.assertRaises(SystemExit):
             MetricsCommand.metrics_import(
@@ -679,26 +681,24 @@ class MetricsImportTest(unittest.TestCase):
         self.assertFalse(printed["success"])
 
     @patch("poly.cli_commands.metrics.error")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.import_metrics_from_file")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_import_invalid_yaml(self, mock_load, mock_import, mock_error):
+    def test_import_invalid_yaml(self, mock_load, mock_error):
         """Exits with error when YAML parsing fails."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        mock_import.side_effect = ValueError("Invalid YAML: ...")
+        project.import_metrics_from_file.side_effect = ValueError("Invalid YAML: ...")
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_import("/tmp/test", file_path="bad.yaml", output_json=False)
 
         self.assertEqual(ctx.exception.code, 1)
 
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.import_metrics_from_file")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_import_success(self, mock_load, mock_import):
-        """Successful import calls import_metrics_from_file and prints summary."""
+    def test_import_success(self, mock_load):
+        """Successful import calls project.import_metrics_from_file and prints summary."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        mock_import.return_value = {
+        project.import_metrics_from_file.return_value = {
             "remote_only": [],
             "metadata": {"created": ["SCORE"], "ignored": []},
         }
@@ -706,15 +706,14 @@ class MetricsImportTest(unittest.TestCase):
         with patch("poly.cli_commands.metrics.success"), patch("poly.cli_commands.metrics.plain"):
             MetricsCommand.metrics_import("/tmp/test", file_path="metrics.yaml", output_json=False)
 
-        mock_import.assert_called_once_with("us", "acc1", "proj1", "metrics.yaml", False)
+        project.import_metrics_from_file.assert_called_once_with("metrics.yaml", False)
 
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.import_metrics_from_file")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_import_handles_dict_response_items(self, mock_load, mock_import):
+    def test_import_handles_dict_response_items(self, mock_load):
         """Import correctly extracts names from dict-format metadata items."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        mock_import.return_value = {
+        project.import_metrics_from_file.return_value = {
             "remote_only": [],
             "metadata": {
                 "created": [{"name": "SCORE", "message": "created"}],
@@ -914,28 +913,10 @@ class ProjectUpdateCustomMetricTest(unittest.TestCase):
 
 
 class ImportMetricsFromFileInterfaceTest(unittest.TestCase):
-    """Tests for AgentStudioInterface.import_metrics_from_file."""
-
-    def test_file_not_found_raises(self):
-        """Raises FileNotFoundError for a missing file."""
-        with self.assertRaises(FileNotFoundError):
-            AgentStudioInterface.import_metrics_from_file(
-                "us", "acc1", "proj1", "/nonexistent/metrics.yaml"
-            )
-
-    @patch("builtins.open", unittest.mock.mock_open(read_data="{{invalid"))
-    @patch("os.path.exists", return_value=True)
-    def test_invalid_yaml_raises(self, _):
-        """Raises ValueError for unparseable YAML."""
-        with self.assertRaises(ValueError) as ctx:
-            AgentStudioInterface.import_metrics_from_file("us", "acc1", "proj1", "bad.yaml")
-
-        self.assertIn("Invalid YAML", str(ctx.exception))
+    """Tests for AgentStudioInterface.import_metrics_from_file orchestration."""
 
     @patch("poly.handlers.interface.PlatformAPIHandler.preview_metrics_import")
-    @patch("builtins.open", unittest.mock.mock_open(read_data="SCORE:\n  type: int\n"))
-    @patch("os.path.exists", return_value=True)
-    def test_dry_run_returns_preview(self, _, mock_preview):
+    def test_dry_run_returns_preview(self, mock_preview):
         """In dry-run mode, returns preview without importing."""
         mock_preview.return_value = {
             "would_create": ["SCORE"],
@@ -944,7 +925,7 @@ class ImportMetricsFromFileInterfaceTest(unittest.TestCase):
         }
 
         result = AgentStudioInterface.import_metrics_from_file(
-            "us", "acc1", "proj1", "metrics.yaml", dry_run=True
+            "us", "acc1", "proj1", "SCORE:\n  type: int\n", {"SCORE"}, dry_run=True
         )
 
         self.assertTrue(result["dry_run"])
@@ -952,9 +933,7 @@ class ImportMetricsFromFileInterfaceTest(unittest.TestCase):
 
     @patch("poly.handlers.interface.PlatformAPIHandler.import_custom_metrics")
     @patch("poly.handlers.interface.PlatformAPIHandler.preview_metrics_import")
-    @patch("builtins.open", unittest.mock.mock_open(read_data="SCORE:\n  type: int\n"))
-    @patch("os.path.exists", return_value=True)
-    def test_import_returns_result_with_remote_only(self, _, mock_preview, mock_import):
+    def test_import_returns_result_with_remote_only(self, mock_preview, mock_import):
         """Full import merges remote_only from preview into the result."""
         mock_preview.return_value = {
             "would_create": ["SCORE"],
@@ -966,12 +945,59 @@ class ImportMetricsFromFileInterfaceTest(unittest.TestCase):
         }
 
         result = AgentStudioInterface.import_metrics_from_file(
-            "us", "acc1", "proj1", "metrics.yaml", dry_run=False
+            "us", "acc1", "proj1", "SCORE:\n  type: int\n", {"SCORE"}, dry_run=False
         )
 
         self.assertEqual(result["remote_only"], ["OLD_METRIC"])
         self.assertEqual(result["metadata"]["created"], ["SCORE"])
         mock_import.assert_called_once()
+
+
+class ProjectImportMetricsFromFileTest(unittest.TestCase):
+    """Tests for AgentStudioProject.import_metrics_from_file file reading and delegation."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project = AgentStudioProject.from_dict(deepcopy(EMPTY_PROJECT_DATA), self.temp_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_file_not_found_raises(self):
+        """Raises FileNotFoundError for a missing file."""
+        with self.assertRaises(FileNotFoundError):
+            self.project.import_metrics_from_file("/nonexistent/metrics.yaml")
+
+    def test_invalid_yaml_raises(self):
+        """Raises ValueError for unparseable YAML."""
+        bad_file = os.path.join(self.temp_dir, "bad.yaml")
+        with open(bad_file, "w") as f:
+            f.write("{{invalid")
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.import_metrics_from_file(bad_file)
+
+        self.assertIn("Invalid YAML", str(ctx.exception))
+
+    @patch("poly.project.AgentStudioInterface.import_metrics_from_file")
+    def test_delegates_parsed_content_to_interface(self, mock_import):
+        """Reads and parses the file, then delegates to the interface layer."""
+        metrics_file = os.path.join(self.temp_dir, "metrics.yaml")
+        with open(metrics_file, "w") as f:
+            f.write("SCORE:\n  type: int\n")
+        mock_import.return_value = {"metadata": {"created": ["SCORE"], "ignored": []}}
+
+        result = self.project.import_metrics_from_file(metrics_file, dry_run=True)
+
+        mock_import.assert_called_once_with(
+            self.project.region,
+            self.project.account_id,
+            self.project.project_id,
+            "SCORE:\n  type: int\n",
+            {"SCORE"},
+            True,
+        )
+        self.assertEqual(result["metadata"]["created"], ["SCORE"])
 
 
 class ValidMetricTypesTest(unittest.TestCase):

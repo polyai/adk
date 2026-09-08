@@ -523,9 +523,7 @@ class MetricsCommand(BaseCommand):
         project = load_project(base_path, output_json=output_json)
 
         try:
-            result = AgentStudioInterface.import_metrics_from_file(
-                project.region, project.account_id, project.project_id, file_path, dry_run
-            )
+            result = project.import_metrics_from_file(file_path, dry_run)
         except (FileNotFoundError, ValueError) as e:
             if output_json:
                 json_print({"success": False, "error": str(e)})
