@@ -174,9 +174,11 @@ class QueueResources(unittest.TestCase):
     def test_priority_create_types_are_queued_first(self):
         """Variables (a priority-create type) are created before non-priority types."""
         new = {
-            Topic: {"TOPIC-1": Topic(
-                resource_id="TOPIC-1", name="t", actions="", content="c", example_queries=[]
-            )},
+            Topic: {
+                "TOPIC-1": Topic(
+                    resource_id="TOPIC-1", name="t", actions="", content="c", example_queries=[]
+                )
+            },
             Variable: {"VAR-1": Variable(resource_id="VAR-1", name="balance")},
         }
 
@@ -190,9 +192,11 @@ class QueueResources(unittest.TestCase):
     def test_priority_delete_types_are_queued_first(self):
         """Variables (a priority-delete type) are deleted before non-priority types."""
         deleted = {
-            Topic: {"TOPIC-1": Topic(
-                resource_id="TOPIC-1", name="t", actions="", content="c", example_queries=[]
-            )},
+            Topic: {
+                "TOPIC-1": Topic(
+                    resource_id="TOPIC-1", name="t", actions="", content="c", example_queries=[]
+                )
+            },
             Variable: {"VAR-1": Variable(resource_id="VAR-1", name="balance")},
         }
 
@@ -336,6 +340,47 @@ class RestoreBranchInterface(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             self.interface.restore_branch("branch-1")
+
+
+class ImportMetricsFromFileInterfaceTest(unittest.TestCase):
+    """Tests for AgentStudioInterface.import_metrics_from_file orchestration."""
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.preview_metrics_import")
+    def test_dry_run_returns_preview(self, mock_preview):
+        """In dry-run mode, returns preview without importing."""
+        mock_preview.return_value = {
+            "would_create": ["SCORE"],
+            "would_skip": [],
+            "remote_only": [],
+        }
+
+        result = AgentStudioInterface.import_metrics_from_file(
+            "us", "acc1", "proj1", "SCORE:\n  type: int\n", {"SCORE"}, dry_run=True
+        )
+
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["would_create"], ["SCORE"])
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.import_custom_metrics")
+    @patch("poly.handlers.interface.PlatformAPIHandler.preview_metrics_import")
+    def test_import_returns_result_with_remote_only(self, mock_preview, mock_import):
+        """Full import merges remote_only from preview into the result."""
+        mock_preview.return_value = {
+            "would_create": ["SCORE"],
+            "would_skip": [],
+            "remote_only": ["OLD_METRIC"],
+        }
+        mock_import.return_value = {
+            "metadata": {"created": ["SCORE"], "ignored": []},
+        }
+
+        result = AgentStudioInterface.import_metrics_from_file(
+            "us", "acc1", "proj1", "SCORE:\n  type: int\n", {"SCORE"}, dry_run=False
+        )
+
+        self.assertEqual(result["remote_only"], ["OLD_METRIC"])
+        self.assertEqual(result["metadata"]["created"], ["SCORE"])
+        mock_import.assert_called_once()
 
 
 if __name__ == "__main__":
