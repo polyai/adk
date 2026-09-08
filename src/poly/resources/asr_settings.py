@@ -46,6 +46,10 @@ class AsrSettings(YamlResource):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "AsrSettings"]:
         """Parse ASR settings from a projection dict."""
+        if "channels" not in projection:
+            logger.debug("No read access to ASR settings - it will not be pulled.")
+            return {}
+
         asr_settings_data = projection.get("channels", {}).get("voice", {}).get("asrSettings", {})
         if not asr_settings_data:
             return {}

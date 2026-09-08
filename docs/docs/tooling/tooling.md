@@ -111,7 +111,7 @@ Tooling slots into the standard [CLI workflow](../reference/cli.md): pull or ini
 
     ---
 
-    Configure personality, role, and rules that define agent behavior.
+    Configure the persona and rules that define agent behavior.
     [Open agent settings](../reference/resources/agent_settings.md)
 
 -   **Flows reference**

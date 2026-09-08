@@ -142,6 +142,7 @@ nav:
       - Resource reference:
           - Overview: reference/resources.md
           - Agent settings: reference/resources/agent_settings.md
+          - Guardrails: reference/resources/guardrails.md
           - Topics: reference/resources/topics.md
           - Functions: reference/resources/functions.md
           - Flows: reference/resources/flows.md

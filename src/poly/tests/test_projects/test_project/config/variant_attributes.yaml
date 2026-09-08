@@ -1,16 +1,21 @@
 variants:
   - name: default
     is_default: true
+  - name: spanish
 attributes:
   - name: customer-name
     values:
       default: "value-1"
+      spanish: "valor-1"
   - name: email-address
     values:
       default: "value-2"
+      spanish: "valor-2"
   - name: member-status
     values:
       default: "value-3"
+      spanish: "valor-3"
   - name: booking-status
     values:
       default: "value-4"
+      spanish: "valor-4"

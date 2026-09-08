@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass, field
 from typing import ClassVar
@@ -14,11 +15,13 @@ from poly.handlers.protobuf.variant_pb2 import (
     Variant_CreateVariant,
     Variant_DeleteAttribute,
     Variant_DeleteVariant,
-    Variant_SetDefaultVariant,
     Variant_UpdateAttribute,
+    Variant_UpdateVariant,
     VariantValues,
 )
 from poly.resources.resource import MultiResourceYamlResource, ResourceMapping, register_resource
+
+logger = logging.getLogger(__name__)
 
 
 @register_resource("variants")
@@ -36,10 +39,12 @@ class Variant(MultiResourceYamlResource):
         resource_id: str,
         name: str,
         is_default: bool = False,
+        slim: bool = False,
     ):
         self.resource_id = resource_id
         self.name = name
         self.is_default = is_default
+        self.slim = slim
         self.attribute_ids = []
 
     def to_yaml_dict(self) -> dict:
@@ -62,9 +67,28 @@ class Variant(MultiResourceYamlResource):
     def from_projection(cls, projection: dict) -> dict[str, "Variant"]:
         """Parse variants from a projection dict."""
         variants = {}
-        for variant_id, variant_data in (
-            projection.get("variantManagement", {}).get("variants", {}).get("entities", {}).items()
-        ):
+        variants_projection = (
+            projection.get("variantManagement", {}).get("variants", {}).get("entities", {})
+        )
+        if "variantManagement" not in projection:
+            logger.debug("No read access to variants - they will not be pulled.")
+            return {}
+
+        # Guard on "isDefault", not "name": names are deliberately exposed to
+        # filtered readers so test cases can resolve their variant, so a name
+        # no longer distinguishes a readable variant from a withheld one.
+        if any("isDefault" not in variant for variant in variants_projection.values()):
+            logger.debug("No read access to variants - keeping names for references only.")
+            return {
+                variant_id: cls(
+                    resource_id=variant_id,
+                    name=variant_data.get("name", ""),
+                    slim=True,
+                )
+                for variant_id, variant_data in variants_projection.items()
+            }
+
+        for variant_id, variant_data in variants_projection.items():
             variants[variant_id] = cls(
                 resource_id=variant_id,
                 name=variant_data["name"],
@@ -93,11 +117,12 @@ class Variant(MultiResourceYamlResource):
 
     @property
     def update_command_type(self) -> str:
-        return "variant_set_default_variant"
+        return "variant_update_variant"
 
-    def build_update_proto(self):
-        return Variant_SetDefaultVariant(
+    def build_update_proto(self) -> Variant_UpdateVariant:
+        return Variant_UpdateVariant(
             id=self.resource_id,
+            name=self.name,
         )
 
     def build_delete_proto(self) -> Variant_DeleteVariant:
@@ -177,11 +202,13 @@ class VariantAttribute(MultiResourceYamlResource):
         *,
         resource_id: str,
         name: str,
-        mappings: dict[str, str],
+        mappings: dict[str, str] | None = None,
+        slim: bool = False,
     ):
         self.resource_id = resource_id
         self.name = name
-        self.mappings = mappings
+        self.mappings = mappings if mappings is not None else {}
+        self.slim = slim
 
     def to_yaml_dict(self) -> dict:
         return {
@@ -215,13 +242,33 @@ class VariantAttribute(MultiResourceYamlResource):
     def from_projection(cls, projection: dict) -> dict[str, "VariantAttribute"]:
         """Parse variant attributes from a projection dict."""
         variant_attributes = {}
-        for attribute_id, attribute_data in (
-            projection.get("variantManagement", {})
-            .get("attributes", {})
-            .get("entities", {})
-            .items()
-        ):
-            if attribute_data["archived"]:
+        attributes_projection = (
+            projection.get("variantManagement", {}).get("attributes", {}).get("entities", {})
+        )
+        if "variantManagement" not in projection:
+            logger.debug("No read access to variant attributes - they will not be pulled.")
+            return {}
+
+        # "archived" is optional in the API schema, so it can't distinguish an
+        # auth-filtered attribute from an unarchived one. "type" always is.
+        # Auth-filtered: keep id and name only, so {{attr:<id>}} in a readable
+        # topic or prompt still renders as a name rather than a raw id. Archived
+        # attributes are stubbed too, since we can't tell them apart here.
+        if any("type" not in attribute for attribute in attributes_projection.values()):
+            logger.debug(
+                "No read access to variant attributes - keeping names for references only."
+            )
+            return {
+                attribute_id: cls(
+                    resource_id=attribute_id,
+                    name=attribute_data.get("name", ""),
+                    slim=True,
+                )
+                for attribute_id, attribute_data in attributes_projection.items()
+            }
+
+        for attribute_id, attribute_data in attributes_projection.items():
+            if attribute_data.get("archived"):
                 continue
             variant_attributes[attribute_id] = cls(
                 resource_id=attribute_id, name=attribute_data["name"], mappings={}

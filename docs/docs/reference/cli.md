@@ -18,6 +18,15 @@ To see all available commands and options:
 poly --help
 ~~~
 
+Commands are listed under section headers so related ones stay together:
+
+| Section | Commands |
+|---|---|
+| Getting started | `init`, `start`, `login`, `studio`, `project` |
+| Project sync | `pull`, `push`, `status`, `revert`, `format`, `validate`, `diff`, `review`, `branch`, `test`, `rtc`, `chat` |
+| Builder API | `deployments`, `conversations`, `audio-cache`, `functions` |
+| Other | `template`, `docs`, `completion` |
+
 Each command also supports its own help output. For example:
 
 ~~~bash
@@ -76,6 +85,7 @@ poly push --help
 | [`poly deployments`](./cli/deployments.md) | List, promote, and roll back deployments |
 | [`poly rtc`](./cli/rtc.md) | Manage per-environment Real-Time Configuration |
 | [`poly audio-cache`](./cli/audio-cache.md) | Inspect and replace cached TTS audio |
+| [`poly functions`](./cli/functions.md) | Run and validate Functions via the REST API |
 | [`poly studio`](./cli/studio.md) | Open the project in the Agent Studio web app |
 
 ## Shared flags
@@ -92,6 +102,46 @@ Most commands accept the same four flags:
 !!! tip "Run commands from the project folder"
 
     ADK commands are expected to be run from within your local project directory. If needed, use `--path` to point to a project explicitly.
+
+## Machine-readable JSON output
+
+All core subcommands accept a `--json` flag that switches stdout to a single JSON object. This is designed for scripting, CI pipelines, and any integration that needs stable, parseable output rather than human-readable console text.
+
+~~~bash
+poly status --json
+poly push --json
+poly pull --json
+poly validate --json
+poly diff --json
+poly revert --json
+poly branch list --json
+poly branch create my-feature --json
+poly branch switch my-feature --json
+poly branch current --json
+poly branch delete --json
+poly branch delete my-feature --json
+poly branch merge 'Merge message' --json
+poly format --json
+poly init --region us-1 --account_id 123 --project_id my_project --json
+poly project create --region us-1 --account_id my-account --name my-project --json
+poly chat --json -m 'Hello'
+poly chat --json --input-file ./script.txt
+poly deployments show abc123def --json
+poly deployments list --json
+poly deployments promote --from <id> --to pre-release --force --json
+poly deployments rollback --to <id> --force --json
+poly conversations list --json
+poly conversations get <conversation_id> --json
+poly conversations get-audio <conversation_id> --json
+poly audio-cache list --json
+poly audio-cache get-file <entry_id> --json
+poly audio-cache update-file <entry_id> --file replacement.wav --json
+poly audio-cache delete <entry_id> --json
+poly audio-cache bulk-delete --ids id1,id2 --json
+poly audio-cache synthesize <entry_id> --text "Hello" --json
+poly functions execute <function_name> --args '{"x": 1}' --json
+poly functions validate --json
+~~~
 
 ### `--json` contract
 

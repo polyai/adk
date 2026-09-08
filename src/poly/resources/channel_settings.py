@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass, field
 from functools import cached_property
@@ -25,6 +26,8 @@ from poly.resources.resource import (
     ResourceMapping,
     register_resource,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _config_path(channel: str) -> str:
@@ -122,6 +125,10 @@ class VoiceDisclaimerMessage(MultiResourceYamlResource):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "VoiceDisclaimerMessage"]:
         """Parse voice disclaimer from a projection dict."""
+        if "channels" not in projection:
+            logger.debug("No read access to the voice disclaimer - it will not be pulled.")
+            return {}
+
         voice_settings = projection.get("channels", {}).get("voice", {})
         voice_disclaimer = voice_settings.get("disclaimer", None)
         if not voice_disclaimer:
@@ -268,6 +275,10 @@ class VoiceGreeting(ChannelGreeting):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "VoiceGreeting"]:
         """Parse voice greeting from a projection dict."""
+        if "channels" not in projection:
+            logger.debug("No read access to the voice greeting - it will not be pulled.")
+            return {}
+
         voice_config = projection.get("channels", {}).get("voice", {}).get("config", {}) or {}
         voice_greeting = voice_config.get("greeting", None)
         if not voice_greeting:
@@ -293,6 +304,10 @@ class ChatGreeting(ChannelGreeting):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "ChatGreeting"]:
         """Parse chat greeting from a projection dict."""
+        if "channels" not in projection:
+            logger.debug("No read access to the chat greeting - it will not be pulled.")
+            return {}
+
         web_chat_settings = projection.get("channels", {}).get("webChat", {})
         if not web_chat_settings.get("status", False):
             return {}
@@ -401,6 +416,10 @@ class VoiceStylePrompt(ChannelStylePrompt):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "VoiceStylePrompt"]:
         """Parse voice style prompt from a projection dict."""
+        if "channels" not in projection:
+            logger.debug("No read access to the voice style prompt - it will not be pulled.")
+            return {}
+
         voice_config = projection.get("channels", {}).get("voice", {}).get("config", {}) or {}
         voice_style_prompt = voice_config.get("stylePrompt", None)
         if not voice_style_prompt:
@@ -425,6 +444,10 @@ class ChatStylePrompt(ChannelStylePrompt):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "ChatStylePrompt"]:
         """Parse chat style prompt from a projection dict."""
+        if "channels" not in projection:
+            logger.debug("No read access to the chat style prompt - it will not be pulled.")
+            return {}
+
         web_chat_settings = projection.get("channels", {}).get("webChat", {})
         if not web_chat_settings.get("status", False):
             return {}

@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import date, datetime, timezone
@@ -44,6 +45,8 @@ from poly.resources.api_integration import ApiIntegration
 from poly.resources.languages import AdditionalLanguage, DefaultLanguage
 from poly.resources.resource import ResourceMapping, SubResource, YamlResource, register_resource
 from poly.resources.variant_attributes import Variant
+
+logger = logging.getLogger(__name__)
 
 INTERNAL_TO_CHANNEL = {
     "chat.polyai": "voice",
@@ -125,7 +128,13 @@ class FunctionCallAssertion:
         ]
 
     def to_yaml_dict(self) -> dict:
-        return {"name": self.name, "arguments": [arg.to_yaml_dict() for arg in self.arguments]}
+        return {
+            "name": self.name,
+            "arguments": [
+                arg.to_yaml_dict()
+                for arg in sorted(self.arguments, key=lambda arg: arg.parameter_name)
+            ],
+        }
 
     def to_proto(self) -> FunctionCallAssertionProto:
         return FunctionCallAssertionProto(
@@ -166,7 +175,8 @@ class TestCaseAssertion(SubResource):
             response["prompt_assertions"] = self.prompts
         if self.function_calls:
             response["function_call_assertions"] = [
-                function_call.to_yaml_dict() for function_call in self.function_calls
+                function_call.to_yaml_dict()
+                for function_call in sorted(self.function_calls, key=lambda call: call.name)
             ]
         return response
 
@@ -481,12 +491,16 @@ class TestCaseApiMocks:
     mocks: dict[str, dict[str, list[ApiResponseRule]]] = field(default_factory=dict)
 
     def to_yaml_dict(self) -> dict:
+        # Integration and operation names are sorted so pulls produce stable YAML; the
+        # rules within an operation are a sequence (see `repeat`) and keep their order.
         return {
             integration_name: {
-                operation_name: [rule.to_yaml_dict() for rule in rules]
-                for operation_name, rules in operations.items()
+                operation_name: [
+                    rule.to_yaml_dict() for rule in self.mocks[integration_name][operation_name]
+                ]
+                for operation_name in sorted(self.mocks[integration_name])
             }
-            for integration_name, operations in self.mocks.items()
+            for integration_name in sorted(self.mocks)
         }
 
     @classmethod
@@ -649,9 +663,16 @@ class TestCase(YamlResource):
     def from_projection(cls, projection: dict) -> dict[str, "TestCase"]:
         """Parse test cases from a projection dict."""
         test_cases = {}
-        for test_case_id, test_case_data in (
-            projection.get("testing", {}).get("testCases", {}).get("entities", {}).items()
+        test_cases_projection = (
+            projection.get("testing", {}).get("testCases", {}).get("entities", {})
+        )
+        if "testing" not in projection or any(
+            "scenario" not in tc for tc in test_cases_projection.values()
         ):
+            logger.debug("No read access to test cases - they will not be pulled.")
+            return {}
+
+        for test_case_id, test_case_data in test_cases_projection.items():
             prompt_assertions = []
             function_assertions = []
             for assertion in test_case_data.get("assertions", []):

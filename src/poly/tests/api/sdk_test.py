@@ -231,5 +231,60 @@ class SendCommandBatch(unittest.TestCase):
             sdk.send_command_batch()
 
 
+class MergeBranch(unittest.TestCase):
+    """Tests for SourcererSDK.merge_branch sequence handling."""
+
+    def _sdk_with_sequence(self, server_sequence: int):
+        sdk = build_sdk()
+        session = MagicMock()
+        session.get.return_value = make_mock_response(
+            200, json_body={"lastKnownSequence": str(server_sequence)}
+        )
+        session.post.return_value = make_mock_response(
+            200, json_body={"sequence": str(server_sequence + 1), "message": "ok"}
+        )
+        sdk._session = session
+        return sdk, session
+
+    def test_merge_fetches_fresh_sequence_over_stale_cache(self):
+        """The merge payload carries the server's sequence, not the cached one."""
+        sdk, session = self._sdk_with_sequence(server_sequence=1751)
+        # Stale cache, e.g. from a projection read that lagged the event store.
+        sdk._last_known_sequence = 1750
+
+        sdk.merge_branch(deployment_message="msg")
+
+        session.get.assert_called_once_with(
+            "https://sourcerer.test/accounts/acc-1/projects/proj-1/branches/branch-1/sequence"
+        )
+        payload = session.post.call_args.kwargs["json"]
+        self.assertEqual(payload["expectedBranchLastKnownSequence"], 1751)
+        self.assertEqual(sdk._last_known_sequence, 1751)
+
+    def test_sync_fetches_fresh_sequence_over_stale_cache(self):
+        """sync_branch refreshes the sequence the same way."""
+        sdk, session = self._sdk_with_sequence(server_sequence=1751)
+        sdk._last_known_sequence = 1750
+
+        sdk.sync_branch()
+
+        payload = session.post.call_args.kwargs["json"]
+        self.assertEqual(payload["expectedBranchSequence"], 1751)
+
+    def test_sequence_mismatch_error_raises_sourcerer_error(self):
+        """A non-conflict 400 (e.g. SEQUENCE_MISMATCH) raises SourcererAPIError."""
+        sdk, session = self._sdk_with_sequence(server_sequence=1750)
+        session.post.return_value = make_mock_response(
+            400,
+            json_body={
+                "error": "sequence mismatch, received 1750 but expected 1751",
+                "error_code": "SEQUENCE_MISMATCH",
+            },
+        )
+
+        with self.assertRaises(SourcererAPIError):
+            sdk.merge_branch(deployment_message="msg")
+
+
 if __name__ == "__main__":
     unittest.main()

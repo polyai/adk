@@ -45,12 +45,16 @@ The last two are not peers of the first four. Agent configuration is the leaf la
 | `rules.txt` | Global behavioral instructions |
 | `personality.yaml` | Tone and manner |
 | `role.yaml` | Who the agent is and what it is for |
+| `guardrails.yaml` | Checks that constrain what the agent can say or do |
+| `persona.txt` | Who the agent is, in free text |
 
 Rules are **always present in the prompt**, on every turn. They are not retrieved and not conditional, which makes them the right home for instructions that are unconditionally true — "always confirm the booking reference before making changes" — and the wrong home for facts, which would consume prompt space even when irrelevant to the current turn.
 
-`personality.yaml` and `role.yaml` are narrower than rules: they accept only `{{attr:}}` and `{{vrbl:}}` references. Behavioral references such as `{{fn:}}` and `{{ho:}}` belong in `rules.txt`.
+`persona.txt` is narrower than rules: it accepts only `{{attr:}}` and `{{vrbl:}}` references. Behavioral references such as `{{fn:}}` and `{{ho:}}` belong in `rules.txt`.
 
-See [agent settings](../reference/resources/agent_settings.md).
+`guardrails.yaml` covers the same ground as rules from the other side. A rule is an instruction in the prompt, which the model can still be talked out of; a guardrail is a check evaluated against the conversation, with its own action when it trips. That makes them easy to confuse — "never give medical advice" is a plausible entry in either. Write it as a rule first, and add a guardrail when testing shows the rule alone isn't holding. The platform also ships a fixed catalog of guardrails you can only toggle, covering the failure modes no prompt reliably prevents on its own, such as jailbreak attempts.
+
+See [agent settings](../reference/resources/agent_settings.md) and [guardrails](../reference/resources/guardrails.md).
 
 ### Knowledge base
 
@@ -234,7 +238,8 @@ See [voice settings](../reference/resources/voice_settings.md), [chat settings](
 |---|---|
 | A new FAQ, policy, or factual answer | Topic (`topics/`) |
 | A global behavioral rule (always do X, never do Y) | `agent_settings/rules.txt` |
-| Agent identity and tone | `agent_settings/personality.yaml` and `role.yaml` |
+| Enforcement for a rule the model keeps working around | Guardrail (`agent_settings/guardrails.yaml`) |
+| Agent identity and tone | `agent_settings/persona.txt` |
 | A multi-step guided conversation | Flow (`flows/`) |
 | Structured data collection from the caller | Entity + flow |
 | Deterministic branching or routing logic | Function (`functions/`) |
@@ -314,7 +319,12 @@ You write references by **name**; Agent Studio stores them by **resource ID**. T
 
 ## Syncing and permissions
 
-Agent Studio permissions carry over to the ADK: a resource you don't have read access to in Agent Studio won't appear in your local project. `poly pull` omits it silently rather than failing, so a project can look smaller locally than it is on the platform.
+Agent Studio permissions carry over to the ADK: resources you don't have full read access to in Agent Studio are handled differently depending on whether they are referenced by other resources you *can* read.
+
+- **Completely withheld resources** (not referenced by anything you can read) are omitted silently from your local project. The project can look smaller locally than it is on the platform, and `poly pull` does not fail.
+- **Partially withheld resources** (withheld, but their IDs appear inside resources you *can* read — for example, a `{{fn:...}}` reference in a topic you can see) are kept as identity-only stubs. They have no file on disk, but the ADK retains enough information to resolve the reference to a name rather than a raw ID. This prevents `{{entity:...}}`-style references from rendering as raw IDs, and stops your local files from appearing permanently modified.
+
+In both cases, withheld resources cannot be pushed, edited, or iterated over — they exist only so that references to them continue to display meaningful names.
 
 ## Platform references
 

@@ -125,12 +125,15 @@ class PullResourcesWithProjection(unittest.TestCase):
         """Passing projection_json bypasses the sync client and loads locally."""
         interface = AgentStudioInterface()
         interface.sync_client = MagicMock()
-        mock_loader.return_value = {"loaded": "resources"}
+        mock_loader.return_value = ({"loaded": "resources"}, ["slim"])
         projection = {"knowledgeBase": {}}
 
-        resources, returned_projection = interface.pull_resources(projection_json=projection)
+        resources, slim_resources, returned_projection = interface.pull_resources(
+            projection_json=projection
+        )
 
         self.assertEqual(resources, {"loaded": "resources"})
+        self.assertEqual(slim_resources, ["slim"])
         self.assertIs(returned_projection, projection)
         mock_loader.assert_called_once_with(projection)
         interface.sync_client.pull_projection.assert_not_called()

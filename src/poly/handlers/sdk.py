@@ -307,8 +307,10 @@ class SourcererSDK:
             )
         """
         try:
+            # Fetch fresh; the cached sequence can lag after a write.
+            self._last_known_sequence = self.fetch_last_known_sequence_number()
             payload = {
-                "expectedBranchLastKnownSequence": self.get_last_known_sequence() or 0,
+                "expectedBranchLastKnownSequence": self._last_known_sequence,
             }
 
             if deployment_message:
@@ -412,8 +414,9 @@ class SourcererSDK:
             )
         """
         try:
+            self._last_known_sequence = self.fetch_last_known_sequence_number()
             payload = {
-                "expectedBranchSequence": self.get_last_known_sequence() or 0,
+                "expectedBranchSequence": self._last_known_sequence,
             }
 
             if conflict_resolutions is not None:

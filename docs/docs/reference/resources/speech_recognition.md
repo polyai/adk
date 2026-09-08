@@ -178,10 +178,19 @@ corrections:
         replacement_type: partial
 ~~~
 
+## Validation
+
+- `interaction_style` must be one of `precise`, `balanced`, `swift`, `sonic`, or `turbo`.
+- Each keyphrase must be non-empty, with a `level` of `default`, `boosted`, or `maximum`.
+- Keyphrases must be unique once trimmed and lowercased — Agent Studio treats `Infusion Sets` and `infusion sets` as the same phrase, and rejects a project that keeps both.
+- Each transcript correction needs a unique `name` and at least one regex rule, and every rule needs a `regular_expression`.
+- `replacement_type` must be one of `full`, `partial`, or `substring`.
+
 ## Best practices
 
 - use `keyphrase_boosting` for terms the recognizer is likely to miss
 - keep boosted keyphrases focused and specific
+- keep each keyphrase unique after trimming and lowercasing
 - use transcript corrections for common, repeated recognition errors
 - avoid overly broad regex rules that may alter normal input unexpectedly
 - choose the ASR interaction style deliberately based on latency and accuracy needs

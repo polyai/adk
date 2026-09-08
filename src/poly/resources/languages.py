@@ -3,6 +3,7 @@
 Copyright PolyAI Limited
 """
 
+import logging
 import os
 from dataclasses import dataclass
 from typing import ClassVar
@@ -21,6 +22,8 @@ from poly.resources.resource import (
     _parse_multi_resource_path,
     register_resource,
 )
+
+logger = logging.getLogger(__name__)
 
 LANGUAGES_FILE = os.path.join("agent_settings", "languages.yaml")
 EMPTY_LANGUAGES = {"default_language": None, "additional_languages": []}
@@ -77,6 +80,10 @@ class DefaultLanguage(MultiResourceYamlResource):
     @classmethod
     def from_projection(cls, projection: dict) -> dict[str, "DefaultLanguage"]:
         """Parse default language from a projection dict."""
+        if "languages" not in projection:
+            logger.debug("No read access to the default language - it will not be pulled.")
+            return {}
+
         language_data = projection.get("languages", {})
         if not language_data:
             return {}
@@ -195,9 +202,14 @@ class AdditionalLanguage(MultiResourceYamlResource):
         if not language_data:
             return {}
         additional_languages = {}
-        for lang_id, lang in (
-            language_data.get("additionalLanguages", {}).get("entities", {}).items()
+        languages_projection = language_data.get("additionalLanguages", {}).get("entities", {})
+        if "languages" not in projection or any(
+            "code" not in lang for lang in languages_projection.values()
         ):
+            logger.debug("No read access to additional languages - they will not be pulled.")
+            return {}
+
+        for lang_id, lang in languages_projection.items():
             code = lang.get("code")
             additional_languages[lang_id] = cls(
                 resource_id=lang_id,
@@ -230,6 +242,9 @@ class AdditionalLanguage(MultiResourceYamlResource):
         self, base_path: str, format: bool = False, save_to_cache: bool = False, **kwargs
     ) -> None:
         """Save this language into the additional_languages list."""
+        # No-op for slim resources, which are not saved to disk.
+        if self.slim:
+            return
         true_file_path = os.path.join(base_path, LANGUAGES_FILE)
         _ensure_languages_file(type(self), true_file_path, save_to_cache)
         top_level = self._get_top_level_data(true_file_path)

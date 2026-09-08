@@ -58,6 +58,8 @@ LEGACY_FUNCTION_HEADER = "from imports import *  # <AUTO GENERATED>\n"
 
 SchemaType = Literal["string", "integer", "number", "boolean"]
 
+DELAY_CONTROL_REFERENCES = ["translations", "variables"]
+
 PY_TO_SCHEMA: dict[str, SchemaType] = {
     "str": "string",
     "int": "integer",
@@ -105,6 +107,7 @@ class FunctionLatencyControl:
     initial_delay: int = 0
     interval: int = 0
     delay_responses: list[FunctionDelayResponse] = field(default_factory=list)
+    randomize: bool = False
 
     def __post_init__(self):
         self.delay_responses = [
@@ -147,6 +150,7 @@ def parse_latency_control(latency_control_data: dict) -> FunctionLatencyControl:
         ),
         interval=latency_control_data.get("interval", 0),
         delay_responses=delay_responses,
+        randomize=latency_control_data.get("randomize", False),
     )
 
 
@@ -183,6 +187,9 @@ class LatencyControl(SubResource):
                     id=dr.id or f"DELAY-{uuid.uuid4().hex[:8]}",
                     message=dr.message,
                     duration=dr.duration,
+                    references=utils.get_references_from_prompt(
+                        dr.message, DELAY_CONTROL_REFERENCES, raise_on_invalid=False
+                    ),
                 )
                 for dr in self.latency_control.delay_responses
             ]
@@ -193,6 +200,7 @@ class LatencyControl(SubResource):
             delay_responses=delay_responses,
             initial_delay=self.latency_control.initial_delay if enabled else 0,
             interval=self.latency_control.interval if enabled else 0,
+            randomize=self.latency_control.randomize if enabled else False,
         )
 
     def build_update_proto(self) -> Message:
@@ -229,14 +237,15 @@ class Function(Resource):
         *,
         resource_id: str,
         name: str,
-        description: str,
-        code: str,
-        parameters: list[FunctionParameters],
-        latency_control: dict | FunctionLatencyControl,
-        function_type: FunctionType,
+        description: str = "",
+        code: str = "",
+        parameters: list[FunctionParameters] | None = None,
+        latency_control: dict | FunctionLatencyControl | None = None,
+        function_type: FunctionType | None = None,
         flow_id: str | None = None,
         flow_name: str | None = None,
         variable_references: dict | None = None,
+        slim: bool = False,
     ):
         self.resource_id = resource_id
         self.name = name
@@ -250,6 +259,7 @@ class Function(Resource):
         self.flow_name = flow_name
         self.function_type = function_type
         self.variable_references = variable_references
+        self.slim = slim
 
     @staticmethod
     def _parse_latency_control(value) -> FunctionLatencyControl:
@@ -265,6 +275,7 @@ class Function(Resource):
                 initial_delay=value.get("initial_delay", value.get("initialDelay", 0)),
                 interval=value.get("interval", 0),
                 delay_responses=value.get("delay_responses", []),
+                randomize=value.get("randomize", False),
             )
         return FunctionLatencyControl()
 
@@ -273,7 +284,17 @@ class Function(Resource):
         """Parse functions from a projection dict."""
         functions = {}
 
+        # Functions are drawn from three projection slices gated on two different
+        # permissions ("functions" for special and global, "jupiter_flows" for
+        # transition), so each slice is checked for read access independently -
+        # losing one must not hide the others.
         special_functions = projection.get("specialFunctions", {})
+        if "specialFunctions" not in projection or any(
+            "code" not in func for func in special_functions.values()
+        ):
+            logger.debug("No read access to start/end functions - they will not be pulled.")
+            special_functions = {}
+
         for func_type_key, func in special_functions.items():
             if func.get("archived", False):
                 continue
@@ -307,6 +328,14 @@ class Function(Resource):
             )
 
         flows = projection.get("flows", {}).get("flows", {}).get("entities", {})
+        if "flows" not in projection or any(
+            "code" not in func
+            for flow_data in flows.values()
+            for func in flow_data.get("transitionFunctions", {}).get("entities", {}).values()
+        ):
+            logger.debug("No read access to transition functions - they will not be pulled.")
+            flows = {}
+
         for flow_id, flow_data in flows.items():
             for func_id, func in (
                 flow_data.get("transitionFunctions", {}).get("entities", {}).items()
@@ -336,9 +365,27 @@ class Function(Resource):
                     function_type=FunctionType.TRANSITION,
                 )
 
-        for func_id, func in (
-            projection.get("functions", {}).get("functions", {}).get("entities", {}).items()
-        ):
+        global_functions = projection.get("functions", {}).get("functions", {}).get("entities", {})
+        if "functions" not in projection:
+            logger.debug("No read access to functions - they will not be pulled.")
+            global_functions = {}
+        elif any("code" not in func for func in global_functions.values()):
+            # Auth-filtered: keep id and name only, so {{fn:<id>}} in a readable
+            # topic (or a phrase filter's function) still renders as a name rather
+            # than a raw id. flow_id/flow_name stay None so the stub keeps the
+            # global function's path and "fn" prefix, not a transition's "ft".
+            # Archived functions are stubbed too, since we can't tell them apart.
+            logger.debug("No read access to functions - keeping names for references only.")
+            for func_id, func in global_functions.items():
+                functions[func_id] = cls(
+                    resource_id=func_id,
+                    name=func.get("name", ""),
+                    function_type=FunctionType.GLOBAL,
+                    slim=True,
+                )
+            global_functions = {}
+
+        for func_id, func in global_functions.items():
             if func.get("archived", False):
                 continue
 
@@ -517,6 +564,10 @@ class Function(Resource):
                     f"flows.{utils.clean_name(resource.resource_name)}.functions",
                 )
 
+        code = Function._swap_latency_control_references(
+            code, resource_mappings, names_to_ids=False
+        )
+
         return code
 
     @classmethod
@@ -552,6 +603,8 @@ class Function(Resource):
 
         code = utils.restore_function_def_line(code, resource_name)
 
+        code = cls._swap_latency_control_references(code, resource_mappings, names_to_ids=True)
+
         return code
 
     @staticmethod
@@ -568,9 +621,91 @@ class Function(Resource):
         if lc.delay_responses:
             dr_items = ", ".join(f"({dr.message!r}, {dr.duration!r})" for dr in lc.delay_responses)
             parts.append(f"delay_responses=[{dr_items}]")
+        if lc.randomize:
+            parts.append("randomize=True")
         return f"{indent}@func_latency_control({', '.join(parts)})\n"
 
-    def validate(self, **kwargs) -> None:
+    @staticmethod
+    def _iter_function_defs(node: ast.AST) -> ty.Iterator[ast.AST]:
+        """Yield every function definition under node, including nested ones.
+
+        Unlike ast.walk this never descends into expressions, which cannot contain a
+        function definition. On large data-literal modules that is the difference between
+        visiting every node and visiting only the statements.
+        """
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                yield child
+            if isinstance(child, (ast.stmt, ast.ExceptHandler)):
+                yield from Function._iter_function_defs(child)
+
+    @staticmethod
+    def _swap_latency_control_references(
+        code: str,
+        resource_mappings: list[ResourceMapping],
+        *,
+        names_to_ids: bool,
+    ) -> str:
+        """Swap references in delay response messages of @func_latency_control decorators.
+
+        Args:
+            code: The function source to rewrite.
+            resource_mappings: Mappings providing the name<->id lookup.
+            names_to_ids: When True, map names -> ids; when False, ids -> names.
+
+        Returns:
+            str: The source with delay response references swapped. Everything outside a
+            @func_latency_control decorator, the function body included, is left as-is.
+        """
+        if "func_latency_control" not in code:
+            return code
+
+        try:
+            module = ast.parse(code)
+        except SyntaxError:
+            return code
+
+        swap = utils.build_reference_swapper(resource_mappings, names_to_ids=names_to_ids)
+
+        replacements: list[tuple[ast.Constant, str, str]] = []
+        for node in Function._iter_function_defs(module):
+            for decorator in node.decorator_list:
+                if not (hasattr(decorator, "func") and hasattr(decorator.func, "id")):
+                    continue
+                if decorator.func.id != "func_latency_control":
+                    continue
+                for kw in decorator.keywords:
+                    if kw.arg != "delay_responses" or not isinstance(kw.value, ast.List):
+                        continue
+                    for elt in kw.value.elts:
+                        if not (isinstance(elt, ast.Tuple) and elt.elts):
+                            continue
+                        msg_node = elt.elts[0]
+                        if isinstance(msg_node, ast.Constant) and isinstance(msg_node.value, str):
+                            old_msg = msg_node.value
+                            new_msg = swap(old_msg)
+                            if old_msg != new_msg:
+                                replacements.append((msg_node, old_msg, new_msg))
+
+        if not replacements:
+            return code
+
+        lines = code.split("\n")
+        line_offsets = [0]
+        for line in lines:
+            line_offsets.append(line_offsets[-1] + len(line) + 1)
+
+        replacements.sort(key=lambda r: (r[0].lineno, r[0].col_offset), reverse=True)
+
+        for msg_node, old_msg, new_msg in replacements:
+            start = line_offsets[msg_node.lineno - 1] + msg_node.col_offset
+            end = line_offsets[msg_node.end_lineno - 1] + msg_node.end_col_offset
+            original_literal = code[start:end]
+            code = code[:start] + original_literal.replace(old_msg, new_msg) + code[end:]
+
+        return code
+
+    def validate(self, resource_mappings: list[ResourceMapping] = None, **kwargs) -> None:
         """Validate the resource.
 
         Raises:
@@ -623,6 +758,23 @@ class Function(Resource):
             if not self.latency_control.delay_responses:
                 raise ValueError("delay_responses cannot be empty.")
 
+            for dr in self.latency_control.delay_responses:
+                if not dr.message:
+                    raise ValueError("Delay response message cannot be empty.")
+
+                references = utils.get_references_from_prompt(
+                    dr.message, DELAY_CONTROL_REFERENCES, raise_on_invalid=True
+                )
+                if resource_mappings:
+                    valid, invalid_references = utils.validate_references(
+                        references, resource_mappings
+                    )
+                    if not valid:
+                        raise ValueError(
+                            f"Invalid references: {invalid_references}"
+                            f" in delay response message '{dr.message}'."
+                        )
+
         for line in self.code.splitlines():
             if line.strip().startswith("#"):
                 continue
@@ -635,7 +787,6 @@ class Function(Resource):
                     "ADK decorators found in raw code. This might be because of a parameter mismatch."
                 )
 
-        resource_mappings = kwargs.get("resource_mappings") or []
         code_for_validation = utils.remove_comments_from_code(self.code)
 
         if self.flow_name and resource_mappings:
@@ -775,12 +926,15 @@ class Function(Resource):
         interval = 0
         delay_responses: list[FunctionDelayResponse] = []
         used_delay_response_ids: set[str] = set()
+        randomize = False
 
         for kw in decorator.keywords:
             if kw.arg == "delay_before_responses_start" and isinstance(kw.value, ast.Constant):
                 initial_delay = kw.value.value
             elif kw.arg == "silence_after_each_response" and isinstance(kw.value, ast.Constant):
                 interval = kw.value.value
+            elif kw.arg == "randomize" and isinstance(kw.value, ast.Constant):
+                randomize = bool(kw.value.value)
             elif kw.arg == "delay_responses" and isinstance(kw.value, ast.List):
                 for elt in kw.value.elts:
                     if isinstance(elt, ast.Tuple) and len(elt.elts) == 2:
@@ -812,6 +966,7 @@ class Function(Resource):
             initial_delay=initial_delay,
             interval=interval,
             delay_responses=delay_responses,
+            randomize=randomize,
         )
 
     @staticmethod
@@ -964,6 +1119,7 @@ class Function(Resource):
             delay_responses=delay_responses,
             initial_delay=self.latency_control.initial_delay,
             interval=self.latency_control.interval,
+            randomize=self.latency_control.randomize,
         )
 
     def build_create_proto(self) -> Message:

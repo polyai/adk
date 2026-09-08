@@ -28,8 +28,7 @@ A typical project structure looks like this:
 ├── _gen/                               # Generated stubs - do not edit
 ├── agent_settings/                     # Agent identity and behavior
 │   ├── languages.yaml                  # Optional
-│   ├── personality.yaml
-│   ├── role.yaml
+│   ├── persona.txt
 │   ├── rules.txt
 │   ├── safety_filters.yaml             # Optional
 │   └── experimental_config.json        # Optional

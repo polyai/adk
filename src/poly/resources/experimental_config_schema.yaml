@@ -215,6 +215,7 @@ components:
         reasoning_effort:
           type: string
           enum:
+            - none
             - minimal
             - low
             - medium
@@ -222,6 +223,7 @@ components:
             - auto
           description: >
             LLM 'thinking time'. Supported values vary by model:
+            OpenAI GPT-5.6 models: `none`, `low`, `medium`, `high`.
             OpenAI reasoning models (GPT-5): `minimal`, `low`, `medium`, `high`.
             Raven 3.5: `auto` (model decides whether to reason, short verbosity) and `low` (always reasons, short verbosity).
             Raven v3: `low` only.

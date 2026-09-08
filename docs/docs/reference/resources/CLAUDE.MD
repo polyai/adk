@@ -33,7 +33,7 @@ config/entities.yaml
 ## What a/an <resource> contains|controls|is for
 
 <The overview. Use grid cards when there are several sub-parts to introduce
-(e.g. agent settings has personality/role/rules); use plain prose when there's
+(e.g. agent settings has persona/rules); use plain prose when there's
 only one shape.>
 
 ### Fields

@@ -17,12 +17,15 @@ Examples:
 poly deployments list
 poly deployments list --env live
 poly deployments list --details
+poly deployments list --limit 10
 ~~~
+
+By default shows all deployments. Pass `--limit` to cap the number of entries shown. Long listings are automatically paged through the system pager when stdout is a TTY; output piped to a file or another command is never paged.
 
 | Flag | Description |
 |---|---|
 | `--env`, `-e` | Environment to list. Choices: `sandbox`, `pre-release`, `live`. Defaults to `live` for projects using simplified deployments, otherwise `sandbox`. |
-| `--limit` | Number of versions to show. Defaults to `10`. |
+| `--limit` | Maximum number of versions to show. Shows all by default. |
 | `--offset` | Number of versions to skip. Defaults to `0`. |
 | `--hash` | Hash of the version to start listing from. Overrides `--offset`. |
 | `--details` | Output each deployment with detailed information. |

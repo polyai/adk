@@ -4,12 +4,15 @@ Copyright PolyAI Limited
 """
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 
 import poly.resources.resource_utils as utils
 from poly.handlers.protobuf.experimental_config_pb2 import ExperimentalConfig_UpdateConfig
 from poly.resources.resource import Resource, register_resource
+
+logger = logging.getLogger(__name__)
 
 
 @register_resource("experimental_config")
@@ -27,6 +30,14 @@ class ExperimentalConfig(Resource):
             .get("experimentalConfigs", {})
             .get("entities", {})
         )
+        # "features" is optional in the API schema, so it can't distinguish an
+        # auth-filtered config from one with no features set. "active" always is.
+        if "experimentalConfig" not in projection or any(
+            "active" not in config for config in experimental_configs.values()
+        ):
+            logger.debug("No read access to experimental config - it will not be pulled.")
+            return {}
+
         config_id, config_data = (
             next(iter(experimental_configs.items()), ("default", {}))
             if experimental_configs

@@ -1,0 +1,16 @@
+platform_guardrails:
+- name: jailbreak_defence
+  enabled: true
+- name: hallucination_control
+  enabled: false
+- name: ai_identity
+  enabled: true
+- name: emergency_escalation
+  enabled: true
+- name: tool_call_integrity
+  enabled: false
+custom_guardrails:
+- name: No medical advice
+  enabled: true
+  action: warn
+  prompt: Never give medical advice. Offer to transfer the caller to a human instead.

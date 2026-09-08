@@ -31,7 +31,7 @@ Available resource names:
 
 | Name | Description |
 |---|---|
-| `agent_settings` | Personality, role, rules |
+| `agent_settings` | Persona, rules |
 | `api_integrations` | External HTTP API definitions |
 | `chat_settings` | Chat greeting, style prompt |
 | `context` | Context files for agent knowledge |
