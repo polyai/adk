@@ -21,6 +21,43 @@ logger = logging.getLogger(__name__)
 VALID_LEVELS = ("default", "boosted", "maximum")
 
 
+def _as_text(value: object) -> str:
+    """Coerce a resolved YAML scalar back to the text the author wrote.
+
+    The loader follows YAML 1.2, so a bare `true`/`false` resolves to a bool and
+    a bare `2024` to an int. Boosting digits or years is a reasonable thing to
+    want, and either type breaks the string handling below.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return value if isinstance(value, str) else str(value)
+
+
+def normalize_keyphrase(keyphrase: str) -> str:
+    """Normalize a keyphrase for uniqueness comparison.
+
+    Mirrors Agent Studio's `normalizeKeyphrase` (trim + lowercase). The platform
+    rejects a whole command batch when two keyphrases normalize the same, so the
+    ADK has to agree about what counts as a duplicate.
+    """
+    return keyphrase.strip().lower()
+
+
+def _group_by_normalized(
+    keyphrases: list[str],
+) -> dict[str, list[str]]:
+    """Group keyphrases by their normalized form, preserving original spellings."""
+    groups: dict[str, list[str]] = {}
+    for keyphrase in keyphrases:
+        normalized = normalize_keyphrase(keyphrase)
+        if not normalized:
+            continue
+        groups.setdefault(normalized, []).append(keyphrase)
+    return groups
+
+
 @register_resource("keyphrase_boosting")
 @dataclass
 class KeyphraseBoosting(MultiResourceYamlResource):
@@ -40,8 +77,8 @@ class KeyphraseBoosting(MultiResourceYamlResource):
         level: str = "default",
     ):
         self.resource_id = resource_id
-        self.name = name
-        self.keyphrase = keyphrase
+        self.name = _as_text(name)
+        self.keyphrase = _as_text(keyphrase)
         self.level = level.lower()
 
     @classmethod
@@ -64,7 +101,28 @@ class KeyphraseBoosting(MultiResourceYamlResource):
                 keyphrase=kp_data.get("keyphrase", ""),
                 level=kp_data.get("level", "default"),
             )
+
+        cls._warn_about_duplicates(keyphrases)
         return keyphrases
+
+    @classmethod
+    def _warn_about_duplicates(cls, keyphrases: dict[str, "KeyphraseBoosting"]) -> None:
+        """Warn about keyphrases that normalize to the same phrase.
+
+        Projects created before Agent Studio enforced uniqueness can still hold
+        colliding entries. Pulling one must not fail, but the next push will, so
+        flag them here while the original spellings are still visible.
+        """
+        for _, spellings in sorted(
+            _group_by_normalized([k.keyphrase for k in keyphrases.values()]).items()
+        ):
+            if len(spellings) > 1:
+                logger.warning(
+                    "Keyphrases %s differ only by case or surrounding whitespace. "
+                    "Agent Studio treats them as one phrase and will reject a push "
+                    "that keeps both - remove the duplicates.",
+                    " / ".join(repr(s) for s in sorted(spellings)),
+                )
 
     @property
     def file_path(self) -> str:
@@ -125,6 +183,33 @@ class KeyphraseBoosting(MultiResourceYamlResource):
                 f"Invalid level '{self.level}'. Must be one of: {', '.join(VALID_LEVELS)}"
             )
 
+    @classmethod
+    def validate_collection(
+        cls,
+        resources: dict[str, "KeyphraseBoosting"],
+        **kwargs,
+    ) -> None:
+        """Reject keyphrases that collide once trimmed and lowercased.
+
+        Agent Studio enforces this server-side and fails the entire push with an
+        opaque entity id, so catch it here where the offending phrase can be named.
+        """
+        groups = _group_by_normalized([r.keyphrase for r in resources.values()])
+        duplicates = {
+            normalized: spellings for normalized, spellings in groups.items() if len(spellings) > 1
+        }
+        if not duplicates:
+            return
+
+        described = "; ".join(
+            " / ".join(repr(s) for s in sorted(spellings))
+            for _, spellings in sorted(duplicates.items())
+        )
+        raise ValueError(
+            "Duplicate keyphrases (compared case-insensitively, ignoring surrounding "
+            f"whitespace): {described}. Keep one entry per phrase."
+        )
+
     @staticmethod
     def discover_resources(base_path: str) -> list[str]:
         # Must match file_path: voice/speech_recognition/keyphrase_boosting.yaml
@@ -144,7 +229,7 @@ class KeyphraseBoosting(MultiResourceYamlResource):
         keyphrases: list[dict] = yaml_dict.get("keyphrases", []) if yaml_dict else []
 
         for kp in keyphrases:
-            name = kp.get(KeyphraseBoosting.resource_key)
+            name = _as_text(kp.get(KeyphraseBoosting.resource_key))
             if not name:
                 continue
             path_safe_name = utils.clean_name(name, lowercase=False)

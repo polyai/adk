@@ -1,6 +1,113 @@
 # CHANGELOG
 
 
+## v0.53.2 (2026-09-03)
+
+### Bug Fixes
+
+- Push deleted asr_biasing/dtmf_config sections as disabled
+  ([#308](https://github.com/polyai/adk/pull/308),
+  [`548f063`](https://github.com/polyai/adk/commit/548f063850ed334fff896e98cbaff3ae77ba04e6))
+
+## Summary
+
+Deleting an `asr_biasing` or `dtmf_config` block from a step's YAML was silently dropped on push, so
+  the deletion never reached Agent Studio and `poly diff` kept showing it as pending forever. Absent
+  sections now read as disabled and are pushed explicitly with `is_enabled: false`.
+
+## Motivation
+
+The backend's `clear_step_settings` command rejects the `asrBiasing`/`dtmf` sections (they
+  deep-merge into legacy top-level mirrors), so these two sections can't go through the clear path
+  like `asr`/`vad`/`barge_in`/`llm` do. Meanwhile the update proto omitted the section entirely when
+  the block was deleted, which the backend reads as "not updated". Since disabling is the only way
+  to express removal for these sections — and `to_yaml_dict` already omits disabled sections —
+  absence and disabled are treated as the same state, and the round trip (push → fetch → diff)
+  converges cleanly.
+
+## Changes
+
+- `FlowSettings` normalises absent `asr_biasing`/`dtmf` to disabled instances in `__init__`, so
+  every construction path (YAML read, projection read, bare defaults) compares equal and a deleted
+  block is detected as a settings update - `build_update_proto` always sends the `asr_biasing` and
+  `dtmf` sections (enabled or disabled) instead of omitting them when unset; the clearable sections
+  (`asr`, `vad`, `barge_in`, `llm`) are still omitted when absent - `DTMFConfig` drops its unused
+  `step_id`/`flow_id`/`resource_id` - Added regression tests: deleted blocks push as disabled, all
+  construction paths agree on the disabled state, and sub-resource diffing flags deleted sections as
+  an update
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
+## v0.53.1 (2026-09-02)
+
+### Bug Fixes
+
+- Catch duplicate keyphrases before pushing ([#302](https://github.com/polyai/adk/pull/302),
+  [`21692da`](https://github.com/polyai/adk/commit/21692da20d331e93f50f14695d927127f429d2f8))
+
+## Summary
+
+Agent Studio normalizes keyphrases (trim + lowercase) and enforces uniqueness server-side. When two
+  entries collide it rejects the whole command batch with an opaque entity id. This validates the
+  same rule locally so the offending phrase is named up front.
+
+## Motivation
+
+A push containing two keyphrases that differ only by case or surrounding whitespace fails on the
+  platform with an error that points at an entity id rather than the phrase, leaving no clear way to
+  find which entry to fix. The ADK can apply the same normalization and fail early with the actual
+  spellings.
+
+## Changes
+
+- Add `normalize_keyphrase` mirroring Agent Studio's `normalizeKeyphrase` (trim + lowercase) - Add
+  `KeyphraseBoosting.validate_collection`, rejecting keyphrases that normalize to the same value and
+  naming every colliding group with its original spellings - Warn (rather than fail) on pull when a
+  projection already contains colliding entries, so existing projects that predate the uniqueness
+  rule can still be pulled
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Unit tests cover distinct phrases that merely share a prefix or stem, case-only collisions,
+  whitespace-only collisions, multiple colliding groups in one collection, and the pull-path
+  warning.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Validation error raised on push:
+
+``` Validation error: Duplicate keyphrases (compared case-insensitively, ignoring surrounding
+  whitespace): 'Infusion Sets' / 'infusion sets'. Keep one entry per phrase. ```
+
+Warning emitted on pull:
+
+``` Keyphrases 'Acme' / 'acme' differ only by case or surrounding whitespace. Agent Studio treats
+  them as one phrase and will reject a push that keeps both - remove the duplicates. ```
+
+---------
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.53.0 (2026-09-01)
 
 ### Documentation

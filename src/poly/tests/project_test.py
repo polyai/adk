@@ -233,7 +233,7 @@ class SerializationRoundTripTest(unittest.TestCase):
                 step_id="step-1",
                 flow_id="flow-123",
                 asr_biasing=ASRBiasing(is_enabled=True),
-                dtmf=DTMFConfig(step_id="step-1", flow_id="flow-123"),
+                dtmf=DTMFConfig(),
             ),
         )
         serialized = resource_utils.resource_to_dict(step)

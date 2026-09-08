@@ -1076,8 +1076,6 @@ class DTMFConfig:
 
     def __init__(
         self,
-        step_id: str,
-        flow_id: str,
         is_enabled: bool = False,
         inter_digit_timeout: int = 0,
         max_digits: int = 0,
@@ -1086,9 +1084,6 @@ class DTMFConfig:
         is_pii: bool = False,
     ):
         self.name = "dtmf"
-        self.step_id = step_id
-        self.flow_id = flow_id
-        self.resource_id = f"{flow_id}.{step_id}"
         self.is_enabled = is_enabled
         self.inter_digit_timeout = inter_digit_timeout
         self.max_digits = max_digits
@@ -1295,8 +1290,9 @@ class FlowSettings(SubResource):
     step_id: str
     flow_id: str
 
-    asr_biasing: Optional[ASRBiasing]
-    dtmf: Optional[DTMFConfig]
+    # Never None: absent means disabled, because the backend can't clear these.
+    asr_biasing: ASRBiasing
+    dtmf: DTMFConfig
     asr: Optional[ASRConfig]
     vad: Optional[VADConfig]
     barge_in: Optional[BargeInConfig]
@@ -1321,7 +1317,7 @@ class FlowSettings(SubResource):
         if isinstance(asr_biasing, dict):
             asr_biasing = ASRBiasing(**asr_biasing)
         if isinstance(dtmf, dict):
-            dtmf = DTMFConfig(step_id, flow_id, **dtmf)
+            dtmf = DTMFConfig(**dtmf)
         if isinstance(asr, dict):
             asr = ASRConfig(**asr)
         if isinstance(vad, dict):
@@ -1335,8 +1331,11 @@ class FlowSettings(SubResource):
             )
             llm = LLMConfig(**llm)
 
-        self.asr_biasing = asr_biasing
-        self.dtmf = dtmf
+        # asr_biasing and dtmf can't be cleared on the backend, so an absent section
+        # means disabled — normalise here so every construction path (YAML, projection,
+        # bare defaults) compares equal.
+        self.asr_biasing = asr_biasing if asr_biasing is not None else ASRBiasing()
+        self.dtmf = dtmf if dtmf is not None else DTMFConfig()
         self.asr = asr
         self.vad = vad
         self.barge_in = barge_in
@@ -1345,9 +1344,9 @@ class FlowSettings(SubResource):
     def to_yaml_dict(self) -> dict:
         """Return a dictionary suitable for YAML serialization."""
         output = {}
-        if self.asr_biasing and self.asr_biasing.is_enabled:
+        if self.asr_biasing.is_enabled:
             output["asr_biasing"] = self.asr_biasing.to_yaml_dict()
-        if self.dtmf and self.dtmf.is_enabled:
+        if self.dtmf.is_enabled:
             output["dtmf_config"] = self.dtmf.to_yaml_dict()
         if self.asr:
             output["asr"] = self.asr.to_yaml_dict()
@@ -1410,8 +1409,8 @@ class FlowSettings(SubResource):
         return cls(
             step_id=step_id,
             flow_id=flow_id,
-            asr_biasing=ASRBiasing(**asr_biasing_data) if asr_biasing_data else None,
-            dtmf=DTMFConfig(step_id, flow_id, **dtmf_data) if dtmf_data else None,
+            asr_biasing=ASRBiasing(**asr_biasing_data) if asr_biasing_data else ASRBiasing(),
+            dtmf=DTMFConfig(**dtmf_data) if dtmf_data else DTMFConfig(),
             asr=ASRConfig(**asr_data) if asr_data else None,
             vad=VADConfig(**vad_data) if vad_data else None,
             barge_in=BargeInConfig(**barge_in_data) if barge_in_data else None,
@@ -1420,10 +1419,8 @@ class FlowSettings(SubResource):
 
     def validate(self, **kwargs):
         """Validate the flow settings resource."""
-        if self.asr_biasing:
-            self.asr_biasing.validate()
-        if self.dtmf:
-            self.dtmf.validate()
+        self.asr_biasing.validate()
+        self.dtmf.validate()
         if self.asr:
             self.asr.validate()
         if self.vad:
@@ -1439,8 +1436,10 @@ class FlowSettings(SubResource):
             flow_id=self.flow_id,
             step_id=self.step_id,
             settings=FlowStepSettings(
-                asr_biasing=self.asr_biasing.to_proto() if self.asr_biasing else None,
-                dtmf=self.dtmf.to_proto() if self.dtmf else None,
+                # Always sent: these can't be cleared, so a disabled state must go
+                # out explicitly or the backend reads the omission as "not updated".
+                asr_biasing=self.asr_biasing.to_proto(),
+                dtmf=self.dtmf.to_proto(),
                 asr=self.asr.to_proto() if self.asr else None,
                 vad=self.vad.to_proto() if self.vad else None,
                 barge_in=self.barge_in.to_proto() if self.barge_in else None,

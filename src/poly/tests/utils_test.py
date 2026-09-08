@@ -1126,7 +1126,7 @@ class ClearUnusedSettingsFromFlowStepTest(unittest.TestCase):
     def _all_sections(self) -> dict:
         return {
             "asr_biasing": ASRBiasing(is_enabled=True),
-            "dtmf": DTMFConfig(self.STEP_ID, self.FLOW_ID, is_enabled=True),
+            "dtmf": DTMFConfig(is_enabled=True),
             "asr": ASRConfig(provider="p", model="m"),
             "vad": VADConfig(
                 provider="p",
