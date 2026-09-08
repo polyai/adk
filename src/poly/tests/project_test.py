@@ -5135,6 +5135,35 @@ class UsingSimplifiedDeploymentsTest(unittest.TestCase):
         """With no deployments anywhere there is no version to disagree on."""
         self._assert_converged(live=[], sandbox=[], expected=True)
 
+    def test_is_not_converged_when_a_version_hash_is_missing(self):
+        """Two unknown versions are not a match.
+
+        Draft deploys record an empty hash. Reporting converged here would claim
+        live holds main's version without being able to know it.
+        """
+        for live_hash, main_hash in (("", "abc"), ("abc", ""), ("", ""), (None, None)):
+            with self.subTest(live=live_hash, main=main_hash):
+                self._assert_converged(
+                    live=[
+                        self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash=live_hash)
+                    ],
+                    sandbox=[
+                        self._deployment("Tue, 02 Jan 2026 12:00:00 GMT", version_hash=main_hash)
+                    ],
+                    expected=False,
+                )
+
+    def test_is_not_converged_when_version_hash_is_absent_entirely(self):
+        """A row with no version_hash key at all is treated the same as an empty one."""
+        self._set_deployments(
+            self.mock_api,
+            live=[{"created_at": "Mon, 01 Jan 2026 12:00:00 GMT", "deleted": False}],
+            sandbox=[{"created_at": "Tue, 02 Jan 2026 12:00:00 GMT", "deleted": False}],
+        )
+        self.project.__dict__.pop("using_simplified_deployments", None)
+
+        self.assertFalse(self.project.using_simplified_deployments)
+
     def test_is_not_converged_without_a_live_deployment(self):
         """Nothing has reached live, so live cannot hold main's version."""
         self._assert_converged(

@@ -3965,13 +3965,22 @@ class AgentStudioProject:
             live_deployments + [d for d in sandbox_deployments if not self._tag_of(d)]
         )
 
+        # Nothing deployed at all: no live content to regress.
         if live_head is None and main_head is None:
             return True
 
         if live_head is None or main_head is None:
             return False
 
-        return live_head.get("version_hash") == main_head.get("version_hash")
+        # Past that, a usable hash on both sides is what makes equality provable.
+        # Draft deploys record an empty hash, and treating two unknowns as equal
+        # would report converged when it cannot be known.
+        live_hash = live_head.get("version_hash")
+        main_hash = main_head.get("version_hash")
+        if not live_hash or not main_hash:
+            return False
+
+        return live_hash == main_hash
 
     def _live_deployments(self, client_env: str) -> list[dict[str, Any]]:
         """Deployments for an environment, excluding deleted ones."""
