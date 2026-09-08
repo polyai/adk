@@ -1399,10 +1399,6 @@ class AgentStudioInterface:
     ) -> dict:
         """Update an existing custom metric.
 
-        Validates that ``expected_values`` is only set for string-type metrics
-        by fetching the metric's type from the API when ``expected_values``
-        is present.
-
         Args:
             region: The region name.
             account_id: The account ID.
@@ -1412,19 +1408,7 @@ class AgentStudioInterface:
 
         Returns:
             dict: The updated metric record.
-
-        Raises:
-            ValueError: If expected_values is set for a non-string metric.
         """
-
-        # TODO: Update to perform the read plus validation in project.py
-
-        # if data.get("expected_values") is not None:
-        #     metrics = PlatformAPIHandler.get_custom_metrics(region, account_id, project_id)
-        #     metric = next((m for m in metrics if m.get("name") == metric_name), None)
-        #     if metric and metric.get("type") != "string":
-        #         raise ValueError("--expected-values is only valid for string metrics.")
-
         return PlatformAPIHandler.update_custom_metric(
             region, account_id, project_id, metric_name, data
         )

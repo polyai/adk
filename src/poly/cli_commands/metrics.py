@@ -392,9 +392,7 @@ class MetricsCommand(BaseCommand):
             sys.exit(1)
 
         try:
-            result = AgentStudioInterface.update_custom_metric(
-                project.region, project.account_id, project.project_id, name, data
-            )
+            result = project.update_custom_metric(name, data)
         except ValueError as e:
             if output_json:
                 json_print({"success": False, "error": str(e)})

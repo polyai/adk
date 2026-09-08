@@ -3820,6 +3820,34 @@ class AgentStudioProject:
 
         return result
 
+    def update_custom_metric(self, metric_name: str, data: dict) -> dict:
+        """Validate and update an existing custom metric.
+
+        Validates that ``expected_values`` is only set for string-type metrics
+        by fetching the metric's current type when ``expected_values`` is present.
+
+        Args:
+            metric_name: Name of the metric to update.
+            data: Fields to update — description, expected_values, active, api.
+
+        Returns:
+            dict: The updated metric record.
+
+        Raises:
+            ValueError: If expected_values is set for a non-string metric.
+        """
+        if data.get("expected_values") is not None:
+            metrics = AgentStudioInterface.get_custom_metrics(
+                self.region, self.account_id, self.project_id
+            )
+            metric = next((m for m in metrics if m.get("name") == metric_name), None)
+            if metric and metric.get("type") != "string":
+                raise ValueError("--expected-values is only valid for string metrics.")
+
+        return AgentStudioInterface.update_custom_metric(
+            self.region, self.account_id, self.project_id, metric_name, data
+        )
+
     def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
         """Get the history of a branch.
 
