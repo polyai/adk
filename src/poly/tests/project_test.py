@@ -5114,6 +5114,23 @@ class UsingSimplifiedDeploymentsTest(unittest.TestCase):
             expected=True,
         )
 
+    def test_an_untagged_sandbox_deployment_still_counts_behind_a_tagged_one(self):
+        """Filtering tagged deployments must not hide main's own sandbox deploys.
+
+        The newest sandbox deployment belongs to a branch, but main deployed the
+        one behind it and live has not caught up.
+        """
+        self._assert_converged(
+            live=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
+            sandbox=[
+                self._deployment(
+                    "Wed, 03 Jan 2026 12:00:00 GMT", version_hash="branch", tag="internal"
+                ),
+                self._deployment("Tue, 02 Jan 2026 12:00:00 GMT", version_hash="def"),
+            ],
+            expected=False,
+        )
+
     def test_converges_when_no_deployments_exist_in_either_environment(self):
         """With no deployments anywhere there is no version to disagree on."""
         self._assert_converged(live=[], sandbox=[], expected=True)
