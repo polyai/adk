@@ -3936,8 +3936,7 @@ class AgentStudioProject:
     def using_simplified_deployments(self) -> bool:
         """Check if the project is using simplified deployments.
 
-        Two conditions, both required: the project has been rolled out to, and it
-        has *converged* — main and live already hold the same version.
+        Requires both the rollout flag and convergence.
         """
         flag_enabled = self.api_handler.feature_flag_enabled(
             key="deployment-simplification",
@@ -3953,29 +3952,20 @@ class AgentStudioProject:
     def _has_converged(self) -> bool:
         """Whether main and live hold the same version.
 
-        Main's latest deployment is the newest of its live deployments and its
-        *untagged* sandbox deployments — the two environments main owns. A
-        sandbox deployment carrying a tag was made by a branch holding that tag,
-        not by main, so counting it would make a branch's work look like main
-        had moved.
-
-        Convergence compares the two versions, not their timestamps. Under
-        simplified deployments a publish to live is followed by a sandbox
-        deployment mirroring it, so sandbox is routinely the newer row while
-        holding identical content — a timestamp comparison reports a difference
-        that does not exist.
+        Versions, not timestamps: a publish to live is mirrored into sandbox
+        seconds later, so sandbox is often newer while holding identical content.
         """
         live_deployments = self._live_deployments("live")
         sandbox_deployments = self._live_deployments("sandbox")
 
         live_head = self._newest(live_deployments)
+        # Main owns live plus its untagged sandbox deployments; a tagged one was
+        # deployed by the branch holding that tag.
         main_head = self._newest(
             live_deployments + [d for d in sandbox_deployments if not self._tag_of(d)]
         )
 
         if live_head is None and main_head is None:
-            # Nothing deployed anywhere, so there is no version for the two to
-            # disagree on.
             return True
 
         if live_head is None or main_head is None:
@@ -3997,11 +3987,7 @@ class AgentStudioProject:
 
     @staticmethod
     def _newest(deployments: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
-        """The most recently created deployment, or None when there are none.
-
-        Sorted rather than assuming the API returns newest first, so the answer
-        does not depend on response ordering.
-        """
+        """The most recently created deployment, by date rather than list order."""
 
         def created_at(deployment: dict[str, Any]) -> datetime:
             return datetime.strptime(deployment["created_at"], "%a, %d %b %Y %H:%M:%S %Z")
