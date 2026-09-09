@@ -8,10 +8,8 @@ from typing import TYPE_CHECKING
 
 POSTHOG_HOST = "https://eu.i.posthog.com"
 
-# One PostHog project per environment, matching what the platform services are
-# deployed with. Reading a flag from the wrong project returns that project's
-# rollout rather than the region's — and the non-prod project has rollouts at
-# 100%, so every flag reads as enabled.
+# Public client-side project keys, safe to commit. One PostHog project per
+# environment.
 POSTHOG_KEY_PROD = "phc_oBh3uJGQWyQkWdoxrTAEqghjkHSgjd5FGEn5vM6CyXBp"
 POSTHOG_KEY_NON_PROD = "phc_kS54QZyZRqi9T77rWEUfJ49vVYY4ADKEPnRUrJ7RNnZ6"
 NON_PROD_REGIONS = frozenset({"dev", "staging"})
@@ -30,9 +28,7 @@ region_to_posthog_cluster = {
     "dev": "apollo",
 }
 
-# Cluster environment, matching what the platform services send as a group
-# property. Anything unlisted is production, so a new region is never reported
-# as a non-production one.
+# Anything unlisted is production.
 region_to_cluster_env = {
     "dev": "dev",
     "staging": "staging",
