@@ -45,10 +45,57 @@ Each attribute includes:
 
 | Field | Description |
 |---|---|
-| `name` | Attribute identifier, ideally in snake_case |
-| `values` | Map from variant name to string value |
+| `name` | Attribute identifier. Must be a valid Python identifier, since it is read in code as `conv.variant.<name>` |
+| `kind` | Optional. The attribute's type: `string` (default), `number`, `boolean`, `enum`, or `object` |
+| `config` | Optional. Type-specific configuration. Only `enum` takes one: `config.values` lists the allowed values |
+| `values` | Map from variant name to value |
 
-Every attribute must provide a value for every defined variant, even if that value is an empty string.
+Every attribute must provide a value for every defined variant, even if that value is blank.
+
+## Attribute types
+
+An attribute with no `kind` is a string attribute, which is how every attribute behaved before types existed — existing files need no change.
+
+Declaring a `kind` does two things: values are checked against it when you push, so a typo is caught at authoring time rather than on a live call, and the agent receives the value in its real type. A `number` attribute arrives as `3`, not `"3"`, and a `boolean` as `true`, not `"True"`.
+
+| `kind` | Written in `values` as | Example |
+|---|---|---|
+| `string` | Text | `London Office` |
+| `number` | A number | `3`, `2.5` |
+| `boolean` | `true` or `false` | `true` |
+| `enum` | One of `config.values` | `premium` |
+| `object` | A map or list | `{currency: USD}` |
+
+Values are written in their declared type. A quoted value is still read correctly — `max_retries: 3` and `max_retries: "3"` are the same attribute, and neither shows as a change against the other — but `poly pull` writes the native form.
+
+A blank value is allowed for every kind and means the attribute is not set for that variant yet.
+
+!!! info "`config` is per-kind"
+
+    Only `enum` takes a `config` today. It is nested rather than a top-level `enum_values` so a future kind can carry its own settings without every other kind growing a field it ignores — and because `values` at the top level is already the per-variant value map.
+
+Changing an attribute's `kind` does not convert its existing values. Update the values in the same change, or the push is rejected with the variants whose values no longer fit.
+
+### Blank values at runtime
+
+A blank value behaves differently depending on the kind, and the difference only shows up on a live call:
+
+- A blank **`string`** attribute substitutes an empty string, so `{{attr:name}}` resolves to nothing.
+- A blank attribute of **any other kind** is left out of the deployed agent entirely, so `{{attr:name}}` stays unresolved and is reported as a configuration gap.
+
+If a prompt depends on a typed attribute, give it a value for every variant rather than leaving one blank.
+
+### Types that Agent Studio shows but does not store
+
+Agent Studio's type picker offers three types that have no equivalent here, because the platform stores them as one of the five kinds above:
+
+| Agent Studio type | Stored as | Value shape in `values` |
+|---|---|---|
+| Date & time | `string` | `2026-09-03 14:30` |
+| Opening hours | `string` | `Mon: 09:00-17:00; Tue: 09:00-17:00; Wed: Closed; Thu: ...` — all seven days, `Mon` to `Sun`, separated by `; ` |
+| Voice | `enum` | A voice ID, from `config.values` |
+
+They are editor choices, not stored types. Agent Studio re-detects "Date & time" and "Opening hours" by matching the value's exact shape, so editing one of those values here into a different shape silently drops the attribute back to a plain text editor in the UI. The value itself still works. "Voice" is indistinguishable from any other `enum` once saved.
 
 ## Example
 
@@ -86,6 +133,29 @@ attributes:
       london: |-
         This call may be recorded in accordance with UK regulations.
       tokyo: ""
+
+  - name: max_retries
+    kind: number
+    values:
+      new_york: 3
+      london: 5
+      tokyo: 3
+
+  - name: serves_alcohol
+    kind: boolean
+    values:
+      new_york: true
+      london: true
+      tokyo: false
+
+  - name: tier
+    kind: enum
+    config:
+      values: [basic, premium]
+    values:
+      new_york: premium
+      london: premium
+      tokyo: basic
 ~~~
 
 ## Why variants are useful
@@ -163,7 +233,7 @@ Common uses include:
 | Branding | greeting name, company name |
 | Contact | phone numbers, addresses, office hours |
 | IDs | location ID, region code |
-| Feature flags | `"True"` / `"False"` strings, checked in Python |
+| Feature flags | `kind: boolean` (`true` / `false`) |
 | URLs | portal links, payment links |
 | Environment | timezone, `is_live` |
 
@@ -176,12 +246,16 @@ Common uses include:
 
 - Exactly one variant must have `is_default: true` — validation fails if zero or more than one variant is marked default.
 - Every variant must have a value in every attribute's `values` map — a missing variant fails validation.
+- Every attribute name must be a valid Python identifier — a letter or underscore followed by letters, digits or underscores — and not a Python reserved word. `customer-name` and `class` both fail.
+- Every value must match its attribute's declared `kind` — a value of the wrong type fails validation, naming the variant it came from.
+- An `enum` attribute must declare a non-empty `config.values` list, with no duplicates.
 
 ## Best practices
 
 - keep variant names stable over time
 - set exactly one default variant
-- provide a value or `""` for every variant in every attribute
+- provide a value, or a blank one, for every variant in every attribute
+- declare a `kind` whenever the value is not text, so mistakes surface at push time
 - prefer `{{attr:...}}` over hard-coded strings when values vary by location or environment
 - use multi-line YAML for disclaimers, instructions, or longer text values
 
