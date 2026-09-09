@@ -12,6 +12,7 @@ import shutil
 import tempfile
 import unittest
 from copy import deepcopy
+from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import poly.resources.resource_utils as resource_utils
@@ -2060,7 +2061,9 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             {},
         )
 
-        self.assertEqual(push_changes.main.updated[Variant], {"VARIANTS-production": renamed_variant})
+        self.assertEqual(
+            push_changes.main.updated[Variant], {"VARIANTS-production": renamed_variant}
+        )
 
 
 class PushProjectTest(unittest.TestCase):
@@ -5041,9 +5044,22 @@ class UsingSimplifiedDeploymentsTest(unittest.TestCase):
         self.assertFalse(project.using_simplified_deployments)
         project.api_handler.get_deployments.assert_not_called()
 
-    def _deployment(self, created_at: str, deleted: bool = False) -> dict:
+    def _deployment(
+        self,
+        created_at: str,
+        version_hash: str = "v1",
+        deleted: bool = False,
+        tag: Optional[str] = None,
+    ) -> dict:
         """Build a minimal deployment dict for convergence checks."""
-        return {"created_at": created_at, "deleted": deleted}
+        deployment = {
+            "created_at": created_at,
+            "version_hash": version_hash,
+            "deleted": deleted,
+        }
+        if tag is not None:
+            deployment["deployment_metadata"] = {"tag": tag}
+        return deployment
 
     def _set_deployments(self, api: MagicMock, live: list, sandbox: list) -> None:
         """Stub get_deployments to return a different list per client_env."""
@@ -5051,44 +5067,152 @@ class UsingSimplifiedDeploymentsTest(unittest.TestCase):
             lambda *args, **kwargs: live if kwargs["client_env"] == "live" else sandbox
         )
 
-    def test_converges_when_no_deployments_exist_in_either_environment(self):
-        """With no deployments anywhere, there's nothing for live to lag behind."""
-        self._set_deployments(self.mock_api, live=[], sandbox=[])
+    def _assert_converged(self, live: list, sandbox: list, expected: bool) -> None:
+        self._set_deployments(self.mock_api, live=live, sandbox=sandbox)
+        self.project.__dict__.pop("using_simplified_deployments", None)
 
-        self.assertTrue(self.project.using_simplified_deployments)
+        self.assertEqual(self.project.using_simplified_deployments, expected)
 
-    def test_convergence_depends_on_relative_head_timestamps(self):
-        """Live is converged once its head is at least as new as sandbox's."""
-        earlier, later = "Mon, 01 Jan 2026 10:00:00 GMT", "Mon, 01 Jan 2026 12:00:00 GMT"
-        cases = {
-            "live newer": ((later, earlier), True),
-            "equal": ((later, later), True),
-            "live older": ((earlier, later), False),
-            "only live has deployments": ((earlier, None), True),
-            "only sandbox has deployments": ((None, earlier), False),
-        }
-        for name, ((live_time, sandbox_time), expected) in cases.items():
-            with self.subTest(name):
-                live = [self._deployment(live_time)] if live_time else []
-                sandbox = [self._deployment(sandbox_time)] if sandbox_time else []
-                self._set_deployments(self.mock_api, live=live, sandbox=sandbox)
-                self.project.__dict__.pop("using_simplified_deployments", None)
+    def test_a_sandbox_mirror_of_live_is_converged(self):
+        """A publish to live is mirrored into sandbox moments later.
 
-                self.assertEqual(self.project.using_simplified_deployments, expected)
-
-    def test_skips_deleted_deployments_to_find_the_head(self):
-        """A deleted deployment at the top of the list is not treated as the head."""
-        self._set_deployments(
-            self.mock_api,
-            live=[
-                self._deployment("Mon, 01 Jan 2026 14:00:00 GMT", deleted=True),
-                self._deployment("Mon, 01 Jan 2026 10:00:00 GMT"),
-            ],
-            sandbox=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT")],
+        The mirror is newer but holds the same version, so the project is
+        converged. Comparing timestamps instead of versions would report this
+        routine case as diverged and drop the project out of the model.
+        """
+        self._assert_converged(
+            live=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
+            sandbox=[self._deployment("Mon, 01 Jan 2026 12:00:09 GMT", version_hash="abc")],
+            expected=True,
         )
 
-        # The live head (10:00, ignoring the deleted 14:00 entry) is older than sandbox's (12:00).
+    def test_a_sandbox_deployment_of_its_own_is_not_converged(self):
+        """A sandbox deployment holding a different version means main has moved."""
+        self._assert_converged(
+            live=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
+            sandbox=[self._deployment("Mon, 01 Jan 2026 13:00:00 GMT", version_hash="def")],
+            expected=False,
+        )
+
+    def test_an_older_sandbox_deployment_does_not_affect_convergence(self):
+        """Only the newest deployment main owns is compared against live."""
+        self._assert_converged(
+            live=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
+            sandbox=[self._deployment("Mon, 01 Jan 2026 10:00:00 GMT", version_hash="old")],
+            expected=True,
+        )
+
+    def test_converges_when_no_deployments_exist_in_either_environment(self):
+        """With no deployments anywhere there is no version to disagree on."""
+        self._assert_converged(live=[], sandbox=[], expected=True)
+
+    def test_a_tagged_sandbox_deployment_proves_simplified_deployments(self):
+        """Tagging a branch deploys it to sandbox, which only simplified allows.
+
+        Its version is the branch's, not main's, so the comparison below would
+        otherwise read it as diverged.
+        """
+        self._assert_converged(
+            live=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
+            sandbox=[
+                self._deployment(
+                    "Tue, 02 Jan 2026 12:00:00 GMT", version_hash="branch", tag="internal"
+                )
+            ],
+            expected=True,
+        )
+
+    def test_a_tagged_deployment_does_not_override_the_flag(self):
+        """The rollout flag is still the first condition."""
+        project = self._build_project(flag_value=False)
+        self._set_deployments(
+            project.api_handler,
+            live=[],
+            sandbox=[self._deployment("Tue, 02 Jan 2026 12:00:00 GMT", tag="internal")],
+        )
+
+        self.assertFalse(project.using_simplified_deployments)
+
+    def test_a_deleted_tagged_deployment_does_not_prove_anything(self):
+        """Removing the tag soft-deletes its deployment.
+
+        The untagged sandbox deployment alongside it holds main's version, and
+        live has not caught up — so the tag must not short-circuit to converged.
+        """
+        self._assert_converged(
+            live=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
+            sandbox=[
+                self._deployment(
+                    "Wed, 03 Jan 2026 12:00:00 GMT",
+                    version_hash="branch",
+                    tag="internal",
+                    deleted=True,
+                ),
+                self._deployment("Tue, 02 Jan 2026 12:00:00 GMT", version_hash="def"),
+            ],
+            expected=False,
+        )
+
+    def test_is_not_converged_when_a_version_hash_is_missing(self):
+        """Two unknown versions are not a match.
+
+        Draft deploys record an empty hash. Reporting converged here would claim
+        live holds main's version without being able to know it.
+        """
+        for live_hash, main_hash in (("", "abc"), ("abc", ""), ("", ""), (None, None)):
+            with self.subTest(live=live_hash, main=main_hash):
+                self._assert_converged(
+                    live=[
+                        self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash=live_hash)
+                    ],
+                    sandbox=[
+                        self._deployment("Tue, 02 Jan 2026 12:00:00 GMT", version_hash=main_hash)
+                    ],
+                    expected=False,
+                )
+
+    def test_is_not_converged_when_version_hash_is_absent_entirely(self):
+        """A row with no version_hash key at all is treated the same as an empty one."""
+        self._set_deployments(
+            self.mock_api,
+            live=[{"created_at": "Mon, 01 Jan 2026 12:00:00 GMT", "deleted": False}],
+            sandbox=[{"created_at": "Tue, 02 Jan 2026 12:00:00 GMT", "deleted": False}],
+        )
+        self.project.__dict__.pop("using_simplified_deployments", None)
+
         self.assertFalse(self.project.using_simplified_deployments)
+
+    def test_is_not_converged_without_a_live_deployment(self):
+        """Nothing has reached live, so live cannot hold main's version."""
+        self._assert_converged(
+            live=[],
+            sandbox=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT")],
+            expected=False,
+        )
+
+    def test_skips_deleted_deployments_to_find_the_head(self):
+        """A deleted deployment is not treated as the head of its environment."""
+        self._assert_converged(
+            live=[
+                self._deployment(
+                    "Mon, 01 Jan 2026 14:00:00 GMT", version_hash="deleted", deleted=True
+                ),
+                self._deployment("Mon, 01 Jan 2026 10:00:00 GMT", version_hash="abc"),
+            ],
+            sandbox=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
+            expected=True,
+        )
+
+    def test_head_does_not_depend_on_response_ordering(self):
+        """The newest deployment is found by date, not by list position."""
+        self._assert_converged(
+            live=[
+                self._deployment("Mon, 01 Jan 2026 10:00:00 GMT", version_hash="old"),
+                self._deployment("Mon, 01 Jan 2026 14:00:00 GMT", version_hash="abc"),
+            ],
+            sandbox=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="mid")],
+            expected=True,
+        )
 
 
 class DeploymentModePropertyTest(unittest.TestCase):
