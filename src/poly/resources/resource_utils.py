@@ -602,6 +602,27 @@ NON_LETTER_REGEX = re.compile(r"[^\w\s]", re.UNICODE)
 MULTI_UNDERSCORE_REGEX = re.compile(r"_+")
 
 
+def generate_subresource_id(prefix: str, *scope: str) -> str:
+    """Derive a stable subresource id from its scoped name.
+
+    Subresources (function parameters, step conditions, delay responses) are matched by
+    name within their parent, so deriving the id from the scoped name means any two
+    reads - and any two branches - mint the same id for the same subresource. Parent
+    NAMES form the scope, never parent ids: ids are what diverge across branches.
+
+    Args:
+        prefix (str): The id prefix, e.g. "CONDITION".
+        *scope (str): The scoped name parts, outermost first (e.g. flow name, step
+            name, condition name).
+
+    Returns:
+        str: ``{prefix}-{8 hex chars}`` derived from the scope, matching the shape of
+            randomly minted ids.
+    """
+    digest = hashlib.sha1("/".join(scope).encode("utf-8")).hexdigest()
+    return f"{prefix}-{digest[:8]}"
+
+
 @functools.cache
 def clean_name(name: str, lowercase: bool = True) -> str:
     """Convert a resource name to a folder-friendly format."""

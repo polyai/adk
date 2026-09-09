@@ -512,7 +512,12 @@ class FlowStep(BaseFlowStep, YamlResource):
                     resource_id=(
                         known_condition.resource_id
                         if known_condition
-                        else f"CONDITION-{uuid.uuid4().hex[:8]}"
+                        else utils.generate_subresource_id(
+                            "CONDITION",
+                            flow_name or "",
+                            yaml_dict.get("name") or "",
+                            condition_name or "",
+                        )
                     ),
                     position=known_condition.position if known_condition else None,
                     ingress=known_condition.ingress if known_condition else None,

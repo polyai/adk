@@ -8,7 +8,6 @@ import logging
 import os
 import re
 import typing as ty
-import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from functools import cached_property, lru_cache
@@ -184,7 +183,8 @@ class LatencyControl(SubResource):
         delay_responses = DelayResponsesUpdate(
             delay_responses=[
                 DelayResponseUpdate(
-                    id=dr.id or f"DELAY-{uuid.uuid4().hex[:8]}",
+                    id=dr.id
+                    or utils.generate_subresource_id("DELAY", dr.message, str(dr.duration)),
                     message=dr.message,
                     duration=dr.duration,
                     references=utils.get_references_from_prompt(
@@ -887,7 +887,7 @@ class Function(Resource):
 
                     _id = next(
                         (param.id for param in known_parameters if param.name == name),
-                        f"PARAMETER-{uuid.uuid4().hex[:8]}",
+                        utils.generate_subresource_id("PARAMETER", function_name, name),
                     )
 
                     if _type in PY_TO_SCHEMA:
@@ -955,7 +955,8 @@ class Function(Resource):
                             used_delay_response_ids.add(existing_id)
                         delay_responses.append(
                             FunctionDelayResponse(
-                                id=existing_id or f"DELAY-{uuid.uuid4().hex[:8]}",
+                                id=existing_id
+                                or utils.generate_subresource_id("DELAY", msg, str(dur)),
                                 message=msg,
                                 duration=dur,
                             )
@@ -1108,7 +1109,7 @@ class Function(Resource):
     def _build_create_latency_control_proto(self) -> FunctionCreateLatencyControl:
         delay_responses = [
             FunctionDelayResponseProto(
-                id=dr.id or f"DELAY-{uuid.uuid4().hex[:8]}",
+                id=dr.id or utils.generate_subresource_id("DELAY", dr.message, str(dr.duration)),
                 message=dr.message,
                 duration=dr.duration,
             )

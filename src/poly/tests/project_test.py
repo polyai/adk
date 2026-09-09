@@ -58,7 +58,7 @@ from poly.resources.flows import (
     FlowSettings,
     StepType,
 )
-from poly.resources.function import FunctionType
+from poly.resources.function import FunctionParameters, FunctionType
 from poly.resources.resource import MultiResourceYamlResource
 from poly.tests.testing_utils import mock_read_from_file
 
@@ -5892,6 +5892,511 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
             with self.assertRaises(ValueError) as ctx:
                 self.project.sync_ids_with_sandbox()
         self.assertIn("uncommitted changes", str(ctx.exception))
+
+
+class FindNewKeptDeletedParentLookupTest(unittest.TestCase):
+    """Tests for find_new_kept_deleted minting new resource ids from the parent branch.
+
+    A resource added locally is minted a fresh id, while the same file on the parent
+    branch already carries a platform assigned id. Pushing the fresh id would leave one
+    file with two ids, which a later merge cannot reconcile, so a new resource whose file
+    path-matches a parent resource adopts the parent's id at mint time.
+    """
+
+    PARENT_FLOW_ID = "FLOW-parent-assigned-id"
+    # The flow id the fixture project already stores, kept when the flow is not new.
+    BRANCH_FLOW_ID = "FLOW_CONFIG-test_flow"
+
+    FLOW_PATH = "flows/test_flow/flow_config.yaml"
+    STEP_PATH = "flows/test_flow/steps/start_step.yaml"
+    FUNCTION_STEP_PATH = "flows/test_flow/function_steps/process_payment.py"
+    FLOW_FUNCTION_PATH = "flows/test_flow/functions/process_data.py"
+    TOPIC_PATH = "topics/topic_1.yaml"
+
+    def setUp(self):
+        # The untouched fixture project stands in for the parent branch: the same files,
+        # with ids that tests overwrite with the ones the parent's platform assigned.
+        parent_project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.parent_fixtures: dict[str, Resource] = {
+            resource.file_path: resource
+            for resources_by_id in parent_project.resources.values()
+            for resource in resources_by_id.values()
+        }
+
+    def _project_where_files_are_new(self, **stored_ids_to_drop: str) -> AgentStudioProject:
+        """A project that has forgotten the given resources, so their files look new.
+
+        Args:
+            **stored_ids_to_drop: section of test_project.json -> resource id to drop from
+                it, e.g. ``topics="TOPIC-Topic 1"``.
+        """
+        project_data = deepcopy(PROJECT_DATA)
+        for section, resource_id in stored_ids_to_drop.items():
+            project_data["resources"][section].pop(resource_id)
+        return AgentStudioProject.from_dict(project_data, TEST_DIR)
+
+    def _parent(self, relative_path: str, resource_id: str, flow_id: str = None) -> Resource:
+        """The parent branch's copy of a fixture file, under the parent's assigned ids."""
+        resource = deepcopy(self.parent_fixtures[relative_path])
+        resource.resource_id = resource_id
+        if flow_id is not None:
+            resource.flow_id = flow_id
+        return resource
+
+    def _parent_lookup(self, *resources: Resource) -> dict[str, Resource]:
+        """Parent resources keyed by absolute file path, exactly as push keys them."""
+        return {os.path.join(TEST_DIR, resource.file_path): resource for resource in resources}
+
+    def _mapping_for(
+        self, mappings: list[ResourceMapping], relative_path: str
+    ) -> ResourceMapping:
+        """The single mapping covering a fixture file."""
+        file_path = os.path.join(TEST_DIR, relative_path)
+        matches = [mapping for mapping in mappings if mapping.file_path == file_path]
+        self.assertEqual(len(matches), 1, f"expected exactly one mapping for {relative_path}")
+        return matches[0]
+
+    def test_new_flow_adopts_the_parent_flow_id(self):
+        """A new flow config that path-matches the parent takes the parent's id."""
+        project = self._project_where_files_are_new(flow_config="FLOW_CONFIG-test_flow")
+        parent_lookup = self._parent_lookup(self._parent(self.FLOW_PATH, self.PARENT_FLOW_ID))
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup=parent_lookup
+        )
+
+        flow_mapping = self._mapping_for(new_mappings, self.FLOW_PATH)
+        self.assertEqual(flow_mapping.resource_id, self.PARENT_FLOW_ID)
+        # A flow's flow_id is its own id, so the whole flow moves together.
+        self.assertEqual(flow_mapping.flow_id, self.PARENT_FLOW_ID)
+
+    def test_new_flow_without_a_parent_match_is_minted_a_fresh_id(self):
+        """A flow with no counterpart on the parent still gets a randomly minted id."""
+        project = self._project_where_files_are_new(flow_config="FLOW_CONFIG-test_flow")
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup={}
+        )
+
+        flow_mapping = self._mapping_for(new_mappings, self.FLOW_PATH)
+        self.assertRegex(flow_mapping.resource_id, r"^FLOW_CONFIG-[a-f0-9]{8}$")
+        self.assertEqual(flow_mapping.flow_id, flow_mapping.resource_id)
+
+    def test_new_step_in_a_new_flow_adopts_the_parent_composite_id(self):
+        """A new step matching a parent step takes that step's id, prefix and all.
+
+        The parent named the step `greeting` while the local file would mint its own id,
+        so the whole composite `{parent_flow_id}_{parent_step_id}` must be adopted.
+        """
+        project = self._project_where_files_are_new(
+            flow_config="FLOW_CONFIG-test_flow",
+            flow_steps="FLOW_CONFIG-test_flow_start_step",
+        )
+        parent_lookup = self._parent_lookup(
+            self._parent(self.FLOW_PATH, self.PARENT_FLOW_ID),
+            self._parent(
+                self.STEP_PATH, f"{self.PARENT_FLOW_ID}_greeting", flow_id=self.PARENT_FLOW_ID
+            ),
+        )
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup=parent_lookup
+        )
+
+        step_mapping = self._mapping_for(new_mappings, self.STEP_PATH)
+        self.assertEqual(step_mapping.resource_id, f"{self.PARENT_FLOW_ID}_greeting")
+        self.assertEqual(step_mapping.flow_id, self.PARENT_FLOW_ID)
+
+    def test_new_step_without_a_parent_match_is_minted_under_its_flow_id(self):
+        """A step the parent does not have is minted a fresh id under the flow it belongs to.
+
+        Step ids embed the flow id as a prefix, and start_step / child_step references are
+        resolved by stripping that prefix, so the prefix must agree with the flow_id even
+        when only the flow was adopted from the parent.
+        """
+        project = self._project_where_files_are_new(
+            flow_config="FLOW_CONFIG-test_flow",
+            flow_steps="FLOW_CONFIG-test_flow_start_step",
+        )
+        parent_lookup = self._parent_lookup(self._parent(self.FLOW_PATH, self.PARENT_FLOW_ID))
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup=parent_lookup
+        )
+
+        step_mapping = self._mapping_for(new_mappings, self.STEP_PATH)
+        self.assertRegex(
+            step_mapping.resource_id, rf"^{self.PARENT_FLOW_ID}_FLOW_STEPS-[a-f0-9]{{8}}$"
+        )
+        self.assertEqual(step_mapping.flow_id, self.PARENT_FLOW_ID)
+
+    def test_new_step_in_a_kept_flow_adopts_only_the_parent_bare_step_id(self):
+        """A new step in an existing flow keeps this branch's flow id in its prefix.
+
+        The flow is not new, so it keeps this branch's id. Adopting the parent's composite
+        id verbatim would file the step under the parent's flow id instead.
+        """
+        project = self._project_where_files_are_new(
+            flow_steps="FLOW_CONFIG-test_flow_start_step"
+        )
+        parent_lookup = self._parent_lookup(
+            self._parent(
+                self.STEP_PATH, f"{self.PARENT_FLOW_ID}_greeting", flow_id=self.PARENT_FLOW_ID
+            )
+        )
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup=parent_lookup
+        )
+
+        step_mapping = self._mapping_for(new_mappings, self.STEP_PATH)
+        self.assertEqual(step_mapping.resource_id, f"{self.BRANCH_FLOW_ID}_greeting")
+        self.assertEqual(step_mapping.flow_id, self.BRANCH_FLOW_ID)
+
+    def test_new_function_step_adopts_the_parent_composite_id(self):
+        """Function steps carry composite ids too, so they adopt them the same way."""
+        project = self._project_where_files_are_new(
+            flow_config="FLOW_CONFIG-test_flow",
+            function_steps="FLOW_CONFIG-test_flow_process_payment",
+        )
+        parent_lookup = self._parent_lookup(
+            self._parent(self.FLOW_PATH, self.PARENT_FLOW_ID),
+            self._parent(
+                self.FUNCTION_STEP_PATH,
+                f"{self.PARENT_FLOW_ID}_take_payment",
+                flow_id=self.PARENT_FLOW_ID,
+            ),
+        )
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup=parent_lookup
+        )
+
+        function_step_mapping = self._mapping_for(new_mappings, self.FUNCTION_STEP_PATH)
+        self.assertEqual(function_step_mapping.resource_id, f"{self.PARENT_FLOW_ID}_take_payment")
+        self.assertEqual(function_step_mapping.flow_id, self.PARENT_FLOW_ID)
+
+    def test_new_flow_scoped_function_adopts_the_parent_id_without_a_flow_prefix(self):
+        """A function inside a flow has a flow_id but a standalone id.
+
+        Only step ids embed the flow id, so prefixing a function's id with the flow id
+        would corrupt it: the parent's id is adopted exactly as it stands.
+        """
+        project = self._project_where_files_are_new(functions="FUNCTION-process_data")
+        parent_lookup = self._parent_lookup(
+            self._parent(
+                self.FLOW_FUNCTION_PATH,
+                "FUNCTION-parent-process-data",
+                flow_id=self.PARENT_FLOW_ID,
+            )
+        )
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup=parent_lookup
+        )
+
+        function_mapping = self._mapping_for(new_mappings, self.FLOW_FUNCTION_PATH)
+        self.assertEqual(function_mapping.resource_id, "FUNCTION-parent-process-data")
+        self.assertEqual(function_mapping.flow_id, self.BRANCH_FLOW_ID)
+
+    def test_new_topic_adopts_the_parent_id(self):
+        """A new topic whose file exists on the parent takes the parent's id."""
+        project = self._project_where_files_are_new(topics="TOPIC-Topic 1")
+        parent_lookup = self._parent_lookup(
+            self._parent(self.TOPIC_PATH, "TOPIC-parent-assigned-id")
+        )
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup=parent_lookup
+        )
+
+        topic_mapping = self._mapping_for(new_mappings, self.TOPIC_PATH)
+        self.assertEqual(topic_mapping.resource_id, "TOPIC-parent-assigned-id")
+
+    def test_new_topic_without_a_parent_match_is_minted_a_fresh_id(self):
+        """A topic the parent does not have is minted a random id as before."""
+        project = self._project_where_files_are_new(topics="TOPIC-Topic 1")
+
+        new_mappings, _, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup={}
+        )
+
+        topic_mapping = self._mapping_for(new_mappings, self.TOPIC_PATH)
+        self.assertRegex(topic_mapping.resource_id, r"^TOPICS-[a-f0-9]{8}$")
+
+    def test_parent_ids_are_ignored_when_no_parent_lookup_is_passed(self):
+        """Without a parent lookup, minting stays random even for a path the parent has.
+
+        Adopting parent ids is opt-in: every caller that does not ask for it must see the
+        behaviour it saw before the feature existed.
+        """
+        project = self._project_where_files_are_new(topics="TOPIC-Topic 1")
+        # Built but deliberately not passed.
+        self._parent_lookup(self._parent(self.TOPIC_PATH, "TOPIC-parent-assigned-id"))
+
+        new_mappings, _, _ = project.find_new_kept_deleted(project.discover_local_resources())
+
+        topic_mapping = self._mapping_for(new_mappings, self.TOPIC_PATH)
+        self.assertRegex(topic_mapping.resource_id, r"^TOPICS-[a-f0-9]{8}$")
+
+    def test_kept_resources_keep_their_branch_ids_when_the_parent_matches(self):
+        """A file the branch already knows keeps its own id, however the parent named it.
+
+        Only newly minted ids may follow the parent: rewriting a kept resource's id would
+        orphan every reference the branch has already pushed under the old id.
+        """
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        parent_lookup = self._parent_lookup(
+            self._parent(self.TOPIC_PATH, "TOPIC-parent-assigned-id"),
+            self._parent(
+                self.STEP_PATH, f"{self.PARENT_FLOW_ID}_greeting", flow_id=self.PARENT_FLOW_ID
+            ),
+        )
+
+        new_mappings, kept_mappings, _ = project.find_new_kept_deleted(
+            project.discover_local_resources(), parent_lookup=parent_lookup
+        )
+
+        self.assertEqual(new_mappings, [])
+        self.assertEqual(
+            self._mapping_for(kept_mappings, self.TOPIC_PATH).resource_id, "TOPIC-Topic 1"
+        )
+        self.assertEqual(
+            self._mapping_for(kept_mappings, self.STEP_PATH).resource_id,
+            f"{self.BRANCH_FLOW_ID}_start_step",
+        )
+
+
+class AugmentOriginalWithParentSubresourcesTest(unittest.TestCase):
+    """Tests for _augment_original_with_parent_subresources merging parent subresources.
+
+    Subresources (function parameters, flow step conditions) are matched by name when a
+    local file is read, so a parameter added on both the parent branch and this branch
+    would mint a fresh id here and diverge from the id the parent already gave it. For a
+    kept resource that path-matches the parent, the parent's subresources are folded into
+    a copy of the branch resource so those names can find an existing id.
+    """
+
+    FLOW_ID = "FLOW-test_flow"
+    STEP_ID = "start_step"
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+
+    def _parameter(self, name: str, parameter_id: str) -> FunctionParameters:
+        """A function parameter carrying the id its branch assigned it."""
+        return FunctionParameters(
+            name=name, type="string", description=f"the {name}", id=parameter_id
+        )
+
+    def _function(self, *parameters: FunctionParameters) -> Function:
+        """A function whose only interesting content is its parameter list."""
+        return Function(
+            resource_id="FUNCTION-book_table",
+            name="book_table",
+            description="Book a table",
+            code="def book_table():\n    pass\n",
+            parameters=list(parameters),
+        )
+
+    def _condition(self, name: str, condition_id: str) -> Condition:
+        """A step condition carrying the id its branch assigned it."""
+        return Condition(
+            resource_id=condition_id,
+            name=name,
+            condition_type="step_condition",
+            step_id=self.STEP_ID,
+            flow_id=self.FLOW_ID,
+        )
+
+    def _flow_step(self, *conditions: Condition) -> FlowStep:
+        """A flow step whose only interesting content is its condition list."""
+        return FlowStep(
+            resource_id=f"{self.FLOW_ID}_{self.STEP_ID}",
+            name="Start step",
+            step_id=self.STEP_ID,
+            flow_id=self.FLOW_ID,
+            flow_name="test_flow",
+            step_type=StepType.DEFAULT_STEP,
+            prompt="Greet the caller",
+            conditions=list(conditions),
+        )
+
+    def test_function_inherits_a_parameter_only_the_parent_has(self):
+        """A parameter name the branch does not know is appended with the parent's id."""
+        branch_function = self._function(self._parameter("party_size", "PARAM-branch-party-size"))
+        parent_function = self._function(
+            self._parameter("party_size", "PARAM-parent-party-size"),
+            self._parameter("seating_area", "PARAM-parent-seating-area"),
+        )
+
+        augmented = self.project._augment_original_with_parent_subresources(
+            branch_function, parent_function
+        )
+
+        self.assertEqual(
+            [(param.name, param.id) for param in augmented.parameters],
+            [
+                ("party_size", "PARAM-branch-party-size"),
+                ("seating_area", "PARAM-parent-seating-area"),
+            ],
+        )
+
+    def test_augmenting_a_function_leaves_the_branch_resource_untouched(self):
+        """The branch function keeps its own parameters after augmentation.
+
+        The branch resource is the one held in self.resources and diffed against later,
+        so mutating it in place would make the parent's parameters look like local edits.
+        """
+        branch_function = self._function(self._parameter("party_size", "PARAM-branch-party-size"))
+        parent_function = self._function(
+            self._parameter("seating_area", "PARAM-parent-seating-area")
+        )
+
+        self.project._augment_original_with_parent_subresources(branch_function, parent_function)
+
+        self.assertEqual(
+            [(param.name, param.id) for param in branch_function.parameters],
+            [("party_size", "PARAM-branch-party-size")],
+        )
+
+    def test_function_parameter_present_on_both_keeps_the_branch_version(self):
+        """A shared parameter name is not duplicated with the parent's copy."""
+        branch_function = self._function(self._parameter("party_size", "PARAM-branch-party-size"))
+        parent_function = self._function(self._parameter("party_size", "PARAM-parent-party-size"))
+
+        augmented = self.project._augment_original_with_parent_subresources(
+            branch_function, parent_function
+        )
+
+        self.assertEqual(
+            [(param.name, param.id) for param in augmented.parameters],
+            [("party_size", "PARAM-branch-party-size")],
+        )
+
+    def test_function_with_nothing_to_inherit_is_returned_as_is(self):
+        """With no parent-only parameters the branch function itself comes back."""
+        branch_function = self._function(self._parameter("party_size", "PARAM-branch-party-size"))
+        parent_function = self._function(self._parameter("party_size", "PARAM-parent-party-size"))
+
+        augmented = self.project._augment_original_with_parent_subresources(
+            branch_function, parent_function
+        )
+
+        self.assertIs(augmented, branch_function)
+
+    def test_flow_step_inherits_a_condition_only_the_parent_has(self):
+        """A condition name the branch does not know is appended with the parent's id."""
+        branch_step = self._flow_step(self._condition("wants_table", "COND-branch-wants-table"))
+        parent_step = self._flow_step(
+            self._condition("wants_table", "COND-parent-wants-table"),
+            self._condition("wants_takeaway", "COND-parent-wants-takeaway"),
+        )
+
+        augmented = self.project._augment_original_with_parent_subresources(
+            branch_step, parent_step
+        )
+
+        self.assertEqual(
+            [(cond.name, cond.resource_id) for cond in augmented.conditions],
+            [
+                ("wants_table", "COND-branch-wants-table"),
+                ("wants_takeaway", "COND-parent-wants-takeaway"),
+            ],
+        )
+
+    def test_augmenting_a_flow_step_leaves_the_branch_resource_untouched(self):
+        """The branch step keeps its own conditions after augmentation."""
+        branch_step = self._flow_step(self._condition("wants_table", "COND-branch-wants-table"))
+        parent_step = self._flow_step(
+            self._condition("wants_takeaway", "COND-parent-wants-takeaway")
+        )
+
+        self.project._augment_original_with_parent_subresources(branch_step, parent_step)
+
+        self.assertEqual(
+            [(cond.name, cond.resource_id) for cond in branch_step.conditions],
+            [("wants_table", "COND-branch-wants-table")],
+        )
+
+    def test_flow_step_condition_present_on_both_keeps_the_branch_version(self):
+        """A shared condition name is not duplicated with the parent's copy."""
+        branch_step = self._flow_step(self._condition("wants_table", "COND-branch-wants-table"))
+        parent_step = self._flow_step(self._condition("wants_table", "COND-parent-wants-table"))
+
+        augmented = self.project._augment_original_with_parent_subresources(
+            branch_step, parent_step
+        )
+
+        self.assertEqual(
+            [(cond.name, cond.resource_id) for cond in augmented.conditions],
+            [("wants_table", "COND-branch-wants-table")],
+        )
+
+    def test_flow_step_with_nothing_to_inherit_is_returned_as_is(self):
+        """With no parent-only conditions the branch step itself comes back."""
+        branch_step = self._flow_step(self._condition("wants_table", "COND-branch-wants-table"))
+        parent_step = self._flow_step(self._condition("wants_table", "COND-parent-wants-table"))
+
+        augmented = self.project._augment_original_with_parent_subresources(
+            branch_step, parent_step
+        )
+
+        self.assertIs(augmented, branch_step)
+
+    def test_function_step_is_returned_unchanged_despite_parent_only_parameters(self):
+        """A function step is not augmented even though it is a Function subclass.
+
+        Reading a function step off disk takes no known_parameters, so handing it merged
+        parameters here would offer ids that the read can never claim.
+        """
+
+        def function_step(*parameters: FunctionParameters) -> FunctionStep:
+            return FunctionStep(
+                resource_id=f"{self.FLOW_ID}_take_payment",
+                name="take_payment",
+                step_id="take_payment",
+                flow_id=self.FLOW_ID,
+                flow_name="test_flow",
+                code="def take_payment():\n    pass\n",
+                parameters=list(parameters),
+            )
+
+        branch_step = function_step(self._parameter("amount", "PARAM-branch-amount"))
+        parent_step = function_step(
+            self._parameter("amount", "PARAM-parent-amount"),
+            self._parameter("currency", "PARAM-parent-currency"),
+        )
+
+        augmented = self.project._augment_original_with_parent_subresources(
+            branch_step, parent_step
+        )
+
+        self.assertIs(augmented, branch_step)
+        self.assertEqual([param.name for param in augmented.parameters], ["amount"])
+
+    def test_resource_without_named_subresources_is_returned_unchanged(self):
+        """A type with no name-matched subresources, such as a topic, is passed through."""
+        branch_topic = Topic(
+            resource_id="TOPIC-branch-id",
+            name="Opening hours",
+            actions="Answer the question",
+            content="We open at 9am",
+            example_queries=["when do you open?"],
+        )
+        parent_topic = Topic(
+            resource_id="TOPIC-parent-id",
+            name="Opening hours",
+            actions="Answer the question",
+            content="We open at 8am",
+            example_queries=["when do you open?", "are you open now?"],
+        )
+
+        augmented = self.project._augment_original_with_parent_subresources(
+            branch_topic, parent_topic
+        )
+
+        self.assertIs(augmented, branch_topic)
 
 
 class TestProjectFixtureIntegrityTest(unittest.TestCase):

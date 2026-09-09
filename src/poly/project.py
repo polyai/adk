@@ -4,6 +4,7 @@ Copyright PolyAI Limited
 """
 
 import base64
+import copy
 import json
 import logging
 import os
@@ -1262,10 +1263,21 @@ class AgentStudioProject:
                         [],
                     )
 
+        # New local resources that path-match a parent branch resource adopt the
+        # parent's ids at mint time, so pushing does not mint ids that diverge from
+        # resources the parent already has. Dry runs skip the parent fetch unless the
+        # test env var forces it (to inspect the adopted ids without pushing).
+        parent_branch_paths_to_resource: dict[str, Resource] = {}
+        if not dry_run or os.environ.get("POLY_ADK_SYNC_PARENT_IDS_TEST"):
+            parent_branch_paths_to_resource = self._fetch_parent_resources_by_path()
+
         # Push Algorithm
         # 1. Get new/kept/deleted resources
         new_resource_mappings, kept_resource_mappings, deleted_resource_mappings = (
-            self.find_new_kept_deleted(self.discover_local_resources())
+            self.find_new_kept_deleted(
+                self.discover_local_resources(),
+                parent_lookup=parent_branch_paths_to_resource,
+            )
         )
         local_resource_mappings = new_resource_mappings + kept_resource_mappings
         # Slim resources have no file to read - they exist only so that references
@@ -1285,10 +1297,31 @@ class AgentStudioProject:
         # 2. Read all new/kept resources from disk
         new_state: ResourceMap = {}
 
+        new_file_paths = {rm.file_path for rm in new_resource_mappings}
         for resource_mapping in local_resource_mappings:
+            # The parent resource supplies known_* subresource ids (function parameters,
+            # step conditions): new resources take the parent's wholesale, kept resources
+            # only inherit subresources they do not already have by name.
+            parent_resource = parent_branch_paths_to_resource.get(resource_mapping.file_path)
+            if resource_mapping.file_path in new_file_paths:
+                original_resource = parent_resource
+            elif parent_resource is not None:
+                branch_resource = self.resources.get(resource_mapping.resource_type, {}).get(
+                    resource_mapping.resource_id
+                )
+                original_resource = (
+                    self._augment_original_with_parent_subresources(
+                        branch_resource, parent_resource
+                    )
+                    if branch_resource
+                    else None
+                )
+            else:
+                original_resource = None
             local_resource = self.read_local_resource(
                 resource=resource_mapping,
                 resource_mappings=resource_mappings,
+                original_resource=original_resource,
             )
             new_state.setdefault(resource_mapping.resource_type, {})[
                 resource_mapping.resource_id
@@ -2211,6 +2244,7 @@ class AgentStudioProject:
         self,
         discovered_resources: dict[type[Resource], list[str]],
         conflict_files: Optional[list[str]] = None,
+        parent_lookup: Optional[dict[str, Resource]] = None,
     ) -> tuple[
         list[ResourceMapping],
         list[ResourceMapping],
@@ -2221,6 +2255,12 @@ class AgentStudioProject:
         Args:
             discovered_resources (dict[type[Resource], list[str]]): The discovered
                 resources to compare against.
+            conflict_files (Optional[list[str]]): If provided, files whose discovery hits a
+                merge conflict are appended here and that resource type is skipped instead of
+                raising. If None, a MergeConflictError propagates.
+            parent_lookup (Optional[dict[str, Resource]]): Parent branch resources keyed by
+                absolute file path. When provided, a new resource whose file path-matches a
+                parent resource adopts the parent's id at mint time instead of a fresh one.
 
         Returns:
             tuple[
@@ -2232,6 +2272,7 @@ class AgentStudioProject:
                 - Kept resources
                 - Deleted resources
         """
+        parent_lookup = parent_lookup or {}
         deleted_resource_mappings: list[ResourceMapping] = []
         new_resource_mappings: list[ResourceMapping] = []
         kept_resource_mappings: list[ResourceMapping] = []
@@ -2258,12 +2299,15 @@ class AgentStudioProject:
         for flow_id, flow_cfg in self.resources.get(FlowConfig, {}).items():
             flow_paths_to_ids[resource_utils.clean_name(flow_cfg.name)] = flow_id
 
-        # Add to mapping for new flows
+        # Add to mapping for new flows: adopt the parent branch's flow id when the flow
+        # config path-matches a parent resource, otherwise mint a fresh id. Resolving
+        # flows first keeps every composite step id consistent with its flow_id below.
         for flow_path in discovered_resources.get(FlowConfig, []):
             flow_name = resource_utils.get_flow_name_from_path(flow_path)
             if resource_utils.clean_name(flow_name) not in flow_paths_to_ids:
-                flow_paths_to_ids[resource_utils.clean_name(flow_name)] = self.generate_uuid(
-                    FlowConfig
+                parent_flow = parent_lookup.get(flow_path)
+                flow_paths_to_ids[resource_utils.clean_name(flow_name)] = (
+                    parent_flow.resource_id if parent_flow else self.generate_uuid(FlowConfig)
                 )
 
         if not self.file_structure_info:
@@ -2345,17 +2389,31 @@ class AgentStudioProject:
                     )
 
                 else:
-                    # Compute new resource ID
-                    resource_id = self.generate_uuid(resource_type)
-
-                    if resource_type == Document:
-                        resource_id = os.path.basename(file_path).upper()
+                    # Compute new resource ID, adopting the parent branch's id on a
+                    # file path match so the ids never diverge from the parent's.
+                    parent_resource = parent_lookup.get(file_path)
 
                     if resource_type in (FlowStep, FunctionStep):
-                        resource_id = f"{flow_id}_{resource_id}"
-
-                    if resource_type == FlowConfig:
+                        if parent_resource:
+                            # Re-composite the parent's bare step id under the local flow
+                            # id: in a kept flow whose id diverges from the parent's, the
+                            # prefix must still agree with the flow_id that step_id
+                            # derivation strips.
+                            parent_flow_id = getattr(parent_resource, "flow_id", None) or ""
+                            bare_step_id = parent_resource.resource_id.removeprefix(
+                                f"{parent_flow_id}_"
+                            )
+                            resource_id = f"{flow_id}_{bare_step_id}"
+                        else:
+                            resource_id = f"{flow_id}_{self.generate_uuid(resource_type)}"
+                    elif resource_type == FlowConfig:
                         resource_id = flow_id
+                    elif resource_type == Document:
+                        resource_id = os.path.basename(file_path).upper()
+                    elif parent_resource:
+                        resource_id = parent_resource.resource_id
+                    else:
+                        resource_id = self.generate_uuid(resource_type)
 
                     new_resource_mappings.append(
                         ResourceMapping(
@@ -3047,26 +3105,122 @@ class AgentStudioProject:
             self.switch_branch("main", force=True)
         return True
 
+    def _fetch_parent_resources_by_path(self) -> dict[str, Resource]:
+        """Fetch the parent branch's resources, keyed by absolute file path.
+
+        Returns:
+            dict[str, Resource]: The parent branch's resources by path. Empty when on
+                main, when the local branch no longer exists remotely, or when the
+                branch has no parent.
+        """
+        current_branch, branches = self.get_branches()
+        if current_branch is None or current_branch == "main":
+            return {}
+
+        parent_branch_id = branches.get(current_branch, {}).get("parentBranchId")
+        if not parent_branch_id:
+            return {}
+
+        branch_api_handler = AgentStudioInterface(
+            self.region, self.account_id, self.project_id, parent_branch_id
+        )
+        resources, _, _ = branch_api_handler.pull_resources()
+
+        return {
+            os.path.join(self.root_path, resource.file_path): resource
+            for resources_dict in resources.values()
+            for resource in resources_dict.values()
+        }
+
+    def _augment_original_with_parent_subresources(
+        self, branch_resource: Resource, parent_resource: Resource
+    ) -> Resource:
+        """Merge parent-only subresources into a copy of a kept resource.
+
+        Subresources (function parameters, flow step conditions) are matched by name
+        when local files are read, so a subresource added both on the parent branch and
+        locally would otherwise mint a fresh id here and diverge from the parent's. The
+        branch resource wins for every name it already knows; only names the branch does
+        not have inherit the parent's subresource (and therefore its id).
+
+        Args:
+            branch_resource (Resource): This branch's version of the resource.
+            parent_resource (Resource): The parent branch's path-matched version.
+
+        Returns:
+            Resource: A copy of ``branch_resource`` with parent-only subresources
+                appended, or ``branch_resource`` itself when there is nothing to merge.
+        """
+        # Exact-type gates mirror read_local_resource's known_* extraction; note a
+        # FunctionStep is a Function subclass but takes no known_parameters there.
+        if type(branch_resource) is Function and type(parent_resource) is Function:
+            branch_names = {param.name for param in branch_resource.parameters}
+            extra = [
+                param for param in parent_resource.parameters if param.name not in branch_names
+            ]
+            if extra:
+                augmented = copy.copy(branch_resource)
+                augmented.parameters = [*branch_resource.parameters, *extra]
+                return augmented
+        elif type(branch_resource) is FlowStep and type(parent_resource) is FlowStep:
+            branch_names = {cond.name for cond in branch_resource.conditions}
+            extra = [cond for cond in parent_resource.conditions if cond.name not in branch_names]
+            if extra:
+                augmented = copy.copy(branch_resource)
+                augmented.conditions = [*branch_resource.conditions, *extra]
+                return augmented
+        return branch_resource
+
     def sync_ids_with_sandbox(self) -> bool:
-        """Sync ids of resources in sandbox into current branch
+        """Sync ids of resources in sandbox into current branch.
 
         Returns:
             bool: True if the sync was successful, False otherwise
         """
+        return self.sync_ids_with_parent(parent_name="main")
+
+    def sync_ids_with_parent(self, parent_name: Optional[str] = None) -> bool:
+        """Sync ids of resources of the parent branch into the current branch.
+
+        Args:
+            parent_name (Optional[str]): Name of the branch to sync ids from. Defaults
+                to the current branch's parent, falling back to "main" when the parent
+                cannot be resolved.
+
+        Returns:
+            bool: True if the sync was successful, False otherwise
+        """
+        if parent_name is None:
+            branches = self.api_handler.get_branches()
+            branch_meta = {meta["branchId"]: meta for meta in branches.values()}
+            current_branch_meta = branch_meta.get(self.branch_id)
+            if not current_branch_meta:
+                raise ValueError(f"Branch {self.branch_id} does not exist.")
+            parent_branch_id = current_branch_meta.get("parentBranchId")
+            parent_branch_meta = branch_meta.get(parent_branch_id) or {}
+            parent_name = parent_branch_meta.get("name")
+            if not parent_name:
+                logger.warning(
+                    f"Could not resolve parent branch for '{self.branch_id}' "
+                    f"(parentBranchId={parent_branch_id!r}); defaulting to 'main'."
+                )
+                parent_name = "main"
+
         if self.branch_id == "main":
             raise ValueError("Cannot sync ids while on main branch.")
 
         if self.get_diffs():
             raise ValueError("Cannot sync ids due to uncommitted changes.")
 
-        # Sandbox slim mappings describe what main withheld; local files resolve their
-        # references against this branch's own slim mappings, so they are not needed here.
-        sandbox_resources, _ = self.get_remote_resources_by_name("main")
-        # Build lookup by file path -> Resource
-        sandbox_resource_lookup: dict[str, Resource] = {}
-        for resources_dict in sandbox_resources.values():
-            for resource in resources_dict.values():
-                sandbox_resource_lookup[resource.file_path] = resource
+        # Parent slim mappings describe what the parent withheld; local files resolve
+        # their references against this branch's own slim mappings, so they are not
+        # needed here.
+        parent_resources, _ = self.get_remote_resources_by_name(parent_name)
+        parent_resource_lookup: dict[str, Resource] = {
+            resource.file_path: resource
+            for resources_dict in parent_resources.values()
+            for resource in resources_dict.values()
+        }
 
         # 1a. Resolve synced FlowConfig ids first, so flow-scoped resources below can
         # translate their (stale, local) flow_id to the id the flow was synced to.
@@ -3075,29 +3229,29 @@ class AgentStudioProject:
             for resource in resources_dict.values():
                 if not isinstance(resource, FlowConfig):
                     continue
-                sandbox_version = sandbox_resource_lookup.get(resource.file_path)
+                parent_version = parent_resource_lookup.get(resource.file_path)
                 flow_id_translation[resource.resource_id] = (
-                    sandbox_version.resource_id if sandbox_version else resource.resource_id
+                    parent_version.resource_id if parent_version else resource.resource_id
                 )
 
-        # 1b. Build sync resource_mappings: use sandbox id when there is a sandbox match by file_path
+        # 1b. Build sync resource_mappings: use parent id when there is a parent match by file_path
         sync_mappings: list[ResourceMapping] = []
         for resource_type, resources_dict in self.resources.items():
             for resource_id, resource in resources_dict.items():
-                sandbox_version = sandbox_resource_lookup.get(resource.file_path)
+                parent_version = parent_resource_lookup.get(resource.file_path)
                 local_flow_id = getattr(resource, "flow_id", None)
 
                 if isinstance(resource, FlowConfig):
                     mapping_resource_id = (
-                        sandbox_version.resource_id if sandbox_version else resource.resource_id
+                        parent_version.resource_id if parent_version else resource.resource_id
                     )
                     mapping_flow_id = mapping_resource_id
                 else:
                     mapping_flow_id = flow_id_translation.get(local_flow_id, local_flow_id)
-                    if sandbox_version:
-                        mapping_resource_id = sandbox_version.resource_id
+                    if parent_version:
+                        mapping_resource_id = parent_version.resource_id
                     else:
-                        # No sandbox counterpart, so this resource was added on the branch and
+                        # No parent counterpart, so this resource was added on the branch and
                         # its composite `{flow_id}_{step_id}` id still carries the pre-sync flow
                         # id. Re-point it at the synced flow id, otherwise the prefix and flow_id
                         # disagree and references (start_step, child_step) cannot be resolved
@@ -3148,11 +3302,11 @@ class AgentStudioProject:
             relative_file_path = os.path.relpath(mapping.file_path, self.root_path)
             original = branch_by_path.get(relative_file_path)
             branch_resource = original[2] if original else None
-            sandbox_resource = sandbox_resource_lookup.get(relative_file_path, branch_resource)
+            parent_resource = parent_resource_lookup.get(relative_file_path, branch_resource)
             local_resource = self.read_local_resource(
                 resource=mapping,
                 resource_mappings=[*slim_mappings, *sync_mappings],
-                original_resource=sandbox_resource,
+                original_resource=parent_resource,
             )
 
             new_state.setdefault(mapping.resource_type, {})[mapping.resource_id] = local_resource

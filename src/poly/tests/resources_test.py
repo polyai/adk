@@ -12111,5 +12111,154 @@ class AsrSettingsFromProjection(unittest.TestCase):
         self.assertEqual(AsrSettings.from_projection({}), {})
 
 
+class DeterministicConditionIdTests(unittest.TestCase):
+    """Tests for condition ids being derived from the condition's scoped name.
+
+    A condition in a step file carries no id of its own, so reading a step used to mint a
+    random one. Two reads of an unchanged file then disagreed about the id, which showed
+    up as a spurious change to push and as one condition owning two ids across branches.
+    """
+
+    def _read_condition(
+        self,
+        flow_name: str = "Booking Flow",
+        step_name: str = "Greeting",
+        condition_name: str = "Go to menu",
+        known_conditions: list[Condition] = None,
+    ) -> Condition:
+        """Read a step file holding a single condition, and return that condition."""
+        step_file_name = resource_utils.clean_name(step_name)
+        flow_folder = resource_utils.clean_name(flow_name)
+        file_path = f"flows/{flow_folder}/steps/{step_file_name}.yaml"
+        step_yaml = (
+            "step_type: default_step\n"
+            f"name: {step_name}\n"
+            "conditions:\n"
+            f"  - name: {condition_name}\n"
+            "    condition_type: exit_flow_condition\n"
+            "    description: Leave the flow\n"
+            "    required_entities: []\n"
+            "prompt: Say hello\n"
+        )
+        flow_mapping = ResourceMapping(
+            resource_id="FLOW-1",
+            resource_name=flow_name,
+            resource_type=FlowConfig,
+            file_path=f"flows/{flow_folder}/flow_config.yaml",
+            flow_name=flow_name,
+            resource_prefix=None,
+        )
+
+        with mock_read_from_file({file_path: step_yaml}):
+            step = FlowStep.read_local_resource(
+                file_path=file_path,
+                resource_id="FLOW-1_step-1",
+                resource_name=step_file_name,
+                resource_mappings=[flow_mapping],
+                known_conditions=known_conditions,
+            )
+
+        self.assertEqual(len(step.conditions), 1)
+        return step.conditions[0]
+
+    def test_reading_the_same_step_twice_gives_the_condition_the_same_id(self):
+        """An unchanged step file reads back the same condition id every time."""
+        first_read = self._read_condition()
+        second_read = self._read_condition()
+
+        self.assertEqual(first_read.resource_id, second_read.resource_id)
+        self.assertRegex(first_read.resource_id, r"^CONDITION-[a-f0-9]{8}$")
+
+    def test_same_condition_name_in_another_flow_gets_a_different_id(self):
+        """Two flows may each have a "Go to menu" condition, and they are not the same one."""
+        booking_flow_condition = self._read_condition(flow_name="Booking Flow")
+        support_flow_condition = self._read_condition(flow_name="Support Flow")
+
+        self.assertNotEqual(
+            booking_flow_condition.resource_id, support_flow_condition.resource_id
+        )
+
+    def test_same_condition_name_in_another_step_gets_a_different_id(self):
+        """Steps within one flow may repeat a condition name, so the step is part of the scope."""
+        greeting_condition = self._read_condition(step_name="Greeting")
+        farewell_condition = self._read_condition(step_name="Farewell")
+
+        self.assertNotEqual(greeting_condition.resource_id, farewell_condition.resource_id)
+
+    def test_known_condition_with_a_matching_name_keeps_its_existing_id(self):
+        """An id the platform already assigned wins over the derived one."""
+        known_condition = Condition(
+            resource_id="cond-assigned-by-the-platform",
+            name="Go to menu",
+            description="Leave the flow",
+            condition_type=ConditionType.EXIT_FLOW,
+            child_step="",
+            step_id="step-1",
+            flow_id="FLOW-1",
+            required_entities=[],
+        )
+
+        condition = self._read_condition(known_conditions=[known_condition])
+
+        self.assertEqual(condition.resource_id, "cond-assigned-by-the-platform")
+
+
+class DeterministicParameterIdTests(unittest.TestCase):
+    """Tests for function parameter ids being derived from the parameter's scoped name.
+
+    A @func_parameter decorator carries no id, so reading a function used to mint a random
+    one and two reads of unchanged code disagreed about the parameter's id.
+    """
+
+    def _code(self, function_name: str = "look_up_booking") -> str:
+        """Function source declaring one decorated parameter."""
+        return (
+            "from _gen import *  # <AUTO GENERATED>\n"
+            "\n"
+            "@func_description('Look up a booking')\n"
+            "@func_parameter('booking_ref', 'the booking reference')\n"
+            f"def {function_name}(conv: Conversation, booking_ref: str):\n"
+            "    return booking_ref\n"
+        )
+
+    def test_reading_the_same_code_twice_gives_the_parameter_the_same_id(self):
+        """Unchanged function code reads back the same parameter id every time."""
+        _, first_read, _, _ = Function._extract_decorators(
+            self._code(), "look_up_booking", known_parameters=[]
+        )
+        _, second_read, _, _ = Function._extract_decorators(
+            self._code(), "look_up_booking", known_parameters=[]
+        )
+
+        self.assertEqual(first_read[0].id, second_read[0].id)
+        self.assertRegex(first_read[0].id, r"^PARAMETER-[a-f0-9]{8}$")
+
+    def test_same_parameter_name_in_another_function_gets_a_different_id(self):
+        """Functions may share a parameter name, so the function is part of the scope."""
+        _, look_up_params, _, _ = Function._extract_decorators(
+            self._code("look_up_booking"), "look_up_booking", known_parameters=[]
+        )
+        _, cancel_params, _, _ = Function._extract_decorators(
+            self._code("cancel_booking"), "cancel_booking", known_parameters=[]
+        )
+
+        self.assertNotEqual(look_up_params[0].id, cancel_params[0].id)
+
+    def test_known_parameter_with_a_matching_name_keeps_its_existing_id(self):
+        """An id the platform already assigned wins over the derived one."""
+        known_parameter = FunctionParameters(
+            id="param-assigned-by-the-platform",
+            name="booking_ref",
+            description="the booking reference",
+            type="string",
+        )
+
+        _, parameters, _, _ = Function._extract_decorators(
+            self._code(), "look_up_booking", known_parameters=[known_parameter]
+        )
+
+        self.assertEqual(parameters[0].id, "param-assigned-by-the-platform")
+
+
 if __name__ == "__main__":
     unittest.main()
