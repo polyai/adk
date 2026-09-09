@@ -5058,7 +5058,7 @@ class UsingSimplifiedDeploymentsTest(unittest.TestCase):
             "deleted": deleted,
         }
         if tag is not None:
-            deployment["deployment_metadata"] = {"deployment_message": "x", "tag": tag}
+            deployment["deployment_metadata"] = {"tag": tag}
         return deployment
 
     def _set_deployments(self, api: MagicMock, live: list, sandbox: list) -> None:
