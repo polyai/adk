@@ -3942,6 +3942,7 @@ class AgentStudioProject:
             key="deployment-simplification",
             region=self.region,
             project_id=self.project_id,
+            account_id=self.account_id,
             default=False,
         )
         if not flag_enabled:
