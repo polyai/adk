@@ -5012,6 +5012,7 @@ class UsingSimplifiedDeploymentsTest(unittest.TestCase):
             key="deployment-simplification",
             region=self.project.region,
             project_id=self.project.project_id,
+            account_id=self.project.account_id,
             default=False,
         )
 
