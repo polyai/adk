@@ -1,6 +1,68 @@
 # CHANGELOG
 
 
+## v0.53.4 (2026-09-09)
+
+### Bug Fixes
+
+- Read feature flags from the region's PostHog project
+  ([#313](https://github.com/polyai/adk/pull/313),
+  [`afd5185`](https://github.com/polyai/adk/commit/afd5185702619cd564f5af4129a8cb3e8b195190))
+
+## Summary
+
+Every feature-flag read went to the non-production PostHog project, whose rollouts sit at 100%, so
+  every flag reported as enabled. The client is now built per region's project, and the project
+  group key and properties match what the platform services send.
+
+## Motivation
+
+`deployment-simplification` returned `true` for every input — including project ids that don't
+  exist:
+
+``` before after a migrated project True True a non-migrated project True False a project id that
+  does True False not exist ```
+
+Two separate causes, both needed fixing:
+
+- **Wrong PostHog project.** One key was hardcoded, the non-production one. There are two:
+  `dev`/`staging`/`apollo` share one, the production clusters share the other. - **Wrong group
+  key.** Project ids are minted per-cluster and several clusters share one PostHog project, so the
+  `project` group key is namespaced as `<cluster>/<project_id>`. A bare id matches no group. Release
+  conditions match on group *properties*, which weren't sent at all.
+
+## Changes
+
+- Select the PostHog project by region; cache one client per project key, since a session can touch
+  more than one region. An unlisted region is treated as production, so a new region is never
+  reported as non-production. - Namespace the `project` group key by cluster. - Send
+  `group_properties` for both groups, including `account_id` so account-scoped conditions can match.
+  `account_id` is omitted when unknown rather than sent empty, which would fail an exact condition.
+  - Send the cluster `env` property, which is what separates two deployments sharing a cluster key.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Tested against a live Agent Studio project
+
+Payload assertions for the group key, properties, an omitted account, and a non-production env.
+  Region-to-project mapping covered for production, non-production, mixed casing and unknown
+  regions.
+
+Verified against real projects: `deployment-simplification` now answers `true` for a migrated
+  project and `false` for one that isn't, and `false` for an invented project id.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented)
+
+1565 passed, none failing. `get_posthog_client()` now takes a region — it has one caller in the
+  package.
+
+Note this changes behaviour wherever a flag gates something: flags that read as enabled everywhere
+  will start resolving per project. That is the point, but it is a real change.
+
+
 ## v0.53.3 (2026-09-09)
 
 ### Bug Fixes
