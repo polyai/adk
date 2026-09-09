@@ -972,6 +972,11 @@ class BranchCommand(BaseCommand):
         branch_label = branch_display_name or "current branch"
 
         def _is_heavy_content(c: dict[str, Any]) -> bool:
+            # Whole-resource conflicts are rendered as a field-level diff, which
+            # stays readable however large the resource is — the heavy path would
+            # replace that with a "choose a side" note and show nothing at all.
+            if isinstance(c.get("oursValue"), dict) and isinstance(c.get("theirsValue"), dict):
+                return False
             for key in ("baseValue", "theirsValue", "oursValue"):
                 v = c.get(key, "")
                 s = v if isinstance(v, str) else str(v)
@@ -1003,10 +1008,10 @@ class BranchCommand(BaseCommand):
                 conflict_total=total,
                 auto_mergeable=auto_merged,
                 heavy=heavy,
-                base_value=str(conflict.get("baseValue", "")),
+                base_value=conflict.get("baseValue", ""),
                 branch_label=branch_label,
-                branch_value=str(conflict.get("theirsValue", "")),
-                main_value=str(conflict.get("oursValue", "")),
+                branch_value=conflict.get("theirsValue", ""),
+                main_value=conflict.get("oursValue", ""),
                 existing_resolution=existing_resolution,
             )
 

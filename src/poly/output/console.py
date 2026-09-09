@@ -473,11 +473,66 @@ def print_turn_metadata(
 # ── Merge ─────────────────────────────────────────────────────────────
 
 
+# Server-stamped fields. They differ on every independently-created copy of a
+# resource and no side of the merge can act on them, so they are excluded from
+# the field-level comparison below.
+_MERGE_AUDIT_FIELDS = frozenset({"createdAt", "createdBy", "updatedAt", "updatedBy"})
+_MERGE_MAX_DIFF_ROWS = 12
+
+
 def _merge_preview_cell(value: str) -> str:
     """Format a side value for display; empty string shows a dim placeholder."""
     if value == "":
         return "[dim italic](empty)[/dim italic]"
     return value
+
+
+def _merge_leaf_diffs(
+    main: Any, branch: Any, path: tuple[str, ...] = ()
+) -> list[tuple[str, Any, Any]]:
+    """Leaves where the two sides differ, as (dotted path, main, branch)."""
+    if isinstance(main, dict) and isinstance(branch, dict):
+        diffs: list[tuple[str, Any, Any]] = []
+        for key in dict.fromkeys([*main, *branch]):
+            if key in _MERGE_AUDIT_FIELDS:
+                continue
+            diffs.extend(_merge_leaf_diffs(main.get(key), branch.get(key), (*path, key)))
+        return diffs
+    if main == branch:
+        return []
+    return [(".".join(path), main, branch)]
+
+
+def _merge_field_diff_rows(
+    rows: Table, main: dict[str, Any], branch: dict[str, Any], branch_label: str
+) -> None:
+    """Add one row per differing field instead of dumping both whole resources."""
+    diffs = _merge_leaf_diffs(main, branch)
+
+    if not diffs:
+        rows.add_row("", "")
+        rows.add_row(
+            "Differences",
+            Text(
+                "None outside createdAt/createdBy/updatedAt/updatedBy — either side can be taken.",
+                style="muted",
+            ),
+        )
+        return
+
+    shown = diffs[:_MERGE_MAX_DIFF_ROWS]
+    for field, main_value, branch_value in shown:
+        rows.add_row("", "")
+        rows.add_row("Field differs", Text(field or "(whole value)", style="bright_cyan"))
+        rows.add_row("Main", _merge_preview_cell(str(main_value)))
+        rows.add_row(f"Branch ({branch_label})", _merge_preview_cell(str(branch_value)))
+
+    if len(diffs) > len(shown):
+        rows.add_row("", "")
+        rows.add_row(
+            "",
+            Text(f"and {len(diffs) - len(shown)} more differing fields", style="muted"),
+        )
 
 
 def print_merge_conflict_interactive_header(
@@ -488,10 +543,10 @@ def print_merge_conflict_interactive_header(
     conflict_total: int,
     auto_mergeable: bool,
     heavy: bool,
-    base_value: str,
+    base_value: Any,
     branch_label: str,
-    branch_value: str,
-    main_value: str,
+    branch_value: Any,
+    main_value: Any,
     existing_resolution: dict[str, Any] | None = None,
 ) -> None:
     """Rich panel for one interactive merge conflict (metadata + optional three-way preview)."""
@@ -535,6 +590,12 @@ def print_merge_conflict_interactive_header(
             style="dim",
         )
         body = Group(rows, Text(""), note)
+    elif isinstance(main_value, dict) and isinstance(branch_value, dict):
+        # A whole resource conflicted (both sides created it, so there is no base
+        # to diff against field by field). Printing both dicts buries the one
+        # field that actually differs, so show the differing fields instead.
+        _merge_field_diff_rows(rows, main_value, branch_value, branch_label)
+        body = rows
     else:
         rows.add_row("", "")
         # Same order as the CLI resolution menu: main, branch, original (then edit only in the menu).
