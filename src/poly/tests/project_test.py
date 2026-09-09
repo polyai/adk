@@ -2060,7 +2060,9 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             {},
         )
 
-        self.assertEqual(push_changes.main.updated[Variant], {"VARIANTS-production": renamed_variant})
+        self.assertEqual(
+            push_changes.main.updated[Variant], {"VARIANTS-production": renamed_variant}
+        )
 
 
 class PushProjectTest(unittest.TestCase):
@@ -5907,11 +5909,13 @@ class FindNewKeptDeletedParentLookupTest(unittest.TestCase):
     # The flow id the fixture project already stores, kept when the flow is not new.
     BRANCH_FLOW_ID = "FLOW_CONFIG-test_flow"
 
-    FLOW_PATH = "flows/test_flow/flow_config.yaml"
-    STEP_PATH = "flows/test_flow/steps/start_step.yaml"
-    FUNCTION_STEP_PATH = "flows/test_flow/function_steps/process_payment.py"
-    FLOW_FUNCTION_PATH = "flows/test_flow/functions/process_data.py"
-    TOPIC_PATH = "topics/topic_1.yaml"
+    # Built with os.path.join because they are matched against Resource.file_path,
+    # which carries native separators (backslashes on Windows).
+    FLOW_PATH = os.path.join("flows", "test_flow", "flow_config.yaml")
+    STEP_PATH = os.path.join("flows", "test_flow", "steps", "start_step.yaml")
+    FUNCTION_STEP_PATH = os.path.join("flows", "test_flow", "function_steps", "process_payment.py")
+    FLOW_FUNCTION_PATH = os.path.join("flows", "test_flow", "functions", "process_data.py")
+    TOPIC_PATH = os.path.join("topics", "topic_1.yaml")
 
     def setUp(self):
         # The untouched fixture project stands in for the parent branch: the same files,
@@ -5947,9 +5951,7 @@ class FindNewKeptDeletedParentLookupTest(unittest.TestCase):
         """Parent resources keyed by absolute file path, exactly as push keys them."""
         return {os.path.join(TEST_DIR, resource.file_path): resource for resource in resources}
 
-    def _mapping_for(
-        self, mappings: list[ResourceMapping], relative_path: str
-    ) -> ResourceMapping:
+    def _mapping_for(self, mappings: list[ResourceMapping], relative_path: str) -> ResourceMapping:
         """The single mapping covering a fixture file."""
         file_path = os.path.join(TEST_DIR, relative_path)
         matches = [mapping for mapping in mappings if mapping.file_path == file_path]
@@ -6036,9 +6038,7 @@ class FindNewKeptDeletedParentLookupTest(unittest.TestCase):
         The flow is not new, so it keeps this branch's id. Adopting the parent's composite
         id verbatim would file the step under the parent's flow id instead.
         """
-        project = self._project_where_files_are_new(
-            flow_steps="FLOW_CONFIG-test_flow_start_step"
-        )
+        project = self._project_where_files_are_new(flow_steps="FLOW_CONFIG-test_flow_start_step")
         parent_lookup = self._parent_lookup(
             self._parent(
                 self.STEP_PATH, f"{self.PARENT_FLOW_ID}_greeting", flow_id=self.PARENT_FLOW_ID
