@@ -3958,6 +3958,13 @@ class AgentStudioProject:
         live_deployments = self._active_deployments("live")
         sandbox_deployments = self._active_deployments("sandbox")
 
+        # Tagging a branch deploys it to sandbox, which is only possible under
+        # simplified deployments — so a tagged sandbox deployment settles the
+        # question on its own. It also holds a branch's version rather than
+        # main's, which the comparison below would read as diverged.
+        if any(self._tag_of(deployment) for deployment in sandbox_deployments):
+            return True
+
         live_head = self._newest(live_deployments)
         main_head = self._newest(live_deployments + sandbox_deployments)
 
@@ -3984,6 +3991,15 @@ class AgentStudioProject:
             self.region, self.account_id, self.project_id, client_env=client_env
         )
         return [d for d in (deployments or []) if not d.get("deleted", False)]
+
+    @staticmethod
+    def _tag_of(deployment: dict[str, Any]) -> Optional[str]:
+        """The tag a deployment was made under, if any.
+
+        Only the tag that deploys to sandbox appears here; the other deploys to
+        pre-release, which convergence does not read.
+        """
+        return (deployment.get("deployment_metadata") or {}).get("tag")
 
     @staticmethod
     def _newest(deployments: list[dict[str, Any]]) -> Optional[dict[str, Any]]:

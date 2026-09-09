@@ -12,6 +12,7 @@ import shutil
 import tempfile
 import unittest
 from copy import deepcopy
+from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import poly.resources.resource_utils as resource_utils
@@ -5043,13 +5044,22 @@ class UsingSimplifiedDeploymentsTest(unittest.TestCase):
         self.assertFalse(project.using_simplified_deployments)
         project.api_handler.get_deployments.assert_not_called()
 
-    def _deployment(self, created_at: str, version_hash: str = "v1", deleted: bool = False) -> dict:
+    def _deployment(
+        self,
+        created_at: str,
+        version_hash: str = "v1",
+        deleted: bool = False,
+        tag: Optional[str] = None,
+    ) -> dict:
         """Build a minimal deployment dict for convergence checks."""
-        return {
+        deployment = {
             "created_at": created_at,
             "version_hash": version_hash,
             "deleted": deleted,
         }
+        if tag is not None:
+            deployment["deployment_metadata"] = {"deployment_message": "x", "tag": tag}
+        return deployment
 
     def _set_deployments(self, api: MagicMock, live: list, sandbox: list) -> None:
         """Stub get_deployments to return a different list per client_env."""
@@ -5095,6 +5105,53 @@ class UsingSimplifiedDeploymentsTest(unittest.TestCase):
     def test_converges_when_no_deployments_exist_in_either_environment(self):
         """With no deployments anywhere there is no version to disagree on."""
         self._assert_converged(live=[], sandbox=[], expected=True)
+
+    def test_a_tagged_sandbox_deployment_proves_simplified_deployments(self):
+        """Tagging a branch deploys it to sandbox, which only simplified allows.
+
+        Its version is the branch's, not main's, so the comparison below would
+        otherwise read it as diverged.
+        """
+        self._assert_converged(
+            live=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
+            sandbox=[
+                self._deployment(
+                    "Tue, 02 Jan 2026 12:00:00 GMT", version_hash="branch", tag="internal"
+                )
+            ],
+            expected=True,
+        )
+
+    def test_a_tagged_deployment_does_not_override_the_flag(self):
+        """The rollout flag is still the first condition."""
+        project = self._build_project(flag_value=False)
+        self._set_deployments(
+            project.api_handler,
+            live=[],
+            sandbox=[self._deployment("Tue, 02 Jan 2026 12:00:00 GMT", tag="internal")],
+        )
+
+        self.assertFalse(project.using_simplified_deployments)
+
+    def test_a_deleted_tagged_deployment_does_not_prove_anything(self):
+        """Removing the tag soft-deletes its deployment.
+
+        The untagged sandbox deployment alongside it holds main's version, and
+        live has not caught up — so the tag must not short-circuit to converged.
+        """
+        self._assert_converged(
+            live=[self._deployment("Mon, 01 Jan 2026 12:00:00 GMT", version_hash="abc")],
+            sandbox=[
+                self._deployment(
+                    "Wed, 03 Jan 2026 12:00:00 GMT",
+                    version_hash="branch",
+                    tag="internal",
+                    deleted=True,
+                ),
+                self._deployment("Tue, 02 Jan 2026 12:00:00 GMT", version_hash="def"),
+            ],
+            expected=False,
+        )
 
     def test_is_not_converged_when_a_version_hash_is_missing(self):
         """Two unknown versions are not a match.
