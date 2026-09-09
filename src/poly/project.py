@@ -1224,6 +1224,7 @@ class AgentStudioProject:
         dry_run=False,
         format=False,
         projection_json: Optional[dict[str, Any]] = None,
+        parent_projection_json: Optional[dict[str, Any]] = None,
     ) -> tuple[bool, str, list[Message]]:
         """Push the project configuration to the Agent Studio Interactor.
 
@@ -1234,6 +1235,10 @@ class AgentStudioProject:
             format (bool): If True, format the resource before saving.
             projection_json (dict[str, Any]): A dictionary containing the projection
                 If provided, the projection will be used instead of fetching it from the API.
+            parent_projection_json (Optional[dict[str, Any]]): The parent branch's
+                projection. When provided, parent ids are adopted from it entirely
+                offline (also on dry runs); an empty dict means "no parent". When
+                None, the parent branch is fetched from the platform instead.
 
         Returns:
             Tuple[bool, str, list[Message]]:
@@ -1265,11 +1270,16 @@ class AgentStudioProject:
 
         # New local resources that path-match a parent branch resource adopt the
         # parent's ids at mint time, so pushing does not mint ids that diverge from
-        # resources the parent already has. Dry runs skip the parent fetch unless the
-        # test env var forces it (to inspect the adopted ids without pushing).
-        parent_branch_paths_to_resource: dict[str, Resource] = {}
-        if not dry_run or os.environ.get("POLY_ADK_SYNC_PARENT_IDS_TEST"):
-            parent_branch_paths_to_resource = self._fetch_parent_resources_by_path()
+        # resources the parent already has. A supplied parent projection is used
+        # entirely offline (also on dry runs); otherwise dry runs skip the parent
+        # fetch unless the test env var forces it (to inspect the adopted ids
+        # without pushing).
+        parent_resources: ResourceMap = {}
+        if parent_projection_json is not None:
+            parent_resources, _ = load_resources_from_projection(parent_projection_json)
+        elif not dry_run or os.environ.get("POLY_ADK_SYNC_PARENT_IDS_TEST"):
+            parent_resources = self._fetch_parent_resources()
+        parent_branch_paths_to_resource = self._resources_by_absolute_path(parent_resources)
 
         # Push Algorithm
         # 1. Get new/kept/deleted resources
@@ -3105,13 +3115,13 @@ class AgentStudioProject:
             self.switch_branch("main", force=True)
         return True
 
-    def _fetch_parent_resources_by_path(self) -> dict[str, Resource]:
-        """Fetch the parent branch's resources, keyed by absolute file path.
+    def _fetch_parent_resources(self) -> ResourceMap:
+        """Fetch the parent branch's resources from the platform.
 
         Returns:
-            dict[str, Resource]: The parent branch's resources by path. Empty when on
-                main, when the local branch no longer exists remotely, or when the
-                branch has no parent.
+            ResourceMap: The parent branch's resources. Empty when on main, when the
+                local branch no longer exists remotely, or when the branch has no
+                parent.
         """
         current_branch, branches = self.get_branches()
         if current_branch is None or current_branch == "main":
@@ -3125,7 +3135,17 @@ class AgentStudioProject:
             self.region, self.account_id, self.project_id, parent_branch_id
         )
         resources, _, _ = branch_api_handler.pull_resources()
+        return resources
 
+    def _resources_by_absolute_path(self, resources: ResourceMap) -> dict[str, Resource]:
+        """Key a ResourceMap's resources by absolute file path.
+
+        Args:
+            resources (ResourceMap): Resources grouped by type and id.
+
+        Returns:
+            dict[str, Resource]: The same resources keyed by absolute file path.
+        """
         return {
             os.path.join(self.root_path, resource.file_path): resource
             for resources_dict in resources.values()
@@ -3190,22 +3210,6 @@ class AgentStudioProject:
         Returns:
             bool: True if the sync was successful, False otherwise
         """
-        if parent_name is None:
-            branches = self.api_handler.get_branches()
-            branch_meta = {meta["branchId"]: meta for meta in branches.values()}
-            current_branch_meta = branch_meta.get(self.branch_id)
-            if not current_branch_meta:
-                raise ValueError(f"Branch {self.branch_id} does not exist.")
-            parent_branch_id = current_branch_meta.get("parentBranchId")
-            parent_branch_meta = branch_meta.get(parent_branch_id) or {}
-            parent_name = parent_branch_meta.get("name")
-            if not parent_name:
-                logger.warning(
-                    f"Could not resolve parent branch for '{self.branch_id}' "
-                    f"(parentBranchId={parent_branch_id!r}); defaulting to 'main'."
-                )
-                parent_name = "main"
-
         if self.branch_id == "main":
             raise ValueError("Cannot sync ids while on main branch.")
 
@@ -3215,7 +3219,15 @@ class AgentStudioProject:
         # Parent slim mappings describe what the parent withheld; local files resolve
         # their references against this branch's own slim mappings, so they are not
         # needed here.
-        parent_resources, _ = self.get_remote_resources_by_name(parent_name)
+        if parent_name is None:
+            parent_resources = self._fetch_parent_resources()
+            if not parent_resources:
+                logger.warning(
+                    f"Could not resolve parent branch for '{self.branch_id}'; defaulting to 'main'."
+                )
+                parent_resources, _ = self.get_remote_resources_by_name("main")
+        else:
+            parent_resources, _ = self.get_remote_resources_by_name(parent_name)
         parent_resource_lookup: dict[str, Resource] = {
             resource.file_path: resource
             for resources_dict in parent_resources.values()

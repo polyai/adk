@@ -5896,6 +5896,331 @@ class SyncIdsWithSandboxTest(unittest.TestCase):
         self.assertIn("uncommitted changes", str(ctx.exception))
 
 
+class FetchParentResourcesTest(unittest.TestCase):
+    """Tests for _fetch_parent_resources pulling the branch this one was cut from.
+
+    Both push and sync-ids lean on this to learn the ids the parent already assigned, so
+    a branch with no resolvable parent must answer "no parent" rather than fall through
+    to whichever branch happens to be current.
+    """
+
+    PARENT_BRANCH_ID = "main-branch-id"
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.mock_api = MagicMock()
+        self.mock_api.get_branches.return_value = {
+            "main": {"branchId": self.PARENT_BRANCH_ID},
+            "feature-a": {"branchId": "branch-1", "parentBranchId": self.PARENT_BRANCH_ID},
+            "orphan": {"branchId": "branch-2"},
+        }
+        self.project._api_handler = self.mock_api
+        self._on_branch("branch-1")
+        patch.object(AgentStudioProject, "save_config").start()
+        self.addCleanup(patch.stopall)
+
+    def _on_branch(self, branch_id: str) -> None:
+        """Put the project on a branch, as the api handler also reports the current one."""
+        self.project.branch_id = branch_id
+        self.mock_api.branch_id = branch_id
+
+    @patch("poly.project.AgentStudioInterface")
+    def test_resources_are_pulled_from_the_parent_branch(self, mock_interface):
+        """The pull goes to the parent's branch id, not the branch we are standing on."""
+        parent_resources = {Topic: {"TOPIC-parent": "the parent's topic"}}
+        mock_interface.return_value.pull_resources.return_value = (parent_resources, [], [])
+
+        self.assertEqual(self.project._fetch_parent_resources(), parent_resources)
+        self.assertIn(self.PARENT_BRANCH_ID, mock_interface.call_args[0])
+
+    @patch("poly.project.AgentStudioInterface")
+    def test_main_branch_has_no_parent(self, mock_interface):
+        """Main is the root, so there is nothing to pull."""
+        self._on_branch(self.PARENT_BRANCH_ID)
+
+        self.assertEqual(self.project._fetch_parent_resources(), {})
+        mock_interface.assert_not_called()
+
+    @patch("poly.project.AgentStudioInterface")
+    def test_branch_without_a_recorded_parent_has_no_parent(self, mock_interface):
+        """A branch the platform records no parent for is treated as having none."""
+        self._on_branch("branch-2")
+
+        self.assertEqual(self.project._fetch_parent_resources(), {})
+        mock_interface.assert_not_called()
+
+    @patch("poly.project.AgentStudioInterface")
+    def test_branch_that_no_longer_exists_remotely_has_no_parent(self, mock_interface):
+        """A locally known branch that is gone from the remote resolves to no parent."""
+        self._on_branch("deleted-branch-id")
+
+        self.assertEqual(self.project._fetch_parent_resources(), {})
+        mock_interface.assert_not_called()
+
+
+class SyncIdsWithParentTest(unittest.TestCase):
+    """Tests for sync_ids_with_parent resolving the branch's own parent branch.
+
+    Syncing ids without naming a branch means "sync with whatever branch this one was
+    cut from", which is fetched from the platform. Falling back to main is only for
+    when that parent cannot be resolved: a branch cut from another branch would
+    otherwise silently adopt main's ids.
+    """
+
+    LOCAL_FLOW_ID = "FLOW_CONFIG-test_flow"
+    PARENT_FLOW_ID = "FLOW-parent-assigned-id"
+
+    def setUp(self):
+        self.project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        self.project.branch_id = "branch-1"
+        self.mock_api = MagicMock()
+        self.mock_api.branch_id = "branch-1"
+        self.mock_api.send_queued_commands.return_value = True
+        self.project._api_handler = self.mock_api
+        patch.object(AgentStudioProject, "save_config").start()
+        self.mock_get_remote = patch.object(
+            AgentStudioProject, "get_remote_resources_by_name"
+        ).start()
+        self.mock_get_remote.return_value = (self._resources_with_reassigned_flow_id(), [])
+        self.addCleanup(patch.stopall)
+
+    def _resources_with_reassigned_flow_id(self):
+        """The fixture's resources, with test_flow carrying the parent's flow id.
+
+        Mirrors a flow created on the parent after this branch was cut: the same files,
+        under the id the parent's platform assigned, so steps carry a
+        `{parent_flow_id}_{step_id}` composite id.
+        """
+        parent = deepcopy(self.project.resources)
+        for resource_type, resources_by_id in parent.items():
+            rekeyed = {}
+            for resource in resources_by_id.values():
+                if isinstance(resource, FlowConfig) and resource.resource_id == self.LOCAL_FLOW_ID:
+                    resource.resource_id = self.PARENT_FLOW_ID
+                elif getattr(resource, "flow_id", None) == self.LOCAL_FLOW_ID:
+                    resource.flow_id = self.PARENT_FLOW_ID
+                    resource.resource_id = resource.resource_id.replace(
+                        self.LOCAL_FLOW_ID, self.PARENT_FLOW_ID, 1
+                    )
+                rekeyed[resource.resource_id] = resource
+            parent[resource_type] = rekeyed
+        return parent
+
+    def test_unnamed_parent_syncs_against_the_fetched_parent_branch(self):
+        """With no branch named, ids come from the branch's own parent, not from main."""
+        parent_resources = self._resources_with_reassigned_flow_id()
+
+        with patch.object(
+            AgentStudioProject, "_fetch_parent_resources", return_value=parent_resources
+        ):
+            self.assertTrue(self.project.sync_ids_with_parent())
+
+        self.assertIn(self.PARENT_FLOW_ID, self.project.resources[FlowConfig])
+        self.mock_get_remote.assert_not_called()
+
+    def test_unresolvable_parent_falls_back_to_main_with_a_warning(self):
+        """A branch whose parent cannot be fetched syncs with main, and says so.
+
+        An empty parent fetch means the parent is unknown, not that it is empty, so
+        silently syncing against nothing would leave the branch's ids untouched.
+        """
+        with patch.object(AgentStudioProject, "_fetch_parent_resources", return_value={}):
+            with self.assertLogs("poly.project", level="WARNING") as logs:
+                self.assertTrue(self.project.sync_ids_with_parent())
+
+        self.mock_get_remote.assert_called_once_with("main")
+        self.assertIn("defaulting to 'main'", "\n".join(logs.output))
+        self.assertIn(self.PARENT_FLOW_ID, self.project.resources[FlowConfig])
+
+    def test_named_parent_is_looked_up_by_name_without_fetching_the_parent(self):
+        """An explicitly named branch is taken at its word, with no parent lookup."""
+        with patch.object(AgentStudioProject, "_fetch_parent_resources") as mock_fetch:
+            self.assertTrue(self.project.sync_ids_with_parent(parent_name="release"))
+
+        self.mock_get_remote.assert_called_once_with("release")
+        mock_fetch.assert_not_called()
+
+    def test_syncing_on_main_raises_before_any_parent_is_fetched(self):
+        """Main has no parent, so the refusal must come before any network call."""
+        self.project.branch_id = "main"
+
+        with patch.object(AgentStudioProject, "_fetch_parent_resources") as mock_fetch:
+            with self.assertRaises(ValueError) as ctx:
+                self.project.sync_ids_with_parent()
+
+        self.assertIn("Cannot sync ids while on main branch", str(ctx.exception))
+        mock_fetch.assert_not_called()
+        self.mock_get_remote.assert_not_called()
+
+
+class ResourcesByAbsolutePathTest(unittest.TestCase):
+    """Tests for _resources_by_absolute_path flattening a ResourceMap onto file paths."""
+
+    def test_resources_of_every_type_are_keyed_by_their_absolute_path(self):
+        """Types are flattened away: the key is the project root joined with file_path."""
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+        topic = Topic(
+            resource_id="TOPIC-1", name="Topic 1", actions="", content="hello", example_queries=[]
+        )
+        function = Function(
+            resource_id="FUNCTION-1",
+            name="lookup_order",
+            description="Looks an order up.",
+            code="def lookup_order(conv):\n    return None\n",
+            parameters=[],
+        )
+
+        by_path = project._resources_by_absolute_path(
+            {Topic: {topic.resource_id: topic}, Function: {function.resource_id: function}}
+        )
+
+        self.assertEqual(
+            by_path,
+            {
+                os.path.join(TEST_DIR, "topics", "topic_1.yaml"): topic,
+                os.path.join(TEST_DIR, "functions", "lookup_order.py"): function,
+            },
+        )
+
+    def test_no_resources_gives_an_empty_lookup(self):
+        """A branch with no parent produces an empty lookup rather than failing."""
+        project = AgentStudioProject.from_dict(deepcopy(PROJECT_DATA), TEST_DIR)
+
+        self.assertEqual(project._resources_by_absolute_path({}), {})
+
+
+class OfflineOnlyApiHandler:
+    """An api_handler that answers offline command staging and refuses everything else.
+
+    Staging commands is local bookkeeping, so those calls are served. Every other call -
+    listing branches, pulling a parent branch, sending commands - would reach the
+    platform, so it raises: that is what makes "the parent projection was used entirely
+    offline" something a test can assert rather than assume.
+    """
+
+    def __init__(self):
+        self.branch_id = "branch-1"
+        self.staged_new_resources: dict[type, dict[str, Resource]] = {}
+
+    def get_queued_commands(self) -> list:
+        """The queue each push starts with: empty."""
+        return []
+
+    def queue_resources(self, *, new_resources, updated_resources, deleted_resources) -> list:
+        """Record the resources push wants to create; building commands needs no network."""
+        for resource_type, resources_by_id in new_resources.items():
+            self.staged_new_resources.setdefault(resource_type, {}).update(resources_by_id)
+        return []
+
+    def clear_command_queue(self) -> None:
+        """Dry runs throw the staged queue away."""
+
+    def __getattr__(self, name: str):
+        """Anything not served offline is a platform call, and must not happen."""
+        raise AssertionError(f"push reached the platform via api_handler.{name}")
+
+
+class PushProjectParentProjectionTest(unittest.TestCase):
+    """Tests for push_project adopting parent ids from a supplied parent projection.
+
+    A caller that already holds the parent branch's projection (the Studio backend does)
+    can hand it to push instead of having push fetch it. The ids are then adopted with no
+    platform call at all, which is what lets a dry run report the ids a real push would
+    mint.
+    """
+
+    PARENT_TOPIC_ID = "TOPIC-parent-assigned-id"
+    # The smallest projection Topic.from_projection accepts: one topic whose name maps
+    # to the fixture's topics/topic_1.yaml.
+    PARENT_PROJECTION = {
+        "knowledgeBase": {
+            "topics": {
+                "ids": [PARENT_TOPIC_ID],
+                "entities": {
+                    PARENT_TOPIC_ID: {
+                        "id": PARENT_TOPIC_ID,
+                        "name": "Topic 1",
+                        "actions": "",
+                        "content": "The parent branch's copy of this topic.",
+                    }
+                },
+            },
+            "uninstantiatedTopics": {"ids": [], "entities": {}},
+        }
+    }
+
+    def setUp(self):
+        patch.object(AgentStudioProject, "save_config").start()
+        self.addCleanup(patch.stopall)
+
+    def _project_where_topic_1_is_new(self) -> AgentStudioProject:
+        """A project that has forgotten Topic 1, so its file looks newly added."""
+        project_data = deepcopy(PROJECT_DATA)
+        project_data["resources"]["topics"].pop("TOPIC-Topic 1")
+        project = AgentStudioProject.from_dict(project_data, TEST_DIR)
+        project._api_handler = OfflineOnlyApiHandler()
+        return project
+
+    def _staged_topic_ids(self, project: AgentStudioProject) -> dict[str, str]:
+        """The name -> id of every topic the push staged as new."""
+        return {
+            topic.name: topic.resource_id
+            for topic in project._api_handler.staged_new_resources.get(Topic, {}).values()
+        }
+
+    def test_new_resource_adopts_the_id_from_the_supplied_parent_projection(self):
+        """A new file matching the projection is pushed under the parent's id, offline."""
+        project = self._project_where_topic_1_is_new()
+
+        success, message, _ = project.push_project(
+            dry_run=True,
+            skip_validation=True,
+            parent_projection_json=self.PARENT_PROJECTION,
+        )
+
+        self.assertTrue(success, message)
+        self.assertEqual(self._staged_topic_ids(project), {"Topic 1": self.PARENT_TOPIC_ID})
+
+    def test_empty_parent_projection_means_no_parent_and_mints_a_fresh_id(self):
+        """An empty projection is "this branch has no parent", not "go and look".
+
+        The branch really may have no parent, so an empty dict must be honoured as an
+        answer: ids are minted as they always were, still without a platform call.
+        """
+        project = self._project_where_topic_1_is_new()
+
+        success, message, _ = project.push_project(
+            dry_run=True, skip_validation=True, parent_projection_json={}
+        )
+
+        self.assertTrue(success, message)
+        self.assertRegex(self._staged_topic_ids(project)["Topic 1"], r"^TOPICS-[a-f0-9]{8}$")
+
+    def test_dry_run_without_a_parent_projection_does_not_fetch_the_parent(self):
+        """No projection and no push means no reason to go to the platform for one."""
+        project = self._project_where_topic_1_is_new()
+
+        with patch.object(AgentStudioProject, "_fetch_parent_resources") as mock_fetch:
+            success, message, _ = project.push_project(dry_run=True, skip_validation=True)
+
+        self.assertTrue(success, message)
+        mock_fetch.assert_not_called()
+        self.assertRegex(self._staged_topic_ids(project)["Topic 1"], r"^TOPICS-[a-f0-9]{8}$")
+
+    def test_dry_run_fetches_the_parent_when_the_test_env_var_is_set(self):
+        """The env var is the escape hatch for inspecting the ids a real push would use."""
+        project = self._project_where_topic_1_is_new()
+
+        with patch.object(
+            AgentStudioProject, "_fetch_parent_resources", return_value={}
+        ) as mock_fetch:
+            with patch.dict(os.environ, {"POLY_ADK_SYNC_PARENT_IDS_TEST": "1"}):
+                success, message, _ = project.push_project(dry_run=True, skip_validation=True)
+
+        self.assertTrue(success, message)
+        mock_fetch.assert_called_once_with()
+
+
 class FindNewKeptDeletedParentLookupTest(unittest.TestCase):
     """Tests for find_new_kept_deleted minting new resource ids from the parent branch.
 
