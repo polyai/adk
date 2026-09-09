@@ -3955,8 +3955,8 @@ class AgentStudioProject:
         Versions, not timestamps: a publish to live is mirrored into sandbox
         seconds later, so sandbox is often newer while holding identical content.
         """
-        live_deployments = self._live_deployments("live")
-        sandbox_deployments = self._live_deployments("sandbox")
+        live_deployments = self._active_deployments("live")
+        sandbox_deployments = self._active_deployments("sandbox")
 
         live_head = self._newest(live_deployments)
         main_head = self._newest(live_deployments + sandbox_deployments)
@@ -3978,7 +3978,7 @@ class AgentStudioProject:
 
         return live_hash == main_hash
 
-    def _live_deployments(self, client_env: str) -> list[dict[str, Any]]:
+    def _active_deployments(self, client_env: str) -> list[dict[str, Any]]:
         """Deployments for an environment, excluding deleted ones."""
         deployments = self.api_handler.get_deployments(
             self.region, self.account_id, self.project_id, client_env=client_env
