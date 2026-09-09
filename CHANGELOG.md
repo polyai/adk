@@ -1,6 +1,146 @@
 # CHANGELOG
 
 
+## v0.53.3 (2026-09-09)
+
+### Bug Fixes
+
+- Compare versions and tag when checking convergence
+  ([#311](https://github.com/polyai/adk/pull/311),
+  [`558203d`](https://github.com/polyai/adk/commit/558203d272d7a629c4c8d0bc123cd26f3d794ef3))
+
+## Summary
+
+`using_simplified_deployments` decides convergence by comparing deployment timestamps, which reports
+  every converged project as unconverged. It now compares version hashes, and treats a tagged
+  sandbox deployment as proof on its own.
+
+## Motivation
+
+The comment states the rule: *"A project is converged if the main == live"*. The code compares
+  timestamps — newest live vs newest sandbox.
+
+`main` has no environment of its own. Its deploys land in sandbox before migration and in live
+  after, so its version is the newest across both.
+
+Two kinds of sandbox deployment sit newer than live:
+
+- the mirror written after each live publish, holding live's version - a tagged branch deployment,
+  holding that branch's version
+
+A project has therefore migrated if any sandbox deployment carries the tag, or if live and main hold
+  the same version hash.
+
+## Changes
+
+- Compare the newest live deployment's `version_hash` against main's newest deployment's, instead of
+  timestamps. - Return converged when a sandbox deployment carries a tag. The rollout flag is still
+  checked first, and a soft-deleted tagged deployment doesn't count. - Require a non-empty hash on
+  both sides. Comparing directly made two absent hashes equal, and draft deploys record an empty
+  hash. - Find each head by `created_at` rather than assuming the API returns newest first. -
+  Convergence extracted into `_has_converged`.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Tested against a live Agent Studio project
+
+Convergence cases: a sandbox mirror of live, a sandbox deployment holding its own version, an older
+  sandbox deployment, a tagged deployment, a tagged deployment with the flag off, a soft-deleted
+  tagged deployment, no deployments at all, no live deployment, a missing or empty hash, a deleted
+  head, and unordered API responses.
+
+Verified against two real projects: a converged one now reports `True` where it reported `False`; an
+  unconverged one still reports `False`.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented)
+
+1555 passed; two pre-existing `posthog_test.py` failures also fail on unmodified `main`.
+
+Note this changes behaviour: affected projects will start targeting `live`. Intended, but real.
+
+### Documentation
+
+- Auto-update from 2a7b3be ([#309](https://github.com/polyai/adk/pull/309),
+  [`261bfbd`](https://github.com/polyai/adk/commit/261bfbda72257bff4a16fcbd365629faed6f6be7))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Note keyphrase uniqueness rule ([#310](https://github.com/polyai/adk/pull/310),
+  [`bba4850`](https://github.com/polyai/adk/commit/bba48508e56fe9d465c7ae4386a3ddae9ebfd0d5))
+
+## Summary
+
+Document the keyphrase uniqueness rule on the speech recognition reference page, so the validation
+  added in `21692da` is discoverable before a push fails.
+
+## Motivation
+
+Agent Studio normalizes keyphrases (trim + lowercase) and rejects a push containing two entries that
+  normalize to the same phrase. Nothing in the docs said so, so the constraint was only discoverable
+  by hitting the error.
+
+## Changes
+
+- Add a `Validation` section to the speech recognition page, covering the keyphrase uniqueness rule
+  along with the existing rules for ASR settings, keyphrase boosting, and transcript corrections -
+  Add a matching bullet to the speech recognition best practices list
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.53.2 (2026-09-03)
 
 ### Bug Fixes
