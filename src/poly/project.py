@@ -3952,8 +3952,14 @@ class AgentStudioProject:
     def _has_converged(self) -> bool:
         """Whether main and live hold the same version.
 
-        Versions, not timestamps: a publish to live is mirrored into sandbox
-        seconds later, so sandbox is often newer while holding identical content.
+        main is a branch with no environment of its own. Its deploys land in
+        sandbox before migration and in live after, so its version is the newest
+        across both — and converged means live is the one holding it.
+
+        Versions, not timestamps: deployments to live are mirrored into sandbox
+        so the two always match, which leaves sandbox newer while holding
+        identical content. Both eras have a newer sandbox row; only the version
+        tells them apart.
         """
         live_deployments = self._active_deployments("live")
         sandbox_deployments = self._active_deployments("sandbox")
