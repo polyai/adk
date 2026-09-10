@@ -1539,6 +1539,7 @@ class AgentStudioInterface:
         identity: Optional[str] = None,
         region: Optional[str] = None,
         project_id: Optional[str] = None,
+        account_id: Optional[str] = None,
         default: bool = False,
     ) -> bool:
         """Check if a feature flag is enabled for a given identity.
@@ -1548,6 +1549,7 @@ class AgentStudioInterface:
             identity (Optional[str]): The unique identifier for the user or entity.
             region (Optional[str]): The region name for grouping.
             project_id (Optional[str]): The project ID for grouping.
+            account_id (Optional[str]): The account ID, for account-scoped conditions.
             default (bool): The default value to return if the flag cannot be evaluated.
 
         Returns:
@@ -1558,4 +1560,5 @@ class AgentStudioInterface:
             key=key,
             default=default,
             project_id=project_id,
+            account_id=account_id,
         )

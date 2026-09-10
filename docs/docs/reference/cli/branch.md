@@ -381,7 +381,7 @@ poly branch status my-feature
 
 ## `poly branch history`
 
-Show the branches that has been merged into the current branch.
+Show the branches that has been merged into the current branch. Long listings are automatically paged through the system pager when stdout is a TTY; output piped to a file or another command is never paged.
 
 Examples:
 
@@ -394,7 +394,7 @@ poly branch history --limit 20
 | Flag | Description |
 |---|---|
 | `--branch-name`, `-b` | Branch to show history for. Defaults to the current branch. |
-| `--limit` | Number of history entries to show. Defaults to `10`. |
+| `--limit` | Maximum number of history entries to show. Shows all by default. |
 
 `--json` output shape:
 

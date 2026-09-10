@@ -191,7 +191,7 @@ class AgentStudioCLI:
                     command.run(args)
                     return
         except Exception as e:
-            if hasattr(args, "json") and args.json:
+            if getattr(args, "json", False) or getattr(args, "output_json_commands", False):
                 json_print({"success": False, "error": str(e), "traceback": traceback.format_exc()})
                 sys.exit(1)
             else:

@@ -173,10 +173,16 @@ def parse_from_projection_json(
     from_projection: Optional[str],
     *,
     json_errors: bool,
+    flag_name: str = "--from-projection",
 ) -> Optional[dict[str, Any]]:
-    """Parse ``--from-projection`` CLI value into a projection dict, or exit on failure.
+    """Parse a projection-carrying CLI value into a projection dict, or exit on failure.
 
     If the value is ``-`` (after stripping), JSON is read from stdin until EOF.
+
+    Args:
+        from_projection (Optional[str]): The raw CLI value; None/empty returns None.
+        json_errors (bool): Emit failures as JSON instead of console errors.
+        flag_name (str): The flag the value came from, used in error messages.
     """
     from poly.output.console import error
 
@@ -190,14 +196,14 @@ def parse_from_projection_json(
         if isinstance(parsed, dict) and "projection" in parsed:
             parsed = parsed["projection"]
     except json.JSONDecodeError as e:
-        msg = f"Invalid JSON in --from-projection: {e}"
+        msg = f"Invalid JSON in {flag_name}: {e}"
         if json_errors:
             json_print({"success": False, "error": msg})
         else:
             error(msg)
         sys.exit(1)
     if not isinstance(parsed, dict):
-        msg = "--from-projection must be a JSON object (dictionary)."
+        msg = f"{flag_name} must be a JSON object (dictionary)."
         if json_errors:
             json_print({"success": False, "error": msg})
         else:

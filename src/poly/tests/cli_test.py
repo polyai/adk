@@ -36,10 +36,11 @@ from poly.cli_commands.functions import (
 from poly.cli_commands.project import InitCommand, ProjectCommand
 from poly.cli_commands.shared import (
     compute_diff,
+    parse_from_projection_json,
     require_deployment_simplification,
     resolve_project_scope,
 )
-from poly.cli_commands.sync import FormatCommand, RevertCommand
+from poly.cli_commands.sync import FormatCommand, PushCommand, RevertCommand
 from poly.cli_commands.utils import CompletionCommand
 from poly.project import DeploymentMode
 from poly.tests.project_test import TEST_DIR
@@ -2021,6 +2022,131 @@ class RevertTest(unittest.TestCase):
         RevertCommand.revert(TEST_DIR, files=[])
 
         self.proj.revert_changes.assert_called_once_with(file_paths=[])
+
+
+class ParseFromProjectionJsonTest(unittest.TestCase):
+    """Tests for parse_from_projection_json, shared by every projection-carrying flag."""
+
+    def test_bare_projection_object_is_returned_unchanged(self):
+        """A plain projection object is already what callers want."""
+        self.assertEqual(
+            parse_from_projection_json('{"knowledgeBase": {}}', json_errors=False),
+            {"knowledgeBase": {}},
+        )
+
+    def test_envelope_is_unwrapped_to_the_projection_it_carries(self):
+        """API responses wrap the projection in a `projection` key; both forms are accepted."""
+        self.assertEqual(
+            parse_from_projection_json('{"projection": {"a": 1}}', json_errors=False), {"a": 1}
+        )
+
+    def test_no_value_means_no_projection(self):
+        """An unset flag leaves the caller to fetch the projection itself."""
+        self.assertIsNone(parse_from_projection_json(None, json_errors=False))
+
+    @patch("poly.output.console.error")
+    def test_invalid_json_error_names_the_flag_it_came_from(self, mock_error):
+        """push takes two projection flags, so the error has to say which one was bad."""
+        with self.assertRaises(SystemExit) as ctx:
+            parse_from_projection_json(
+                "not json", json_errors=False, flag_name="--parent-projection"
+            )
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("--parent-projection", mock_error.call_args[0][0])
+
+    @patch("poly.output.console.error")
+    def test_non_object_json_error_names_the_flag_it_came_from(self, mock_error):
+        """Valid JSON that is not an object is rejected against the same flag."""
+        with self.assertRaises(SystemExit) as ctx:
+            parse_from_projection_json("[1, 2]", json_errors=False, flag_name="--parent-projection")
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn("--parent-projection", mock_error.call_args[0][0])
+
+    @patch("poly.output.console.error")
+    def test_flag_name_defaults_to_from_projection(self, mock_error):
+        """Callers that pass no flag name still get an error naming a real flag."""
+        with self.assertRaises(SystemExit):
+            parse_from_projection_json("not json", json_errors=False)
+
+        self.assertIn("--from-projection", mock_error.call_args[0][0])
+
+    @patch("poly.cli_commands.shared.json_print")
+    def test_failure_is_reported_as_json_when_json_errors_is_set(self, mock_json_print):
+        """Machine callers get the same message as a JSON failure, not console output."""
+        with self.assertRaises(SystemExit):
+            parse_from_projection_json(
+                "not json", json_errors=True, flag_name="--parent-projection"
+            )
+
+        output = mock_json_print.call_args[0][0]
+        self.assertFalse(output["success"])
+        self.assertIn("--parent-projection", output["error"])
+
+
+class UnreadableStdin:
+    """A stdin that fails the test if anything reads it."""
+
+    def read(self, *args, **kwargs) -> str:
+        """Reading is the mistake this stands guard against."""
+        raise AssertionError("stdin was read")
+
+
+class PushStdinProjectionGuardTest(unittest.TestCase):
+    """Tests for `poly push` refusing to read two projections from one stdin.
+
+    --from-projection and --parent-projection both accept `-`. Reading both would have
+    the first consume the whole stream and the second see EOF, so the combination is
+    refused up front instead of failing as unparseable JSON.
+    """
+
+    def setUp(self):
+        self.mock_load = patch("poly.cli_commands.sync.load_project").start()
+        self.project = MagicMock()
+        self.project.account_id = "test_account"
+        self.project.project_id = "test_project"
+        self.mock_load.return_value = self.project
+        self.addCleanup(patch.stopall)
+
+    @patch("poly.output.console.error")
+    def test_both_projection_flags_reading_stdin_is_refused(self, mock_error):
+        """The refusal comes before stdin is touched and before anything is pushed."""
+        with patch("sys.stdin", UnreadableStdin()):
+            with self.assertRaises(SystemExit) as ctx:
+                PushCommand.push(TEST_DIR, from_projection="-", parent_projection="-")
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertIn(
+            "Only one of --from-projection and --parent-projection may read from stdin.",
+            mock_error.call_args[0][0],
+        )
+        self.project.push_project.assert_not_called()
+
+    @patch("poly.cli_commands.sync.json_print")
+    def test_the_refusal_is_reported_as_json_in_json_mode(self, mock_json_print):
+        """Machine callers get the refusal as a JSON failure."""
+        with patch("sys.stdin", UnreadableStdin()):
+            with self.assertRaises(SystemExit) as ctx:
+                PushCommand.push(
+                    TEST_DIR, from_projection="-", parent_projection="-", output_json=True
+                )
+
+        self.assertEqual(ctx.exception.code, 1)
+        self.assertFalse(mock_json_print.call_args[0][0]["success"])
+        self.project.push_project.assert_not_called()
+
+    def test_a_single_flag_may_still_read_stdin(self):
+        """One flag reading stdin is fine: the projection is parsed and handed to push."""
+        self.project.push_project.return_value = (True, "Dry run completed.", [])
+
+        with patch("sys.stdin", StringIO('{"knowledgeBase": {}}')):
+            PushCommand.push(TEST_DIR, dry_run=True, parent_projection="-")
+
+        self.assertEqual(
+            self.project.push_project.call_args.kwargs["parent_projection_json"],
+            {"knowledgeBase": {}},
+        )
 
 
 class PrintDeploymentsTest(unittest.TestCase):
