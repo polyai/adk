@@ -183,8 +183,7 @@ class LatencyControl(SubResource):
         delay_responses = DelayResponsesUpdate(
             delay_responses=[
                 DelayResponseUpdate(
-                    id=dr.id
-                    or utils.generate_subresource_id("DELAY", dr.message, str(dr.duration)),
+                    id=dr.id,
                     message=dr.message,
                     duration=dr.duration,
                     references=utils.get_references_from_prompt(
@@ -956,7 +955,9 @@ class Function(Resource):
                         delay_responses.append(
                             FunctionDelayResponse(
                                 id=existing_id
-                                or utils.generate_subresource_id("DELAY", msg, str(dur), str(i)),
+                                or utils.generate_subresource_id(
+                                    "DELAY", str(msg), str(dur), str(i)
+                                ),
                                 message=msg,
                                 duration=dur,
                             )

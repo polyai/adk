@@ -2076,7 +2076,9 @@ class ParseFromProjectionJsonTest(unittest.TestCase):
     def test_failure_is_reported_as_json_when_json_errors_is_set(self, mock_json_print):
         """Machine callers get the same message as a JSON failure, not console output."""
         with self.assertRaises(SystemExit):
-            parse_from_projection_json("not json", json_errors=True, flag_name="--parent-projection")
+            parse_from_projection_json(
+                "not json", json_errors=True, flag_name="--parent-projection"
+            )
 
         output = mock_json_print.call_args[0][0]
         self.assertFalse(output["success"])
