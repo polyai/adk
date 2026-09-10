@@ -1,4 +1,4 @@
-"""Auth command family: start and login.
+"""Update command: upgrade the CLI and its AI agent skills, plus the startup update check.
 
 Copyright PolyAI Limited
 """
