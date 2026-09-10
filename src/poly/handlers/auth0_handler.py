@@ -46,6 +46,13 @@ REGION_TO_AUTH_DETAILS = {
     ),
 }
 
+# Auth0 application whose login page exposes only the GitHub connection.
+# Not region-keyed and never added to REGION_TO_AUTH_DETAILS.
+ONBOARD_AUTH_DETAILS = AuthDetails(
+    base_url="https://login.studio.poly.ai",
+    device_client_id="fp7CIVelwOwMPBNNpHpQCLiRMj7nG0fs",
+)
+
 
 class Auth0Handler:
     """Handler for authentication with the PolyAI Auth0 tenant."""
@@ -99,6 +106,26 @@ class Auth0Handler:
         return api_response
 
     @classmethod
+    def request_device_code_for(cls, auth_details: AuthDetails) -> dict:
+        """Start the device authorization flow against a specific Auth0 application.
+
+        Args:
+            auth_details: The Auth0 application (base URL + client id) to authenticate against.
+
+        Returns:
+            Dict containing device_code, user_code, verification_uri,
+            verification_uri_complete, expires_in, and interval.
+        """
+        data = {
+            "client_id": auth_details.device_client_id,
+            "scope": "openid profile email",
+            "audience": "https://platform.polyai.app/api",
+        }
+        return cls.make_request(
+            auth_details.base_url, "/oauth/device/code", method="POST", data=data
+        )
+
+    @classmethod
     def request_device_code(cls, region: str) -> dict:
         """Start the device authorization flow.
 
@@ -111,14 +138,29 @@ class Auth0Handler:
             raise ValueError(
                 f"Unknown region '{region}'. Valid regions: {', '.join(REGION_TO_AUTH_DETAILS)}"
             )
+        return cls.request_device_code_for(auth_details)
+
+    @classmethod
+    def poll_device_token_for(cls, auth_details: AuthDetails, device_code: str) -> dict:
+        """Poll for a token after the user has authorized the device.
+
+        Args:
+            auth_details: The Auth0 application (base URL + client id) to poll.
+            device_code: The device_code from request_device_code_for.
+
+        Returns:
+            Dict containing access_token, id_token, etc. on success.
+
+        Raises:
+            requests.HTTPError: 403 with 'authorization_pending' or 'slow_down'
+                while the user hasn't authorized yet.
+        """
         data = {
             "client_id": auth_details.device_client_id,
-            "scope": "openid profile email",
-            "audience": "https://platform.polyai.app/api",
+            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
+            "device_code": device_code,
         }
-        return cls.make_request(
-            auth_details.base_url, "/oauth/device/code", method="POST", data=data
-        )
+        return cls.make_request(auth_details.base_url, "/oauth/token", method="POST", data=data)
 
     @classmethod
     def poll_device_token(cls, region: str, device_code: str) -> dict:
@@ -140,9 +182,4 @@ class Auth0Handler:
             raise ValueError(
                 f"Unknown region '{region}'. Valid regions: {', '.join(REGION_TO_AUTH_DETAILS)}"
             )
-        data = {
-            "client_id": auth_details.device_client_id,
-            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-            "device_code": device_code,
-        }
-        return cls.make_request(auth_details.base_url, "/oauth/token", method="POST", data=data)
+        return cls.poll_device_token_for(auth_details, device_code)
