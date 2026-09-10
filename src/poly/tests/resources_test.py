@@ -606,6 +606,56 @@ def my_func(conv: Conversation):
         _, _, _, lc = Function._extract_decorators(code_with_decorator, "my_func", [], known_lc)
         self.assertEqual(lc.delay_responses[0].id, "DELAY-existing")
 
+    def test_two_identical_delay_responses_get_distinct_ids(self):
+        """Same message and same duration twice is two delays, so it must be two ids.
+
+        Delay ids are derived from the delay's contents, so deriving from message and
+        duration alone collapsed duplicates onto one id and lost one of the two.
+        """
+        code_with_decorator = """@func_latency_control(delay_responses=[('One moment.', 2), ('One moment.', 2)])
+def my_func(conv: Conversation):
+    pass
+"""
+        _, _, _, lc = Function._extract_decorators(code_with_decorator, "my_func", [])
+
+        first, second = lc.delay_responses
+        self.assertNotEqual(first.id, second.id)
+
+    def test_extract_gives_delay_responses_the_same_ids_on_every_read(self):
+        """Unchanged decorator code reads back the same delay ids every time."""
+        code_with_decorator = """@func_latency_control(delay_responses=[('One moment.', 2), ('One moment.', 2)])
+def my_func(conv: Conversation):
+    pass
+"""
+        _, _, _, first_read = Function._extract_decorators(code_with_decorator, "my_func", [])
+        _, _, _, second_read = Function._extract_decorators(code_with_decorator, "my_func", [])
+
+        first_ids = [dr.id for dr in first_read.delay_responses]
+        second_ids = [dr.id for dr in second_read.delay_responses]
+        self.assertEqual(first_ids, second_ids)
+        for delay_id in first_ids:
+            self.assertRegex(delay_id, r"^DELAY-[a-f0-9]{8}$")
+
+    def test_one_known_id_is_claimed_by_the_first_of_two_identical_delays(self):
+        """A known id is used once, and the duplicate falls back to a derived id."""
+        code_with_decorator = """@func_latency_control(delay_responses=[('One moment.', 2), ('One moment.', 2)])
+def my_func(conv: Conversation):
+    pass
+"""
+        known_lc = FunctionLatencyControl(
+            enabled=True,
+            delay_responses=[
+                FunctionDelayResponse(id="DELAY-existing", message="One moment.", duration=2),
+            ],
+        )
+
+        _, _, _, lc = Function._extract_decorators(code_with_decorator, "my_func", [], known_lc)
+
+        first, second = lc.delay_responses
+        self.assertEqual(first.id, "DELAY-existing")
+        self.assertRegex(second.id, r"^DELAY-[a-f0-9]{8}$")
+        self.assertNotEqual(first.id, second.id)
+
     def test_latency_control_roundtrip(self):
         """to_pretty -> from_pretty -> _extract_decorators round-trip."""
         lc = FunctionLatencyControl(

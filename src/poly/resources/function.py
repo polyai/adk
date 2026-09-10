@@ -936,7 +936,7 @@ class Function(Resource):
             elif kw.arg == "randomize" and isinstance(kw.value, ast.Constant):
                 randomize = bool(kw.value.value)
             elif kw.arg == "delay_responses" and isinstance(kw.value, ast.List):
-                for elt in kw.value.elts:
+                for i, elt in enumerate(kw.value.elts):
                     if isinstance(elt, ast.Tuple) and len(elt.elts) == 2:
                         msg = elt.elts[0].value if isinstance(elt.elts[0], ast.Constant) else ""
                         dur = elt.elts[1].value if isinstance(elt.elts[1], ast.Constant) else 0
@@ -956,7 +956,7 @@ class Function(Resource):
                         delay_responses.append(
                             FunctionDelayResponse(
                                 id=existing_id
-                                or utils.generate_subresource_id("DELAY", msg, str(dur)),
+                                or utils.generate_subresource_id("DELAY", msg, str(dur), str(i)),
                                 message=msg,
                                 duration=dur,
                             )
@@ -1109,7 +1109,7 @@ class Function(Resource):
     def _build_create_latency_control_proto(self) -> FunctionCreateLatencyControl:
         delay_responses = [
             FunctionDelayResponseProto(
-                id=dr.id or utils.generate_subresource_id("DELAY", dr.message, str(dr.duration)),
+                id=dr.id,
                 message=dr.message,
                 duration=dr.duration,
             )

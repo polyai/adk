@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 import poly.resources.resource_utils as resource_utils
 from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.protobuf.commands_pb2 import Command
+from poly.handlers.sdk import SourcererAPIError
 from poly.project import AgentStudioProject, DeploymentMode
 from poly.resources import (
     AsrSettings,
@@ -6342,6 +6343,41 @@ class PushProjectParentProjectionTest(unittest.TestCase):
 
         self.assertTrue(success, message)
         mock_fetch.assert_called_once_with()
+
+    def test_a_failed_parent_fetch_is_reported_as_an_api_error(self):
+        """Whatever the platform call raised, push must say what actually went wrong.
+
+        The raw error (a transport or auth failure) surfaced to the user as an unhandled
+        crash with no hint that fetching the parent branch was the step that failed.
+        """
+        project = self._project_where_topic_1_is_new()
+        fetch_failure = RuntimeError("boom")
+
+        with patch.object(
+            AgentStudioProject, "_fetch_parent_resources", side_effect=fetch_failure
+        ):
+            with patch.dict(os.environ, {"POLY_ADK_SYNC_PARENT_IDS_TEST": "1"}):
+                with self.assertRaises(SourcererAPIError) as raised:
+                    project.push_project(dry_run=True, skip_validation=True)
+
+        self.assertIn("Failed to fetch parent resources", str(raised.exception))
+        self.assertIs(raised.exception.__cause__, fetch_failure)
+
+    def test_a_supplied_parent_projection_never_reaches_the_failing_fetch(self):
+        """The projection is the answer, so a broken platform call cannot fail the push."""
+        project = self._project_where_topic_1_is_new()
+
+        with patch.object(
+            AgentStudioProject, "_fetch_parent_resources", side_effect=RuntimeError("boom")
+        ):
+            success, message, _ = project.push_project(
+                dry_run=True,
+                skip_validation=True,
+                parent_projection_json=self.PARENT_PROJECTION,
+            )
+
+        self.assertTrue(success, message)
+        self.assertEqual(self._staged_topic_ids(project), {"Topic 1": self.PARENT_TOPIC_ID})
 
 
 class FindNewKeptDeletedParentLookupTest(unittest.TestCase):

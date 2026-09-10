@@ -24,6 +24,7 @@ import poly.utils as utils
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
+from poly.handlers.sdk import SourcererAPIError
 from poly.migration_utils import (
     MigrationFlag,
     get_all_migration_flags,
@@ -1278,7 +1279,10 @@ class AgentStudioProject:
         if parent_projection_json is not None:
             parent_resources, _ = load_resources_from_projection(parent_projection_json)
         elif not dry_run or os.environ.get("POLY_ADK_SYNC_PARENT_IDS_TEST"):
-            parent_resources = self._fetch_parent_resources()
+            try:
+                parent_resources = self._fetch_parent_resources()
+            except Exception as e:
+                raise SourcererAPIError("Failed to fetch parent resources") from e
         parent_branch_paths_to_resource = self._resources_by_absolute_path(parent_resources)
 
         # Push Algorithm
