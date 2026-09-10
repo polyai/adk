@@ -3,11 +3,24 @@
 Copyright PolyAI Limited
 """
 
+import importlib
+import logging
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from poly.handlers import posthog as posthog_module
-from poly.handlers.posthog import PosthogHandler, get_posthog_client, get_user_identity
+from poly.handlers.posthog import (
+    PosthogHandler,
+    capture_event,
+    flush,
+    get_anonymous_id,
+    get_posthog_client,
+    get_user_identity,
+    telemetry_disabled,
+)
 
 
 class IsFeatureEnabledTest(unittest.TestCase):
@@ -243,6 +256,24 @@ class GetPosthogClientTest(unittest.TestCase):
         timeout = mock_posthog_cls.call_args.kwargs["feature_flags_request_timeout_seconds"]
         self.assertEqual(timeout, posthog_module.FEATURE_FLAGS_REQUEST_TIMEOUT_SECONDS)
 
+    def test_posthog_sdk_logger_is_raised_to_error_at_import(self):
+        """Importing the module silences the third-party posthog logger.
+
+        It must happen at import time (not inside get_posthog_client), so the
+        feature-flag path and the capture path behave the same regardless of
+        which runs first. Reloading the module re-triggers that import-time
+        side effect, which is what this test actually exercises.
+        """
+        posthog_logger = logging.getLogger("posthog")
+        original_level = posthog_logger.level
+        posthog_logger.setLevel(logging.WARNING)
+        try:
+            importlib.reload(posthog_module)
+            self.assertEqual(posthog_logger.level, logging.ERROR)
+        finally:
+            posthog_logger.setLevel(original_level)
+            importlib.reload(posthog_module)
+
 
 class GetUserIdentityTest(unittest.TestCase):
     """Tests for get_user_identity, the PostHog distinct_id source."""
@@ -251,6 +282,174 @@ class GetUserIdentityTest(unittest.TestCase):
         """The distinct_id is the OS username, so rollouts bucket per developer."""
         with patch("getpass.getuser", return_value="ada"):
             self.assertEqual(get_user_identity(), "ada")
+
+
+class TelemetryDisabledTest(unittest.TestCase):
+    """Tests for telemetry_disabled's env var handling."""
+
+    def setUp(self):
+        self._env_patch = patch.dict(os.environ, {}, clear=False)
+        self._env_patch.start()
+        os.environ.pop("DO_NOT_TRACK", None)
+        os.environ.pop("POLY_NO_TELEMETRY", None)
+
+    def tearDown(self):
+        self._env_patch.stop()
+
+    def test_disabled_by_default(self):
+        """With neither env var set, telemetry is enabled."""
+        self.assertFalse(telemetry_disabled())
+
+    def test_do_not_track_disables_telemetry(self):
+        """DO_NOT_TRACK=1 or =true disables telemetry, case-insensitively."""
+        for value in ("1", "true", "True", "TRUE"):
+            with self.subTest(value=value):
+                with patch.dict(os.environ, {"DO_NOT_TRACK": value}):
+                    self.assertTrue(telemetry_disabled())
+
+    def test_poly_telemetry_disables_telemetry(self):
+        """POLY_NO_TELEMETRY=1 or =true disables telemetry, case-insensitively."""
+        for value in ("1", "true", "True"):
+            with self.subTest(value=value):
+                with patch.dict(os.environ, {"POLY_NO_TELEMETRY": value}):
+                    self.assertTrue(telemetry_disabled())
+
+    def test_other_values_do_not_disable_telemetry(self):
+        """A falsy or unrelated value leaves telemetry enabled."""
+        for value in ("0", "false", "no", ""):
+            with self.subTest(value=value):
+                with patch.dict(os.environ, {"DO_NOT_TRACK": value}):
+                    self.assertFalse(telemetry_disabled())
+
+
+class GetAnonymousIdTest(unittest.TestCase):
+    """Tests for get_anonymous_id's persisted UUID."""
+
+    def setUp(self):
+        self._tmp_dir = tempfile.TemporaryDirectory()
+        self._path_patch = patch.object(
+            posthog_module, "TELEMETRY_ID_PATH", str(Path(self._tmp_dir.name) / "telemetry_id")
+        )
+        self._path_patch.start()
+
+    def tearDown(self):
+        self._path_patch.stop()
+        self._tmp_dir.cleanup()
+
+    def test_creates_and_persists_a_uuid(self):
+        """A missing telemetry id file is created with a UUID, mode 600."""
+        first = get_anonymous_id()
+
+        path = Path(posthog_module.TELEMETRY_ID_PATH)
+        self.assertTrue(path.is_file())
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(path.read_text(encoding="utf-8"), first)
+
+    def test_reuses_existing_id(self):
+        """A second call returns the same id as the first, rather than a new one."""
+        first = get_anonymous_id()
+        second = get_anonymous_id()
+
+        self.assertEqual(first, second)
+
+
+class CaptureEventTest(unittest.TestCase):
+    """Tests for capture_event's telemetry-opt-out and failure handling."""
+
+    def setUp(self):
+        self._env_patch = patch.dict(os.environ, {}, clear=False)
+        self._env_patch.start()
+        os.environ.pop("DO_NOT_TRACK", None)
+        os.environ.pop("POLY_NO_TELEMETRY", None)
+
+    def tearDown(self):
+        self._env_patch.stop()
+
+    def test_disabled_env_var_means_no_client_call(self):
+        """When telemetry is disabled, get_posthog_client is never even reached."""
+        with (
+            patch.dict(os.environ, {"DO_NOT_TRACK": "1"}),
+            patch("poly.handlers.posthog.get_posthog_client") as mock_get_client,
+        ):
+            capture_event("studio", "onboard_started", {}, "anon-1")
+
+        mock_get_client.assert_not_called()
+
+    def test_forwards_event_and_properties_unchanged(self):
+        """capture_event passes distinct_id/event/properties straight through."""
+        mock_client = MagicMock()
+        properties = {"source": "onboard", "account_id": "acc-1"}
+        with patch("poly.handlers.posthog.get_posthog_client", return_value=mock_client):
+            capture_event("studio", "onboard_account_resolved", properties, "anon-1")
+
+        mock_client.capture.assert_called_once_with(
+            distinct_id="anon-1", event="onboard_account_resolved", properties=properties
+        )
+        # No accidental secret leakage: only what the caller passed is sent.
+        sent_properties = mock_client.capture.call_args.kwargs["properties"]
+        self.assertNotIn("key", sent_properties)
+        self.assertNotIn("token", sent_properties)
+
+    def test_client_exception_is_swallowed(self):
+        """A PostHog failure never propagates out of capture_event."""
+        mock_client = MagicMock()
+        mock_client.capture.side_effect = RuntimeError("connection reset")
+        with patch("poly.handlers.posthog.get_posthog_client", return_value=mock_client):
+            capture_event("studio", "onboard_started", {}, "anon-1")  # must not raise
+
+    def test_client_lookup_exception_is_swallowed(self):
+        """A failure building the client never propagates out of capture_event."""
+        with patch(
+            "poly.handlers.posthog.get_posthog_client", side_effect=RuntimeError("boom")
+        ):
+            capture_event("studio", "onboard_started", {}, "anon-1")  # must not raise
+
+
+class FlushTest(unittest.TestCase):
+    """Tests for flush's telemetry-opt-out and failure handling."""
+
+    def setUp(self):
+        self._env_patch = patch.dict(os.environ, {}, clear=False)
+        self._env_patch.start()
+        os.environ.pop("DO_NOT_TRACK", None)
+        os.environ.pop("POLY_NO_TELEMETRY", None)
+
+    def tearDown(self):
+        self._env_patch.stop()
+
+    def test_disabled_env_var_means_no_client_call(self):
+        """When telemetry is disabled, flush never reaches the client."""
+        with (
+            patch.dict(os.environ, {"DO_NOT_TRACK": "1"}),
+            patch("poly.handlers.posthog.get_posthog_client") as mock_get_client,
+        ):
+            flush("studio")
+
+        mock_get_client.assert_not_called()
+
+    def test_flushes_with_the_given_timeout(self):
+        """flush forwards the timeout to the underlying client."""
+        mock_client = MagicMock()
+        with patch("poly.handlers.posthog.get_posthog_client", return_value=mock_client):
+            flush("studio", timeout_seconds=5.0)
+
+        mock_client.flush.assert_called_once_with(timeout_seconds=5.0)
+
+    def test_default_timeout_is_five_seconds(self):
+        """The default flush budget is 5s, not the SDK's own default."""
+        mock_client = MagicMock()
+        with patch("poly.handlers.posthog.get_posthog_client", return_value=mock_client):
+            flush("studio")
+
+        mock_client.flush.assert_called_once_with(timeout_seconds=5.0)
+        self.assertEqual(posthog_module.DEFAULT_FLUSH_TIMEOUT_SECONDS, 5.0)
+
+    def test_client_exception_is_swallowed(self):
+        """A PostHog failure never propagates out of flush."""
+        mock_client = MagicMock()
+        mock_client.flush.side_effect = RuntimeError("connection reset")
+        with patch("poly.handlers.posthog.get_posthog_client", return_value=mock_client):
+            flush("studio")  # must not raise
 
 
 if __name__ == "__main__":

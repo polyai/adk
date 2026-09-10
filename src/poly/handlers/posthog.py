@@ -4,6 +4,8 @@ Copyright PolyAI Limited
 """
 
 import logging
+import os
+import uuid
 from typing import TYPE_CHECKING
 
 POSTHOG_HOST = "https://eu.i.posthog.com"
@@ -15,7 +17,19 @@ POSTHOG_KEY_NON_PROD = "phc_kS54QZyZRqi9T77rWEUfJ49vVYY4ADKEPnRUrJ7RNnZ6"
 NON_PROD_REGIONS = frozenset({"dev", "staging"})
 
 FEATURE_FLAGS_REQUEST_TIMEOUT_SECONDS = 1
+DEFAULT_FLUSH_TIMEOUT_SECONDS = 5.0
+
+TELEMETRY_ID_PATH = os.path.expanduser("~/.poly/telemetry_id")
+
 logger = logging.getLogger(__name__)
+
+# The posthog SDK logs its own warnings (e.g. a flush running out of budget)
+# at WARNING level, which would otherwise leak into a user's terminal. Our
+# own logger.warning calls for capture/flush failures are unaffected - only
+# the third-party SDK logger is raised, and once, at import time, so it
+# behaves the same regardless of which entry point (feature flags or
+# capture) is used first.
+logging.getLogger("posthog").setLevel(logging.ERROR)
 
 
 if TYPE_CHECKING:
@@ -72,6 +86,87 @@ def get_user_identity() -> str:
     import getpass
 
     return getpass.getuser()
+
+
+def _is_truthy_flag(value: str | None) -> bool:
+    """Whether an env var value means "on" (`"1"` or `"true"`, case-insensitive)."""
+    return (value or "").strip().lower() in {"1", "true"}
+
+
+def telemetry_disabled() -> bool:
+    """Whether telemetry capture is opted out of via environment variable.
+
+    Returns:
+        bool: True if `DO_NOT_TRACK` or `POLY_NO_TELEMETRY` is set to `1`/`true`.
+    """
+    return _is_truthy_flag(os.environ.get("DO_NOT_TRACK")) or _is_truthy_flag(
+        os.environ.get("POLY_NO_TELEMETRY")
+    )
+
+
+def get_anonymous_id() -> str:
+    """Get (or create) a stable anonymous id for this machine's telemetry events.
+
+    Returns:
+        str: A UUID4, persisted at `~/.poly/telemetry_id` (mode 600) so it is
+            stable across CLI invocations.
+    """
+    if os.path.isfile(TELEMETRY_ID_PATH):
+        try:
+            with open(TELEMETRY_ID_PATH, "r", encoding="utf-8") as f:
+                existing = f.read().strip()
+            if existing:
+                return existing
+        except OSError:
+            logger.warning(f"Could not read telemetry id at {TELEMETRY_ID_PATH!r}.")
+
+    new_id = str(uuid.uuid4())
+    os.makedirs(os.path.dirname(TELEMETRY_ID_PATH), exist_ok=True)
+    with open(TELEMETRY_ID_PATH, "w", encoding="utf-8") as f:
+        f.write(new_id)
+    os.chmod(TELEMETRY_ID_PATH, 0o600)
+    return new_id
+
+
+def capture_event(region: str, event: str, properties: dict, distinct_id: str) -> None:
+    """Capture a telemetry event, never raising and never blocking on a slow network.
+
+    A no-op when telemetry is disabled. Any failure to reach PostHog is
+    logged at warning level and swallowed - telemetry must never break or
+    slow down the command it is instrumenting.
+
+    Args:
+        region: The region the event relates to, used to pick the PostHog project.
+        event: The event name.
+        properties: Event properties. Must never include secrets (API keys, JWTs).
+        distinct_id: The PostHog distinct id to attribute the event to.
+    """
+    if telemetry_disabled():
+        return
+    try:
+        client = get_posthog_client(region)
+        client.capture(distinct_id=distinct_id, event=event, properties=properties)
+    except Exception as exc:
+        logger.warning(f"PostHog capture failed event={event!r}", exc_info=exc)
+
+
+def flush(region: str, timeout_seconds: float = DEFAULT_FLUSH_TIMEOUT_SECONDS) -> None:
+    """Flush any buffered telemetry events before the process exits.
+
+    Bounded by `timeout_seconds` so a slow or unreachable PostHog can't hang
+    process exit. Any failure is logged at warning level and swallowed.
+
+    Args:
+        region: The region whose PostHog client should be flushed.
+        timeout_seconds: Maximum time to wait for the flush to complete.
+    """
+    if telemetry_disabled():
+        return
+    try:
+        client = get_posthog_client(region)
+        client.flush(timeout_seconds=timeout_seconds)
+    except Exception as exc:
+        logger.warning("PostHog flush failed", exc_info=exc)
 
 
 class PosthogHandler:
