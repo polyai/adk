@@ -111,7 +111,15 @@ ignore_packages = [
 
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]
-version_variables = []
+# Keep skills/*/SKILL.md metadata.version in lockstep with the CLI version.
+# Validated in CI by scripts/validate_skills.py.
+version_variables = [
+    "skills/poly-adk-branching/SKILL.md:version",
+    "skills/poly-adk-conversations/SKILL.md:version",
+    "skills/poly-adk-rtc/SKILL.md:version",
+    "skills/poly-adk-testing/SKILL.md:version",
+    "skills/poly-adk-workflow/SKILL.md:version",
+]
 branch = "main"
 commit_message = "chore(release): {version}"
 build_command = "pip install build && python -m build"
