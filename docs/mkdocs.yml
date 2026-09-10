@@ -116,7 +116,7 @@ nav:
       - CLI reference:
           - Overview: reference/cli.md
           - login: reference/cli/login.md
-          - start: reference/cli/start.md
+          - setup: reference/cli/setup.md
           - init: reference/cli/init.md
           - project: reference/cli/project.md
           - template: reference/cli/template.md

@@ -42,7 +42,7 @@ Assume `poly` is installed. If a command fails because it isn't:
 
 ## 2. Authentication
 
-Assume the user is already logged in — do not check credentials up front. Only if a command fails with an authentication error, ask the user to run `poly login` — it opens a browser to sign in, so they must complete it themselves. Regions: `studio` for self-serve accounts, `us-1` / `euw-1` / `uk-1` for enterprise workspaces. Self-serve users can alternatively run `poly start`, which signs up and optionally creates a project and pulls it locally in one step.
+Assume the user is already logged in — do not check credentials up front. Only if a command fails with an authentication error, ask the user to run `poly login` — it opens a browser to sign in, so they must complete it themselves. Regions: `studio` for self-serve accounts, `us-1` / `euw-1` / `uk-1` for enterprise workspaces. On a fresh machine, `poly setup` runs sign-in plus shell completion, AI skills, and project setup in one command.
 
 Credentials are resolved in this order: `~/.poly/credentials.json` (written by `poly login`), then a region-scoped env var (`POLY_ADK_KEY_US` / `POLY_ADK_KEY_EUW` / `POLY_ADK_KEY_UK` / `POLY_ADK_KEY_STUDIO`), then `POLY_ADK_KEY` — useful when debugging why the CLI is using the wrong account or region.
 

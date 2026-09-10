@@ -5,7 +5,7 @@ description: Go from zero to a working local agent project in minutes using the 
 
 # Getting started
 
-Three steps — install the ADK, sign in, then create or connect a project — take you from an empty machine to a local project you can edit, push, and deploy.
+Two steps — install the ADK, then run `poly setup` — take you from an empty machine to a local project you can edit, push, and deploy.
 
 ---
 
@@ -33,17 +33,22 @@ poly --help
 
     If you plan to work in **VS Code** or **Cursor**, you can also install the [PolyAI ADK extension](../tooling/tooling.md#polyai-adk-extension-for-vs-code-and-cursor) for resource-aware editing on top of the CLI. The extension is additive — the `poly` command remains the source of truth for every workflow.
 
-## Step 2 — Sign in and set up your API key
+## Step 2 — Run `poly setup`
 
-`poly login` is the sign-in path for every account type:
+One command handles the rest of onboarding:
 
 ```bash
-poly login
+poly setup
 ```
 
-It opens a browser window, fetches (or creates) an API key for your user, and saves it to `~/.poly/credentials.json` so future `poly` commands pick it up automatically — no environment variables to manage. The browser step can happen on any device, not just the machine running the CLI.
+It runs four steps, skipping any that are already done — so it is safe to re-run at any time:
 
-You are asked to pick a region. Choose based on your account type:
+1. **Sign in** — opens a browser window, fetches (or creates) an API key for your user, and saves it to `~/.poly/credentials.json` so future `poly` commands pick it up automatically — no environment variables to manage. The browser step can happen on any device, not just the machine running the CLI.
+2. **Shell completion** — installs tab completion for bash, zsh, or fish.
+3. **AI agent skills** — installs the ADK's skills into coding agents detected on your machine (Claude Code, Cursor, Codex, and others), so they know the `poly` workflow. Requires Node.js 18+ and is skipped with a warning otherwise.
+4. **Project** — offers to create a new Agent Studio project or connect an existing one, covered in Step 3 below.
+
+You are asked to pick a region when signing in. Choose based on your account type:
 
 | Region | Account type |
 |---|---|
@@ -53,29 +58,26 @@ You are asked to pick a region. Choose based on your account type:
 To skip the prompt, pass the region directly:
 
 ```bash
-poly login --region studio   # or us-1, euw-1, uk-1
+poly setup --region studio   # or us-1, euw-1, uk-1
 ```
 
 If you're not sure which account type you have, your PolyAI contact can confirm.
 
 !!! warning "Creating an account"
-    Only self-serve accounts can be created through `poly login`. Enterprise clusters are provisioned by PolyAI — if you need an enterprise workspace, get in touch with your PolyAI contact.
+    Only self-serve accounts can be created through the sign-in flow. Enterprise clusters are provisioned by PolyAI — if you need an enterprise workspace, get in touch with your PolyAI contact.
 
-To sign in to more than one region from the same machine, re-run `poly login` for each — the credential file stores them side by side.
+See [`poly setup`](../reference/cli/setup.md) for the flags that skip or target individual steps.
 
-### Shortcut for self-serve — `poly start`
+### Sign in only — `poly login`
 
-If you are a self-serve user, you can use `poly start` to create an account and a project in one command:
+To set up credentials without the rest, `poly login` runs the sign-in step on its own:
 
 ```bash
-poly start
+poly login
+poly login --region us-1
 ```
 
-1. **Sign up or sign in** — opens a browser window for authentication.
-2. **API key** — generates a key and saves it to `~/.poly/credentials.json`.
-3. **Create a project** — optionally creates a new Agent Studio project and pulls it down locally so you can start editing immediately.
-
-`poly start` is self-serve only and does not work against enterprise clusters. On an enterprise workspace, use `poly login` above.
+To sign in to more than one region from the same machine, re-run `poly login` for each — the credential file stores them side by side.
 
 ### Manual API key export { #manual-api-key-export }
 
@@ -113,7 +115,7 @@ export POLY_ADK_KEY=<your-fallback-api-key>   # used for any other region
 !!! info "How the ADK resolves API keys"
     The ADK checks for credentials in the following order:
 
-    1. **Credential file** — `~/.poly/credentials.json` (written by `poly login` or `poly start`)
+    1. **Credential file** — `~/.poly/credentials.json` (written by `poly setup` or `poly login`)
     2. **Region-specific env var** — e.g. `POLY_ADK_KEY_US`
     3. **General env var** — `POLY_ADK_KEY`
 
@@ -124,7 +126,7 @@ export POLY_ADK_KEY=<your-fallback-api-key>   # used for any other region
 
 ## Step 3 — Create or connect a project
 
-To create a new Agent Studio project and pull it down locally:
+`poly setup` offers this as its final step. To do it separately, or to add more projects later — to create a new Agent Studio project and pull it down locally:
 
 ```bash
 poly project create

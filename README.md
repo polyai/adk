@@ -28,7 +28,7 @@ uv tool install polyai-adk
 Once installed, use the `poly` command to manage your projects:
 
 ```bash
-poly start      # Create an account, access token and new project
+poly setup      # Set up everything: account, API key, AI skills, and a project
 poly init       # Initialize a project
 poly project    # Manage poly projects
 poly pull       # Pull latest configuration
