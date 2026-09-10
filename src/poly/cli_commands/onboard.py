@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 # `poly onboard` always targets the PLG/studio cluster - it is the only
 # cluster the onboarding Auth0 client (GitHub-only login) is registered
-# against, so unlike `login`/`start` there is no --region choice here.
+# against, so unlike `login` there is no --region choice here.
 ONBOARD_REGION = "studio"
 
 DEFAULT_KEY_NAME = "onboard-key"
@@ -52,8 +52,6 @@ ACCOUNT_POLL_ATTEMPTS = 20
 ACCOUNT_POLL_INTERVAL_SECONDS = 1
 ACCOUNT_POLL_TIMEOUT_SECONDS = ACCOUNT_POLL_ATTEMPTS * ACCOUNT_POLL_INTERVAL_SECONDS
 POSTHOG_SOURCE = "onboard"
-
-CREDENTIALS_KEPT_SUMMARY = "existing credential kept"
 
 
 def _adk_version() -> str:
@@ -166,21 +164,17 @@ def _get_or_create_key(
     return api_key, False
 
 
-def _save_credentials(api_key: str) -> str:
+def _save_credentials(api_key: str) -> tuple[bool, str]:
     """Save `api_key` to the credential file, unless studio already has one.
 
     Returns:
-        str: A summary of what happened, for the completion output.
+        tuple[bool, str]: Whether a new credential was saved, and a summary
+            of what happened, for the completion output.
     """
     if load_api_key_from_credential_file(ONBOARD_REGION) is not None:
-        return CREDENTIALS_KEPT_SUMMARY
+        return False, "existing credential kept"
     save_api_key_credential_file(api_key, region=ONBOARD_REGION)
-    return f"{CREDENTIALS_FILE_PATH} ({ONBOARD_REGION})"
-
-
-def _persist_env(api_key: str, force: bool) -> tuple[ProfileTarget, str]:
-    """Write POLY_API_KEY into the detected profile (or Windows user environment)."""
-    return write_env_var("POLY_API_KEY", api_key, force=force)
+    return True, f"{CREDENTIALS_FILE_PATH} ({ONBOARD_REGION})"
 
 
 def _print_summary(
@@ -301,7 +295,7 @@ class OnboardCommand(BaseCommand):
         verbose: bool = False,
     ) -> None:
         """Sign in via GitHub, provision an account API key, and export it."""
-        from poly.output.console import info, mask_api_key, plain, success
+        from poly.output.console import err_console, info, mask_api_key, plain, success
 
         reporter = _Reporter(
             output_json,
@@ -321,13 +315,20 @@ class OnboardCommand(BaseCommand):
             step = "signin"
 
             def on_verification_url(verification_uri: str, user_code: str) -> None:
-                reporter.say(
-                    info,
+                message = (
                     "To sign in with GitHub, open the following link in your browser\n"
                     "and enter the code when prompted.\n\n"
                     f"  URL:  {verification_uri}\n"
-                    f"  Code: [bold]{user_code}[/bold]",
+                    f"  Code: [bold]{user_code}[/bold]"
                 )
+                if reporter.output_json:
+                    # --json only constrains stdout - an agent that can't open a
+                    # browser itself still needs this to complete sign-in, so it
+                    # goes to stderr rather than being dropped like every other
+                    # human-readable message in this mode.
+                    err_console.print(f"[info]{message}[/info]")
+                else:
+                    reporter.say(info, message)
                 reporter.emit("onboard_device_code_issued")
 
             jwt_token = signin_with_device_flow(
@@ -361,14 +362,14 @@ class OnboardCommand(BaseCommand):
                 )
 
             step = "credentials"
-            credentials_summary = _save_credentials(api_key)
-            if credentials_summary == CREDENTIALS_KEPT_SUMMARY:
-                reporter.say(info, f"Existing ADK credential for {ONBOARD_REGION} kept.")
-            else:
+            saved, credentials_summary = _save_credentials(api_key)
+            if saved:
                 reporter.say(info, f"Saved to {credentials_summary}.")
+            else:
+                reporter.say(info, f"Existing ADK credential for {ONBOARD_REGION} kept.")
 
             step = "env"
-            target, masked_line = _persist_env(api_key, force)
+            target, masked_line = write_env_var("POLY_API_KEY", api_key, force=force)
             reporter.say(info, f"Wrote to {target.path}:")
             reporter.say(plain, f"  {masked_line}")
             reporter.emit(

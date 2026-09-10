@@ -53,6 +53,8 @@ Install [uv](https://docs.astral.sh/uv/) with `winget install astral-sh.uv`. If 
 }
 ~~~
 
+With `--json`, the sign-in URL and code are printed to stderr instead of being suppressed, since the JSON contract only constrains stdout and an agent that can't open a browser still needs them to complete sign-in.
+
 ## Telemetry
 
 `poly onboard` sends anonymous usage events (`onboard_started`, `onboard_authenticated`, `onboard_account_resolved`, `onboard_key_reused`/`onboard_key_created`, `onboard_env_written`, `onboard_completed`, `onboard_failed`) to help improve the flow; the API key and sign-in token are never included. Set `DO_NOT_TRACK=1` or `POLY_NO_TELEMETRY=1` to opt out.

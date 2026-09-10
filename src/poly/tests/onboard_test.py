@@ -172,6 +172,25 @@ class HappyPath(OnboardTestCase):
 
         self.assertNotIn("[", buffer.getvalue())
 
+    def test_json_mode_prints_verification_url_to_stderr(self):
+        """--json still surfaces the sign-in URL/code - on stderr, since stdout is JSON-only."""
+        verification_uri = "https://login.studio.poly.ai/activate?user_code=ABCD-EFGH"
+
+        def fake_signin(auth_details, *, on_verification_url=None, **kwargs):
+            on_verification_url(verification_uri, "ABCD-EFGH")
+            return FAKE_JWT
+
+        self.mocks["signin"].side_effect = fake_signin
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            OnboardCommand.onboard(output_json=True)
+
+        self.assertIn(verification_uri, stderr.getvalue())
+        payload = json.loads(stdout.getvalue())
+        self.assertTrue(payload["success"])
+
 
 class AccountPollFailure(OnboardTestCase):
     """Tests for the no-account-appeared failure path."""

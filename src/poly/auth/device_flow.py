@@ -1,5 +1,5 @@
 """Shared RFC 8628 device authorization flow, used by every command that signs a
-user in via Auth0 (``poly login``, ``poly start``, ``poly onboard``).
+user in via Auth0 (``poly login``, ``poly onboard``).
 
 Copyright PolyAI Limited
 """
@@ -42,7 +42,7 @@ def signin_with_device_flow(
         open_browser: Whether to open the verification URL in the user's default browser.
         on_verification_url: Called with ``(verification_uri, user_code)`` once the device
             code has been issued, so a caller can print its own framing. When omitted, the
-            same message ``poly login``/``poly start`` have always shown is printed.
+            same message ``poly login`` has always shown is printed.
 
     Returns:
         The JWT access token.
