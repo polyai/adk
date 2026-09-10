@@ -3799,6 +3799,16 @@ class AgentStudioProject:
             self.region, self.account_id, self.project_id
         )
 
+    def export_custom_metrics(self) -> dict:
+        """Export all custom metrics as a YAML-parsed dict.
+
+        Returns:
+            dict: Mapping of metric name to metric definition.
+        """
+        return AgentStudioInterface.export_custom_metrics(
+            self.region, self.account_id, self.project_id
+        )
+
     def create_custom_metric(self, data: dict) -> dict:
         """Validate and create a new custom metric.
 

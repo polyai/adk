@@ -12,7 +12,6 @@ from ruamel.yaml import YAML
 
 from poly.cli_commands.base import BaseCommand, Parents
 from poly.cli_commands.shared import load_project
-from poly.handlers.interface import AgentStudioInterface
 from poly.output.console import error, plain, print_metrics, success, warning
 from poly.output.json_output import json_print
 
@@ -256,9 +255,7 @@ class MetricsCommand(BaseCommand):
     ) -> None:
         """Export all custom metrics as YAML."""
         project = load_project(base_path, output_json=output_json)
-        metrics = AgentStudioInterface.export_custom_metrics(
-            project.region, project.account_id, project.project_id
-        )
+        metrics = project.export_custom_metrics()
 
         if output_json:
             json_print(metrics)
