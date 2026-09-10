@@ -12,12 +12,30 @@ from poly.output.console import (
     _OverflowPager,
     console,
     flatten_branch_tree,
+    mask_api_key,
+    mask_secret,
     paged_output,
     print_archived_branches,
     print_branch_history,
     print_releases_branches,
     resolve_parent_branch_label,
 )
+
+
+class MaskSecretTest(unittest.TestCase):
+    """Tests for mask_secret and mask_api_key's markup-free/coloured split."""
+
+    def test_mask_secret_has_no_markup(self):
+        """mask_secret is plain text, safe for JSON output or an exception message."""
+        self.assertEqual(mask_secret("sk-abcdefgh1234"), "sk-a****1234")
+
+    def test_short_secret_is_fully_masked(self):
+        """A secret too short to safely reveal 4+4 characters of is masked entirely."""
+        self.assertEqual(mask_secret("short"), "****")
+
+    def test_mask_api_key_wraps_mask_secret_in_colour_markup(self):
+        """mask_api_key adds console colour markup around the same masked value."""
+        self.assertEqual(mask_api_key("sk-abcdefgh1234"), "[yellow]sk-a****1234[/yellow]")
 
 
 def _branch(

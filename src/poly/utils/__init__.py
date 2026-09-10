@@ -4,6 +4,8 @@ Utilities live in focused submodules — ``poly.utils.credentials``,
 ``poly.utils.merge``, ``poly.utils.stub_gen``, ``poly.utils.decorators``,
 ``poly.utils.variable_references`` and ``poly.utils.commands`` — with the
 public names re-exported here for convenience and backwards compatibility.
+Newer submodules (``poly.utils.api_keys``, ``poly.utils.env_profile``) are
+imported directly by their callers instead.
 
 Copyright PolyAI Limited
 """
