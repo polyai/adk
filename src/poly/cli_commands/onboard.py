@@ -19,19 +19,10 @@ from datetime import datetime, timezone
 from importlib.metadata import version as get_package_version
 from typing import Callable
 
-import requests
-
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.handlers.auth0_handler import ONBOARD_AUTH_DETAILS
 from poly.handlers.interface import AgentStudioInterface
-from poly.handlers.posthog import (
-    capture_event,
-    flush,
-    get_anonymous_id,
-    get_posthog_client,
-    telemetry_disabled,
-)
 from poly.utils.api_keys import select_reusable_api_key
 from poly.utils.credentials import (
     CREDENTIALS_FILE_PATH,
@@ -71,6 +62,8 @@ class _Reporter:
     """
 
     def __init__(self, output_json: bool, base_properties: dict[str, str]):
+        from poly.handlers.posthog import get_anonymous_id, telemetry_disabled
+
         self.output_json = output_json
         self.base_properties = base_properties
         # Skip creating ~/.poly/telemetry_id entirely when telemetry is off,
@@ -84,10 +77,14 @@ class _Reporter:
 
     def emit(self, event: str, **extra: object) -> None:
         """Capture a telemetry event tagged with the current distinct id."""
+        from poly.handlers.posthog import capture_event
+
         capture_event(ONBOARD_REGION, event, {**self.base_properties, **extra}, self.distinct_id)
 
     def fail(self, exc: Exception, step: str, exit_code: int, *, verbose: bool) -> None:
         """Report a failure - telemetry, then a clean message or a full traceback - and exit."""
+        from poly.handlers.posthog import flush
+
         self.emit("onboard_failed", step=step, error_class=type(exc).__name__)
         flush(ONBOARD_REGION)
         if verbose:
@@ -270,6 +267,7 @@ class OnboardCommand(BaseCommand):
         )
         onboard_parser.add_argument(
             "--force",
+            "-f",
             action="store_true",
             help="Overwrite an existing POLY_API_KEY in your profile if it holds a different value.",
         )
@@ -295,6 +293,9 @@ class OnboardCommand(BaseCommand):
         verbose: bool = False,
     ) -> None:
         """Sign in via GitHub, provision an account API key, and export it."""
+        import requests
+
+        from poly.handlers.posthog import flush
         from poly.output.console import err_console, info, mask_api_key, plain, success
 
         reporter = _Reporter(
@@ -407,6 +408,8 @@ def _alias_to_account(anonymous_id: str, account_id: str) -> None:
 
     Never raises: a failure here must not interrupt onboarding.
     """
+    from poly.handlers.posthog import get_posthog_client, telemetry_disabled
+
     if telemetry_disabled():
         return
     try:

@@ -60,14 +60,14 @@ class OnboardTestCase(unittest.TestCase):
                 ),
             ),
             "get_anonymous_id": patch(
-                "poly.cli_commands.onboard.get_anonymous_id", return_value=FAKE_ANON_ID
+                "poly.handlers.posthog.get_anonymous_id", return_value=FAKE_ANON_ID
             ),
             "detect_profile": patch(
                 "poly.cli_commands.onboard.detect_profile",
                 return_value=ProfileTarget(path=Path("/home/user/.zshrc"), shell="zsh"),
             ),
-            "capture_event": patch("poly.cli_commands.onboard.capture_event"),
-            "flush": patch("poly.cli_commands.onboard.flush"),
+            "capture_event": patch("poly.handlers.posthog.capture_event"),
+            "flush": patch("poly.handlers.posthog.flush"),
             "alias": patch("poly.cli_commands.onboard._alias_to_account"),
             "sleep": patch("poly.cli_commands.onboard.time.sleep"),
         }
@@ -260,6 +260,20 @@ class Verbose(OnboardTestCase):
 
         with self.assertRaises(ValueError):
             OnboardCommand.onboard(verbose=True)
+
+
+class ArgParsing(unittest.TestCase):
+    """Tests for onboard's own argparse wiring."""
+
+    def test_force_short_alias(self):
+        """-f is accepted as a short alias for --force, matching other commands."""
+        from poly.cli import AgentStudioCLI
+
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        args = cli._create_parser().parse_args(["onboard", "-f"])
+
+        self.assertTrue(args.force)
 
 
 class CommandRegistration(unittest.TestCase):
