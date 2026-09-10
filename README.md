@@ -29,7 +29,7 @@ Once installed, use the `poly` command to manage your projects:
 
 ```bash
 poly setup      # Set up everything: account, API key, AI skills, and a project
-poly onboard    # One-shot setup for AI coding assistants
+poly apikey     # One-shot setup for AI coding assistants
 poly init       # Initialize a project
 poly project    # Manage poly projects
 poly pull       # Pull latest configuration

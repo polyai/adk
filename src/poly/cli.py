@@ -11,6 +11,7 @@ from argparse import ArgumentParser
 
 import argcomplete
 
+from poly.cli_commands.apikey import ApiKeyCommand
 from poly.cli_commands.audio_cache import AudioCacheCommand
 from poly.cli_commands.auth import LoginCommand
 from poly.cli_commands.base import (
@@ -26,7 +27,6 @@ from poly.cli_commands.chat import ChatCommand
 from poly.cli_commands.conversations import ConversationsCommand
 from poly.cli_commands.deployments import DeploymentsCommand
 from poly.cli_commands.functions import FunctionsCommand
-from poly.cli_commands.onboard import OnboardCommand
 from poly.cli_commands.project import InitCommand, ProjectCommand, StudioCommand
 from poly.cli_commands.review import ReviewCommand
 from poly.cli_commands.rtc import RTCCommand
@@ -55,7 +55,7 @@ COMMANDS = [
     InitCommand,
     SetupCommand,
     LoginCommand,
-    OnboardCommand,
+    ApiKeyCommand,
     StudioCommand,
     ProjectCommand,
     TemplateCommand,

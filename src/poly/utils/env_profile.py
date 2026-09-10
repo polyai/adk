@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 # Marker written immediately above a line this module added, so a later run
 # can tell "we wrote this" apart from a line the user added by hand, and so
 # replacing a value in place never leaves a duplicate marker behind.
-MARKER_COMMENT = "# Added by poly onboard"
+MARKER_COMMENT = "# Added by poly apikey"
 
 # HWND_BROADCAST / WM_SETTINGCHANGE / SMTO_ABORTIFHUNG, used to notify running
 # processes (Explorer, the Start menu, already-open terminals) that the user

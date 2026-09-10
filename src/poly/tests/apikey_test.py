@@ -1,4 +1,4 @@
-"""Tests for the `poly onboard` command.
+"""Tests for the `poly apikey` command.
 
 Copyright PolyAI Limited
 """
@@ -11,8 +11,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from poly.cli_commands.apikey import ApiKeyCommand
 from poly.cli_commands.base import GETTING_STARTED_GROUP
-from poly.cli_commands.onboard import OnboardCommand
 from poly.utils.env_profile import EnvVarConflict, ProfileTarget
 
 FAKE_JWT = "jwt-1"
@@ -21,8 +21,8 @@ FAKE_ACCOUNT = "acc-1"
 FAKE_ANON_ID = "anon-fixed"
 
 
-class OnboardTestCase(unittest.TestCase):
-    """Base class wiring up the standard set of onboard collaborator mocks."""
+class ApiKeyTestCase(unittest.TestCase):
+    """Base class wiring up the standard set of apikey collaborator mocks."""
 
     def setUp(self):
         # Never touch the real ~/.poly or depend on the host's $SHELL.
@@ -30,30 +30,30 @@ class OnboardTestCase(unittest.TestCase):
         os.environ.pop("POLY_NO_TELEMETRY", None)
         patchers = {
             "signin": patch(
-                "poly.cli_commands.onboard.signin_with_device_flow", return_value=FAKE_JWT
+                "poly.cli_commands.apikey.signin_with_device_flow", return_value=FAKE_JWT
             ),
             "authorise": patch(
-                "poly.cli_commands.onboard.AgentStudioInterface.authorise"
+                "poly.cli_commands.apikey.AgentStudioInterface.authorise"
             ),
             "get_accounts": patch(
-                "poly.cli_commands.onboard.AgentStudioInterface.get_accounts_internal",
+                "poly.cli_commands.apikey.AgentStudioInterface.get_accounts_internal",
                 return_value=[{"id": FAKE_ACCOUNT}],
             ),
             "list_keys": patch(
-                "poly.cli_commands.onboard.AgentStudioInterface.list_account_api_keys_internal",
+                "poly.cli_commands.apikey.AgentStudioInterface.list_account_api_keys_internal",
                 return_value=[],
             ),
             "create_key": patch(
-                "poly.cli_commands.onboard.AgentStudioInterface.create_account_api_key_internal",
+                "poly.cli_commands.apikey.AgentStudioInterface.create_account_api_key_internal",
                 return_value={"key": FAKE_KEY},
             ),
             "load_cred": patch(
-                "poly.cli_commands.onboard.load_api_key_from_credential_file",
+                "poly.cli_commands.apikey.load_api_key_from_credential_file",
                 return_value=None,
             ),
-            "save_cred": patch("poly.cli_commands.onboard.save_api_key_credential_file"),
+            "save_cred": patch("poly.cli_commands.apikey.save_api_key_credential_file"),
             "write_env": patch(
-                "poly.cli_commands.onboard.write_env_var",
+                "poly.cli_commands.apikey.write_env_var",
                 return_value=(
                     ProfileTarget(path=Path("/home/user/.zshrc"), shell="zsh"),
                     'export POLY_API_KEY="sk-n****7890"',
@@ -63,69 +63,69 @@ class OnboardTestCase(unittest.TestCase):
                 "poly.handlers.posthog.get_anonymous_id", return_value=FAKE_ANON_ID
             ),
             "detect_profile": patch(
-                "poly.cli_commands.onboard.detect_profile",
+                "poly.cli_commands.apikey.detect_profile",
                 return_value=ProfileTarget(path=Path("/home/user/.zshrc"), shell="zsh"),
             ),
             "capture_event": patch("poly.handlers.posthog.capture_event"),
             "flush": patch("poly.handlers.posthog.flush"),
-            "alias": patch("poly.cli_commands.onboard._alias_to_account"),
-            "sleep": patch("poly.cli_commands.onboard.time.sleep"),
+            "alias": patch("poly.cli_commands.apikey._alias_to_account"),
+            "sleep": patch("poly.cli_commands.apikey.time.sleep"),
         }
         self.mocks = {name: p.start() for name, p in patchers.items()}
         for p in patchers.values():
             self.addCleanup(p.stop)
 
     def _failed_events(self):
-        """The properties dict of every onboard_failed capture_event call."""
+        """The properties dict of every apikey_failed capture_event call."""
         return [
             call.args[2]
             for call in self.mocks["capture_event"].call_args_list
-            if call.args[1] == "onboard_failed"
+            if call.args[1] == "apikey_failed"
         ]
 
     def _event_names(self):
         return [call.args[1] for call in self.mocks["capture_event"].call_args_list]
 
 
-class HappyPath(OnboardTestCase):
-    """Tests for the successful onboard flow."""
+class HappyPath(ApiKeyTestCase):
+    """Tests for the successful apikey flow."""
 
     def test_creates_key_and_writes_env(self):
         """No existing key: a new one is created and POLY_API_KEY is written."""
-        OnboardCommand.onboard()
+        ApiKeyCommand.apikey()
 
         self.mocks["create_key"].assert_called_once()
         self.mocks["write_env"].assert_called_once_with("POLY_API_KEY", FAKE_KEY, force=False)
-        self.assertIn("onboard_key_created", self._event_names())
-        self.assertIn("onboard_completed", self._event_names())
+        self.assertIn("apikey_key_created", self._event_names())
+        self.assertIn("apikey_completed", self._event_names())
 
     def test_existing_studio_credential_is_not_overwritten(self):
         """An existing credential-file entry for studio is left untouched."""
         self.mocks["load_cred"].return_value = "already-there"
 
-        OnboardCommand.onboard()
+        ApiKeyCommand.apikey()
 
         self.mocks["save_cred"].assert_not_called()
 
     def test_reuse_path_emits_key_reused(self):
         """A matching existing key is reused instead of creating a new one."""
         with patch(
-            "poly.cli_commands.onboard.select_reusable_api_key", return_value="sk-existing"
+            "poly.cli_commands.apikey.select_reusable_api_key", return_value="sk-existing"
         ):
-            OnboardCommand.onboard()
+            ApiKeyCommand.apikey()
 
         self.mocks["create_key"].assert_not_called()
-        self.assertIn("onboard_key_reused", self._event_names())
+        self.assertIn("apikey_key_reused", self._event_names())
 
     def test_account_id_flag_skips_the_poll(self):
         """--account-id bypasses polling GET /jupiter/v2/accounts entirely."""
-        OnboardCommand.onboard(account_id="acc-given")
+        ApiKeyCommand.apikey(account_id="acc-given")
 
         self.mocks["get_accounts"].assert_not_called()
         account_resolved = next(
             call.args[2]
             for call in self.mocks["capture_event"].call_args_list
-            if call.args[1] == "onboard_account_resolved"
+            if call.args[1] == "apikey_account_resolved"
         )
         self.assertEqual(account_resolved["account_id"], "acc-given")
 
@@ -133,14 +133,14 @@ class HappyPath(OnboardTestCase):
         """The real API key is never printed, masked or otherwise, in plain output."""
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            OnboardCommand.onboard()
+            ApiKeyCommand.apikey()
 
         self.assertNotIn(FAKE_KEY, buffer.getvalue())
 
     def test_anonymous_id_not_created_when_telemetry_disabled(self):
         """DO_NOT_TRACK=1 skips get_anonymous_id entirely - no ~/.poly/telemetry_id touched."""
         with patch.dict(os.environ, {"DO_NOT_TRACK": "1"}):
-            OnboardCommand.onboard()
+            ApiKeyCommand.apikey()
 
         self.mocks["get_anonymous_id"].assert_not_called()
 
@@ -148,7 +148,7 @@ class HappyPath(OnboardTestCase):
         """--json prints one object with the documented fields and a masked key only."""
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            OnboardCommand.onboard(output_json=True)
+            ApiKeyCommand.apikey(output_json=True)
 
         payload = json.loads(buffer.getvalue())
         self.assertTrue(payload["success"])
@@ -168,7 +168,7 @@ class HappyPath(OnboardTestCase):
         """The masked key in --json output is plain text, not `[yellow]...[/yellow]` markup."""
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            OnboardCommand.onboard(output_json=True)
+            ApiKeyCommand.apikey(output_json=True)
 
         self.assertNotIn("[", buffer.getvalue())
 
@@ -185,22 +185,22 @@ class HappyPath(OnboardTestCase):
         stdout = io.StringIO()
         stderr = io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            OnboardCommand.onboard(output_json=True)
+            ApiKeyCommand.apikey(output_json=True)
 
         self.assertIn(verification_uri, stderr.getvalue())
         payload = json.loads(stdout.getvalue())
         self.assertTrue(payload["success"])
 
 
-class AccountPollFailure(OnboardTestCase):
+class AccountPollFailure(ApiKeyTestCase):
     """Tests for the no-account-appeared failure path."""
 
     def test_empty_accounts_after_20_tries_fails_with_exit_1(self):
-        """20 empty polls without --account-id exits 1 with an onboard_failed(step=account)."""
+        """20 empty polls without --account-id exits 1 with an apikey_failed(step=account)."""
         self.mocks["get_accounts"].return_value = []
 
         with self.assertRaises(SystemExit) as ctx:
-            OnboardCommand.onboard()
+            ApiKeyCommand.apikey()
 
         self.assertEqual(ctx.exception.code, 1)
         self.assertEqual(self.mocks["get_accounts"].call_count, 20)
@@ -209,7 +209,7 @@ class AccountPollFailure(OnboardTestCase):
         self.assertEqual(failed[0]["step"], "account")
 
 
-class EnvConflict(OnboardTestCase):
+class EnvConflict(ApiKeyTestCase):
     """Tests for the POLY_API_KEY conflict path."""
 
     def test_conflict_exits_2_without_force(self):
@@ -219,7 +219,7 @@ class EnvConflict(OnboardTestCase):
         )
 
         with self.assertRaises(SystemExit) as ctx:
-            OnboardCommand.onboard()
+            ApiKeyCommand.apikey()
 
         self.assertEqual(ctx.exception.code, 2)
         failed = self._failed_events()
@@ -235,7 +235,7 @@ class EnvConflict(OnboardTestCase):
 
         with contextlib.redirect_stdout(buffer):
             with self.assertRaises(SystemExit):
-                OnboardCommand.onboard(output_json=True)
+                ApiKeyCommand.apikey(output_json=True)
 
         payload = json.loads(buffer.getvalue())
         self.assertFalse(payload["success"])
@@ -246,12 +246,12 @@ class EnvConflict(OnboardTestCase):
 
     def test_force_is_forwarded_to_write_env_var(self):
         """--force is passed straight through to write_env_var."""
-        OnboardCommand.onboard(force=True)
+        ApiKeyCommand.apikey(force=True)
 
         self.mocks["write_env"].assert_called_once_with("POLY_API_KEY", FAKE_KEY, force=True)
 
 
-class Verbose(OnboardTestCase):
+class Verbose(ApiKeyTestCase):
     """Tests for --verbose re-raising instead of exiting cleanly."""
 
     def test_verbose_reraises_instead_of_exiting(self):
@@ -259,11 +259,11 @@ class Verbose(OnboardTestCase):
         self.mocks["get_accounts"].return_value = []
 
         with self.assertRaises(ValueError):
-            OnboardCommand.onboard(verbose=True)
+            ApiKeyCommand.apikey(verbose=True)
 
 
 class ArgParsing(unittest.TestCase):
-    """Tests for onboard's own argparse wiring."""
+    """Tests for apikey's own argparse wiring."""
 
     def test_force_short_alias(self):
         """-f is accepted as a short alias for --force, matching other commands."""
@@ -271,7 +271,7 @@ class ArgParsing(unittest.TestCase):
 
         cli = AgentStudioCLI()
         cli.register_commands()
-        args = cli._create_parser().parse_args(["onboard", "-f"])
+        args = cli._create_parser().parse_args(["apikey", "-f"])
 
         self.assertTrue(args.force)
 
@@ -280,13 +280,13 @@ class CommandRegistration(unittest.TestCase):
     """Tests that the command is wired into the CLI's Getting started group."""
 
     def test_command_name_and_group(self):
-        self.assertEqual(OnboardCommand.command, "onboard")
-        self.assertEqual(OnboardCommand.group, GETTING_STARTED_GROUP)
+        self.assertEqual(ApiKeyCommand.command, "apikey")
+        self.assertEqual(ApiKeyCommand.group, GETTING_STARTED_GROUP)
 
     def test_registered_in_cli_commands(self):
         from poly.cli import COMMANDS
 
-        self.assertIn(OnboardCommand, COMMANDS)
+        self.assertIn(ApiKeyCommand, COMMANDS)
 
 
 if __name__ == "__main__":

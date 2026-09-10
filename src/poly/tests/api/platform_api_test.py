@@ -18,7 +18,7 @@ from poly.tests.testing_utils import make_mock_response
 
 
 class JwtAuthedAccountAndKeyCalls(unittest.TestCase):
-    """Tests for the JWT-authenticated account/key methods used by `poly onboard`."""
+    """Tests for the JWT-authenticated account/key methods used by `poly apikey`."""
 
     @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
     def test_authorise_sends_bearer_and_default_source(self, mock_make_request):
@@ -52,10 +52,10 @@ class JwtAuthedAccountAndKeyCalls(unittest.TestCase):
     @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
     def test_get_accounts_internal_sends_given_source(self, mock_make_request):
         """get_accounts_internal() sends the caller-supplied X-Poly-Source."""
-        PlatformAPIHandler.get_accounts_internal("studio", "jwt-token", source="onboard")
+        PlatformAPIHandler.get_accounts_internal("studio", "jwt-token", source="apikey")
 
         kwargs = mock_make_request.call_args.kwargs
-        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "onboard")
+        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "apikey")
 
     @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
     def test_list_account_api_keys_internal_hits_expected_url(self, mock_make_request):
@@ -78,11 +78,11 @@ class JwtAuthedAccountAndKeyCalls(unittest.TestCase):
     def test_list_account_api_keys_internal_sends_given_source(self, mock_make_request):
         """list_account_api_keys_internal() sends the caller-supplied X-Poly-Source."""
         PlatformAPIHandler.list_account_api_keys_internal(
-            "studio", "jwt-token", "acc-1", source="onboard"
+            "studio", "jwt-token", "acc-1", source="apikey"
         )
 
         kwargs = mock_make_request.call_args.kwargs
-        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "onboard")
+        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "apikey")
 
     @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
     def test_create_account_api_key_internal_posts_name(self, mock_make_request):
@@ -90,14 +90,14 @@ class JwtAuthedAccountAndKeyCalls(unittest.TestCase):
         mock_make_request.return_value = {"key": "sk-new", "name": ""}
 
         result = PlatformAPIHandler.create_account_api_key_internal(
-            "studio", "jwt-token", "acc-1", "onboard-key"
+            "studio", "jwt-token", "acc-1", "cli-generated-key"
         )
 
         args, kwargs = mock_make_request.call_args
         self.assertEqual(args[0], "studio")
         self.assertEqual(args[1], "/jupiter/v2/accounts/acc-1/api-keys")
         self.assertEqual(args[2], "POST")
-        self.assertEqual(kwargs["data"], {"name": "onboard-key"})
+        self.assertEqual(kwargs["data"], {"name": "cli-generated-key"})
         self.assertEqual(kwargs["headers"]["Authorization"], "Bearer jwt-token")
         self.assertTrue(kwargs["use_jupiter_api"])
         self.assertEqual(result, {"key": "sk-new", "name": ""})
@@ -106,11 +106,11 @@ class JwtAuthedAccountAndKeyCalls(unittest.TestCase):
     def test_create_account_api_key_internal_sends_given_source(self, mock_make_request):
         """create_account_api_key_internal() sends the caller-supplied X-Poly-Source."""
         PlatformAPIHandler.create_account_api_key_internal(
-            "studio", "jwt-token", "acc-1", "onboard-key", source="onboard"
+            "studio", "jwt-token", "acc-1", "cli-generated-key", source="apikey"
         )
 
         kwargs = mock_make_request.call_args.kwargs
-        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "onboard")
+        self.assertEqual(kwargs["headers"]["X-Poly-Source"], "apikey")
 
 
 class GetBaseUrl(unittest.TestCase):

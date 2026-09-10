@@ -373,19 +373,19 @@ class CaptureEventTest(unittest.TestCase):
             patch.dict(os.environ, {"DO_NOT_TRACK": "1"}),
             patch("poly.handlers.posthog.get_posthog_client") as mock_get_client,
         ):
-            capture_event("studio", "onboard_started", {}, "anon-1")
+            capture_event("studio", "apikey_started", {}, "anon-1")
 
         mock_get_client.assert_not_called()
 
     def test_forwards_event_and_properties_unchanged(self):
         """capture_event passes distinct_id/event/properties straight through."""
         mock_client = MagicMock()
-        properties = {"source": "onboard", "account_id": "acc-1"}
+        properties = {"source": "apikey", "account_id": "acc-1"}
         with patch("poly.handlers.posthog.get_posthog_client", return_value=mock_client):
-            capture_event("studio", "onboard_account_resolved", properties, "anon-1")
+            capture_event("studio", "apikey_account_resolved", properties, "anon-1")
 
         mock_client.capture.assert_called_once_with(
-            distinct_id="anon-1", event="onboard_account_resolved", properties=properties
+            distinct_id="anon-1", event="apikey_account_resolved", properties=properties
         )
         # No accidental secret leakage: only what the caller passed is sent.
         sent_properties = mock_client.capture.call_args.kwargs["properties"]
@@ -397,14 +397,14 @@ class CaptureEventTest(unittest.TestCase):
         mock_client = MagicMock()
         mock_client.capture.side_effect = RuntimeError("connection reset")
         with patch("poly.handlers.posthog.get_posthog_client", return_value=mock_client):
-            capture_event("studio", "onboard_started", {}, "anon-1")  # must not raise
+            capture_event("studio", "apikey_started", {}, "anon-1")  # must not raise
 
     def test_client_lookup_exception_is_swallowed(self):
         """A failure building the client never propagates out of capture_event."""
         with patch(
             "poly.handlers.posthog.get_posthog_client", side_effect=RuntimeError("boom")
         ):
-            capture_event("studio", "onboard_started", {}, "anon-1")  # must not raise
+            capture_event("studio", "apikey_started", {}, "anon-1")  # must not raise
 
 
 class FlushTest(unittest.TestCase):

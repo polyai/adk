@@ -72,7 +72,7 @@ Reference `rules.md` in your session prompt. This gives the coding tool accurate
 
     The IDE extension and Claude Code cover different modes of work. You can edit in VS Code or Cursor day-to-day and still reach for Claude Code when you want an agent to generate or refactor a large slice of the project on your behalf.
 
-If you are setting up the ADK from Claude Code or another coding assistant, [`poly onboard`](../reference/cli/onboard.md) performs the GitHub sign-in and API key setup in one non-interactive command.
+If you are setting up the ADK from Claude Code or another coding assistant, [`poly apikey`](../reference/cli/apikey.md) performs the GitHub sign-in and API key setup in one non-interactive command.
 
 ## Other local tools
 

@@ -15,7 +15,7 @@ def _key(
     key: str = "sk-1",
     active: bool = True,
     expires_at: str | None = None,
-    name: str = "onboard-key",
+    name: str = "cli-generated-key",
     created_at: str = "2026-01-01T00:00:00Z",
 ) -> dict:
     """Build a key record shaped like the accounts API response."""
@@ -33,10 +33,10 @@ class SelectReusableApiKey(unittest.TestCase):
 
     def test_matches_on_policy_name_not_top_level_name(self):
         """The key name lives under policies[0].name, not the key's own `name` field."""
-        key = _key(name="onboard-key")
+        key = _key(name="cli-generated-key")
         key["name"] = ""  # top-level `name` comes back empty, per the real API.
 
-        result = select_reusable_api_key([key], "onboard-key", NOW)
+        result = select_reusable_api_key([key], "cli-generated-key", NOW)
 
         self.assertEqual(result, "sk-1")
 
@@ -44,7 +44,7 @@ class SelectReusableApiKey(unittest.TestCase):
         """An inactive key is never reused."""
         key = _key(active=False)
 
-        result = select_reusable_api_key([key], "onboard-key", NOW)
+        result = select_reusable_api_key([key], "cli-generated-key", NOW)
 
         self.assertIsNone(result)
 
@@ -53,7 +53,7 @@ class SelectReusableApiKey(unittest.TestCase):
         expired = (NOW - timedelta(days=1)).isoformat()
         key = _key(expires_at=expired)
 
-        result = select_reusable_api_key([key], "onboard-key", NOW)
+        result = select_reusable_api_key([key], "cli-generated-key", NOW)
 
         self.assertIsNone(result)
 
@@ -62,7 +62,7 @@ class SelectReusableApiKey(unittest.TestCase):
         future = (NOW + timedelta(days=1)).isoformat()
         key = _key(expires_at=future)
 
-        result = select_reusable_api_key([key], "onboard-key", NOW)
+        result = select_reusable_api_key([key], "cli-generated-key", NOW)
 
         self.assertEqual(result, "sk-1")
 
@@ -70,7 +70,7 @@ class SelectReusableApiKey(unittest.TestCase):
         """A key with no expires_at (or None) never expires."""
         key = _key(expires_at=None)
 
-        result = select_reusable_api_key([key], "onboard-key", NOW)
+        result = select_reusable_api_key([key], "cli-generated-key", NOW)
 
         self.assertEqual(result, "sk-1")
 
@@ -78,7 +78,7 @@ class SelectReusableApiKey(unittest.TestCase):
         """A key created under a different name is not reused."""
         key = _key(name="some-other-key")
 
-        result = select_reusable_api_key([key], "onboard-key", NOW)
+        result = select_reusable_api_key([key], "cli-generated-key", NOW)
 
         self.assertIsNone(result)
 
@@ -87,13 +87,13 @@ class SelectReusableApiKey(unittest.TestCase):
         older = _key(key="sk-old", created_at="2025-01-01T00:00:00Z")
         newer = _key(key="sk-new", created_at="2026-01-01T00:00:00Z")
 
-        result = select_reusable_api_key([older, newer], "onboard-key", NOW)
+        result = select_reusable_api_key([older, newer], "cli-generated-key", NOW)
 
         self.assertEqual(result, "sk-new")
 
     def test_empty_list_returns_none(self):
         """An empty key list has nothing to reuse."""
-        result = select_reusable_api_key([], "onboard-key", NOW)
+        result = select_reusable_api_key([], "cli-generated-key", NOW)
 
         self.assertIsNone(result)
 

@@ -1,10 +1,10 @@
-"""Onboard command: one-shot GitHub sign-in and account API key setup.
+"""API key command: one-shot GitHub sign-in and account API key setup.
 
-`poly onboard` signs a user in via the GitHub-only Auth0 device flow, creates
+`poly apikey` signs a user in via the GitHub-only Auth0 device flow, creates
 their PolyAI account if needed, provisions (or reuses) an account-scoped API
 key, and writes ``POLY_API_KEY`` into their shell profile - or, on Windows,
-their user environment. It never prompts. See ``poly onboard --help`` or
-``docs/docs/reference/cli/onboard.md`` for the full step-by-step behaviour.
+their user environment. It never prompts. See ``poly apikey --help`` or
+``docs/docs/reference/cli/apikey.md`` for the full step-by-step behaviour.
 
 Copyright PolyAI Limited
 """
@@ -21,7 +21,7 @@ from typing import Callable
 
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
-from poly.handlers.auth0_handler import ONBOARD_AUTH_DETAILS
+from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS
 from poly.handlers.interface import AgentStudioInterface
 from poly.utils.api_keys import select_reusable_api_key
 from poly.utils.credentials import (
@@ -33,16 +33,16 @@ from poly.utils.env_profile import EnvVarConflict, ProfileTarget, detect_profile
 
 logger = logging.getLogger(__name__)
 
-# `poly onboard` always targets the PLG/studio cluster - it is the only
-# cluster the onboarding Auth0 client (GitHub-only login) is registered
+# `poly apikey` always targets the PLG/studio cluster - it is the only
+# cluster the dedicated Auth0 client (GitHub-only login) is registered
 # against, so unlike `login` there is no --region choice here.
-ONBOARD_REGION = "studio"
+APIKEY_REGION = "studio"
 
-DEFAULT_KEY_NAME = "onboard-key"
+DEFAULT_KEY_NAME = "cli-generated-key"
 ACCOUNT_POLL_ATTEMPTS = 20
 ACCOUNT_POLL_INTERVAL_SECONDS = 1
 ACCOUNT_POLL_TIMEOUT_SECONDS = ACCOUNT_POLL_ATTEMPTS * ACCOUNT_POLL_INTERVAL_SECONDS
-POSTHOG_SOURCE = "onboard"
+APIKEY_SOURCE = "apikey"
 
 
 def _adk_version() -> str:
@@ -79,14 +79,14 @@ class _Reporter:
         """Capture a telemetry event tagged with the current distinct id."""
         from poly.handlers.posthog import capture_event
 
-        capture_event(ONBOARD_REGION, event, {**self.base_properties, **extra}, self.distinct_id)
+        capture_event(APIKEY_REGION, event, {**self.base_properties, **extra}, self.distinct_id)
 
     def fail(self, exc: Exception, step: str, exit_code: int, *, verbose: bool) -> None:
         """Report a failure - telemetry, then a clean message or a full traceback - and exit."""
         from poly.handlers.posthog import flush
 
-        self.emit("onboard_failed", step=step, error_class=type(exc).__name__)
-        flush(ONBOARD_REGION)
+        self.emit("apikey_failed", step=step, error_class=type(exc).__name__)
+        flush(APIKEY_REGION)
         if verbose:
             raise exc
         message = str(exc)
@@ -120,7 +120,7 @@ def _resolve_account_id(api: AgentStudioInterface, jwt_token: str, account_id: s
         return account_id
     for _ in range(ACCOUNT_POLL_ATTEMPTS):
         accounts = api.get_accounts_internal(
-            region=ONBOARD_REGION, jwt_token=jwt_token, source=POSTHOG_SOURCE
+            region=APIKEY_REGION, jwt_token=jwt_token, source=APIKEY_SOURCE
         )
         if accounts:
             return accounts[0]["id"]
@@ -142,18 +142,18 @@ def _get_or_create_key(
         ValueError: The create call succeeded but returned no key.
     """
     keys = api.list_account_api_keys_internal(
-        region=ONBOARD_REGION, jwt_token=jwt_token, account_id=account_id, source=POSTHOG_SOURCE
+        region=APIKEY_REGION, jwt_token=jwt_token, account_id=account_id, source=APIKEY_SOURCE
     )
     existing_key = select_reusable_api_key(keys, key_name, datetime.now(timezone.utc))
     if existing_key is not None:
         return existing_key, True
 
     response = api.create_account_api_key_internal(
-        region=ONBOARD_REGION,
+        region=APIKEY_REGION,
         jwt_token=jwt_token,
         account_id=account_id,
         name=key_name,
-        source=POSTHOG_SOURCE,
+        source=APIKEY_SOURCE,
     )
     api_key = response.get("key")
     if not api_key:
@@ -168,10 +168,10 @@ def _save_credentials(api_key: str) -> tuple[bool, str]:
         tuple[bool, str]: Whether a new credential was saved, and a summary
             of what happened, for the completion output.
     """
-    if load_api_key_from_credential_file(ONBOARD_REGION) is not None:
+    if load_api_key_from_credential_file(APIKEY_REGION) is not None:
         return False, "existing credential kept"
-    save_api_key_credential_file(api_key, region=ONBOARD_REGION)
-    return True, f"{CREDENTIALS_FILE_PATH} ({ONBOARD_REGION})"
+    save_api_key_credential_file(api_key, region=APIKEY_REGION)
+    return True, f"{CREDENTIALS_FILE_PATH} ({APIKEY_REGION})"
 
 
 def _print_summary(
@@ -228,18 +228,18 @@ def _print_json(
     )
 
 
-class OnboardCommand(BaseCommand):
+class ApiKeyCommand(BaseCommand):
     """One-shot GitHub sign-in, account API key, and POLY_API_KEY setup."""
 
-    command = "onboard"
+    command = "apikey"
 
     group = GETTING_STARTED_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
-        """Register the ``onboard`` subcommand."""
-        onboard_parser = subparsers.add_parser(
-            "onboard",
+        """Register the ``apikey`` subcommand."""
+        apikey_parser = subparsers.add_parser(
+            "apikey",
             parents=[parents.verbose, parents.debug, parents.json],
             help="One-shot setup for AI coding assistants.",
             description=(
@@ -249,23 +249,23 @@ class OnboardCommand(BaseCommand):
                 " yourself.\n\n"
                 "To sign in interactively instead, use `poly login`.\n\n"
                 "Examples:\n"
-                "  poly onboard\n"
-                "  poly onboard --account-id acc-123\n"
+                "  poly apikey\n"
+                "  poly apikey --account-id acc-123\n"
             ),
         )
-        onboard_parser.add_argument(
+        apikey_parser.add_argument(
             "--key-name",
             type=str,
             default=DEFAULT_KEY_NAME,
             help=f"Name for the account-scoped API key. Defaults to '{DEFAULT_KEY_NAME}'.",
         )
-        onboard_parser.add_argument(
+        apikey_parser.add_argument(
             "--account-id",
             type=str,
             default=None,
             help="Account ID to scope the key to. Skips polling for a newly created account.",
         )
-        onboard_parser.add_argument(
+        apikey_parser.add_argument(
             "--force",
             "-f",
             action="store_true",
@@ -274,8 +274,8 @@ class OnboardCommand(BaseCommand):
 
     @classmethod
     def run(cls, args: Namespace) -> None:
-        """Dispatch to the onboard handler."""
-        cls.onboard(
+        """Dispatch to the apikey handler."""
+        cls.apikey(
             key_name=args.key_name,
             account_id=args.account_id,
             force=args.force,
@@ -284,7 +284,7 @@ class OnboardCommand(BaseCommand):
         )
 
     @classmethod
-    def onboard(
+    def apikey(
         cls,
         key_name: str = DEFAULT_KEY_NAME,
         account_id: str | None = None,
@@ -301,7 +301,7 @@ class OnboardCommand(BaseCommand):
         reporter = _Reporter(
             output_json,
             {
-                "source": POSTHOG_SOURCE,
+                "source": APIKEY_SOURCE,
                 "adk_version": _adk_version(),
                 "os": platform.system(),
                 "shell": detect_profile().shell,
@@ -310,7 +310,7 @@ class OnboardCommand(BaseCommand):
 
         step = "start"
         try:
-            reporter.emit("onboard_started")
+            reporter.emit("apikey_started")
             reporter.say(info, "Setting up your PolyAI account and API key...")
 
             step = "signin"
@@ -330,22 +330,22 @@ class OnboardCommand(BaseCommand):
                     err_console.print(f"[info]{message}[/info]")
                 else:
                     reporter.say(info, message)
-                reporter.emit("onboard_device_code_issued")
+                reporter.emit("apikey_device_code_issued")
 
             jwt_token = signin_with_device_flow(
-                ONBOARD_AUTH_DETAILS, on_verification_url=on_verification_url
+                APIKEY_AUTH_DETAILS, on_verification_url=on_verification_url
             )
-            reporter.emit("onboard_authenticated")
+            reporter.emit("apikey_authenticated")
             reporter.say(success, "Authenticated successfully!")
 
             step = "authorise"
             api = AgentStudioInterface()
             reporter.say(info, "Setting up your account...")
-            api.authorise(region=ONBOARD_REGION, jwt_token=jwt_token)
+            api.authorise(region=APIKEY_REGION, jwt_token=jwt_token)
 
             step = "account"
             resolved_account_id = _resolve_account_id(api, jwt_token, account_id)
-            reporter.emit("onboard_account_resolved", account_id=resolved_account_id)
+            reporter.emit("apikey_account_resolved", account_id=resolved_account_id)
             _alias_to_account(reporter.distinct_id, resolved_account_id)
             reporter.distinct_id = resolved_account_id
 
@@ -354,12 +354,12 @@ class OnboardCommand(BaseCommand):
             if key_reused:
                 reporter.say(success, f"Reusing existing '{key_name}' key: {mask_api_key(api_key)}")
                 reporter.emit(
-                    "onboard_key_reused", account_id=resolved_account_id, key_name=key_name
+                    "apikey_key_reused", account_id=resolved_account_id, key_name=key_name
                 )
             else:
                 reporter.say(success, f"Created API key '{key_name}': {mask_api_key(api_key)}")
                 reporter.emit(
-                    "onboard_key_created", account_id=resolved_account_id, key_name=key_name
+                    "apikey_key_created", account_id=resolved_account_id, key_name=key_name
                 )
 
             step = "credentials"
@@ -367,20 +367,18 @@ class OnboardCommand(BaseCommand):
             if saved:
                 reporter.say(info, f"Saved to {credentials_summary}.")
             else:
-                reporter.say(info, f"Existing ADK credential for {ONBOARD_REGION} kept.")
+                reporter.say(info, f"Existing ADK credential for {APIKEY_REGION} kept.")
 
             step = "env"
             target, masked_line = write_env_var("POLY_API_KEY", api_key, force=force)
             reporter.say(info, f"Wrote to {target.path}:")
             reporter.say(plain, f"  {masked_line}")
             reporter.emit(
-                "onboard_env_written", account_id=resolved_account_id, profile_shell=target.shell
+                "apikey_env_written", account_id=resolved_account_id, profile_shell=target.shell
             )
 
-            reporter.emit(
-                "onboard_completed", account_id=resolved_account_id, key_reused=key_reused
-            )
-            flush(ONBOARD_REGION)
+            reporter.emit("apikey_completed", account_id=resolved_account_id, key_reused=key_reused)
+            flush(APIKEY_REGION)
 
             if output_json:
                 _print_json(
@@ -406,13 +404,13 @@ class OnboardCommand(BaseCommand):
 def _alias_to_account(anonymous_id: str, account_id: str) -> None:
     """Link the anonymous telemetry id to the resolved account, once.
 
-    Never raises: a failure here must not interrupt onboarding.
+    Never raises: a failure here must not interrupt the flow.
     """
     from poly.handlers.posthog import get_posthog_client, telemetry_disabled
 
     if telemetry_disabled():
         return
     try:
-        get_posthog_client(ONBOARD_REGION).alias(previous_id=anonymous_id, distinct_id=account_id)
+        get_posthog_client(APIKEY_REGION).alias(previous_id=anonymous_id, distinct_id=account_id)
     except Exception:
         logger.warning("PostHog alias failed", exc_info=True)

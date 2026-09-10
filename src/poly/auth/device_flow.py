@@ -1,5 +1,5 @@
 """Shared RFC 8628 device authorization flow, used by every command that signs a
-user in via Auth0 (``poly login``, ``poly onboard``).
+user in via Auth0 (``poly login``, ``poly apikey``).
 
 Copyright PolyAI Limited
 """

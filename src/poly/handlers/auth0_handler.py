@@ -48,7 +48,7 @@ REGION_TO_AUTH_DETAILS = {
 
 # Auth0 application whose login page exposes only the GitHub connection.
 # Not region-keyed and never added to REGION_TO_AUTH_DETAILS.
-ONBOARD_AUTH_DETAILS = AuthDetails(
+APIKEY_AUTH_DETAILS = AuthDetails(
     base_url="https://login.studio.poly.ai",
     device_client_id="fp7CIVelwOwMPBNNpHpQCLiRMj7nG0fs",
 )
