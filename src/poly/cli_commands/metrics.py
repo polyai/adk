@@ -240,9 +240,7 @@ class MetricsCommand(BaseCommand):
     def metrics_list(cls, base_path: str, output_json: bool = False) -> None:
         """List all custom metrics for the project."""
         project = load_project(base_path, output_json=output_json)
-        metrics = AgentStudioInterface.get_custom_metrics(
-            project.region, project.account_id, project.project_id
-        )
+        metrics = project.get_custom_metrics()
 
         if output_json:
             json_print(metrics)
@@ -431,11 +429,7 @@ class MetricsCommand(BaseCommand):
         """
         import questionary
 
-        metrics = AgentStudioInterface.get_custom_metrics(
-            project.region,
-            project.account_id,
-            project.project_id,  # type: ignore[attr-defined]
-        )
+        metrics = project.get_custom_metrics()
 
         metric = next((m for m in metrics if m.get("name") == name), None)
         if metric is None:

@@ -38,28 +38,26 @@ class MetricsListTest(unittest.TestCase):
     """Tests for MetricsCommand.metrics_list."""
 
     @patch("poly.cli_commands.metrics.print_metrics")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_list_calls_print_metrics(self, mock_load, mock_get, mock_print):
+    def test_list_calls_print_metrics(self, mock_load, mock_print):
         """metrics_list fetches metrics and prints them in table mode."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
+        project.get_custom_metrics.return_value = [{"name": "SCORE", "type": "int"}]
         mock_load.return_value = project
-        mock_get.return_value = [{"name": "SCORE", "type": "int"}]
 
         MetricsCommand.metrics_list("/tmp/test", output_json=False)
 
-        mock_get.assert_called_once_with("us", "acc1", "proj1")
+        project.get_custom_metrics.assert_called_once_with()
         mock_print.assert_called_once_with([{"name": "SCORE", "type": "int"}])
 
     @patch("poly.cli_commands.metrics.json_print")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
     @patch("poly.cli_commands.metrics.load_project")
-    def test_list_json_output(self, mock_load, mock_get, mock_json):
+    def test_list_json_output(self, mock_load, mock_json):
         """metrics_list uses json_print when output_json=True."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
-        mock_load.return_value = project
         metrics = [{"name": "SCORE"}]
-        mock_get.return_value = metrics
+        project.get_custom_metrics.return_value = metrics
+        mock_load.return_value = project
 
         MetricsCommand.metrics_list("/tmp/test", output_json=True)
 
@@ -532,12 +530,11 @@ class InteractiveEditTest(unittest.TestCase):
         },
     ]
 
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
     @patch("poly.cli_commands.metrics.error")
-    def test_metric_not_found_exits(self, mock_error, mock_get):
+    def test_metric_not_found_exits(self, mock_error):
         """Exits with error when the named metric does not exist."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
-        mock_get.return_value = self.SAMPLE_METRICS
+        project.get_custom_metrics.return_value = self.SAMPLE_METRICS
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand._interactive_edit(project, "NONEXISTENT")
@@ -546,11 +543,10 @@ class InteractiveEditTest(unittest.TestCase):
         mock_error.assert_called_once()
 
     @patch("questionary.checkbox")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
-    def test_checkbox_cancel_exits(self, mock_get, mock_checkbox):
-        """Exits when user cancels field selection."""
+    def test_metrics_checkbox_cancel_exits(self, mock_checkbox):
+        """Exits when user cancels field selection in metrics."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
-        mock_get.return_value = self.SAMPLE_METRICS
+        project.get_custom_metrics.return_value = self.SAMPLE_METRICS
         mock_checkbox.return_value.ask.return_value = None
 
         with self.assertRaises(SystemExit) as ctx:
@@ -559,11 +555,10 @@ class InteractiveEditTest(unittest.TestCase):
         self.assertEqual(ctx.exception.code, 1)
 
     @patch("questionary.checkbox")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
-    def test_no_fields_selected_exits(self, mock_get, mock_checkbox):
-        """Exits when user selects no fields."""
+    def test_no_fields_selected_exits(self, mock_checkbox):
+        """Exits when user selects no fields in metrics."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
-        mock_get.return_value = self.SAMPLE_METRICS
+        project.get_custom_metrics.return_value = self.SAMPLE_METRICS
         mock_checkbox.return_value.ask.return_value = []
 
         with self.assertRaises(SystemExit) as ctx:
@@ -573,11 +568,10 @@ class InteractiveEditTest(unittest.TestCase):
 
     @patch("questionary.text")
     @patch("questionary.checkbox")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
-    def test_edit_description(self, mock_get, mock_checkbox, mock_text):
+    def test_edit_description(self, mock_checkbox, mock_text):
         """Returns updated description when user edits it."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
-        mock_get.return_value = self.SAMPLE_METRICS
+        project.get_custom_metrics.return_value = self.SAMPLE_METRICS
         mock_checkbox.return_value.ask.return_value = ["description"]
         mock_text.return_value.ask.return_value = "New description"
 
@@ -587,11 +581,10 @@ class InteractiveEditTest(unittest.TestCase):
 
     @patch("questionary.confirm")
     @patch("questionary.checkbox")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
-    def test_edit_api_and_active(self, mock_get, mock_checkbox, mock_confirm):
+    def test_edit_api_and_active(self, mock_checkbox, mock_confirm):
         """Returns updated api and active flags."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
-        mock_get.return_value = self.SAMPLE_METRICS
+        project.get_custom_metrics.return_value = self.SAMPLE_METRICS
         mock_checkbox.return_value.ask.return_value = ["api", "active"]
         mock_confirm.return_value.ask.side_effect = [True, False]
 
@@ -601,11 +594,10 @@ class InteractiveEditTest(unittest.TestCase):
 
     @patch("questionary.text")
     @patch("questionary.checkbox")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
-    def test_edit_expected_values_string_metric(self, mock_get, mock_checkbox, mock_text):
+    def test_edit_expected_values_string_metric(self, mock_checkbox, mock_text):
         """Parses space-separated expected values for string metrics."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
-        mock_get.return_value = self.SAMPLE_METRICS
+        project.get_custom_metrics.return_value = self.SAMPLE_METRICS
         mock_checkbox.return_value.ask.return_value = ["expected_values"]
         mock_text.return_value.ask.return_value = "low medium high"
 
@@ -614,11 +606,10 @@ class InteractiveEditTest(unittest.TestCase):
         self.assertEqual(result, {"expected_values": ["low", "medium", "high"]})
 
     @patch("questionary.checkbox")
-    @patch("poly.cli_commands.metrics.AgentStudioInterface.get_custom_metrics")
-    def test_no_expected_values_for_non_string(self, mock_get, mock_checkbox):
+    def test_no_expected_values_for_non_string(self, mock_checkbox):
         """expected_values is not offered as a choice for non-string metrics."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
-        mock_get.return_value = self.SAMPLE_METRICS
+        project.get_custom_metrics.return_value = self.SAMPLE_METRICS
         mock_checkbox.return_value.ask.return_value = []
 
         with self.assertRaises(SystemExit):
