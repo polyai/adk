@@ -8,6 +8,8 @@ import logging
 import os
 from typing import Optional
 
+from poly.constants import POLY_HOME_DIR
+
 logger = logging.getLogger(__name__)
 
 _API_KEY_ENV_VAR = "POLY_ADK_KEY"
@@ -21,7 +23,7 @@ _REGION_TO_KEY_SUFFIX: dict[str, str] = {
     "dev": "DEV",
 }
 
-CREDENTIALS_FILE_PATH = os.path.expanduser("~/.poly/credentials.json")
+CREDENTIALS_FILE_PATH = os.path.join(POLY_HOME_DIR, "credentials.json")
 
 
 def save_api_key_credential_file(api_key: str, region: str) -> None:
