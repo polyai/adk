@@ -461,6 +461,18 @@ class SetupProjectStepTest(unittest.TestCase):
         self.mock_create.assert_not_called()
         self.mock_init.assert_not_called()
 
+    def test_status_file_without_project_yaml_skips_the_project_step(self):
+        """A checkout reconstructable from the status file alone is a project too."""
+        status_path = Path(self.base_path, "_gen", ".agent_studio_config")
+        status_path.parent.mkdir()
+        status_path.write_bytes(b"eyJwcm9qZWN0X2lkIjogInByb2otMSJ9")
+
+        SetupCommand._setup_project(self.base_path, region="us-1")
+
+        self.mock_select.assert_not_called()
+        self.mock_create.assert_not_called()
+        self.mock_init.assert_not_called()
+
     @patch("poly.output.console.info")
     def test_non_interactive_terminal_skips_the_prompt(self, mock_info):
         """Piped/CI runs cannot answer a prompt, so the step explains and skips."""
@@ -635,7 +647,7 @@ class AuthenticateAndSaveKeyTest(unittest.TestCase):
 
 
 class SigninDeviceFlowTest(unittest.TestCase):
-    """Tests for auth._signin, the browser device flow shared by setup/start/login."""
+    """Tests for auth._signin, the browser device flow shared by setup/login."""
 
     DEVICE_RESPONSE = {
         "user_code": "ABCD-EFGH",
