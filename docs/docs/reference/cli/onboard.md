@@ -10,7 +10,6 @@ One-shot setup for an AI coding assistant: GitHub sign-in, an account-scoped API
 Examples:
 
 ~~~bash
-uv tool install --python 3.14 polyai-adk
 poly onboard
 poly onboard --account-id acc-123
 poly onboard --key-name my-key --force
@@ -23,7 +22,7 @@ poly onboard --key-name my-key --force
 3. Resolves your account id — by default, polls for up to 20 seconds for the newly created account to appear; pass `--account-id` to skip this.
 4. Reuses an active, unexpired API key named `onboard-key` if one already exists for the account, otherwise creates one. Unlike [`poly login`](./login.md)'s Personal Access Token, this key is **account-scoped**.
 5. Saves the key to `~/.poly/credentials.json` under the `studio` region — but only if no `studio` entry already exists there. An existing ADK credential is never overwritten.
-6. Writes `export POLY_API_KEY="..."` (or, on Windows, sets the variable in your user environment) into your detected shell profile, so new shells and processes pick it up automatically.
+6. Writes `export POLY_API_KEY="..."` (or, on Windows, sets the variable in your user environment) into your detected shell profile, so new shells and processes pick it up automatically. The ADK itself reads `~/.poly/credentials.json` and doesn't need this variable; it's exported for the PolyAI SDKs and other tools that read `POLY_API_KEY` directly.
 7. Prints a summary with the key masked. The key and your sign-in token are never printed or logged.
 
 Exit codes: `0` on success, `1` on a sign-in, account, or API failure, `2` when `POLY_API_KEY` is already set in your profile to a different value and `--force` was not passed.
@@ -36,7 +35,7 @@ Install [uv](https://docs.astral.sh/uv/) with `winget install astral-sh.uv`. If 
 |---|---|
 | `--key-name NAME` | Name for the account-scoped API key. Defaults to `onboard-key`. |
 | `--account-id ID` | Account ID to scope the key to. Skips polling for a newly created account. |
-| `--force` | Overwrite an existing `POLY_API_KEY` in your profile if it holds a different value. |
+| `--force`, `-f` | Overwrite an existing `POLY_API_KEY` in your profile if it holds a different value. |
 
 `--json` output shape:
 
