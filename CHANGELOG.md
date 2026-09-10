@@ -1,6 +1,115 @@
 # CHANGELOG
 
 
+## v0.55.0 (2026-09-10)
+
+### Features
+
+- Add poly update command and startup version check ([#303](https://github.com/polyai/adk/pull/303),
+  [`4b6d5c9`](https://github.com/polyai/adk/commit/4b6d5c99e7e8cf6e189591ecf9d7d7d561730f6a))
+
+## Summary
+
+Adds a `poly update` command that detects how the CLI was installed, runs the matching upgrade
+  command, and refreshes the installed AI agent skills, supporting `--check`, `--to VERSION`,
+  `--cli-only`, and `--skills-only`. Also adds a passive startup notice that tells users when a
+  newer release exists, limited to standalone tool installs.
+
+Final PR of the stack: stacked on #305 (`poly setup`), whose skills wrapper it reuses.
+
+## Motivation
+
+There is no built-in way to update the CLI. Users have no way of learning that a new version exists,
+  and upgrading means knowing which of several install methods they used and running the right
+  command by hand.
+
+## Changes
+
+- Add `poly update`, which upgrades the CLI to the latest release on PyPI. - Add `poly update
+  --check` to report whether an update is available without installing it. - Add `poly update --to
+  VERSION` to install a specific release, including downgrades and reinstalls. Named `--to` rather
+  than `--version` because the root parser already uses that to print the installed version. The
+  requested version is validated against PyPI first, so a typo fails immediately with a list of
+  recent releases rather than a resolver error. - Detect the install method from `sys.prefix` and
+  package metadata, and pick the matching command for `uv tool`, `pipx`, `uv pip` and `pip`. Pinned
+  installs use `install --force` rather than `upgrade`, since the upgrade subcommands will not move
+  backwards and would silently no-op a downgrade. - Refuse to upgrade an editable/dev install, which
+  would otherwise replace a working checkout with a released package and leave local edits
+  mysteriously inert. - Refuse to upgrade an ephemeral `uvx` / `uv run` environment, where the
+  install is discarded when the command exits. - Add a passive update notice on CLI startup, rate
+  limited to once every 12 hours via a stamp file in `~/.poly`. It is restricted to standalone `uv
+  tool` / `pipx` installs: a project install's version is pinned by that project's manifest, so
+  prompting the user to upgrade it would be advice the next dependency sync silently undoes. -
+  Suppress the startup notice for `--json` and non-TTY output so machine-readable output cannot be
+  corrupted, via `POLY_NO_UPDATE_CHECK`, and in CI. Non-TTY already covered most CI runners, but
+  only incidentally, and that stops holding for any runner that allocates a terminal, so the usual
+  markers are checked explicitly. Jenkins, Azure Pipelines and TeamCity are named individually
+  because they do not set `CI`. Errors are swallowed and logged at debug level so a version check
+  can never break the command the user actually ran. - Mention `POLY_NO_UPDATE_CHECK` in `poly
+  update --help`, so someone who sees the notice can find out how to silence it. No
+  `--no-update-check` flag: the env var already works inline (`POLY_NO_UPDATE_CHECK=1 poly status`),
+  so a flag would only duplicate it across every subcommand's help output. - Gate the startup check
+  cheapest-first — string comparison, then a small file read, then a 2 second network call — so the
+  common case adds no measurable startup cost. Skip recording the stamp when PyPI does not answer,
+  so a transient failure retries on the next run instead of causing 12 hours of silence. - Add PyPI
+  helpers to `cli_commands/shared.py`: `get_latest_version`, `get_available_versions` and
+  `is_newer_version`. Version comparison uses `packaging` rather than string inequality, which
+  previously reported an update available on every run for any build not exactly matching PyPI. -
+  Add a shared `POLY_HOME_DIR` constant and use it for both the credentials file and the update
+  stamp, replacing an inlined `~/.poly` path. - Declare `packaging>=24.0`, which was previously only
+  available transitively.
+
+- Update the installed AI agent skills as part of `poly update` — also when the CLI is already
+  current — via the pinned `npx skills` wrapper this PR inherits from #305. - Add `--cli-only` and
+  `--skills-only` (mutually exclusive) to narrow the update to one half. `--skills-only`
+  deliberately skips the not-upgradable guard, so editable/dev installs can still update their
+  skills. - Treat skill failures in a combined update as best-effort: warn without failing the
+  command. With `--skills-only` they are the whole command failing (exit 1). - Capture npx output in
+  `--json` mode so stdout stays a single object, and report the outcome under a `skills_updated`
+  key.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+101 unit tests covering the skills half of the update (scope flags, best-effort vs required failure
+  handling, quiet npx in `--json` mode), install-method detection, version comparison and ordering,
+  command construction for each install method, target-version validation, the `update` control
+  flow, and every startup-check and suppression gate. Tests make no network calls and never touch
+  the real `~/.poly`.
+
+Manual testing covered `--check`, `--to` with valid, invalid and older versions, and the
+  editable-install guard.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Startup notice gates, verified across every path:
+
+| scenario | network call | stamp written | result | | --- | --- | --- | --- | | `uv tool` install,
+  update available | yes | yes | notice shown | | `pipx` install, update available | yes | yes |
+  notice shown | | project venv | no | no | silent | | ephemeral `uvx` | no | no | silent | |
+  `--json` output | no | no | silent | | piped, not a TTY | no | no | silent | |
+  `POLY_NO_UPDATE_CHECK=1` | no | no | silent | | CI (`CI`, `JENKINS_URL`, `TF_BUILD`,
+  `TEAMCITY_VERSION`) | no | no | silent | | checked within last 12 hours | no | no | silent | |
+  PyPI unreachable | yes | no | silent | | already up to date | yes | yes | silent |
+
+Invalid target version:
+
+``` $ poly update --to 99.99.99 Error: Version '99.99.99' not found on PyPI. Recent versions:
+  0.53.1, 0.53.0, 0.52.0, 0.51.0, 0.50.0 $ echo $? 1 ```
+
+---------
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+
 ## v0.54.0 (2026-09-10)
 
 ### Features
