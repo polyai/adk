@@ -79,6 +79,14 @@ poly login --region us-1
 
 To sign in to more than one region from the same machine, re-run `poly login` for each — the credential file stores them side by side.
 
+### Setup from an AI coding assistant — `poly onboard`
+
+If an AI coding agent is setting this up on your behalf, it can run [`poly onboard`](../reference/cli/onboard.md) — a non-interactive, one-shot command that signs in via GitHub, provisions an account-scoped API key, and exports `POLY_API_KEY` into your shell profile without any prompts.
+
+```bash
+poly onboard
+```
+
 ### Manual API key export { #manual-api-key-export }
 
 If you would rather store your credentials in an environment variable - in a CI for example - create the key yourself in the Agent Studio UI:
