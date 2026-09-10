@@ -21,10 +21,19 @@ from poly.utils.env_profile import (
 
 @contextmanager
 def _home_env():
-    """Patch HOME to a fresh temp dir so detect_profile()'s "~" resolves there."""
+    """Patch HOME/USERPROFILE to a fresh temp dir and force the posix code path.
+
+    Needed so the Unix/fish tests behave identically on the Windows CI
+    runner: `os.path.expanduser("~")` reads `USERPROFILE` on Windows and
+    ignores `HOME` (Python 3.8+), and `detect_profile()`/`write_env_var()`
+    both branch on `os.name`, which is `"nt"` there.
+    """
     with tempfile.TemporaryDirectory() as tmp_dir:
         home = Path(tmp_dir)
-        with patch.dict(os.environ, {"HOME": str(home)}):
+        with (
+            patch.dict(os.environ, {"HOME": str(home), "USERPROFILE": str(home)}),
+            patch("poly.utils.env_profile.os.name", "posix"),
+        ):
             yield home
 
 
@@ -89,6 +98,24 @@ class DetectProfile(unittest.TestCase):
         self.assertEqual(str(target.path), "HKCU\\Environment")
         self.assertEqual(target.shell, "powershell")
 
+    def test_resolves_under_temp_dir_when_posix_is_forced(self):
+        """Regression for the Windows CI fix.
+
+        Forcing posix resolution while both HOME and USERPROFILE are set (as
+        they would be on the Windows runner) must still resolve under the
+        patched home, not the real Windows profile directory.
+        """
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            home = Path(tmp_dir)
+            with (
+                patch.dict(
+                    os.environ, {"HOME": str(home), "USERPROFILE": str(home), "SHELL": "/bin/zsh"}
+                ),
+                patch("poly.utils.env_profile.os.name", "posix"),
+            ):
+                target = detect_profile()
+        self.assertEqual(target.path, home / ".zshrc")
+
 
 class WriteEnvVarUnix(unittest.TestCase):
     """Tests for write_env_var against a real temp file on Unix-style profiles."""
@@ -96,10 +123,16 @@ class WriteEnvVarUnix(unittest.TestCase):
     def setUp(self):
         self._tmp_dir = tempfile.TemporaryDirectory()
         self.home = Path(self._tmp_dir.name)
-        self._env_patch = patch.dict(os.environ, {"HOME": str(self.home), "SHELL": "/bin/zsh"})
+        self._env_patch = patch.dict(
+            os.environ,
+            {"HOME": str(self.home), "USERPROFILE": str(self.home), "SHELL": "/bin/zsh"},
+        )
         self._env_patch.start()
+        self._os_name_patch = patch("poly.utils.env_profile.os.name", "posix")
+        self._os_name_patch.start()
 
     def tearDown(self):
+        self._os_name_patch.stop()
         self._env_patch.stop()
         self._tmp_dir.cleanup()
 
@@ -173,11 +206,15 @@ class WriteEnvVarFish(unittest.TestCase):
         self._tmp_dir = tempfile.TemporaryDirectory()
         self.home = Path(self._tmp_dir.name)
         self._env_patch = patch.dict(
-            os.environ, {"HOME": str(self.home), "SHELL": "/usr/bin/fish"}
+            os.environ,
+            {"HOME": str(self.home), "USERPROFILE": str(self.home), "SHELL": "/usr/bin/fish"},
         )
         self._env_patch.start()
+        self._os_name_patch = patch("poly.utils.env_profile.os.name", "posix")
+        self._os_name_patch.start()
 
     def tearDown(self):
+        self._os_name_patch.stop()
         self._env_patch.stop()
         self._tmp_dir.cleanup()
 
