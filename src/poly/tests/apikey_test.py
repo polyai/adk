@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from poly.cli_commands.apikey import ApiKeyCommand
 from poly.cli_commands.base import GETTING_STARTED_GROUP
+from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS
 from poly.utils.env_profile import EnvVarConflict, ProfileTarget
 
 FAKE_JWT = "jwt-1"
@@ -192,6 +193,76 @@ class HappyPath(ApiKeyTestCase):
         self.assertTrue(payload["success"])
 
 
+class RegionSelection(ApiKeyTestCase):
+    """Tests for --region's effect on sign-in, key naming, and region threading."""
+
+    def test_default_region_signs_in_via_github_only_client(self):
+        """With no --region, sign-in uses the studio GitHub-only client."""
+        ApiKeyCommand.apikey()
+
+        auth_details = self.mocks["signin"].call_args.args[0]
+        self.assertIs(auth_details, APIKEY_AUTH_DETAILS)
+
+    def test_non_studio_region_signs_in_via_standard_client(self):
+        """--region us-1 uses the same Auth0 app `poly login --region us-1` uses."""
+        ApiKeyCommand.apikey(region="us-1")
+
+        auth_details = self.mocks["signin"].call_args.args[0]
+        self.assertIs(auth_details, REGION_TO_AUTH_DETAILS["us-1"])
+
+    def test_default_key_name_for_studio(self):
+        """The default key name for studio is unchanged."""
+        ApiKeyCommand.apikey()
+
+        self.mocks["create_key"].assert_called_once_with(
+            region="studio",
+            jwt_token=FAKE_JWT,
+            account_id=FAKE_ACCOUNT,
+            name="cli-generated-key",
+            source="apikey",
+        )
+
+    def test_default_key_name_for_other_region_is_suffixed(self):
+        """The default key name for a non-studio region is disambiguated by region."""
+        ApiKeyCommand.apikey(region="us-1")
+
+        self.mocks["create_key"].assert_called_once_with(
+            region="us-1",
+            jwt_token=FAKE_JWT,
+            account_id=FAKE_ACCOUNT,
+            name="cli-generated-key-us-1",
+            source="apikey",
+        )
+
+    def test_explicit_key_name_overrides_the_region_default(self):
+        """--key-name wins over the region-based default regardless of region."""
+        ApiKeyCommand.apikey(region="us-1", key_name="my-key")
+
+        self.mocks["create_key"].assert_called_once_with(
+            region="us-1",
+            jwt_token=FAKE_JWT,
+            account_id=FAKE_ACCOUNT,
+            name="my-key",
+            source="apikey",
+        )
+
+    def test_region_is_threaded_into_account_and_credentials_calls(self):
+        """The chosen region reaches get_accounts_internal and the credentials file."""
+        ApiKeyCommand.apikey(region="us-1")
+
+        self.mocks["get_accounts"].assert_called_once_with(
+            region="us-1", jwt_token=FAKE_JWT, source="apikey"
+        )
+        self.mocks["save_cred"].assert_called_once_with(FAKE_KEY, region="us-1")
+
+    def test_region_is_threaded_into_telemetry(self):
+        """capture_event receives the chosen region, not a hardcoded 'studio'."""
+        ApiKeyCommand.apikey(region="us-1")
+
+        regions = {call.args[0] for call in self.mocks["capture_event"].call_args_list}
+        self.assertEqual(regions, {"us-1"})
+
+
 class AccountPollFailure(ApiKeyTestCase):
     """Tests for the no-account-appeared failure path."""
 
@@ -274,6 +345,26 @@ class ArgParsing(unittest.TestCase):
         args = cli._create_parser().parse_args(["apikey", "-f"])
 
         self.assertTrue(args.force)
+
+    def test_region_defaults_to_studio(self):
+        """With no --region flag, args.region is 'studio' - the individual-dev path."""
+        from poly.cli import AgentStudioCLI
+
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        args = cli._create_parser().parse_args(["apikey"])
+
+        self.assertEqual(args.region, "studio")
+
+    def test_region_accepts_a_production_region(self):
+        """--region us-1 is accepted, matching poly login's region choices."""
+        from poly.cli import AgentStudioCLI
+
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        args = cli._create_parser().parse_args(["apikey", "--region", "us-1"])
+
+        self.assertEqual(args.region, "us-1")
 
 
 class CommandRegistration(unittest.TestCase):

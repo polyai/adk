@@ -1,10 +1,12 @@
-"""API key command: one-shot GitHub sign-in and account API key setup.
+"""API key command: one-shot sign-in and account API key setup.
 
-`poly apikey` signs a user in via the GitHub-only Auth0 device flow, creates
-their PolyAI account if needed, provisions (or reuses) an account-scoped API
-key, and writes ``POLY_API_KEY`` into their shell profile - or, on Windows,
-their user environment. It never prompts. See ``poly apikey --help`` or
-``docs/docs/reference/cli/apikey.md`` for the full step-by-step behaviour.
+`poly apikey` signs a user in - via the GitHub-only Auth0 device flow for the
+default `studio` region, or the standard sign-in page for any other region -
+creates their PolyAI account if needed, provisions (or reuses) an
+account-scoped API key, and writes ``POLY_API_KEY`` into their shell profile -
+or, on Windows, their user environment. It never prompts. See
+``poly apikey --help`` or ``docs/docs/reference/cli/apikey.md`` for the full
+step-by-step behaviour.
 
 Copyright PolyAI Limited
 """
@@ -21,8 +23,8 @@ from typing import Callable
 
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
-from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS
-from poly.handlers.interface import AgentStudioInterface
+from poly.handlers.auth0_handler import APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS
+from poly.handlers.interface import REGIONS, AgentStudioInterface
 from poly.utils.api_keys import select_reusable_api_key
 from poly.utils.credentials import (
     CREDENTIALS_FILE_PATH,
@@ -33,16 +35,16 @@ from poly.utils.env_profile import EnvVarConflict, ProfileTarget, detect_profile
 
 logger = logging.getLogger(__name__)
 
-# `poly apikey` always targets the PLG/studio cluster - it is the only
-# cluster the dedicated Auth0 client (GitHub-only login) is registered
-# against, so unlike `login` there is no --region choice here.
-APIKEY_REGION = "studio"
-
 DEFAULT_KEY_NAME = "cli-generated-key"
 ACCOUNT_POLL_ATTEMPTS = 20
 ACCOUNT_POLL_INTERVAL_SECONDS = 1
 ACCOUNT_POLL_TIMEOUT_SECONDS = ACCOUNT_POLL_ATTEMPTS * ACCOUNT_POLL_INTERVAL_SECONDS
 APIKEY_SOURCE = "apikey"
+
+
+def _default_key_name(region: str) -> str:
+    """The default API key name - disambiguated by region so keys never collide."""
+    return DEFAULT_KEY_NAME if region == "studio" else f"{DEFAULT_KEY_NAME}-{region}"
 
 
 def _adk_version() -> str:
@@ -61,9 +63,10 @@ class _Reporter:
     account id) and every step after that needs to see the new value.
     """
 
-    def __init__(self, output_json: bool, base_properties: dict[str, str]):
+    def __init__(self, region: str, output_json: bool, base_properties: dict[str, str]):
         from poly.handlers.posthog import get_anonymous_id, telemetry_disabled
 
+        self.region = region
         self.output_json = output_json
         self.base_properties = base_properties
         # Skip creating ~/.poly/telemetry_id entirely when telemetry is off,
@@ -79,14 +82,14 @@ class _Reporter:
         """Capture a telemetry event tagged with the current distinct id."""
         from poly.handlers.posthog import capture_event
 
-        capture_event(APIKEY_REGION, event, {**self.base_properties, **extra}, self.distinct_id)
+        capture_event(self.region, event, {**self.base_properties, **extra}, self.distinct_id)
 
     def fail(self, exc: Exception, step: str, exit_code: int, *, verbose: bool) -> None:
         """Report a failure - telemetry, then a clean message or a full traceback - and exit."""
         from poly.handlers.posthog import flush
 
         self.emit("apikey_failed", step=step, error_class=type(exc).__name__)
-        flush(APIKEY_REGION)
+        flush(self.region)
         if verbose:
             raise exc
         message = str(exc)
@@ -110,7 +113,9 @@ class _Reporter:
         sys.exit(exit_code)
 
 
-def _resolve_account_id(api: AgentStudioInterface, jwt_token: str, account_id: str | None) -> str:
+def _resolve_account_id(
+    api: AgentStudioInterface, region: str, jwt_token: str, account_id: str | None
+) -> str:
     """Return `account_id` unchanged, or poll for the first account to appear.
 
     Raises:
@@ -120,7 +125,7 @@ def _resolve_account_id(api: AgentStudioInterface, jwt_token: str, account_id: s
         return account_id
     for _ in range(ACCOUNT_POLL_ATTEMPTS):
         accounts = api.get_accounts_internal(
-            region=APIKEY_REGION, jwt_token=jwt_token, source=APIKEY_SOURCE
+            region=region, jwt_token=jwt_token, source=APIKEY_SOURCE
         )
         if accounts:
             return accounts[0]["id"]
@@ -131,7 +136,7 @@ def _resolve_account_id(api: AgentStudioInterface, jwt_token: str, account_id: s
 
 
 def _get_or_create_key(
-    api: AgentStudioInterface, jwt_token: str, account_id: str, key_name: str
+    api: AgentStudioInterface, region: str, jwt_token: str, account_id: str, key_name: str
 ) -> tuple[str, bool]:
     """Reuse an active, unexpired key named `key_name`, or create one.
 
@@ -142,14 +147,14 @@ def _get_or_create_key(
         ValueError: The create call succeeded but returned no key.
     """
     keys = api.list_account_api_keys_internal(
-        region=APIKEY_REGION, jwt_token=jwt_token, account_id=account_id, source=APIKEY_SOURCE
+        region=region, jwt_token=jwt_token, account_id=account_id, source=APIKEY_SOURCE
     )
     existing_key = select_reusable_api_key(keys, key_name, datetime.now(timezone.utc))
     if existing_key is not None:
         return existing_key, True
 
     response = api.create_account_api_key_internal(
-        region=APIKEY_REGION,
+        region=region,
         jwt_token=jwt_token,
         account_id=account_id,
         name=key_name,
@@ -161,17 +166,17 @@ def _get_or_create_key(
     return api_key, False
 
 
-def _save_credentials(api_key: str) -> tuple[bool, str]:
-    """Save `api_key` to the credential file, unless studio already has one.
+def _save_credentials(region: str, api_key: str) -> tuple[bool, str]:
+    """Save `api_key` to the credential file, unless `region` already has one.
 
     Returns:
         tuple[bool, str]: Whether a new credential was saved, and a summary
             of what happened, for the completion output.
     """
-    if load_api_key_from_credential_file(APIKEY_REGION) is not None:
+    if load_api_key_from_credential_file(region) is not None:
         return False, "existing credential kept"
-    save_api_key_credential_file(api_key, region=APIKEY_REGION)
-    return True, f"{CREDENTIALS_FILE_PATH} ({APIKEY_REGION})"
+    save_api_key_credential_file(api_key, region=region)
+    return True, f"{CREDENTIALS_FILE_PATH} ({region})"
 
 
 def _print_summary(
@@ -229,7 +234,7 @@ def _print_json(
 
 
 class ApiKeyCommand(BaseCommand):
-    """One-shot GitHub sign-in, account API key, and POLY_API_KEY setup."""
+    """One-shot sign-in, account API key, and POLY_API_KEY setup."""
 
     command = "apikey"
 
@@ -243,7 +248,7 @@ class ApiKeyCommand(BaseCommand):
             parents=[parents.verbose, parents.debug, parents.json],
             help="One-shot setup for AI coding assistants.",
             description=(
-                "One-shot setup: GitHub sign-in, account API key, POLY_API_KEY in your"
+                "One-shot setup: sign-in, account API key, POLY_API_KEY in your"
                 " environment.\n\n"
                 "Never prompts. Designed to be run by an AI coding assistant; fine to run"
                 " yourself.\n\n"
@@ -251,13 +256,28 @@ class ApiKeyCommand(BaseCommand):
                 "Examples:\n"
                 "  poly apikey\n"
                 "  poly apikey --account-id acc-123\n"
+                "  poly apikey --region us-1\n"
+            ),
+        )
+        apikey_parser.add_argument(
+            "--region",
+            type=str,
+            choices=REGIONS,
+            default="studio",
+            help=(
+                "Region/cluster to create the key for. Defaults to 'studio' (PLG), which"
+                " signs in via GitHub only. Any other region uses the standard sign-in page"
+                " (email/SSO), the same one `poly login` uses."
             ),
         )
         apikey_parser.add_argument(
             "--key-name",
             type=str,
-            default=DEFAULT_KEY_NAME,
-            help=f"Name for the account-scoped API key. Defaults to '{DEFAULT_KEY_NAME}'.",
+            default=None,
+            help=(
+                f"Name for the account-scoped API key. Defaults to '{DEFAULT_KEY_NAME}' for"
+                f" studio, or '{DEFAULT_KEY_NAME}-<region>' for any other region."
+            ),
         )
         apikey_parser.add_argument(
             "--account-id",
@@ -276,6 +296,7 @@ class ApiKeyCommand(BaseCommand):
     def run(cls, args: Namespace) -> None:
         """Dispatch to the apikey handler."""
         cls.apikey(
+            region=args.region,
             key_name=args.key_name,
             account_id=args.account_id,
             force=args.force,
@@ -286,19 +307,23 @@ class ApiKeyCommand(BaseCommand):
     @classmethod
     def apikey(
         cls,
-        key_name: str = DEFAULT_KEY_NAME,
+        region: str = "studio",
+        key_name: str | None = None,
         account_id: str | None = None,
         force: bool = False,
         output_json: bool = False,
         verbose: bool = False,
     ) -> None:
-        """Sign in via GitHub, provision an account API key, and export it."""
+        """Sign in and provision an account API key for `region`, then export it."""
         import requests
 
         from poly.handlers.posthog import flush
         from poly.output.console import err_console, info, mask_api_key, plain, success
 
+        key_name = key_name if key_name is not None else _default_key_name(region)
+
         reporter = _Reporter(
+            region,
             output_json,
             {
                 "source": APIKEY_SOURCE,
@@ -314,10 +339,14 @@ class ApiKeyCommand(BaseCommand):
             reporter.say(info, "Setting up your PolyAI account and API key...")
 
             step = "signin"
+            auth_details = (
+                APIKEY_AUTH_DETAILS if region == "studio" else REGION_TO_AUTH_DETAILS[region]
+            )
+            sign_in_via = "GitHub" if region == "studio" else "your browser"
 
             def on_verification_url(verification_uri: str, user_code: str) -> None:
                 message = (
-                    "To sign in with GitHub, open the following link in your browser\n"
+                    f"To sign in with {sign_in_via}, open the following link in your browser\n"
                     "and enter the code when prompted.\n\n"
                     f"  URL:  {verification_uri}\n"
                     f"  Code: [bold]{user_code}[/bold]"
@@ -333,7 +362,7 @@ class ApiKeyCommand(BaseCommand):
                 reporter.emit("apikey_device_code_issued")
 
             jwt_token = signin_with_device_flow(
-                APIKEY_AUTH_DETAILS, on_verification_url=on_verification_url
+                auth_details, on_verification_url=on_verification_url
             )
             reporter.emit("apikey_authenticated")
             reporter.say(success, "Authenticated successfully!")
@@ -341,16 +370,18 @@ class ApiKeyCommand(BaseCommand):
             step = "authorise"
             api = AgentStudioInterface()
             reporter.say(info, "Setting up your account...")
-            api.authorise(region=APIKEY_REGION, jwt_token=jwt_token)
+            api.authorise(region=region, jwt_token=jwt_token)
 
             step = "account"
-            resolved_account_id = _resolve_account_id(api, jwt_token, account_id)
+            resolved_account_id = _resolve_account_id(api, region, jwt_token, account_id)
             reporter.emit("apikey_account_resolved", account_id=resolved_account_id)
-            _alias_to_account(reporter.distinct_id, resolved_account_id)
+            _alias_to_account(region, reporter.distinct_id, resolved_account_id)
             reporter.distinct_id = resolved_account_id
 
             step = "key"
-            api_key, key_reused = _get_or_create_key(api, jwt_token, resolved_account_id, key_name)
+            api_key, key_reused = _get_or_create_key(
+                api, region, jwt_token, resolved_account_id, key_name
+            )
             if key_reused:
                 reporter.say(success, f"Reusing existing '{key_name}' key: {mask_api_key(api_key)}")
                 reporter.emit(
@@ -363,11 +394,11 @@ class ApiKeyCommand(BaseCommand):
                 )
 
             step = "credentials"
-            saved, credentials_summary = _save_credentials(api_key)
+            saved, credentials_summary = _save_credentials(region, api_key)
             if saved:
                 reporter.say(info, f"Saved to {credentials_summary}.")
             else:
-                reporter.say(info, f"Existing ADK credential for {APIKEY_REGION} kept.")
+                reporter.say(info, f"Existing ADK credential for {region} kept.")
 
             step = "env"
             target, masked_line = write_env_var("POLY_API_KEY", api_key, force=force)
@@ -378,7 +409,7 @@ class ApiKeyCommand(BaseCommand):
             )
 
             reporter.emit("apikey_completed", account_id=resolved_account_id, key_reused=key_reused)
-            flush(APIKEY_REGION)
+            flush(region)
 
             if output_json:
                 _print_json(
@@ -401,7 +432,7 @@ class ApiKeyCommand(BaseCommand):
             reporter.fail(e, step, exit_code=1, verbose=verbose)
 
 
-def _alias_to_account(anonymous_id: str, account_id: str) -> None:
+def _alias_to_account(region: str, anonymous_id: str, account_id: str) -> None:
     """Link the anonymous telemetry id to the resolved account, once.
 
     Never raises: a failure here must not interrupt the flow.
@@ -411,6 +442,6 @@ def _alias_to_account(anonymous_id: str, account_id: str) -> None:
     if telemetry_disabled():
         return
     try:
-        get_posthog_client(APIKEY_REGION).alias(previous_id=anonymous_id, distinct_id=account_id)
+        get_posthog_client(region).alias(previous_id=anonymous_id, distinct_id=account_id)
     except Exception:
         logger.warning("PostHog alias failed", exc_info=True)
