@@ -994,17 +994,35 @@ def _format_duration(seconds: int | None) -> str:
     return f"{m}m{s:02d}s" if m else f"{s}s"
 
 
+def _field(c: dict[str, Any], *keys: str) -> Any:
+    """Read the first present key from a conversation dict.
+
+    The v3 conversations list API (jupiter-independent, snake_case) and the v1
+    fallback used in regions without v3 yet (camelCase) name fields
+    differently — see DEVP-664. Callers pass both spellings, snake_case first.
+    """
+    for key in keys:
+        if key in c:
+            return c[key]
+    return None
+
+
 def print_conversations(
     conversations: list[dict[str, Any]],
     url_builder: Callable[[str], str] | None = None,
 ) -> None:
     """Print a table of conversation summaries.
 
+    Note: the v3 conversations list API doesn't return a summary, tags,
+    PolyScore, note, deployment ID, direction, or language — those remain
+    available per-conversation via `poly conversations get <id>`, which still
+    targets the unchanged detail endpoint.
+
     Args:
         conversations: List of conversation summary dicts.
         url_builder: Optional callable(conversation_id) -> str that returns a Studio URL.
     """
-    show_variant = any(c.get("variantId") for c in conversations)
+    show_variant = any(_field(c, "variant_id", "variantId") for c in conversations)
 
     table = Table(box=None, show_header=True, header_style="bold", padding=(0, 1))
     table.add_column("Conversation ID", style="bold yellow", no_wrap=True)
@@ -1015,22 +1033,21 @@ def print_conversations(
     if show_variant:
         table.add_column("Variant", no_wrap=True)
     table.add_column("Handoff", no_wrap=True)
-    table.add_column("Summary", overflow="fold")
 
     for c in conversations:
-        started = c.get("startedAt") or "—"
+        started = _field(c, "started_at", "startedAt") or "—"
         if started != "—":
             started = _format_iso_timestamp(started)
-        duration = _format_duration(c.get("duration"))
-        from_number = c.get("fromNumber") or "—"
+        duration_seconds = _field(c, "total_duration", "duration")
+        duration = _format_duration(duration_seconds)
+        from_number = _field(c, "from_number", "fromNumber") or "—"
         channel = c.get("channel") or "—"
         handoff = ""
-        if c.get("handoff"):
-            dest = c.get("handoffDestination") or ""
+        if _field(c, "handoff"):
+            dest = _field(c, "handoff_destination", "handoffDestination") or ""
             handoff = f"[yellow]{dest}[/yellow]" if dest else "[yellow]yes[/yellow]"
-        summary = _extract_summary_heading(c.get("shortSummary"))
 
-        cid = c.get("conversationId", "—")
+        cid = _field(c, "id", "conversationId") or "—"
         if url_builder and cid != "—":
             url = url_builder(cid)
             cid_display = f"[link={url}]{cid}[/link]"
@@ -1039,8 +1056,8 @@ def print_conversations(
 
         row = [cid_display, started, duration, from_number, channel]
         if show_variant:
-            row.append(c.get("variantId") or "—")
-        row.extend([handoff, summary])
+            row.append(_field(c, "variant_id", "variantId") or "—")
+        row.append(handoff)
         table.add_row(*row)
 
     console.print(table)

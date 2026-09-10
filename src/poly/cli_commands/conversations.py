@@ -3,7 +3,13 @@
 Copyright PolyAI Limited
 """
 
-from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
+from argparse import (
+    ArgumentParser,
+    BooleanOptionalAction,
+    Namespace,
+    RawTextHelpFormatter,
+    _SubParsersAction,
+)
 from typing import Optional
 
 from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
@@ -63,6 +69,27 @@ class ConversationsCommand(BaseCommand):
             type=int,
             default=0,
             help="Number of conversations to skip. Defaults to 0.",
+        )
+        conv_list_parser.add_argument(
+            "--cursor",
+            type=str,
+            default=None,
+            help="Pagination cursor from a previous response's `cursor` field. "
+            "Preferred over --offset where available.",
+        )
+        conv_list_parser.add_argument(
+            "--channel",
+            type=str,
+            action="append",
+            default=None,
+            help="Filter by channel (e.g. voice, chat). Repeatable.",
+        )
+        conv_list_parser.add_argument(
+            "--in-progress",
+            dest="in_progress",
+            action=BooleanOptionalAction,
+            default=None,
+            help="Filter to only in-progress, or only finished (--no-in-progress), conversations.",
         )
 
         conv_get_parser = conversations_subparsers.add_parser(
@@ -127,6 +154,9 @@ class ConversationsCommand(BaseCommand):
                 args.path,
                 args.limit,
                 args.offset,
+                cursor=args.cursor,
+                channel=args.channel,
+                in_progress=args.in_progress,
                 output_json=args.json,
             )
         elif args.conversations_subcommand == "get":
@@ -151,6 +181,9 @@ class ConversationsCommand(BaseCommand):
         base_path: str,
         limit: int = 50,
         offset: int = 0,
+        cursor: Optional[str] = None,
+        channel: Optional[list[str]] = None,
+        in_progress: Optional[bool] = None,
         output_json: bool = False,
     ) -> None:
         """List conversations for the project.
@@ -158,7 +191,10 @@ class ConversationsCommand(BaseCommand):
         Args:
             base_path: Base path for the project.
             limit: Max number of conversations to return.
-            offset: Number of conversations to skip.
+            offset: Number of conversations to skip. Prefer `cursor` where available.
+            cursor: Opaque pagination cursor from a previous response. v3 regions only.
+            channel: Filter by one or more channels. v3 regions only.
+            in_progress: Filter to only in-progress or only finished conversations. v3 regions only.
             output_json: If True, emit machine-readable JSON.
         """
         from poly.output.console import info, paged_output, print_conversations
@@ -166,9 +202,13 @@ class ConversationsCommand(BaseCommand):
         project = load_project(base_path, output_json=output_json)
         result = AgentStudioInterface.list_conversations(
             region=project.region,
+            account_id=project.account_id,
             project_id=project.project_id,
             limit=limit,
             offset=offset,
+            cursor=cursor,
+            channel=channel,
+            in_progress=in_progress,
         )
         conversations = result.get("conversations", [])
 

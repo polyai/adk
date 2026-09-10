@@ -1041,22 +1041,33 @@ class AgentStudioInterface:
     @staticmethod
     def list_conversations(
         region: str,
+        account_id: str,
         project_id: str,
         limit: int = 50,
         offset: int = 0,
+        cursor: Optional[str] = None,
+        channel: Optional[list[str]] = None,
+        in_progress: Optional[bool] = None,
     ) -> dict:
         """List conversations for a project.
 
         Args:
             region: The region name.
+            account_id: The account ID. Only used for the v3 endpoint.
             project_id: The project ID (agent ID).
             limit: Max number of conversations to return.
-            offset: Number of conversations to skip.
+            offset: Number of conversations to skip. Prefer `cursor` where available.
+            cursor: Opaque pagination cursor from a previous v3 response. v3 only.
+            channel: Filter by one or more channels (e.g. "voice", "chat"). v3 only.
+            in_progress: Filter to only in-progress (True) or only finished (False)
+                conversations. v3 only.
 
         Returns:
-            dict: The API response with conversations, count, limit, offset.
+            dict: The API response with conversations and pagination info.
         """
-        return PlatformAPIHandler.list_conversations(region, project_id, limit, offset)
+        return PlatformAPIHandler.list_conversations(
+            region, account_id, project_id, limit, offset, cursor, channel, in_progress
+        )
 
     @staticmethod
     def get_conversation(
