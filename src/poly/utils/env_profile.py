@@ -32,6 +32,16 @@ _SMTO_ABORTIFHUNG = 0x0002
 _WINDOWS_ENVIRONMENT_DISPLAY_PATH = "HKCU\\Environment"
 
 
+def _is_windows() -> bool:
+    """Whether to use the Windows registry environment instead of a profile file."""
+    return os.name == "nt"
+
+
+def _is_macos() -> bool:
+    """Whether bash should be pointed at ~/.bash_profile (macOS) rather than ~/.bashrc."""
+    return sys.platform == "darwin"
+
+
 @dataclass
 class ProfileTarget:
     """Where an environment variable gets persisted, and in what dialect."""
@@ -66,7 +76,7 @@ def detect_profile() -> ProfileTarget:
         ProfileTarget: The file (or, on Windows, the registry location) and
             dialect to write to.
     """
-    if os.name == "nt":
+    if _is_windows():
         return ProfileTarget(path=Path(_WINDOWS_ENVIRONMENT_DISPLAY_PATH), shell="powershell")
 
     home = Path(os.path.expanduser("~"))
@@ -75,7 +85,7 @@ def detect_profile() -> ProfileTarget:
     if shell == "zsh":
         return ProfileTarget(path=home / ".zshrc", shell="zsh")
     if shell == "bash":
-        if sys.platform == "darwin":
+        if _is_macos():
             return ProfileTarget(path=home / ".bash_profile", shell="bash")
         return ProfileTarget(path=home / ".bashrc", shell="bash")
     if shell == "fish":
@@ -99,7 +109,7 @@ def write_env_var(name: str, value: str, *, force: bool = False) -> tuple[Profil
         EnvVarConflict: `name` is already set to a different value and `force`
             is false.
     """
-    if os.name == "nt":
+    if _is_windows():
         return _write_env_var_windows(name, value, force=force)
     return _write_env_var_unix(name, value, force=force)
 
@@ -251,5 +261,11 @@ class _WindowsRegistryBackend:
 
 
 def _get_windows_registry_backend() -> _WindowsRegistryBackend:
-    """Factory for the registry backend, patched by tests on non-Windows CI."""
+    """Factory for the registry backend, patched by tests on non-Windows CI.
+
+    Alongside `_is_windows()` and `_is_macos()`, this is one of three test
+    seams in this module - patching them lets a test force a code path
+    without mutating the real `os.name`/`sys.platform`, which would break
+    `pathlib` and other stdlib code on the actual host platform.
+    """
     return _WindowsRegistryBackend()

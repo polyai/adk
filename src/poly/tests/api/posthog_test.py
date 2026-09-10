@@ -342,7 +342,9 @@ class GetAnonymousIdTest(unittest.TestCase):
 
         path = Path(posthog_module.TELEMETRY_ID_PATH)
         self.assertTrue(path.is_file())
-        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        if os.name != "nt":
+            # Windows doesn't enforce POSIX mode bits - chmod only toggles read-only.
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(path.read_text(encoding="utf-8"), first)
 
     def test_reuses_existing_id(self):

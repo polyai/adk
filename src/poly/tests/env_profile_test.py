@@ -21,18 +21,20 @@ from poly.utils.env_profile import (
 
 @contextmanager
 def _home_env():
-    """Patch HOME/USERPROFILE to a fresh temp dir and force the posix code path.
+    """Patch HOME/USERPROFILE to a fresh temp dir and force the non-Windows code path.
 
     Needed so the Unix/fish tests behave identically on the Windows CI
     runner: `os.path.expanduser("~")` reads `USERPROFILE` on Windows and
     ignores `HOME` (Python 3.8+), and `detect_profile()`/`write_env_var()`
-    both branch on `os.name`, which is `"nt"` there.
+    both branch on `_is_windows()`, which is true there. Patching the seam
+    (rather than the real `os.name`) means `pathlib` still sees the actual
+    host platform and doesn't try to build the wrong path flavor.
     """
     with tempfile.TemporaryDirectory() as tmp_dir:
         home = Path(tmp_dir)
         with (
             patch.dict(os.environ, {"HOME": str(home), "USERPROFILE": str(home)}),
-            patch("poly.utils.env_profile.os.name", "posix"),
+            patch("poly.utils.env_profile._is_windows", return_value=False),
         ):
             yield home
 
@@ -52,7 +54,7 @@ class DetectProfile(unittest.TestCase):
         with (
             _home_env() as home,
             patch.dict(os.environ, {"SHELL": "/bin/bash"}),
-            patch("poly.utils.env_profile.sys.platform", "darwin"),
+            patch("poly.utils.env_profile._is_macos", return_value=True),
         ):
             target = detect_profile()
         self.assertEqual(target.path, home / ".bash_profile")
@@ -63,7 +65,7 @@ class DetectProfile(unittest.TestCase):
         with (
             _home_env() as home,
             patch.dict(os.environ, {"SHELL": "/bin/bash"}),
-            patch("poly.utils.env_profile.sys.platform", "linux"),
+            patch("poly.utils.env_profile._is_macos", return_value=False),
         ):
             target = detect_profile()
         self.assertEqual(target.path, home / ".bashrc")
@@ -93,17 +95,17 @@ class DetectProfile(unittest.TestCase):
 
     def test_windows_returns_registry_target_regardless_of_shell(self):
         """On Windows, the target is always the registry, $SHELL is not consulted."""
-        with patch("poly.utils.env_profile.os.name", "nt"):
+        with patch("poly.utils.env_profile._is_windows", return_value=True):
             target = detect_profile()
-        self.assertEqual(str(target.path), "HKCU\\Environment")
+        self.assertEqual(target.path, Path(r"HKCU\Environment"))
         self.assertEqual(target.shell, "powershell")
 
-    def test_resolves_under_temp_dir_when_posix_is_forced(self):
+    def test_resolves_under_temp_dir_with_both_home_variables_set(self):
         """Regression for the Windows CI fix.
 
-        Forcing posix resolution while both HOME and USERPROFILE are set (as
-        they would be on the Windows runner) must still resolve under the
-        patched home, not the real Windows profile directory.
+        With `_is_windows` forced False and both HOME and USERPROFILE set (as
+        they would be on the Windows runner), detect_profile() must still
+        resolve under the patched home, not the real Windows profile directory.
         """
         with tempfile.TemporaryDirectory() as tmp_dir:
             home = Path(tmp_dir)
@@ -111,7 +113,7 @@ class DetectProfile(unittest.TestCase):
                 patch.dict(
                     os.environ, {"HOME": str(home), "USERPROFILE": str(home), "SHELL": "/bin/zsh"}
                 ),
-                patch("poly.utils.env_profile.os.name", "posix"),
+                patch("poly.utils.env_profile._is_windows", return_value=False),
             ):
                 target = detect_profile()
         self.assertEqual(target.path, home / ".zshrc")
@@ -128,11 +130,11 @@ class WriteEnvVarUnix(unittest.TestCase):
             {"HOME": str(self.home), "USERPROFILE": str(self.home), "SHELL": "/bin/zsh"},
         )
         self._env_patch.start()
-        self._os_name_patch = patch("poly.utils.env_profile.os.name", "posix")
-        self._os_name_patch.start()
+        self._is_windows_patch = patch("poly.utils.env_profile._is_windows", return_value=False)
+        self._is_windows_patch.start()
 
     def tearDown(self):
-        self._os_name_patch.stop()
+        self._is_windows_patch.stop()
         self._env_patch.stop()
         self._tmp_dir.cleanup()
 
@@ -210,11 +212,11 @@ class WriteEnvVarFish(unittest.TestCase):
             {"HOME": str(self.home), "USERPROFILE": str(self.home), "SHELL": "/usr/bin/fish"},
         )
         self._env_patch.start()
-        self._os_name_patch = patch("poly.utils.env_profile.os.name", "posix")
-        self._os_name_patch.start()
+        self._is_windows_patch = patch("poly.utils.env_profile._is_windows", return_value=False)
+        self._is_windows_patch.start()
 
     def tearDown(self):
-        self._os_name_patch.stop()
+        self._is_windows_patch.stop()
         self._env_patch.stop()
         self._tmp_dir.cleanup()
 
@@ -248,7 +250,7 @@ class WriteEnvVarWindows(unittest.TestCase):
         backend.read.return_value = existing
         return backend
 
-    @patch("poly.utils.env_profile.os.name", "nt")
+    @patch("poly.utils.env_profile._is_windows", new=lambda: True)
     @patch("poly.utils.env_profile._get_windows_registry_backend")
     def test_writes_new_value_and_broadcasts(self, mock_get_backend):
         """A fresh value is written to the registry and the change is broadcast."""
@@ -257,13 +259,13 @@ class WriteEnvVarWindows(unittest.TestCase):
 
         target, masked_line = write_env_var("POLY_API_KEY", "sk-abcdefgh1234")
 
-        self.assertEqual(str(target.path), "HKCU\\Environment")
+        self.assertEqual(target.path, Path(r"HKCU\Environment"))
         backend.write.assert_called_once_with("POLY_API_KEY", "sk-abcdefgh1234")
         backend.broadcast.assert_called_once()
         self.assertNotIn("sk-abcdefgh1234", masked_line)
         self.assertEqual(os.environ["POLY_API_KEY"], "sk-abcdefgh1234")
 
-    @patch("poly.utils.env_profile.os.name", "nt")
+    @patch("poly.utils.env_profile._is_windows", new=lambda: True)
     @patch("poly.utils.env_profile._get_windows_registry_backend")
     def test_identical_value_is_a_no_op(self, mock_get_backend):
         """An identical existing registry value is left untouched."""
@@ -275,7 +277,7 @@ class WriteEnvVarWindows(unittest.TestCase):
         backend.write.assert_not_called()
         self.assertIn("already set", message)
 
-    @patch("poly.utils.env_profile.os.name", "nt")
+    @patch("poly.utils.env_profile._is_windows", new=lambda: True)
     @patch("poly.utils.env_profile._get_windows_registry_backend")
     def test_conflicting_value_raises_without_force(self, mock_get_backend):
         """A differing existing registry value raises EnvVarConflict without --force."""
@@ -286,7 +288,7 @@ class WriteEnvVarWindows(unittest.TestCase):
             write_env_var("POLY_API_KEY", "new-value")
         backend.write.assert_not_called()
 
-    @patch("poly.utils.env_profile.os.name", "nt")
+    @patch("poly.utils.env_profile._is_windows", new=lambda: True)
     @patch("poly.utils.env_profile._get_windows_registry_backend")
     def test_force_overwrites_conflicting_value(self, mock_get_backend):
         """force=True overwrites a differing existing registry value."""
