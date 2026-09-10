@@ -606,6 +606,56 @@ def my_func(conv: Conversation):
         _, _, _, lc = Function._extract_decorators(code_with_decorator, "my_func", [], known_lc)
         self.assertEqual(lc.delay_responses[0].id, "DELAY-existing")
 
+    def test_two_identical_delay_responses_get_distinct_ids(self):
+        """Same message and same duration twice is two delays, so it must be two ids.
+
+        Delay ids are derived from the delay's contents, so deriving from message and
+        duration alone collapsed duplicates onto one id and lost one of the two.
+        """
+        code_with_decorator = """@func_latency_control(delay_responses=[('One moment.', 2), ('One moment.', 2)])
+def my_func(conv: Conversation):
+    pass
+"""
+        _, _, _, lc = Function._extract_decorators(code_with_decorator, "my_func", [])
+
+        first, second = lc.delay_responses
+        self.assertNotEqual(first.id, second.id)
+
+    def test_extract_gives_delay_responses_the_same_ids_on_every_read(self):
+        """Unchanged decorator code reads back the same delay ids every time."""
+        code_with_decorator = """@func_latency_control(delay_responses=[('One moment.', 2), ('One moment.', 2)])
+def my_func(conv: Conversation):
+    pass
+"""
+        _, _, _, first_read = Function._extract_decorators(code_with_decorator, "my_func", [])
+        _, _, _, second_read = Function._extract_decorators(code_with_decorator, "my_func", [])
+
+        first_ids = [dr.id for dr in first_read.delay_responses]
+        second_ids = [dr.id for dr in second_read.delay_responses]
+        self.assertEqual(first_ids, second_ids)
+        for delay_id in first_ids:
+            self.assertRegex(delay_id, r"^DELAY-[a-f0-9]{8}$")
+
+    def test_one_known_id_is_claimed_by_the_first_of_two_identical_delays(self):
+        """A known id is used once, and the duplicate falls back to a derived id."""
+        code_with_decorator = """@func_latency_control(delay_responses=[('One moment.', 2), ('One moment.', 2)])
+def my_func(conv: Conversation):
+    pass
+"""
+        known_lc = FunctionLatencyControl(
+            enabled=True,
+            delay_responses=[
+                FunctionDelayResponse(id="DELAY-existing", message="One moment.", duration=2),
+            ],
+        )
+
+        _, _, _, lc = Function._extract_decorators(code_with_decorator, "my_func", [], known_lc)
+
+        first, second = lc.delay_responses
+        self.assertEqual(first.id, "DELAY-existing")
+        self.assertRegex(second.id, r"^DELAY-[a-f0-9]{8}$")
+        self.assertNotEqual(first.id, second.id)
+
     def test_latency_control_roundtrip(self):
         """to_pretty -> from_pretty -> _extract_decorators round-trip."""
         lc = FunctionLatencyControl(
@@ -3155,8 +3205,6 @@ TEST_FLOW_STEP = FlowStep(
         ),
         # Enabled so it survives to_yaml_dict, which omits disabled sections.
         dtmf=DTMFConfig(
-            flow_id="flow-123",
-            step_id="step-1",
             is_enabled=True,
             max_digits=4,
         ),
@@ -3380,8 +3428,10 @@ class FlowStepTests(unittest.TestCase):
             flow_name="Test Flow",
             resource_mappings=[],
         )
-        self.assertIsNone(step.settings.asr_biasing)
-        self.assertIsNone(step.settings.dtmf)
+        # Absent sections read as disabled — they can't be cleared on the backend,
+        # so absence and disabled are the same state.
+        self.assertFalse(step.settings.asr_biasing.is_enabled)
+        self.assertFalse(step.settings.dtmf.is_enabled)
 
     def test_prompt_whitespace_is_stripped(self):
         """Prompts with leading/trailing whitespace are stripped on read."""
@@ -3848,8 +3898,6 @@ conditions:
             end_key="#",
             collect_while_agent_speaking=False,
             is_pii=False,
-            step_id="step-1",
-            flow_id="flow-123",
         )
 
         def advanced_step_with(**settings_kwargs) -> FlowStep:
@@ -3872,6 +3920,9 @@ conditions:
             ("ASR biasing changed", advanced_step_with(asr_biasing=new_asr)),
             ("DTMF changed", advanced_step_with(dtmf=new_dtmf)),
             ("both changed", advanced_step_with(asr_biasing=new_asr, dtmf=new_dtmf)),
+            # Deleting the blocks reads as disabled, which still differs from the
+            # enabled originals and must go out as a settings update.
+            ("both deleted", advanced_step_with()),
         ]:
             with self.subTest(description):
                 new, updated, deleted = step.get_new_updated_deleted_subresources(
@@ -11576,8 +11627,8 @@ class FlowSettingsFromProjectionTest(unittest.TestCase):
             }
         )
 
-        self.assertIsNone(settings.asr_biasing)
-        self.assertIsNone(settings.dtmf)
+        self.assertFalse(settings.asr_biasing.is_enabled)
+        self.assertFalse(settings.dtmf.is_enabled)
         self.assertEqual(settings.llm.provider_model_id, "m")
 
     def test_legacy_top_level_config_is_read_when_there_is_no_settings_block(self):
@@ -11616,7 +11667,7 @@ class FlowSettingsSerializationTest(unittest.TestCase):
     def test_round_trips_every_section(self):
         settings = self._settings(
             asr_biasing=ASRBiasing(is_enabled=True, custom_keywords=["acme"], numeric=True),
-            dtmf=DTMFConfig(self.STEP_ID, self.FLOW_ID, is_enabled=True, max_digits=4),
+            dtmf=DTMFConfig(is_enabled=True, max_digits=4),
             asr=ASRConfig(provider="prov", model="mod"),
             vad=VADConfig(
                 provider="prov",
@@ -11644,7 +11695,7 @@ class FlowSettingsSerializationTest(unittest.TestCase):
     def test_dtmf_uses_legacy_yaml_key(self):
         """The YAML key stays dtmf_config so existing step files keep working."""
         settings = self._settings(
-            dtmf=DTMFConfig(self.STEP_ID, self.FLOW_ID, is_enabled=True, max_digits=2)
+            dtmf=DTMFConfig(is_enabled=True, max_digits=2)
         )
 
         yaml_dict = settings.to_yaml_dict()
@@ -11661,7 +11712,7 @@ class FlowSettingsSerializationTest(unittest.TestCase):
         """Disabled is represented as absent for the sections that deep-merge."""
         settings = self._settings(
             asr_biasing=ASRBiasing(is_enabled=False, custom_keywords=["acme"]),
-            dtmf=DTMFConfig(self.STEP_ID, self.FLOW_ID, is_enabled=False),
+            dtmf=DTMFConfig(is_enabled=False),
         )
 
         self.assertEqual(settings.to_yaml_dict(), {})
@@ -11686,8 +11737,58 @@ class FlowSettingsSerializationTest(unittest.TestCase):
         self.assertTrue(proto.settings.HasField("barge_in"))
         self.assertTrue(proto.settings.HasField("llm"))
         self.assertEqual(proto.settings.llm.provider_model_id, "mod-1")
-        for absent in ("asr_biasing", "dtmf", "asr", "vad"):
+        # asr and vad are clearable, so absence means "no override" and they must
+        # stay unset. asr_biasing and dtmf can't be cleared on the backend — absence
+        # means disabled, and the disable only lands if the section is sent.
+        for absent in ("asr", "vad"):
             self.assertFalse(proto.settings.HasField(absent), absent)
+        for disabled in ("asr_biasing", "dtmf"):
+            self.assertTrue(proto.settings.HasField(disabled), disabled)
+            self.assertFalse(proto.settings.asr_biasing.is_enabled)
+            self.assertFalse(proto.settings.dtmf.is_enabled)
+
+    def test_absent_asr_biasing_and_dtmf_read_as_disabled(self):
+        """Absence and disabled are the same state for the unclearable sections,
+        regardless of how the settings were constructed."""
+        from_yaml = FlowSettings.from_yaml_dict({}, step_id=self.STEP_ID, flow_id=self.FLOW_ID)
+        from_projection = FlowSettings.from_projection(
+            {"settings": {}}, step_id=self.STEP_ID, flow_id=self.FLOW_ID
+        )
+        bare = self._settings()
+
+        for name, settings in [
+            ("from_yaml_dict", from_yaml),
+            ("from_projection", from_projection),
+            ("defaults", bare),
+        ]:
+            with self.subTest(name):
+                self.assertFalse(settings.asr_biasing.is_enabled)
+                self.assertFalse(settings.dtmf.is_enabled)
+        # All construction paths must compare equal, or unchanged steps would queue
+        # spurious settings updates on push.
+        self.assertEqual(from_yaml, from_projection)
+        self.assertEqual(from_yaml, bare)
+
+    def test_deleting_asr_biasing_pushes_it_as_disabled(self):
+        """asr_biasing/dtmf can't go through clear_step_settings, so deleting the
+        YAML block must push the section explicitly disabled — omitting it would be
+        read by the backend as "not updated" and the deletion would silently no-op."""
+        original = self._settings(
+            asr_biasing=ASRBiasing(is_enabled=True, name_spelling=True, yes_no=True),
+            dtmf=DTMFConfig(is_enabled=True, max_digits=4),
+        )
+        # Deleting both blocks from the step YAML reads back as disabled sections.
+        updated = FlowSettings.from_yaml_dict(
+            {}, step_id=self.STEP_ID, flow_id=self.FLOW_ID
+        )
+
+        self.assertNotEqual(updated, original)
+
+        proto = updated.build_update_proto()
+        self.assertTrue(proto.settings.HasField("asr_biasing"))
+        self.assertFalse(proto.settings.asr_biasing.is_enabled)
+        self.assertTrue(proto.settings.HasField("dtmf"))
+        self.assertFalse(proto.settings.dtmf.is_enabled)
 
     def test_command_type_is_the_combined_settings_command(self):
         settings = self._settings(barge_in=BargeInConfig(is_enabled=True))
@@ -11781,7 +11882,7 @@ class FlowSettingsValidationTest(unittest.TestCase):
                 settings = FlowSettings(
                     step_id="step-1",
                     flow_id="flow-123",
-                    dtmf=DTMFConfig("step-1", "flow-123", **kwargs),
+                    dtmf=DTMFConfig(**kwargs),
                 )
                 with self.assertRaises(ValueError) as ctx:
                     settings.validate()
@@ -11814,7 +11915,7 @@ class FlowSettingsValidationTest(unittest.TestCase):
 
     def test_flow_step_validate_checks_its_settings(self):
         """Settings are a sub-resource, so nothing else validates them."""
-        step = self._step(dtmf=DTMFConfig("step-1", "flow-123", max_digits=-1))
+        step = self._step(dtmf=DTMFConfig(max_digits=-1))
 
         with self.assertRaises(ValueError) as ctx:
             step.validate(resource_mappings=self._mappings())
@@ -11823,7 +11924,7 @@ class FlowSettingsValidationTest(unittest.TestCase):
 
     def test_valid_settings_pass_flow_step_validation(self):
         step = self._step(
-            dtmf=DTMFConfig("step-1", "flow-123", max_digits=4, inter_digit_timeout=0),
+            dtmf=DTMFConfig(max_digits=4, inter_digit_timeout=0),
             vad=VADConfig(vad_start=0.0, vad_end=2.5),
         )
 
@@ -12058,6 +12159,155 @@ class AsrSettingsFromProjection(unittest.TestCase):
     def test_empty_projection_yields_no_asr_settings(self):
         """An empty projection should return an empty dict."""
         self.assertEqual(AsrSettings.from_projection({}), {})
+
+
+class DeterministicConditionIdTests(unittest.TestCase):
+    """Tests for condition ids being derived from the condition's scoped name.
+
+    A condition in a step file carries no id of its own, so reading a step used to mint a
+    random one. Two reads of an unchanged file then disagreed about the id, which showed
+    up as a spurious change to push and as one condition owning two ids across branches.
+    """
+
+    def _read_condition(
+        self,
+        flow_name: str = "Booking Flow",
+        step_name: str = "Greeting",
+        condition_name: str = "Go to menu",
+        known_conditions: list[Condition] = None,
+    ) -> Condition:
+        """Read a step file holding a single condition, and return that condition."""
+        step_file_name = resource_utils.clean_name(step_name)
+        flow_folder = resource_utils.clean_name(flow_name)
+        file_path = f"flows/{flow_folder}/steps/{step_file_name}.yaml"
+        step_yaml = (
+            "step_type: default_step\n"
+            f"name: {step_name}\n"
+            "conditions:\n"
+            f"  - name: {condition_name}\n"
+            "    condition_type: exit_flow_condition\n"
+            "    description: Leave the flow\n"
+            "    required_entities: []\n"
+            "prompt: Say hello\n"
+        )
+        flow_mapping = ResourceMapping(
+            resource_id="FLOW-1",
+            resource_name=flow_name,
+            resource_type=FlowConfig,
+            file_path=f"flows/{flow_folder}/flow_config.yaml",
+            flow_name=flow_name,
+            resource_prefix=None,
+        )
+
+        with mock_read_from_file({file_path: step_yaml}):
+            step = FlowStep.read_local_resource(
+                file_path=file_path,
+                resource_id="FLOW-1_step-1",
+                resource_name=step_file_name,
+                resource_mappings=[flow_mapping],
+                known_conditions=known_conditions,
+            )
+
+        self.assertEqual(len(step.conditions), 1)
+        return step.conditions[0]
+
+    def test_reading_the_same_step_twice_gives_the_condition_the_same_id(self):
+        """An unchanged step file reads back the same condition id every time."""
+        first_read = self._read_condition()
+        second_read = self._read_condition()
+
+        self.assertEqual(first_read.resource_id, second_read.resource_id)
+        self.assertRegex(first_read.resource_id, r"^CONDITION-[a-f0-9]{8}$")
+
+    def test_same_condition_name_in_another_flow_gets_a_different_id(self):
+        """Two flows may each have a "Go to menu" condition, and they are not the same one."""
+        booking_flow_condition = self._read_condition(flow_name="Booking Flow")
+        support_flow_condition = self._read_condition(flow_name="Support Flow")
+
+        self.assertNotEqual(
+            booking_flow_condition.resource_id, support_flow_condition.resource_id
+        )
+
+    def test_same_condition_name_in_another_step_gets_a_different_id(self):
+        """Steps within one flow may repeat a condition name, so the step is part of the scope."""
+        greeting_condition = self._read_condition(step_name="Greeting")
+        farewell_condition = self._read_condition(step_name="Farewell")
+
+        self.assertNotEqual(greeting_condition.resource_id, farewell_condition.resource_id)
+
+    def test_known_condition_with_a_matching_name_keeps_its_existing_id(self):
+        """An id the platform already assigned wins over the derived one."""
+        known_condition = Condition(
+            resource_id="cond-assigned-by-the-platform",
+            name="Go to menu",
+            description="Leave the flow",
+            condition_type=ConditionType.EXIT_FLOW,
+            child_step="",
+            step_id="step-1",
+            flow_id="FLOW-1",
+            required_entities=[],
+        )
+
+        condition = self._read_condition(known_conditions=[known_condition])
+
+        self.assertEqual(condition.resource_id, "cond-assigned-by-the-platform")
+
+
+class DeterministicParameterIdTests(unittest.TestCase):
+    """Tests for function parameter ids being derived from the parameter's scoped name.
+
+    A @func_parameter decorator carries no id, so reading a function used to mint a random
+    one and two reads of unchanged code disagreed about the parameter's id.
+    """
+
+    def _code(self, function_name: str = "look_up_booking") -> str:
+        """Function source declaring one decorated parameter."""
+        return (
+            "from _gen import *  # <AUTO GENERATED>\n"
+            "\n"
+            "@func_description('Look up a booking')\n"
+            "@func_parameter('booking_ref', 'the booking reference')\n"
+            f"def {function_name}(conv: Conversation, booking_ref: str):\n"
+            "    return booking_ref\n"
+        )
+
+    def test_reading_the_same_code_twice_gives_the_parameter_the_same_id(self):
+        """Unchanged function code reads back the same parameter id every time."""
+        _, first_read, _, _ = Function._extract_decorators(
+            self._code(), "look_up_booking", known_parameters=[]
+        )
+        _, second_read, _, _ = Function._extract_decorators(
+            self._code(), "look_up_booking", known_parameters=[]
+        )
+
+        self.assertEqual(first_read[0].id, second_read[0].id)
+        self.assertRegex(first_read[0].id, r"^PARAMETER-[a-f0-9]{8}$")
+
+    def test_same_parameter_name_in_another_function_gets_a_different_id(self):
+        """Functions may share a parameter name, so the function is part of the scope."""
+        _, look_up_params, _, _ = Function._extract_decorators(
+            self._code("look_up_booking"), "look_up_booking", known_parameters=[]
+        )
+        _, cancel_params, _, _ = Function._extract_decorators(
+            self._code("cancel_booking"), "cancel_booking", known_parameters=[]
+        )
+
+        self.assertNotEqual(look_up_params[0].id, cancel_params[0].id)
+
+    def test_known_parameter_with_a_matching_name_keeps_its_existing_id(self):
+        """An id the platform already assigned wins over the derived one."""
+        known_parameter = FunctionParameters(
+            id="param-assigned-by-the-platform",
+            name="booking_ref",
+            description="the booking reference",
+            type="string",
+        )
+
+        _, parameters, _, _ = Function._extract_decorators(
+            self._code(), "look_up_booking", known_parameters=[known_parameter]
+        )
+
+        self.assertEqual(parameters[0].id, "param-assigned-by-the-platform")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,450 @@
 # CHANGELOG
 
 
+## v0.54.0 (2026-09-10)
+
+### Features
+
+- Add AI agent skills suite ([#304](https://github.com/polyai/adk/pull/304),
+  [`1ae9187`](https://github.com/polyai/adk/commit/1ae9187daa993879ebca0e476d4209c677e62e29))
+
+## Summary
+
+Adds a `skills/` directory with five agent skills that teach AI coding agents (Claude Code, Cursor,
+  Codex, etc.) the `poly` CLI workflow, plus a README describing the suite. Installable via `npx
+  skills add`.
+
+First PR of a three-part stack: #305 adds `poly setup`, which installs these skills, and #303 makes
+  `poly update` keep them current.
+
+## Motivation
+
+AI coding agents working on ADK projects currently have no contextual knowledge of the `poly`
+  workflow — resource schemas, the no-`main` rule, pushed-state testing semantics, or conflict
+  resolution. These skills provide that context on demand, structured after Google's `agents-cli`
+  skills suite: a workflow entrypoint plus task-specific skills that load only when relevant.
+
+## Changes
+
+- `skills/poly-adk-workflow/SKILL.md` — entrypoint: install/update, auth, `poly docs` habit,
+  resource-choice guidance, project structure, the core edit → validate → push → test → merge loop,
+  and a routing table to the task skills - `skills/poly-adk-testing/SKILL.md` — `poly validate`,
+  scripted `poly chat`, `test_suite/` authoring with `api_mocks`, `poly functions execute/validate`
+  - `skills/poly-adk-branching/SKILL.md` — branch semantics, three-way merge model, conflict
+  markers, non-interactive `merge --resolutions`, review gists -
+  `skills/poly-adk-conversations/SKILL.md` — `poly conversations`, instrumenting with `conv.log` and
+  metrics, real-call → test-case loop - `skills/poly-adk-rtc/SKILL.md` — RTC pull/push cycle, drift
+  protection, live-environment safety - `skills/README.md` — suite overview and install instructions
+
+Resource schemas are deliberately not duplicated — skills instruct agents to run `poly docs`, which
+  ships schemas with the installed CLI. Skill `metadata.version` is pinned to the current release
+  (0.53.1).
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+Markdown-only change. Skills were installed locally via `npx skills add` (frontmatter validated by
+  the tool) and exercised in Claude Code sessions against a real project. All CLI commands and flags
+  referenced were cross-checked against `docs/` and, where relevant, the source.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+- Add poly setup command and remove poly start ([#305](https://github.com/polyai/adk/pull/305),
+  [`f647d06`](https://github.com/polyai/adk/commit/f647d0691db6afedff0df72b92a3cc7b209847d6))
+
+## Summary
+
+Adds `poly setup` — a single onboarding command covering authentication, shell completion, AI agent
+  skill installation, and project setup — and removes `poly start`, which it supersedes. Second PR
+  of the stack: stacked on #304 (the skills it installs), and the base for #303, which makes `poly
+  update` keep them current.
+
+## Motivation
+
+Onboarding currently spans several commands users must discover one by one (`poly login`, `poly
+  completion`, `poly project create`), and the new agent skills had no installation path. `poly
+  setup` runs all of it in one command, skipping any step that is already done, so it doubles as a
+  repair command. `poly start` covered a subset of this (auth + project, hardcoded to the `studio`
+  region) and is not referenced in published material, so it is removed rather than left as a second
+  entry point.
+
+## Changes
+
+- New `poly setup` command with `--region`, `--base-path`, `--skip-auth`, `--skip-skills`, `--agent`
+  (repeatable), `--dev`, and `--global/-g` flags - New `cli_commands/skills.py`: wrapper around the
+  pinned `npx skills` package with a Node.js 18+ gate; skill installation is non-fatal — a missing
+  Node warns and setup continues - `poly login` (and setup) now wait up to 20s for a newly created
+  API key to become active before returning - Region selection extracted to a shared picker; `poly
+  start`'s four hardcoded `studio` call sites removed along the way - `poly start` removed from the
+  CLI, docs, and nav - Docs: new `setup` reference page; getting-started restructured to "install,
+  then `poly setup`"; tooling page now leads with skill installation via setup - `poly-adk-workflow`
+  skill updated to mention `poly setup` for fresh machines - Root README quickstart updated from
+  `poly start` to `poly setup`
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+60 new tests (node gate, npx argument construction and non-raising failures, per-step skip logic,
+  real rc-file completion installs in throwaway home directories — set via both HOME and USERPROFILE
+  so they are hermetic on Windows — region threading, and activation-poll behavior). Manually
+  verified end-to-end with an isolated `$HOME`: completion install + idempotent re-run, `--dev -g
+  --agent claude-code` installing all five skills via npx, graceful skip without a TTY, and `poly
+  start` now reporting an invalid choice.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) — `poly start` is intentionally
+  removed; `poly setup` / `poly login` are the migration path - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+- Proactively match parent branch ids on push ([#314](https://github.com/polyai/adk/pull/314),
+  [`e0fb4d5`](https://github.com/polyai/adk/commit/e0fb4d5de75d609067a87027572b1a35e1149909))
+
+## Summary
+
+`poly push` now proactively adopts the parent branch's resource ids for new local resources that
+  match by file path, and mints subresource ids (conditions, function parameters, delay responses)
+  deterministically from their scoped names. This keeps ids aligned across branches so merges
+  reconcile resources instead of duplicating them.
+
+## Motivation
+
+When a resource is added on the parent branch and its files reach a child branch (e.g. via a
+  git-side merge of the project repo), pushing previously minted fresh random ids for them. The same
+  logical resource then had a different id on each branch, and merges treated the two copies as
+  unrelated — producing duplicates or name collisions. Adopting existing ids at mint time and
+  deriving subresource ids from stable names removes the main sources of this divergence.
+
+## Changes
+
+- `poly push` fetches the parent branch's resources by file path and passes them into
+  `find_new_kept_deleted`; a new resource whose file path-matches a parent resource adopts the
+  parent's id at mint time. Flows resolve first so composite step ids stay consistent, and steps
+  adopt the parent's bare step id under the local flow prefix. - Parent-id adoption always runs on
+  real pushes; dry runs skip the parent fetch unless `POLY_ADK_SYNC_PARENT_IDS_TEST=1` forces it for
+  testing. - Kept resources inherit parent-only subresources by name, so a condition or parameter
+  added on both the parent and the branch ends up with one shared id. - Condition, function
+  parameter, and delay-response ids are derived from their scoped names (`generate_subresource_id`)
+  instead of minted randomly — repeated reads are idempotent and independently created same-named
+  subresources agree across branches. - `sync_ids_with_sandbox` is generalized to
+  `sync_ids_with_parent`, defaulting to the branch's actual parent and falling back to main. - The
+  parent branch's projection can be supplied directly — `push_project(parent_projection_json=...)`
+  for library consumers (e.g. a service embedding the ADK), mirrored by a hidden
+  `--parent-projection JSON|-` CLI flag. A supplied projection builds the parent-id lookup fully
+  offline (no branch or projection fetch) and enables adoption on dry runs; an empty dict means "no
+  parent"; omitting it keeps the fetch behavior. - Parent fetching and path-keying are split
+  (`_fetch_parent_resources` returning the raw resources + a shared `_resources_by_absolute_path`),
+  and `sync_ids_with_parent` reuses the same fetch for its default-parent resolution. - Retargeted
+  the id-sync tests at the mint site and added coverage for deterministic ids, subresource
+  inheritance, the offline parent-projection path (enforced by a test API handler that fails on any
+  network call), and the new CLI parsing.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Manual test pass:
+
+- [x] 1. New resource from the parent adopts the parent's id on push - [x] 2. New flow with steps —
+  flow id adopted, step ids bare in commands, conditions carry parent ids, references resolve - [x]
+  3. New step in a kept flow adopts the parent's bare step id under the branch flow prefix - [x] 4.
+  Condition added on both sides keeps the parent's condition id (kept step) - [x] 5. Parameter added
+  on both sides keeps the parent's parameter id - [x] 6. Repeated dry runs mint identical condition
+  ids (read idempotence) - [x] 7. Sibling branches mint identical ids for the same-named condition -
+  [x] 8. Delay-response ids stable across pushes - [x] 9. Push from main unchanged - [x] 10. Dry run
+  without the test env var does not fetch the parent - [x] 11. Local-only resource still mints a
+  random id - [x] 12. Parent fetch failure mode on a real push - [x] 13. `sync_ids_with_parent`
+  against a non-main parent - [x] 14. Pull + status clean after a push with adopted ids - [x] 15.
+  Merge with an untouched adopted-id resource auto-resolves (audit-only diff) - [x] 16. Merge with a
+  branch-edited adopted-id resource surfaces a real conflict - [x] 17. Merge without the audit-field
+  auto-resolve deployed (control) - [x] 18. `poly push --dry-run --parent-projection -` (projection
+  piped in) shows adopted ids fully offline
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) — note: real pushes now always
+  attempt parent-id adoption for new resources; dry-run output is unchanged unless the test env var
+  is set - [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+
+## v0.53.4 (2026-09-09)
+
+### Bug Fixes
+
+- Read feature flags from the region's PostHog project
+  ([#313](https://github.com/polyai/adk/pull/313),
+  [`afd5185`](https://github.com/polyai/adk/commit/afd5185702619cd564f5af4129a8cb3e8b195190))
+
+## Summary
+
+Every feature-flag read went to the non-production PostHog project, whose rollouts sit at 100%, so
+  every flag reported as enabled. The client is now built per region's project, and the project
+  group key and properties match what the platform services send.
+
+## Motivation
+
+`deployment-simplification` returned `true` for every input — including project ids that don't
+  exist:
+
+``` before after a migrated project True True a non-migrated project True False a project id that
+  does True False not exist ```
+
+Two separate causes, both needed fixing:
+
+- **Wrong PostHog project.** One key was hardcoded, the non-production one. There are two:
+  `dev`/`staging`/`apollo` share one, the production clusters share the other. - **Wrong group
+  key.** Project ids are minted per-cluster and several clusters share one PostHog project, so the
+  `project` group key is namespaced as `<cluster>/<project_id>`. A bare id matches no group. Release
+  conditions match on group *properties*, which weren't sent at all.
+
+## Changes
+
+- Select the PostHog project by region; cache one client per project key, since a session can touch
+  more than one region. An unlisted region is treated as production, so a new region is never
+  reported as non-production. - Namespace the `project` group key by cluster. - Send
+  `group_properties` for both groups, including `account_id` so account-scoped conditions can match.
+  `account_id` is omitted when unknown rather than sent empty, which would fail an exact condition.
+  - Send the cluster `env` property, which is what separates two deployments sharing a cluster key.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Tested against a live Agent Studio project
+
+Payload assertions for the group key, properties, an omitted account, and a non-production env.
+  Region-to-project mapping covered for production, non-production, mixed casing and unknown
+  regions.
+
+Verified against real projects: `deployment-simplification` now answers `true` for a migrated
+  project and `false` for one that isn't, and `false` for an invented project id.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented)
+
+1565 passed, none failing. `get_posthog_client()` now takes a region — it has one caller in the
+  package.
+
+Note this changes behaviour wherever a flag gates something: flags that read as enabled everywhere
+  will start resolving per project. That is the point, but it is a real change.
+
+
+## v0.53.3 (2026-09-09)
+
+### Bug Fixes
+
+- Compare versions and tag when checking convergence
+  ([#311](https://github.com/polyai/adk/pull/311),
+  [`558203d`](https://github.com/polyai/adk/commit/558203d272d7a629c4c8d0bc123cd26f3d794ef3))
+
+## Summary
+
+`using_simplified_deployments` decides convergence by comparing deployment timestamps, which reports
+  every converged project as unconverged. It now compares version hashes, and treats a tagged
+  sandbox deployment as proof on its own.
+
+## Motivation
+
+The comment states the rule: *"A project is converged if the main == live"*. The code compares
+  timestamps — newest live vs newest sandbox.
+
+`main` has no environment of its own. Its deploys land in sandbox before migration and in live
+  after, so its version is the newest across both.
+
+Two kinds of sandbox deployment sit newer than live:
+
+- the mirror written after each live publish, holding live's version - a tagged branch deployment,
+  holding that branch's version
+
+A project has therefore migrated if any sandbox deployment carries the tag, or if live and main hold
+  the same version hash.
+
+## Changes
+
+- Compare the newest live deployment's `version_hash` against main's newest deployment's, instead of
+  timestamps. - Return converged when a sandbox deployment carries a tag. The rollout flag is still
+  checked first, and a soft-deleted tagged deployment doesn't count. - Require a non-empty hash on
+  both sides. Comparing directly made two absent hashes equal, and draft deploys record an empty
+  hash. - Find each head by `created_at` rather than assuming the API returns newest first. -
+  Convergence extracted into `_has_converged`.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Tested against a live Agent Studio project
+
+Convergence cases: a sandbox mirror of live, a sandbox deployment holding its own version, an older
+  sandbox deployment, a tagged deployment, a tagged deployment with the flag off, a soft-deleted
+  tagged deployment, no deployments at all, no live deployment, a missing or empty hash, a deleted
+  head, and unordered API responses.
+
+Verified against two real projects: a converged one now reports `True` where it reported `False`; an
+  unconverged one still reports `False`.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented)
+
+1555 passed; two pre-existing `posthog_test.py` failures also fail on unmodified `main`.
+
+Note this changes behaviour: affected projects will start targeting `live`. Intended, but real.
+
+### Documentation
+
+- Auto-update from 2a7b3be ([#309](https://github.com/polyai/adk/pull/309),
+  [`261bfbd`](https://github.com/polyai/adk/commit/261bfbda72257bff4a16fcbd365629faed6f6be7))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Note keyphrase uniqueness rule ([#310](https://github.com/polyai/adk/pull/310),
+  [`bba4850`](https://github.com/polyai/adk/commit/bba48508e56fe9d465c7ae4386a3ddae9ebfd0d5))
+
+## Summary
+
+Document the keyphrase uniqueness rule on the speech recognition reference page, so the validation
+  added in `21692da` is discoverable before a push fails.
+
+## Motivation
+
+Agent Studio normalizes keyphrases (trim + lowercase) and rejects a push containing two entries that
+  normalize to the same phrase. Nothing in the docs said so, so the constraint was only discoverable
+  by hitting the error.
+
+## Changes
+
+- Add a `Validation` section to the speech recognition page, covering the keyphrase uniqueness rule
+  along with the existing rules for ASR settings, keyphrase boosting, and transcript corrections -
+  Add a matching bullet to the speech recognition best practices list
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
+## v0.53.2 (2026-09-03)
+
+### Bug Fixes
+
+- Push deleted asr_biasing/dtmf_config sections as disabled
+  ([#308](https://github.com/polyai/adk/pull/308),
+  [`548f063`](https://github.com/polyai/adk/commit/548f063850ed334fff896e98cbaff3ae77ba04e6))
+
+## Summary
+
+Deleting an `asr_biasing` or `dtmf_config` block from a step's YAML was silently dropped on push, so
+  the deletion never reached Agent Studio and `poly diff` kept showing it as pending forever. Absent
+  sections now read as disabled and are pushed explicitly with `is_enabled: false`.
+
+## Motivation
+
+The backend's `clear_step_settings` command rejects the `asrBiasing`/`dtmf` sections (they
+  deep-merge into legacy top-level mirrors), so these two sections can't go through the clear path
+  like `asr`/`vad`/`barge_in`/`llm` do. Meanwhile the update proto omitted the section entirely when
+  the block was deleted, which the backend reads as "not updated". Since disabling is the only way
+  to express removal for these sections — and `to_yaml_dict` already omits disabled sections —
+  absence and disabled are treated as the same state, and the round trip (push → fetch → diff)
+  converges cleanly.
+
+## Changes
+
+- `FlowSettings` normalises absent `asr_biasing`/`dtmf` to disabled instances in `__init__`, so
+  every construction path (YAML read, projection read, bare defaults) compares equal and a deleted
+  block is detected as a settings update - `build_update_proto` always sends the `asr_biasing` and
+  `dtmf` sections (enabled or disabled) instead of omitting them when unset; the clearable sections
+  (`asr`, `vad`, `barge_in`, `llm`) are still omitted when absent - `DTMFConfig` drops its unused
+  `step_id`/`flow_id`/`resource_id` - Added regression tests: deleted blocks push as disabled, all
+  construction paths agree on the disabled state, and sub-resource diffing flags deleted sections as
+  an update
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+
 ## v0.53.1 (2026-09-02)
 
 ### Bug Fixes

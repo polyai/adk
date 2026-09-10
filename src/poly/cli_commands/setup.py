@@ -17,6 +17,7 @@ from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
 from poly.cli_commands.project import InitCommand, ProjectCommand
 from poly.cli_commands.skills import install_skills, node_gate_reason
 from poly.handlers.interface import REGIONS
+from poly.project import PROJECT_CONFIG_FILE, STATUS_FILE
 from poly.utils import any_credentials_exist
 
 logger = logging.getLogger(__name__)
@@ -244,9 +245,10 @@ class SetupCommand(BaseCommand):
 
         from poly.output.console import info, success
 
-        if os.path.exists(os.path.join(base_path, "project.yaml")):
-            success("Project: already inside an ADK project — skipping.")
-            return
+        for marker in (PROJECT_CONFIG_FILE, STATUS_FILE):
+            if os.path.exists(os.path.join(base_path, marker)):
+                success("Project: already inside an ADK project — skipping.")
+                return
 
         if not sys.stdin.isatty():
             info(

@@ -440,6 +440,57 @@ class StringUtilsTests(unittest.TestCase):
         self.assertEqual(resource_utils.to_camel_case(mixed_case), "thisIsAnotherTestName")
 
 
+class GenerateSubresourceIdTests(unittest.TestCase):
+    """Tests for generate_subresource_id deriving ids from a subresource's scoped name.
+
+    Subresources (conditions, parameters, delay responses) are matched by name inside
+    their parent, so deriving the id from that scoped name is what makes two reads - and
+    two branches - agree on an id instead of each minting a random one.
+    """
+
+    def test_same_scope_always_yields_the_same_id(self):
+        """The same scope derives the same id, however many times it is asked for."""
+        first = resource_utils.generate_subresource_id(
+            "CONDITION", "Booking Flow", "Greeting", "Go to menu"
+        )
+        second = resource_utils.generate_subresource_id(
+            "CONDITION", "Booking Flow", "Greeting", "Go to menu"
+        )
+
+        self.assertEqual(first, second)
+
+    def test_id_has_the_shape_of_a_randomly_minted_id(self):
+        """Derived ids must be drop-in replacements for the random ids they replaced."""
+        derived = resource_utils.generate_subresource_id("PARAMETER", "look_up_booking", "ref")
+
+        self.assertRegex(derived, r"^PARAMETER-[a-f0-9]{8}$")
+
+    def test_different_scopes_yield_different_ids(self):
+        """The same condition name under a different step is a different subresource."""
+        under_greeting = resource_utils.generate_subresource_id(
+            "CONDITION", "Booking Flow", "Greeting", "Go to menu"
+        )
+        under_farewell = resource_utils.generate_subresource_id(
+            "CONDITION", "Booking Flow", "Farewell", "Go to menu"
+        )
+
+        self.assertNotEqual(under_greeting, under_farewell)
+
+    def test_scope_order_is_significant(self):
+        """Scope parts are ordered outermost first, so swapping them is a different scope."""
+        flow_then_step = resource_utils.generate_subresource_id("CONDITION", "booking", "greeting")
+        step_then_flow = resource_utils.generate_subresource_id("CONDITION", "greeting", "booking")
+
+        self.assertNotEqual(flow_then_step, step_then_flow)
+
+    def test_different_prefixes_yield_different_ids(self):
+        """Two kinds of subresource sharing a scope must not share an id."""
+        condition = resource_utils.generate_subresource_id("CONDITION", "greet", "confirm")
+        parameter = resource_utils.generate_subresource_id("PARAMETER", "greet", "confirm")
+
+        self.assertNotEqual(condition, parameter)
+
+
 class ResourceReferenceTests(unittest.TestCase):
     """Tests for resource reference extraction and manipulation."""
 
@@ -1126,7 +1177,7 @@ class ClearUnusedSettingsFromFlowStepTest(unittest.TestCase):
     def _all_sections(self) -> dict:
         return {
             "asr_biasing": ASRBiasing(is_enabled=True),
-            "dtmf": DTMFConfig(self.STEP_ID, self.FLOW_ID, is_enabled=True),
+            "dtmf": DTMFConfig(is_enabled=True),
             "asr": ASRConfig(provider="p", model="m"),
             "vad": VADConfig(
                 provider="p",
