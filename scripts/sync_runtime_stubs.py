@@ -44,6 +44,7 @@ STUB_FILES = [
     "agentic_dial.py",
     "emails.py",
     "entity_validator.py",
+    "cxone.py",
 ]
 
 
