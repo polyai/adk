@@ -368,9 +368,7 @@ class FlowStep(BaseFlowStep, YamlResource):
             Condition(**condition) if not isinstance(condition, Condition) else condition
             for condition in (conditions or [])
         ]
-        # The YAML read has always stripped the prompt, so stripped is the canonical
-        # form — normalise here so a projection read (where Studio edits often leave
-        # trailing whitespace) compares equal to a disk read of the same content.
+        # Stripped is the canonical form — YAML reads have always stripped.
         self.prompt = (prompt or "").strip()
         self.position = position or {}
 
@@ -1341,11 +1339,8 @@ class FlowSettings(SubResource):
 
         # asr_biasing and dtmf can't be cleared on the backend, so an absent section
         # means disabled — normalise here so every construction path (YAML, projection,
-        # bare defaults) compares equal. The same goes for a disabled section's
-        # residual sub-values: to_yaml_dict drops disabled sections entirely, so
-        # residuals the platform still stores (e.g. a stale interDigitTimeout on a
-        # step whose DTMF was later disabled) can never round-trip through disk and
-        # must not make identical content compare unequal.
+        # bare defaults) compares equal. Disabled sections normalise to bare defaults:
+        # YAML drops them entirely, so their residual values can't round-trip.
         self.asr_biasing = asr_biasing if asr_biasing is not None else ASRBiasing()
         self.dtmf = dtmf if dtmf is not None else DTMFConfig()
         if not self.asr_biasing.is_enabled:

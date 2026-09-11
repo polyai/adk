@@ -11511,13 +11511,8 @@ class FlowStepFromProjection(unittest.TestCase):
         self.assertEqual(step.prompt, "Hello!")
 
     def test_prompt_whitespace_is_stripped_on_every_path(self):
-        """Surrounding prompt whitespace must not affect equality.
-
-        The YAML read has always stripped the prompt, but the projection read did
-        not, so a step whose prompt was saved in Studio with a trailing newline
-        compared unequal to the identical disk read forever — the same failure mode
-        variable_references had for functions.
-        """
+        """Surrounding prompt whitespace must not affect equality — YAML reads
+        strip, so projection reads must too."""
         projection = {
             "flows": {
                 "flows": {
@@ -11690,13 +11685,9 @@ class FlowSettingsFromProjectionTest(unittest.TestCase):
 class FlowSettingsEqualityTest(unittest.TestCase):
     """Disabled asr_biasing/dtmf residuals must not affect equality.
 
-    to_yaml_dict drops disabled sections entirely, so residual sub-values the
-    platform still stores (e.g. a stale interDigitTimeout on a step whose DTMF was
-    later disabled) can never round-trip through disk. Including them in the
-    generated __eq__ made every projection-read step with such residuals compare
-    unequal to a disk read of identical content — and sync_ids_with_sandbox compares
-    whole resources, so one duplicate-name merge fallback rewrote every step in the
-    project.
+    YAML drops disabled sections entirely, so their residual values can never
+    round-trip through disk — a projection read carrying residuals must still
+    compare equal to a disk read of identical content.
     """
 
     STEP_ID = "step-1"
@@ -11968,8 +11959,7 @@ class FlowSettingsValidationTest(unittest.TestCase):
         ]
 
     def test_negative_dtmf_values_are_rejected(self):
-        # Enabled, because a disabled section is normalised to bare defaults at
-        # construction — residual values are discarded before validation.
+        # Enabled: a disabled section is normalised away before validation.
         for kwargs, expected in [
             ({"max_digits": -1}, "max_digits"),
             ({"inter_digit_timeout": -1}, "inter_digit_timeout"),
@@ -12010,12 +12000,8 @@ class FlowSettingsValidationTest(unittest.TestCase):
         self.assertIsNone(settings.validate())
 
     def test_flow_step_validate_checks_its_settings(self):
-        """Settings are a sub-resource, so nothing else validates them.
-
-        The invalid config must be enabled: a disabled section is normalised to
-        bare defaults at construction, discarding residual values before
-        validation can see them.
-        """
+        """Settings are a sub-resource, so nothing else validates them."""
+        # Enabled: a disabled section is normalised away before validation.
         step = self._step(dtmf=DTMFConfig(is_enabled=True, max_digits=-1))
 
         with self.assertRaises(ValueError) as ctx:
