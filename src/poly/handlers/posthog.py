@@ -8,6 +8,8 @@ import os
 import uuid
 from typing import TYPE_CHECKING
 
+from poly.constants import POLY_HOME_DIR
+
 POSTHOG_HOST = "https://eu.i.posthog.com"
 
 # Public client-side project keys, safe to commit. One PostHog project per
@@ -19,7 +21,7 @@ NON_PROD_REGIONS = frozenset({"dev", "staging"})
 FEATURE_FLAGS_REQUEST_TIMEOUT_SECONDS = 1
 DEFAULT_FLUSH_TIMEOUT_SECONDS = 5.0
 
-TELEMETRY_ID_PATH = os.path.expanduser("~/.poly/telemetry_id")
+TELEMETRY_ID_PATH = os.path.join(POLY_HOME_DIR, "telemetry_id")
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +110,7 @@ def get_anonymous_id() -> str:
     """Get (or create) a stable anonymous id for this machine's telemetry events.
 
     Returns:
-        str: A UUID4, persisted at `~/.poly/telemetry_id` (mode 600) so it is
+        str: A UUID4, persisted at `TELEMETRY_ID_PATH` (mode 600) so it is
             stable across CLI invocations.
     """
     if os.path.isfile(TELEMETRY_ID_PATH):

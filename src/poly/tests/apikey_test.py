@@ -40,6 +40,10 @@ class ApiKeyTestCase(unittest.TestCase):
                 "poly.cli_commands.apikey.AgentStudioInterface.get_accounts_internal",
                 return_value=[{"id": FAKE_ACCOUNT}],
             ),
+            "get_accounts_static": patch(
+                "poly.cli_commands.apikey.AgentStudioInterface.get_accounts",
+                return_value={FAKE_ACCOUNT: "Account One"},
+            ),
             "list_keys": patch(
                 "poly.cli_commands.apikey.AgentStudioInterface.list_account_api_keys_internal",
                 return_value=[],
@@ -278,6 +282,37 @@ class AccountPollFailure(ApiKeyTestCase):
         failed = self._failed_events()
         self.assertEqual(len(failed), 1)
         self.assertEqual(failed[0]["step"], "account")
+
+
+class KeyActivationWait(ApiKeyTestCase):
+    """Tests for the post-credentials key-activation poll."""
+
+    def test_activates_on_third_poll(self):
+        """The command completes normally once the key activates partway through the poll."""
+        self.mocks["get_accounts_static"].side_effect = [
+            Exception("not active"),
+            Exception("not active"),
+            {FAKE_ACCOUNT: "Account One"},
+        ]
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            ApiKeyCommand.apikey()
+
+        self.assertEqual(self.mocks["get_accounts_static"].call_count, 3)
+        self.mocks["write_env"].assert_called_once()
+
+    def test_never_activates_still_completes_and_warns(self):
+        """20 failed polls print a warning but do not fail the command or emit telemetry."""
+        self.mocks["get_accounts_static"].side_effect = Exception("not active")
+
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            ApiKeyCommand.apikey()
+
+        self.assertEqual(self.mocks["get_accounts_static"].call_count, 20)
+        self.mocks["write_env"].assert_called_once()
+        self.assertIn("not active yet", stdout.getvalue())
+        self.assertNotIn("apikey_failed", self._event_names())
 
 
 class EnvConflict(ApiKeyTestCase):

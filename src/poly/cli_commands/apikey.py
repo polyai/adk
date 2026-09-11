@@ -11,6 +11,7 @@ step-by-step behaviour.
 Copyright PolyAI Limited
 """
 
+import contextlib
 import logging
 import platform
 import sys
@@ -18,7 +19,6 @@ import time
 import traceback
 from argparse import ArgumentParser, Namespace, _SubParsersAction
 from datetime import datetime, timezone
-from importlib.metadata import version as get_package_version
 from typing import Callable
 
 from poly.auth.device_flow import DeviceFlowError, signin_with_device_flow
@@ -45,14 +45,6 @@ APIKEY_SOURCE = "apikey"
 def _default_key_name(region: str) -> str:
     """The default API key name - disambiguated by region so keys never collide."""
     return DEFAULT_KEY_NAME if region == "studio" else f"{DEFAULT_KEY_NAME}-{region}"
-
-
-def _adk_version() -> str:
-    """The installed ADK version, or "unknown" if it cannot be determined."""
-    try:
-        return get_package_version("polyai-adk")
-    except Exception:
-        return "unknown"
 
 
 class _Reporter:
@@ -164,6 +156,25 @@ def _get_or_create_key(
     if not api_key:
         raise ValueError("API key not found in response. Please contact support.")
     return api_key, False
+
+
+def _wait_for_key_active(api: AgentStudioInterface, region: str) -> bool:
+    """Poll until the saved key is usable, mirroring `poly login`'s activation wait.
+
+    A newly created key can take a few seconds to activate; polling here means a
+    command run immediately after `poly apikey` does not fail against a key the
+    platform has not finished activating yet.
+
+    Returns:
+        bool: Whether the key became active within the poll window.
+    """
+    for _ in range(ACCOUNT_POLL_ATTEMPTS):
+        try:
+            api.get_accounts(region=region)
+            return True
+        except Exception:
+            time.sleep(ACCOUNT_POLL_INTERVAL_SECONDS)
+    return False
 
 
 def _save_credentials(region: str, api_key: str) -> tuple[bool, str]:
@@ -317,6 +328,7 @@ class ApiKeyCommand(BaseCommand):
         """Sign in and provision an account API key for `region`, then export it."""
         import requests
 
+        from poly.cli_commands.shared import get_package_version
         from poly.handlers.posthog import flush
         from poly.output.console import err_console, info, mask_api_key, plain, success
 
@@ -327,7 +339,7 @@ class ApiKeyCommand(BaseCommand):
             output_json,
             {
                 "source": APIKEY_SOURCE,
-                "adk_version": _adk_version(),
+                "adk_version": get_package_version(),
                 "os": platform.system(),
                 "shell": detect_profile().shell,
             },
@@ -399,6 +411,23 @@ class ApiKeyCommand(BaseCommand):
                 reporter.say(info, f"Saved to {credentials_summary}.")
             else:
                 reporter.say(info, f"Existing ADK credential for {region} kept.")
+
+            step = "activation"
+            from poly.output.console import console, warning
+
+            status_ctx = (
+                contextlib.nullcontext()
+                if reporter.output_json
+                else console.status("[info]Verifying API key is active...[/info]")
+            )
+            with status_ctx:
+                key_active = _wait_for_key_active(api, region)
+            if not key_active:
+                reporter.say(
+                    warning,
+                    "API key was saved but is not active yet."
+                    " If your next command fails, wait a moment and retry.",
+                )
 
             step = "env"
             target, masked_line = write_env_var("POLY_API_KEY", api_key, force=force)
