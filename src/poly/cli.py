@@ -11,6 +11,7 @@ from argparse import ArgumentParser
 
 import argcomplete
 
+from poly.cli_commands.apikey import ApiKeyCommand
 from poly.cli_commands.audio_cache import AudioCacheCommand
 from poly.cli_commands.auth import LoginCommand
 from poly.cli_commands.base import (
@@ -54,6 +55,7 @@ COMMANDS = [
     InitCommand,
     SetupCommand,
     LoginCommand,
+    ApiKeyCommand,
     StudioCommand,
     ProjectCommand,
     TemplateCommand,

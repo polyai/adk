@@ -1039,6 +1039,59 @@ class AgentStudioInterface:
         return PlatformAPIHandler.create_pat_internal(region, jwt_token, name)
 
     @staticmethod
+    def get_accounts_internal(region: str, jwt_token: str, source: str = "adk") -> list[dict]:
+        """Get the accounts visible to the authenticated user, via JWT auth.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            source: Value for the ``X-Poly-Source`` header.
+
+        Returns:
+            list[dict]: The raw list of account records.
+        """
+        return PlatformAPIHandler.get_accounts_internal(region, jwt_token, source=source)
+
+    @staticmethod
+    def list_account_api_keys_internal(
+        region: str, jwt_token: str, account_id: str, source: str = "adk"
+    ) -> list[dict]:
+        """List the account-scoped API keys for an account, via JWT auth.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            account_id: The account ID.
+            source: Value for the ``X-Poly-Source`` header.
+
+        Returns:
+            list[dict]: The raw list of API key records.
+        """
+        return PlatformAPIHandler.list_account_api_keys_internal(
+            region, jwt_token, account_id, source=source
+        )
+
+    @staticmethod
+    def create_account_api_key_internal(
+        region: str, jwt_token: str, account_id: str, name: str, source: str = "adk"
+    ) -> dict:
+        """Create an account-scoped API key, via JWT auth.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            account_id: The account ID to scope the key to.
+            name: A label for the API key.
+            source: Value for the ``X-Poly-Source`` header.
+
+        Returns:
+            dict: The full API key record, including the secret under ``key``.
+        """
+        return PlatformAPIHandler.create_account_api_key_internal(
+            region, jwt_token, account_id, name, source=source
+        )
+
+    @staticmethod
     def list_conversations(
         region: str,
         project_id: str,

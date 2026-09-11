@@ -1220,10 +1220,14 @@ def print_welcome_message() -> None:
     console.print()
 
 
+def mask_secret(key: str) -> str:
+    """Mask a secret for safe display, with no markup - e.g. for JSON output or an exception message."""
+    return key[:4] + "****" + key[-4:] if len(key) > 8 else "****"
+
+
 def mask_api_key(key: str) -> str:
-    """Display masked API key"""
-    masked = key[:4] + "****" + key[-4:] if len(key) > 8 else "****"
-    return f"[yellow]{masked}[/yellow]"
+    """Display masked API key, coloured for the console."""
+    return f"[yellow]{mask_secret(key)}[/yellow]"
 
 
 def handle_exception(exc: Exception) -> None:

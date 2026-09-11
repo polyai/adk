@@ -22,7 +22,7 @@ Commands are listed under section headers so related ones stay together:
 
 | Section | Commands |
 |---|---|
-| Getting started | `init`, `setup`, `login`, `studio`, `project` |
+| Getting started | `init`, `setup`, `login`, `apikey`, `studio`, `project` |
 | Project sync | `pull`, `push`, `status`, `revert`, `format`, `validate`, `diff`, `review`, `branch`, `test`, `rtc`, `chat` |
 | Builder API | `deployments`, `conversations`, `audio-cache`, `functions` |
 | Other | `template`, `docs`, `completion` |
@@ -45,6 +45,7 @@ poly push --help
 |---|---|
 | [`poly setup`](./cli/setup.md) | Set up everything in one command: auth, completion, AI skills, and a project |
 | [`poly login`](./cli/login.md) | Sign in to, or sign up for, an Agent Studio account |
+| [`poly apikey`](./cli/apikey.md) | Get an account-scoped API key for the PolyAI APIs / Dialog RSN and export `POLY_API_KEY` |
 | [`poly init`](./cli/init.md) | Connect a local folder to an existing project |
 | [`poly project`](./cli/project.md) | Create and manage Agent Studio projects |
 | [`poly template`](./cli/template.md) | Browse and load example project templates |
@@ -141,6 +142,7 @@ poly audio-cache bulk-delete --ids id1,id2 --json
 poly audio-cache synthesize <entry_id> --text "Hello" --json
 poly functions execute <function_name> --args '{"x": 1}' --json
 poly functions validate --json
+poly apikey --region studio --json
 ~~~
 
 ### `--json` contract
