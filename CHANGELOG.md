@@ -1,6 +1,157 @@
 # CHANGELOG
 
 
+## v0.56.0 (2026-09-11)
+
+### Continuous Integration
+
+- Validate ADK skills frontmatter and keep versions in lockstep with the CLI
+  ([#316](https://github.com/polyai/adk/pull/316),
+  [`6fa5c65`](https://github.com/polyai/adk/commit/6fa5c65c693ed294578df32aa099633a8ef711b9))
+
+## Summary
+
+Adds CI validation that every `skills/*/SKILL.md` has well-formed frontmatter with the required
+  fields and a `metadata.version` matching the CLI version in `pyproject.toml`, plus release
+  automation that auto-bumps skill versions in lockstep with the CLI version.
+
+## Motivation
+
+Skill versions had already silently drifted (skills at 0.53.1 while the CLI was at 0.54.0) with no
+  CI signal — a mismatch lets a skill's documented behaviour (`requires.bins`, examples, resource
+  schemas) fall out of sync with the CLI it describes.
+
+## Changes
+
+- New `scripts/validate_skills.py`: checks each skill's YAML frontmatter for the required fields
+  (`name`, `description`, `metadata.author`, `metadata.license`, `metadata.version`,
+  `metadata.requires.bins`) and that `metadata.version` equals `project.version` in `pyproject.toml`
+  - New `validate-skills` workflow running the script, path-filtered to `skills/**`,
+  `pyproject.toml`, and the script itself, so it only runs when relevant files change (and needs no
+  package install) - Registered the five `SKILL.md` files in `[tool.semantic_release]
+  version_variables`, so the release commit stamps skill versions together with `pyproject.toml` -
+  Bumped all five skills from the drifted 0.53.1 to the current 0.54.0
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+Verified manually: the validator passes on the repo and correctly rejects fixtures with missing
+  frontmatter, broken YAML, missing fields, empty `bins`, and a mismatched version. The
+  semantic-release stamping was verified end-to-end in a scratch clone — a forced patch bump updated
+  `pyproject.toml` and all five `SKILL.md` files together, touching only the frontmatter `version:`
+  line in each.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+``` $ uv run --no-project --with "ruamel.yaml>=0.18.0" python scripts/validate_skills.py OK
+  skills/poly-adk-branching/SKILL.md OK skills/poly-adk-conversations/SKILL.md OK
+  skills/poly-adk-rtc/SKILL.md OK skills/poly-adk-testing/SKILL.md OK
+  skills/poly-adk-workflow/SKILL.md
+
+Validated 5 skills against CLI version 0.54.0 ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+### Features
+
+- Add poly metrics commands (list, export, add, edit, import)
+  ([#259](https://github.com/polyai/adk/pull/259),
+  [`041a1a9`](https://github.com/polyai/adk/commit/041a1a9fe79dff10efe2511b19d5f4d538f3410d))
+
+## Summary
+
+Add `poly metrics` CLI commands for managing custom metrics in Agent Studio projects: * list *
+  export / import (YAML) * add * edit
+
+## Motivation
+
+Custom metrics are currently only manageable through the Agent Studio UI. This adds full CLI support
+  so teams can script metric setup, export/import metric definitions across projects, and integrate
+  metric management into CI pipelines.
+
+## Changes
+
+### Commands
+
+- **`poly metrics list`** — display all custom metrics in a Rich table (Name, Type, Active, API,
+  Description) with active/inactive count summary; `--json` for machine-readable output - **`poly
+  metrics export [file]`** — export all metrics as YAML to stdout or a file; `--json` outputs JSON
+  instead - **`poly metrics add`** — create a new metric with `--name`, `--type`, `--description`,
+  `--api`, `--expected-values`; omit required flags for interactive mode (name text input, type
+  selector, description prompt, API confirm via `questionary`) - **`poly metrics edit <name>`** —
+  update an existing metric's `--description`, `--api` (bool), `--active` (bool), or
+  `--expected-values`; `--api`/`--active` accept `true`/`false` or can be used bare to set `true`.
+  When called with just a metric name and no flags, enters **interactive mode**: fetches the metric,
+  displays current values, and prompts with `questionary.checkbox()` to select which fields to
+  update. `--expected-values` is only offered for string-type metrics. Friendly error when metric
+  not found (404). - **`poly metrics import <file>`** — bulk-import metrics from a YAML file;
+  creates new metrics and skips existing ones; `--dry-run` previews what would be created/skipped
+  and warns about remote-only metrics that won't be deleted
+
+### API flag workaround
+
+The server's `create_custom_metric` route hardcodes `api=False`, ignoring the client-supplied value
+  (the AS UI also doesn't set this on create). When `--api` is passed, under the hood the the CLI
+  follows up with a PATCH to set `api=True`.
+
+### Implementation notes
+
+- Platform API: 5 new methods on `PlatformAPIHandler`; `make_request` extended with `files`
+  (multipart upload) and `response_format` (YAML parsing) params . These were needed for import and
+  export YAML as file handling only previously supported JSON. - Tests: 30 unit tests across 8 test
+  classes
+
+import/export flow was chosen here as the implementation details of metrics require that metrics
+  have project scope (not branch scope) and cannot be deleted once written.
+
+In this case, using a local file to manage additions and changes could give way to merge issues and
+  user confusion where deleted items are not actually removed. For this reason I have opted to model
+  this feature on the platform features, with one exception that API can be set on metric creation.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly metrics` for all subcommands) - [x]
+  Tested against a live Agent Studio project
+
+**Manual test spreadsheet**: [Google
+  Sheet](https://docs.google.com/spreadsheets/d/1ahhwLpTKTt_pApH7Z_oESQkX8ki-vj2GrHf2ABO75Zw/edit?gid=246662677#gid=246662677)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+### `poly metrics list` <img width="565" height="296" alt="Screenshot 2026-07-31 at 15 06 03"
+  src="https://github.com/user-attachments/assets/efc5dfb6-b3cb-4783-8bae-2d64c8173106" />
+
+### `poly metrics add` (interactive) <img width="294" height="87" alt="Screenshot 2026-08-04 at 16
+  53 09" src="https://github.com/user-attachments/assets/dc4d33ea-11c2-476b-8593-0bbd6f116857" />
+
+### `poly metrics add` — API flag prompt <img width="225" height="29" alt="Screenshot 2026-07-31 at
+  15 17 40" src="https://github.com/user-attachments/assets/d1ef1e1e-a0c0-453e-bc8e-069bd8f43c84" />
+
+### `poly metrics add --expected-values` (JSON output) <img width="358" height="230" alt="Screenshot
+  2026-07-31 at 15 21 57"
+  src="https://github.com/user-attachments/assets/7d14753f-f65f-418c-ae30-92e5ab7e6582" />
+
+### `poly metrics add --api` (JSON output) <img width="358" height="178" alt="Screenshot 2026-07-31
+  at 15 30 58" src="https://github.com/user-attachments/assets/3f6e919f-db79-427d-98d6-1425238d4ce2"
+  />
+
+
 ## v0.55.0 (2026-09-10)
 
 ### Features
