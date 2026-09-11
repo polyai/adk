@@ -9,7 +9,7 @@ from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParser
 
 from ruamel.yaml import YAML
 
-from poly.cli_commands.base import BaseCommand, Parents
+from poly.cli_commands.base import BUILDER_API_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project
 from poly.output.console import error, plain, print_metrics, success, warning
 from poly.output.json_output import json_print
@@ -32,6 +32,7 @@ class MetricsCommand(BaseCommand):
     """Manage custom metrics in the Agent Studio project."""
 
     command = "metrics"
+    group = BUILDER_API_GROUP
 
     @classmethod
     def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
@@ -45,7 +46,7 @@ class MetricsCommand(BaseCommand):
                 "Examples:\n"
                 "  poly metrics list\n"
                 "  poly metrics add --name SCORE --type int --description 'CSAT Score'\n"
-                "  poly metrics edit CSAT_OFFERED --no-active\n"
+                "  poly metrics edit CSAT_OFFERED --active false\n"
                 "  poly metrics import metrics.yaml"
             ),
             formatter_class=RawTextHelpFormatter,
