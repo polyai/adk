@@ -5,7 +5,7 @@ description: Reference for the `poly metrics` command.
 
 # `poly metrics`
 
-Manage the custom metrics defined for a project — the named counters and values that functions write to with `conv.write_metric(...)`. `poly metrics` requires a subcommand.
+Manage the custom metrics defined for a project, which functions access and write via `conv.write_metric(...)`. `poly metrics` requires a subcommand.
 
 Metrics are defined per project, not per branch or environment. Creating, editing, or importing a metric takes effect immediately for the whole project; there is no push step and nothing is written to the local resource tree.
 
@@ -42,9 +42,13 @@ Export every metric definition as YAML, to a file or to stdout.
 
 Examples:
 
+To YAML:
+~~~bash
+poly metrics export metrics.yaml
+~~~
+To stdout:
 ~~~bash
 poly metrics export
-poly metrics export metrics.yaml
 ~~~
 
 The YAML is keyed by metric name, and is the same shape [`poly metrics import`](#poly-metrics-import) reads:

@@ -25,7 +25,7 @@ Good logging explains the *shape* of a call — which paths it took, which exter
 
 Metrics count things you want to aggregate across calls — how often a flow completes, how often a handoff fires, how often an API falls back.
 
-A metric has two halves: the definition, managed with [`poly metrics`](../reference/cli/metrics.md), and the value, written from function code with `conv.write_metric(...)`. See [custom metrics](./custom-metrics.md) for managing the definitions.
+Metrics in a project are managed with [`poly metrics`](../reference/cli/metrics.md), which are then invoked in project code via `conv.write_metric(...)`. See [custom metrics](./custom-metrics.md) for managing the definitions.
 
 The common mistake is emitting the same metric repeatedly. A metric written inside a loop, or on every turn, inflates the count and tells you nothing:
 
