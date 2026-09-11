@@ -60,9 +60,5 @@ Install [uv](https://docs.astral.sh/uv/) with `winget install astral-sh.uv`. If 
 
 With `--json`, the sign-in URL and code are printed to stderr instead of being suppressed, since the JSON contract only constrains stdout and an agent that can't open a browser still needs them to complete sign-in. `key_active` is `false` if the key never finished activating within the poll window — the human-readable warning that would normally say so is suppressed in `--json` mode, so this is how an agent detects it.
 
-## Telemetry
-
-`poly apikey` sends anonymous usage events (`apikey_started`, `apikey_authenticated`, `apikey_account_resolved`, `apikey_key_reused`/`apikey_key_created`, `apikey_env_written`, `apikey_completed`, `apikey_failed`) to help improve the flow; the API key and sign-in token are never included. Set `DO_NOT_TRACK=1` or `POLY_NO_TELEMETRY=1` to opt out.
-
 !!! info "Designed for AI coding assistants"
     `poly apikey` never prompts, so it can be run unattended by an agent. It is not a replacement for [`poly login`](./login.md) — that remains the interactive path for a human at the keyboard.

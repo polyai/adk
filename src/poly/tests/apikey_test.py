@@ -6,7 +6,6 @@ Copyright PolyAI Limited
 import contextlib
 import io
 import json
-import os
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -21,7 +20,6 @@ from poly.utils.env_profile import EnvVarConflict, ProfileTarget
 FAKE_JWT = "jwt-1"
 FAKE_KEY = "sk-newkey1234567890"
 FAKE_ACCOUNT = "acc-1"
-FAKE_ANON_ID = "anon-fixed"
 
 
 class ApiKeyTestCase(unittest.TestCase):
@@ -29,15 +27,11 @@ class ApiKeyTestCase(unittest.TestCase):
 
     def setUp(self):
         # Never touch the real ~/.poly or depend on the host's $SHELL.
-        os.environ.pop("DO_NOT_TRACK", None)
-        os.environ.pop("POLY_NO_TELEMETRY", None)
         patchers = {
             "signin": patch(
                 "poly.cli_commands.apikey.signin_with_device_flow", return_value=FAKE_JWT
             ),
-            "authorise": patch(
-                "poly.cli_commands.apikey.AgentStudioInterface.authorise"
-            ),
+            "authorise": patch("poly.cli_commands.apikey.AgentStudioInterface.authorise"),
             "get_accounts": patch(
                 "poly.cli_commands.apikey.AgentStudioInterface.get_accounts_internal",
                 return_value=[{"id": FAKE_ACCOUNT}],
@@ -66,32 +60,11 @@ class ApiKeyTestCase(unittest.TestCase):
                     'export POLY_API_KEY="sk-n****7890"',
                 ),
             ),
-            "get_anonymous_id": patch(
-                "poly.handlers.posthog.get_anonymous_id", return_value=FAKE_ANON_ID
-            ),
-            "detect_profile": patch(
-                "poly.cli_commands.apikey.detect_profile",
-                return_value=ProfileTarget(path=Path("/home/user/.zshrc"), shell="zsh"),
-            ),
-            "capture_event": patch("poly.handlers.posthog.capture_event"),
-            "flush": patch("poly.handlers.posthog.flush"),
-            "alias": patch("poly.cli_commands.apikey._alias_to_account"),
             "sleep": patch("poly.cli_commands.apikey.time.sleep"),
         }
         self.mocks = {name: p.start() for name, p in patchers.items()}
         for p in patchers.values():
             self.addCleanup(p.stop)
-
-    def _failed_events(self):
-        """The properties dict of every apikey_failed capture_event call."""
-        return [
-            call.args[2]
-            for call in self.mocks["capture_event"].call_args_list
-            if call.args[1] == "apikey_failed"
-        ]
-
-    def _event_names(self):
-        return [call.args[1] for call in self.mocks["capture_event"].call_args_list]
 
 
 class HappyPath(ApiKeyTestCase):
@@ -103,8 +76,6 @@ class HappyPath(ApiKeyTestCase):
 
         self.mocks["create_key"].assert_called_once()
         self.mocks["write_env"].assert_called_once_with("POLY_API_KEY", FAKE_KEY, force=False)
-        self.assertIn("apikey_key_created", self._event_names())
-        self.assertIn("apikey_completed", self._event_names())
 
     def test_existing_studio_credential_is_not_overwritten(self):
         """An existing credential-file entry for studio is left untouched."""
@@ -114,27 +85,25 @@ class HappyPath(ApiKeyTestCase):
 
         self.mocks["save_cred"].assert_not_called()
 
-    def test_reuse_path_emits_key_reused(self):
+    def test_reuse_path_does_not_create_new_key(self):
         """A matching existing key is reused instead of creating a new one."""
-        with patch(
-            "poly.cli_commands.apikey.select_reusable_api_key", return_value="sk-existing"
-        ):
+        with patch("poly.cli_commands.apikey.select_reusable_api_key", return_value="sk-existing"):
             ApiKeyCommand.apikey()
 
         self.mocks["create_key"].assert_not_called()
-        self.assertIn("apikey_key_reused", self._event_names())
 
     def test_account_id_flag_skips_the_poll(self):
         """--account-id bypasses polling GET /jupiter/v2/accounts entirely."""
         ApiKeyCommand.apikey(account_id="acc-given")
 
         self.mocks["get_accounts"].assert_not_called()
-        account_resolved = next(
-            call.args[2]
-            for call in self.mocks["capture_event"].call_args_list
-            if call.args[1] == "apikey_account_resolved"
+        self.mocks["create_key"].assert_called_once_with(
+            region="studio",
+            jwt_token=FAKE_JWT,
+            account_id="acc-given",
+            name="cli-generated-key",
+            source="apikey",
         )
-        self.assertEqual(account_resolved["account_id"], "acc-given")
 
     def test_key_value_never_appears_in_stdout(self):
         """The real API key is never printed, masked or otherwise, in plain output."""
@@ -143,13 +112,6 @@ class HappyPath(ApiKeyTestCase):
             ApiKeyCommand.apikey()
 
         self.assertNotIn(FAKE_KEY, buffer.getvalue())
-
-    def test_anonymous_id_not_created_when_telemetry_disabled(self):
-        """DO_NOT_TRACK=1 skips get_anonymous_id entirely - no ~/.poly/telemetry_id touched."""
-        with patch.dict(os.environ, {"DO_NOT_TRACK": "1"}):
-            ApiKeyCommand.apikey()
-
-        self.mocks["get_anonymous_id"].assert_not_called()
 
     def test_json_output_has_expected_keys_and_masked_value(self):
         """--json prints one object with the documented fields and a masked key only."""
@@ -263,13 +225,6 @@ class RegionSelection(ApiKeyTestCase):
         )
         self.mocks["save_cred"].assert_called_once_with(FAKE_KEY, region="us-1")
 
-    def test_region_is_threaded_into_telemetry(self):
-        """capture_event receives the chosen region, not a hardcoded 'studio'."""
-        ApiKeyCommand.apikey(region="us-1")
-
-        regions = {call.args[0] for call in self.mocks["capture_event"].call_args_list}
-        self.assertEqual(regions, {"us-1"})
-
     def _sign_in_message(self, **kwargs) -> str:
         """Run apikey and return the verification message printed to stdout."""
 
@@ -301,17 +256,18 @@ class AccountPollFailure(ApiKeyTestCase):
     """Tests for the no-account-appeared failure path."""
 
     def test_empty_accounts_after_20_tries_fails_with_exit_1(self):
-        """20 empty polls without --account-id exits 1 with an apikey_failed(step=account)."""
+        """20 empty polls without --account-id exits 1 reporting the account step."""
         self.mocks["get_accounts"].return_value = []
 
-        with self.assertRaises(SystemExit) as ctx:
-            ApiKeyCommand.apikey()
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            with self.assertRaises(SystemExit) as ctx:
+                ApiKeyCommand.apikey(output_json=True)
 
         self.assertEqual(ctx.exception.code, 1)
         self.assertEqual(self.mocks["get_accounts"].call_count, 20)
-        failed = self._failed_events()
-        self.assertEqual(len(failed), 1)
-        self.assertEqual(failed[0]["step"], "account")
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(payload["step"], "account")
 
 
 class MultipleAccounts(ApiKeyTestCase):
@@ -428,7 +384,7 @@ class KeyActivationWait(ApiKeyTestCase):
         self.mocks["write_env"].assert_called_once()
 
     def test_never_activates_still_completes_and_warns(self):
-        """20 failed polls print a warning but do not fail the command or emit telemetry."""
+        """20 failed polls print a warning but do not fail the command."""
         self.mocks["get_accounts_static"].side_effect = Exception("not active")
 
         stdout = io.StringIO()
@@ -438,25 +394,24 @@ class KeyActivationWait(ApiKeyTestCase):
         self.assertEqual(self.mocks["get_accounts_static"].call_count, 20)
         self.mocks["write_env"].assert_called_once()
         self.assertIn("not active yet", stdout.getvalue())
-        self.assertNotIn("apikey_failed", self._event_names())
 
 
 class EnvConflict(ApiKeyTestCase):
     """Tests for the POLY_API_KEY conflict path."""
 
     def test_conflict_exits_2_without_force(self):
-        """A conflicting existing value exits 2 and reports the env step."""
+        """A conflicting existing value exits 2 with a --force hint."""
         self.mocks["write_env"].side_effect = EnvVarConflict(
             "old****", "new****", Path("/home/user/.zshrc")
         )
 
-        with self.assertRaises(SystemExit) as ctx:
-            ApiKeyCommand.apikey()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as ctx:
+                ApiKeyCommand.apikey()
 
         self.assertEqual(ctx.exception.code, 2)
-        failed = self._failed_events()
-        self.assertEqual(failed[0]["step"], "env")
-        self.assertEqual(failed[0]["error_class"], "EnvVarConflict")
+        self.assertIn("Re-run with --force", stderr.getvalue())
 
     def test_json_error_matches_the_documented_contract(self):
         """--json failures include success/error/traceback/step, with no Rich markup."""

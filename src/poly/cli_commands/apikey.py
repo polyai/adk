@@ -12,8 +12,6 @@ Copyright PolyAI Limited
 """
 
 import contextlib
-import logging
-import platform
 import sys
 import time
 import traceback
@@ -31,9 +29,7 @@ from poly.utils.credentials import (
     load_api_key_from_credential_file,
     save_api_key_credential_file,
 )
-from poly.utils.env_profile import EnvVarConflict, ProfileTarget, detect_profile, write_env_var
-
-logger = logging.getLogger(__name__)
+from poly.utils.env_profile import EnvVarConflict, ProfileTarget, write_env_var
 
 DEFAULT_KEY_NAME = "cli-generated-key"
 ACCOUNT_POLL_ATTEMPTS = 20
@@ -47,62 +43,35 @@ def _default_key_name(region: str) -> str:
     return DEFAULT_KEY_NAME if region == "studio" else f"{DEFAULT_KEY_NAME}-{region}"
 
 
-class _Reporter:
-    """Quiet-when-json printing and telemetry, tied to the flow's distinct id.
+def _say(output_json: bool, fn: Callable[[str], None], message: str) -> None:
+    """Print via `fn` unless --json is active (stdout must then be a single JSON object)."""
+    if not output_json:
+        fn(message)
 
-    A small stateful object rather than closures, since the distinct id
-    changes partway through the flow (from an anonymous id to the resolved
-    account id) and every step after that needs to see the new value.
-    """
 
-    def __init__(self, region: str, output_json: bool, base_properties: dict[str, str]):
-        from poly.handlers.posthog import get_anonymous_id, telemetry_disabled
+def _fail(exc: Exception, step: str, exit_code: int, *, output_json: bool, verbose: bool) -> None:
+    """Print a clean error (or re-raise under --verbose) and exit."""
+    if verbose:
+        raise exc
+    message = str(exc)
+    if isinstance(exc, EnvVarConflict):
+        message = f"{exc} Re-run with --force to replace it."
+    if output_json:
+        from poly.output.json_output import json_print
 
-        self.region = region
-        self.output_json = output_json
-        self.base_properties = base_properties
-        # Skip creating ~/.poly/telemetry_id entirely when telemetry is off,
-        # rather than writing it and then never using it.
-        self.distinct_id = "disabled" if telemetry_disabled() else get_anonymous_id()
+        json_print(
+            {
+                "success": False,
+                "error": message,
+                "traceback": traceback.format_exc(),
+                "step": step,
+            }
+        )
+    else:
+        from poly.output.console import error
 
-    def say(self, fn: Callable[[str], None], message: str) -> None:
-        """Print via `fn`, unless --json is active - its output must be the only thing on stdout."""
-        if not self.output_json:
-            fn(message)
-
-    def emit(self, event: str, **extra: object) -> None:
-        """Capture a telemetry event tagged with the current distinct id."""
-        from poly.handlers.posthog import capture_event
-
-        capture_event(self.region, event, {**self.base_properties, **extra}, self.distinct_id)
-
-    def fail(self, exc: Exception, step: str, exit_code: int, *, verbose: bool) -> None:
-        """Report a failure - telemetry, then a clean message or a full traceback - and exit."""
-        from poly.handlers.posthog import flush
-
-        self.emit("apikey_failed", step=step, error_class=type(exc).__name__)
-        flush(self.region)
-        if verbose:
-            raise exc
-        message = str(exc)
-        if isinstance(exc, EnvVarConflict):
-            message = f"{exc} Re-run with --force to replace it."
-        if self.output_json:
-            from poly.output.json_output import json_print
-
-            json_print(
-                {
-                    "success": False,
-                    "error": message,
-                    "traceback": traceback.format_exc(),
-                    "step": step,
-                }
-            )
-        else:
-            from poly.output.console import error
-
-            error(message)
-        sys.exit(exit_code)
+        error(message)
+    sys.exit(exit_code)
 
 
 def _resolve_account_id(
@@ -345,27 +314,13 @@ class ApiKeyCommand(BaseCommand):
         """Sign in and provision an account API key for `region`, then export it."""
         import requests
 
-        from poly.cli_commands.shared import get_package_version
-        from poly.handlers.posthog import flush
         from poly.output.console import err_console, info, mask_api_key, plain, success
 
         key_name = key_name if key_name is not None else _default_key_name(region)
 
-        reporter = _Reporter(
-            region,
-            output_json,
-            {
-                "source": APIKEY_SOURCE,
-                "adk_version": get_package_version(),
-                "os": platform.system(),
-                "shell": detect_profile().shell,
-            },
-        )
-
         step = "start"
         try:
-            reporter.emit("apikey_started")
-            reporter.say(info, "Setting up your PolyAI account and API key...")
+            _say(output_json, info, "Setting up your PolyAI account and API key...")
 
             step = "signin"
             auth_details = (
@@ -384,25 +339,23 @@ class ApiKeyCommand(BaseCommand):
                     f"  URL:  {verification_uri}\n"
                     f"  Code: [bold]{user_code}[/bold]"
                 )
-                if reporter.output_json:
+                if output_json:
                     # --json only constrains stdout - an agent that can't open a
                     # browser itself still needs this to complete sign-in, so it
                     # goes to stderr rather than being dropped like every other
                     # human-readable message in this mode.
                     err_console.print(f"[info]{message}[/info]")
                 else:
-                    reporter.say(info, message)
-                reporter.emit("apikey_device_code_issued")
+                    _say(output_json, info, message)
 
             jwt_token = signin_with_device_flow(
                 auth_details, on_verification_url=on_verification_url
             )
-            reporter.emit("apikey_authenticated")
-            reporter.say(success, "Authenticated successfully!")
+            _say(output_json, success, "Authenticated successfully!")
 
             step = "authorise"
             api = AgentStudioInterface()
-            reporter.say(info, "Setting up your account...")
+            _say(output_json, info, "Setting up your account...")
             try:
                 api.authorise(region=region, jwt_token=jwt_token)
             except requests.HTTPError as e:
@@ -416,44 +369,40 @@ class ApiKeyCommand(BaseCommand):
 
             step = "account"
             resolved_account_id = _resolve_account_id(api, region, jwt_token, account_id)
-            reporter.emit("apikey_account_resolved", account_id=resolved_account_id)
-            _alias_to_account(region, reporter.distinct_id, resolved_account_id)
-            reporter.distinct_id = resolved_account_id
 
             step = "key"
             api_key, key_reused = _get_or_create_key(
                 api, region, jwt_token, resolved_account_id, key_name
             )
             if key_reused:
-                reporter.say(success, f"Reusing existing '{key_name}' key: {mask_api_key(api_key)}")
-                reporter.emit(
-                    "apikey_key_reused", account_id=resolved_account_id, key_name=key_name
+                _say(
+                    output_json,
+                    success,
+                    f"Reusing existing '{key_name}' key: {mask_api_key(api_key)}",
                 )
             else:
-                reporter.say(success, f"Created API key '{key_name}': {mask_api_key(api_key)}")
-                reporter.emit(
-                    "apikey_key_created", account_id=resolved_account_id, key_name=key_name
-                )
+                _say(output_json, success, f"Created API key '{key_name}': {mask_api_key(api_key)}")
 
             step = "credentials"
             saved, credentials_summary = _save_credentials(region, api_key)
             if saved:
-                reporter.say(info, f"Saved to {credentials_summary}.")
+                _say(output_json, info, f"Saved to {credentials_summary}.")
             else:
-                reporter.say(info, f"Existing ADK credential for {region} kept.")
+                _say(output_json, info, f"Existing ADK credential for {region} kept.")
 
             step = "activation"
             from poly.output.console import console, warning
 
             status_ctx = (
                 contextlib.nullcontext()
-                if reporter.output_json
+                if output_json
                 else console.status("[info]Verifying API key is active...[/info]")
             )
             with status_ctx:
                 key_active = _wait_for_key_active(api, region)
             if not key_active:
-                reporter.say(
+                _say(
+                    output_json,
                     warning,
                     "API key was saved but is not active yet."
                     " If your next command fails, wait a moment and retry.",
@@ -461,14 +410,8 @@ class ApiKeyCommand(BaseCommand):
 
             step = "env"
             target, masked_line = write_env_var("POLY_API_KEY", api_key, force=force)
-            reporter.say(info, f"Wrote to {target.path}:")
-            reporter.say(plain, f"  {masked_line}")
-            reporter.emit(
-                "apikey_env_written", account_id=resolved_account_id, profile_shell=target.shell
-            )
-
-            reporter.emit("apikey_completed", account_id=resolved_account_id, key_reused=key_reused)
-            flush(region)
+            _say(output_json, info, f"Wrote to {target.path}:")
+            _say(output_json, plain, f"  {masked_line}")
 
             if output_json:
                 _print_json(
@@ -492,21 +435,6 @@ class ApiKeyCommand(BaseCommand):
                 )
 
         except EnvVarConflict as e:
-            reporter.fail(e, step, exit_code=2, verbose=verbose)
+            _fail(e, step, exit_code=2, output_json=output_json, verbose=verbose)
         except (DeviceFlowError, requests.HTTPError, ValueError) as e:
-            reporter.fail(e, step, exit_code=1, verbose=verbose)
-
-
-def _alias_to_account(region: str, anonymous_id: str, account_id: str) -> None:
-    """Link the anonymous telemetry id to the resolved account, once.
-
-    Never raises: a failure here must not interrupt the flow.
-    """
-    from poly.handlers.posthog import get_posthog_client, telemetry_disabled
-
-    if telemetry_disabled():
-        return
-    try:
-        get_posthog_client(region).alias(previous_id=anonymous_id, distinct_id=account_id)
-    except Exception:
-        logger.warning("PostHog alias failed", exc_info=True)
+            _fail(e, step, exit_code=1, output_json=output_json, verbose=verbose)
