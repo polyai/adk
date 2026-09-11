@@ -1359,8 +1359,18 @@ class AgentStudioInterface:
 
         Returns:
             dict: The created metric record.
+
+        Raises:
+            ValueError: If the metric already exists, or the API call fails.
         """
-        return PlatformAPIHandler.create_custom_metric(region, account_id, project_id, data)
+        try:
+            return PlatformAPIHandler.create_custom_metric(region, account_id, project_id, data)
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 409:
+                raise ValueError(f"Metric '{data.get('name')}' already exists.") from e
+            raise ValueError(
+                f"Failed to create metric: {e.response.text if e.response else e}"
+            ) from e
 
     @staticmethod
     def set_custom_metric_api_flag(
@@ -1408,10 +1418,20 @@ class AgentStudioInterface:
 
         Returns:
             dict: The updated metric record.
+
+        Raises:
+            ValueError: If the metric does not exist, or the API call fails.
         """
-        return PlatformAPIHandler.update_custom_metric(
-            region, account_id, project_id, metric_name, data
-        )
+        try:
+            return PlatformAPIHandler.update_custom_metric(
+                region, account_id, project_id, metric_name, data
+            )
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                raise ValueError(f"Metric '{metric_name}' not found.") from e
+            raise ValueError(
+                f"Failed to update metric: {e.response.text if e.response else e}"
+            ) from e
 
     @staticmethod
     def export_custom_metrics(

@@ -7,7 +7,6 @@ import logging
 import sys
 from argparse import ArgumentParser, Namespace, RawTextHelpFormatter, _SubParsersAction
 
-import requests
 from ruamel.yaml import YAML
 
 from poly.cli_commands.base import BaseCommand, Parents
@@ -339,16 +338,6 @@ class MetricsCommand(BaseCommand):
             else:
                 error(str(e))
             sys.exit(1)
-        except requests.HTTPError as e:
-            if e.response is not None and e.response.status_code == 409:
-                msg = f"Metric '{name}' already exists."
-            else:
-                msg = f"Failed to create metric: {e.response.text if e.response else e}"
-            if output_json:
-                json_print({"success": False, "error": msg})
-            else:
-                error(msg)
-            sys.exit(1)
 
         if output_json:
             json_print({"success": True, "metric": result})
@@ -393,16 +382,6 @@ class MetricsCommand(BaseCommand):
                 json_print({"success": False, "error": str(e)})
             else:
                 error(str(e))
-            sys.exit(1)
-        except requests.HTTPError as e:
-            if e.response is not None and e.response.status_code == 404:
-                msg = f"Metric '{name}' not found."
-            else:
-                msg = f"Failed to update metric: {e.response.text if e.response else e}"
-            if output_json:
-                json_print({"success": False, "error": msg})
-            else:
-                error(msg)
             sys.exit(1)
 
         if output_json:

@@ -311,10 +311,7 @@ class MetricsAddTest(unittest.TestCase):
         """409 from the server shows 'already exists' instead of raw HTTP error."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        response = MagicMock(status_code=409, text="conflict")
-        project.create_custom_metric.side_effect = __import__("requests").HTTPError(
-            response=response
-        )
+        project.create_custom_metric.side_effect = ValueError("Metric 'SCORE' already exists.")
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_add(
@@ -335,10 +332,7 @@ class MetricsAddTest(unittest.TestCase):
         """409 in JSON mode prints structured error with 'already exists'."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        response = MagicMock(status_code=409, text="conflict")
-        project.create_custom_metric.side_effect = __import__("requests").HTTPError(
-            response=response
-        )
+        project.create_custom_metric.side_effect = ValueError("Metric 'SCORE' already exists.")
 
         with self.assertRaises(SystemExit):
             MetricsCommand.metrics_add(
@@ -436,10 +430,7 @@ class MetricsEditTest(unittest.TestCase):
         """404 from the server shows 'not found' instead of raw HTTP error."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        response = MagicMock(status_code=404, text="not found")
-        project.update_custom_metric.side_effect = __import__("requests").HTTPError(
-            response=response
-        )
+        project.update_custom_metric.side_effect = ValueError("Metric 'GHOST' not found.")
 
         with self.assertRaises(SystemExit) as ctx:
             MetricsCommand.metrics_edit(
@@ -455,10 +446,7 @@ class MetricsEditTest(unittest.TestCase):
         """404 in JSON mode prints structured error with 'not found'."""
         project = MagicMock(region="us", account_id="acc1", project_id="proj1")
         mock_load.return_value = project
-        response = MagicMock(status_code=404, text="not found")
-        project.update_custom_metric.side_effect = __import__("requests").HTTPError(
-            response=response
-        )
+        project.update_custom_metric.side_effect = ValueError("Metric 'GHOST' not found.")
 
         with self.assertRaises(SystemExit):
             MetricsCommand.metrics_edit(

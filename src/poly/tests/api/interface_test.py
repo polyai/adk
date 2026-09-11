@@ -383,5 +383,63 @@ class ImportMetricsFromFileInterfaceTest(unittest.TestCase):
         mock_import.assert_called_once()
 
 
+class CustomMetricErrorTranslation(unittest.TestCase):
+    """Tests that create/update_custom_metric translate HTTPError into ValueError."""
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.create_custom_metric")
+    def test_create_conflict_gives_already_exists_message(self, mock_create):
+        """A 409 on create is translated into a friendly 'already exists' error."""
+        response = MagicMock(status_code=409, text="conflict")
+        mock_create.side_effect = requests.HTTPError("conflict", response=response)
+
+        with self.assertRaises(ValueError) as ctx:
+            AgentStudioInterface.create_custom_metric(
+                "us", "acc1", "proj1", {"name": "SCORE", "type": "int"}
+            )
+
+        self.assertIn("SCORE", str(ctx.exception))
+        self.assertIn("already exists", str(ctx.exception))
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.create_custom_metric")
+    def test_create_other_error_gives_generic_message(self, mock_create):
+        """A non-409 error on create falls back to a generic failure message."""
+        response = MagicMock(status_code=500, text="server error")
+        mock_create.side_effect = requests.HTTPError("boom", response=response)
+
+        with self.assertRaises(ValueError) as ctx:
+            AgentStudioInterface.create_custom_metric(
+                "us", "acc1", "proj1", {"name": "SCORE", "type": "int"}
+            )
+
+        self.assertIn("Failed to create metric", str(ctx.exception))
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.update_custom_metric")
+    def test_update_not_found_gives_not_found_message(self, mock_update):
+        """A 404 on update is translated into a friendly 'not found' error."""
+        response = MagicMock(status_code=404, text="missing")
+        mock_update.side_effect = requests.HTTPError("missing", response=response)
+
+        with self.assertRaises(ValueError) as ctx:
+            AgentStudioInterface.update_custom_metric(
+                "us", "acc1", "proj1", "GHOST", {"active": False}
+            )
+
+        self.assertIn("GHOST", str(ctx.exception))
+        self.assertIn("not found", str(ctx.exception))
+
+    @patch("poly.handlers.interface.PlatformAPIHandler.update_custom_metric")
+    def test_update_other_error_gives_generic_message(self, mock_update):
+        """A non-404 error on update falls back to a generic failure message."""
+        response = MagicMock(status_code=500, text="server error")
+        mock_update.side_effect = requests.HTTPError("boom", response=response)
+
+        with self.assertRaises(ValueError) as ctx:
+            AgentStudioInterface.update_custom_metric(
+                "us", "acc1", "proj1", "SCORE", {"active": False}
+            )
+
+        self.assertIn("Failed to update metric", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()
