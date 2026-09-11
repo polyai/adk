@@ -46,6 +46,7 @@ from poly.cli_commands.template import TemplateCommand
 from poly.cli_commands.testing import TestingCommand
 from poly.cli_commands.update import UpdateCommand, display_update_message
 from poly.cli_commands.utils import CompletionCommand, DocsCommand
+from poly.cli_commands.wren import WrenCommand
 from poly.handlers.interface import REGIONS
 from poly.output.json_output import json_print
 
@@ -75,6 +76,7 @@ COMMANDS = [
     FunctionsCommand,
     TestingCommand,
     RTCCommand,
+    WrenCommand,
     ChatCommand,
     DocsCommand,
     CompletionCommand,
