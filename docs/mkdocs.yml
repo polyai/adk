@@ -98,6 +98,7 @@ nav:
       - Branches, push, and pull: development/branches-push-pull.md
       - Testing: development/testing.md
       - Observability: development/observability.md
+      - Custom metrics: development/custom-metrics.md
       - Environments and deployment: development/environments-and-deployment.md
       - Real-time configuration: development/real-time-configuration.md
       - Audio caching: development/audio-caching.md
@@ -133,6 +134,7 @@ nav:
           - test: reference/cli/test.md
           - conversations: reference/cli/conversations.md
           - deployments: reference/cli/deployments.md
+          - metrics: reference/cli/metrics.md
           - rtc: reference/cli/rtc.md
           - audio-cache: reference/cli/audio-cache.md
           - docs: reference/cli/docs.md
