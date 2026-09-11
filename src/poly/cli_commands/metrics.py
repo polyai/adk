@@ -237,13 +237,16 @@ class MetricsCommand(BaseCommand):
     @classmethod
     def metrics_list(cls, base_path: str, output_json: bool = False) -> None:
         """List all custom metrics for the project."""
+        from poly.output.console import paged_output
+
         project = load_project(base_path, output_json=output_json)
         metrics = project.get_custom_metrics()
 
         if output_json:
             json_print(metrics)
         else:
-            print_metrics(metrics)
+            with paged_output():
+                print_metrics(metrics)
 
     @classmethod
     def metrics_export(
