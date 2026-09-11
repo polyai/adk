@@ -1,12 +1,13 @@
-"""API key command: one-shot sign-in and account API key setup.
+"""API key command: sign in and provision an account-scoped API key.
 
-`poly apikey` signs a user in - via the GitHub-only Auth0 device flow for the
-default `studio` region, or the standard sign-in page for any other region -
-creates their PolyAI account if needed, provisions (or reuses) an
-account-scoped API key, and writes ``POLY_API_KEY`` into their shell profile -
-or, on Windows, their user environment. It never prompts. See
-``poly apikey --help`` or ``docs/docs/reference/cli/apikey.md`` for the full
-step-by-step behaviour.
+`poly apikey` is the narrower cousin of `poly login`: it exists to get an API key for
+the PolyAI APIs and Dialog RSN into your environment, not to set up the ADK itself. It
+signs a user in - via the GitHub-only Auth0 device flow for the default `studio` region, or
+the standard sign-in page for any other region - creates their PolyAI account if needed,
+provisions (or reuses) an account-scoped API key, and writes ``POLY_API_KEY`` into their
+shell profile - or, on Windows, their user environment. It never prompts. To set up the
+ADK itself, use ``poly setup`` or ``poly login`` instead. See ``poly apikey --help`` or
+``docs/docs/reference/cli/apikey.md`` for the full step-by-step behaviour.
 
 Copyright PolyAI Limited
 """
@@ -79,13 +80,12 @@ def _resolve_account_id(
 ) -> str:
     """Return `account_id` unchanged, or poll for the account to appear.
 
-    On `studio`, a user has exactly one account, so the first one found is used. On
-    enterprise regions, a user commonly has several - silently picking one would be a
-    guess, so more than one account without an explicit `--account-id` is an error.
+    More than one account without an explicit `--account-id` is an error - silently
+    picking one would be a guess.
 
     Raises:
-        ValueError: No account appeared within `ACCOUNT_POLL_TIMEOUT_SECONDS`, or (non-studio
-            only) more than one account was found and `account_id` was not given.
+        ValueError: No account appeared within `ACCOUNT_POLL_TIMEOUT_SECONDS`, or more
+            than one account was found and `account_id` was not given.
     """
     if account_id is not None:
         return account_id
@@ -94,7 +94,7 @@ def _resolve_account_id(
             region=region, jwt_token=jwt_token, source=APIKEY_SOURCE
         )
         if accounts:
-            if region != "studio" and len(accounts) > 1:
+            if len(accounts) > 1:
                 listing = ", ".join(f"{a['id']} ({a.get('name', 'unnamed')})" for a in accounts)
                 raise ValueError(
                     f"Multiple accounts found for {region}: {listing}. "
@@ -227,7 +227,7 @@ def _print_json(
 
 
 class ApiKeyCommand(BaseCommand):
-    """One-shot sign-in, account API key, and POLY_API_KEY setup."""
+    """Sign in, provision an account API key, and export POLY_API_KEY."""
 
     command = "apikey"
 
@@ -239,28 +239,30 @@ class ApiKeyCommand(BaseCommand):
         apikey_parser = subparsers.add_parser(
             "apikey",
             parents=[parents.verbose, parents.debug, parents.json],
-            help="One-shot setup for AI coding assistants.",
+            help="Create an account API key and export POLY_API_KEY for the PolyAI APIs.",
             description=(
-                "One-shot setup: sign-in, account API key, POLY_API_KEY in your"
-                " environment.\n\n"
-                "Never prompts. Designed to be run by an AI coding assistant; fine to run"
-                " yourself.\n\n"
-                "To sign in interactively instead, use `poly login`.\n\n"
+                "Sign in, create (or reuse) an account-scoped API key, and export it as"
+                " POLY_API_KEY for use with the PolyAI APIs and Dialog RSN. Non-interactive,"
+                " so an AI coding assistant can run it for you.\n\n"
+                "To set up the ADK itself, use `poly setup` or `poly login` instead - the ADK"
+                " reads its credentials from ~/.poly/credentials.json and does not need"
+                " POLY_API_KEY.\n\n"
                 "Examples:\n"
-                "  poly apikey\n"
-                "  poly apikey --account-id acc-123\n"
+                "  poly apikey --region studio\n"
+                "  poly apikey --region studio --account-id acc-123\n"
                 "  poly apikey --region us-1\n"
+                "  poly apikey --region studio --json\n"
             ),
         )
         apikey_parser.add_argument(
             "--region",
             type=str,
             choices=REGIONS,
-            default="studio",
+            required=True,
             help=(
-                "Region/cluster to create the key for. Defaults to 'studio' (PLG), which"
-                " signs in via GitHub only. Any other region uses the standard sign-in page"
-                " (email/SSO), the same one `poly login` uses."
+                "Region/cluster to create the key for. 'studio' is the self-serve cluster"
+                " individual developers sign up on via GitHub; any other region uses the"
+                " standard sign-in page (email/SSO), the same one `poly login` uses."
             ),
         )
         apikey_parser.add_argument(
@@ -278,8 +280,8 @@ class ApiKeyCommand(BaseCommand):
             default=None,
             help=(
                 "Account ID to scope the key to. Skips polling for a newly created account."
-                " Required for enterprise regions when your account has more than one -"
-                " the command refuses to guess which one you mean."
+                " Required when your account has more than one - the command refuses to"
+                " guess which one you mean."
             ),
         )
         apikey_parser.add_argument(
@@ -304,7 +306,7 @@ class ApiKeyCommand(BaseCommand):
     @classmethod
     def apikey(
         cls,
-        region: str = "studio",
+        region: str,
         key_name: str | None = None,
         account_id: str | None = None,
         force: bool = False,
@@ -363,7 +365,7 @@ class ApiKeyCommand(BaseCommand):
                     raise ValueError(
                         f"No account is provisioned for you on {region}. Enterprise accounts"
                         " are set up by PolyAI - contact your PolyAI representative, or run"
-                        " `poly apikey` without --region to create a self-serve studio account."
+                        " `poly apikey --region studio` to create a self-serve studio account."
                     ) from e
                 raise
 

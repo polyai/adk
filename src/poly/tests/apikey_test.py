@@ -72,7 +72,7 @@ class HappyPath(ApiKeyTestCase):
 
     def test_creates_key_and_writes_env(self):
         """No existing key: a new one is created and POLY_API_KEY is written."""
-        ApiKeyCommand.apikey()
+        ApiKeyCommand.apikey(region="studio")
 
         self.mocks["create_key"].assert_called_once()
         self.mocks["write_env"].assert_called_once_with("POLY_API_KEY", FAKE_KEY, force=False)
@@ -81,20 +81,20 @@ class HappyPath(ApiKeyTestCase):
         """An existing credential-file entry for studio is left untouched."""
         self.mocks["load_cred"].return_value = "already-there"
 
-        ApiKeyCommand.apikey()
+        ApiKeyCommand.apikey(region="studio")
 
         self.mocks["save_cred"].assert_not_called()
 
     def test_reuse_path_does_not_create_new_key(self):
         """A matching existing key is reused instead of creating a new one."""
         with patch("poly.cli_commands.apikey.select_reusable_api_key", return_value="sk-existing"):
-            ApiKeyCommand.apikey()
+            ApiKeyCommand.apikey(region="studio")
 
         self.mocks["create_key"].assert_not_called()
 
     def test_account_id_flag_skips_the_poll(self):
         """--account-id bypasses polling GET /jupiter/v2/accounts entirely."""
-        ApiKeyCommand.apikey(account_id="acc-given")
+        ApiKeyCommand.apikey(region="studio", account_id="acc-given")
 
         self.mocks["get_accounts"].assert_not_called()
         self.mocks["create_key"].assert_called_once_with(
@@ -109,7 +109,7 @@ class HappyPath(ApiKeyTestCase):
         """The real API key is never printed, masked or otherwise, in plain output."""
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            ApiKeyCommand.apikey()
+            ApiKeyCommand.apikey(region="studio")
 
         self.assertNotIn(FAKE_KEY, buffer.getvalue())
 
@@ -117,7 +117,7 @@ class HappyPath(ApiKeyTestCase):
         """--json prints one object with the documented fields and a masked key only."""
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            ApiKeyCommand.apikey(output_json=True)
+            ApiKeyCommand.apikey(region="studio", output_json=True)
 
         payload = json.loads(buffer.getvalue())
         self.assertTrue(payload["success"])
@@ -139,7 +139,7 @@ class HappyPath(ApiKeyTestCase):
         """The masked key in --json output is plain text, not `[yellow]...[/yellow]` markup."""
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
-            ApiKeyCommand.apikey(output_json=True)
+            ApiKeyCommand.apikey(region="studio", output_json=True)
 
         self.assertNotIn("[", buffer.getvalue())
 
@@ -156,7 +156,7 @@ class HappyPath(ApiKeyTestCase):
         stdout = io.StringIO()
         stderr = io.StringIO()
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            ApiKeyCommand.apikey(output_json=True)
+            ApiKeyCommand.apikey(region="studio", output_json=True)
 
         self.assertIn(verification_uri, stderr.getvalue())
         payload = json.loads(stdout.getvalue())
@@ -166,9 +166,9 @@ class HappyPath(ApiKeyTestCase):
 class RegionSelection(ApiKeyTestCase):
     """Tests for --region's effect on sign-in, key naming, and region threading."""
 
-    def test_default_region_signs_in_via_github_only_client(self):
-        """With no --region, sign-in uses the studio GitHub-only client."""
-        ApiKeyCommand.apikey()
+    def test_studio_region_signs_in_via_github_only_client(self):
+        """With --region studio, sign-in uses the studio GitHub-only client."""
+        ApiKeyCommand.apikey(region="studio")
 
         auth_details = self.mocks["signin"].call_args.args[0]
         self.assertIs(auth_details, APIKEY_AUTH_DETAILS)
@@ -182,7 +182,7 @@ class RegionSelection(ApiKeyTestCase):
 
     def test_default_key_name_for_studio(self):
         """The default key name for studio is unchanged."""
-        ApiKeyCommand.apikey()
+        ApiKeyCommand.apikey(region="studio")
 
         self.mocks["create_key"].assert_called_once_with(
             region="studio",
@@ -240,7 +240,7 @@ class RegionSelection(ApiKeyTestCase):
 
     def test_studio_sign_in_message_names_github(self):
         """Studio's sign-in line still names GitHub explicitly."""
-        message = self._sign_in_message()
+        message = self._sign_in_message(region="studio")
 
         self.assertIn("To sign in with GitHub, open the following link", message)
 
@@ -262,7 +262,7 @@ class AccountPollFailure(ApiKeyTestCase):
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
             with self.assertRaises(SystemExit) as ctx:
-                ApiKeyCommand.apikey(output_json=True)
+                ApiKeyCommand.apikey(region="studio", output_json=True)
 
         self.assertEqual(ctx.exception.code, 1)
         self.assertEqual(self.mocks["get_accounts"].call_count, 20)
@@ -271,7 +271,7 @@ class AccountPollFailure(ApiKeyTestCase):
 
 
 class MultipleAccounts(ApiKeyTestCase):
-    """Tests for refusing to guess an account among several on enterprise regions."""
+    """Tests for refusing to guess an account among several, on any region."""
 
     TWO_ACCOUNTS = [
         {"id": "acc-1", "name": "Account One"},
@@ -279,7 +279,7 @@ class MultipleAccounts(ApiKeyTestCase):
     ]
 
     def test_non_studio_with_two_accounts_and_no_account_id_fails_with_list(self):
-        """Two accounts on an enterprise region without --account-id is a clean, listed error."""
+        """Two accounts without --account-id is a clean, listed error."""
         self.mocks["get_accounts"].return_value = self.TWO_ACCOUNTS
 
         buffer = io.StringIO()
@@ -310,19 +310,21 @@ class MultipleAccounts(ApiKeyTestCase):
             source="apikey",
         )
 
-    def test_studio_with_two_accounts_still_takes_the_first(self):
-        """Studio keeps picking the first account even with more than one - unchanged."""
+    def test_studio_with_two_accounts_errors_like_any_region(self):
+        """Studio has no special case - more than one account is an error there too."""
         self.mocks["get_accounts"].return_value = self.TWO_ACCOUNTS
 
-        ApiKeyCommand.apikey()
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            with self.assertRaises(SystemExit) as ctx:
+                ApiKeyCommand.apikey(region="studio", output_json=True)
 
-        self.mocks["create_key"].assert_called_once_with(
-            region="studio",
-            jwt_token=FAKE_JWT,
-            account_id="acc-1",
-            name="cli-generated-key",
-            source="apikey",
-        )
+        self.assertEqual(ctx.exception.code, 1)
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(payload["step"], "account")
+        self.assertIn("acc-1", payload["error"])
+        self.assertIn("acc-2", payload["error"])
+        self.assertIn("--account-id", payload["error"])
 
 
 class UnprovisionedEnterpriseUser(ApiKeyTestCase):
@@ -357,7 +359,7 @@ class UnprovisionedEnterpriseUser(ApiKeyTestCase):
         buffer = io.StringIO()
         with contextlib.redirect_stdout(buffer):
             with self.assertRaises(SystemExit) as ctx:
-                ApiKeyCommand.apikey(output_json=True)
+                ApiKeyCommand.apikey(region="studio", output_json=True)
 
         self.assertEqual(ctx.exception.code, 1)
         payload = json.loads(buffer.getvalue())
@@ -378,7 +380,7 @@ class KeyActivationWait(ApiKeyTestCase):
         ]
 
         with contextlib.redirect_stdout(io.StringIO()):
-            ApiKeyCommand.apikey()
+            ApiKeyCommand.apikey(region="studio")
 
         self.assertEqual(self.mocks["get_accounts_static"].call_count, 3)
         self.mocks["write_env"].assert_called_once()
@@ -389,7 +391,7 @@ class KeyActivationWait(ApiKeyTestCase):
 
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
-            ApiKeyCommand.apikey()
+            ApiKeyCommand.apikey(region="studio")
 
         self.assertEqual(self.mocks["get_accounts_static"].call_count, 20)
         self.mocks["write_env"].assert_called_once()
@@ -408,7 +410,7 @@ class EnvConflict(ApiKeyTestCase):
         stderr = io.StringIO()
         with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
             with self.assertRaises(SystemExit) as ctx:
-                ApiKeyCommand.apikey()
+                ApiKeyCommand.apikey(region="studio")
 
         self.assertEqual(ctx.exception.code, 2)
         self.assertIn("Re-run with --force", stderr.getvalue())
@@ -422,7 +424,7 @@ class EnvConflict(ApiKeyTestCase):
 
         with contextlib.redirect_stdout(buffer):
             with self.assertRaises(SystemExit):
-                ApiKeyCommand.apikey(output_json=True)
+                ApiKeyCommand.apikey(region="studio", output_json=True)
 
         payload = json.loads(buffer.getvalue())
         self.assertFalse(payload["success"])
@@ -433,7 +435,7 @@ class EnvConflict(ApiKeyTestCase):
 
     def test_force_is_forwarded_to_write_env_var(self):
         """--force is passed straight through to write_env_var."""
-        ApiKeyCommand.apikey(force=True)
+        ApiKeyCommand.apikey(region="studio", force=True)
 
         self.mocks["write_env"].assert_called_once_with("POLY_API_KEY", FAKE_KEY, force=True)
 
@@ -446,7 +448,7 @@ class Verbose(ApiKeyTestCase):
         self.mocks["get_accounts"].return_value = []
 
         with self.assertRaises(ValueError):
-            ApiKeyCommand.apikey(verbose=True)
+            ApiKeyCommand.apikey(region="studio", verbose=True)
 
 
 class ArgParsing(unittest.TestCase):
@@ -458,19 +460,23 @@ class ArgParsing(unittest.TestCase):
 
         cli = AgentStudioCLI()
         cli.register_commands()
-        args = cli._create_parser().parse_args(["apikey", "-f"])
+        args = cli._create_parser().parse_args(["apikey", "-f", "--region", "studio"])
 
         self.assertTrue(args.force)
 
-    def test_region_defaults_to_studio(self):
-        """With no --region flag, args.region is 'studio' - the individual-dev path."""
+    def test_region_is_required(self):
+        """Omitting --region is an argparse error (exit code 2)."""
         from poly.cli import AgentStudioCLI
 
         cli = AgentStudioCLI()
         cli.register_commands()
-        args = cli._create_parser().parse_args(["apikey"])
+        parser = cli._create_parser()
 
-        self.assertEqual(args.region, "studio")
+        with contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(SystemExit) as ctx:
+                parser.parse_args(["apikey"])
+
+        self.assertEqual(ctx.exception.code, 2)
 
     def test_region_accepts_a_production_region(self):
         """--region us-1 is accepted, matching poly login's region choices."""
