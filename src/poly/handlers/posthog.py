@@ -58,6 +58,7 @@ def get_posthog_client(region: str) -> Posthog:
             project_api_key=project_api_key,
             host=POSTHOG_HOST,
             feature_flags_request_timeout_seconds=FEATURE_FLAGS_REQUEST_TIMEOUT_SECONDS,
+            sync_mode=True,
         )
         _clients[project_api_key] = client
     return client
