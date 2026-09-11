@@ -11510,6 +11510,33 @@ class FlowStepFromProjection(unittest.TestCase):
         self.assertEqual(step.flow_name, "Booking")
         self.assertEqual(step.prompt, "Hello!")
 
+    def test_prompt_whitespace_is_stripped_on_every_path(self):
+        """Surrounding prompt whitespace must not affect equality — YAML reads
+        strip, so projection reads must too."""
+        projection = {
+            "flows": {
+                "flows": {
+                    "entities": {
+                        "FLOW-1": {
+                            "name": "Booking",
+                            "steps": {
+                                "entities": {
+                                    "STEP-A": {
+                                        "name": "greet",
+                                        "type": "default_step",
+                                        "prompt": "  Hello!\n",
+                                        "conditions": [],
+                                    }
+                                }
+                            },
+                        }
+                    }
+                }
+            }
+        }
+        step = FlowStep.from_projection(projection)["FLOW-1_STEP-A"]
+        self.assertEqual(step.prompt, "Hello!")
+
     def test_skips_function_steps(self):
         """function_step type entries should be excluded from FlowStep parsing."""
         projection = {
@@ -11653,6 +11680,64 @@ class FlowSettingsFromProjectionTest(unittest.TestCase):
         self.assertEqual(settings.to_yaml_dict(), {})
         self.assertEqual(settings.step_id, self.STEP_ID)
         self.assertEqual(settings.flow_id, self.FLOW_ID)
+
+
+class FlowSettingsEqualityTest(unittest.TestCase):
+    """Disabled asr_biasing/dtmf residuals must not affect equality.
+
+    YAML drops disabled sections entirely, so their residual values can never
+    round-trip through disk — a projection read carrying residuals must still
+    compare equal to a disk read of identical content.
+    """
+
+    STEP_ID = "step-1"
+    FLOW_ID = "FLOW-abc"
+
+    def _settings(self, **kwargs) -> FlowSettings:
+        return FlowSettings(step_id=self.STEP_ID, flow_id=self.FLOW_ID, **kwargs)
+
+    def test_disabled_dtmf_residuals_are_normalised(self):
+        with_residuals = self._settings(
+            dtmf=DTMFConfig(
+                is_enabled=False,
+                inter_digit_timeout=3,
+                end_key="",
+                collect_while_agent_speaking=True,
+                is_pii=True,
+                max_digits=1,
+            )
+        )
+        self.assertEqual(with_residuals, self._settings())
+        self.assertEqual(with_residuals.dtmf, DTMFConfig())
+
+    def test_disabled_asr_biasing_residuals_are_normalised(self):
+        with_residuals = self._settings(
+            asr_biasing=ASRBiasing(
+                is_enabled=False, precise_date=True, custom_keywords=["acme"]
+            )
+        )
+        self.assertEqual(with_residuals, self._settings())
+        self.assertEqual(with_residuals.asr_biasing, ASRBiasing())
+
+    def test_enabled_sections_still_compare_by_value(self):
+        enabled = self._settings(dtmf=DTMFConfig(is_enabled=True, inter_digit_timeout=3))
+        self.assertNotEqual(enabled, self._settings())
+        self.assertNotEqual(
+            enabled, self._settings(dtmf=DTMFConfig(is_enabled=True, inter_digit_timeout=5))
+        )
+        self.assertEqual(
+            enabled, self._settings(dtmf=DTMFConfig(is_enabled=True, inter_digit_timeout=3))
+        )
+
+    def test_enabling_or_disabling_is_still_a_change(self):
+        self.assertNotEqual(
+            self._settings(dtmf=DTMFConfig(is_enabled=True)),
+            self._settings(dtmf=DTMFConfig(is_enabled=False)),
+        )
+        self.assertNotEqual(
+            self._settings(asr_biasing=ASRBiasing(is_enabled=True)),
+            self._settings(),
+        )
 
 
 class FlowSettingsSerializationTest(unittest.TestCase):
@@ -11874,6 +11959,7 @@ class FlowSettingsValidationTest(unittest.TestCase):
         ]
 
     def test_negative_dtmf_values_are_rejected(self):
+        # Enabled: a disabled section is normalised away before validation.
         for kwargs, expected in [
             ({"max_digits": -1}, "max_digits"),
             ({"inter_digit_timeout": -1}, "inter_digit_timeout"),
@@ -11882,7 +11968,7 @@ class FlowSettingsValidationTest(unittest.TestCase):
                 settings = FlowSettings(
                     step_id="step-1",
                     flow_id="flow-123",
-                    dtmf=DTMFConfig(**kwargs),
+                    dtmf=DTMFConfig(is_enabled=True, **kwargs),
                 )
                 with self.assertRaises(ValueError) as ctx:
                     settings.validate()
@@ -11915,7 +12001,8 @@ class FlowSettingsValidationTest(unittest.TestCase):
 
     def test_flow_step_validate_checks_its_settings(self):
         """Settings are a sub-resource, so nothing else validates them."""
-        step = self._step(dtmf=DTMFConfig(max_digits=-1))
+        # Enabled: a disabled section is normalised away before validation.
+        step = self._step(dtmf=DTMFConfig(is_enabled=True, max_digits=-1))
 
         with self.assertRaises(ValueError) as ctx:
             step.validate(resource_mappings=self._mappings())
