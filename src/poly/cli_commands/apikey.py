@@ -108,10 +108,15 @@ class _Reporter:
 def _resolve_account_id(
     api: AgentStudioInterface, region: str, jwt_token: str, account_id: str | None
 ) -> str:
-    """Return `account_id` unchanged, or poll for the first account to appear.
+    """Return `account_id` unchanged, or poll for the account to appear.
+
+    On `studio`, a user has exactly one account, so the first one found is used. On
+    enterprise regions, a user commonly has several - silently picking one would be a
+    guess, so more than one account without an explicit `--account-id` is an error.
 
     Raises:
-        ValueError: No account appeared within `ACCOUNT_POLL_TIMEOUT_SECONDS`.
+        ValueError: No account appeared within `ACCOUNT_POLL_TIMEOUT_SECONDS`, or (non-studio
+            only) more than one account was found and `account_id` was not given.
     """
     if account_id is not None:
         return account_id
@@ -120,6 +125,12 @@ def _resolve_account_id(
             region=region, jwt_token=jwt_token, source=APIKEY_SOURCE
         )
         if accounts:
+            if region != "studio" and len(accounts) > 1:
+                listing = ", ".join(f"{a['id']} ({a.get('name', 'unnamed')})" for a in accounts)
+                raise ValueError(
+                    f"Multiple accounts found for {region}: {listing}. "
+                    "Re-run with --account-id <id> to pick one."
+                )
             return accounts[0]["id"]
         time.sleep(ACCOUNT_POLL_INTERVAL_SECONDS)
     raise ValueError(
@@ -225,6 +236,7 @@ def _print_json(
     key_reused: bool,
     credentials_summary: str,
     target: ProfileTarget,
+    key_active: bool,
 ) -> None:
     """Print the --json completion object."""
     from poly.output.console import mask_secret
@@ -240,6 +252,7 @@ def _print_json(
             "credentials_file": credentials_summary,
             "profile_path": str(target.path),
             "profile_shell": target.shell,
+            "key_active": key_active,
         }
     )
 
@@ -294,7 +307,11 @@ class ApiKeyCommand(BaseCommand):
             "--account-id",
             type=str,
             default=None,
-            help="Account ID to scope the key to. Skips polling for a newly created account.",
+            help=(
+                "Account ID to scope the key to. Skips polling for a newly created account."
+                " Required for enterprise regions when your account has more than one -"
+                " the command refuses to guess which one you mean."
+            ),
         )
         apikey_parser.add_argument(
             "--force",
@@ -354,11 +371,15 @@ class ApiKeyCommand(BaseCommand):
             auth_details = (
                 APIKEY_AUTH_DETAILS if region == "studio" else REGION_TO_AUTH_DETAILS[region]
             )
-            sign_in_via = "GitHub" if region == "studio" else "your browser"
+            sign_in_line = (
+                "To sign in with GitHub, open the following link in your browser"
+                if region == "studio"
+                else "To sign in, open the following link in your browser"
+            )
 
             def on_verification_url(verification_uri: str, user_code: str) -> None:
                 message = (
-                    f"To sign in with {sign_in_via}, open the following link in your browser\n"
+                    f"{sign_in_line}\n"
                     "and enter the code when prompted.\n\n"
                     f"  URL:  {verification_uri}\n"
                     f"  Code: [bold]{user_code}[/bold]"
@@ -382,7 +403,16 @@ class ApiKeyCommand(BaseCommand):
             step = "authorise"
             api = AgentStudioInterface()
             reporter.say(info, "Setting up your account...")
-            api.authorise(region=region, jwt_token=jwt_token)
+            try:
+                api.authorise(region=region, jwt_token=jwt_token)
+            except requests.HTTPError as e:
+                if region != "studio" and e.response is not None and e.response.status_code == 403:
+                    raise ValueError(
+                        f"No account is provisioned for you on {region}. Enterprise accounts"
+                        " are set up by PolyAI - contact your PolyAI representative, or run"
+                        " `poly apikey` without --region to create a self-serve studio account."
+                    ) from e
+                raise
 
             step = "account"
             resolved_account_id = _resolve_account_id(api, region, jwt_token, account_id)
@@ -442,7 +472,13 @@ class ApiKeyCommand(BaseCommand):
 
             if output_json:
                 _print_json(
-                    resolved_account_id, api_key, key_name, key_reused, credentials_summary, target
+                    resolved_account_id,
+                    api_key,
+                    key_name,
+                    key_reused,
+                    credentials_summary,
+                    target,
+                    key_active,
                 )
             else:
                 _print_summary(

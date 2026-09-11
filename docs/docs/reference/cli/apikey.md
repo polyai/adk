@@ -19,8 +19,8 @@ poly apikey --region us-1
 `poly apikey`:
 
 1. Signs in via the Auth0 device authorization flow. For the default `studio` region, this is a dedicated client whose login page shows only "Continue with GitHub". For any other `--region`, it's the same standard sign-in page (email/SSO) that [`poly login`](./login.md) uses.
-2. Calls the authorise endpoint, which creates your account in that region if it doesn't already exist.
-3. Resolves your account id — by default, polls for up to 20 seconds for the newly created account to appear; pass `--account-id` to skip this.
+2. Calls the authorise endpoint. On `studio`, this creates your workspace if you don't already have one. On an enterprise region (`us-1`, `uk-1`, `euw-1`), your account must already be provisioned by PolyAI — the command stops with a clear message if it isn't.
+3. Resolves your account id — by default, polls for up to 20 seconds for the newly created account to appear; pass `--account-id` to skip this. On an enterprise region, more than one account without `--account-id` is an error rather than a guess: the command lists the accounts found and asks you to pick one.
 4. Reuses an active, unexpired API key with the default name if one already exists for the account, otherwise creates one. Unlike [`poly login`](./login.md)'s Personal Access Token, this key is **account-scoped**.
 5. Saves the key to `~/.poly/credentials.json` under `--region` — but only if no entry for that region already exists there. An existing ADK credential is never overwritten, and credentials for different regions coexist independently.
 6. Writes `export POLY_API_KEY="..."` (or, on Windows, sets the variable in your user environment) into your detected shell profile, so new shells and processes pick it up automatically. The ADK itself reads `~/.poly/credentials.json` and doesn't need this variable; it's exported for the PolyAI SDKs and other tools that read `POLY_API_KEY` directly.
@@ -53,11 +53,12 @@ Install [uv](https://docs.astral.sh/uv/) with `winget install astral-sh.uv`. If 
   "api_key_masked": "sk-n****7890",
   "credentials_file": "/home/user/.poly/credentials.json (studio)",
   "profile_path": "/home/user/.zshrc",
-  "profile_shell": "zsh"
+  "profile_shell": "zsh",
+  "key_active": true
 }
 ~~~
 
-With `--json`, the sign-in URL and code are printed to stderr instead of being suppressed, since the JSON contract only constrains stdout and an agent that can't open a browser still needs them to complete sign-in.
+With `--json`, the sign-in URL and code are printed to stderr instead of being suppressed, since the JSON contract only constrains stdout and an agent that can't open a browser still needs them to complete sign-in. `key_active` is `false` if the key never finished activating within the poll window — the human-readable warning that would normally say so is suppressed in `--json` mode, so this is how an agent detects it.
 
 ## Telemetry
 

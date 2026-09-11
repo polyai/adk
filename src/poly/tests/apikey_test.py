@@ -9,7 +9,9 @@ import json
 import os
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
+
+import requests
 
 from poly.cli_commands.apikey import ApiKeyCommand
 from poly.cli_commands.base import GETTING_STARTED_GROUP
@@ -165,8 +167,10 @@ class HappyPath(ApiKeyTestCase):
             "credentials_file",
             "profile_path",
             "profile_shell",
+            "key_active",
         ):
             self.assertIn(key, payload)
+        self.assertIs(payload["key_active"], True)
         self.assertNotIn(FAKE_KEY, buffer.getvalue())
 
     def test_json_output_has_no_rich_markup(self):
@@ -266,6 +270,32 @@ class RegionSelection(ApiKeyTestCase):
         regions = {call.args[0] for call in self.mocks["capture_event"].call_args_list}
         self.assertEqual(regions, {"us-1"})
 
+    def _sign_in_message(self, **kwargs) -> str:
+        """Run apikey and return the verification message printed to stdout."""
+
+        def fake_signin(auth_details, *, on_verification_url=None, **_kwargs):
+            on_verification_url("https://example.test/activate", "ABCD-EFGH")
+            return FAKE_JWT
+
+        self.mocks["signin"].side_effect = fake_signin
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            ApiKeyCommand.apikey(**kwargs)
+        return buffer.getvalue()
+
+    def test_studio_sign_in_message_names_github(self):
+        """Studio's sign-in line still names GitHub explicitly."""
+        message = self._sign_in_message()
+
+        self.assertIn("To sign in with GitHub, open the following link", message)
+
+    def test_non_studio_sign_in_message_has_no_redundant_browser_mention(self):
+        """A non-studio region's sign-in line doesn't say 'with your browser open ... in your browser'."""
+        message = self._sign_in_message(region="us-1")
+
+        self.assertIn("To sign in, open the following link", message)
+        self.assertNotIn("with your browser", message)
+
 
 class AccountPollFailure(ApiKeyTestCase):
     """Tests for the no-account-appeared failure path."""
@@ -282,6 +312,102 @@ class AccountPollFailure(ApiKeyTestCase):
         failed = self._failed_events()
         self.assertEqual(len(failed), 1)
         self.assertEqual(failed[0]["step"], "account")
+
+
+class MultipleAccounts(ApiKeyTestCase):
+    """Tests for refusing to guess an account among several on enterprise regions."""
+
+    TWO_ACCOUNTS = [
+        {"id": "acc-1", "name": "Account One"},
+        {"id": "acc-2", "name": "Account Two"},
+    ]
+
+    def test_non_studio_with_two_accounts_and_no_account_id_fails_with_list(self):
+        """Two accounts on an enterprise region without --account-id is a clean, listed error."""
+        self.mocks["get_accounts"].return_value = self.TWO_ACCOUNTS
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            with self.assertRaises(SystemExit) as ctx:
+                ApiKeyCommand.apikey(region="us-1", output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(payload["step"], "account")
+        self.assertIn("acc-1", payload["error"])
+        self.assertIn("Account One", payload["error"])
+        self.assertIn("acc-2", payload["error"])
+        self.assertIn("Account Two", payload["error"])
+        self.assertIn("--account-id", payload["error"])
+
+    def test_non_studio_with_one_account_proceeds(self):
+        """A single account on an enterprise region resolves without --account-id."""
+        self.mocks["get_accounts"].return_value = [{"id": "acc-solo", "name": "Solo"}]
+
+        ApiKeyCommand.apikey(region="us-1")
+
+        self.mocks["create_key"].assert_called_once_with(
+            region="us-1",
+            jwt_token=FAKE_JWT,
+            account_id="acc-solo",
+            name="cli-generated-key-us-1",
+            source="apikey",
+        )
+
+    def test_studio_with_two_accounts_still_takes_the_first(self):
+        """Studio keeps picking the first account even with more than one - unchanged."""
+        self.mocks["get_accounts"].return_value = self.TWO_ACCOUNTS
+
+        ApiKeyCommand.apikey()
+
+        self.mocks["create_key"].assert_called_once_with(
+            region="studio",
+            jwt_token=FAKE_JWT,
+            account_id="acc-1",
+            name="cli-generated-key",
+            source="apikey",
+        )
+
+
+class UnprovisionedEnterpriseUser(ApiKeyTestCase):
+    """Tests for the friendly-403 rewrite when authorise fails on an enterprise region."""
+
+    @staticmethod
+    def _forbidden_error() -> requests.HTTPError:
+        """Build the HTTPError authorise raises for an unprovisioned enterprise user."""
+        response = MagicMock()
+        response.status_code = 403
+        return requests.HTTPError("403 Client Error: Forbidden", response=response)
+
+    def test_403_on_enterprise_region_is_rewritten(self):
+        """A 403 from authorise on us-1 becomes the friendly provisioning message."""
+        self.mocks["authorise"].side_effect = self._forbidden_error()
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            with self.assertRaises(SystemExit) as ctx:
+                ApiKeyCommand.apikey(region="us-1", output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(payload["step"], "authorise")
+        self.assertIn("No account is provisioned for you on us-1", payload["error"])
+        self.assertIn("poly apikey", payload["error"])
+
+    def test_403_on_studio_is_not_rewritten(self):
+        """A 403 from authorise on studio is a genuine auth error and surfaces as-is."""
+        self.mocks["authorise"].side_effect = self._forbidden_error()
+
+        buffer = io.StringIO()
+        with contextlib.redirect_stdout(buffer):
+            with self.assertRaises(SystemExit) as ctx:
+                ApiKeyCommand.apikey(output_json=True)
+
+        self.assertEqual(ctx.exception.code, 1)
+        payload = json.loads(buffer.getvalue())
+        self.assertEqual(payload["step"], "authorise")
+        self.assertNotIn("No account is provisioned", payload["error"])
+        self.assertIn("403", payload["error"])
 
 
 class KeyActivationWait(ApiKeyTestCase):
