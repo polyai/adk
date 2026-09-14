@@ -106,7 +106,22 @@ ignore_packages = [
     "urllib3",
     "wcwidth",
     "posthog",
-    "typing_extensions"
+    "typing_extensions",
+    # Voice-calling deps + transitives — all permissive (BSD/MIT/Apache/ISC), but
+    # licensecheck can't auto-classify their metadata and reports UNKNOWN.
+    "aioice",
+    "aiortc",
+    "av",
+    "cffi",
+    "cryptography",
+    "dnspython",
+    "google-crc32c",
+    "numpy",
+    "pycparser",
+    "pylibsrtp",
+    "pywebrtc-audio",
+    "sounddevice",
+    "websockets",
 ]
 
 [tool.semantic_release]
@@ -187,7 +202,15 @@ dependencies = [
     "argcomplete>=3.0.0",
     "langcodes==3.5.1",
     "posthog==7.35.4",
-    "packaging>=24.0"
+    "packaging>=24.0",
+    # Voice calling (`poly call`): WebRTC transport, audio I/O, and WebRTC APM / AEC3
+    # (echo cancellation). Native deps — pinned to versions with confirmed prebuilt
+    # cp314 wheels so a future release can't break installs.
+    "aiortc==1.15.0",
+    "sounddevice==0.5.6",
+    "websockets==17.1",
+    "numpy==2.5.3",
+    "pywebrtc-audio==0.2.0",
 ]
 
 [project.license]

@@ -10,9 +10,19 @@
     "URL": "https://pyyaml.org/"
   },
   {
-    "License": "BSD License",
+    "License": "BSD-2-Clause",
     "Name": "Pygments",
     "URL": "https://pygments.org"
+  },
+  {
+    "License": "BSD-3-Clause",
+    "Name": "aioice",
+    "URL": "https://github.com/aiortc/aioice"
+  },
+  {
+    "License": "BSD-3-Clause",
+    "Name": "aiortc",
+    "URL": "https://github.com/aiortc/aiortc"
   },
   {
     "License": "MIT License",
@@ -30,6 +40,11 @@
     "URL": "https://www.attrs.org/en/stable/changelog.html"
   },
   {
+    "License": "BSD-3-Clause",
+    "Name": "av",
+    "URL": "https://pyav.basswood-io.com"
+  },
+  {
     "License": "MIT License",
     "Name": "backoff",
     "URL": "https://github.com/litl/backoff"
@@ -43,6 +58,11 @@
     "License": "Mozilla Public License 2.0 (MPL 2.0)",
     "Name": "certifi",
     "URL": "https://github.com/certifi/python-certifi"
+  },
+  {
+    "License": "MIT-0",
+    "Name": "cffi",
+    "URL": "https://cffi.readthedocs.io/en/latest/whatsnew.html"
   },
   {
     "License": "MIT",
@@ -60,6 +80,11 @@
     "URL": "https://github.com/coveragepy/coveragepy"
   },
   {
+    "License": "Apache-2.0 OR BSD-3-Clause",
+    "Name": "cryptography",
+    "URL": "https://github.com/pyca/cryptography"
+  },
+  {
     "License": "Python Software Foundation License",
     "Name": "distlib",
     "URL": "https://github.com/pypa/distlib"
@@ -68,6 +93,11 @@
     "License": "Apache Software License",
     "Name": "distro",
     "URL": "https://github.com/python-distro/distro"
+  },
+  {
+    "License": "ISC License (ISCL)",
+    "Name": "dnspython",
+    "URL": "https://www.dnspython.org"
   },
   {
     "License": "MIT License",
@@ -80,6 +110,11 @@
     "URL": "https://github.com/tox-dev/py-filelock"
   },
   {
+    "License": "UNKNOWN",
+    "Name": "google-crc32c",
+    "URL": "https://github.com/googleapis/python-crc32c"
+  },
+  {
     "License": "MIT",
     "Name": "identify",
     "URL": "https://github.com/pre-commit/identify"
@@ -88,6 +123,11 @@
     "License": "BSD-3-Clause",
     "Name": "idna",
     "URL": "https://github.com/kjd/idna"
+  },
+  {
+    "License": "MIT License",
+    "Name": "ifaddr",
+    "URL": "https://github.com/pydron/ifaddr"
   },
   {
     "License": "MIT",
@@ -135,6 +175,11 @@
     "URL": "https://github.com/ekalinin/nodeenv"
   },
   {
+    "License": "BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0",
+    "Name": "numpy",
+    "URL": "https://numpy.org"
+  },
+  {
     "License": "Apache Software License; BSD License",
     "Name": "packaging",
     "URL": "https://github.com/pypa/packaging"
@@ -170,6 +215,26 @@
     "URL": "https://developers.google.com/protocol-buffers/"
   },
   {
+    "License": "Apache Software License",
+    "Name": "pyOpenSSL",
+    "URL": "https://pyopenssl.org/"
+  },
+  {
+    "License": "BSD-3-Clause",
+    "Name": "pycparser",
+    "URL": "https://github.com/eliben/pycparser"
+  },
+  {
+    "License": "MIT License",
+    "Name": "pyee",
+    "URL": "https://github.com/jfhbrook/pyee"
+  },
+  {
+    "License": "BSD-3-Clause",
+    "Name": "pylibsrtp",
+    "URL": "https://github.com/aiortc/pylibsrtp"
+  },
+  {
     "License": "MIT",
     "Name": "pytest",
     "URL": "https://docs.pytest.org/en/latest/"
@@ -188,6 +253,11 @@
     "License": "MIT License",
     "Name": "python-discovery",
     "URL": "https://github.com/tox-dev/python-discovery"
+  },
+  {
+    "License": "Apache-2.0",
+    "Name": "pywebrtc-audio",
+    "URL": "https://github.com/strands-labs/pywebrtc-audio"
   },
   {
     "License": "MIT License",
@@ -230,7 +300,7 @@
     "URL": "https://sourceforge.net/p/ruamel-yaml/code/ci/default/tree/"
   },
   {
-    "License": "MIT License",
+    "License": "MIT",
     "Name": "ruff",
     "URL": "https://docs.astral.sh/ruff"
   },
@@ -238,6 +308,11 @@
     "License": "MIT License",
     "Name": "six",
     "URL": "https://github.com/benjaminp/six"
+  },
+  {
+    "License": "MIT",
+    "Name": "sounddevice",
+    "URL": "https://github.com/spatialaudio/python-sounddevice/"
   },
   {
     "License": "MIT",
@@ -278,5 +353,10 @@
     "License": "MIT",
     "Name": "virtualenv",
     "URL": "https://github.com/pypa/virtualenv"
+  },
+  {
+    "License": "BSD-3-Clause",
+    "Name": "websockets",
+    "URL": "https://github.com/python-websockets/websockets"
   }
 ]
