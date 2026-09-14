@@ -8,6 +8,7 @@ import os
 import sys
 from argparse import (
     ArgumentParser,
+    BooleanOptionalAction,
     Namespace,
     RawTextHelpFormatter,
     _SubParsersAction,
@@ -84,6 +85,14 @@ class CallCommand(BaseCommand):
             action="store_true",
             help="Push the project before calling, so the draft build includes local changes.",
         )
+        call_parser.add_argument(
+            "--echo-cancellation",
+            dest="aec",
+            action=BooleanOptionalAction,
+            default=True,
+            help="Echo cancellation, on by default so the agent doesn't hear itself on a "
+            "speaker. Use --no-echo-cancellation to disable.",
+        )
 
     @classmethod
     def run(cls, args: Namespace) -> None:
@@ -94,6 +103,7 @@ class CallCommand(BaseCommand):
             variant=args.variant,
             mode=args.mode,
             push_before_call=args.push,
+            aec=args.aec,
         )
 
     @classmethod
@@ -104,9 +114,10 @@ class CallCommand(BaseCommand):
         variant: Optional[str] = None,
         mode: str = DEFAULT_CALL_MODE,
         push_before_call: bool = False,
+        aec: bool = True,
     ) -> None:
         """Start an interactive voice call with the agent's draft build."""
-        from poly.output.console import error, info, success
+        from poly.output.console import error, info, success, warning
 
         project = load_project(base_path)
 
@@ -141,6 +152,18 @@ class CallCommand(BaseCommand):
             error(_VOICE_DEPS_HINT)
             sys.exit(1)
 
+        # AEC is on by default; if the WebRTC APM isn't available, warn and continue
+        # without it rather than blocking the call.
+        if aec:
+            try:
+                import pywebrtc_audio  # noqa: F401
+            except ImportError:
+                warning(
+                    "Echo cancellation unavailable (reinstall ADK to restore it); "
+                    "continuing without it."
+                )
+                aec = False
+
         try:
             session = project.create_call_session("draft", variant=variant, mode=mode)
         except (ValueError, NotImplementedError) as exc:
@@ -150,11 +173,13 @@ class CallCommand(BaseCommand):
         caller = os.environ.get("ADK_COMMAND_USER_OVERRIDE") or "adk-user"
         info(
             f"Calling [bold]{project.account_id}/{project.project_id}[/bold] "
-            f"branch=[bold]{branch_label}[/bold] (mode={mode}). Press Ctrl+C to hang up."
+            f"branch=[bold]{branch_label}[/bold] "
+            f"(mode={mode}, echo cancellation {'on' if aec else 'off'}). "
+            "Press Ctrl+C to hang up."
         )
 
         try:
-            asyncio.run(run_call(session, caller))
+            asyncio.run(run_call(session, caller, aec=aec))
         except CallError as exc:
             error(f"Call failed: {exc}")
             sys.exit(1)
