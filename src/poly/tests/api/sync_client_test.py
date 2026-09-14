@@ -251,5 +251,38 @@ class MergeBranch(unittest.TestCase):
         self.assertEqual(errors, [{"path": [], "message": "API Error 400: boom"}])
 
 
+class GetBranchCallInfo(unittest.TestCase):
+    """Tests for SyncClientHandler.get_branch_call_info."""
+
+    def _handler_on_existing_branch(self):
+        handler = build_handler()
+        # assert_branch_exists checks the branch is real before delegating.
+        handler._sdk.fetch_branches.return_value = {"branches": [{"branchId": "branch-1"}]}
+        return handler
+
+    def test_returns_call_info_from_sdk(self):
+        """The handler delegates to sdk.get_branch_call_info and returns its result."""
+        handler = self._handler_on_existing_branch()
+        expected = {
+            "artifactVersion": "art-1",
+            "lambdaDeploymentVersion": "lambda-1",
+            "authToken": "studio-token",
+        }
+        handler._sdk.get_branch_call_info.return_value = expected
+
+        result = handler.get_branch_call_info("branch-1")
+
+        self.assertEqual(result, expected)
+        handler._sdk.get_branch_call_info.assert_called_once_with("branch-1")
+
+    def test_asserts_branch_exists_before_delegating(self):
+        """The branch existence check runs before the deploy call is prepared."""
+        handler = self._handler_on_existing_branch()
+
+        handler.get_branch_call_info("branch-1")
+
+        handler._sdk.fetch_branches.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

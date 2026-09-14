@@ -21,6 +21,7 @@ from google.protobuf.message import Message
 
 import poly.resources.resource_utils as resource_utils
 import poly.utils as utils
+from poly.call.session import DEFAULT_CALL_MODE, CallSession
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
@@ -2707,6 +2708,62 @@ class AgentStudioProject:
             input_lang=input_lang,
             output_lang=output_lang,
             sip_headers=sip_headers,
+        )
+
+    def create_call_session(
+        self,
+        environment: str,
+        variant: Optional[str] = None,
+        mode: str = DEFAULT_CALL_MODE,
+    ) -> CallSession:
+        """Bootstrap a WebRTC voice call session against a branch draft build.
+
+        Prepares the branch deployment and mints a studio token, returning the
+        parameters the signaling OFFER needs. Only draft/branch calls are
+        currently supported; deployed environments raise NotImplementedError.
+
+        Args:
+            environment (str): The environment to call. Only "draft" is supported.
+            variant (ty.Optional[str]): The variant ID to call, if any.
+            mode (str): The call mode (see ``DEFAULT_CALL_MODE``).
+
+        Returns:
+            CallSession: Parameters for opening the WebRTC call.
+
+        Raises:
+            NotImplementedError: If a non-draft environment is requested.
+            ValueError: If the branch call info response is incomplete.
+            requests.HTTPError: If the API call fails.
+        """
+        if environment != "draft":
+            raise NotImplementedError(
+                "ad call currently supports only draft/branch calls; "
+                "deployed-environment calling is not yet available."
+            )
+
+        call_info = self.api_handler.get_branch_call_info(self.branch_id)
+
+        artifact_version = call_info.get("artifactVersion")
+        lambda_deployment_version = call_info.get("lambdaDeploymentVersion")
+        auth_token = call_info.get("authToken")
+        gateway_ws_url = call_info.get("gatewayWsUrl")
+        if (
+            not artifact_version
+            or not lambda_deployment_version
+            or not auth_token
+            or not gateway_ws_url
+        ):
+            raise ValueError(f"Unexpected response from branch call info: {call_info}")
+
+        return CallSession(
+            account_id=self.account_id,
+            project_id=self.project_id,
+            variant_id=variant or "",
+            artifact_version=artifact_version,
+            lambda_deployment_version=lambda_deployment_version,
+            auth_token=auth_token,
+            gateway_ws_url=gateway_ws_url,
+            mode=mode,
         )
 
     def send_message(

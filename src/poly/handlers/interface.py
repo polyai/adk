@@ -754,6 +754,24 @@ class AgentStudioInterface:
         except (requests.HTTPError, SourcererAPIError) as e:
             self._handle_api_error(e)
 
+    def get_branch_call_info(self, branch_id: str) -> dict:
+        """Get deployment info needed to start a draft voice call on a branch.
+
+        Fetches the branch projection sequence from sourcerer, then prepares the
+        deployment to obtain artifactVersion, lambdaDeploymentVersion and a
+        studio authToken for the WebRTC call.
+
+        Args:
+            branch_id: The branch ID
+
+        Returns:
+            dict with 'artifactVersion', 'lambdaDeploymentVersion' and 'authToken'.
+        """
+        try:
+            return self.sync_client.get_branch_call_info(branch_id)
+        except (requests.HTTPError, SourcererAPIError) as e:
+            self._handle_api_error(e)
+
     @staticmethod
     def create_draft_chat(
         region: str,
