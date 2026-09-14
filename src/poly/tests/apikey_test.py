@@ -31,7 +31,11 @@ class ApiKeyTestCase(unittest.TestCase):
             "signin": patch(
                 "poly.cli_commands.apikey.signin_with_device_flow", return_value=FAKE_JWT
             ),
-            "authorise": patch("poly.cli_commands.apikey.AgentStudioInterface.authorise"),
+            "authorise": patch(
+                "poly.cli_commands.apikey.AgentStudioInterface.authorise",
+                return_value={"user": {"is_first_login": False}},
+            ),
+            "capture_event": patch("poly.handlers.posthog.capture_event"),
             "get_accounts": patch(
                 "poly.cli_commands.apikey.AgentStudioInterface.get_accounts_internal",
                 return_value=[{"id": FAKE_ACCOUNT}],
@@ -250,6 +254,64 @@ class RegionSelection(ApiKeyTestCase):
 
         self.assertIn("To sign in, open the following link", message)
         self.assertNotIn("with your browser", message)
+
+
+class SignupEvent(ApiKeyTestCase):
+    """Tests for the apikey_signup PostHog event fired on genuine first-time signup."""
+
+    def test_studio_first_login_emits_signup(self):
+        """A first login on studio fires apikey_signup for the resolved account."""
+        self.mocks["authorise"].return_value = {"user": {"is_first_login": True}}
+
+        ApiKeyCommand.apikey(region="studio")
+
+        self.mocks["capture_event"].assert_called_once_with(
+            "studio", "apikey_signup", {"source": "apikey"}, distinct_id=FAKE_ACCOUNT
+        )
+
+    def test_studio_returning_user_does_not_emit_signup(self):
+        """A returning user on studio (is_first_login False) does not fire the event."""
+        self.mocks["authorise"].return_value = {"user": {"is_first_login": False}}
+
+        ApiKeyCommand.apikey(region="studio")
+
+        self.mocks["capture_event"].assert_not_called()
+
+    def test_studio_missing_is_first_login_key_does_not_emit_signup(self):
+        """A response with no is_first_login key at all is treated as not-a-signup."""
+        self.mocks["authorise"].return_value = {"user": {}}
+
+        ApiKeyCommand.apikey(region="studio")
+
+        self.mocks["capture_event"].assert_not_called()
+
+    def test_non_studio_first_login_does_not_emit_signup(self):
+        """is_first_login on a non-studio region does not fire the event.
+
+        On enterprise regions is_first_login also covers an existing user with no
+        admin role on any account yet, not just a genuine new signup.
+        """
+        self.mocks["authorise"].return_value = {"user": {"is_first_login": True}}
+
+        ApiKeyCommand.apikey(region="us-1")
+
+        self.mocks["capture_event"].assert_not_called()
+
+    def test_none_auth_response_does_not_crash_or_emit_signup(self):
+        """A None authorise response is handled defensively, not treated as a signup."""
+        self.mocks["authorise"].return_value = None
+
+        ApiKeyCommand.apikey(region="studio")
+
+        self.mocks["capture_event"].assert_not_called()
+
+    def test_auth_response_missing_user_key_does_not_crash_or_emit_signup(self):
+        """An authorise response with no "user" key is handled defensively."""
+        self.mocks["authorise"].return_value = {}
+
+        ApiKeyCommand.apikey(region="studio")
+
+        self.mocks["capture_event"].assert_not_called()
 
 
 class AccountPollFailure(ApiKeyTestCase):

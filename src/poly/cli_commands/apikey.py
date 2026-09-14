@@ -359,7 +359,7 @@ class ApiKeyCommand(BaseCommand):
             api = AgentStudioInterface()
             _say(output_json, info, "Setting up your account...")
             try:
-                api.authorise(region=region, jwt_token=jwt_token)
+                auth_response = api.authorise(region=region, jwt_token=jwt_token)
             except requests.HTTPError as e:
                 if region != "studio" and e.response is not None and e.response.status_code == 403:
                     raise ValueError(
@@ -368,9 +368,25 @@ class ApiKeyCommand(BaseCommand):
                         " `poly apikey --region studio` to create a self-serve studio account."
                     ) from e
                 raise
+            # On non-studio regions, `is_first_login` also fires for an existing user
+            # who has no admin role on any account yet (enterprise auto-provisioning),
+            # not just a genuinely new signup - restrict the signup event to studio,
+            # the only region this tracking was asked for.
+            is_signup = region == "studio" and bool(
+                (auth_response or {}).get("user", {}).get("is_first_login")
+            )
 
             step = "account"
             resolved_account_id = _resolve_account_id(api, region, jwt_token, account_id)
+            if is_signup:
+                from poly.handlers.posthog import capture_event
+
+                capture_event(
+                    region,
+                    "apikey_signup",
+                    {"source": APIKEY_SOURCE},
+                    distinct_id=resolved_account_id,
+                )
 
             step = "key"
             api_key, key_reused = _get_or_create_key(

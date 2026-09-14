@@ -63,6 +63,23 @@ def get_posthog_client(region: str) -> Posthog:
     return client
 
 
+def capture_event(region: str, event: str, properties: dict, distinct_id: str) -> None:
+    """Send an analytics event to PostHog. Fire-and-forget: never raises.
+
+    Args:
+        region: The region whose PostHog project the event should land in.
+        event: The event name.
+        properties: Event properties.
+        distinct_id: The PostHog distinct id to attach the event to.
+    """
+    try:
+        get_posthog_client(region).capture(
+            event=event, distinct_id=distinct_id, properties=properties
+        )
+    except Exception as exc:
+        logger.warning(f"PostHog event capture failed event={event}", exc_info=exc)
+
+
 def get_user_identity() -> str:
     """Get the user identity for Posthog feature flag evaluation.
 

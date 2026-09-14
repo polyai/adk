@@ -119,9 +119,9 @@ class IsFeatureEnabledTest(unittest.TestCase):
             region="studio", key="some-flag", default=False, project_id="proj-1"
         )
 
-        project_properties = self.client.feature_enabled.call_args.kwargs[
-            "group_properties"
-        ]["project"]
+        project_properties = self.client.feature_enabled.call_args.kwargs["group_properties"][
+            "project"
+        ]
         self.assertNotIn("account_id", project_properties)
 
     def test_non_production_regions_send_their_own_env(self):
@@ -251,6 +251,40 @@ class GetUserIdentityTest(unittest.TestCase):
         """The distinct_id is the OS username, so rollouts bucket per developer."""
         with patch("getpass.getuser", return_value="ada"):
             self.assertEqual(get_user_identity(), "ada")
+
+
+class CaptureEventTest(unittest.TestCase):
+    """Tests for capture_event, the fire-and-forget analytics capture helper."""
+
+    def setUp(self):
+        self.client = MagicMock()
+        self.client_patcher = patch(
+            "poly.handlers.posthog.get_posthog_client", return_value=self.client
+        )
+        self.client_patcher.start()
+
+    def tearDown(self):
+        patch.stopall()
+
+    def test_sends_event_with_distinct_id_and_properties(self):
+        """A capture call is forwarded to the region's client with the given fields."""
+        from poly.handlers.posthog import capture_event
+
+        capture_event("studio", "apikey_signup", {"source": "apikey"}, "acc-1")
+
+        self.client.capture.assert_called_once_with(
+            event="apikey_signup",
+            distinct_id="acc-1",
+            properties={"source": "apikey"},
+        )
+
+    def test_client_failure_is_swallowed(self):
+        """A slow or unreachable PostHog must never fail the caller."""
+        from poly.handlers.posthog import capture_event
+
+        self.client.capture.side_effect = RuntimeError("connection reset")
+
+        capture_event("studio", "apikey_signup", {"source": "apikey"}, "acc-1")
 
 
 if __name__ == "__main__":
