@@ -13,6 +13,7 @@ import copy
 from typing import Callable, TypeAlias
 
 from poly.resources import (
+    AttributeKind,
     ChatGreeting,
     ChatSafetyFilters,
     ChatStylePrompt,
@@ -327,17 +328,18 @@ def default_new_variant_attributes(
     current_resources: ResourceMap,
 ) -> None:
     """Give new variants all known (non-deleted) attributes as default values."""
-    # Add known attributes to any new variant to give it a default value
+    # Add known attributes to any new variant to give it a default value. A typed
+    # attribute cannot hold "", so its seed is a native null; the real value follows
+    # in the attribute update pushed straight after.
     deleted_attribute_ids = set(deleted_resources.get(VariantAttribute, {}).keys())
     for variant in new_resources.get(Variant, {}).values():
         if not isinstance(variant, Variant):
             raise TypeError(f"Variant is not a Variant: {variant}")
-        attribute_ids = [
-            aid
-            for aid in current_resources.get(VariantAttribute, {}).keys()
-            if aid not in deleted_attribute_ids
-        ]
-        variant.attribute_ids = attribute_ids
+        variant.attribute_values = {
+            attribute_id: "" if attribute.kind == AttributeKind.STRING else None
+            for attribute_id, attribute in current_resources.get(VariantAttribute, {}).items()
+            if attribute_id not in deleted_attribute_ids
+        }
 
 
 def fix_conditions_for_deleted_steps(
