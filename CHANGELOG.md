@@ -1,6 +1,72 @@
 # CHANGELOG
 
 
+## v0.57.0 (2026-09-14)
+
+### Features
+
+- Support typed variant attributes ([#307](https://github.com/polyai/adk/pull/307),
+  [`3fcf3e2`](https://github.com/polyai/adk/commit/3fcf3e2d1579282c339e102d06613fa21bc3d15b))
+
+## Summary
+
+Variant attributes can now declare a type. ADK reads an attribute's `kind` (and an enum's `config`)
+  from the platform, validates every value against it locally, and dual-writes native typed values
+  on push — matching the `AttributeType` support the platform added in the Variant Attribute Types
+  project.
+
+## Motivation
+
+The platform now stores variant attribute values twice: the legacy stringified `values` map and a
+  native `typedValues` map that wins on read. ADK knew about neither, so it flattened every typed
+  attribute to a string on pull, and its pushes were rejected outright by the backend's type
+  validation once a project had a typed attribute.
+
+Linear project: https://linear.app/poly-ai/project/variant-attribute-types-a7bc31d07a9c/overview
+
+## Changes
+
+- Variant attributes gain an optional `kind` (`string`, `number`, `boolean`, `enum`, `object`) and,
+  for enums, a `config` listing the allowed values. - Push dual-writes both maps and sends the
+  declared type on create and update. - Pull prefers `typedValues`, falls back to the whole `values`
+  map when it is malformed, and parses a legacy string against the declared kind — so an attribute
+  typed in Agent Studio but never re-saved still reads natively. - Values are validated against
+  their kind before push, naming the variant a mismatch came from instead of surfacing it on a live
+  call. - `values` stays a map of strings on disk, with `kind` saying how to read them. An ADK
+  released before typed attributes calls `.strip()` on every value and would fail on a native int,
+  bool or nested map in a file a newer ADK had written. Native YAML is still accepted on input, and
+  both spellings hash identically so neither shows as a diff against the other. - New variants seed
+  typed attributes with a native null rather than `""`, which the platform rejects for any
+  non-string kind. - Docs updated, including two behaviours that aren't discoverable from the file:
+  a blank typed attribute is omitted from the deployed agent (a blank string substitutes empty), and
+  Agent Studio's Date & time / Opening hours / Voice types are stored as `string` or `enum` here.
+
+A project that never adopts a type sees no change to its file at all.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+1585 tests pass. New coverage pins the wire round trip per kind, the projection read including the
+  malformed-`typedValues` fallback, YAML round trips for every kind, and the backward-compatible
+  encoding — including a test that runs the pre-types reader's exact comprehension over what this
+  writes, plus a guard asserting that same reader really does fail on a native value.
+
+Not yet exercised against a live project. Worth a real `poly push` of a typed attribute before
+  merging, since this changes the push payload.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+---------
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.56.0 (2026-09-11)
 
 ### Continuous Integration
