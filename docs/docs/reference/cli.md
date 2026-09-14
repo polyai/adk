@@ -22,9 +22,9 @@ Commands are listed under section headers so related ones stay together:
 
 | Section | Commands |
 |---|---|
-| Getting started | `init`, `start`, `login`, `studio`, `project` |
+| Getting started | `init`, `setup`, `login`, `studio`, `project` |
 | Project sync | `pull`, `push`, `status`, `revert`, `format`, `validate`, `diff`, `review`, `branch`, `test`, `rtc`, `chat` |
-| Builder API | `deployments`, `conversations`, `audio-cache`, `functions` |
+| Builder API | `deployments`, `metrics`, `conversations`, `audio-cache`, `functions` |
 | Other | `template`, `docs`, `completion` |
 
 Each command also supports its own help output. For example:
@@ -43,8 +43,8 @@ poly push --help
 
 | Command | Purpose |
 |---|---|
+| [`poly setup`](./cli/setup.md) | Set up everything in one command: auth, completion, AI skills, and a project |
 | [`poly login`](./cli/login.md) | Sign in to, or sign up for, an Agent Studio account |
-| [`poly start`](./cli/start.md) | Create an account and a project in one step |
 | [`poly init`](./cli/init.md) | Connect a local folder to an existing project |
 | [`poly project`](./cli/project.md) | Create and manage Agent Studio projects |
 | [`poly template`](./cli/template.md) | Browse and load example project templates |
@@ -76,6 +76,7 @@ poly push --help
 | [`poly chat`](./cli/chat.md) | Talk to the agent interactively |
 | [`poly test`](./cli/test.md) | Run and inspect simulated conversation tests |
 | [`poly conversations`](./cli/conversations.md) | List and inspect real conversations |
+| [`poly metrics`](./cli/metrics.md) | Define and manage the project's custom metrics |
 | [`poly docs`](./cli/docs.md) | Output resource documentation |
 
 ### Deployment and configuration
@@ -130,6 +131,11 @@ poly deployments show abc123def --json
 poly deployments list --json
 poly deployments promote --from <id> --to pre-release --force --json
 poly deployments rollback --to <id> --force --json
+poly metrics list --json
+poly metrics export --json
+poly metrics add --name BOOKING_CONFIRMED --type bool --json
+poly metrics edit BOOKING_CONFIRMED --active false --json
+poly metrics import metrics.yaml --dry-run --json
 poly conversations list --json
 poly conversations get <conversation_id> --json
 poly conversations get-audio <conversation_id> --json

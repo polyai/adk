@@ -1,0 +1,40 @@
+name: Validate skills
+
+on:
+  pull_request:
+    paths:
+      - 'skills/**'
+      - 'pyproject.toml'
+      - 'scripts/validate_skills.py'
+      - '.github/workflows/validate-skills.yaml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'skills/**'
+      - 'pyproject.toml'
+      - 'scripts/validate_skills.py'
+      - '.github/workflows/validate-skills.yaml'
+
+jobs:
+  validate-skills:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+      with:
+        version: "latest"
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.14"
+
+    - name: Validate skills
+      run: uv run --no-project --with "ruamel.yaml>=0.18.0" python scripts/validate_skills.py

@@ -1,4 +1,4 @@
-"""Auth command family: start and login.
+"""Auth command family: login.
 
 Copyright PolyAI Limited
 """
@@ -8,19 +8,40 @@ import sys
 from argparse import ArgumentParser, Namespace, _SubParsersAction
 
 from poly.cli_commands.base import GETTING_STARTED_GROUP, BaseCommand, Parents
-from poly.cli_commands.project import ProjectCommand
 from poly.handlers.auth0_handler import Auth0Handler
 from poly.handlers.interface import REGIONS, AgentStudioInterface
 from poly.utils import (
     CREDENTIALS_FILE_PATH,
-    any_credentials_exist,
     save_api_key_credential_file,
 )
 
 
+def _select_region() -> str:
+    """Interactively select a region."""
+    import questionary
+
+    return questionary.select(
+        "Select your region:",
+        choices=[
+            questionary.Choice("Studio", value="studio"),
+            questionary.Choice("US (us-1) — Enterprise", value="us-1"),
+            questionary.Choice("UK (uk-1) — Enterprise", value="uk-1"),
+            questionary.Choice("EU West (euw-1) — Enterprise", value="euw-1"),
+        ],
+        default="studio",
+    ).ask()
+
+
 def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
-    """Authorise the user, fetch or create a PAT, and save it to the credential file."""
-    from poly.output.console import console, error, info, mask_api_key, plain, success
+    """Authorise the user, fetch or create a PAT, and save it to the credential file.
+
+    Waits for the key to become active before returning, so a command run
+    immediately afterwards (e.g. project creation) does not fail against a key
+    the platform has not finished activating.
+    """
+    import time
+
+    from poly.output.console import console, error, info, mask_api_key, plain, success, warning
 
     api_handler = AgentStudioInterface()
 
@@ -49,6 +70,21 @@ def _authenticate_and_save_key(jwt_access_token: str, region: str) -> None:
     plain("API key has been saved to your credential file for future use.")
     info(f"Credential file path: {CREDENTIALS_FILE_PATH}")
     plain("")
+
+    # A newly created PAT can take a few seconds to activate. Wait here so that
+    # 'poly login' and 'poly setup' hand back a key that actually works.
+    with console.status("[info]Verifying API key is active...[/info]"):
+        for _ in range(20):
+            try:
+                api_handler.get_accounts(region=region)
+                break
+            except Exception:
+                time.sleep(1)
+        else:
+            warning(
+                "API key was saved but is not active yet."
+                " If your next command fails, wait a moment and retry."
+            )
 
 
 def _signin(region: str) -> str:
@@ -111,118 +147,6 @@ def _signin(region: str) -> str:
     return access_token
 
 
-class StartCommand(BaseCommand):
-    """Create a new Agent Studio account, set up API key, and create a first project."""
-
-    command = "start"
-
-    group = GETTING_STARTED_GROUP
-
-    @classmethod
-    def add_arguments(cls, subparsers: _SubParsersAction[ArgumentParser], parents: Parents) -> None:
-        """Register the ``start`` subcommand."""
-        start_parser = subparsers.add_parser(
-            "start",
-            parents=[parents.verbose, parents.debug],
-            help="Get started with PolyAI Agent Studio",
-            description=(
-                "Create a new Agent Studio account, set up your API key, and create a first project"
-                " with a single command.\n\n"
-                "Examples:\n"
-                "  poly start\n"
-            ),
-        )
-        start_parser.add_argument(
-            "--base-path",
-            type=str,
-            default=os.getcwd(),
-            help="Base path to initialize the project. Defaults to current working directory.",
-        )
-
-    @classmethod
-    def run(cls, args: Namespace) -> None:
-        """Dispatch to the start handler."""
-        cls.start(base_path=args.base_path)
-
-    @classmethod
-    def start(cls, base_path: str) -> None:
-        """Create an Agent Studio account, set up API key, and create a first project."""
-        import time
-
-        import questionary
-
-        from poly.output.console import (
-            console,
-            error,
-            info,
-            plain,
-            print_welcome_message,
-            success,
-            warning,
-        )
-
-        print_welcome_message()
-        plain(
-            "This will guide you through setting up your API key"
-            " and creating a new project in Agent Studio."
-        )
-        questionary.press_any_key_to_continue("Press any key to continue...").ask()
-
-        # --- 1. Check for existing API key ---
-        if any_credentials_exist():
-            warning("An existing API key was found in your environment.")
-            use_existing = questionary.confirm(
-                "Do you want to continue with the existing key?",
-                auto_enter=False,
-                default=True,
-            ).ask()
-            if use_existing:
-                success("Continuing with existing API key.")
-                create_project = questionary.confirm(
-                    "Would you like to create a new project in Agent Studio now?",
-                    auto_enter=False,
-                    default=True,
-                ).ask()
-                if create_project:
-                    ProjectCommand.create_project(base_path)
-                else:
-                    info("You can create a new project later by running 'poly project create'")
-                return
-
-        # --- 2. Sign in via device flow ---
-        jwt_access_token = _signin("studio")
-
-        # --- 3. Authorise and save API key ---
-        _authenticate_and_save_key(jwt_access_token, region="studio")
-
-        # --- 4. Wait for the new PAT to become active (needed for project creation) ---
-        api_handler = AgentStudioInterface()
-        with console.status("[info]Verifying API key is active...[/info]"):
-            for _ in range(20):
-                try:
-                    api_handler.get_accounts(region="studio")
-                    break
-                except Exception:
-                    time.sleep(1)
-            else:
-                error(
-                    "API key was created but is not active yet."
-                    " Please wait a moment and try 'poly project create'."
-                )
-                return
-
-        # --- 5. Optionally create a project ---
-        create_project = questionary.confirm(
-            "Would you like to create a new project in Agent Studio now?",
-            auto_enter=False,
-            default=True,
-        ).ask()
-        if create_project:
-            ProjectCommand.create_project(base_path, region="studio")
-        else:
-            info("You can create a new project later by running 'poly project create'")
-
-
 class LoginCommand(BaseCommand):
     """Log in to an existing Agent Studio account and save API key credentials."""
 
@@ -276,16 +200,7 @@ class LoginCommand(BaseCommand):
         questionary.press_any_key_to_continue("Press any key to continue...").ask()
 
         if region is None:
-            region = questionary.select(
-                "Select your region:",
-                choices=[
-                    questionary.Choice("Studio", value="studio"),
-                    questionary.Choice("US (us-1) — Enterprise", value="us-1"),
-                    questionary.Choice("UK (uk-1) — Enterprise", value="uk-1"),
-                    questionary.Choice("EU West (euw-1) — Enterprise", value="euw-1"),
-                ],
-                default="studio",
-            ).ask()
+            region = _select_region()
 
         jwt_access_token = _signin(region)
         _authenticate_and_save_key(jwt_access_token, region=region)

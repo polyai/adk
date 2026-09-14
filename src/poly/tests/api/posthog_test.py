@@ -77,7 +77,13 @@ class IsFeatureEnabledTest(unittest.TestCase):
         self.assertTrue(result)
 
     def test_passes_key_identity_and_project_group(self):
-        """The flag key, distinct_id and project group are forwarded to PostHog."""
+        """The flag key, distinct_id and project group are forwarded to PostHog.
+
+        The project group key is namespaced by cluster: project ids are minted
+        per-cluster, and several clusters share one PostHog project, so a bare
+        id matches no group. Conditions match on the properties, so those are
+        sent too.
+        """
         self.client.feature_enabled.return_value = True
 
         PosthogHandler.is_feature_enabled(
@@ -85,14 +91,49 @@ class IsFeatureEnabledTest(unittest.TestCase):
             key="deployment-simplification",
             default=False,
             project_id="proj-1",
+            account_id="acct-1",
         )
 
         self.client.feature_enabled.assert_called_once_with(
             "deployment-simplification",
             distinct_id="test-user",
-            groups={"cluster": "studio", "project": "proj-1"},
+            groups={"cluster": "studio", "project": "studio/proj-1"},
+            group_properties={
+                "cluster": {"cluster": "studio", "env": "prod"},
+                "project": {
+                    "project_id": "proj-1",
+                    "cluster": "studio",
+                    "env": "prod",
+                    "account_id": "acct-1",
+                },
+            },
             send_feature_flag_events=False,
         )
+
+    def test_omits_account_id_when_unknown(self):
+        """An absent account leaves the stored property alone; an empty one fails
+        an exact condition."""
+        self.client.feature_enabled.return_value = True
+
+        PosthogHandler.is_feature_enabled(
+            region="studio", key="some-flag", default=False, project_id="proj-1"
+        )
+
+        project_properties = self.client.feature_enabled.call_args.kwargs[
+            "group_properties"
+        ]["project"]
+        self.assertNotIn("account_id", project_properties)
+
+    def test_non_production_regions_send_their_own_env(self):
+        """The env property separates the two deployments sharing a cluster key."""
+        self.client.feature_enabled.return_value = True
+
+        PosthogHandler.is_feature_enabled(
+            region="staging", key="some-flag", default=False, project_id="proj-1"
+        )
+
+        properties = self.client.feature_enabled.call_args.kwargs["group_properties"]
+        self.assertEqual(properties["cluster"]["env"], "staging")
 
     def test_omits_project_group_when_no_project_id(self):
         """Without a project id only the cluster group is sent."""
@@ -118,29 +159,86 @@ class IsFeatureEnabledTest(unittest.TestCase):
                 )
 
 
+class PosthogKeyForRegionTest(unittest.TestCase):
+    """Tests for which PostHog project a region's flags are read from."""
+
+    def test_production_regions_use_the_production_project(self):
+        for region in ("us-1", "uk-1", "euw-1"):
+            with self.subTest(region=region):
+                self.assertEqual(
+                    posthog_module.posthog_key_for_region(region),
+                    posthog_module.POSTHOG_KEY_PROD,
+                )
+
+    def test_non_production_regions_use_the_non_production_project(self):
+        for region in ("dev", "staging"):
+            with self.subTest(region=region):
+                self.assertEqual(
+                    posthog_module.posthog_key_for_region(region),
+                    posthog_module.POSTHOG_KEY_NON_PROD,
+                )
+
+    def test_region_is_matched_case_insensitively(self):
+        self.assertEqual(
+            posthog_module.posthog_key_for_region("DEV"),
+            posthog_module.POSTHOG_KEY_NON_PROD,
+        )
+
+    def test_an_unknown_region_uses_the_production_project(self):
+        """Non-prod is the exception; anything else reads production.
+
+        The non-production project has rollouts at 100%, so defaulting there
+        would report every flag as enabled.
+        """
+        for region in ("", "studio", "something-new"):
+            with self.subTest(region=region):
+                self.assertEqual(
+                    posthog_module.posthog_key_for_region(region),
+                    posthog_module.POSTHOG_KEY_PROD,
+                )
+
+
 class GetPosthogClientTest(unittest.TestCase):
-    """Tests for the module-level PostHog client singleton."""
+    """Tests for the per-project PostHog client cache."""
 
     def setUp(self):
-        self.original_client = posthog_module._client
-        posthog_module._client = None
+        self.original_clients = dict(posthog_module._clients)
+        posthog_module._clients.clear()
 
     def tearDown(self):
-        posthog_module._client = self.original_client
+        posthog_module._clients.clear()
+        posthog_module._clients.update(self.original_clients)
 
-    def test_client_is_constructed_once_and_reused(self):
-        """The client is built on first use and cached for subsequent calls."""
+    def test_client_is_constructed_once_per_project_and_reused(self):
+        """One client per PostHog project, built on first use."""
         with patch("posthog.Posthog") as mock_posthog_cls:
-            first = get_posthog_client()
-            second = get_posthog_client()
+            first = get_posthog_client("us-1")
+            second = get_posthog_client("uk-1")
 
         self.assertIs(first, second)
         mock_posthog_cls.assert_called_once()
 
+    def test_regions_in_different_projects_get_different_clients(self):
+        """A session touching both environments must not share one client."""
+        with patch("posthog.Posthog", side_effect=lambda **kwargs: MagicMock()):
+            production = get_posthog_client("us-1")
+            non_production = get_posthog_client("dev")
+
+        self.assertIsNot(production, non_production)
+
+    def test_client_is_built_with_the_region_project_key(self):
+        with patch("posthog.Posthog") as mock_posthog_cls:
+            get_posthog_client("us-1")
+
+        self.assertEqual(
+            mock_posthog_cls.call_args.kwargs["project_api_key"],
+            posthog_module.POSTHOG_KEY_PROD,
+        )
+
     def test_client_is_configured_with_a_request_timeout(self):
         """A feature-flag read is bounded so the CLI cannot hang on PostHog."""
         with patch("posthog.Posthog") as mock_posthog_cls:
-            get_posthog_client()
+            get_posthog_client("us-1")
 
         timeout = mock_posthog_cls.call_args.kwargs["feature_flags_request_timeout_seconds"]
         self.assertEqual(timeout, posthog_module.FEATURE_FLAGS_REQUEST_TIMEOUT_SECONDS)

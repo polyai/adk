@@ -1,6 +1,663 @@
 # CHANGELOG
 
 
+## v0.56.0 (2026-09-11)
+
+### Continuous Integration
+
+- Validate ADK skills frontmatter and keep versions in lockstep with the CLI
+  ([#316](https://github.com/polyai/adk/pull/316),
+  [`6fa5c65`](https://github.com/polyai/adk/commit/6fa5c65c693ed294578df32aa099633a8ef711b9))
+
+## Summary
+
+Adds CI validation that every `skills/*/SKILL.md` has well-formed frontmatter with the required
+  fields and a `metadata.version` matching the CLI version in `pyproject.toml`, plus release
+  automation that auto-bumps skill versions in lockstep with the CLI version.
+
+## Motivation
+
+Skill versions had already silently drifted (skills at 0.53.1 while the CLI was at 0.54.0) with no
+  CI signal — a mismatch lets a skill's documented behaviour (`requires.bins`, examples, resource
+  schemas) fall out of sync with the CLI it describes.
+
+## Changes
+
+- New `scripts/validate_skills.py`: checks each skill's YAML frontmatter for the required fields
+  (`name`, `description`, `metadata.author`, `metadata.license`, `metadata.version`,
+  `metadata.requires.bins`) and that `metadata.version` equals `project.version` in `pyproject.toml`
+  - New `validate-skills` workflow running the script, path-filtered to `skills/**`,
+  `pyproject.toml`, and the script itself, so it only runs when relevant files change (and needs no
+  package install) - Registered the five `SKILL.md` files in `[tool.semantic_release]
+  version_variables`, so the release commit stamps skill versions together with `pyproject.toml` -
+  Bumped all five skills from the drifted 0.53.1 to the current 0.54.0
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+Verified manually: the validator passes on the repo and correctly rejects fixtures with missing
+  frontmatter, broken YAML, missing fields, empty `bins`, and a mismatched version. The
+  semantic-release stamping was verified end-to-end in a scratch clone — a forced patch bump updated
+  `pyproject.toml` and all five `SKILL.md` files together, touching only the frontmatter `version:`
+  line in each.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+``` $ uv run --no-project --with "ruamel.yaml>=0.18.0" python scripts/validate_skills.py OK
+  skills/poly-adk-branching/SKILL.md OK skills/poly-adk-conversations/SKILL.md OK
+  skills/poly-adk-rtc/SKILL.md OK skills/poly-adk-testing/SKILL.md OK
+  skills/poly-adk-workflow/SKILL.md
+
+Validated 5 skills against CLI version 0.54.0 ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+### Features
+
+- Add poly metrics commands (list, export, add, edit, import)
+  ([#259](https://github.com/polyai/adk/pull/259),
+  [`041a1a9`](https://github.com/polyai/adk/commit/041a1a9fe79dff10efe2511b19d5f4d538f3410d))
+
+## Summary
+
+Add `poly metrics` CLI commands for managing custom metrics in Agent Studio projects: * list *
+  export / import (YAML) * add * edit
+
+## Motivation
+
+Custom metrics are currently only manageable through the Agent Studio UI. This adds full CLI support
+  so teams can script metric setup, export/import metric definitions across projects, and integrate
+  metric management into CI pipelines.
+
+## Changes
+
+### Commands
+
+- **`poly metrics list`** — display all custom metrics in a Rich table (Name, Type, Active, API,
+  Description) with active/inactive count summary; `--json` for machine-readable output - **`poly
+  metrics export [file]`** — export all metrics as YAML to stdout or a file; `--json` outputs JSON
+  instead - **`poly metrics add`** — create a new metric with `--name`, `--type`, `--description`,
+  `--api`, `--expected-values`; omit required flags for interactive mode (name text input, type
+  selector, description prompt, API confirm via `questionary`) - **`poly metrics edit <name>`** —
+  update an existing metric's `--description`, `--api` (bool), `--active` (bool), or
+  `--expected-values`; `--api`/`--active` accept `true`/`false` or can be used bare to set `true`.
+  When called with just a metric name and no flags, enters **interactive mode**: fetches the metric,
+  displays current values, and prompts with `questionary.checkbox()` to select which fields to
+  update. `--expected-values` is only offered for string-type metrics. Friendly error when metric
+  not found (404). - **`poly metrics import <file>`** — bulk-import metrics from a YAML file;
+  creates new metrics and skips existing ones; `--dry-run` previews what would be created/skipped
+  and warns about remote-only metrics that won't be deleted
+
+### API flag workaround
+
+The server's `create_custom_metric` route hardcodes `api=False`, ignoring the client-supplied value
+  (the AS UI also doesn't set this on create). When `--api` is passed, under the hood the the CLI
+  follows up with a PATCH to set `api=True`.
+
+### Implementation notes
+
+- Platform API: 5 new methods on `PlatformAPIHandler`; `make_request` extended with `files`
+  (multipart upload) and `response_format` (YAML parsing) params . These were needed for import and
+  export YAML as file handling only previously supported JSON. - Tests: 30 unit tests across 8 test
+  classes
+
+import/export flow was chosen here as the implementation details of metrics require that metrics
+  have project scope (not branch scope) and cannot be deleted once written.
+
+In this case, using a local file to manage additions and changes could give way to merge issues and
+  user confusion where deleted items are not actually removed. For this reason I have opted to model
+  this feature on the platform features, with one exception that API can be set on metric creation.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly metrics` for all subcommands) - [x]
+  Tested against a live Agent Studio project
+
+**Manual test spreadsheet**: [Google
+  Sheet](https://docs.google.com/spreadsheets/d/1ahhwLpTKTt_pApH7Z_oESQkX8ki-vj2GrHf2ABO75Zw/edit?gid=246662677#gid=246662677)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+### `poly metrics list` <img width="565" height="296" alt="Screenshot 2026-07-31 at 15 06 03"
+  src="https://github.com/user-attachments/assets/efc5dfb6-b3cb-4783-8bae-2d64c8173106" />
+
+### `poly metrics add` (interactive) <img width="294" height="87" alt="Screenshot 2026-08-04 at 16
+  53 09" src="https://github.com/user-attachments/assets/dc4d33ea-11c2-476b-8593-0bbd6f116857" />
+
+### `poly metrics add` — API flag prompt <img width="225" height="29" alt="Screenshot 2026-07-31 at
+  15 17 40" src="https://github.com/user-attachments/assets/d1ef1e1e-a0c0-453e-bc8e-069bd8f43c84" />
+
+### `poly metrics add --expected-values` (JSON output) <img width="358" height="230" alt="Screenshot
+  2026-07-31 at 15 21 57"
+  src="https://github.com/user-attachments/assets/7d14753f-f65f-418c-ae30-92e5ab7e6582" />
+
+### `poly metrics add --api` (JSON output) <img width="358" height="178" alt="Screenshot 2026-07-31
+  at 15 30 58" src="https://github.com/user-attachments/assets/3f6e919f-db79-427d-98d6-1425238d4ce2"
+  />
+
+
+## v0.55.0 (2026-09-10)
+
+### Features
+
+- Add poly update command and startup version check ([#303](https://github.com/polyai/adk/pull/303),
+  [`4b6d5c9`](https://github.com/polyai/adk/commit/4b6d5c99e7e8cf6e189591ecf9d7d7d561730f6a))
+
+## Summary
+
+Adds a `poly update` command that detects how the CLI was installed, runs the matching upgrade
+  command, and refreshes the installed AI agent skills, supporting `--check`, `--to VERSION`,
+  `--cli-only`, and `--skills-only`. Also adds a passive startup notice that tells users when a
+  newer release exists, limited to standalone tool installs.
+
+Final PR of the stack: stacked on #305 (`poly setup`), whose skills wrapper it reuses.
+
+## Motivation
+
+There is no built-in way to update the CLI. Users have no way of learning that a new version exists,
+  and upgrading means knowing which of several install methods they used and running the right
+  command by hand.
+
+## Changes
+
+- Add `poly update`, which upgrades the CLI to the latest release on PyPI. - Add `poly update
+  --check` to report whether an update is available without installing it. - Add `poly update --to
+  VERSION` to install a specific release, including downgrades and reinstalls. Named `--to` rather
+  than `--version` because the root parser already uses that to print the installed version. The
+  requested version is validated against PyPI first, so a typo fails immediately with a list of
+  recent releases rather than a resolver error. - Detect the install method from `sys.prefix` and
+  package metadata, and pick the matching command for `uv tool`, `pipx`, `uv pip` and `pip`. Pinned
+  installs use `install --force` rather than `upgrade`, since the upgrade subcommands will not move
+  backwards and would silently no-op a downgrade. - Refuse to upgrade an editable/dev install, which
+  would otherwise replace a working checkout with a released package and leave local edits
+  mysteriously inert. - Refuse to upgrade an ephemeral `uvx` / `uv run` environment, where the
+  install is discarded when the command exits. - Add a passive update notice on CLI startup, rate
+  limited to once every 12 hours via a stamp file in `~/.poly`. It is restricted to standalone `uv
+  tool` / `pipx` installs: a project install's version is pinned by that project's manifest, so
+  prompting the user to upgrade it would be advice the next dependency sync silently undoes. -
+  Suppress the startup notice for `--json` and non-TTY output so machine-readable output cannot be
+  corrupted, via `POLY_NO_UPDATE_CHECK`, and in CI. Non-TTY already covered most CI runners, but
+  only incidentally, and that stops holding for any runner that allocates a terminal, so the usual
+  markers are checked explicitly. Jenkins, Azure Pipelines and TeamCity are named individually
+  because they do not set `CI`. Errors are swallowed and logged at debug level so a version check
+  can never break the command the user actually ran. - Mention `POLY_NO_UPDATE_CHECK` in `poly
+  update --help`, so someone who sees the notice can find out how to silence it. No
+  `--no-update-check` flag: the env var already works inline (`POLY_NO_UPDATE_CHECK=1 poly status`),
+  so a flag would only duplicate it across every subcommand's help output. - Gate the startup check
+  cheapest-first — string comparison, then a small file read, then a 2 second network call — so the
+  common case adds no measurable startup cost. Skip recording the stamp when PyPI does not answer,
+  so a transient failure retries on the next run instead of causing 12 hours of silence. - Add PyPI
+  helpers to `cli_commands/shared.py`: `get_latest_version`, `get_available_versions` and
+  `is_newer_version`. Version comparison uses `packaging` rather than string inequality, which
+  previously reported an update available on every run for any build not exactly matching PyPI. -
+  Add a shared `POLY_HOME_DIR` constant and use it for both the credentials file and the update
+  stamp, replacing an inlined `~/.poly` path. - Declare `packaging>=24.0`, which was previously only
+  available transitively.
+
+- Update the installed AI agent skills as part of `poly update` — also when the CLI is already
+  current — via the pinned `npx skills` wrapper this PR inherits from #305. - Add `--cli-only` and
+  `--skills-only` (mutually exclusive) to narrow the update to one half. `--skills-only`
+  deliberately skips the not-upgradable guard, so editable/dev installs can still update their
+  skills. - Treat skill failures in a combined update as best-effort: warn without failing the
+  command. With `--skills-only` they are the whole command failing (exit 1). - Capture npx output in
+  `--json` mode so stdout stays a single object, and report the outcome under a `skills_updated`
+  key.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+101 unit tests covering the skills half of the update (scope flags, best-effort vs required failure
+  handling, quiet npx in `--json` mode), install-method detection, version comparison and ordering,
+  command construction for each install method, target-version validation, the `update` control
+  flow, and every startup-check and suppression gate. Tests make no network calls and never touch
+  the real `~/.poly`.
+
+Manual testing covered `--check`, `--to` with valid, invalid and older versions, and the
+  editable-install guard.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+Startup notice gates, verified across every path:
+
+| scenario | network call | stamp written | result | | --- | --- | --- | --- | | `uv tool` install,
+  update available | yes | yes | notice shown | | `pipx` install, update available | yes | yes |
+  notice shown | | project venv | no | no | silent | | ephemeral `uvx` | no | no | silent | |
+  `--json` output | no | no | silent | | piped, not a TTY | no | no | silent | |
+  `POLY_NO_UPDATE_CHECK=1` | no | no | silent | | CI (`CI`, `JENKINS_URL`, `TF_BUILD`,
+  `TEAMCITY_VERSION`) | no | no | silent | | checked within last 12 hours | no | no | silent | |
+  PyPI unreachable | yes | no | silent | | already up to date | yes | yes | silent |
+
+Invalid target version:
+
+``` $ poly update --to 99.99.99 Error: Version '99.99.99' not found on PyPI. Recent versions:
+  0.53.1, 0.53.0, 0.52.0, 0.51.0, 0.50.0 $ echo $? 1 ```
+
+---------
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+
+## v0.54.0 (2026-09-10)
+
+### Features
+
+- Add AI agent skills suite ([#304](https://github.com/polyai/adk/pull/304),
+  [`1ae9187`](https://github.com/polyai/adk/commit/1ae9187daa993879ebca0e476d4209c677e62e29))
+
+## Summary
+
+Adds a `skills/` directory with five agent skills that teach AI coding agents (Claude Code, Cursor,
+  Codex, etc.) the `poly` CLI workflow, plus a README describing the suite. Installable via `npx
+  skills add`.
+
+First PR of a three-part stack: #305 adds `poly setup`, which installs these skills, and #303 makes
+  `poly update` keep them current.
+
+## Motivation
+
+AI coding agents working on ADK projects currently have no contextual knowledge of the `poly`
+  workflow — resource schemas, the no-`main` rule, pushed-state testing semantics, or conflict
+  resolution. These skills provide that context on demand, structured after Google's `agents-cli`
+  skills suite: a workflow entrypoint plus task-specific skills that load only when relevant.
+
+## Changes
+
+- `skills/poly-adk-workflow/SKILL.md` — entrypoint: install/update, auth, `poly docs` habit,
+  resource-choice guidance, project structure, the core edit → validate → push → test → merge loop,
+  and a routing table to the task skills - `skills/poly-adk-testing/SKILL.md` — `poly validate`,
+  scripted `poly chat`, `test_suite/` authoring with `api_mocks`, `poly functions execute/validate`
+  - `skills/poly-adk-branching/SKILL.md` — branch semantics, three-way merge model, conflict
+  markers, non-interactive `merge --resolutions`, review gists -
+  `skills/poly-adk-conversations/SKILL.md` — `poly conversations`, instrumenting with `conv.log` and
+  metrics, real-call → test-case loop - `skills/poly-adk-rtc/SKILL.md` — RTC pull/push cycle, drift
+  protection, live-environment safety - `skills/README.md` — suite overview and install instructions
+
+Resource schemas are deliberately not duplicated — skills instruct agents to run `poly docs`, which
+  ships schemas with the installed CLI. Skill `metadata.version` is pinned to the current release
+  (0.53.1).
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+Markdown-only change. Skills were installed locally via `npx skills add` (frontmatter validated by
+  the tool) and exercised in Claude Code sessions against a real project. All CLI commands and flags
+  referenced were cross-checked against `docs/` and, where relevant, the source.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+- Add poly setup command and remove poly start ([#305](https://github.com/polyai/adk/pull/305),
+  [`f647d06`](https://github.com/polyai/adk/commit/f647d0691db6afedff0df72b92a3cc7b209847d6))
+
+## Summary
+
+Adds `poly setup` — a single onboarding command covering authentication, shell completion, AI agent
+  skill installation, and project setup — and removes `poly start`, which it supersedes. Second PR
+  of the stack: stacked on #304 (the skills it installs), and the base for #303, which makes `poly
+  update` keep them current.
+
+## Motivation
+
+Onboarding currently spans several commands users must discover one by one (`poly login`, `poly
+  completion`, `poly project create`), and the new agent skills had no installation path. `poly
+  setup` runs all of it in one command, skipping any step that is already done, so it doubles as a
+  repair command. `poly start` covered a subset of this (auth + project, hardcoded to the `studio`
+  region) and is not referenced in published material, so it is removed rather than left as a second
+  entry point.
+
+## Changes
+
+- New `poly setup` command with `--region`, `--base-path`, `--skip-auth`, `--skip-skills`, `--agent`
+  (repeatable), `--dev`, and `--global/-g` flags - New `cli_commands/skills.py`: wrapper around the
+  pinned `npx skills` package with a Node.js 18+ gate; skill installation is non-fatal — a missing
+  Node warns and setup continues - `poly login` (and setup) now wait up to 20s for a newly created
+  API key to become active before returning - Region selection extracted to a shared picker; `poly
+  start`'s four hardcoded `studio` call sites removed along the way - `poly start` removed from the
+  CLI, docs, and nav - Docs: new `setup` reference page; getting-started restructured to "install,
+  then `poly setup`"; tooling page now leads with skill installation via setup - `poly-adk-workflow`
+  skill updated to mention `poly setup` for fresh machines - Root README quickstart updated from
+  `poly start` to `poly setup`
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+60 new tests (node gate, npx argument construction and non-raising failures, per-step skip logic,
+  real rc-file completion installs in throwaway home directories — set via both HOME and USERPROFILE
+  so they are hermetic on Windows — region threading, and activation-poll behavior). Manually
+  verified end-to-end with an isolated `$HOME`: completion install + idempotent re-run, `--dev -g
+  --agent claude-code` installing all five skills via npx, graceful skip without a TTY, and `poly
+  start` now reporting an invalid choice.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) — `poly start` is intentionally
+  removed; `poly setup` / `poly login` are the migration path - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+- Proactively match parent branch ids on push ([#314](https://github.com/polyai/adk/pull/314),
+  [`e0fb4d5`](https://github.com/polyai/adk/commit/e0fb4d5de75d609067a87027572b1a35e1149909))
+
+## Summary
+
+`poly push` now proactively adopts the parent branch's resource ids for new local resources that
+  match by file path, and mints subresource ids (conditions, function parameters, delay responses)
+  deterministically from their scoped names. This keeps ids aligned across branches so merges
+  reconcile resources instead of duplicating them.
+
+## Motivation
+
+When a resource is added on the parent branch and its files reach a child branch (e.g. via a
+  git-side merge of the project repo), pushing previously minted fresh random ids for them. The same
+  logical resource then had a different id on each branch, and merges treated the two copies as
+  unrelated — producing duplicates or name collisions. Adopting existing ids at mint time and
+  deriving subresource ids from stable names removes the main sources of this divergence.
+
+## Changes
+
+- `poly push` fetches the parent branch's resources by file path and passes them into
+  `find_new_kept_deleted`; a new resource whose file path-matches a parent resource adopts the
+  parent's id at mint time. Flows resolve first so composite step ids stay consistent, and steps
+  adopt the parent's bare step id under the local flow prefix. - Parent-id adoption always runs on
+  real pushes; dry runs skip the parent fetch unless `POLY_ADK_SYNC_PARENT_IDS_TEST=1` forces it for
+  testing. - Kept resources inherit parent-only subresources by name, so a condition or parameter
+  added on both the parent and the branch ends up with one shared id. - Condition, function
+  parameter, and delay-response ids are derived from their scoped names (`generate_subresource_id`)
+  instead of minted randomly — repeated reads are idempotent and independently created same-named
+  subresources agree across branches. - `sync_ids_with_sandbox` is generalized to
+  `sync_ids_with_parent`, defaulting to the branch's actual parent and falling back to main. - The
+  parent branch's projection can be supplied directly — `push_project(parent_projection_json=...)`
+  for library consumers (e.g. a service embedding the ADK), mirrored by a hidden
+  `--parent-projection JSON|-` CLI flag. A supplied projection builds the parent-id lookup fully
+  offline (no branch or projection fetch) and enables adoption on dry runs; an empty dict means "no
+  parent"; omitting it keeps the fetch behavior. - Parent fetching and path-keying are split
+  (`_fetch_parent_resources` returning the raw resources + a shared `_resources_by_absolute_path`),
+  and `sync_ids_with_parent` reuses the same fetch for its default-parent resolution. - Retargeted
+  the id-sync tests at the mint site and added coverage for deterministic ids, subresource
+  inheritance, the offline parent-projection path (enforced by a test API handler that fails on any
+  network call), and the new CLI parsing.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+Manual test pass:
+
+- [x] 1. New resource from the parent adopts the parent's id on push - [x] 2. New flow with steps —
+  flow id adopted, step ids bare in commands, conditions carry parent ids, references resolve - [x]
+  3. New step in a kept flow adopts the parent's bare step id under the branch flow prefix - [x] 4.
+  Condition added on both sides keeps the parent's condition id (kept step) - [x] 5. Parameter added
+  on both sides keeps the parent's parameter id - [x] 6. Repeated dry runs mint identical condition
+  ids (read idempotence) - [x] 7. Sibling branches mint identical ids for the same-named condition -
+  [x] 8. Delay-response ids stable across pushes - [x] 9. Push from main unchanged - [x] 10. Dry run
+  without the test env var does not fetch the parent - [x] 11. Local-only resource still mints a
+  random id - [x] 12. Parent fetch failure mode on a real push - [x] 13. `sync_ids_with_parent`
+  against a non-main parent - [x] 14. Pull + status clean after a push with adopted ids - [x] 15.
+  Merge with an untouched adopted-id resource auto-resolves (audit-only diff) - [x] 16. Merge with a
+  branch-edited adopted-id resource surfaces a real conflict - [x] 17. Merge without the audit-field
+  auto-resolve deployed (control) - [x] 18. `poly push --dry-run --parent-projection -` (projection
+  piped in) shows adopted ids fully offline
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) — note: real pushes now always
+  attempt parent-id adoption for new resources; dry-run output is unchanged unless the test env var
+  is set - [x] Commit messages follow [conventional commits](https://www.conventionalcommits.org/)
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Fable 5 <noreply@anthropic.com>
+
+
+## v0.53.4 (2026-09-09)
+
+### Bug Fixes
+
+- Read feature flags from the region's PostHog project
+  ([#313](https://github.com/polyai/adk/pull/313),
+  [`afd5185`](https://github.com/polyai/adk/commit/afd5185702619cd564f5af4129a8cb3e8b195190))
+
+## Summary
+
+Every feature-flag read went to the non-production PostHog project, whose rollouts sit at 100%, so
+  every flag reported as enabled. The client is now built per region's project, and the project
+  group key and properties match what the platform services send.
+
+## Motivation
+
+`deployment-simplification` returned `true` for every input — including project ids that don't
+  exist:
+
+``` before after a migrated project True True a non-migrated project True False a project id that
+  does True False not exist ```
+
+Two separate causes, both needed fixing:
+
+- **Wrong PostHog project.** One key was hardcoded, the non-production one. There are two:
+  `dev`/`staging`/`apollo` share one, the production clusters share the other. - **Wrong group
+  key.** Project ids are minted per-cluster and several clusters share one PostHog project, so the
+  `project` group key is namespaced as `<cluster>/<project_id>`. A bare id matches no group. Release
+  conditions match on group *properties*, which weren't sent at all.
+
+## Changes
+
+- Select the PostHog project by region; cache one client per project key, since a session can touch
+  more than one region. An unlisted region is treated as production, so a new region is never
+  reported as non-production. - Namespace the `project` group key by cluster. - Send
+  `group_properties` for both groups, including `account_id` so account-scoped conditions can match.
+  `account_id` is omitted when unknown rather than sent empty, which would fail an exact condition.
+  - Send the cluster `env` property, which is what separates two deployments sharing a cluster key.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Tested against a live Agent Studio project
+
+Payload assertions for the group key, properties, an omitted account, and a non-production env.
+  Region-to-project mapping covered for production, non-production, mixed casing and unknown
+  regions.
+
+Verified against real projects: `deployment-simplification` now answers `true` for a migrated
+  project and `false` for one that isn't, and `false` for an invented project id.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented)
+
+1565 passed, none failing. `get_posthog_client()` now takes a region — it has one caller in the
+  package.
+
+Note this changes behaviour wherever a flag gates something: flags that read as enabled everywhere
+  will start resolving per project. That is the point, but it is a real change.
+
+
+## v0.53.3 (2026-09-09)
+
+### Bug Fixes
+
+- Compare versions and tag when checking convergence
+  ([#311](https://github.com/polyai/adk/pull/311),
+  [`558203d`](https://github.com/polyai/adk/commit/558203d272d7a629c4c8d0bc123cd26f3d794ef3))
+
+## Summary
+
+`using_simplified_deployments` decides convergence by comparing deployment timestamps, which reports
+  every converged project as unconverged. It now compares version hashes, and treats a tagged
+  sandbox deployment as proof on its own.
+
+## Motivation
+
+The comment states the rule: *"A project is converged if the main == live"*. The code compares
+  timestamps — newest live vs newest sandbox.
+
+`main` has no environment of its own. Its deploys land in sandbox before migration and in live
+  after, so its version is the newest across both.
+
+Two kinds of sandbox deployment sit newer than live:
+
+- the mirror written after each live publish, holding live's version - a tagged branch deployment,
+  holding that branch's version
+
+A project has therefore migrated if any sandbox deployment carries the tag, or if live and main hold
+  the same version hash.
+
+## Changes
+
+- Compare the newest live deployment's `version_hash` against main's newest deployment's, instead of
+  timestamps. - Return converged when a sandbox deployment carries a tag. The rollout flag is still
+  checked first, and a soft-deleted tagged deployment doesn't count. - Require a non-empty hash on
+  both sides. Comparing directly made two absent hashes equal, and draft deploys record an empty
+  hash. - Find each head by `created_at` rather than assuming the API returns newest first. -
+  Convergence extracted into `_has_converged`.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Tested against a live Agent Studio project
+
+Convergence cases: a sandbox mirror of live, a sandbox deployment holding its own version, an older
+  sandbox deployment, a tagged deployment, a tagged deployment with the flag off, a soft-deleted
+  tagged deployment, no deployments at all, no live deployment, a missing or empty hash, a deleted
+  head, and unordered API responses.
+
+Verified against two real projects: a converged one now reports `True` where it reported `False`; an
+  unconverged one still reports `False`.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented)
+
+1555 passed; two pre-existing `posthog_test.py` failures also fail on unmodified `main`.
+
+Note this changes behaviour: affected projects will start targeting `live`. Intended, but real.
+
+### Documentation
+
+- Auto-update from 2a7b3be ([#309](https://github.com/polyai/adk/pull/309),
+  [`261bfbd`](https://github.com/polyai/adk/commit/261bfbda72257bff4a16fcbd365629faed6f6be7))
+
+## Summary
+
+<!-- What does this PR do? Keep it to 1-3 sentences. -->
+
+## Motivation
+
+<!-- Why is this change needed? Link to an issue if applicable. -->
+
+Closes #<!-- issue number -->
+
+## Changes
+
+<!-- Bullet list of the key changes. Focus on *what* changed, not *how*. -->
+
+-
+
+## Test strategy
+
+<!-- How did you verify this works? Check all that apply. -->
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [ ] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [ ] `ruff check .` and `ruff format --check .` pass - [ ] `pytest` passes - [ ] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [ ] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+<!-- Optional: paste terminal output, screenshots, or before/after diffs if helpful. -->
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+- Note keyphrase uniqueness rule ([#310](https://github.com/polyai/adk/pull/310),
+  [`bba4850`](https://github.com/polyai/adk/commit/bba48508e56fe9d465c7ae4386a3ddae9ebfd0d5))
+
+## Summary
+
+Document the keyphrase uniqueness rule on the speech recognition reference page, so the validation
+  added in `21692da` is discoverable before a push fails.
+
+## Motivation
+
+Agent Studio normalizes keyphrases (trim + lowercase) and rejects a push containing two entries that
+  normalize to the same phrase. Nothing in the docs said so, so the constraint was only discoverable
+  by hitting the error.
+
+## Changes
+
+- Add a `Validation` section to the speech recognition page, covering the keyphrase uniqueness rule
+  along with the existing rules for ASR settings, keyphrase boosting, and transcript corrections -
+  Add a matching bullet to the speech recognition best practices list
+
+## Test strategy
+
+- [ ] Added/updated unit tests - [ ] Manual CLI testing (`poly <command>`) - [ ] Tested against a
+  live Agent Studio project - [x] N/A (docs, config, or trivial change)
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+## Screenshots / Logs
+
+N/A
+
+Co-authored-by: github-actions[bot] <github-actions[bot]@users.noreply.github.com>
+
+Co-authored-by: Claude Opus 5 (1M context) <noreply@anthropic.com>
+
+
 ## v0.53.2 (2026-09-03)
 
 ### Bug Fixes
