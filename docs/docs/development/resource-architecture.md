@@ -196,7 +196,7 @@ Both channels share the same two files:
 
 ~~~yaml
 greeting:
-  welcome_message: Hello! Your account shows {{attr:member-status}}. How can I help?
+  welcome_message: Hello! Your account shows {{attr:member_status}}. How can I help?
   language_code: en-GB
 style_prompt:
   prompt: You are a helpful and professional customer service assistant.
@@ -296,7 +296,7 @@ Resources can point at each other by name rather than repeating hard-coded value
 | `{{vrbl:variable_name}}` | [State variable](../reference/resources/variables.md) |
 | `{{tn:translation_key}}` | [Translation string](../reference/resources/translations.md) |
 
-Names may contain letters, numbers, underscores, and hyphens.
+Names must be valid Python identifiers — a letter or underscore followed by letters, digits, or underscores. Hyphens and spaces are not allowed.
 
 !!! note "`{{ft:}}` is scoped to its own flow"
 
