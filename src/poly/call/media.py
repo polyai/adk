@@ -6,11 +6,17 @@ import asyncio
 import logging
 import threading
 from fractions import Fraction
+from typing import TYPE_CHECKING
 
 import av
 import numpy as np
-import sounddevice as sd
 from aiortc.mediastreams import MediaStreamError, MediaStreamTrack
+
+# sounddevice is imported lazily inside the stream-opening methods below: importing it
+# loads the native PortAudio library, which isn't present in headless environments (CI).
+# Keeping the import local means the pure helpers in this module stay importable there.
+if TYPE_CHECKING:
+    import sounddevice as sd
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +58,8 @@ class MicrophoneTrack(MediaStreamTrack):
 
     def __init__(self) -> None:
         """Open the input stream and start feeding capture blocks to the loop."""
+        import sounddevice as sd
+
         super().__init__()
         self._loop = asyncio.get_running_loop()
         self._queue: asyncio.Queue[np.ndarray] = asyncio.Queue(_MAX_QUEUED_BLOCKS)
@@ -115,6 +123,8 @@ class SpeakerPlayer:
 
     def start(self, track: MediaStreamTrack) -> None:
         """Begin draining ``track`` to the speaker."""
+        import sounddevice as sd
+
         self._stream = sd.OutputStream(
             samplerate=SAMPLE_RATE,
             channels=CHANNELS,
