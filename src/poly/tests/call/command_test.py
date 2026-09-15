@@ -42,8 +42,8 @@ def fake_client_module(recorder: list) -> types.ModuleType:
     class CallError(Exception):
         pass
 
-    async def run_call(session, caller):
-        recorder.append((session, caller))
+    async def run_call(session, caller, *, aec=False):
+        recorder.append((session, caller, aec))
 
     module.CallError = CallError
     module.run_call = run_call
@@ -70,12 +70,48 @@ class CallCommandTest(unittest.TestCase):
         recorder: list = []
 
         with patch.dict(sys.modules, {"poly.call.client": fake_client_module(recorder)}):
-            CallCommand.call("/path", variant="v1", mode="echo")
+            CallCommand.call("/path", variant="v1", mode="echo", aec=False)
 
         project.create_call_session.assert_called_once_with("draft", variant="v1", mode="echo")
         self.assertEqual(len(recorder), 1)
-        session, _caller = recorder[0]
+        session, _caller, aec = recorder[0]
         self.assertEqual(session.project_id, "proj-1")
+        self.assertFalse(aec)
+
+    @patch("poly.cli_commands.call.load_project")
+    def test_aec_on_by_default(self, mock_load):
+        mock_load.return_value = make_project(branch="feature-x")
+        recorder: list = []
+
+        with patch.dict(
+            sys.modules,
+            {
+                "poly.call.client": fake_client_module(recorder),
+                "pywebrtc_audio": types.ModuleType("pywebrtc_audio"),  # dep present
+            },
+        ):
+            CallCommand.call("/path")  # no aec arg -> defaults on
+
+        self.assertEqual(len(recorder), 1)
+        self.assertTrue(recorder[0][2])  # aec == True
+
+    @patch("poly.cli_commands.call.load_project")
+    def test_aec_missing_dep_degrades_gracefully(self, mock_load):
+        project = make_project(branch="feature-x")
+        mock_load.return_value = project
+        recorder: list = []
+
+        # Voice stack present, AEC lib absent: the call should proceed without AEC,
+        # not abort.
+        with patch.dict(
+            sys.modules,
+            {"poly.call.client": fake_client_module(recorder), "pywebrtc_audio": None},
+        ):
+            CallCommand.call("/path")  # default aec on
+
+        project.create_call_session.assert_called_once()
+        self.assertEqual(len(recorder), 1)
+        self.assertFalse(recorder[0][2])  # degraded to aec == False
 
     @patch("poly.cli_commands.call.load_project")
     def test_broken_voice_deps_exit_with_hint(self, mock_load):
@@ -84,7 +120,7 @@ class CallCommandTest(unittest.TestCase):
         # A None entry in sys.modules makes the import raise ImportError (broken install).
         with patch.dict(sys.modules, {"poly.call.client": None}):
             with self.assertRaises(SystemExit):
-                CallCommand.call("/path")
+                CallCommand.call("/path", aec=False)
 
     @patch("poly.cli_commands.call.load_project")
     def test_push_failure_aborts_before_calling(self, mock_load):

@@ -52,11 +52,16 @@ def pcm_block_to_frame(block: np.ndarray, pts: int) -> av.AudioFrame:
 
 
 class MicrophoneTrack(MediaStreamTrack):
-    """An aiortc audio track sourced from the local microphone."""
+    """An aiortc audio track sourced from the local microphone.
+
+    When ``echo_canceller`` and ``reference`` are provided, each captured block is run
+    through the echo canceller against the far-end (played) reference before it is sent,
+    removing the agent's own audio picked up by the mic.
+    """
 
     kind = "audio"
 
-    def __init__(self) -> None:
+    def __init__(self, echo_canceller=None, reference=None) -> None:
         """Open the input stream and start feeding capture blocks to the loop."""
         import sounddevice as sd
 
@@ -64,6 +69,8 @@ class MicrophoneTrack(MediaStreamTrack):
         self._loop = asyncio.get_running_loop()
         self._queue: asyncio.Queue[np.ndarray] = asyncio.Queue(_MAX_QUEUED_BLOCKS)
         self._pts = 0
+        self._echo_canceller = echo_canceller
+        self._reference = reference
         self._stream = sd.InputStream(
             samplerate=SAMPLE_RATE,
             channels=CHANNELS,
@@ -91,6 +98,10 @@ class MicrophoneTrack(MediaStreamTrack):
         if self.readyState != "live":
             raise MediaStreamError
         block = await self._queue.get()
+        if self._echo_canceller is not None and self._reference is not None:
+            near = block.reshape(-1)
+            far = self._reference.read(len(near))
+            block = self._echo_canceller.process(near, far)
         frame = pcm_block_to_frame(block, self._pts)
         self._pts += frame.samples
         return frame
@@ -111,13 +122,18 @@ class SpeakerPlayer:
     accumulated in a buffer that the PortAudio output callback drains.
     """
 
-    def __init__(self) -> None:
-        """Prepare the resampler, output buffer, and (idle) consumer task."""
+    def __init__(self, reference=None) -> None:
+        """Prepare the resampler, output buffer, and (idle) consumer task.
+
+        When ``reference`` is provided, the samples actually sent to the speaker are
+        recorded there as the AEC far-end reference.
+        """
         self._resampler = av.audio.resampler.AudioResampler(
             format="s16", layout="mono", rate=SAMPLE_RATE
         )
         self._buffer = np.zeros(0, dtype=np.int16)
         self._lock = threading.Lock()
+        self._reference = reference
         self._stream: sd.OutputStream | None = None
         self._task: asyncio.Task | None = None
 
@@ -160,6 +176,10 @@ class SpeakerPlayer:
             self._buffer = self._buffer[available:]
         if available < frames:
             outdata[available:, 0] = 0  # underrun → silence
+        # Record what actually went to the DAC as the AEC far-end reference —
+        # the best-aligned copy of the audio the mic will pick up as echo.
+        if self._reference is not None:
+            self._reference.write(outdata[:, 0].copy())
 
     def stop(self) -> None:
         """Stop playback and release the output stream."""
