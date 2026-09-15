@@ -16,6 +16,7 @@ from typing import Optional
 from unittest.mock import MagicMock, patch
 
 import poly.resources.resource_utils as resource_utils
+from poly.call.session import DEFAULT_CALL_MODE
 from poly.handlers.interface import AgentStudioInterface
 from poly.handlers.protobuf.commands_pb2 import Command
 from poly.handlers.sdk import SourcererAPIError
@@ -6401,9 +6402,7 @@ class PushProjectParentProjectionTest(unittest.TestCase):
         project = self._project_where_topic_1_is_new()
         fetch_failure = RuntimeError("boom")
 
-        with patch.object(
-            AgentStudioProject, "_fetch_parent_resources", side_effect=fetch_failure
-        ):
+        with patch.object(AgentStudioProject, "_fetch_parent_resources", side_effect=fetch_failure):
             with patch.dict(os.environ, {"POLY_ADK_SYNC_PARENT_IDS_TEST": "1"}):
                 with self.assertRaises(SourcererAPIError) as raised:
                     project.push_project(dry_run=True, skip_validation=True)
@@ -7135,6 +7134,95 @@ class ProjectImportMetricsFromFileTest(unittest.TestCase):
             True,
         )
         self.assertEqual(result["metadata"]["created"], ["SCORE"])
+
+
+class CreateCallSessionTest(unittest.TestCase):
+    """Tests for the create_call_session method."""
+
+    def setUp(self):
+        """Mock the api_handler and build a project from fixture data."""
+        self.mock_api_handler = patch.object(
+            AgentStudioProject, "api_handler", new_callable=MagicMock
+        ).start()
+        self.project = AgentStudioProject.from_dict(PROJECT_DATA, TEST_DIR)
+
+    def tearDown(self):
+        """Clean up patches."""
+        patch.stopall()
+
+    @staticmethod
+    def _valid_call_info() -> dict:
+        """A complete branch call-info response."""
+        return {
+            "artifactVersion": "artifact-v1",
+            "lambdaDeploymentVersion": "lambda-v1",
+            "authToken": "studio-token",
+            "gatewayWsUrl": "wss://webrtc-gateway.test.polyai.app",
+        }
+
+    def test_draft_returns_call_session(self):
+        """A draft call maps the deploy response onto a CallSession."""
+        self.mock_api_handler.get_branch_call_info.return_value = self._valid_call_info()
+
+        session = self.project.create_call_session("draft", variant="VARIANT-x")
+
+        self.mock_api_handler.get_branch_call_info.assert_called_once_with(self.project.branch_id)
+        self.assertEqual(session.account_id, self.project.account_id)
+        self.assertEqual(session.project_id, self.project.project_id)
+        self.assertEqual(session.variant_id, "VARIANT-x")
+        self.assertEqual(session.artifact_version, "artifact-v1")
+        self.assertEqual(session.lambda_deployment_version, "lambda-v1")
+        self.assertEqual(session.auth_token, "studio-token")
+        self.assertEqual(session.gateway_ws_url, "wss://webrtc-gateway.test.polyai.app")
+        self.assertEqual(session.mode, DEFAULT_CALL_MODE)
+
+    def test_draft_defaults_empty_variant(self):
+        """A missing variant is normalised to an empty string."""
+        self.mock_api_handler.get_branch_call_info.return_value = self._valid_call_info()
+
+        session = self.project.create_call_session("draft")
+
+        self.assertEqual(session.variant_id, "")
+
+    def test_custom_mode_is_passed_through(self):
+        """The requested call mode is preserved on the session."""
+        self.mock_api_handler.get_branch_call_info.return_value = self._valid_call_info()
+
+        session = self.project.create_call_session("draft", mode="echo")
+
+        self.assertEqual(session.mode, "echo")
+
+    def test_non_draft_raises_not_implemented(self):
+        """Deployed environments are not yet supported and must not call the API."""
+        with self.assertRaises(NotImplementedError):
+            self.project.create_call_session("sandbox")
+
+        self.mock_api_handler.get_branch_call_info.assert_not_called()
+
+    def test_incomplete_response_raises_value_error(self):
+        """A response missing any required field is rejected, naming the field."""
+        for missing in (
+            "artifactVersion",
+            "lambdaDeploymentVersion",
+            "authToken",
+            "gatewayWsUrl",
+        ):
+            info = self._valid_call_info()
+            info[missing] = ""
+            self.mock_api_handler.get_branch_call_info.return_value = info
+            with self.assertRaises(ValueError) as ctx:
+                self.project.create_call_session("draft")
+            self.assertIn(missing, str(ctx.exception))
+
+    def test_incomplete_response_does_not_leak_auth_token(self):
+        """The validation error must never echo the authToken credential."""
+        info = self._valid_call_info()
+        info["authToken"] = "super-secret-token"
+        info["gatewayWsUrl"] = ""  # trigger the error with the token still present
+        self.mock_api_handler.get_branch_call_info.return_value = info
+        with self.assertRaises(ValueError) as ctx:
+            self.project.create_call_session("draft")
+        self.assertNotIn("super-secret-token", str(ctx.exception))
 
 
 if __name__ == "__main__":

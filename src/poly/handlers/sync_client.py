@@ -408,6 +408,11 @@ class SyncClientHandler:
         self.assert_branch_exists()
         return self.sdk.get_branch_chat_info(branch_id)
 
+    def get_branch_call_info(self, branch_id: str) -> dict[str, Any]:
+        """Get deployment info needed to start a draft voice call on a branch."""
+        self.assert_branch_exists()
+        return self.sdk.get_branch_call_info(branch_id)
+
     def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
         """Get the history of a specific branch.
 

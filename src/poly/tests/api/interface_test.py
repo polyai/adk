@@ -441,5 +441,41 @@ class CustomMetricErrorTranslation(unittest.TestCase):
         self.assertIn("Failed to update metric", str(ctx.exception))
 
 
+class GetBranchCallInfoInterface(unittest.TestCase):
+    """Tests for AgentStudioInterface.get_branch_call_info."""
+
+    def setUp(self):
+        self.interface = AgentStudioInterface()
+        self.interface.sync_client = MagicMock()
+
+    def test_returns_call_info_from_sync_client(self):
+        """The interface delegates to sync_client and returns the result."""
+        expected = {
+            "artifactVersion": "art-1",
+            "lambdaDeploymentVersion": "lambda-1",
+            "authToken": "studio-token",
+        }
+        self.interface.sync_client.get_branch_call_info.return_value = expected
+
+        result = self.interface.get_branch_call_info("branch-1")
+
+        self.assertEqual(result, expected)
+        self.interface.sync_client.get_branch_call_info.assert_called_once_with("branch-1")
+
+    def test_translates_http_error(self):
+        """An HTTPError from the sync client is translated into a ValueError."""
+        self.interface.sync_client.get_branch_call_info.side_effect = requests.HTTPError("boom")
+
+        with self.assertRaises(ValueError):
+            self.interface.get_branch_call_info("branch-1")
+
+    def test_translates_sourcerer_api_error(self):
+        """A SourcererAPIError from the sync client is translated into a ValueError."""
+        self.interface.sync_client.get_branch_call_info.side_effect = SourcererAPIError("boom")
+
+        with self.assertRaises(ValueError):
+            self.interface.get_branch_call_info("branch-1")
+
+
 if __name__ == "__main__":
     unittest.main()
