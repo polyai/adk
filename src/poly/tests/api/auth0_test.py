@@ -9,7 +9,11 @@ from unittest.mock import patch
 
 import requests
 
-from poly.handlers.auth0_handler import REGION_TO_AUTH_DETAILS, Auth0Handler
+from poly.handlers.auth0_handler import (
+    APIKEY_AUTH_DETAILS,
+    REGION_TO_AUTH_DETAILS,
+    Auth0Handler,
+)
 from poly.tests.testing_utils import make_mock_response
 
 
@@ -84,6 +88,75 @@ class PollDeviceToken(unittest.TestCase):
         """An unknown region raises ValueError before any request is made."""
         with self.assertRaises(ValueError):
             Auth0Handler.poll_device_token("mars-1", "dc-1")
+
+
+class ApiKeyAuthDetails(unittest.TestCase):
+    """Tests for the dedicated Auth0 client's AuthDetails and the `_for` variants."""
+
+    def test_apikey_auth_details_values(self):
+        """The client id and host match the dedicated, GitHub-only Auth0 application."""
+        self.assertEqual(APIKEY_AUTH_DETAILS.device_client_id, "fp7CIVelwOwMPBNNpHpQCLiRMj7nG0fs")
+        self.assertEqual(APIKEY_AUTH_DETAILS.base_url, "https://login.studio.poly.ai")
+
+    def test_apikey_auth_details_not_a_region(self):
+        """The dedicated Auth0 client is not selectable via any --region value."""
+        self.assertNotIn(APIKEY_AUTH_DETAILS, REGION_TO_AUTH_DETAILS.values())
+
+    @patch("poly.handlers.auth0_handler.requests.request")
+    def test_request_device_code_for_sends_given_client_id(self, mock_request):
+        """request_device_code_for sends the passed-in AuthDetails' client id, not a region's."""
+        mock_request.return_value = make_mock_response(
+            200, json_body={"device_code": "dc-1", "user_code": "ABCD"}
+        )
+
+        result = Auth0Handler.request_device_code_for(APIKEY_AUTH_DETAILS)
+
+        sent = json.loads(mock_request.call_args.kwargs["data"])
+        self.assertEqual(sent["client_id"], APIKEY_AUTH_DETAILS.device_client_id)
+        self.assertEqual(
+            mock_request.call_args.kwargs["url"],
+            APIKEY_AUTH_DETAILS.base_url + "/oauth/device/code",
+        )
+        self.assertEqual(result, {"device_code": "dc-1", "user_code": "ABCD"})
+
+    @patch("poly.handlers.auth0_handler.requests.request")
+    def test_poll_device_token_for_sends_given_client_id(self, mock_request):
+        """poll_device_token_for sends the passed-in AuthDetails' client id, not a region's."""
+        mock_request.return_value = make_mock_response(200, json_body={"access_token": "tok-1"})
+
+        result = Auth0Handler.poll_device_token_for(APIKEY_AUTH_DETAILS, "dc-1")
+
+        sent = json.loads(mock_request.call_args.kwargs["data"])
+        self.assertEqual(sent["client_id"], APIKEY_AUTH_DETAILS.device_client_id)
+        self.assertEqual(sent["device_code"], "dc-1")
+        self.assertEqual(
+            mock_request.call_args.kwargs["url"], APIKEY_AUTH_DETAILS.base_url + "/oauth/token"
+        )
+        self.assertEqual(result, {"access_token": "tok-1"})
+
+    @patch("poly.handlers.auth0_handler.requests.request")
+    def test_region_keyed_request_device_code_still_uses_region_client_id(self, mock_request):
+        """Delegating to the `_for` variant must not change the region-keyed client id sent."""
+        mock_request.return_value = make_mock_response(
+            200, json_body={"device_code": "dc-1", "user_code": "ABCD"}
+        )
+
+        Auth0Handler.request_device_code("studio")
+
+        sent = json.loads(mock_request.call_args.kwargs["data"])
+        self.assertEqual(sent["client_id"], REGION_TO_AUTH_DETAILS["studio"].device_client_id)
+        self.assertNotEqual(sent["client_id"], APIKEY_AUTH_DETAILS.device_client_id)
+
+    @patch("poly.handlers.auth0_handler.requests.request")
+    def test_region_keyed_poll_device_token_still_uses_region_client_id(self, mock_request):
+        """Delegating to the `_for` variant must not change the region-keyed client id sent."""
+        mock_request.return_value = make_mock_response(200, json_body={"access_token": "tok-1"})
+
+        Auth0Handler.poll_device_token("studio", "dc-1")
+
+        sent = json.loads(mock_request.call_args.kwargs["data"])
+        self.assertEqual(sent["client_id"], REGION_TO_AUTH_DETAILS["studio"].device_client_id)
+        self.assertNotEqual(sent["client_id"], APIKEY_AUTH_DETAILS.device_client_id)
 
 
 if __name__ == "__main__":

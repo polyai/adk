@@ -255,12 +255,44 @@ class PlatformAPIHandler:
         Returns:
             dict[str, str]: A dictionary mapping account ids to account names
         """
-        accounts = {}
         accounts_data = PlatformAPIHandler.make_request(region, ACCOUNTS_URL, "GET")
+        return PlatformAPIHandler._parse_accounts(accounts_data)
 
+    @staticmethod
+    def get_accounts_with_key(region: str, api_key: str) -> dict[str, str]:
+        """Get the accounts for a region, authenticating with `api_key` directly.
+
+        Unlike `get_accounts`, which always authenticates via the on-disk credential,
+        this lets a caller verify that a *specific* key (e.g. one just created or
+        reused, not necessarily the one saved to disk) actually works.
+
+        Args:
+            region (str): The region name.
+            api_key (str): The API key to authenticate with.
+
+        Returns:
+            dict[str, str]: A dictionary mapping account ids to account names.
+        """
+        accounts_data = PlatformAPIHandler.make_request(
+            region,
+            ACCOUNTS_URL,
+            "GET",
+            headers={
+                "X-API-KEY": api_key,
+                "X-PolyAI-Correlation-Id": f"adk-{uuid.uuid4()}",
+                "X-Poly-Source": "adk",
+                "Content-Type": "application/json",
+            },
+        )
+        return PlatformAPIHandler._parse_accounts(accounts_data)
+
+    @staticmethod
+    def _parse_accounts(accounts_data: object) -> dict[str, str]:
+        """Parse a raw accounts-list API response into an id-to-name mapping."""
         if not isinstance(accounts_data, list):
             raise ValueError("Expected a list of accounts")
 
+        accounts = {}
         for account in accounts_data:
             if account.get("active", False) and account.get("id") and account.get("name"):
                 accounts[account.get("id")] = account.get("name")
@@ -849,6 +881,25 @@ class PlatformAPIHandler:
         return PlatformAPIHandler.make_request(region, endpoint, "PATCH", data=data)
 
     @staticmethod
+    def _jwt_headers(jwt_token: str, source: str = "adk") -> dict[str, str]:
+        """Build the header set for a JWT-authenticated Jupiter API call.
+
+        Args:
+            jwt_token: A valid JWT access token.
+            source: Value for the ``X-Poly-Source`` header, used to distinguish
+                which command/flow a call originated from.
+
+        Returns:
+            dict[str, str]: Headers for a Bearer-authenticated request.
+        """
+        return {
+            "Authorization": f"Bearer {jwt_token}",
+            "Content-Type": "application/json",
+            "X-PolyAI-Correlation-Id": f"adk-{uuid.uuid4()}",
+            "X-Poly-Source": source,
+        }
+
+    @staticmethod
     def authorise(region: str, jwt_token: str) -> dict:
         """Authorise the user via JWT, creating their account if needed.
 
@@ -859,16 +910,12 @@ class PlatformAPIHandler:
         Returns:
             dict: The user record.
         """
-        correlation_id = f"adk-{uuid.uuid4()}"
-        headers = {
-            "Authorization": f"Bearer {jwt_token}",
-            "Content-Type": "application/json",
-            "X-PolyAI-Correlation-Id": correlation_id,
-            "X-Poly-Source": "adk",
-        }
-
         return PlatformAPIHandler.make_request(
-            region, "/jupiter/v1/authorise", "GET", headers=headers, use_jupiter_api=True
+            region,
+            "/jupiter/v1/authorise",
+            "GET",
+            headers=PlatformAPIHandler._jwt_headers(jwt_token),
+            use_jupiter_api=True,
         )
 
     @staticmethod
@@ -882,16 +929,12 @@ class PlatformAPIHandler:
         Returns:
             list[dict]: List of PAT records.
         """
-        correlation_id = f"adk-{uuid.uuid4()}"
-        headers = {
-            "Authorization": f"Bearer {jwt_token}",
-            "Content-Type": "application/json",
-            "X-PolyAI-Correlation-Id": correlation_id,
-            "X-Poly-Source": "adk",
-        }
-
         return PlatformAPIHandler.make_request(
-            region, "/jupiter/v2/pats", "GET", headers=headers, use_jupiter_api=True
+            region,
+            "/jupiter/v2/pats",
+            "GET",
+            headers=PlatformAPIHandler._jwt_headers(jwt_token),
+            use_jupiter_api=True,
         )
 
     @staticmethod
@@ -906,23 +949,86 @@ class PlatformAPIHandler:
         Returns:
             str: The PAT token.
         """
-        correlation_id = f"adk-{uuid.uuid4()}"
-        headers = {
-            "Authorization": f"Bearer {jwt_token}",
-            "Content-Type": "application/json",
-            "X-PolyAI-Correlation-Id": correlation_id,
-            "X-Poly-Source": "adk",
-        }
-
         response = PlatformAPIHandler.make_request(
             region,
             "/jupiter/v2/pats",
             "POST",
             data={"name": name},
-            headers=headers,
+            headers=PlatformAPIHandler._jwt_headers(jwt_token),
             use_jupiter_api=True,
         )
         return response.get("key")
+
+    @staticmethod
+    def get_accounts_internal(region: str, jwt_token: str, source: str = "adk") -> list[dict]:
+        """Get the accounts visible to the authenticated user, via JWT auth.
+
+        Unlike ``get_accounts`` (API-key auth, filtered to a name mapping),
+        this returns the raw account records for a JWT-authenticated caller.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            source: Value for the ``X-Poly-Source`` header.
+
+        Returns:
+            list[dict]: The raw list of account records.
+        """
+        return PlatformAPIHandler.make_request(
+            region,
+            "/jupiter/v2/accounts",
+            "GET",
+            headers=PlatformAPIHandler._jwt_headers(jwt_token, source=source),
+            use_jupiter_api=True,
+        )
+
+    @staticmethod
+    def list_account_api_keys_internal(
+        region: str, jwt_token: str, account_id: str, source: str = "adk"
+    ) -> list[dict]:
+        """List the account-scoped API keys for an account, via JWT auth.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            account_id: The account ID.
+            source: Value for the ``X-Poly-Source`` header.
+
+        Returns:
+            list[dict]: The raw list of API key records.
+        """
+        return PlatformAPIHandler.make_request(
+            region,
+            f"/jupiter/v2/accounts/{account_id}/api-keys",
+            "GET",
+            headers=PlatformAPIHandler._jwt_headers(jwt_token, source=source),
+            use_jupiter_api=True,
+        )
+
+    @staticmethod
+    def create_account_api_key_internal(
+        region: str, jwt_token: str, account_id: str, name: str, source: str = "adk"
+    ) -> dict:
+        """Create an account-scoped API key, via JWT auth.
+
+        Args:
+            region: The region name.
+            jwt_token: A valid JWT access token.
+            account_id: The account ID to scope the key to.
+            name: A label for the API key.
+            source: Value for the ``X-Poly-Source`` header.
+
+        Returns:
+            dict: The full API key record, including the secret under ``key``.
+        """
+        return PlatformAPIHandler.make_request(
+            region,
+            f"/jupiter/v2/accounts/{account_id}/api-keys",
+            "POST",
+            data={"name": name},
+            headers=PlatformAPIHandler._jwt_headers(jwt_token, source=source),
+            use_jupiter_api=True,
+        )
 
     @staticmethod
     def list_conversations(
