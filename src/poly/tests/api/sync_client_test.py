@@ -256,7 +256,10 @@ class GetBranchCallInfo(unittest.TestCase):
 
     def _handler_on_existing_branch(self):
         handler = build_handler()
-        # assert_branch_exists checks the branch is real before delegating.
+        # assert_branch_exists compares self.branch_id (the SDK's) against fetch_branches,
+        # so set it explicitly — otherwise it stays a MagicMock, never matches, and the
+        # helper silently exercises the "branch not found → switch to main" fallback.
+        handler._sdk.branch_id = "branch-1"
         handler._sdk.fetch_branches.return_value = {"branches": [{"branchId": "branch-1"}]}
         return handler
 

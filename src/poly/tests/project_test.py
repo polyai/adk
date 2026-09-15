@@ -7200,7 +7200,7 @@ class CreateCallSessionTest(unittest.TestCase):
         self.mock_api_handler.get_branch_call_info.assert_not_called()
 
     def test_incomplete_response_raises_value_error(self):
-        """A response missing any required field is rejected."""
+        """A response missing any required field is rejected, naming the field."""
         for missing in (
             "artifactVersion",
             "lambdaDeploymentVersion",
@@ -7210,8 +7210,19 @@ class CreateCallSessionTest(unittest.TestCase):
             info = self._valid_call_info()
             info[missing] = ""
             self.mock_api_handler.get_branch_call_info.return_value = info
-            with self.assertRaises(ValueError):
+            with self.assertRaises(ValueError) as ctx:
                 self.project.create_call_session("draft")
+            self.assertIn(missing, str(ctx.exception))
+
+    def test_incomplete_response_does_not_leak_auth_token(self):
+        """The validation error must never echo the authToken credential."""
+        info = self._valid_call_info()
+        info["authToken"] = "super-secret-token"
+        info["gatewayWsUrl"] = ""  # trigger the error with the token still present
+        self.mock_api_handler.get_branch_call_info.return_value = info
+        with self.assertRaises(ValueError) as ctx:
+            self.project.create_call_session("draft")
+        self.assertNotIn("super-secret-token", str(ctx.exception))
 
 
 if __name__ == "__main__":

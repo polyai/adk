@@ -2743,26 +2743,25 @@ class AgentStudioProject:
 
         call_info = self.api_handler.get_branch_call_info(self.branch_id)
 
-        artifact_version = call_info.get("artifactVersion")
-        lambda_deployment_version = call_info.get("lambdaDeploymentVersion")
-        auth_token = call_info.get("authToken")
-        gateway_ws_url = call_info.get("gatewayWsUrl")
-        if (
-            not artifact_version
-            or not lambda_deployment_version
-            or not auth_token
-            or not gateway_ws_url
-        ):
-            raise ValueError(f"Unexpected response from branch call info: {call_info}")
+        fields = {
+            "artifactVersion": call_info.get("artifactVersion"),
+            "lambdaDeploymentVersion": call_info.get("lambdaDeploymentVersion"),
+            "authToken": call_info.get("authToken"),
+            "gatewayWsUrl": call_info.get("gatewayWsUrl"),
+        }
+        missing = [name for name, value in fields.items() if not value]
+        if missing:
+            # Report only the missing field names
+            raise ValueError(f"Incomplete branch call info; missing field(s): {', '.join(missing)}")
 
         return CallSession(
             account_id=self.account_id,
             project_id=self.project_id,
             variant_id=variant or "",
-            artifact_version=artifact_version,
-            lambda_deployment_version=lambda_deployment_version,
-            auth_token=auth_token,
-            gateway_ws_url=gateway_ws_url,
+            artifact_version=fields["artifactVersion"],
+            lambda_deployment_version=fields["lambdaDeploymentVersion"],
+            auth_token=fields["authToken"],
+            gateway_ws_url=fields["gatewayWsUrl"],
             mode=mode,
         )
 
