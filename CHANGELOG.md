@@ -1,6 +1,35 @@
 # CHANGELOG
 
 
+## v0.58.0 (2026-09-15)
+
+### Features
+
+- **call**: Callsession model + draft-call bootstrap (ad call 1/N)
+  ([#319](https://github.com/polyai/adk/pull/319),
+  [`30d2da7`](https://github.com/polyai/adk/commit/30d2da72c26b542482023cd70c441b63e2ad2006))
+
+First slice of the **`ad call`** feature (terminal voice call to your agent), split into stacked
+  PRs. **Pure HTTP + a data model — no new runtime dependencies.** The WebRTC/audio deps come later.
+
+## What - **`poly.call.session.CallSession`** — immutable model holding everything a WebRTC call
+  OFFER needs - **Draft-call bootstrap** - `get_branch_call_info` → sync client → interface (`POST
+  /branches/{id}/deploy`). - `AgentStudioProject.create_call_session(...)` — validates the response
+  and returns a `CallSession`. Draft-only for now (deployed envs raise `NotImplementedError`).
+
+## TODO
+
+- [x] 1. **model + bootstrap ← this PR** - [ ] 2. signaling protocol - [ ] 3. WebRTC transport
+  (media + driver) — *adds the voice deps* - [ ] 4. `poly call` CLI command - [ ] 5. echo
+  cancellation
+
+## Related https://linear.app/poly-ai/issue/DEVP-703/feature-ad-call
+
+---------
+
+Co-authored-by: Claude Opus 4.8 <noreply@anthropic.com>
+
+
 ## v0.57.0 (2026-09-14)
 
 ### Features
