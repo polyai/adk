@@ -15,7 +15,6 @@ Copyright PolyAI Limited
 import contextlib
 import sys
 import time
-import traceback
 from argparse import ArgumentParser, Namespace, _SubParsersAction
 from datetime import datetime, timezone
 from typing import Callable
@@ -64,7 +63,6 @@ def _fail(exc: Exception, step: str, exit_code: int, *, output_json: bool, verbo
             {
                 "success": False,
                 "error": message,
-                "traceback": traceback.format_exc(),
                 "step": step,
             }
         )
@@ -138,19 +136,22 @@ def _get_or_create_key(
     return api_key, False
 
 
-def _wait_for_key_active(api: AgentStudioInterface, region: str) -> bool:
-    """Poll until the saved key is usable, mirroring `poly login`'s activation wait.
+def _wait_for_key_active(api: AgentStudioInterface, region: str, api_key: str) -> bool:
+    """Poll until `api_key` itself is usable, mirroring `poly login`'s activation wait.
 
     A newly created key can take a few seconds to activate; polling here means a
     command run immediately after `poly apikey` does not fail against a key the
-    platform has not finished activating yet.
+    platform has not finished activating yet. Must probe with `api_key` directly
+    rather than `get_accounts` (which authenticates via the on-disk credential) -
+    when an existing credential is kept rather than overwritten, that would
+    silently validate a different, already-active key instead of this one.
 
     Returns:
         bool: Whether the key became active within the poll window.
     """
     for _ in range(ACCOUNT_POLL_ATTEMPTS):
         try:
-            api.get_accounts(region=region)
+            api.get_accounts_with_key(region=region, api_key=api_key)
             return True
         except Exception:
             time.sleep(ACCOUNT_POLL_INTERVAL_SECONDS)
@@ -417,7 +418,7 @@ class ApiKeyCommand(BaseCommand):
                 else console.status("[info]Verifying API key is active...[/info]")
             )
             with status_ctx:
-                key_active = _wait_for_key_active(api, region)
+                key_active = _wait_for_key_active(api, region, api_key)
             if not key_active:
                 _say(
                     output_json,

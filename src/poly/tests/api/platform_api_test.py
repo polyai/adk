@@ -310,6 +310,31 @@ class GetAccounts(unittest.TestCase):
             PlatformAPIHandler.get_accounts("studio")
 
 
+class GetAccountsWithKey(unittest.TestCase):
+    """Tests for PlatformAPIHandler.get_accounts_with_key."""
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_authenticates_with_the_given_key_not_the_on_disk_credential(
+        self, mock_make_request
+    ):
+        """The explicit key is sent as X-API-KEY, bypassing retrieve_api_key entirely."""
+        mock_make_request.return_value = [{"id": "a1", "name": "Active One", "active": True}]
+
+        accounts = PlatformAPIHandler.get_accounts_with_key("studio", "explicit-key-123")
+
+        self.assertEqual(accounts, {"a1": "Active One"})
+        _, kwargs = mock_make_request.call_args
+        self.assertEqual(kwargs["headers"]["X-API-KEY"], "explicit-key-123")
+
+    @patch("poly.handlers.platform_api.PlatformAPIHandler.make_request")
+    def test_non_list_response_raises_value_error(self, mock_make_request):
+        """A response that is not a list raises ValueError, same as get_accounts."""
+        mock_make_request.return_value = {"unexpected": "shape"}
+
+        with self.assertRaises(ValueError):
+            PlatformAPIHandler.get_accounts_with_key("studio", "explicit-key-123")
+
+
 class GetProjects(unittest.TestCase):
     """Tests for PlatformAPIHandler.get_projects."""
 

@@ -40,8 +40,8 @@ class ApiKeyTestCase(unittest.TestCase):
                 "poly.cli_commands.apikey.AgentStudioInterface.get_accounts_internal",
                 return_value=[{"id": FAKE_ACCOUNT}],
             ),
-            "get_accounts_static": patch(
-                "poly.cli_commands.apikey.AgentStudioInterface.get_accounts",
+            "get_accounts_with_key": patch(
+                "poly.cli_commands.apikey.AgentStudioInterface.get_accounts_with_key",
                 return_value={FAKE_ACCOUNT: "Account One"},
             ),
             "list_keys": patch(
@@ -435,7 +435,7 @@ class KeyActivationWait(ApiKeyTestCase):
 
     def test_activates_on_third_poll(self):
         """The command completes normally once the key activates partway through the poll."""
-        self.mocks["get_accounts_static"].side_effect = [
+        self.mocks["get_accounts_with_key"].side_effect = [
             Exception("not active"),
             Exception("not active"),
             {FAKE_ACCOUNT: "Account One"},
@@ -444,20 +444,38 @@ class KeyActivationWait(ApiKeyTestCase):
         with contextlib.redirect_stdout(io.StringIO()):
             ApiKeyCommand.apikey(region="studio")
 
-        self.assertEqual(self.mocks["get_accounts_static"].call_count, 3)
+        self.assertEqual(self.mocks["get_accounts_with_key"].call_count, 3)
         self.mocks["write_env"].assert_called_once()
 
     def test_never_activates_still_completes_and_warns(self):
         """20 failed polls print a warning but do not fail the command."""
-        self.mocks["get_accounts_static"].side_effect = Exception("not active")
+        self.mocks["get_accounts_with_key"].side_effect = Exception("not active")
 
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
             ApiKeyCommand.apikey(region="studio")
 
-        self.assertEqual(self.mocks["get_accounts_static"].call_count, 20)
+        self.assertEqual(self.mocks["get_accounts_with_key"].call_count, 20)
         self.mocks["write_env"].assert_called_once()
         self.assertIn("not active yet", stdout.getvalue())
+
+    def test_probes_the_actual_key_not_the_on_disk_credential(self):
+        """The activation check is called with the key this run produced.
+
+        Regression test for the bug James found in review: when an existing
+        credential is kept rather than overwritten, the old check
+        (`get_accounts`, authenticated via the on-disk credential) would
+        silently validate a different, already-active key instead of the one
+        actually being exported.
+        """
+        self.mocks["load_cred"].return_value = "some-other-on-disk-key"
+
+        with contextlib.redirect_stdout(io.StringIO()):
+            ApiKeyCommand.apikey(region="studio")
+
+        self.mocks["get_accounts_with_key"].assert_called_with(
+            region="studio", api_key=FAKE_KEY
+        )
 
 
 class EnvConflict(ApiKeyTestCase):
@@ -478,7 +496,11 @@ class EnvConflict(ApiKeyTestCase):
         self.assertIn("Re-run with --force", stderr.getvalue())
 
     def test_json_error_matches_the_documented_contract(self):
-        """--json failures include success/error/traceback/step, with no Rich markup."""
+        """--json failures include success/error/step, with no Rich markup.
+
+        No traceback: that's what --verbose is for, and the human-readable path
+        already omits one without it - --json shouldn't be more verbose by default.
+        """
         self.mocks["write_env"].side_effect = EnvVarConflict(
             "old****", "new****", Path("/home/user/.zshrc")
         )
@@ -491,8 +513,7 @@ class EnvConflict(ApiKeyTestCase):
         payload = json.loads(buffer.getvalue())
         self.assertFalse(payload["success"])
         self.assertEqual(payload["step"], "env")
-        self.assertIn("traceback", payload)
-        self.assertTrue(payload["traceback"])
+        self.assertNotIn("traceback", payload)
         self.assertNotIn("[", buffer.getvalue())
 
     def test_force_is_forwarded_to_write_env_var(self):

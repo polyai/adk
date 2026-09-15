@@ -255,12 +255,44 @@ class PlatformAPIHandler:
         Returns:
             dict[str, str]: A dictionary mapping account ids to account names
         """
-        accounts = {}
         accounts_data = PlatformAPIHandler.make_request(region, ACCOUNTS_URL, "GET")
+        return PlatformAPIHandler._parse_accounts(accounts_data)
 
+    @staticmethod
+    def get_accounts_with_key(region: str, api_key: str) -> dict[str, str]:
+        """Get the accounts for a region, authenticating with `api_key` directly.
+
+        Unlike `get_accounts`, which always authenticates via the on-disk credential,
+        this lets a caller verify that a *specific* key (e.g. one just created or
+        reused, not necessarily the one saved to disk) actually works.
+
+        Args:
+            region (str): The region name.
+            api_key (str): The API key to authenticate with.
+
+        Returns:
+            dict[str, str]: A dictionary mapping account ids to account names.
+        """
+        accounts_data = PlatformAPIHandler.make_request(
+            region,
+            ACCOUNTS_URL,
+            "GET",
+            headers={
+                "X-API-KEY": api_key,
+                "X-PolyAI-Correlation-Id": f"adk-{uuid.uuid4()}",
+                "X-Poly-Source": "adk",
+                "Content-Type": "application/json",
+            },
+        )
+        return PlatformAPIHandler._parse_accounts(accounts_data)
+
+    @staticmethod
+    def _parse_accounts(accounts_data: object) -> dict[str, str]:
+        """Parse a raw accounts-list API response into an id-to-name mapping."""
         if not isinstance(accounts_data, list):
             raise ValueError("Expected a list of accounts")
 
+        accounts = {}
         for account in accounts_data:
             if account.get("active", False) and account.get("id") and account.get("name"):
                 accounts[account.get("id")] = account.get("name")
