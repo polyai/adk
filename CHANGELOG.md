@@ -1,6 +1,163 @@
 # CHANGELOG
 
 
+## v0.59.0 (2026-09-15)
+
+### Features
+
+- Add `poly apikey` for one-shot GitHub sign-in and API key setup
+  ([#315](https://github.com/polyai/adk/pull/315),
+  [`a1dd15c`](https://github.com/polyai/adk/commit/a1dd15cefa44c4661c762e7acf4a27263b8e2e55))
+
+## Summary
+
+Adds `poly apikey`, a non-interactive command whose job is to get an API key for the PolyAI APIs and
+  Dialog RSN into a user's environment - not to set up the ADK itself, which stays with `poly
+  setup`/`poly login`. It signs a user in through the device flow, creates their Agent Studio
+  account if needed, mints (or reuses) an account-scoped API key, saves it to the credentials file,
+  and exports `POLY_API_KEY` into the user's shell profile (or user environment on Windows).
+  `--region studio` targets the PLG cluster via a GitHub-only sign-in page, for individual
+  developers; `--region <region>` targets any other cluster (us-1/uk-1/euw-1) via the same email/SSO
+  page `poly login` uses, for enterprise users who need a key for a region other than where their
+  identity lives. It's runnable by an AI coding assistant on the user's behalf, since it never
+  prompts and handles no secrets outside the process.
+
+## Motivation
+
+The studio sign-in page is getting a "Set up with your AI coding assistant" panel: a prompt the user
+  copies into Claude Code, Cursor or Codex. The first version of that prompt had the agent drive the
+  Auth0 device flow and edit dotfiles directly. Agents frequently refused it as a prompt-injection
+  pattern, and when they did run it the token and key passed through the agent's transcript. Moving
+  the flow into the CLI makes the pasted prompt "install the package and run one command", which
+  agents accept, and keeps every secret inside the process. `poly apikey` is scoped narrowly to the
+  API-key/Dialog RSN use case; ADK onboarding for an assistant still goes through `poly setup`/`poly
+  login`, unchanged by this PR.
+
+Sign-up tracking is done on the Auth0 side (post-login Action -> PostHog), so the ADK sends no
+  telemetry.
+
+Why this is a separate command rather than a flag on `poly login`, or part of `poly setup` (#305):
+
+- It authenticates against a different Auth0 application, whose login page shows only "Continue with
+  GitHub". `login` and `setup` keep the email/Google/GitHub page. - It creates an **account-scoped**
+  API key on the accounts API, not a user PAT. - It exports `POLY_API_KEY` for use by the PolyAI
+  SDKs and other tools, which `login` deliberately does not. The ADK itself keeps reading
+  `~/.poly/credentials.json`, so the variable is for everything downstream of onboarding rather than
+  for `poly` commands. - It never prompts, and its `--json` shape is a stable contract for the agent
+  driving it. `setup` is the interactive, human-facing path and stays that way.
+
+## Changes
+
+- Add `poly apikey` (Getting started group) with `--region`, `--key-name`, `--account-id`,
+  `-f/--force`, and the shared `--json` / `--verbose` / `--debug` parents. Exit `0` on success, `1`
+  on sign-in, account or API failure, `2` when `POLY_API_KEY` is already set to a different value
+  and `--force` was not given. After saving credentials it polls (up to 20×, 1 s apart, mirroring
+  `poly login`/`poly setup`) for the key to become active before writing `POLY_API_KEY`, so a
+  command run immediately afterwards doesn't fail against a key the platform hasn't finished
+  activating; if it never activates, it warns and continues rather than failing. - `--region`
+  (required, no default) picks which cluster's Auth0 app to sign in against and which cluster's
+  account/key APIs to call - reusing `REGION_TO_AUTH_DETAILS` and the region-keyed interface methods
+  `poly login` already uses, so no new Auth0 infrastructure was needed. The default key name becomes
+  `cli-generated-key-<region>` for any non-`studio` region, so a key created for one region never
+  collides with or overwrites a key from another - each region's credential also gets its own
+  independent entry in `~/.poly/credentials.json`. - Extract the RFC 8628 device-flow loop from
+  `auth.py` into `poly.auth.device_flow`, taking an `AuthDetails` rather than a region so a caller
+  can target a specific Auth0 application. `login` and `setup` keep their exact output; they now
+  call the shared helper. The poll interval is capped at 30 s under repeated `slow_down`. - Add
+  JWT-authenticated platform calls for listing accounts and listing/creating account API keys, and
+  factor the repeated Bearer header block into `_jwt_headers(jwt, source)`. The `X-Poly-Source`
+  header is parameterised so apikey traffic is distinguishable from the rest of the ADK; existing
+  callers still send `adk`. - Add `poly.utils.api_keys.select_reusable_api_key`: newest active,
+  unexpired key whose `policies[0].name` matches (the creation name lands there, not on the key's
+  own `name`). - Add `poly.utils.env_profile`: detects the profile file from `$SHELL` (`~/.zshrc`,
+  `~/.bash_profile` on macOS / `~/.bashrc` on Linux, fish config, `~/.profile` fallback) and writes
+  the export line with a marker comment, replacing an existing line in place only with `--force`. On
+  Windows it writes the user-scope registry environment and broadcasts `WM_SETTINGCHANGE`, via a
+  small backend seam so the logic is testable on Linux CI. - Never overwrite an existing `studio`
+  entry in `~/.poly/credentials.json`; report that it was kept. - On enterprise regions
+  (`us-1`/`uk-1`/`euw-1`), `/jupiter/v1/authorise` only auto-creates a workspace for `@poly-ai.com`
+  users (verified in `poly_core`, `src/agent_v3/jupiter_api/interactors/auth_interactor.py`) -
+  anyone else who isn't already provisioned in Aegis gets a raw `403`. `apikey` now catches that and
+  raises a friendly message pointing at `--account-id`/PolyAI provisioning instead of surfacing the
+  HTTP error; studio's 403 behaviour (a genuine auth error) is untouched. Also: account resolution
+  now refuses to silently pick among multiple accounts on any region - including studio - erroring
+  and listing them unless `--account-id` is given; the sign-in message no longer reads "with your
+  browser ... in your browser" for non-studio regions, and `--json` output includes `key_active` so
+  an agent can tell whether the activation wait actually succeeded. - Docs: reference page for
+  `apikey`, entries in the CLI overview and nav, a short subsection in Getting started, and a README
+  line.
+
+## Test strategy
+
+- [x] Added/updated unit tests - [x] Manual CLI testing (`poly <command>`) - [x] Tested against a
+  live Agent Studio project
+
+Unit tests (run on both the Ubuntu and Windows CI runners) cover the device flow (first-poll
+  success, pending, slow-down cap, expiry, unknown error, no-browser, custom callback), key
+  selection (policy-name match, inactive, expired, missing expiry, newest wins), profile detection
+  and writing for zsh/bash/fish/fallback and the Windows registry path (fake backend), and the
+  command itself (create and reuse paths, `--account-id`, empty-account timeout, conflict exit 2,
+  `--force` forwarding, `--json` shape, key never printed, region selection - `--region studio` vs.
+  `--region us-1` sign-in target, per-region default key name, `--key-name` overriding it, region
+  threaded into account/credentials calls, `--region` required). Tests make no network calls and do
+  not touch the real `~/.poly`.
+
+Manual runs against studio with a fresh GitHub account, all passing end to end:
+
+| Platform | Shell / store | Paths exercised | |---|---|---| | macOS 15 | zsh, `~/.zshrc` | new
+  account, key created, conflict exit 2, `--force` replace in place | | Debian 12 (Docker) | bash,
+  `~/.bashrc` | key reused, append with marker, fresh login shell sees the variable | | Windows
+  Server 2022 (GCP) | user registry | key reused, `HKCU\Environment` written, value visible from a
+  new process |
+
+In each case `poly project list --region studio` authenticated with the saved credential afterwards.
+
+`--region` for a non-`studio` cluster has not been exercised against a live enterprise tenant in
+  this environment (no credentials for one here) - it reuses the exact `AuthDetails`/device-flow/
+  interface calls `poly login --region <region>` already uses in production, so risk is limited to
+  this file's own plumbing, covered by the unit tests above.
+
+## Checklist
+
+- [x] `ruff check .` and `ruff format --check .` pass - [x] `pytest` passes - [x] No breaking
+  changes to the `poly` CLI interface (or migration path documented) - [x] Commit messages follow
+  [conventional commits](https://www.conventionalcommits.org/)
+
+`--region` went from optional (defaulting to `studio`) to required in a later push of this same PR.
+  `poly apikey` has never shipped in a release, so this is not a break in released behaviour - just
+  tightening the interface before it goes out.
+
+Overlaps with #305 (`poly setup`) in `auth.py` imports, `cli.py`'s command list and the docs index
+  pages; whichever lands second rebases. This branch no longer references `poly start`, so merge
+  order does not change its docs.
+
+## Screenshots / Logs
+
+``` $ poly apikey --region studio Setting up your PolyAI account and API key... To sign in with
+  GitHub, open the following link in your browser and enter the code when prompted.
+
+URL: https://login.studio.poly.ai/activate?user_code=XXXX-XXXX
+
+Code: XXXX-XXXX Authenticated successfully! Setting up your account... Created API key
+  'cli-generated-key': abcd****wxyz Saved to ~/.poly/credentials.json (studio). Wrote to ~/.zshrc:
+  export POLY_API_KEY="abcd****wxyz"
+
+Done. Account: ws-xxxxxxxx
+
+API key: abcd****wxyz (cli-generated-key, created) Saved to: ~/.poly/credentials.json (studio)
+  Profile: ~/.zshrc (export POLY_API_KEY="abcd****wxyz")
+
+Open a new terminal, or run `source ~/.zshrc`, to pick up POLY_API_KEY. ```
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+---------
+
+Co-authored-by: Claude Sonnet 5 <noreply@anthropic.com>
+
+Co-authored-by: Andy Mohajeri <Andy.Mohajeri@poly-ai.com>
+
+
 ## v0.58.0 (2026-09-15)
 
 ### Features
