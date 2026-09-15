@@ -3959,6 +3959,121 @@ class AgentStudioProject:
         except (jsonschema.SchemaError, jsonschema.exceptions.UnknownType) as e:
             return [f"Invalid schema: {e}"]
 
+    def get_custom_metrics(self) -> list[dict]:
+        """List all custom metrics for the project.
+
+        Returns:
+            list[dict]: List of custom metric records.
+        """
+        return AgentStudioInterface.get_custom_metrics(
+            self.region, self.account_id, self.project_id
+        )
+
+    def export_custom_metrics(self) -> dict:
+        """Export all custom metrics as a YAML-parsed dict.
+
+        Returns:
+            dict: Mapping of metric name to metric definition.
+        """
+        return AgentStudioInterface.export_custom_metrics(
+            self.region, self.account_id, self.project_id
+        )
+
+    def create_custom_metric(self, data: dict) -> dict:
+        """Validate and create a new custom metric.
+
+        Validates that ``expected_values`` is only set for string-type metrics,
+        then creates the metric. Works around a server bug where the ``api``
+        flag is ignored on create by issuing a follow-up update when ``api``
+        is ``True``.
+
+        Args:
+            data: Metric payload — name, type, description, expected_values, api.
+
+        Returns:
+            dict: The created metric record.
+
+        Raises:
+            ValueError: If expected_values is set for a non-string metric.
+        """
+        if data.get("expected_values") and data.get("type") != "string":
+            raise ValueError("--expected-values is only valid for string metrics.")
+
+        result = AgentStudioInterface.create_custom_metric(
+            self.region, self.account_id, self.project_id, data
+        )
+
+        if data.get("api"):
+            result = AgentStudioInterface.set_custom_metric_api_flag(
+                self.region, self.account_id, self.project_id, data["name"], True
+            )
+
+        return result
+
+    def update_custom_metric(self, metric_name: str, data: dict) -> dict:
+        """Validate and update an existing custom metric.
+
+        Validates that ``expected_values`` is only set for string-type metrics
+        by fetching the metric's current type when ``expected_values`` is present.
+
+        Args:
+            metric_name: Name of the metric to update.
+            data: Fields to update — description, expected_values, active, api.
+
+        Returns:
+            dict: The updated metric record.
+
+        Raises:
+            ValueError: If expected_values is set for a non-string metric.
+        """
+        if data.get("expected_values") is not None:
+            metrics = AgentStudioInterface.get_custom_metrics(
+                self.region, self.account_id, self.project_id
+            )
+            metric = next((m for m in metrics if m.get("name") == metric_name), None)
+            if metric and metric.get("type") != "string":
+                raise ValueError("--expected-values is only valid for string metrics.")
+
+        return AgentStudioInterface.update_custom_metric(
+            self.region, self.account_id, self.project_id, metric_name, data
+        )
+
+    def import_metrics_from_file(self, file_path: str, dry_run: bool = False) -> dict:
+        """Read a YAML file and import its metrics, or preview the import.
+
+        Args:
+            file_path: Path to the YAML file with metric definitions.
+            dry_run: If True, return a preview without applying changes.
+
+        Returns:
+            dict: In dry-run mode, a preview dict with ``would_create``,
+            ``would_skip``, and ``remote_only``. Otherwise, the import result
+            with ``metadata.created`` and ``metadata.ignored``.
+
+        Raises:
+            FileNotFoundError: If the file does not exist.
+            ValueError: If the file contains invalid YAML.
+        """
+        from ruamel.yaml import YAML, YAMLError
+
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"File not found: {file_path}")
+
+        with open(file_path) as f:
+            yaml_content = f.read()
+
+        try:
+            ry = YAML()
+            local_metrics = ry.load(yaml_content) or {}
+        except YAMLError as e:
+            raise ValueError(f"Invalid YAML: {e}") from e
+
+        local_names = set(local_metrics.keys())
+
+        return AgentStudioInterface.import_metrics_from_file(
+            self.region, self.account_id, self.project_id, yaml_content, local_names, dry_run
+        )
+
     def get_branch_history(self, branch_id: str) -> list[dict[str, Any]]:
         """Get the history of a branch.
 

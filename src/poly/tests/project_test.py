@@ -22,6 +22,7 @@ from poly.handlers.sdk import SourcererAPIError
 from poly.project import AgentStudioProject, DeploymentMode
 from poly.resources import (
     AsrSettings,
+    AttributeKind,
     ChatGreeting,
     ChatSafetyFilters,
     ChatStylePrompt,
@@ -2044,7 +2045,54 @@ class CleanResourcesBeforePushTest(unittest.TestCase):
             deleted_resources,
         )
 
-        self.assertEqual(new_variant.attribute_ids, ["VARIANT_ATTRIBUTES-keep"])
+        self.assertEqual(new_variant.attribute_values, {"VARIANT_ATTRIBUTES-keep": ""})
+
+    def test_new_variant_seeds_typed_attributes_with_null(self):
+        """A typed attribute cannot hold "", so a new variant seeds it as null instead."""
+        string_attr = VariantAttribute(
+            resource_id="VARIANT_ATTRIBUTES-greeting",
+            name="greeting_name",
+            mappings={"v1": "Hello"},
+        )
+        number_attr = VariantAttribute(
+            resource_id="VARIANT_ATTRIBUTES-retries",
+            name="max_retries",
+            mappings={"v1": 3},
+            kind=AttributeKind.NUMBER,
+        )
+        self.project.resources[VariantAttribute] = {
+            "VARIANT_ATTRIBUTES-greeting": string_attr,
+            "VARIANT_ATTRIBUTES-retries": number_attr,
+        }
+
+        new_variant = Variant(
+            resource_id="VARIANTS-new",
+            name="New Variant",
+            is_default=False,
+        )
+
+        self.project._clean_resources_before_push(
+            {},
+            {Variant: {"VARIANTS-new": new_variant}},
+            {},
+            {},
+        )
+
+        self.assertEqual(
+            new_variant.attribute_values,
+            {"VARIANT_ATTRIBUTES-greeting": "", "VARIANT_ATTRIBUTES-retries": None},
+        )
+
+        # Both seeds reach the wire: "" in the legacy string map for every attribute,
+        # and a native null in typed_values for the typed one.
+        proto = new_variant.build_create_proto()
+        self.assertEqual(
+            dict(proto.attribute_values.values),
+            {"VARIANT_ATTRIBUTES-greeting": "", "VARIANT_ATTRIBUTES-retries": ""},
+        )
+        self.assertEqual(
+            dict(proto.attribute_values.typed_values), {"VARIANT_ATTRIBUTES-retries": None}
+        )
 
     def test_non_default_variant_update_is_kept(self):
         """A renamed non-default variant must still be pushed as an update."""
@@ -6940,6 +6988,153 @@ class TestProjectFixtureIntegrityTest(unittest.TestCase):
         # Without this the test passes vacuously if the path keying ever breaks.
         self.assertEqual(compared, len(self.mappings))
         self.assertEqual(differing, [])
+
+
+class ProjectCreateCustomMetricTest(unittest.TestCase):
+    """Tests for AgentStudioProject.create_custom_metric validation and orchestration."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project = AgentStudioProject.from_dict(deepcopy(EMPTY_PROJECT_DATA), self.temp_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @patch("poly.project.AgentStudioInterface.set_custom_metric_api_flag")
+    @patch("poly.project.AgentStudioInterface.create_custom_metric")
+    def test_api_flag_triggers_follow_up_update(self, mock_create, mock_set_api):
+        """When api=True, a follow-up call sets the api flag after create."""
+        mock_create.return_value = {"name": "SCORE", "type": "int"}
+        mock_set_api.return_value = {"name": "SCORE", "type": "int", "api": True}
+
+        result = self.project.create_custom_metric({"name": "SCORE", "type": "int", "api": True})
+
+        mock_create.assert_called_once()
+        mock_set_api.assert_called_once_with(
+            self.project.region, self.project.account_id, self.project.project_id, "SCORE", True
+        )
+        self.assertTrue(result["api"])
+
+    @patch("poly.project.AgentStudioInterface.set_custom_metric_api_flag")
+    @patch("poly.project.AgentStudioInterface.create_custom_metric")
+    def test_no_api_flag_skips_follow_up(self, mock_create, mock_set_api):
+        """When api is not set, no follow-up call is issued."""
+        mock_create.return_value = {"name": "SCORE", "type": "int"}
+
+        self.project.create_custom_metric({"name": "SCORE", "type": "int"})
+
+        mock_create.assert_called_once()
+        mock_set_api.assert_not_called()
+
+    def test_expected_values_rejected_for_non_string(self):
+        """Raises ValueError when expected_values is set on a non-string metric."""
+        with self.assertRaises(ValueError) as ctx:
+            self.project.create_custom_metric(
+                {"name": "SCORE", "type": "int", "expected_values": ["a", "b"]},
+            )
+
+        self.assertIn("only valid for string", str(ctx.exception))
+
+    @patch("poly.project.AgentStudioInterface.create_custom_metric")
+    def test_expected_values_allowed_for_string(self, mock_create):
+        """Does not raise when expected_values is set on a string metric."""
+        mock_create.return_value = {"name": "STATUS", "type": "string"}
+
+        self.project.create_custom_metric(
+            {"name": "STATUS", "type": "string", "expected_values": ["open", "closed"]},
+        )
+
+        mock_create.assert_called_once()
+
+
+class ProjectUpdateCustomMetricTest(unittest.TestCase):
+    """Tests for AgentStudioProject.update_custom_metric validation and orchestration."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project = AgentStudioProject.from_dict(deepcopy(EMPTY_PROJECT_DATA), self.temp_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    @patch("poly.project.AgentStudioInterface.update_custom_metric")
+    @patch("poly.project.AgentStudioInterface.get_custom_metrics")
+    def test_expected_values_rejected_for_non_string(self, mock_get, mock_update):
+        """Raises ValueError when expected_values targets a non-string metric."""
+        mock_get.return_value = [{"name": "SCORE", "type": "int"}]
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.update_custom_metric("SCORE", {"expected_values": ["a", "b"]})
+
+        self.assertIn("only valid for string", str(ctx.exception))
+        mock_update.assert_not_called()
+
+    @patch("poly.project.AgentStudioInterface.update_custom_metric")
+    @patch("poly.project.AgentStudioInterface.get_custom_metrics")
+    def test_expected_values_allowed_for_string(self, mock_get, mock_update):
+        """Does not raise when expected_values targets a string metric."""
+        mock_get.return_value = [{"name": "STATUS", "type": "string"}]
+        mock_update.return_value = {"name": "STATUS"}
+
+        self.project.update_custom_metric("STATUS", {"expected_values": ["open"]})
+
+        mock_update.assert_called_once()
+
+    @patch("poly.project.AgentStudioInterface.update_custom_metric")
+    def test_no_expected_values_skips_type_check(self, mock_update):
+        """When expected_values is not in data, no type lookup is made."""
+        mock_update.return_value = {"name": "SCORE"}
+
+        self.project.update_custom_metric("SCORE", {"description": "new desc"})
+
+        mock_update.assert_called_once()
+
+
+class ProjectImportMetricsFromFileTest(unittest.TestCase):
+    """Tests for AgentStudioProject.import_metrics_from_file file reading and delegation."""
+
+    def setUp(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.project = AgentStudioProject.from_dict(deepcopy(EMPTY_PROJECT_DATA), self.temp_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_file_not_found_raises(self):
+        """Raises FileNotFoundError for a missing file."""
+        with self.assertRaises(FileNotFoundError):
+            self.project.import_metrics_from_file("/nonexistent/metrics.yaml")
+
+    def test_invalid_yaml_raises(self):
+        """Raises ValueError for unparseable YAML."""
+        bad_file = os.path.join(self.temp_dir, "bad.yaml")
+        with open(bad_file, "w") as f:
+            f.write("{{invalid")
+
+        with self.assertRaises(ValueError) as ctx:
+            self.project.import_metrics_from_file(bad_file)
+
+        self.assertIn("Invalid YAML", str(ctx.exception))
+
+    @patch("poly.project.AgentStudioInterface.import_metrics_from_file")
+    def test_delegates_parsed_content_to_interface(self, mock_import):
+        """Reads and parses the file, then delegates to the interface layer."""
+        metrics_file = os.path.join(self.temp_dir, "metrics.yaml")
+        with open(metrics_file, "w") as f:
+            f.write("SCORE:\n  type: int\n")
+        mock_import.return_value = {"metadata": {"created": ["SCORE"], "ignored": []}}
+
+        result = self.project.import_metrics_from_file(metrics_file, dry_run=True)
+
+        mock_import.assert_called_once_with(
+            self.project.region,
+            self.project.account_id,
+            self.project.project_id,
+            "SCORE:\n  type: int\n",
+            {"SCORE"},
+            True,
+        )
+        self.assertEqual(result["metadata"]["created"], ["SCORE"])
 
 
 if __name__ == "__main__":

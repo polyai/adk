@@ -276,6 +276,8 @@ Functions are a natural place to write metrics and logs.
 
 ### Metrics
 
+Metric definitions are managed with [`poly metrics`](../cli/metrics.md), not in the resource tree. The name passed here is the name defined there.
+
 Examples:
 
 ~~~python
@@ -318,6 +320,13 @@ conv.log.error(...)
 
     Learn how state variables are discovered and referenced.
     [Open variables](./variables.md)
+
+-   **Custom metrics**
+
+    ---
+
+    Define the metrics that `conv.write_metric` writes to.
+    [Open custom metrics](../../development/custom-metrics.md)
 
 -   **Topics**
 
