@@ -10,7 +10,7 @@
     "URL": "https://pyyaml.org/"
   },
   {
-    "License": "BSD-2-Clause",
+    "License": "BSD License",
     "Name": "Pygments",
     "URL": "https://pygments.org"
   },
@@ -300,7 +300,7 @@
     "URL": "https://sourceforge.net/p/ruamel-yaml/code/ci/default/tree/"
   },
   {
-    "License": "MIT",
+    "License": "MIT License",
     "Name": "ruff",
     "URL": "https://docs.astral.sh/ruff"
   },
