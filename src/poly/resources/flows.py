@@ -368,7 +368,8 @@ class FlowStep(BaseFlowStep, YamlResource):
             Condition(**condition) if not isinstance(condition, Condition) else condition
             for condition in (conditions or [])
         ]
-        self.prompt = prompt
+        # Stripped is the canonical form — YAML reads have always stripped.
+        self.prompt = (prompt or "").strip()
         self.position = position or {}
 
     @classmethod
@@ -552,7 +553,7 @@ class FlowStep(BaseFlowStep, YamlResource):
             flow_name=flow_name,
             step_type=step_type,
             settings=settings,
-            prompt=yaml_dict.get("prompt", "").strip(),
+            prompt=yaml_dict.get("prompt", ""),
             conditions=conditions,
             position=known_position,
             extracted_entities=extracted_entities,
@@ -1338,9 +1339,14 @@ class FlowSettings(SubResource):
 
         # asr_biasing and dtmf can't be cleared on the backend, so an absent section
         # means disabled — normalise here so every construction path (YAML, projection,
-        # bare defaults) compares equal.
+        # bare defaults) compares equal. Disabled sections normalise to bare defaults:
+        # YAML drops them entirely, so their residual values can't round-trip.
         self.asr_biasing = asr_biasing if asr_biasing is not None else ASRBiasing()
         self.dtmf = dtmf if dtmf is not None else DTMFConfig()
+        if not self.asr_biasing.is_enabled:
+            self.asr_biasing = ASRBiasing()
+        if not self.dtmf.is_enabled:
+            self.dtmf = DTMFConfig()
         self.asr = asr
         self.vad = vad
         self.barge_in = barge_in
