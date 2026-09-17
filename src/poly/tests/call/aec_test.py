@@ -64,8 +64,11 @@ class EchoCancellerTest(unittest.TestCase):
     def setUp(self):
         pytest.importorskip("pywebrtc_audio")
         from poly.call.aec import EchoCanceller
+        from poly.call.media import SAMPLE_RATE
 
-        self._ec = EchoCanceller()
+        # Construct at the real media rate (48 kHz), as the call path does — the binding
+        # would otherwise default to 16 kHz and mismodel our stream.
+        self._ec = EchoCanceller(SAMPLE_RATE)
 
     def test_cancels_pure_echo(self):
         # near is pure echo of far (no local speech) -> should be strongly attenuated
@@ -89,6 +92,25 @@ class EchoCancellerTest(unittest.TestCase):
         out = self._ec.process(block, block)
         self.assertEqual(len(out), 480)
         self.assertEqual(np.asarray(out).dtype, np.int16)
+
+    def test_passes_through_local_speech_when_no_echo(self):
+        # Local speech with a silent far-end reference (nothing playing -> no echo) must
+        # survive: the canceller should NOT suppress genuine user audio. This guards
+        # barge-in against a regression that just returns silence (which would still pass
+        # the pure-echo test above).
+        rng = np.random.default_rng(0)
+        near_full = (rng.standard_normal(48000) * 3000).astype(np.int16)
+        far_full = np.zeros(48000, dtype=np.int16)
+
+        out = []
+        for i in range(0, len(near_full) - 480, 480):
+            out.append(self._ec.process(near_full[i : i + 480], far_full[i : i + 480]))
+        out = np.concatenate(out)
+
+        skip = 16000  # let the filter converge
+        rms = lambda x: float(np.sqrt(np.mean(x.astype(np.float64) ** 2)) + 1e-9)  # noqa: E731
+        retained = rms(out[skip:]) / rms(near_full[skip : skip + len(out) - skip])
+        self.assertGreater(retained, 0.5)
 
 
 if __name__ == "__main__":

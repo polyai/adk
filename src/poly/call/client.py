@@ -70,7 +70,7 @@ async def run_call(session: CallSession, caller: str, *, aec: bool = False) -> N
         # Constructed first so a missing dependency fails before any device is opened.
         from poly.call.aec import EchoCanceller, FarEndReference
 
-        echo_canceller = EchoCanceller()
+        echo_canceller = EchoCanceller(SAMPLE_RATE)
         # Cap the reference at ~1 s to bound worst-case latency; steady-state depth
         # self-regulates and the APM's delay estimator aligns near/far.
         reference = FarEndReference(max_samples=SAMPLE_RATE)

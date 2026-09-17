@@ -78,38 +78,47 @@ class CallCommandTest(unittest.TestCase):
         self.assertEqual(session.project_id, "proj-1")
         self.assertFalse(aec)
 
+    @patch("poly.call.aec.EchoCanceller")
     @patch("poly.cli_commands.call.load_project")
-    def test_aec_on_by_default(self, mock_load):
+    def test_aec_on_by_default(self, mock_load, mock_canceller):
         mock_load.return_value = make_project(branch="feature-x")
         recorder: list = []
 
-        with patch.dict(
-            sys.modules,
-            {
-                "poly.call.client": fake_client_module(recorder),
-                "pywebrtc_audio": types.ModuleType("pywebrtc_audio"),  # dep present
-            },
-        ):
+        # Canceller constructs cleanly (dep present and working) -> AEC stays on.
+        with patch.dict(sys.modules, {"poly.call.client": fake_client_module(recorder)}):
             CallCommand.call("/path")  # no aec arg -> defaults on
 
+        mock_canceller.assert_called_once()  # the probe ran
         self.assertEqual(len(recorder), 1)
         self.assertTrue(recorder[0][2])  # aec == True
 
+    @patch("poly.call.aec.EchoCanceller", side_effect=RuntimeError("APM unavailable"))
     @patch("poly.cli_commands.call.load_project")
-    def test_aec_missing_dep_degrades_gracefully(self, mock_load):
+    def test_aec_missing_dep_degrades_gracefully(self, mock_load, _mock_canceller):
         project = make_project(branch="feature-x")
         mock_load.return_value = project
         recorder: list = []
 
-        # Voice stack present, AEC lib absent: the call should proceed without AEC,
-        # not abort.
-        with patch.dict(
-            sys.modules,
-            {"poly.call.client": fake_client_module(recorder), "pywebrtc_audio": None},
-        ):
+        # AEC lib absent: the wrapper raises at construction; the call proceeds without
+        # AEC rather than aborting.
+        with patch.dict(sys.modules, {"poly.call.client": fake_client_module(recorder)}):
             CallCommand.call("/path")  # default aec on
 
         project.create_call_session.assert_called_once()
+        self.assertEqual(len(recorder), 1)
+        self.assertFalse(recorder[0][2])  # degraded to aec == False
+
+    @patch("poly.call.aec.EchoCanceller", side_effect=Exception("native init failed"))
+    @patch("poly.cli_commands.call.load_project")
+    def test_aec_construction_failure_degrades_gracefully(self, mock_load, _mock_canceller):
+        project = make_project(branch="feature-x")
+        mock_load.return_value = project
+        recorder: list = []
+
+        # Dep present but the APM throws at construction: still degrade, don't crash.
+        with patch.dict(sys.modules, {"poly.call.client": fake_client_module(recorder)}):
+            CallCommand.call("/path")
+
         self.assertEqual(len(recorder), 1)
         self.assertFalse(recorder[0][2])  # degraded to aec == False
 

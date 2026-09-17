@@ -156,8 +156,11 @@ class CallCommand(BaseCommand):
         # without it rather than blocking the call.
         if aec:
             try:
-                import pywebrtc_audio  # noqa: F401
-            except ImportError:
+                from poly.call.aec import EchoCanceller
+                from poly.call.media import SAMPLE_RATE
+
+                EchoCanceller(SAMPLE_RATE)
+            except Exception:
                 warning(
                     "Echo cancellation unavailable (reinstall ADK to restore it); "
                     "continuing without it."

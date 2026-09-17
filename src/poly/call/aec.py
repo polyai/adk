@@ -22,8 +22,12 @@ _AEC_UNAVAILABLE_HINT = (
 class EchoCanceller:
     """WebRTC APM echo canceller over mono int16 blocks at the capture rate."""
 
-    def __init__(self) -> None:
+    def __init__(self, sample_rate: int) -> None:
         """Create the underlying WebRTC echo canceller.
+
+        Args:
+            sample_rate: The rate (Hz) of the near/far blocks passed to process.
+                Must match the media stream.
 
         Raises:
             RuntimeError: If the WebRTC APM (pywebrtc-audio) can't be loaded.
@@ -32,7 +36,7 @@ class EchoCanceller:
             import pywebrtc_audio
         except ImportError as exc:  # pragma: no cover - exercised via the CLI hint
             raise RuntimeError(_AEC_UNAVAILABLE_HINT) from exc
-        self._ec = pywebrtc_audio.EchoCanceller()
+        self._ec = pywebrtc_audio.EchoCanceller(sample_rate)
 
     def process(self, near: np.ndarray, far: np.ndarray) -> np.ndarray:
         """Return ``near`` with the echo of ``far`` removed.
