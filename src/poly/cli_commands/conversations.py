@@ -78,13 +78,6 @@ class ConversationsCommand(BaseCommand):
             "Preferred over --offset where available.",
         )
         conv_list_parser.add_argument(
-            "--channel",
-            type=str,
-            action="append",
-            default=None,
-            help="Filter by channel (e.g. voice, chat). Repeatable.",
-        )
-        conv_list_parser.add_argument(
             "--in-progress",
             dest="in_progress",
             action=BooleanOptionalAction,
@@ -155,7 +148,6 @@ class ConversationsCommand(BaseCommand):
                 args.limit,
                 args.offset,
                 cursor=args.cursor,
-                channel=args.channel,
                 in_progress=args.in_progress,
                 output_json=args.json,
             )
@@ -182,7 +174,6 @@ class ConversationsCommand(BaseCommand):
         limit: int = 50,
         offset: int = 0,
         cursor: Optional[str] = None,
-        channel: Optional[list[str]] = None,
         in_progress: Optional[bool] = None,
         output_json: bool = False,
     ) -> None:
@@ -193,7 +184,6 @@ class ConversationsCommand(BaseCommand):
             limit: Max number of conversations to return.
             offset: Number of conversations to skip. Prefer `cursor` where available.
             cursor: Opaque pagination cursor from a previous response. v3 regions only.
-            channel: Filter by one or more channels. v3 regions only.
             in_progress: Filter to only in-progress or only finished conversations. v3 regions only.
             output_json: If True, emit machine-readable JSON.
         """
@@ -207,7 +197,6 @@ class ConversationsCommand(BaseCommand):
             limit=limit,
             offset=offset,
             cursor=cursor,
-            channel=channel,
             in_progress=in_progress,
         )
         conversations = result.get("conversations", [])

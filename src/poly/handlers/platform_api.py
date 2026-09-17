@@ -46,9 +46,9 @@ CUSTOM_METRICS_IMPORT_URL = (
 # These use public APIs not /adk endpoints
 PROMOTE_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/promote"
 ROLLBACK_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/rollback"
-# v1 conversations list is deprecated (sunset end of Aug 2026). v3 is only live in
-# us-1/uk-1/euw-1 today (staging has v3 for us-1 only) — regions without a v3 host
-# still use CONVERSATIONS_URL until the backend finishes rolling v3 out. DEVP-664.
+# v1 conversations list is deprecated. v3 is routed in us-1/uk-1/euw-1/dev today —
+# studio (and staging, until confirmed) have no v3 host yet and still use
+# CONVERSATIONS_URL until the backend finishes rolling v3 out. DEVP-664.
 CONVERSATIONS_URL = "/v1/agents/{project_id}/conversations"
 CONVERSATIONS_V3_URL = "/v3/{account_id}/{project_id}/conversations"
 CONVERSATION_URL = "/v1/agents/{project_id}/conversations/{conversation_id}"
@@ -98,13 +98,14 @@ class PlatformAPIHandler:
         "studio": "https://jupiter-api.plg-us-1-prod.polyai.app",
     }
 
-    # v3 conversations list host. Only us-1/uk-1/euw-1 (and staging's us-1) are live;
-    # dev/staging/studio have no v3 host yet, so they intentionally fall back to
+    # v3 conversations list host. us-1/uk-1/euw-1/dev are routed; studio and staging
+    # (until confirmed) have no v3 host yet, so they intentionally fall back to
     # `region_to_base_url` (v1) in `get_base_url`. DEVP-664.
     platform_region_to_base_url = {
         "euw-1": "https://api.euw-1.platform.polyai.app",
         "uk-1": "https://api.uk-1.platform.polyai.app",
         "us-1": "https://api.us-1.platform.polyai.app",
+        "dev": "https://api.dev.polyai.app",
     }
 
     @staticmethod
@@ -1060,13 +1061,12 @@ class PlatformAPIHandler:
         limit: int = 50,
         offset: int = 0,
         cursor: ty.Optional[str] = None,
-        channel: ty.Optional[list[str]] = None,
         in_progress: ty.Optional[bool] = None,
     ) -> dict:
         """List conversations for a project.
 
-        Uses the v3 conversations API in regions where it's live (us-1, uk-1, euw-1).
-        Other regions (dev, staging, studio) fall back to the deprecated v1 endpoint
+        Uses the v3 conversations API in regions where it's routed (us-1, uk-1, euw-1,
+        dev). Other regions (staging, studio) fall back to the deprecated v1 endpoint
         until the backend finishes rolling v3 out to them — see DEVP-664.
 
         Args:
@@ -1076,7 +1076,6 @@ class PlatformAPIHandler:
             limit: Max number of conversations to return.
             offset: Number of conversations to skip. Prefer `cursor` where available.
             cursor: Opaque pagination cursor from a previous v3 response. v3 only.
-            channel: Filter by one or more channels (e.g. "voice", "chat"). v3 only.
             in_progress: Filter to only in-progress (True) or only finished (False)
                 conversations. v3 only.
 
@@ -1088,8 +1087,6 @@ class PlatformAPIHandler:
             params: dict[str, ty.Any] = {"limit": limit, "offset": offset}
             if cursor:
                 params["cursor"] = cursor
-            if channel:
-                params["channel"] = channel
             if in_progress is not None:
                 params["in_progress"] = in_progress
             return PlatformAPIHandler.make_request(

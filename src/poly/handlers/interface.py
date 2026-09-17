@@ -1131,7 +1131,6 @@ class AgentStudioInterface:
         limit: int = 50,
         offset: int = 0,
         cursor: Optional[str] = None,
-        channel: Optional[list[str]] = None,
         in_progress: Optional[bool] = None,
     ) -> dict:
         """List conversations for a project.
@@ -1143,7 +1142,6 @@ class AgentStudioInterface:
             limit: Max number of conversations to return.
             offset: Number of conversations to skip. Prefer `cursor` where available.
             cursor: Opaque pagination cursor from a previous v3 response. v3 only.
-            channel: Filter by one or more channels (e.g. "voice", "chat"). v3 only.
             in_progress: Filter to only in-progress (True) or only finished (False)
                 conversations. v3 only.
 
@@ -1151,7 +1149,7 @@ class AgentStudioInterface:
             dict: The API response with conversations and pagination info.
         """
         return PlatformAPIHandler.list_conversations(
-            region, account_id, project_id, limit, offset, cursor, channel, in_progress
+            region, account_id, project_id, limit, offset, cursor, in_progress
         )
 
     @staticmethod

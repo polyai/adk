@@ -3657,20 +3657,17 @@ class ConversationsCommandTest(unittest.TestCase):
             limit=20,
             offset=5,
             cursor=None,
-            channel=None,
             in_progress=None,
         )
         mock_print.assert_called_once()
 
     @patch("poly.cli_commands.conversations.AgentStudioInterface.list_conversations")
     @patch("poly.output.console.print_conversations")
-    def test_list_passes_cursor_channel_in_progress(self, mock_print, mock_api):
-        """conversations list passes --cursor/--channel/--in-progress through to the API."""
+    def test_list_passes_cursor_in_progress(self, mock_print, mock_api):
+        """conversations list passes --cursor/--in-progress through to the API."""
         mock_api.return_value = self.SAMPLE_CONVERSATIONS
 
-        ConversationsCommand.conversations_list(
-            TEST_DIR, cursor="abc", channel=["voice"], in_progress=True
-        )
+        ConversationsCommand.conversations_list(TEST_DIR, cursor="abc", in_progress=True)
 
         mock_api.assert_called_once_with(
             region="us-1",
@@ -3679,9 +3676,40 @@ class ConversationsCommandTest(unittest.TestCase):
             limit=50,
             offset=0,
             cursor="abc",
-            channel=["voice"],
             in_progress=True,
         )
+
+    @patch("poly.cli_commands.conversations.AgentStudioInterface.list_conversations")
+    @patch("poly.output.console.print_conversations")
+    def test_parser_wires_cursor_and_in_progress_flags(self, mock_print, mock_api):
+        """The real argparse parser wires --cursor/--in-progress through to the API call."""
+        mock_api.return_value = self.SAMPLE_CONVERSATIONS
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        args = cli._create_parser().parse_args(
+            ["conversations", "list", "--cursor", "abc", "--in-progress"]
+        )
+
+        ConversationsCommand.run(args)
+
+        mock_api.assert_called_once_with(
+            region="us-1",
+            account_id="test-account",
+            project_id="test-project",
+            limit=50,
+            offset=0,
+            cursor="abc",
+            in_progress=True,
+        )
+
+    def test_parser_rejects_removed_channel_flag(self):
+        """--channel is no longer a recognized flag (server ignored it; removed DEVP-664)."""
+        cli = AgentStudioCLI()
+        cli.register_commands()
+        parser = cli._create_parser()
+
+        with self.assertRaises(SystemExit), patch("sys.stderr"):
+            parser.parse_args(["conversations", "list", "--channel", "voice"])
 
     @patch("poly.cli_commands.conversations.AgentStudioInterface.list_conversations")
     @patch("poly.cli_commands.conversations.json_print")
