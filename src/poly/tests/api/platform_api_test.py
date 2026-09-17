@@ -410,7 +410,7 @@ class ListConversations(unittest.TestCase):
                 "limit": 50,
                 "offset": 0,
                 "cursor": "abc",
-                "in_progress": False,
+                "in_progress": "false",
             },
             use_platform_api=True,
         )
@@ -440,6 +440,117 @@ class ListConversations(unittest.TestCase):
         mock_make_request.assert_called_once_with(
             "studio", "/v1/agents/proj-1/conversations", "GET", params={"limit": 20, "offset": 5}
         )
+
+
+class ListConversationsHttpBoundary(unittest.TestCase):
+    """Tests that exercise the real `requests` call, not just `make_request`'s args.
+
+    Everything above patches `PlatformAPIHandler.make_request` directly, which proves
+    `list_conversations` calls it with the right endpoint/params but never proves those
+    params actually reach the wire correctly (e.g. `requests` serialises a raw Python
+    `True`/`False` as "True"/"False", not "true"/"false" — see DEVP-664 fix). These patch
+    `requests.request` instead, one layer further out, so the real URL/query-string
+    encoding and response handling in `make_request` are what's under test.
+    """
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_cursor_and_in_progress_are_encoded_lowercase_on_the_wire(
+        self, mock_request, _mock_key
+    ):
+        """The real outgoing query string has in_progress=true, not in_progress=True."""
+        mock_request.return_value = make_mock_response(
+            200, json_body={"conversations": [], "next_offset": None, "cursor": None}
+        )
+
+        PlatformAPIHandler.list_conversations(
+            "dev", "PLATFORM", "PROJECT-1", cursor="abc", in_progress=True
+        )
+
+        kwargs = mock_request.call_args.kwargs
+        self.assertEqual(kwargs["method"], "GET")
+        self.assertEqual(
+            kwargs["url"], "https://api.dev.polyai.app/v3/PLATFORM/PROJECT-1/conversations"
+        )
+        prepared = requests.Request("GET", kwargs["url"], params=kwargs["params"]).prepare()
+        self.assertIn("in_progress=true", prepared.url)
+        self.assertNotIn("in_progress=True", prepared.url)
+        self.assertIn("cursor=abc", prepared.url)
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_in_progress_false_is_also_encoded_lowercase(self, mock_request, _mock_key):
+        """False must not disappear or become the string "False" on the wire."""
+        mock_request.return_value = make_mock_response(
+            200, json_body={"conversations": [], "next_offset": None, "cursor": None}
+        )
+
+        PlatformAPIHandler.list_conversations("us-1", "acc-1", "proj-1", in_progress=False)
+
+        kwargs = mock_request.call_args.kwargs
+        prepared = requests.Request("GET", kwargs["url"], params=kwargs["params"]).prepare()
+        self.assertIn("in_progress=false", prepared.url)
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_realistic_v3_payload_round_trips_unchanged(self, mock_request, _mock_key):
+        """A realistic backend response (real field names) passes through untouched."""
+        backend_payload = {
+            "conversations": [
+                {
+                    "id": "KA-999",
+                    "account_id": "PLATFORM",
+                    "project_id": "PROJECT-1",
+                    "environment": "sandbox",
+                    "started_at": "2026-09-16T10:00:00+00:00",
+                    "channel": "voice.sip",
+                    "from_number": "+15550001111",
+                    "to_number": "+15550002222",
+                    "in_progress": False,
+                    "num_turns": 6,
+                    "total_duration": 42,
+                    "polyai_duration": 30,
+                    "handoff": False,
+                    "handoff_reason": None,
+                    "handoff_destination": None,
+                    "variant_id": "v-1",
+                    "variant_name": "Voice Default",
+                }
+            ],
+            "next_offset": None,
+            "cursor": "next-page-cursor",
+        }
+        mock_request.return_value = make_mock_response(200, json_body=backend_payload)
+
+        result = PlatformAPIHandler.list_conversations("dev", "PLATFORM", "PROJECT-1")
+
+        self.assertEqual(result, backend_payload)
+
+    @patch("poly.handlers.platform_api.retrieve_api_key", return_value="secret-key")
+    @patch("poly.handlers.platform_api.requests.request")
+    def test_403_permission_denied_response_surfaces_as_http_error_with_body(
+        self, mock_request, _mock_key
+    ):
+        """Replays the exact 403 observed live against dev v3 (DEVP-664 manual check).
+
+        Confirms the real backend rejection reaches the caller as an HTTPError whose
+        response body is preserved, rather than being swallowed or reshaped — this is
+        what `poly.output.console.handle_exception` reports to the user as
+        "API request failed: ...".
+        """
+        mock_request.return_value = make_mock_response(
+            403,
+            content=(
+                b"<!doctype html>\n<html lang=en>\n<title>403 Forbidden</title>\n"
+                b"<h1>Forbidden</h1>\n<p>API Key does not have required permissions.</p>"
+            ),
+        )
+
+        with self.assertRaises(requests.HTTPError) as ctx:
+            PlatformAPIHandler.list_conversations("dev", "PLATFORM", "PROJECT-8P4PW6MR")
+
+        self.assertEqual(ctx.exception.response.status_code, 403)
+        self.assertIn("API Key does not have required permissions", ctx.exception.response.text)
 
 
 class GetConversationAudio(unittest.TestCase):

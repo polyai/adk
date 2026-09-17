@@ -17,6 +17,7 @@ from poly.output.console import (
     paged_output,
     print_archived_branches,
     print_branch_history,
+    print_conversations,
     print_releases_branches,
     resolve_parent_branch_label,
 )
@@ -499,3 +500,94 @@ class PagedOutputTest(unittest.TestCase):
         mock_pager.assert_called_once()
         self.assertIsInstance(mock_pager.call_args.kwargs["pager"], _OverflowPager)
         self.assertTrue(mock_pager.call_args.kwargs["styles"])
+
+
+class PrintConversationsTest(unittest.TestCase):
+    """Tests for print_conversations, the table used by `conversations list` (DEVP-664)."""
+
+    def _render(self, conversations: list[dict]) -> str:
+        original_width = console.width
+        console.width = 200  # wide enough that no_wrap columns don't ellipsize
+        try:
+            with console.capture() as capture:
+                print_conversations(conversations)
+            return capture.get()
+        finally:
+            console.width = original_width
+
+    def test_v3_shape_renders_expected_row(self):
+        """A v3 (snake_case) conversation renders id, duration, channel, variant, and handoff."""
+        output = self._render(
+            [
+                {
+                    "id": "KA-123",
+                    "started_at": "2026-05-26T10:00:00+00:00",
+                    "total_duration": 90,
+                    "channel": "VOICE-SIP",
+                    "from_number": "+1555000",
+                    "variant_id": "Voice",
+                    "handoff": True,
+                    "handoff_destination": "support-team",
+                }
+            ]
+        )
+
+        self.assertIn("KA-123", output)
+        self.assertIn("1m30s", output)
+        self.assertIn("VOICE-SIP", output)
+        self.assertIn("Variant", output)
+        self.assertIn("Voice", output)
+        self.assertIn("support-team", output)
+        self.assertNotIn("Summary", output)
+
+    def test_v1_fallback_shape_renders_the_same_row(self):
+        """A v1 (camelCase) conversation renders identically via the same table."""
+        output = self._render(
+            [
+                {
+                    "conversationId": "KA-456",
+                    "startedAt": "2026-05-26T10:00:00+00:00",
+                    "duration": 90,
+                    "channel": "VOICE-SIP",
+                    "fromNumber": "+1555000",
+                    "variantId": "Voice",
+                    "handoff": True,
+                    "handoffDestination": "support-team",
+                }
+            ]
+        )
+
+        self.assertIn("KA-456", output)
+        self.assertIn("1m30s", output)
+        self.assertIn("Voice", output)
+        self.assertIn("support-team", output)
+
+    def test_no_variant_across_any_conversation_hides_the_column(self):
+        """When nothing has a variant, the Variant column is omitted entirely."""
+        output = self._render(
+            [{"id": "KA-1", "started_at": "2026-05-26T10:00:00+00:00", "total_duration": 5}]
+        )
+
+        self.assertNotIn("Variant", output)
+
+    def test_handoff_without_destination_shows_plain_yes(self):
+        """A handoff with no destination string still marks the row as handed off."""
+        output = self._render(
+            [
+                {
+                    "id": "KA-2",
+                    "started_at": "2026-05-26T10:00:00+00:00",
+                    "total_duration": 5,
+                    "handoff": True,
+                }
+            ]
+        )
+
+        self.assertIn("yes", output)
+
+    def test_missing_optional_fields_render_placeholders_not_crash(self):
+        """A conversation missing started_at/from_number/channel still renders safely."""
+        output = self._render([{"id": "KA-3"}])
+
+        self.assertIn("KA-3", output)
+        self.assertIn("—", output)

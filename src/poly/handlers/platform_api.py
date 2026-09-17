@@ -1088,7 +1088,7 @@ class PlatformAPIHandler:
             if cursor:
                 params["cursor"] = cursor
             if in_progress is not None:
-                params["in_progress"] = in_progress
+                params["in_progress"] = str(in_progress).lower()
             return PlatformAPIHandler.make_request(
                 region, endpoint, "GET", params=params, use_platform_api=True
             )
