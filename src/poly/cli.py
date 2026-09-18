@@ -23,6 +23,7 @@ from poly.cli_commands.base import (
     group_subcommands,
 )
 from poly.cli_commands.branch import BranchCommand
+from poly.cli_commands.call import CallCommand
 from poly.cli_commands.chat import ChatCommand
 from poly.cli_commands.conversations import ConversationsCommand
 from poly.cli_commands.deployments import DeploymentsCommand
@@ -78,6 +79,7 @@ COMMANDS = [
     TestingCommand,
     RTCCommand,
     ChatCommand,
+    CallCommand,
     DocsCommand,
     CompletionCommand,
     UpdateCommand,
