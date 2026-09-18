@@ -46,7 +46,11 @@ CUSTOM_METRICS_IMPORT_URL = (
 # These use public APIs not /adk endpoints
 PROMOTE_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/promote"
 ROLLBACK_URL = "/v1/agents/{project_id}/deployments/{deployment_id}/rollback"
+# v1 conversations list is deprecated. v3 is routed in us-1/uk-1/euw-1/dev today —
+# studio (and staging, until confirmed) have no v3 host yet and still use
+# CONVERSATIONS_URL until the backend finishes rolling v3 out. DEVP-664.
 CONVERSATIONS_URL = "/v1/agents/{project_id}/conversations"
+CONVERSATIONS_V3_URL = "/v3/{account_id}/{project_id}/conversations"
 CONVERSATION_URL = "/v1/agents/{project_id}/conversations/{conversation_id}"
 CONVERSATION_AUDIO_URL = "/v1/agents/{project_id}/conversations/{conversation_id}/audio"
 AUDIO_CACHE_URL = "/v1/agents/{project_id}/audio-cache"
@@ -94,18 +98,35 @@ class PlatformAPIHandler:
         "studio": "https://jupiter-api.plg-us-1-prod.polyai.app",
     }
 
+    # v3 conversations list host. us-1/uk-1/euw-1/dev are routed; studio and staging
+    # (until confirmed) have no v3 host yet, so they intentionally fall back to
+    # `region_to_base_url` (v1) in `get_base_url`. DEVP-664.
+    platform_region_to_base_url = {
+        "euw-1": "https://api.euw-1.platform.polyai.app",
+        "uk-1": "https://api.uk-1.platform.polyai.app",
+        "us-1": "https://api.us-1.platform.polyai.app",
+        "dev": "https://api.dev.polyai.app",
+    }
+
     @staticmethod
-    def get_base_url(region: str, use_jupiter_api: bool = False) -> str:
+    def get_base_url(
+        region: str, use_jupiter_api: bool = False, use_platform_api: bool = False
+    ) -> str:
         """Get the base URL for the Platform API based on the region.
 
         Args:
             region (str): The region name
             use_jupiter_api (bool): Whether to use the Jupiter API
+            use_platform_api (bool): Whether to use the v3 platform API. Falls back to
+                the default (v1) base URL for regions without a v3 host yet.
         Returns:
             str: The base URL for the Platform API
         """
         if use_jupiter_api:
             if base_url := PlatformAPIHandler.jupiter_region_to_base_url.get(region):
+                return base_url
+        elif use_platform_api:
+            if base_url := PlatformAPIHandler.platform_region_to_base_url.get(region):
                 return base_url
         else:
             if base_url := PlatformAPIHandler.region_to_base_url.get(region):
@@ -123,6 +144,7 @@ class PlatformAPIHandler:
         files: ty.Optional[dict] = None,
         response_format: str = "json",
         use_jupiter_api: bool = False,
+        use_platform_api: bool = False,
     ) -> dict:
         """Make a request to the Platform API.
 
@@ -139,11 +161,12 @@ class PlatformAPIHandler:
             response_format (str): How to parse the response. "json" (default)
                 or "yaml".
             use_jupiter_api (bool): Whether to use the Jupiter API.
+            use_platform_api (bool): Whether to use the v3 platform API.
 
         Returns:
             dict: The parsed response.
         """
-        url = PlatformAPIHandler.get_base_url(region, use_jupiter_api) + endpoint
+        url = PlatformAPIHandler.get_base_url(region, use_jupiter_api, use_platform_api) + endpoint
         correlation_id = f"adk-{uuid.uuid4()}"
 
         if headers is None:
@@ -1033,21 +1056,43 @@ class PlatformAPIHandler:
     @staticmethod
     def list_conversations(
         region: str,
+        account_id: str,
         project_id: str,
         limit: int = 50,
         offset: int = 0,
+        cursor: ty.Optional[str] = None,
+        in_progress: ty.Optional[bool] = None,
     ) -> dict:
         """List conversations for a project.
 
+        Uses the v3 conversations API in regions where it's routed (us-1, uk-1, euw-1,
+        dev). Other regions (staging, studio) fall back to the deprecated v1 endpoint
+        until the backend finishes rolling v3 out to them — see DEVP-664.
+
         Args:
             region: The region name.
+            account_id: The account ID. Only used for the v3 endpoint.
             project_id: The project ID (agent ID).
             limit: Max number of conversations to return.
-            offset: Number of conversations to skip.
+            offset: Number of conversations to skip. Prefer `cursor` where available.
+            cursor: Opaque pagination cursor from a previous v3 response. v3 only.
+            in_progress: Filter to only in-progress (True) or only finished (False)
+                conversations. v3 only.
 
         Returns:
-            dict: The API response with conversations, count, limit, offset.
+            dict: The API response with conversations and pagination info.
         """
+        if region in PlatformAPIHandler.platform_region_to_base_url:
+            endpoint = CONVERSATIONS_V3_URL.format(account_id=account_id, project_id=project_id)
+            params: dict[str, ty.Any] = {"limit": limit, "offset": offset}
+            if cursor:
+                params["cursor"] = cursor
+            if in_progress is not None:
+                params["in_progress"] = in_progress
+            return PlatformAPIHandler.make_request(
+                region, endpoint, "GET", params=params, use_platform_api=True
+            )
+
         endpoint = CONVERSATIONS_URL.format(project_id=project_id)
         return PlatformAPIHandler.make_request(
             region, endpoint, "GET", params={"limit": limit, "offset": offset}
