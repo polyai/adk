@@ -1,7 +1,7 @@
 """Tests for the call command.
 
-These mock the voice stack (``poly.call.client``) so they run without the
-optional ``voice`` extra installed.
+These mock the voice stack (``poly.call.client``) so they run without importing the
+native WebRTC/audio dependencies.
 
 Copyright PolyAI Limited
 """
