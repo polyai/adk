@@ -17,7 +17,7 @@ from aiortc import RTCIceCandidate, RTCPeerConnection, RTCSessionDescription
 from aiortc.mediastreams import MediaStreamTrack
 from aiortc.sdp import candidate_from_sdp
 
-from poly.call.media import MicrophoneTrack, SpeakerPlayer
+from poly.call.media import SAMPLE_RATE, MicrophoneTrack, SpeakerPlayer
 from poly.call.session import CallSession
 from poly.call.signaling import (
     AnswerMessage,
@@ -51,19 +51,33 @@ def _ice_candidate_from_message(msg: IceCandidateMessage) -> RTCIceCandidate | N
     return candidate
 
 
-async def run_call(session: CallSession, caller: str) -> None:
+async def run_call(session: CallSession, caller: str, *, aec: bool = False) -> None:
     """Place a voice call and run it until the gateway closes or an error occurs.
 
     Args:
         session: The bootstrapped call session (from ``create_call_session``).
         caller: An identifier for the caller (e.g. the user's email).
+        aec: When True, run the mic through acoustic echo cancellation so the agent
+            does not hear its own audio played through the speaker.
 
     Raises:
         CallError: If the gateway returns a signaling error.
+        RuntimeError: If ``aec`` is set but the WebRTC APM (pywebrtc-audio) can't load.
     """
+    echo_canceller = None
+    reference = None
+    if aec:
+        # Constructed first so a missing dependency fails before any device is opened.
+        from poly.call.aec import EchoCanceller, FarEndReference
+
+        echo_canceller = EchoCanceller(SAMPLE_RATE)
+        # Cap the reference at ~1 s to bound worst-case latency; steady-state depth
+        # self-regulates and the APM's delay estimator aligns near/far.
+        reference = FarEndReference(max_samples=SAMPLE_RATE)
+
     pc = RTCPeerConnection()
-    microphone = MicrophoneTrack()
-    speaker = SpeakerPlayer()
+    microphone = MicrophoneTrack(echo_canceller=echo_canceller, reference=reference)
+    speaker = SpeakerPlayer(reference=reference)
     pc.addTrack(microphone)
     connection_failed = asyncio.Event()
 
