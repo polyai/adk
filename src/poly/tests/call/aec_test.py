@@ -1,7 +1,8 @@
 """Tests for voice-call acoustic echo cancellation.
 
-The FarEndReference tests need only numpy; the EchoCanceller tests are skipped unless
-the optional ``aec`` extra (pywebrtc-audio) is installed.
+The FarEndReference tests need only numpy. pywebrtc-audio ships with ADK as a core
+dependency, so the EchoCanceller tests' importorskip guard trips only on a broken
+native install.
 
 Copyright PolyAI Limited
 """
