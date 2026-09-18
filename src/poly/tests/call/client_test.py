@@ -1,6 +1,7 @@
 """Tests for the WebRTC call driver's pure helpers.
 
-Skipped unless the optional ``voice`` extra (aiortc) is installed.
+aiortc ships with ADK as a core dependency; the importorskip guard below trips only on a
+broken/partial native install.
 
 Copyright PolyAI Limited
 """

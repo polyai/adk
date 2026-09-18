@@ -1,6 +1,7 @@
 """Tests for voice-call media helpers.
 
-Skipped unless the optional ``voice`` extra (av/numpy) is installed.
+av/numpy ship with ADK as core dependencies; the importorskip guards below trip only on a
+broken/partial native install.
 
 Copyright PolyAI Limited
 """
