@@ -21,7 +21,7 @@ from google.protobuf.message import Message
 
 import poly.resources.resource_utils as resource_utils
 import poly.utils as utils
-from poly.call.session import DEFAULT_CALL_MODE, CallSession
+from poly.call.session import CallSession
 from poly.handlers.interface import (
     AgentStudioInterface,
 )
@@ -2714,7 +2714,6 @@ class AgentStudioProject:
         self,
         environment: str,
         variant: Optional[str] = None,
-        mode: str = DEFAULT_CALL_MODE,
     ) -> CallSession:
         """Bootstrap a WebRTC voice call session against a branch draft build.
 
@@ -2725,7 +2724,6 @@ class AgentStudioProject:
         Args:
             environment (str): The environment to call. Only "draft" is supported.
             variant (ty.Optional[str]): The variant ID to call, if any.
-            mode (str): The call mode (see ``DEFAULT_CALL_MODE``).
 
         Returns:
             CallSession: Parameters for opening the WebRTC call.
@@ -2762,7 +2760,6 @@ class AgentStudioProject:
             lambda_deployment_version=fields["lambdaDeploymentVersion"],
             auth_token=fields["authToken"],
             gateway_ws_url=fields["gatewayWsUrl"],
-            mode=mode,
         )
 
     def send_message(

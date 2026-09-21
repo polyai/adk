@@ -6,6 +6,7 @@ Copyright PolyAI Limited
 import asyncio
 import os
 import sys
+import uuid
 from argparse import (
     ArgumentParser,
     BooleanOptionalAction,
@@ -15,7 +16,6 @@ from argparse import (
 )
 from typing import Optional
 
-from poly.call.session import DEFAULT_CALL_MODE
 from poly.cli_commands.base import PROJECT_SYNC_GROUP, BaseCommand, Parents
 from poly.cli_commands.shared import load_project
 
@@ -24,6 +24,11 @@ _VOICE_DEPS_HINT = (
     "Voice calling dependencies failed to load. Reinstall ADK with:\n"
     "    pip install --force-reinstall polyai-adk"
 )
+
+
+def new_call_sid() -> str:
+    """Generate a unique call SID."""
+    return f"ADK-{uuid.uuid4()}"
 
 
 class CallCommand(BaseCommand):
@@ -49,7 +54,6 @@ class CallCommand(BaseCommand):
                 "  poly call\n"
                 "  poly call --push\n"
                 "  poly call --variant my-variant\n"
-                "  poly call --mode echo   # gateway echoes your audio (media self-test)\n"
             ),
             formatter_class=RawTextHelpFormatter,
         )
@@ -74,13 +78,6 @@ class CallCommand(BaseCommand):
             help="Name of variant to use for the call.",
         )
         call_parser.add_argument(
-            "--mode",
-            type=str,
-            default=DEFAULT_CALL_MODE,
-            choices=["end-to-end", "traditional", "echo"],
-            help="Call mode. 'echo' has the gateway echo your audio back (media self-test).",
-        )
-        call_parser.add_argument(
             "--push",
             action="store_true",
             help="Push the project before calling, so the draft build includes local changes.",
@@ -101,7 +98,6 @@ class CallCommand(BaseCommand):
             args.path,
             environment=args.environment,
             variant=args.variant,
-            mode=args.mode,
             push_before_call=args.push,
             aec=args.aec,
         )
@@ -112,7 +108,6 @@ class CallCommand(BaseCommand):
         base_path: str,
         environment: str = "branch",
         variant: Optional[str] = None,
-        mode: str = DEFAULT_CALL_MODE,
         push_before_call: bool = False,
         aec: bool = True,
     ) -> None:
@@ -168,25 +163,28 @@ class CallCommand(BaseCommand):
                 aec = False
 
         try:
-            session = project.create_call_session("draft", variant=variant, mode=mode)
+            session = project.create_call_session("draft", variant=variant)
         except (ValueError, NotImplementedError) as exc:
             error(str(exc))
             sys.exit(1)
 
         caller = os.environ.get("ADK_COMMAND_USER_OVERRIDE") or "adk-user"
+        call_sid = new_call_sid()
+        call_url = project.get_conversation_url(call_sid)
         info(
             f"Calling [bold]{project.account_id}/{project.project_id}[/bold] "
-            f"branch=[bold]{branch_label}[/bold] "
-            f"(mode={mode}, echo cancellation {'on' if aec else 'off'}). "
+            f"on branch [bold]{branch_label}[/bold]. "
             "Press Ctrl+C to hang up."
         )
 
         try:
-            asyncio.run(run_call(session, caller, aec=aec))
+            asyncio.run(run_call(session, caller, aec=aec, call_sid=call_sid))
         except CallError as exc:
             error(f"Call failed: {exc}")
             sys.exit(1)
         except KeyboardInterrupt:
+            # Fallback
             pass
 
         success("Call ended.")
+        info(f"Review this call in Agent Studio: [link={call_url}]{call_url}[/link]")

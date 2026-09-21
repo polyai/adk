@@ -22,6 +22,9 @@ def make_project(branch: str = "feature-x") -> MagicMock:
     project.get_current_branch.return_value = branch
     project.account_id = "acc-1"
     project.project_id = "proj-1"
+    project.get_conversation_url.side_effect = (
+        lambda cid: f"https://studio.poly.ai/acc-1/proj-1/conversations/{cid}"
+    )
     project.create_call_session.return_value = CallSession(
         account_id="acc-1",
         project_id="proj-1",
@@ -42,8 +45,8 @@ def fake_client_module(recorder: list) -> types.ModuleType:
     class CallError(Exception):
         pass
 
-    async def run_call(session, caller, *, aec=False):
-        recorder.append((session, caller, aec))
+    async def run_call(session, caller, *, aec=False, call_sid=None):
+        recorder.append((session, caller, aec, call_sid))
 
     module.CallError = CallError
     module.run_call = run_call
@@ -70,13 +73,14 @@ class CallCommandTest(unittest.TestCase):
         recorder: list = []
 
         with patch.dict(sys.modules, {"poly.call.client": fake_client_module(recorder)}):
-            CallCommand.call("/path", variant="v1", mode="echo", aec=False)
+            CallCommand.call("/path", variant="v1", aec=False)
 
-        project.create_call_session.assert_called_once_with("draft", variant="v1", mode="echo")
+        project.create_call_session.assert_called_once_with("draft", variant="v1")
         self.assertEqual(len(recorder), 1)
-        session, _caller, aec = recorder[0]
+        session, _caller, aec, call_sid = recorder[0]
         self.assertEqual(session.project_id, "proj-1")
         self.assertFalse(aec)
+        self.assertTrue(call_sid.startswith("ADK-"))
 
     @patch("poly.call.aec.EchoCanceller")
     @patch("poly.cli_commands.call.load_project")

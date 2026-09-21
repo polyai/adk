@@ -2,11 +2,11 @@
 
 from dataclasses import dataclass
 
-# The call mode requested in the OFFER. The WebRTC gateway resolves the *effective*
-# mode per-agent from LLeMur config and largely ignores this value — it's only the
-# fallback the gateway applies if that config lookup fails for any reason. We default
-# to "traditional" (cascaded ASR->LLM->TTS) to match the gateway's own fallback.
-DEFAULT_CALL_MODE = "traditional"
+# The call mode sent in the OFFER. The WebRTC gateway resolves the *effective* mode
+# per-agent from LLeMur config and largely ignores this value — it's only the fallback
+# the gateway applies if that config lookup fails. We send "end-to-end" to match the
+# in-browser Agent Studio call panel, which always sends that mode.
+DEFAULT_CALL_MODE = "end-to-end"
 
 
 @dataclass(frozen=True)

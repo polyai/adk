@@ -26,13 +26,13 @@ class CallSessionTest(unittest.TestCase):
         fields.update(overrides)
         return CallSession(**fields)
 
-    def test_mode_defaults_to_traditional(self):
-        # Matches the WebRTC gateway's fallback when LLeMur config can't be resolved.
+    def test_mode_defaults_to_end_to_end(self):
+        # Matches the in-browser call panel, which always sends "end-to-end".
         self.assertEqual(self._make().mode, DEFAULT_CALL_MODE)
-        self.assertEqual(DEFAULT_CALL_MODE, "traditional")
+        self.assertEqual(DEFAULT_CALL_MODE, "end-to-end")
 
     def test_holds_all_offer_fields(self):
-        session = self._make(variant_id="VARIANT-x", mode="echo")
+        session = self._make(variant_id="VARIANT-x", mode="end-to-end")
         self.assertEqual(session.account_id, "acc-1")
         self.assertEqual(session.project_id, "proj-1")
         self.assertEqual(session.variant_id, "VARIANT-x")
@@ -40,7 +40,7 @@ class CallSessionTest(unittest.TestCase):
         self.assertEqual(session.lambda_deployment_version, "lambda-v1")
         self.assertEqual(session.auth_token, "studio-token")
         self.assertEqual(session.gateway_ws_url, "wss://gw")
-        self.assertEqual(session.mode, "echo")
+        self.assertEqual(session.mode, "end-to-end")
 
     def test_is_frozen(self):
         with self.assertRaises(dataclasses.FrozenInstanceError):

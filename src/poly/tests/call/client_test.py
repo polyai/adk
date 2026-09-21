@@ -89,7 +89,7 @@ class RunUntilDoneTest(unittest.TestCase):
         async def scenario():
             failed = asyncio.Event()
             failed.set()  # connection already failed
-            await _run_until_done(MagicMock(), _BlockingWs(), failed)
+            await _run_until_done(MagicMock(), _BlockingWs(), failed, asyncio.Event())
 
         with self.assertRaises(CallError):
             asyncio.run(scenario())
@@ -97,7 +97,17 @@ class RunUntilDoneTest(unittest.TestCase):
     def test_close_message_returns_normally(self):
         async def scenario():
             ws = _ScriptedWs([json.dumps({"type": "close", "sessionId": "s"})])
-            await _run_until_done(MagicMock(), ws, asyncio.Event())
+            await _run_until_done(MagicMock(), ws, asyncio.Event(), asyncio.Event())
+
+        asyncio.run(scenario())  # must not raise
+
+    def test_stop_event_returns_normally(self):
+        # User hangs up (Ctrl+C): the stop event fires while signaling is still blocked,
+        # and the call ends cleanly rather than raising.
+        async def scenario():
+            stop = asyncio.Event()
+            stop.set()
+            await _run_until_done(MagicMock(), _BlockingWs(), asyncio.Event(), stop)
 
         asyncio.run(scenario())  # must not raise
 
